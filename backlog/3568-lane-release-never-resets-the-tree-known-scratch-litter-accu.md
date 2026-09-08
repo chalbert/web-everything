@@ -37,3 +37,12 @@ The original draft of this card offered the release-time fix and a periodic pass
 5. The allowlist itself is a single exported named constant reused by BOTH `cmdRelease` and the health-watch pass — a test (or a shared-import assertion in one of the suites above) fails if the two ever diverge to two separately-maintained lists.
 6. A one-line *Relationship to #3568* cross-reference is added to we:backlog/3569-a-rolling-24h-delivery-capacity-monitor-artifact-lane-utiliz.md, matching the *Relationship to #3569* section above, so neither card reads as unaware of the other.
 7. `npm run check:standards` shows no new errors and no new warnings against the baseline at build time (disclose the baseline delta actually observed in the PR body, per this repo's own convention — do not hardcode a specific number here).
+
+## Placement note (2026-09-07)
+
+This lane-pool hygiene mechanic is exactly the "lane-pool + leases" substrate we:backlog/2445's own Extraction
+seams section names as what a Plateau Loop coordinator inherits. we:backlog/3618 tracks generalizing it
+(alongside we:backlog/3576's docket generalization and the staged hardware-usage-aware admission-control
+project) into the Loop's own in-process lane/capacity substrate under the existing Plateau Loop epic
+(we:backlog/2445). Build and land this fix for WE's own dispatcher regardless; this note is a forward
+pointer, not a dependency.

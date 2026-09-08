@@ -108,3 +108,82 @@ export function checkReviewLabelSingleHome(docs = []) {
   }
   return { errors };
 }
+
+/**
+ * SINGLE_HOME_CODE_FILES — the only files ALLOWED to perform the review-label write mutation: the single-home
+ * CLI (#2644) and the provider port it shells (#x8xf5rl). `checkReviewLabelSingleHome` above stops a MARKDOWN
+ * doc from INSTRUCTING the raw swap (#2882); it never looked at `.mjs` source, so nothing stopped a SCRIPT from
+ * minting the same raw path in code — the residual #2416 gap: "a `review:human` gate-self PR is never
+ * agent-cleared" is enforced in `decideSetLabel`'s pure core, but only for callers that actually reach it. A
+ * second script that calls `gh pr edit --add-label review:accepted` directly, or drives the provider's
+ * `setLabels` with an `add: review:accepted` of its own, never reaches `decideSetLabel` at all and so never
+ * pays INVARIANT 2 or the #2409 `reviewed-sha` stamp.
+ */
+export const SINGLE_HOME_CODE_FILES = Object.freeze([
+  'scripts/review-set-label.mjs',
+  'scripts/lib/review-label-provider.mjs',
+]);
+
+/**
+ * A `gh`-shelling call (`execFileSync`/`spawnSync`/`spawn`/`execSync`/`exec`) carrying the accept flag and the
+ * accepted label together, OR a `setLabels(...)` write whose `add` resolves to the accepted label — either shape
+ * re-implements the single home's write instead of calling it. Co-occurrence-based on purpose, like `RAW_SWAP_RE`
+ * above: it does not care whether the gh args are array-form or ONE command string built with a template
+ * literal or plain concatenation, whether the flag and the label are space-joined or `=`-joined, whether the
+ * label is wrapped in an array, or whether it names the shared constant or the bare label string — a round-1
+ * panel review of this rule (five findings, #2416) traced all five of those past the first cut, which only
+ * matched the one call SHAPE visible in the single home's own existing caller. Bounded + newline-tolerant like
+ * `RAW_SWAP_RE`, so a multi-line literal still matches; stops at a `)` so it cannot pair an unrelated call with
+ * a mention of the label far below it.
+ *
+ * (This docblock deliberately never TYPES a live example of the shape it forbids — the rule would flag its own
+ * source file otherwise, the same self-reference `RAW_SWAP_RE`'s doc-guard sibling has to avoid. See this
+ * file's own test suite for the fixture shapes it actually asserts against.)
+ *
+ * WHAT THIS STILL CANNOT CATCH, on purpose, same posture as `RAW_SWAP_RE`'s own bounds above and #2895's
+ * documented actor-provenance residual: a script that assigns the `gh` args array, the label string, or the
+ * `setLabels` options object to a variable or a computed/conditional expression BEFORE the call defeats textual
+ * co-occurrence — no bounded regex can trace data flow, and reaching for one here would be the "carve-out with
+ * holes" `RAW_SWAP_RE`'s own header already rejected once. This rule's job is to catch the ORDINARY
+ * re-implementation an engineer (or agent) who doesn't know the single home exists would naturally write —
+ * exactly how the #2882 doc instance shipped — not to defeat someone deliberately obfuscating a call to route
+ * around a lint they know is watching. A round-2 panel pass (#2416) traced this exact boundary directly: two
+ * MORE idiomatic-but-still-textual shapes (`execFile`, a bare non-method `setLabels(`) were
+ * concrete gaps and are now covered below; a conditional/ternary label expression — and, per a round-3 pass,
+ * a nested function call anywhere in the intervening argv (which the `[^)]` filler cannot skip over) — are the
+ * SAME residual as variable indirection: no bounded regex traces data flow or balances parens. Filed as a
+ * follow-on rather than chased here, per we:backlog/xgewdfr-harden-the-2416-review-label-code-scan-gate-against-expressi.md.
+ */
+const ACCEPTED_TOKEN = String.raw`\[?['"\`]?(?:review:accepted|REVIEW_LABELS\.accepted)`;
+const CODE_SWAP_RE = new RegExp(
+  String.raw`\b(?:execFileSync|spawnSync|spawn|execSync|execFile|exec)\s*\(\s*['"\`]?gh['"\`]?[^)]{0,400}?--add-label['"\`]?[=\s,]+${ACCEPTED_TOKEN}`
+  + '|'
+  + String.raw`\.?\bsetLabels\s*\([^)]{0,400}?\badd\s*:\s*${ACCEPTED_TOKEN}`,
+  'g',
+);
+
+/**
+ * Find every SCRIPT (not doc) file that mints its own `review:accepted` write outside the single home. Pure —
+ * the caller supplies `{file, content}` for every non-test `.mjs` under `scripts/`; the fs walk stays in
+ * `check-standards.mjs` (mirrors `checkReviewLabelSingleHome`'s split).
+ * @param {Array<{file:string, content:string}>} files
+ * @returns {{errors:string[]}}
+ */
+export function checkReviewLabelSingleHomeCode(files = []) {
+  const errors = [];
+  for (const f of Array.isArray(files) ? files : []) {
+    const file = f && typeof f.file === 'string' ? f.file : '';
+    const content = f && typeof f.content === 'string' ? f.content : '';
+    if (!file || !content || SINGLE_HOME_CODE_FILES.includes(file)) continue;
+    for (const m of content.matchAll(CODE_SWAP_RE)) {
+      errors.push(
+        `${file}:${lineOf(content, m.index)}: mints its own \`review:accepted\` write outside the single home — `
+        + `route it through \`we:${SINGLE_HOME}\` (or the provider it shells, \`we:scripts/lib/review-label-provider.mjs\`) `
+        + `instead of calling \`gh pr edit --add-label\` / \`setLabels\` directly. A script that mints this mutation `
+        + `bypasses INVARIANT 2 and the \`reviewed-sha\` stamp exactly like the raw doc instruction \`checkReviewLabelSingleHome\` `
+        + `above forbids (#2416) — this is that same guarantee, for code instead of prose.`,
+      );
+    }
+  }
+  return { errors };
+}

@@ -1,0 +1,17 @@
+---
+bornAs: xr8s3ir
+kind: story
+size: 5
+status: open
+scope: ["we:.claude/skills/", "we:.claude/commands/"]
+dateOpened: "2026-09-08"
+tags: []
+---
+
+# Skill + slash command to detect the conveyor session and route file/prepare/build requests to it
+
+An interactive session that is NOT itself running the conveyor has no formalized way to find the peer session that is, and hand off file/prepare/build requests to it instead of doing the backlog mutation itself. Found live 2026-09-04+: a requester's session used ListAgents to find the peer session named 'Conveyor', then SendMessage to ask it to file a backlog item on the requester's behalf, per the routing-through-declared-operations pattern we:.claude/skills/mechanical-delivery-doctrine/SKILL.md already establishes for build dispatch. That worked but was entirely hand-composed — no skill/command formalizes 'am I the conveyor session, and if not, who is, and how do I hand this off with enough self-contained context to act.' Scope: a new skill (we:.claude/skills/, name TBD by the builder) plus a matching slash command (we:.claude/commands/) that (1) determines whether the current session is itself running the conveyor vs. an ordinary interactive session, (2) if not, uses ListAgents to find the live peer session running the conveyor, and (3) when the user asks to file/prepare/build and this session is not the conveyor, routes the request to that peer session via SendMessage with self-contained context, instead of the session doing the mutation itself or telling the user to go find the conveyor manually. This is a thin routing/dispatch layer in front of the existing declared operations and skills (we:.claude/skills/file-item/SKILL.md, we:.claude/skills/next-backlog-item/SKILL.md, we:.claude/skills/prepare-decision-item/SKILL.md, we:.claude/skills/batch-backlog-items/SKILL.md, we:.claude/skills/conveyor/SKILL.md) — it must reuse/wrap their logic, not re-implement filing/prepare/build mechanics. OPEN QUESTION, explicitly not resolved by this filing: what is the durable way to identify 'the' conveyor session when none is running, or when more than one conveyor-shaped session exists? A ListAgents check at filing time (2026-09-04) showed several conveyor-* background sessions alongside one named exactly 'Conveyor' — a plain name match on 'Conveyor' is not obviously reliable or durable (background sessions could be named similarly, more than one could claim the role, or none could be live), and this item's own design work must treat that as an open fork to resolve, not an assumption to bake in. Grepped for prior coverage first (route conveyor / find the conveyor / detect conveyor session / SendMessage conveyor / conveyor session / peer session / multi-session / which session is, plus a read of the closest-sounding candidates we:backlog/3118-session-free-conveyor-where-does-headless-agent-spawning-liv.md, we:backlog/3188-should-an-agent-session-be-restricted-to-declared-operations.md, we:backlog/3399-no-operator-runbook-exists-for-running-monitoring-or-recover.md) — all close hits are about the conveyor's own INTERNAL dispatch routing (build/prepare/fix mechanics inside the mechanical dispatcher itself), not about an ordinary INTERACTIVE session discovering and routing to the conveyor peer session via cross-session ListAgents/SendMessage. Confirmed novel.
+
+## Done when
+
+1. **Executable** — TODO: a command that fails before this item lands and passes after.

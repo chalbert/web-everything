@@ -4,6 +4,10 @@ kind: task
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:conformance-vectors/
+  - we:src/_includes/project-webdirectives.njk
+  - fui:plugs/webdirectives/ssr/
 ---
 
 # Pin the webdirectives-ssr escaping contract with a cross-language conformance vector

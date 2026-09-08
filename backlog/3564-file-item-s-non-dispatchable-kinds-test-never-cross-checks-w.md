@@ -5,6 +5,12 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-07"
 tags: []
+scope:
+  - we:scripts/conveyor/
+  - we:scripts/operations/
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/__tests__/
 ---
 
 # file-item's NON_DISPATCHABLE_KINDS test never cross-checks we:scripts/conveyor/queue.mjs's real map, so the two can silently drift

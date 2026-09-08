@@ -253,14 +253,24 @@ an accept. Do not re-run the panel: prove the net patch is byte-identical, then 
 that says so. `reviewed-contribution` (#x9xqexm) already covers pure base movement.
 
 **A host that cannot authenticate to GitHub — record through the operation, never by hand (#xrk6hmj).** On a
-cloud VM no local process holds a GitHub credential, so the `record` effect's shell-out to
+cloud VM no local process holds a GitHub credential, so `record`'s label-swap effect's shell-out to
 `we:scripts/review-set-label.mjs` fails and the verdict has to travel as a file on the `ops/review-requests`
 branch, which `we:.github/workflows/apply-review-request.yml` applies with the real CLI. That transport has a
-caller now — use it:
+caller now — use it, and use the SELF-SUFFICIENT one (#3540):
 
 ```
-node scripts/operations/run.mjs record-verdict --runId=<run-id> --to=accepted|changes|clear-human [--operatorInstruction="<quoted instruction>"] --json
+node scripts/operations/record-verdict-cli.mjs --runId=<run-id> --to=accepted|changes|clear-human [--operatorInstruction="<quoted instruction>"] --json
 ```
+
+**Use `record-verdict-cli.mjs`, not the bare `run.mjs record-verdict`, on a host with no `gh` (#3540).** Before
+this, the write-up `record-verdict` needs was staged ONLY by `review-pr`'s own `record` step — bundled with the
+`gh`-needing label swap — so reaching it meant a separate, manual `review-pr --resume=<runId> --answer=accept`
+first, which then halted on the label swap it could never complete: a clean, agent-reviewable accept recorded
+as an indistinguishable `effect-halted` run. `record-verdict-cli.mjs` answers `review-pr`'s `confirm` and stages
+its write-up (`stageVerdict`, the local half — no `gh`) as part of THIS SAME call, so `--runId=<run-id>
+--to=accepted` is the whole thing: no prior `review-pr --resume` of your own. (`run.mjs record-verdict` still
+works exactly as before for a host that already has the write-up staged some other way — e.g. re-recording a
+verdict whose `review-pr` run already completed `record` in full.)
 
 **There is deliberately no `--pr`.** The subject, the repo, the juror's session id and the staged write-up are
 read back out of the run record the review itself wrote, because the failure mode here is not tedium — it is
@@ -271,9 +281,13 @@ transport branch over your lane — the operation pushes through its own worktre
 hand takes your uncommitted work with it.
 
 It refuses rather than inventing: a run that produced no verdict, a run that is not a review, and a run that
-staged no write-up are all refused, because each would put a request on the transport branch indistinguishable
-from a real review. `--to=clear-human` still carries every constraint of the ceremony above — the instruction
-goes in `--operatorInstruction`, verbatim, and the applier refuses the target without it.
+genuinely staged no write-up are all refused, because each would put a request on the transport branch
+indistinguishable from a real review. The refusal now names WHY the write-up is missing (#3540) — a deliberate
+`abstain`, a `confirm` that still needs an answer, or (unreachable in the ordinary case) a genuine defect — so
+it no longer reads as "the review was defective" when a clean review simply had not been recorded yet.
+`--to=clear-human` still carries every constraint of the ceremony above — the instruction goes in
+`--operatorInstruction`, verbatim, and the applier refuses the target without it, and it names no `review-pr`
+confirm answer, so `record-verdict-cli.mjs`'s pre-pass never touches the review-pr run for it.
 
 ## Invariant
 

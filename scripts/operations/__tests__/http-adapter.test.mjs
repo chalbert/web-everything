@@ -192,7 +192,7 @@ describe('the read-only path is given nothing to write WITH', () => {
 
   it('`runReadOnly` takes no store, no sinks and no judge — and refuses a declaration that can suspend', () => {
     expect(() => runReadOnly(REVIEW_PR_DECL(), { input: { pr: 1, repo: 'a/b' }, id: 'r-1', registry: createRegistry() }))
-      .toThrow(/is not `compute`-only — judge\(judge\), judgeSecurity\(judge\), advise\(effect\), confirm\(confirm\), record\(effect\)/);
+      .toThrow(/is not `compute`-only — judge\(judge\), judgeSecurity\(judge\), advise\(effect\), confirm\(confirm\), stageVerdict\(effect\), record\(effect\)/);
     expect(() => assertReadOnlyDeclaration(REVIEW_PR_DECL())).toThrow(/is not `compute`-only/);
     expect(assertReadOnlyDeclaration(SUGGEST_DECL()).name).toBe(SUGGEST_NEXT_OP);
   });
@@ -430,7 +430,7 @@ describe('describe — one declaration, one description', () => {
   it('the index lists every declared operation and whether it can write', async () => {
     const res = await handleOperationRequest({ method: 'GET', url: '/operations' }, { ...wiring(), newRunId: idMinter() });
     expect(res.body.operations).toEqual([
-      { op: REVIEW_PR_OP, readOnly: false, describe: '/operations/review-pr', steps: ['read(compute)', 'judge(judge)', 'judgeSecurity(judge)', 'reduce(compute)', 'advise(effect)', 'confirm(confirm)', 'record(effect)'] },
+      { op: REVIEW_PR_OP, readOnly: false, describe: '/operations/review-pr', steps: ['read(compute)', 'judge(judge)', 'judgeSecurity(judge)', 'reduce(compute)', 'advise(effect)', 'confirm(confirm)', 'stageVerdict(effect)', 'record(effect)'] },
       { op: SUGGEST_NEXT_OP, readOnly: true, describe: '/operations/suggest-next', steps: ['board(compute)', 'shortlist(compute)'] },
     ]);
   });

@@ -3,9 +3,11 @@ bornAs: x11ujy1
 kind: story
 size: 3
 parent: "3580"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/explore-io.mjs"]
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: []
 ---
 
@@ -32,3 +34,22 @@ Leverage-first first slice of the new dispatcher-decoupling epic (parent), mirro
 5. **Explicitly out of scope**: a second provider implementation (that is the epic's later step, blocked on
    #3371's probe verdict), and we:skills-src/inspect-agent-health/agent-health.mjs's transcript format (a
    separate, harder adapter problem the epic names explicitly rather than folding in here).
+
+
+## Progress
+
+- Named the provider port on both spawn seams: `createDispatchSinks`'s `provider` param
+  (`we:scripts/operations/dispatch-lane-io.mjs`) and `createExploreSinks`'s `provider` param
+  (`we:scripts/operations/explore-io.mjs`). Request shape: `{sessionId, cwd, prompt, ...}` in, a durable
+  handle string out — independent of any CLI's argv/stdout.
+- `defaultClaudeProvider` in each file is the ONE Claude implementation, composing the untouched
+  `buildAgentArgv`/`buildInvestigatorArgv` with the existing `spawnAgent` seam. `parseBackgroundedId` is
+  untouched — it still serves the resume-detection path, not this handle.
+- The default `provider` closes over the caller's `spawnAgent`, so every existing CLI-argv-shaped test
+  passes unmodified — this session's own vitest runs showed every existing test in the touched and
+  adjacent suites green, plus the new provider-port tests below (not an audited/CI-backed count, just
+  what ran locally this session).
+- Added port-shaped executable tests in both `we:scripts/operations/__tests__/dispatch-lane.test.mjs` and
+  `we:scripts/operations/__tests__/explore.test.mjs` (`describe('the
+  provider port — #3579', ...)`) — a hand-written fake with no argv/opts shape at all, accepted and driven the
+  same way the real spawner is.

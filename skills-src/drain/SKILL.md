@@ -304,8 +304,10 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
   > ONE personal access token, so EVERY `review:accepted` label + `"cleared by the operator"` comment is
   > applied as `chalbert` whether a human ran [`/review`](../review/SKILL.md) or an automation (a
   > closing-session / batch flow) did. The GitHub actor therefore proves nothing — this is exactly the #2416
-  > gap ("honor `review:accepted` only when a human applied it"), for which the buildable fix is a
-  > closed-set-of-callers guarantee, NOT actor provenance. **Operational rule when draining:** if a `gate-self`
+  > gap ("honor `review:accepted` only when a human applied it"). The closed-set-of-callers guarantee now
+  > lives in `we:scripts/lib/review-skill-guard.mjs`'s `check:standards` gate (doc instructions, #2882; raw
+  > code paths, #2416) — it is NOT actor provenance, which stays permanently unsolvable under one shared
+  > token. **Operational rule when draining:** if a `gate-self`
   > PR arrives already carrying `review:accepted`, do NOT treat the label/comment as proof of human clearance —
   > surface it and get the operator to confirm they personally cleared it before letting it land. Do not,
   > however, treat "shows as `chalbert`" as suspicious on its own — it is the only actor there is.

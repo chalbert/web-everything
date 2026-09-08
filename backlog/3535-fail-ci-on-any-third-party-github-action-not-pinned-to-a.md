@@ -4,6 +4,18 @@ kind: task
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:scripts/
+  - we:.github/workflows/
+  - fui:scripts/
+  - fui:.github/workflows/
+  - plateau:scripts/
+  - plateau:.github/workflows/
+scopeRationale: >
+  Done-when #2 leaves the mechanism (own we:scripts/check-standards.mjs rule vs. zizmor/actionlint)
+  to the builder, so the exact touched file per repo isn't fixed yet; entries are directory-level to
+  cover either shape, plus each repo's own .github/workflows/ dir (we:.github/workflows/,
+  fui:.github/workflows/, plateau:.github/workflows/) for pinning today's existing violations.
 ---
 
 # Fail CI on any third-party GitHub Action referenced by a mutable tag rather than a commit SHA

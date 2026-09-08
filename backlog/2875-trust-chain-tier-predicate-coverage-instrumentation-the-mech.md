@@ -6,6 +6,10 @@ parent: "2873"
 status: open
 dateOpened: "2026-08-02"
 tags: [conveyor, self-approval, spec-first]
+scope:
+  - we:scripts/lib/
+  - we:vitest.config.ts
+scopeRationale: "isTrustChainTier's target file (new vs. added to an existing lib file) isn't named by the story; scoped to the directory until the build PR picks one."
 ---
 
 # Trust-chain tier predicate + coverage instrumentation — the mechanical in-scope definition everything else depends on

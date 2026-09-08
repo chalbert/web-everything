@@ -804,12 +804,34 @@ export function isPreSpawnRefusal(error) {
  * and the isolation default are the two things a first live run has to settle; #xaibmeu, which routes the
  * conveyor through this operation, is where that happens.
  *
+ * ── THE PROVIDER PORT (#3579) ───────────────────────────────────────────────────────────────────────────────
+ *
+ * `provider` is the seam between "an item is ready to dispatch" and "some CLI's argv/stdout" — the boundary
+ * this item (#3579) names, mirroring #3370's judge-seam extraction. Its shape is deliberately independent of
+ * any one CLI:
+ *
+ *   request:  {sessionId, cwd, prompt, sessionSlug, num, extraArgs, systemPromptFile}
+ *             — a session/item identity, the FILLED brief text, and an expected-duration hint (read by the
+ *             caller from `payload.expectedWithinMinutes`, not part of the request itself).
+ *   returns:  a durable handle string (or a Promise of one) usable for LATER liveness polling — never a raw
+ *             stdout blob or a CLI-shaped result.
+ *
+ * `defaultClaudeProvider` is ONE implementation of this port, not the port itself: it composes
+ * {@link buildAgentArgv} (Claude's argv construction) with the injected `spawnAgent` (the CLI-shaped seam that
+ * already existed) and answers with `sessionId` as the handle — Claude's own liveness reads (`stampLiveness`
+ * et al.) already poll by that same minted id, so {@link parseBackgroundedId}'s stdout parsing plays no part in
+ * producing THIS handle; it stays exactly where it was, serving the resume-detection path
+ * (`resumeSucceeded`) that reads a live spawn's own printed id.
+ *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
  *   so this is the checkout it runs `lane-pool acquire` from, never the lane itself.
- * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
+ * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`. Feeds
+ *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT `spawnAgent` goes through. See
  *   {@link readTick} for why this is a second seam and not the same one.
+ * @param {(request: object) => (string|Promise<string>)} [o.provider] - the PORT (see above). Defaults to
+ *   {@link defaultClaudeProvider} closed over `spawnAgent`.
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
@@ -819,6 +841,7 @@ export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
+  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
@@ -827,10 +850,21 @@ export function createDispatchSinks({
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
       const sessionId = String(mintSessionId());
-      const argv = buildAgentArgv({ sessionId, payload, extraArgs, systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE });
+      let handle;
       try {
-        spawnAgent(argv, { cwd: root });
+        handle = await provider({
+          sessionId,
+          cwd: root,
+          prompt: payload?.prompt,
+          sessionSlug: payload?.sessionSlug,
+          num: payload?.num,
+          extraArgs,
+          systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+        });
       } catch (e) {
+        // A validation failure `buildAgentArgv` already proved happened before any process existed (e.g. an
+        // empty prompt) carries `.notApplied` — rethrow it as-is rather than reclassifying it as indeterminate.
+        if (e && e.notApplied) throw e;
         if (isPreSpawnRefusal(e)) {
           throw notApplied(`claude could not be started (${String(e.code)}) — no agent exists`, { sessionId });
         }
@@ -845,11 +879,32 @@ export function createDispatchSinks({
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
       return inFlight({
-        handle: sessionId,
+        handle: handle != null ? String(handle) : sessionId,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });
     },
   };
+}
+
+/**
+ * THE DEFAULT provider port implementation (#3579) — Claude's own. Translates the port's CLI-independent
+ * request into {@link buildAgentArgv}'s payload shape, hands the resulting argv to `spawnAgent`, and answers
+ * with the pre-minted `sessionId` as the durable handle (matching the pre-#3579 behaviour exactly: the sink
+ * never trusted stdout for the handle, only the id it minted itself).
+ *
+ * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
+ * @param {{spawnAgent?: Function}} [io]
+ * @returns {string}
+ */
+export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts) } = {}) {
+  const argv = buildAgentArgv({
+    sessionId: request.sessionId,
+    payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },
+    extraArgs: request.extraArgs,
+    systemPromptFile: request.systemPromptFile,
+  });
+  spawnAgent(argv, { cwd: request.cwd });
+  return request.sessionId;
 }
 
 /**

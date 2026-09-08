@@ -3,9 +3,12 @@ bornAs: xy8di3v
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/review-dispatch.mjs", "we:skills-src/review/review-agent-brief.md", "we:scripts/operations/__tests__/review-dispatch.test.mjs"]
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+graduatedTo: none
 tags: []
 ---
 

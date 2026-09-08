@@ -59,6 +59,7 @@ import {
   classifyDispatchPr,
   createDispatchObservers,
   createDispatchSinks,
+  defaultClaudeProvider,
   DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
   REPO_ROOT,
   defaultLaneRefForPr,
@@ -791,6 +792,104 @@ describe('what the sink actually runs', () => {
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
     const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-d4' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
+  });
+});
+
+// #3579 — the provider port between "an item is ready to dispatch" and any one CLI's argv/output.
+describe('the provider port — #3579', () => {
+  it('accepts a hand-written PORT-shaped fake (not a CLI-argv-shaped spawnAgent) and is driven the same way', async () => {
+    const requests = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      mintSessionId: () => 'sess-port-1',
+      now: () => new Date('2026-08-13T10:00:00.000Z'),
+      // A fake with NO argv/opts shape at all — just the port contract: a request in, a handle out.
+      provider: (request) => {
+        requests.push(request);
+        return 'provider-handle-1';
+      },
+    });
+    const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1' });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      sessionId: 'sess-port-1', cwd: PRIMARY, prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1',
+    });
+    // …driven the same way the real spawner is: its RETURNED handle becomes the in-flight marker's handle.
+    expect(result).toMatchObject({ handle: 'provider-handle-1' });
+    expect(isInFlightResult(result)).toBe(true);
+  });
+
+  it('defaultClaudeProvider is ONE implementation of the port, composing buildAgentArgv + spawnAgent', () => {
+    const spawned = [];
+    const handle = defaultClaudeProvider(
+      { sessionId: 'sess-c9', cwd: PRIMARY, prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9', extraArgs: ['--model', 'sonnet'] },
+      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; } },
+    );
+    expect(handle).toBe('sess-c9');
+    expect(spawned).toEqual([{
+      argv: buildAgentArgv({
+        sessionId: 'sess-c9',
+        payload: { prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9' },
+        extraArgs: ['--model', 'sonnet'],
+      }),
+      opts: { cwd: PRIMARY },
+    }]);
+  });
+
+  it('a plain spawnAgent (the old CLI-argv-shaped stub) still drives the DEFAULT provider unmodified', async () => {
+    const spawned = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+      mintSessionId: () => 'sess-legacy',
+    });
+    const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #legacy', sessionSlug: 'conveyor-legacy', num: 'legacy' });
+    expect(spawned).toHaveLength(1);
+    expect(result).toMatchObject({ handle: 'sess-legacy' });
+  });
+
+  // #3579 review — a validation refusal from `buildAgentArgv` now runs INSIDE the provider call (moved there so
+  // the port can compose it). The only thing preserving the pre-#3579 "clean failed, not indeterminate" shape
+  // is the `if (e && e.notApplied) throw e;` rethrow, and that guarantee was stated only in a comment — prove it
+  // end to end through the real sink + the DEFAULT provider, not just by unit-testing buildAgentArgv in isolation.
+  it('an empty-prompt refusal from buildAgentArgv, reached via the DEFAULT provider, still rejects CLEAN — not indeterminate', async () => {
+    const spawnAgent = () => { throw new Error('must not spawn — refused before any process could exist'); };
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent, mintSessionId: () => 'sess-empty' });
+    // `notApplied: true` (retriable), NOT a bare/UNKNOWN error — the empty-prompt guard already proved nothing
+    // started, and moving `buildAgentArgv` inside the provider call must not blur that into "indeterminate".
+    await expect(sinks[DISPATCH_EFFECT]({ prompt: '  ', sessionSlug: 's', num: '1' }))
+      .rejects.toMatchObject({ notApplied: true, message: expect.stringContaining('empty prompt') });
+  });
+
+  it('a provider returning no handle (null/undefined) falls back to the minted sessionId, exactly like the default', async () => {
+    const sinks = createDispatchSinks({
+      root: PRIMARY, mintSessionId: () => 'sess-no-handle', provider: () => undefined,
+    });
+    const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #x', sessionSlug: 'conveyor-x', num: 'x' });
+    expect(result).toMatchObject({ handle: 'sess-no-handle' });
+  });
+
+  // #3579 review (correctness + standards-conformance, twice) — `defaultClaudeProvider` forwards a NARROWED
+  // `{prompt, sessionSlug, num}` object to `buildAgentArgv` instead of the caller's whole `payload`. Prove that
+  // is lossless by construction, not by assertion: the argv `defaultClaudeProvider` produces from a request
+  // built off a payload carrying EXTRA fields is byte-identical to calling `buildAgentArgv` with that whole
+  // payload directly — because `buildAgentArgv` itself reads only `.prompt`/`.sessionSlug`/`.num` off `payload`.
+  it('the narrowed request `defaultClaudeProvider` builds is lossless — identical argv to a full-payload buildAgentArgv call', () => {
+    const richPayload = {
+      prompt: '# build #42', sessionSlug: 'conveyor-42', num: '42',
+      // fields buildAgentArgv does NOT read — present to prove they were never needed, not silently dropped.
+      expectedWithinMinutes: 90, scope: ['we:scripts/foo.mjs'], unrelatedField: 'ignored-by-buildAgentArgv',
+    };
+    const directArgv = buildAgentArgv({ sessionId: 'sess-parity', payload: richPayload, extraArgs: ['--model', 'sonnet'] });
+    const spawned = [];
+    defaultClaudeProvider(
+      {
+        sessionId: 'sess-parity', cwd: PRIMARY, prompt: richPayload.prompt, sessionSlug: richPayload.sessionSlug,
+        num: richPayload.num, extraArgs: ['--model', 'sonnet'],
+      },
+      { spawnAgent: (argv) => { spawned.push(argv); return ''; } },
+    );
+    expect(spawned[0]).toEqual(directArgv);
   });
 });
 

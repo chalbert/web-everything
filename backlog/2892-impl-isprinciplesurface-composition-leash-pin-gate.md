@@ -5,6 +5,14 @@ status: open
 dateOpened: "2026-08-02"
 blockedBy: ["2785", "2890"]
 tags: [governance, mechanization, review-human, principle-surface, check-standards]
+scope:
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/rules-loader.cjs
+  - we:scripts/lib/__tests__/
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/__tests__/
 ---
 
 # Impl: `isPrincipleSurface` composition + leash-pin gate + first `@principle` invariants (enforces #2840)

@@ -81,6 +81,39 @@ export function factsFromRun(record, { runId } = {}) {
 }
 
 /**
+ * #3540 — WHY IS THE WRITE-UP MISSING? PURE. Distinguishes the three shapes an empty body can mean, so the
+ * refusal above stops reading as one undifferentiated "the review was defective" (#3540's own complaint: an
+ * agent-reviewable, zero-finding accept refused this way "reads like the review was defective when it was
+ * clean").
+ *
+ *   - `abstain` — the operator (or an agent actor) deliberately recorded nothing. Not a defect: there is no
+ *     verdict to carry, by design.
+ *   - still `awaiting-confirm` — the review has NOT been recorded yet, only judged. This is the common case on
+ *     a credential-less host: `we:scripts/operations/record-verdict-cli.mjs` (not this bare declaration) closes
+ *     it by answering `confirm` and staging the write-up as part of the SAME call, so a caller through THAT
+ *     entry point should not see this message at all for an `accepted`/`changes` target.
+ *   - anything else — the review ran to completion and produced an EMPTY write-up, which the judge shape's
+ *     required `summary` field (#x0p5k2q) should make unreachable. A genuine defect, not a normal state.
+ *
+ * @param {object|null} record - the run record, or `null` (the caller already refused that case by the time
+ *   this runs, but the function stays total rather than assuming).
+ * @returns {string} one sentence to append to the refusal.
+ */
+export function describeNoWriteUp(record) {
+  if (!record || typeof record !== 'object') return 'No run record was found to explain why.';
+  if (record?.findings?.confirm === 'abstain') {
+    return 'The review recorded `abstain` — that is deliberate: nothing was ever meant to be carried.';
+  }
+  if (record?.pending?.kind === 'confirm') {
+    return 'The review has a verdict but has not been RECORDED yet — it is still awaiting a decision at '
+      + '`confirm`. Pass `--to=accepted`/`--to=changes` to `record-verdict-cli.mjs` (#3540), which answers it '
+      + 'and stages the write-up as part of this same call, rather than resuming `review-pr` by hand first.';
+  }
+  return 'The review has run to completion and produced an EMPTY write-up, which should not be reachable (the '
+    + 'judge shape requires a `summary`, #x0p5k2q) — this is a defect worth reporting, not a normal state.';
+}
+
+/**
  * The request the transport will carry. PURE — the caller's `validate` is
  * `we:scripts/apply-review-request.mjs`'s own, injected so this file states no rule of its own.
  *
@@ -163,7 +196,7 @@ export function recordVerdictOperation({ readRun } = {}, { validateRequest, appl
         if (typeof body !== 'string' || !body.trim()) {
           throw new Error(
             `record-verdict: run ${view.input.runId} staged no write-up to carry. The durable comment IS the `
-            + 'review; a verdict with an empty body lands a label and tells the author nothing.',
+            + `review; a verdict with an empty body lands a label and tells the author nothing. ${describeNoWriteUp(record)}`,
           );
         }
         return { ...facts, body };

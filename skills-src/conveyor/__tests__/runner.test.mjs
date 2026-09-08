@@ -404,6 +404,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=owner/repo',
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
+      'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
     ]);
   });
 });

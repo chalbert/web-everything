@@ -7,6 +7,10 @@ blockedBy: []
 dateOpened: "2026-06-22"
 preparedDate: "2026-08-15"
 tags: []
+scope:
+  - we:docs/agent/vision-tiers.md
+  - we:src/_data/designKnowledgeWatch.json
+  - we:scripts/__tests__/design-knowledge-distillation.test.mjs
 ---
 
 # Distillation pipeline — curated weighted sources into codified rubric heuristics with provenance (single-source axes)
