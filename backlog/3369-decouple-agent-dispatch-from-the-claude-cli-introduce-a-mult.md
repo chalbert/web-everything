@@ -129,3 +129,56 @@ extraction builds for WE's own judge/dispatch seams. we:backlog/3619 tracks that
 runner build (we:backlog/2444/2530) should reuse this proven port pattern rather than re-deriving it, under
 the existing Plateau Loop epic (we:backlog/2445). Build and land this epic for WE's own dispatcher
 regardless; this note is a forward pointer, not a dependency.
+
+## Research correction (2026-09-08)
+
+**The "Two real candidates" table above (2026-08-27) is stale for the Google side.** Verified via fresh
+web search tonight, independently of any prior summary: Google announced at I/O 2026 (2026-05-19) that
+Gemini CLI and the Gemini Code Assist IDE extensions would stop serving Google AI Pro, Ultra, and free-tier
+individual accounts on **2026-06-18**, replaced by a new tool, **Antigravity CLI** (binary `agy`). Gemini
+Code Assist Standard/Enterprise org seats and pay-as-you-go API-key access were unaffected — only the
+individual-subscription tier the table above was evaluating got cut. Sources: [The New Stack — Google pushes
+Pro, Ultra, and free users from open-source Gemini CLI to closed-source Antigravity
+CLI](https://thenewstack.io/google-antigravity-cli/), [Inventive HQ — Gemini CLI Is Being Retired on June
+18](https://inventivehq.com/blog/gemini-cli-deprecated-antigravity-cli-migration), [Google Antigravity —
+Changes to Antigravity Plans](https://antigravity.google/blog/changes-to-antigravity-plans), [Google
+Antigravity — Plans docs](https://antigravity.google/docs/plans/), [Google Antigravity — Headless mode
+docs](https://antigravity.google/docs/cli/headless/).
+
+**What changed, confirmed independently tonight:**
+
+- **Pricing/tiers**: Google AI Pro stays $20/mo. Google AI Ultra split into two tiers as of the May 2026
+  restructure: $100/mo (5x Pro's token allowance) and $200/mo (20x Pro's allowance, down from a prior
+  single $250/mo Ultra plan). This mirrors the same 5x/20x framing Claude Max and Codex Pro already use —
+  useful for cross-provider cost comparison once this is revisited.
+- **Metering**: usage is billed in "compute effort" units (task-complexity-dependent — a simple question
+  might cost 1 unit, a multi-file refactor 50), not flat per-request or per-token counts. Harder to compare
+  1:1 against Claude/Codex's request- or token-based limits than the original table implied for Gemini CLI.
+- **License**: Antigravity CLI is closed-source/proprietary (free during preview), unlike the original
+  open-source Gemini CLI the table above evaluated.
+- **Headless/scriptable invocation — the property this epic's whole research table exists to check —
+  appears STRUCTURALLY COMPARABLE to what this epic's table already describes for Codex, not worse.**
+  Confirmed from Antigravity's own headless-mode docs: `-p`/`--print`/`--prompt` triggers a single
+  non-interactive run and exit (same shape as Codex's `codex exec` / Gemini CLI's old `--prompt`);
+  `--output-format json` returns a single JSON envelope (`conversation_id`, `status`, `response`, `usage`,
+  `duration_seconds`), `--output-format stream-json` emits NDJSON events as the run progresses;
+  `--json-schema <path>` constrains output to a schema, landing in a `structured_output` field — the same
+  role `--output-schema` plays for Codex and `--json-schema` played for Claude's own judge spawn; and
+  `--continue`/`-c` or `--conversation <id>` resumes a session via a CLI-issued conversation id, the same
+  "id comes FROM the CLI's own output" shape the table above already praised in Codex's
+  `codex exec resume $SESSION`. **This is docs-only, not a real spawn** — the same caveat this epic's own
+  text already applies to the original Codex/Gemini table ("nothing below should be built on the search
+  evidence alone"). If Google integration is picked back up, it needs #3371's own method (a real,
+  adversarial spawn) run against Antigravity CLI specifically before this comparability claim is trusted.
+
+**Open question for whenever Google integration is actually revisited** (post-Codex, per #3581's ratified
+pacing — not now, and this does not reopen that pacing or #3371's Codex-over-Gemini call for the judge
+seam): re-run a probe using #3371's method against **Antigravity CLI**, not the retired Gemini CLI the
+original table names — the binary, invocation surface, and billing/metering model have all changed even
+though "the Google candidate" is still Google. The docs-level read above suggests the headless story is a
+rename, not a regression, but that has not been verified with a real spawn and should not be assumed true
+until it is.
+
+**Disposition of the table above**: left as-is for the historical record of the original 2026-08-27
+research; it should not be used to plan an actual Google integration going forward. This correction section
+is the current state of the Google side.

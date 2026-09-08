@@ -90,6 +90,13 @@ inside" has now actually opened.
 
 ## Gemini sequencing — pacing amendment (operator, 2026-09-08)
 
+**Naming note (2026-09-08):** "Gemini" throughout this section means whatever CLI is the current Google
+integration candidate at the time this pacing actually fires — see #3369's "Research correction
+(2026-09-08)" section: Google's individual-subscription CLI is no longer Gemini CLI (retired for Pro/Ultra/
+free accounts on 2026-06-18) but its replacement, Antigravity CLI. This is a pointer only, not a re-pick —
+it does not change which provider was chosen for the judge seam (#3371, still Codex) or reopen this card's
+own sequencing/pacing.
+
 **Supersedes an earlier, looser draft of this same amendment.** A same-day earlier draft (opened as PR #2067,
 branch `lane/3581-gemini-pacing-amendment`, never merged) recorded the operator's mid-session remark that
 Gemini should follow Codex "soon after," "not gated behind Codex fully maturing first." That draft was
