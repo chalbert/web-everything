@@ -15,7 +15,8 @@ const {
   validateRulesAnchors, collectExplicitAnchorDefs, findDuplicateAnchors, findOrphanAnchors,
   collectAnchorReferences, anchorSubstance, validateAnchorSubstance, runStatuteCheck,
   collectEnforcerPaths, enforcerPathCandidates, validateInvariantEnforcers, collectOpenItemIds,
-  collectItemStatuses, validateCitedItemStatusClaims,
+  collectItemStatuses, validateCitedItemStatusClaims, findPointInTimeClaims, POINT_IN_TIME_EXEMPT_ANCHORS,
+  collectCatalogedAnchorIds,
 } = require('../lib/validate-rules-anchors.cjs');
 
 describe('extractAnchors — the three anchor forms the governance docs use', () => {
@@ -384,5 +385,182 @@ describe('#2842 — validateCitedItemStatusClaims: a cited item\'s claimed statu
       expect(m.has('555')).toBe(false);            // no status → not an item this rule can judge
       expect([...collectOpenItemIds(dir)].sort()).toEqual(['111', '222', '444', 'xaaa111', 'xbbb222']);
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+// ── #2849 · findPointInTimeClaims: an uncatalogued anchor's point-in-time claim must name its retiring
+// OPEN item ─────────────────────────────────────────────────────────────────────────────────────────
+// Derived from #2854 Fork 1 = (a): a catalogued anchor is exempt (its status is already machine-readable
+// via #2844); an uncatalogued one needs an "until #NNNN" pointer at a live item, or it errors. Every case
+// is fixture-driven, with the negative controls (clean prose, a catalogued anchor, an item never claiming
+// a temporal token) proving the rule doesn't just flag everything.
+describe('#2849 — findPointInTimeClaims: an uncatalogued point-in-time claim must name its retiring OPEN item', () => {
+  const doc = (id, body) => `### Heading {#${id}}\n\n${body}\n`;
+
+  it('passes an anchor with no point-in-time token at all', () => {
+    const errs = findPointInTimeClaims(doc('clean', 'A timeless rule with no temporal language.'), 'doc.md', {
+      isOpenItem: () => false,
+    });
+    expect(errs).toEqual([]);
+  });
+
+  it('REJECTS a point-in-time claim with no retiring pointer at all', () => {
+    const errs = findPointInTimeClaims(doc('drift', 'Not yet enforced by any code path.'), 'doc.md', {
+      isOpenItem: () => false,
+    });
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/makes a point-in-time claim/);
+    expect(errs[0].message).toMatch(/"not yet"/);
+  });
+
+  it('accepts an "until #NNNN" pointer at a LIVE (open) item — the narrow escape #2854 kept', () => {
+    const errs = findPointInTimeClaims(doc('owed', 'Still build-pending until #4242 lands.'), 'doc.md', {
+      isOpenItem: (id) => id === '4242',
+    });
+    expect(errs).toEqual([]);
+  });
+
+  it('REJECTS an "until #NNNN" pointer at an item that is NOT open (resolved/dropped/absent)', () => {
+    const errs = findPointInTimeClaims(doc('stale', 'Today this still parks until #9999.'), 'doc.md', {
+      isOpenItem: () => false,
+    });
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/is not an OPEN backlog item/);
+    expect(errs[0].message).toMatch(/#9999/);
+  });
+
+  it('a CATALOGUED anchor is exempt — #2844 already binds its status machine-readably', () => {
+    const errs = findPointInTimeClaims(doc('catalogued', 'Not yet built, no pointer at all.'), 'doc.md', {
+      catalogedAnchorIds: new Set(['catalogued']),
+      isOpenItem: () => false,
+    });
+    expect(errs).toEqual([]);
+  });
+
+  it('an EXEMPT (pre-existing, grandfathered) anchor with no pointer passes — the transition list', () => {
+    const errs = findPointInTimeClaims(doc('legacy', 'Still build-pending, no pointer.'), 'doc.md', {
+      exemptAnchorIds: new Set(['legacy']),
+      isOpenItem: () => false,
+    });
+    expect(errs).toEqual([]);
+  });
+
+  it('the exemption list does NOT cover an invalid "until #NNNN" pointer — grandfathering is not a blanket pass', () => {
+    const errs = findPointInTimeClaims(doc('legacy', 'Still build-pending until #9999.'), 'doc.md', {
+      exemptAnchorIds: new Set(['legacy']),
+      isOpenItem: () => false,
+    });
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/is not an OPEN backlog item/);
+  });
+
+  it('is PURE — no filesystem; an empty doc is inert', () => {
+    expect(findPointInTimeClaims('', 'doc.md', { isOpenItem: () => false })).toEqual([]);
+  });
+
+  it('REJECTS an "until #NNNN" pointer that names a LIVE item but sits far from the token — the ' +
+     'pointer must be near the claim it retires, not merely appear somewhere in the anchor', () => {
+    const errs = findPointInTimeClaims(
+      doc('mixed', 'Today this still needs manual review. See #4200 for the tracking grooming, filed until #4300 sweeps the backlog.'),
+      'doc.md',
+      { isOpenItem: (id) => id === '4300' },
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/no linked open item retiring it nearby/);
+  });
+
+  it('REJECTS the same unrelated-pointer shape even when the intervening sentence starts LOWERCASE — a ' +
+     'sentence-boundary heuristic would under-split this and wrongly treat it as one clause; a fixed ' +
+     'character window has no such failure mode (found by red-team review)', () => {
+    const errs = findPointInTimeClaims(
+      doc('lowercase-continuation',
+        'Today this still needs manual review. filed elsewhere for tracking, until #4300 sweeps the whole backlog clean of every last straggler.'),
+      'doc.md',
+      { isOpenItem: (id) => id === '4300' },
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/no linked open item retiring it nearby/);
+  });
+
+  it('accepts a multi-claim anchor where EVERY token occurrence pairs with its own NEARBY pointer', () => {
+    const errs = findPointInTimeClaims(
+      doc('layered', 'Today this still needs manual review until #4300 lands. Separately, not yet renamed until #4301 ships.'),
+      'doc.md',
+      { isOpenItem: (id) => id === '4300' || id === '4301' },
+    );
+    expect(errs).toEqual([]);
+  });
+
+  it('reports EVERY dangling pointer, not just the last one seen, when an anchor has more than one', () => {
+    const errs = findPointInTimeClaims(
+      doc('multi-dangling', 'Today this parks until #1111. Separately, not yet fixed until #2222.'),
+      'doc.md',
+      { isOpenItem: () => false },
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/#1111/);
+    expect(errs[0].message).toMatch(/#2222/);
+  });
+});
+
+describe('#2849 — POINT_IN_TIME_EXEMPT_ANCHORS: the transition grandfather must only shrink', () => {
+  // The exact set recorded when this lint shipped. A cardinality check alone ("size <= 29") would pass a
+  // SWAP — drop one legacy id, add one brand-new one, same or smaller count — which is exactly what
+  // "never grows" must catch. Membership against this frozen snapshot catches that; only the size check
+  // does not.
+  const SHIPPED_SNAPSHOT = new Set([
+    'constellation-placement', 'relocation-granularity', 'backlog-tracking-locus-now-distributed-next',
+    'non-verdict-conformance-matcher', 'portfolio-project-tiering', 'plug-distribution-unit',
+    'native-first-baseline', 'forward-emit-dedicated-ir', 'standard-consumability',
+    'webrouting-runtime-route-ingestion', 'first-party-dogfood', 'vocabulary-completeness-early',
+    'merge-risk-optimistic-with-targeted-lock', 'pr-flow-rollout-mechanism',
+    'operations-declared-once-callers-generated', 'conveyor-dispatch-calls-the-declared-operation',
+    'state-lives-where-its-nature-dictates', 'deterministic-oracle-clears-slice',
+    'human-is-principle-surface-not-path', 'enforce-flip-triple-gated', 'memory-admission-verified-grounding',
+    'statute-anchor-states-rule-not-status', 'size-adds-reviewers-never-refuses',
+    'every-pr-gets-a-look-advisory-floor', 'heavy-command-admission-queue',
+    'agent-mutations-through-typed-operations', 'registry-name-guard-namespace',
+    'ci-lifecycle-total-label-function', 'anchor',
+  ]);
+
+  it('never silently grows past its recorded size — bumping it is a deliberate, reviewed code edit', () => {
+    expect(POINT_IN_TIME_EXEMPT_ANCHORS.size).toBeLessThanOrEqual(29);
+  });
+
+  it('never gains an id outside the shipped snapshot — a same-size SWAP is still growth', () => {
+    for (const id of POINT_IN_TIME_EXEMPT_ANCHORS) expect(SHIPPED_SNAPSHOT.has(id)).toBe(true);
+  });
+});
+
+// ── #2849 · collectCatalogedAnchorIds: the catalogue→anchor wiring runStatuteCheck relies on ────────────
+// This is the glue between #2844's machine-readable catalogue and #2849's prose lint, extracted to its own
+// function so it is exercised DIRECTLY (build-brief discipline: an integration test over the real call
+// path, not only the isolated `findPointInTimeClaims` unit). Includes the REAL catalogue.json — proving the
+// one entry it ships with actually resolves, not just a synthetic fixture shape.
+describe('#2849 — collectCatalogedAnchorIds: which anchors a catalogue entry already covers', () => {
+  it('collects an anchor id whose entry cites the given doc', () => {
+    const invariants = [{ id: 'a', anchor: 'docs/agent/platform-decisions.md#known' }];
+    expect(collectCatalogedAnchorIds(invariants, 'docs/agent/platform-decisions.md')).toEqual(new Set(['known']));
+  });
+
+  it('excludes an entry that cites a DIFFERENT doc', () => {
+    const invariants = [{ id: 'a', anchor: 'docs/agent/block-standard.md#known' }];
+    expect(collectCatalogedAnchorIds(invariants, 'docs/agent/platform-decisions.md')).toEqual(new Set());
+  });
+
+  it('ignores an entry with no anchor, or a malformed one', () => {
+    const invariants = [{ id: 'a' }, { id: 'b', anchor: 'not-a-cite' }, { id: 'c', anchor: '' }];
+    expect(collectCatalogedAnchorIds(invariants, 'docs/agent/platform-decisions.md')).toEqual(new Set());
+  });
+
+  it('is PURE — an empty/absent invariants array is inert', () => {
+    expect(collectCatalogedAnchorIds([], 'docs/agent/platform-decisions.md')).toEqual(new Set());
+    expect(collectCatalogedAnchorIds(undefined, 'docs/agent/platform-decisions.md')).toEqual(new Set());
+  });
+
+  it('resolves the REAL invariant-catalogue.json — the actual wiring runStatuteCheck depends on', () => {
+    const catalogue = require('../lib/invariant-catalogue.json');
+    const ids = collectCatalogedAnchorIds(catalogue.invariants, 'docs/agent/platform-decisions.md');
+    expect(ids.has('fix-review-convergence-independent-root-cause')).toBe(true);
   });
 });
