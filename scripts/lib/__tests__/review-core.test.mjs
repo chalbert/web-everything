@@ -54,6 +54,7 @@ import {
   buildValidatorMandate,
   PROSE_IMPRECISION_RULE,
   GUARANTEE_NEEDS_A_TEST_RULE,
+  GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE,
   MUTATION_PROBE_RULE,
   MUTATION_PROBE_RULE_TOOL_FREE,
   FENCED_DATA_RULE,
@@ -730,9 +731,14 @@ describe('buildPanelMandate (#2310)', () => {
     // exactly that one sentence.
     const CLONE_LINE = 'If you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.';
     const TOOL_FREE_LINE = 'You have no tools and cannot run or clone the code at all — judge from the diff text alone and say so on any finding a real run would have settled.';
+    // #3158 round 2 — GUARANTEE_NEEDS_A_TEST_RULE was conditioned the same way as the clone-line, one round
+    // after the fixture was captured against the (then-unconditioned) tool-bearing wording.
     const withToolFreeClause = (text) => {
       expect(text).toContain(CLONE_LINE); // the hatch fires on real fixture text, not a no-op
-      return text.replace(CLONE_LINE, TOOL_FREE_LINE);
+      expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE); // ditto for the guarantee-needs-a-test clause
+      return text
+        .replace(CLONE_LINE, TOOL_FREE_LINE)
+        .replace(GUARANTEE_NEEDS_A_TEST_RULE, GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE);
     };
 
     // #3158 — the fixture was captured against the TOOL-BEARING wording (the only wording that existed pre-#3158),
@@ -2511,39 +2517,66 @@ describe('review-parked-prs.mjs — the editor is gated on the care band (source
  * one week, every one with a comment describing it and no test.
  */
 describe('GUARANTEE_NEEDS_A_TEST_RULE rides alongside the prose rule', () => {
-  it('reaches every adversary the prose rule reaches', () => {
+  // #3158 round 2 — this rule carries the SAME "BREAK the guarded line" instruction as the mutation probe, so
+  // it is conditioned on `toolsAvailable` exactly the same way: tool-bearing callers pass `true` explicitly
+  // (`base`/`panel`/`validator`/`adapter` all default `false` — every one of them is tool-free by default).
+  it('reaches every adversary the prose rule reaches — TOOL-BEARING flavour', () => {
+    for (const [name, text] of Object.entries({
+      base: buildMandate({ toolsAvailable: true }),
+      panel: buildPanelMandate({ lens: 'correctness', toolsAvailable: true }),
+      validator: buildValidatorMandate({ lens: 'correctness', toolsAvailable: true }),
+      adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness', toolsAvailable: true }),
+    })) {
+      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE)}`).toBe(`${name}: true`);
+    }
+  });
+
+  it('reaches every adversary by DEFAULT — TOOL-FREE flavour, never the tool-bearing one', () => {
     for (const [name, text] of Object.entries({
       base: buildMandate({}),
       panel: buildPanelMandate({ lens: 'correctness' }),
       validator: buildValidatorMandate({ lens: 'correctness' }),
       adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness' }),
     })) {
-      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE)}`).toBe(`${name}: true`);
+      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE)}`).toBe(`${name}: true`);
+      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE)}`).toBe(`${name}: false`);
     }
   });
 
   it('appears exactly once, same as its neighbour', () => {
-    const text = buildPanelMandate({ lens: 'correctness', netChangedFiles: ['a.mjs'] });
+    const text = buildPanelMandate({ lens: 'correctness', netChangedFiles: ['a.mjs'], toolsAvailable: true });
     expect(text.split(GUARANTEE_NEEDS_A_TEST_RULE).length - 1).toBe(1);
   });
 
-  // FRAMED AS COVERAGE, not as prose — otherwise the rule beside it makes this unraisable.
+  // FRAMED AS COVERAGE, not as prose — otherwise the rule beside it makes this unraisable. Checked on BOTH
+  // flavours: routing-as-coverage is the shared property, not something the tool-free split should cost.
   it('routes the finding as COVERAGE, so the prose rule does not swallow it', () => {
-    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/COVERAGE finding/);
-    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/not a prose one/);
+    for (const rule of [GUARANTEE_NEEDS_A_TEST_RULE, GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE]) {
+      expect(rule).toMatch(/COVERAGE finding/);
+      expect(rule).toMatch(/not a prose one/);
+    }
   });
 
-  // The technique, not just the instruction: reviewers who found these did it by mutation.
+  // The technique, not just the instruction: reviewers who found these did it by mutation. The tool-free
+  // flavour names the same DEFAULTS shape but cannot instruct the BREAK itself.
   it('names the technique and the commonest shape', () => {
     expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/BREAK the guarded line/);
     expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/DEFAULTS/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).not.toMatch(/BREAK the guarded line/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).toMatch(/DEFAULTS/);
   });
 
   it('does not contradict the prose rule — both are present and distinct', () => {
-    const text = buildValidatorMandate({ lens: 'correctness' });
+    const text = buildValidatorMandate({ lens: 'correctness', toolsAvailable: true });
     expect(text).toContain(PROSE_IMPRECISION_RULE);
     expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
     expect(PROSE_IMPRECISION_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
+  });
+
+  it('the tool-free flavour never tells a `--tools \'\'` juror to break or run anything', () => {
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).not.toMatch(/\bBREAK\b/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).toMatch(/You have NO tools/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE);
   });
 });
 

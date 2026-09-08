@@ -303,6 +303,23 @@ describe('buildMandateText', () => {
       const text = buildMandateText({ kind: 'validator', lens: 'security', toolsAvailable: true });
       expect(text).toMatch(/throwaway `git clone`/);
     });
+
+    // Round-1 panel review of #3158 (correctness + standards-conformance, both flagged this): every other test
+    // here calls `buildMandateText({ toolsAvailable: true })` as a plain object property, never through the CLI's
+    // OWN argv path — `mandate --lens=X --toolsAvailable` is a BARE flag with no `=value`, the exact literal
+    // `we:scripts/workflows/review-parked-prs.mjs` embeds in a shelled-out prompt string. This composes
+    // `parseFlags`'s real output with `runMandate`'s own `flags.toolsAvailable === true || flags.toolsAvailable
+    // === 'true'` expression (mirrored here since `runMandate` itself is not exported — it calls `process.exit`
+    // and is boundary I/O, not the pure glue this file unit-tests) to pin the argv-to-boolean contract that
+    // caller depends on end to end, not just at the `buildMandateText` object-argument layer.
+    it('the bare `--toolsAvailable` argv flag (no `=value`) reaches the tool-bearing mandate end to end', () => {
+      const flags = parseFlags(['mandate', '--lens=security', '--toolsAvailable']);
+      expect(flags.toolsAvailable).toBe(true);
+      const toolsAvailable = flags.toolsAvailable === true || flags.toolsAvailable === 'true';
+      const text = buildMandateText({ kind: 'lens', lens: flags.lens, toolsAvailable });
+      expect(text).toContain(MUTATION_PROBE_RULE);
+      expect(text).not.toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+    });
   });
 });
 

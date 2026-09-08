@@ -207,15 +207,39 @@ export const DEFAULT_MANDATE = 'correctness';
  * FRAMED AS COVERAGE, NOT AS PROSE, and that is load-bearing: a missing test is a real gap in the diff, so it
  * routes through the ordinary disposition machinery. Reading it as a prose finding would put it straight back
  * under the rule above and it would never be raised.
+ *
+ * #3158 round 3 — the OPENING and CLOSING clauses below are SHARED with {@link GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE}
+ * (constants, not re-typed per flavour) so the two can never drift apart on the wording that is supposed to be
+ * identical — only the middle "how to check it" clause differs, because that is the one thing a tool-free juror
+ * genuinely cannot do. A round-2 panel review of this same card found the tool-free sibling missing entirely
+ * because there was no shared template to hook the fix into; sharing the constants is what a review two rounds
+ * later flagged as the missing piece.
  */
+const GUARANTEE_HEADER = 'A COMMENT THAT PROMISES SOMETHING IS A TEST WITH THE WRONG SYNTAX. For each guarantee the diff states in prose — "X can never happen", "this refuses Y", "the caller cannot Z" — ';
+const GUARANTEE_FOOTER = 'prose is the only thing in a diff that nothing checks. Watch DEFAULTS in particular — a default value quietly satisfying a check written for the explicit value is the single most common shape here.';
+
 export const GUARANTEE_NEEDS_A_TEST_RULE = [
-  'A COMMENT THAT PROMISES SOMETHING IS A TEST WITH THE WRONG SYNTAX. For each guarantee the diff states in',
-  'prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find the test that defends it, then',
-  'BREAK the guarded line and confirm a NAMED test reddens. A guarantee no test defends is a COVERAGE finding,',
-  'not a prose one, and it is worth raising: prose is the only thing in a diff that nothing checks. Watch',
-  'DEFAULTS in particular — a default value quietly satisfying a check written for the explicit value is the',
-  'single most common shape here.',
-].join(' ');
+  GUARANTEE_HEADER,
+  'find the test that defends it, then BREAK the guarded line and confirm a NAMED test reddens. A guarantee no ',
+  'test defends is a COVERAGE finding, not a prose one, and it is worth raising: ',
+  GUARANTEE_FOOTER,
+].join('');
+
+/**
+ * #3158 — THE TOOL-FREE COUNTERPART TO {@link GUARANTEE_NEEDS_A_TEST_RULE}. Round-2 panel review of #3158 found
+ * this rule left unconditioned when `MUTATION_PROBE_RULE` was split into tool-bearing/tool-free flavours: it
+ * carries the SAME "BREAK the guarded line and confirm a NAMED test reddens" instruction, emitted unconditionally
+ * by every `buildMandate` call regardless of `toolsAvailable` — the exact false-instruction shape #3158 exists
+ * to remove, just missed on this sibling rule the first time. Use this whenever `toolsAvailable` is false. Shares
+ * `GUARANTEE_HEADER`/`GUARANTEE_FOOTER` with its tool-bearing sibling — see that constant's doc for why.
+ */
+export const GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE = [
+  GUARANTEE_HEADER,
+  'name the test that SHOULD defend it. You have NO tools, so you cannot break the guarded line and watch it ',
+  'redden — say so rather than claiming a mutation result you never produced. A guarantee no test defends is a ',
+  'COVERAGE finding, not a prose one, and it is worth raising even unverified: ',
+  GUARANTEE_FOOTER,
+].join('');
 
 /**
  * #3094 — THE MUTATION PROBE. What separates a finding that is real from one that merely reads well: break the
@@ -234,15 +258,20 @@ export const GUARANTEE_NEEDS_A_TEST_RULE = [
  *
  * Exported so a caller building another transport can assert its presence rather than paraphrasing it, and so a
  * test can pin that it is the only thing #3094 added to the mandate when no `aim` is passed.
+ *
+ * #3158 round 3 — shares `MUTATION_PROBE_EXEMPTION_CLAUSE` with {@link MUTATION_PROBE_RULE_TOOL_FREE} (a
+ * constant, not a re-typed copy) so the "does not apply to a behaviour-free finding" wording can never drift
+ * between the two flavours — see that constant's doc for the round-2 gap this closes.
  */
+const MUTATION_PROBE_EXEMPTION_CLAUSE = 'an assertion of a defect with no mutation result behind it is weaker than one with it. This does NOT apply to a finding that changes no behaviour — pure style, naming, wording, simplicity — where there is nothing to break: say nothing about mutation for those.';
+
 export const MUTATION_PROBE_RULE = [
-  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS. If you report a defect that affects correctness or changes',
-  'behaviour, BREAK the line you say is wrong or unguarded and state, in the finding, whether a NAMED test',
-  'reddens — name the test if one does, and say plainly that NO named test reddens if none does. "No test',
-  'catches this" is itself a finding worth reporting; an assertion of a defect with no mutation result behind it',
-  'is weaker than one with it. This does NOT apply to a finding that changes no behaviour — pure style, naming,',
-  'wording, simplicity — where there is nothing to break: say nothing about mutation for those.',
-].join(' ');
+  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS. If you report a defect that affects correctness or changes ',
+  'behaviour, BREAK the line you say is wrong or unguarded and state, in the finding, whether a NAMED test ',
+  'reddens — name the test if one does, and say plainly that NO named test reddens if none does. "No test ',
+  'catches this" is itself a finding worth reporting; ',
+  MUTATION_PROBE_EXEMPTION_CLAUSE,
+].join('');
 
 /**
  * #3158 — THE TOOL-FREE COUNTERPART TO {@link MUTATION_PROBE_RULE}. Every `judgePanel` seat is `--tools ''`
@@ -251,16 +280,16 @@ export const MUTATION_PROBE_RULE = [
  * thing instead: the juror is told PLAINLY it has no tools, so it cannot claim a mutation result it never
  * produced, and it should weigh its own confidence down accordingly — the same "no test catches this is
  * itself a finding" framing, minus the instruction it cannot carry out. Use this whenever `toolsAvailable`
- * is false; use {@link MUTATION_PROBE_RULE} only where it is true.
+ * is false; use {@link MUTATION_PROBE_RULE} only where it is true. Shares `MUTATION_PROBE_EXEMPTION_CLAUSE`
+ * with its tool-bearing sibling.
  */
 export const MUTATION_PROBE_RULE_TOOL_FREE = [
-  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS, TOOL-FREE. You have NO tools and cannot run or clone anything, so',
-  'you CANNOT break a line and watch a test redden — never claim to have done so. If you report a defect that',
-  'affects correctness or changes behaviour, say plainly that no mutation check was possible and weigh your',
-  'confidence accordingly: an assertion of a defect with no mutation result behind it is weaker than one with',
-  'it. This does NOT apply to a finding that changes no behaviour — pure style, naming, wording, simplicity —',
-  'where there is nothing to break: say nothing about mutation for those.',
-].join(' ');
+  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS, TOOL-FREE. You have NO tools and cannot run or clone anything, so ',
+  'you CANNOT break a line and watch a test redden — never claim to have done so. If you report a defect that ',
+  'affects correctness or changes behaviour, say plainly that no mutation check was possible and weigh your ',
+  'confidence accordingly: ',
+  MUTATION_PROBE_EXEMPTION_CLAUSE,
+].join('');
 
 export const PROSE_IMPRECISION_RULE = [
   'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
@@ -286,10 +315,20 @@ export const PROSE_IMPRECISION_RULE = [
  *   caller passes a non-default today, so that is a stated gap in the allow-list's rationale, not a live hole.
  *   #3158: `toolsAvailable` states whether THIS transport actually granted the juror tools — default `false`
  *   because every existing caller of `buildPanelMandate`/`buildValidatorMandate` runs through `judgePanel`
- *   (tool-free by design, see that module's header). The one caller that DOES grant tools
- *   (`we:scripts/operations/review-pr.mjs`'s `buildReviewJudgeRequest`, #3319) passes `true` explicitly. Never
- *   guess this from context — an absent value must read as "no tools", the fail-closed default, not the other
- *   way round.
+ *   (tool-free by design, see that module's header). Two callers DO grant tools and pass `true` explicitly:
+ *   `we:scripts/operations/review-pr.mjs`'s `buildReviewJudgeRequest` (#3319, in-process) and
+ *   `we:scripts/workflows/review-parked-prs.mjs`'s tool-bearing Workflow subagent, which drives THIS mandate
+ *   through the `review-core-cli.mjs mandate --toolsAvailable` subprocess rather than calling this function
+ *   directly. Never guess this from context — an absent value must read as "no tools", the fail-closed
+ *   default, not the other way round.
+ *
+ *   THIS IS A CLOSED CLAIM, AUDITED, NOT ASSUMED (round-3 panel review of #3158) — `git grep -n
+ *   'buildMandate(\|buildPanelMandate(\|buildValidatorMandate(\|buildMandateText('` finds every call site;
+ *   every one besides the two named above omits `toolsAvailable` and is correctly tool-free by default:
+ *   `we:skills-src/jury/resolve-roster.mjs` (the `/jury` shim, seats through `judgePanel` per #3057) and
+ *   `we:scripts/converge-cli.mjs` (`/converge`'s panel AND red-team, both `judgePanel` per that skill's own
+ *   `SKILL.md`). A THIRD caller ever passing `toolsAvailable: true` must show its own lane-scoped `allowedTools`
+ *   grant beside it, the same pairing the two existing callers already carry — never add one without the other.
  * @returns {string}
  */
 export function buildMandate({
@@ -327,7 +366,9 @@ export function buildMandate({
         ? ['If you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.']
         : ['You have no tools and cannot run or clone the code at all — judge from the diff text alone and say so on any finding a real run would have settled.']),
       PROSE_IMPRECISION_RULE,
-      GUARANTEE_NEEDS_A_TEST_RULE,
+      // #3158 round 2 — this carries the SAME "BREAK the line" instruction as the mutation probe and was missed
+      // the first time this file conditioned that instruction on `toolsAvailable`.
+      toolsAvailable ? GUARANTEE_NEEDS_A_TEST_RULE : GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE,
     ],
   });
 }
@@ -1080,9 +1121,10 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, goal?: string,
  *   round?: number, fenced?: boolean, aim?: string, diffBasis?: string|null, toolsAvailable?: boolean}} o -
  *   #3158: `toolsAvailable` defaults to `false` because every caller reaching this through `judgePanel` is
- *   tool-free by design (see that module's header). The ONE caller that grants real tools
- *   (`we:scripts/operations/review-pr.mjs`, #3319) passes `true` explicitly, which swaps in
- *   {@link MUTATION_PROBE_RULE} for {@link MUTATION_PROBE_RULE_TOOL_FREE} below.
+ *   tool-free by design (see that module's header). The two callers that grant real tools —
+ *   `we:scripts/operations/review-pr.mjs` (#3319, direct call) and `we:scripts/workflows/review-parked-prs.mjs`
+ *   (via the `review-core-cli.mjs mandate --toolsAvailable` subprocess) — pass `true` explicitly, which swaps
+ *   in {@link MUTATION_PROBE_RULE} for {@link MUTATION_PROBE_RULE_TOOL_FREE} below.
  * @returns {string}
  */
 export function buildPanelMandate({
@@ -1187,7 +1229,9 @@ export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = M
  * value is that it never saw why the peers thought it was right. `combineValidatedVerdict` then gates the panel's
  * accept on this independent verdict, and only a JOINT accept earns `redteam:accepted` (the label lives in
  * `review-escalation.mjs`; this module stays label-free — it JUDGES ONLY).
- * @param {{lens: string, contextIsolation?: string}} o
+ * @param {{lens: string, contextIsolation?: string, toolsAvailable?: boolean}} o - #3158: `toolsAvailable`
+ *   defaults `false` — every caller of this validator runs it through `judgePanel` (tool-free by design); see
+ *   `buildPanelMandate`'s doc for the two callers that pass `true`.
  * @returns {string}
  */
 export function buildValidatorMandate({ lens, contextIsolation = 'diff-only', toolsAvailable = false } = {}) {

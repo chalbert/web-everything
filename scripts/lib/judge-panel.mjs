@@ -166,7 +166,7 @@
  *
  * WHICH FINDING CLASSES A TOOL-FREE PANEL CAN AND CANNOT REACH, so a caller never reads a tool-free accept as a
  * tool-backed one: it CAN find anything visible by inspection — logic errors, missing edge cases, a guarantee
- * stated in prose with no test defending it (`GUARANTEE_NEEDS_A_TEST_RULE`, still fully in force: reading the
+ * stated in prose with no test defending it (`GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE` on this transport, still fully in force: reading the
  * test suite and reasoning about coverage needs no tools), naming/structure/simplicity concerns, a scope-creep
  * or ground-truth mismatch against the stated diff. It CANNOT independently verify a claim by executing
  * anything — it cannot run the gate, reproduce a failure, or mutate a line and watch a NAMED test redden. On
