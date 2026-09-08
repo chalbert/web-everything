@@ -125,13 +125,36 @@ export const SINGLE_HOME_CODE_FILES = Object.freeze([
 ]);
 
 /**
- * A raw `execFileSync('gh', …)`-shaped subprocess call carrying `pr edit … --add-label review:accepted`, OR a
- * `setLabels(...)` write whose `add` resolves to the accepted label (`REVIEW_LABELS.accepted` or the literal
- * string) — either shape re-implements the single home's write instead of calling it. Bounded + newline-tolerant
- * like `RAW_SWAP_RE` above, so a multi-line array/object literal still matches; stops at a `)` so it cannot pair
- * an unrelated call with a `review:accepted` mention far below it.
+ * A `gh`-shelling call (`execFileSync`/`spawnSync`/`spawn`/`execSync`/`exec`) carrying the accept flag and the
+ * accepted label together, OR a `setLabels(...)` write whose `add` resolves to the accepted label — either shape
+ * re-implements the single home's write instead of calling it. Co-occurrence-based on purpose, like `RAW_SWAP_RE`
+ * above: it does not care whether the gh args are array-form or ONE command string built with a template
+ * literal or plain concatenation, whether the flag and the label are space-joined or `=`-joined, whether the
+ * label is wrapped in an array, or whether it names the shared constant or the bare label string — a round-1
+ * panel review of this rule (five findings, #2416) traced all four of those past the first cut, which only
+ * matched the one call SHAPE visible in the single home's own existing caller. Bounded + newline-tolerant like
+ * `RAW_SWAP_RE`, so a multi-line literal still matches; stops at a `)` so it cannot pair an unrelated call with
+ * a mention of the label far below it.
+ *
+ * (This docblock deliberately never TYPES a live example of the shape it forbids — the rule would flag its own
+ * source file otherwise, the same self-reference `RAW_SWAP_RE`'s doc-guard sibling has to avoid. See this
+ * file's own test suite for the fixture shapes it actually asserts against.)
+ *
+ * WHAT THIS STILL CANNOT CATCH, on purpose, same posture as `RAW_SWAP_RE`'s own bounds above and #2895's
+ * documented actor-provenance residual: a script that assigns the `gh` args array, the label string, or the
+ * `setLabels` options object to a variable BEFORE the call defeats textual co-occurrence — no bounded regex can
+ * trace data flow, and reaching for one here would be the "carve-out with holes" `RAW_SWAP_RE`'s own header
+ * already rejected once. This rule's job is to catch the ORDINARY re-implementation an engineer (or agent) who
+ * doesn't know the single home exists would naturally write — exactly how the #2882 doc instance shipped — not
+ * to defeat someone deliberately obfuscating a call to route around a lint they know is watching.
  */
-const CODE_SWAP_RE = /(?:execFileSync|spawnSync|spawn|exec)\s*\(\s*['"]gh['"][^)]{0,400}?--add-label['"]?\s*,?\s*['"]review:accepted['"]|\.setLabels\s*\([^)]{0,400}?\badd\s*:\s*(?:REVIEW_LABELS\.accepted|['"]review:accepted['"])/g;
+const ACCEPTED_TOKEN = String.raw`\[?['"\`]?(?:review:accepted|REVIEW_LABELS\.accepted)`;
+const CODE_SWAP_RE = new RegExp(
+  String.raw`\b(?:execFileSync|spawnSync|spawn|execSync|exec)\s*\(\s*['"\`]?gh['"\`]?[^)]{0,400}?--add-label['"\`]?[=\s,]+${ACCEPTED_TOKEN}`
+  + '|'
+  + String.raw`\.setLabels\s*\([^)]{0,400}?\badd\s*:\s*${ACCEPTED_TOKEN}`,
+  'g',
+);
 
 /**
  * Find every SCRIPT (not doc) file that mints its own `review:accepted` write outside the single home. Pure —

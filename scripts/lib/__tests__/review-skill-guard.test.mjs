@@ -17,6 +17,7 @@ import { join, dirname } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const doc = (content, file = 'skills-src/review/SKILL.md') => [{ file, content }];
+const code = (content, file = 'scripts/some-script.mjs') => [{ file, content }];
 
 describe('checkReviewLabelSingleHome — the raw swap is an error', () => {
   it('flags a raw accept swap, naming the file and line', () => {
@@ -152,7 +153,6 @@ describe('the fs walk cannot drift from the guarded set', () => {
 
 
 describe('checkReviewLabelSingleHomeCode — the raw swap in CODE is an error (#2416)', () => {
-  const code = (content, file = 'scripts/some-script.mjs') => [{ file, content }];
 
   it('flags a raw execFileSync gh swap', () => {
     const { errors } = checkReviewLabelSingleHomeCode(code(
@@ -200,9 +200,61 @@ describe('checkReviewLabelSingleHomeCode — the raw swap in CODE is an error (#
     expect(errors).toHaveLength(0);
   });
 
+  // Round-1 panel review of this rule (#2416) traced the FIRST cut of CODE_SWAP_RE past four idiomatic,
+  // non-obfuscated call shapes it never considered — it was built by enumerating the one shape visible in
+  // the single home's own existing caller. Each is a realistic form a script author would reach for with no
+  // intent to evade anything, unlike the variable-indirection residual documented on CODE_SWAP_RE itself.
+  describe('idiomatic call shapes the round-1 panel found missing', () => {
+    it('flags a single command-string execSync call (not an args array)', () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        "execSync('gh pr edit 42 --repo x/y --add-label review:accepted')",
+      ));
+      expect(errors).toHaveLength(1);
+    });
+
+    it('flags `--add-label=review:accepted` (the `=`-joined flag form)', () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        'execSync(`gh pr edit 42 --repo x/y --add-label=review:accepted`)',
+      ));
+      expect(errors).toHaveLength(1);
+    });
+
+    it('flags an array-wrapped setLabels add (REVIEW_LABELS.accepted)', () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        'provider.setLabels(repo, pr, { add: [REVIEW_LABELS.accepted], remove: [] });',
+      ));
+      expect(errors).toHaveLength(1);
+    });
+
+    it('flags an array-wrapped setLabels add (literal string)', () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        "provider.setLabels(repo, pr, { add: ['review:accepted'], remove: [] });",
+      ));
+      expect(errors).toHaveLength(1);
+    });
+
+    it('flags REVIEW_LABELS.accepted in the raw gh-exec branch too, not just setLabels', () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        "execFileSync('gh', ['pr', 'edit', pr, '--add-label', REVIEW_LABELS.accepted])",
+      ));
+      expect(errors).toHaveLength(1);
+    });
+  });
+
   it('tolerates a missing/odd files shape', () => {
     expect(checkReviewLabelSingleHomeCode().errors).toHaveLength(0);
     expect(checkReviewLabelSingleHomeCode([null, {}, { file: 'scripts/a.mjs' }]).errors).toHaveLength(0);
+  });
+});
+
+describe('checkReviewLabelSingleHomeCode — the documented residual (variable indirection)', () => {
+  // Not a bug: CODE_SWAP_RE is textual co-occurrence, not data-flow analysis. Pinned here so the limitation
+  // stays a DOCUMENTED, tested boundary rather than a silent one — see the function's own docblock.
+  it('does NOT catch a labels object assigned to a variable before the call', () => {
+    const { errors } = checkReviewLabelSingleHomeCode(code(
+      "const spec = { add: REVIEW_LABELS.accepted, remove: [] };\nprovider.setLabels(repo, pr, spec);",
+    ));
+    expect(errors).toHaveLength(0);
   });
 });
 
