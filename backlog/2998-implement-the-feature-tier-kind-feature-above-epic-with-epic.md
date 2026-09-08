@@ -6,6 +6,14 @@ parent: "2705"
 status: open
 dateOpened: "2026-08-08"
 tags: [backlog, taxonomy, data-model, hierarchy, tooling]
+scope:
+  - we:scripts/backlog.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/__tests__/
+  - we:src/backlog.njk
+  - we:src/_data/backlog.js
+  - plateau-app:src/backlog-view/
 ---
 
 # Implement the feature tier: kind:feature above epic, with epic-parity plumbing and the flat/root gates
