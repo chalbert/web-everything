@@ -22,8 +22,12 @@
  *   • The PURE core ({@link planTick} and every helper above the shell banner) has NO fs / git / `Date` /
  *     child_process / gh — the state read, the plan, the free lanes, the bookkeeping, and the clock (`now`) are
  *     all passed IN. It is unit-tested directly (scripts/conveyor/__tests__/tick-core.test.mjs) with plain
- *     objects, no git/network. The one import — `normNum` from {@link ./queue-store.mjs} — is the SAME id
- *     normalizer the state read and dispatcher key on, so this core can never disagree with them on item identity.
+ *     objects, no git/network. Two imports, both pure: `normNum` from {@link ./queue-store.mjs} — the SAME id
+ *     normalizer the state read and dispatcher key on, so this core can never disagree with them on item
+ *     identity — and {@link ../lib/lane-concurrency.mjs} — the SAME concurrency-ceiling helper
+ *     `dispatch-plan.mjs` uses for its own build launches (#xupukxa), so the two lane-consuming decisions this
+ *     core makes (prepare/fix/ci-heal spawns) share one budget with dispatch-plan's builds rather than each
+ *     independently maxing out the free-lane pool.
  *   • The IO SHELL (the `main()` CLI, gated on the main-module check) gathers the read-only inputs by shelling
  *     the existing readiness scripts — `conveyor-state.mjs --json`, `dispatch-plan.mjs --json`, and
  *     `lane-pool.mjs list --acquirable --json` for the free lanes — reads the conveyor's bookkeeping from STDIN
@@ -132,6 +136,7 @@
  */
 
 import { normNum } from './queue-store.mjs';
+import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
 
 /** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
  *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
@@ -848,7 +853,7 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *   prRearmCounts?: object,              // DURABLE per-PR re-arm-comment counts { [pr]: n } — the restart-surviving retry-cap floor (#2643); the IO shell derives it via `countRearmComments`
  *   admission?: { cap?:number, waiting?:Array<{owner:string, lane?:*, num?:*, requestedAt?:string}> },  // #3461 — the heavy-command admission-queue `status` read; each `waiting` entry surfaces as a `waiting-for-capacity` note
  *   liveAgentSessions?: Array<{name?:string}>|Array<string>,  // #3403 — the restart-surviving BUILD-guard floor: `claude agents --json` rows (or plain names), fed through {@link durableBuildNums}
- *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number },
+ *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number, maxConcurrentLanes?:number },
  *   now?: number|null, lastOperatorTurn?: number|null,
  * }} input
  * @returns {{ decisions:object, nextState:object }}
@@ -862,6 +867,13 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     ciHealTtlTicks: config.ciHealTtlTicks ?? DEFAULT_CI_HEAL_TTL_TICKS,
     ciHealRetryCap: config.ciHealRetryCap ?? DEFAULT_CI_HEAL_RETRY_CAP,
     idleWindowMs: config.idleWindowMs ?? DEFAULT_IDLE_WINDOW_MS,
+    // #xupukxa — the SAME concurrency ceiling dispatch-plan.mjs applies to its own build launches, applied
+    // here to prepare/fix/ci-heal spawns (step 3 below) so all four spawn kinds share one budget. Defaults to
+    // `Infinity` (unlimited — today's pre-#xupukxa behavior), mirroring dispatch-plan.mjs's own pure-core
+    // default: every existing direct caller of this core (unit tests included) keeps its prior unrestricted
+    // behavior unless it opts in. The IO shell resolves and passes a real default via
+    // `resolveMaxConcurrentLanes` for every live tick.
+    maxConcurrentLanes: config.maxConcurrentLanes ?? Infinity,
   };
   const tick = Number(bookkeeping.tick) || 0;
   const { queue = [], unshaped = [], needsSlice = [], decisions = [], lanes = [], prs = [], health = {}, infraBlocked = [] } = state;
@@ -920,7 +932,19 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const buildLive = [...build.live, ...durableBuildGuards];
 
   // 2. FILTER plan.launch through the live build guard (num OR lane), then record a guard per new build.
-  const launched = filterLaunches(plan.launch, buildLive);
+  const guardFiltered = filterLaunches(plan.launch, buildLive);
+  // #xupukxa — DEFENSE IN DEPTH: dispatch-plan.mjs already caps `plan.launch` against the concurrency ceiling
+  // using its OWN, separately-read active-lease count; re-cap here against `lanes.length` (THIS tick's own
+  // active-lane read) so a stale plan or a lease-count race between the two subprocess reads can never let
+  // builds alone exceed the ceiling — the same ceiling step 3 below also holds prepare/fix/ci-heal spawns to.
+  // A build trimmed here is NOT suppressed by the guard (it never got a chance to race a lane); tagged
+  // `by: 'capacity-cap'` in `suppressed` so it reads distinctly from a real guard suppression, and surfaced as
+  // its own note below rather than silently dropped.
+  const buildBudget = capToConcurrency(guardFiltered.spawn, { activeCount: lanes.length, cap: cfg.maxConcurrentLanes });
+  const launched = {
+    spawn: buildBudget.admitted,
+    suppressed: [...guardFiltered.suppressed, ...buildBudget.overflow.map((l) => ({ num: l.num, lane: l.lane, by: 'capacity-cap' }))],
+  };
   const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, spawnedTick: tick }));
   const liveBuildGuards = [...buildLive, ...newBuildGuards];
 
@@ -948,6 +972,22 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     ...ciHeal.live.map((g) => String(g.lane)),
   ]);
   let availableLanes = (Array.isArray(freeLanes) ? freeLanes : []).filter((l) => !takenLanes.has(String(l)));
+
+  // 3.5 #xupukxa — trim `availableLanes` to whatever room is left under the SAME concurrency ceiling, counting
+  //     both lanes already active BEFORE this tick (`lanes.length`) and this tick's own admitted build launches
+  //     (`launched.spawn.length`, capped in step 2 above). Prepare/fix/ci-heal spawns below draw from this
+  //     ONE trimmed pool in priority order, so the four spawn kinds combined can never push the tick's total
+  //     lane consumption past `cfg.maxConcurrentLanes` — the exact gap the live incident exposed (19 builds +
+  //     23 prepare-scope agents, each independently maxing out whatever free lanes the OTHER had not yet taken).
+  const capacityBudget = capToConcurrency(availableLanes, {
+    activeCount: lanes.length + launched.spawn.length,
+    cap: cfg.maxConcurrentLanes,
+  });
+  availableLanes = capacityBudget.admitted;
+  // `notes` is declared further down (step 9) — stash these here and splice them in there, rather than reorder
+  // the whole function around one early-arriving note kind.
+  const capacityCapNotes = capacityBudget.overflow.map((l) =>
+    ({ kind: 'capacity-cap', lane: l, text: `⏸ lane-${l} available but withheld — concurrent-lane cap (${cfg.maxConcurrentLanes}) reached` }));
 
   // 4. PREPARE spawns (scope + decision) — union re-dispatch gate, lane exclusion; consume lanes.
   const prep = planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick });
@@ -985,7 +1025,13 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
 
   // 9. Surface notes — the deterministic, no-agent surfaces (§3d epics, §3e prepared decisions) + guard TTL
   //    re-dispatch warnings, gathered so the skill posts them without re-deriving.
-  const notes = [];
+  const notes = [...capacityCapNotes];
+  // #xupukxa — a build trimmed by the SAME concurrency ceiling (step 2) is surfaced too, not just the
+  // available-lane withholding above: an operator watching the status line otherwise sees a ready build
+  // silently vanish rather than being told why.
+  for (const s of launched.suppressed) {
+    if (s.by === 'capacity-cap') notes.push({ kind: 'capacity-cap', num: s.num, text: `⏸ #${s.num} — capacity-cap (concurrent-lane cap ${cfg.maxConcurrentLanes} reached)` });
+  }
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
   for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
   // #3454 — an UNCLAIMED TTL (dispatch-lane.mjs's own in-flight guard refused it pre-flight, or it died before
@@ -1160,6 +1206,10 @@ async function main(argv) {
       lastOperatorTurn = parsed.lastOperatorTurn ?? null;
     }
   }
+  // #xupukxa — resolve the concurrency ceiling from env exactly like dispatch-plan.mjs's own IO shell, unless
+  // the caller's piped-in bookkeeping already named one explicitly (an operator override rides through
+  // `config.maxConcurrentLanes` on STDIN same as any other config knob).
+  if (config.maxConcurrentLanes == null) config.maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
 
   const stateArgs = ['--json'];
   const planArgs = ['--json'];

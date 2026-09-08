@@ -23,10 +23,14 @@ describe('classifyHeld — covers every dispatch-plan.mjs HELD_REASONS token', (
     }
   });
 
-  it('"overlaps lane-<n>" (a concrete lane id) and "no free lane" are queued-waiting-turn', () => {
+  it('"overlaps lane-<n>" (a concrete lane id), "no free lane", and "capacity-cap" are queued-waiting-turn', () => {
     expect(classifyHeld('overlaps lane-7')).toBe('queued-waiting-turn');
     expect(classifyHeld('overlaps lane-42')).toBe('queued-waiting-turn');
     expect(classifyHeld('no free lane')).toBe('queued-waiting-turn');
+    // #xupukxa — a free lane exists but the concurrent-lane cap withheld it; same "nothing to do but wait"
+    // bucket as `no free lane`, not `not-ready` (regression pin: an earlier bug checked only index 0 of the
+    // exact-match list, so a second entry silently fell through to the catch-all throw).
+    expect(classifyHeld('capacity-cap')).toBe('queued-waiting-turn');
   });
 
   it('every NOT_READY_REASONS token is not-ready', () => {

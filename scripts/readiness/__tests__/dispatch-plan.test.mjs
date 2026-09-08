@@ -626,3 +626,60 @@ describe('clearedNotReady — a cleared id with no ready row is surfaced, never 
     expect(clearedNotReady([{ num: '' }, { num: null }], readyRows, normNum)).toEqual([]);
   });
 });
+
+describe('dispatchPlan — maxConcurrentLanes (#xupukxa, live incident 2026-09-07: 42 concurrent lane dispatch)', () => {
+  it('omitted — unlimited, byte-for-byte the pre-#xupukxa behavior (every existing caller keeps working)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }, { num: 2, scope: ['b/'] }, { num: 3, scope: ['c/'] }],
+      leases: [],
+      freeLanes: [10, 11, 12],
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }, { num: 2, lane: 11 }, { num: 3, lane: 12 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('trims free lanes against the cap MINUS already-active leases, holding the rest `capacity-cap`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }, { num: 2, scope: ['b/'] }, { num: 3, scope: ['c/'] }],
+      leases: [{ lane: 1, scope: ['z/'] }], // 1 already active
+      freeLanes: [10, 11, 12],
+      maxConcurrentLanes: 2, // room = 2 - 1 = 1
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+    expect(plan.held).toEqual([
+      { num: 2, reason: 'capacity-cap' },
+      { num: 3, reason: 'capacity-cap' },
+    ]);
+  });
+
+  it('a cap already exhausted by active leases holds every disjoint item `capacity-cap`, not `no free lane`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [{ lane: 1, scope: ['z/'] }, { lane: 2, scope: ['y/'] }],
+      freeLanes: [10, 11, 12],
+      maxConcurrentLanes: 2, // room = 2 - 2 = 0, but real free lanes exist
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'capacity-cap' }]);
+  });
+
+  it('a genuinely empty free-lane pool still holds `no free lane` (cap was never the limiting factor)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [],
+      freeLanes: [],
+      maxConcurrentLanes: 8,
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'no free lane' }]);
+  });
+
+  it('a cap large enough to cover leases + free lanes launches everything, same as unlimited', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }, { num: 2, scope: ['b/'] }],
+      leases: [{ lane: 1, scope: ['z/'] }],
+      freeLanes: [10, 11],
+      maxConcurrentLanes: 8,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }, { num: 2, lane: 11 }]);
+    expect(plan.held).toEqual([]);
+  });
+});

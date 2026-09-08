@@ -1141,3 +1141,71 @@ describe('computeTickCounts — the structured tallies behind buildStatusLine (#
     expect(computeTickCounts()).toEqual({ building: 0, preparing: 0, fixing: 0, healing: 0, queued: 0, parked: 0, verdict: 'ok' });
   });
 });
+
+describe('planTick — maxConcurrentLanes (#xupukxa, live incident 2026-09-07: 19 builds + 23 prepare-scope in one tick)', () => {
+  it('omitted config — unlimited, byte-for-byte the pre-#xupukxa behavior', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }, { num: 21 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5, 6],
+      bookkeeping: { tick: 0 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope.map((s) => s.num).sort()).toEqual([20, 21]);
+  });
+
+  it('a tight cap trims prepare/decision spawns AFTER admitting builds, sharing one budget', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }, { num: 21 }, { num: 22 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5, 6, 7],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 2 }, // 1 build admitted; room left for prepares = 2 - 0 (prior active) - 1 (build) = 1
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope).toHaveLength(1);
+    expect(out.decisions.notes.filter((n) => n.kind === 'capacity-cap').length).toBeGreaterThan(0);
+  });
+
+  it('caps builds themselves when the plan alone would exceed the ceiling (defense-in-depth vs. a stale/race plan)', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }, { num: 12, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }, { num: 11, lane: 5 }, { num: 12, lane: 6 }] },
+      freeLanes: [4, 5, 6],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 2 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }, { num: 11, lane: 5 }]);
+    expect(out.decisions.suppressedBuilds).toEqual(
+      expect.arrayContaining([{ num: 12, lane: 6, by: 'capacity-cap' }]),
+    );
+    expect(out.decisions.notes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'capacity-cap', num: 12 })]),
+    );
+  });
+
+  it('counts already-active lanes (state.lanes) against the cap, not just this tick’s new spawns', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], lanes: [{ lane: 1, num: 1 }, { lane: 2, num: 2 }], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [3],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 2 }, // already 2 active — no room left for the prepare
+    });
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(true);
+  });
+
+  it('a cap comfortably above demand changes nothing observable', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 50 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 5 }]);
+    expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(false);
+  });
+});
