@@ -151,6 +151,36 @@ describe('merge-ai-prs — #xc7p3q9: couple-join decoupled from the ready-to-mer
     expect(plan.deferred[0].heldCoupleOnly).toBe(true);
   });
 
+  it('#2502 — buildDrainVerdicts attaches the tip commit oid as headSha, threaded through into a deferred plan entry', () => {
+    // Real call path: narrowPrsByRepo → buildDrainVerdicts (classifyPr + attach) → joinImplToCouples →
+    // planLabelDrain — the SAME sequence runCli drives (B12, per this file's own norm above). Asserts the field
+    // survives both stops: the verdict itself, and the `deferred` plan entry the drain's emitted `result.deferred`
+    // is built from.
+    const tipOid = 'abc123deadbeef';
+    const opts = implOnly(contextWithCarrier({ labels: [REVIEW_LABELS.changes] }));
+    opts.reads = new Map([[`${FUI}::55`, { commits: [claude, { ...claude, oid: tipOid }], manifest: null }]]);
+    const { verdicts, plan } = drivePlan(opts);
+    expect(verdicts.find((v) => v.num === 55).headSha).toBe(tipOid);
+    expect(plan.deferred[0].headSha).toBe(tipOid);
+  });
+
+  it('#2502 — a READY (landable) candidate carries headSha on the exact `c` object runCli\'s merged/failedMerges/toMerge pushes read', () => {
+    // `merged.push({num: c.num, repo: c.repo, headSha: c.headSha ?? null})` and `failedMerges.push({...})` in
+    // runCli read `c` straight off `plan.ready` (`remaining = verdicts.map((v) => ({ ...v }))`, then
+    // `plan.ready` from THIS SAME `planLabelDrain` — no rebuild, no field-dropping in between). `toMerge`/
+    // `skipped`/`parked` read `v.headSha` straight off `verdicts` (a `.filter`/direct index, again no rebuild).
+    // The prior test proves headSha survives onto a `verdicts` entry and a `plan.deferred` entry; this one
+    // proves the THIRD shape (`plan.ready`) — between the two, every one of the six emitted buckets is proven
+    // to read off an object this diff is shown attaching `headSha` to, never a re-derived one.
+    const tipOid = 'ready0oid9';
+    const opts = implOnly(contextWithCarrier({ labels: ['ready-to-merge'] }), { implNum: 55 });
+    opts.reads = new Map([[`${FUI}::55`, { commits: [claude, { ...claude, oid: tipOid }], manifest: null }]]);
+    const { plan } = drivePlan(opts);
+    // sanity: this really is the READY path, not the deferred one the prior test exercises
+    expect(plan.ready.map((c) => c.num)).toEqual([55]);
+    expect(plan.ready[0].headSha).toBe(tipOid);
+  });
+
   it('AC3 (Fix 1/2) — `--repos=<implSlug>` scope where WE is NOT a candidate → fail CLOSED past a held carrier', () => {
     // The candidate scope is frontierui ALONE (WE excluded), but the constellation-wide blind context still holds
     // the held WE carrier — so the impl joins it and defers rather than orphan-landing.
@@ -589,7 +619,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
   it('the reproduction WITH coupleIncomplete yields deferred [30] waiting on item 100', () => {
     const plan = repro({ landedThisPass: new Set([100]), coupleIncomplete: new Set([100]) });
     expect(plan.ready).toEqual([]);
-    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: null }]);
   });
 
   // ── 2. the SIBLING predicate — stackProven proof (1) makes the same subtraction ─────────────────────────────
@@ -600,7 +630,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     expect(proven.ready.map((c) => c.num)).toEqual([30]);                 // control: proof (1) alone frees it
     const withCounter = planLabelDrain([stackCand(30, 101, [100])], { landedThisPass: new Set([100]), coupleIncomplete: new Set([100]) });
     expect(withCounter.ready).toEqual([]);
-    expect(withCounter.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+    expect(withCounter.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: null }]);
   });
 
   it('stackProven: the subtraction SHORT-CIRCUITS — a weaker later arm cannot undo the counter-evidence', () => {
@@ -618,7 +648,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
       provenOnMain: new Set([100]), extraOpenItems: new Set([100, 101]), coupleIncomplete: new Set([100]),
     });
     expect(plan.ready).toEqual([]);
-    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: null }]);
   });
 
   it('an empty coupleIncomplete leaves #999 F1/F2 byte-identical (explicit no-op control)', () => {
@@ -735,7 +765,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     const run = runCascade({ verdicts: mkVerdicts(), prsByRepo: mkPrsByRepo(), failRefs: new Set(['lane/a-fui']) });
     expect(run.merged).toEqual([77]);                                    // only the WE carrier landed
     expect(run.landedThisPass.has(100)).toBe(true);                      // …and it stamped item 100 as landed
-    expect(run.deferred).toEqual([{ num: 88, item: 101, waitOn: [100] }]);  // the dependent held back
+    expect(run.deferred).toEqual([{ num: 88, item: 101, waitOn: [100], headSha: null }]);  // the dependent held back
   });
 
   it('real window CONTROL: on today\'s wiring (no re-derived set reaching replan) the dependent wrongly LANDS', () => {
