@@ -2,9 +2,10 @@
 bornAs: xt12rcn
 kind: task
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/conveyor/ci-queue-watch.mjs"]
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-07"
 tags: [infra, ci, observability, monitoring]
 relatedTo: ["3569"]
 ---
@@ -15,4 +16,15 @@ Investigated 2026-09-07 whether GitHub Actions runner concurrency is a real or p
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `node we:scripts/conveyor/ci-queue-watch.mjs sweep --json` fails (`Cannot find module`)
+   before this item lands; after, it samples `gh run list`, classifies the wait (`ok`/`watch`/`blocked` past
+   configurable thresholds), and appends the sample to we:.conveyor/ci-queue-history.json — a SECOND sweep
+   appends a second entry rather than overwriting the first, proving the history actually accumulates over
+   time (we:scripts/conveyor/__tests__/ci-queue-watch.test.mjs, CLI-integration section).
+2. **Wired into the resident cadence** — we:skills-src/conveyor/runner.mjs's `makeCliMechanicalPasses` runs
+   we:scripts/conveyor/ci-queue-watch.mjs `sweep` every tick alongside the branch-drift sweep it mirrors, with
+   no human or interactive session sampling `gh run list` by hand (the exact gap this card's own investigation
+   named); proven by the mechanical-pass exact-list regression test in
+   we:skills-src/conveyor/__tests__/runner.test.mjs.
+3. **Purely informative, by design** — no dispatch gate reads the persisted verdict (unlike branch-drift's
+   `blocked`); this item's scope is visibility into the trend, not a gate on top of it.

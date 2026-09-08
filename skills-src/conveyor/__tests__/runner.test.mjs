@@ -399,6 +399,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',
       'node /scripts/conveyor/reconcile-fix-dispatch.mjs --repo=owner/repo',
       'node /scripts/conveyor/branch-drift.mjs sweep --repo=owner/repo',
+      'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=owner/repo',
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',

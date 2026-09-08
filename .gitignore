@@ -55,6 +55,10 @@ commitment-policy/**/*.d.ts
 # hit a PR-open failure on an outside dependency (a GitHub outage) records the resumable handle here; the
 # conveyor auto-retries + resume-opens once infra recovers. Operational recovery state, never committed.
 .conveyor/infra-blocked.json
+# CI queue-wait history sidecar (#3574) — the periodic `gh run list` wait-time sample the resident runner's own
+# tick appends to, so a genuine Actions run-queue regression becomes a visible trend instead of invisible.
+# Machine-local, recreated on demand by ci-queue-watch.mjs sweep; never committed, like the other sidecars here.
+.conveyor/ci-queue-history.json
 # False-green evidence sidecar (#2681) — the diff-driven test-selection shadow full-suite compare records each
 # sample (was a full-suite failure OUTSIDE the shrink's selected set?) here. Ephemeral measure-mode evidence the
 # eventual default-on decision reads; machine/CI-local, recreated on demand, never committed.
