@@ -2,7 +2,7 @@
 bornAs: xwwwc7a
 kind: task
 parent: "1245"
-status: open
+status: resolved
 relatedTo: ["3154", "1245"]
 locus: frontierui
 scope:
@@ -11,6 +11,8 @@ scope:
   - "fui:blocks/__tests__/unit/router/types.test.ts"
   - "fui:blocks/__tests__/unit/router/RouteViewElement.test.ts"
 dateOpened: "2026-08-17"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: [blocks, router, drift, frontierui, constellation, debt]
 ---
 
