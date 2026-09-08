@@ -108,12 +108,26 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
+
+/** The review-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
+ *  (`#xy8di3v`, extending `#3418`/`#xqyyoje`'s fix to the review-dispatch path). Passed via
+ *  `--append-system-prompt-file` on every dispatched review session so its "this prompt is real, not a
+ *  template" identity is a harness-level fact present BEFORE the per-PR brief is even read, rather than prose
+ *  competing with a brief whose own "Fill these before spawning" table can read as unfilled post-substitution
+ *  (live-confirmed 2026-09-07: review-1998/2024/2027 each self-aborted a genuinely-instantiated brief on
+ *  exactly this confusion — see `we:backlog/3606-*.md`). A review-specific file, not a reuse of the
+ *  delivery-side one verbatim, because that file names `we:scripts/operations/dispatch-lane.mjs` as the
+ *  starting operation and talks about a lane id/backlog file path a review dispatch does not carry the same
+ *  way — wrong specifics would be its own new confusion. */
+export const REVIEW_DISPATCH_SYSTEM_PROMPT_FILE = join(
+  dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'review', 'review-agent-system-prompt.md',
+);
 import { checkMainStaleness, gitRun } from '../lib/main-staleness.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
@@ -359,6 +373,7 @@ export function dispatchReview({
   const argv = buildAgentArgv({
     sessionId,
     payload: { prompt, sessionSlug: planned.sessionSlug },
+    systemPromptFile: REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
     extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
   });
   spawnAgent(argv, { cwd: root });

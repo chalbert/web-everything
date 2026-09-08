@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
-  REVIEW_DISPATCH_DISALLOWED_TOOLS,
+  REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
 } from '../review-dispatch.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
@@ -117,6 +117,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
+      '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
@@ -169,12 +170,36 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
+      '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
     ]);
+  });
+
+  // #xy8di3v — extending #3418/#xqyyoje's static system-prompt fix to review-dispatch: live-confirmed
+  // 2026-09-07, review-1998/2024/2027 each read a genuinely, correctly instantiated brief and wrongly
+  // concluded they'd been handed a raw template — see we:backlog/3606-*.md. Pin the argv shape directly, the
+  // same way dispatch-lane-io.test.mjs pins it for the build-dispatch side.
+  it('#xy8di3v — always passes REVIEW_DISPATCH_SYSTEM_PROMPT_FILE via --append-system-prompt-file, ahead of '
+    + 'the disallowed-tools deny list and any extraArgs', () => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234,
+      repo: 'chalbert/web-everything',
+      root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
+    });
+    const promptFileIdx = calls[0].argv.indexOf('--append-system-prompt-file');
+    expect(promptFileIdx).toBeGreaterThan(-1);
+    expect(calls[0].argv[promptFileIdx + 1]).toBe(REVIEW_DISPATCH_SYSTEM_PROMPT_FILE);
+    const disallowedIdx = calls[0].argv.findIndex((a) => a.startsWith('--disallowedTools='));
+    expect(disallowedIdx).toBeGreaterThan(promptFileIdx);
   });
 });
 
