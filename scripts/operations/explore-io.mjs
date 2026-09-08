@@ -307,10 +307,18 @@ export function isPreSpawnRefusal(error) {
  * the condition that refusal exists for does not arise. Copying it across would have refused every `explore`
  * run started from a lane, which is where agent-driven runs actually happen.
  *
+ * THE PROVIDER PORT (#3579) — the SAME port `dispatch-lane-io.mjs#createDispatchSinks` names, applied to the
+ * panelist spawn: `provider` takes a request independent of any CLI's argv/output ({sessionId, runId, panelist,
+ * cwd, prompt, extraArgs}) and returns a durable handle. {@link defaultClaudeProvider} is ONE implementation,
+ * composing {@link buildInvestigatorArgv} with `spawnAgent`; see that file's own header for the full contract.
+ *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd a panelist starts in: the checkout it investigates.
- * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
+ * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`. Feeds
+ *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT spawner/scaffolder go through.
+ * @param {(request: object) => (string|Promise<string>)} [o.provider] - the PORT. Defaults to
+ *   {@link defaultClaudeProvider} closed over `spawnAgent`.
  * @param {() => string} [o.mintSessionId]
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
@@ -321,6 +329,7 @@ export function createExploreSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
+  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
   scaffoldItem = (args) => defaultScaffoldItem(args, { exec, root }),
   writeText = (path, text) => writeFileSync(path, text, 'utf8'),
   readTextIfPresent = (path) => (existsSync(path) ? readFileSync(path, 'utf8') : null),
@@ -353,16 +362,20 @@ export function createExploreSinks({
           + `${String((e && e.message) || e).split('\n')[0]}. No agent was started.`,
         );
       }
-      const argv = buildInvestigatorArgv({
-        sessionId,
-        runId: ctx.runId,
-        payload,
-        prompt: composeInvestigationPrompt(payload?.brief, reportPath),
-        extraArgs,
-      });
+      let handle;
       try {
-        spawnAgent(argv, { cwd: root });
+        handle = await provider({
+          sessionId,
+          runId: ctx.runId,
+          panelist: payload?.panelist,
+          cwd: root,
+          prompt: composeInvestigationPrompt(payload?.brief, reportPath),
+          extraArgs,
+        });
       } catch (e) {
+        // A validation failure `buildInvestigatorArgv` already proved happened before any process existed
+        // carries `.notApplied` — rethrow it as-is rather than reclassifying it as indeterminate.
+        if (e && e.notApplied) throw e;
         if (isPreSpawnRefusal(e)) {
           throw notApplied(`claude could not be started (${String(e.code)}) — no investigator exists`, { sessionId });
         }
@@ -377,7 +390,7 @@ export function createExploreSinks({
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
       return inFlight({
-        handle: sessionId,
+        handle: handle != null ? String(handle) : sessionId,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });
     },
@@ -399,6 +412,28 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
   return exec('claude', argv, {
     encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
   });
+}
+
+/**
+ * THE DEFAULT provider port implementation (#3579) — Claude's own, mirroring
+ * `dispatch-lane-io.mjs#defaultClaudeProvider`. Translates the port's CLI-independent request into
+ * {@link buildInvestigatorArgv}'s shape, hands the resulting argv to `spawnAgent`, and answers with the
+ * pre-minted `sessionId` as the durable handle — matching the pre-#3579 behaviour exactly.
+ *
+ * @param {{sessionId:string, runId:string, panelist?:string, cwd:string, prompt:string, extraArgs?:string[]}} request
+ * @param {{spawnAgent?: Function}} [io]
+ * @returns {string}
+ */
+export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts) } = {}) {
+  const argv = buildInvestigatorArgv({
+    sessionId: request.sessionId,
+    runId: request.runId,
+    payload: { panelist: request.panelist },
+    prompt: request.prompt,
+    extraArgs: request.extraArgs,
+  });
+  spawnAgent(argv, { cwd: request.cwd });
+  return request.sessionId;
 }
 
 /** `claude agents --json` — ACTIVE sessions only. `--all` would list completed ones too, so a finished
