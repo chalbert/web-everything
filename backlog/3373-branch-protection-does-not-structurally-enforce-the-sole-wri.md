@@ -99,3 +99,19 @@ no?" — a fair challenge that turned out to have a real answer: no, not structu
 **[#3423](/backlog/3423-branch-protection-enforcement-of-the-sole-writer-invariant-p/)** (prepared
 `kind: decision`), which this item is now `blockedBy`. The fork's full research, options, and recommended
 default live only there — see that card, not this one, for the enforcement call.
+
+**2026-09-08 — the predicted gap actually happened, not hypothetically this time.** `#3623`/`#3624` landed on
+`origin/main` via two DIRECT commit+push events ("File #xkyisxe…", "WE: file backlog item…") that never went
+through a lane/PR/drain at all — exactly consequence 1 above, minus even needing `enforce_admins: false`
+(there was no PR to bypass review on; it was a raw push). Both sat stranded (hash-keyed, un-numbered) on
+`origin/main` for 44-92 minutes, blocking `check:standards` — and therefore every open PR — repo-wide until a
+human ran `we:scripts/backlog.mjs number-stranded` by hand. Root-caused and evidenced (daemon `history.jsonl`/
+`daemon.log` timestamps, `git log` commit parentage) in the session that investigated this. A structural
+mitigation landed at the APPLICATION layer as a same-night follow-up (`we:scripts/push-if-green.mjs` now runs
+the JIT-numbering step, inside the existing `withNumberingLock` mutex, unconditionally before every push of
+`main` — see `we:scripts/lib/number-pending-hashes-before-push.mjs`), which closes this specific incident
+shape regardless of who calls `we:scripts/push-if-green.mjs` or why. That is a real, complementary control,
+but it is NOT a substitute for this card's ask: it only fires for a caller that goes through
+`we:scripts/push-if-green.mjs` at all — a raw `git push` from an admin-scoped credential (this card's actual
+subject) still bypasses it exactly as consequence 1 describes. This card and #3423 stay open and are not
+blocked-by or resolved-by this fix.
