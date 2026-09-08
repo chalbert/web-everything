@@ -6,6 +6,21 @@ status: open
 blockedBy: ["3015"]
 dateOpened: "2026-08-08"
 tags: []
+scope:
+  - we:scripts/conveyor/learnings-drop.mjs
+  - we:scripts/conveyor/learnings-harvest.mjs
+  - we:scripts/conveyor/learnings-dedup.mjs
+  - we:scripts/conveyor/close-session-sweep.mjs
+  - we:scripts/lib/review-loop-policy.mjs
+  - we:scripts/__tests__/learnings-drop.test.mjs
+  - we:scripts/__tests__/learnings-harvest.test.mjs
+  - we:scripts/__tests__/learnings-dedup.test.mjs
+  - we:scripts/__tests__/close-session-sweep.test.mjs
+  - we:scripts/lib/__tests__/review-loop-policy.test.mjs
+  - we:skills-src/harvest-learnings/SKILL.md
+  - we:skills-src/closing-session/SKILL.md
+  - we:skills-src/capture-learning/SKILL.md
+  - we:.claude/commands/harvest.md
 ---
 
 # Shrink #1068 to the ruled design — delete the recurrence admission gate
