@@ -6,6 +6,9 @@ parent: "3273"
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:skills-src/gap-sweep-rerun/SKILL.md
+  - we:skills-src/review-program/SKILL.md
 ---
 
 # Rewire gap-sweep-rerun and review-program skills onto the declared gap-sweep-status operation
