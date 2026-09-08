@@ -2,9 +2,11 @@
 bornAs: xdo1qbv
 kind: task
 parent: "3383"
-status: open
-scope: ["we:scripts/lane-pool.mjs", "we:skills-src/conveyor/delivery-agent-brief.md", "we:skills-src/conveyor/runner.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs", "we:scripts/__tests__/lane-pool-release-cleans-litter.test.mjs"]
+status: resolved
+scope: ["we:scripts/lane-pool.mjs", "we:skills-src/conveyor/delivery-agent-brief.md", "we:skills-src/conveyor/runner.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs", "we:scripts/__tests__/lane-pool-release-cleans-litter.test.mjs", "we:scripts/lib/lane-litter.mjs", "we:scripts/lib/__tests__/lane-litter.test.mjs"]
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
 tags: []
 ---
 

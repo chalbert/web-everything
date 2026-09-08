@@ -265,6 +265,12 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
     // population) — see that file's own header for the full gap this closes.
     runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
+    // #3568 — reaps known-safe scratch litter (`.commit-msg.txt`, `.pr-body.md`, …) from every UNLEASED lane
+    // whose entire dirty state matches only that allowlist, reusing the SAME `we:scripts/lib/lane-litter.mjs`
+    // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix
+    // or accumulated through any path other than a normal release. See that file's own header for the full
+    // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
+    runQuiet('conveyor/lane-pool-health-watch.mjs');
     // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
     // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
     // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
