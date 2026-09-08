@@ -2,10 +2,11 @@
 bornAs: xt12rcn
 kind: task
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/ci-queue-watch.mjs"]
 dateOpened: "2026-09-07"
 dateStarted: "2026-09-07"
+dateResolved: "2026-09-08"
 tags: [infra, ci, observability, monitoring]
 relatedTo: ["3569"]
 ---
