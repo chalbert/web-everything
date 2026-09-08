@@ -7,6 +7,14 @@ parent: "3029"
 dateOpened: "2026-09-06"
 tags: [operations, conveyor, github, branch-protection, sole-writer, config]
 crossRef: { url: /backlog/3423-branch-protection-enforcement-of-the-sole-writer-invariant-p/, label: "the ruling this implements" }
+scope:
+  - we:scripts/lib/
+  - we:scripts/readiness/
+  - we:scripts/operations/
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/__tests__/
+  - we:docs/agent/platform-decisions.md
+  - we:package.json
 ---
 
 # Make the enforcement rung a declared knob, with Rung 2 as its off-by-default flavor
