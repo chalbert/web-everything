@@ -17,7 +17,7 @@
  *      `assertLaneCwd` accepts it — the same run without the flag still refuses, which is what proves the flag
  *      is the thing supplying the lane and not an accident of the ambient environment.
  *
- * NOTHING HERE SPAWNS A JUROR. The `spawn` handed to `createDefaultJudge` is a stub that runs the real
+ * NOTHING HERE SPAWNS A JUROR. The `provider` handed to `createDefaultJudge` is a stub that runs the real
  * `assertLaneCwd` over the options it was given and then returns a canned answer, so the guard under test is
  * the shipped one while the subprocess is not paid for. The one child process is `run.mjs --help`, whose whole
  * point is that the derived usage text reaches an operator through the real entry point.
@@ -75,7 +75,7 @@ async function driveWithSpawnSpy({ declaration, argv, laneEnv = undefined }) {
   const registry = createRegistry();
   registry.register(declaration);
   const seen = [];
-  const spawn = async (opts) => {
+  const provider = async (opts) => {
     // THE SHIPPED GUARD, not a re-implementation of it. `selfCwd` is left at its default (this process), which
     // is the honest arrangement: the driver is wherever vitest runs, and the temp lane is never inside it.
     assertLaneCwd(opts.cwd ?? null, opts.allowedTools ?? null);
@@ -97,7 +97,7 @@ async function driveWithSpawnSpy({ declaration, argv, laneEnv = undefined }) {
       sinks: {},
       // `run.mjs`'s OWN factory, with only the spawn substituted. Nothing about the flag→spawn precedence is
       // re-implemented here, so a change to it in `run.mjs` is a change to what these tests measure.
-      makeJudge: createCliJudgeFactory({ env, factory: (opts) => createDefaultJudge({ ...opts, spawn }) }),
+      makeJudge: createCliJudgeFactory({ env, factory: (opts) => createDefaultJudge({ ...opts, provider }) }),
       argv,
       newRunId: () => 'run-juror-flags',
     });
@@ -284,7 +284,7 @@ describe('#3151 `--model` overrides the declared juror model without reopening #
   it('is guarded AFTER the merge, so a flag-shaped override cannot reach argv', async () => {
     // `createDefaultJudge` is reachable by hand, not only through the parse that already refuses this — so the
     // factory itself must assert the value it is about to SPAWN, never the one it was handed.
-    const judgeFn = createDefaultJudge({ spawn: async () => ({ value: {} }), model: '--bare' });
+    const judgeFn = createDefaultJudge({ provider: async () => ({ value: {} }), model: '--bare' });
     await expect(judgeFn({ mandate: 'm', shape: {}, model: 'sonnet', effort: 'high', budget: 1 }))
       .rejects.toThrow(/refusing to spawn a juror with `model`/);
   });

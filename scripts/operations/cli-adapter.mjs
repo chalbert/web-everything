@@ -445,6 +445,47 @@ export function unwrapJudgeOutcome(returned) {
 }
 
 /**
+ * @typedef {object} JudgeProviderRequest
+ * @property {string} mandate - the juror's stable system-prompt instruction.
+ * @property {string} input - the material to judge, exactly as the engine's `judge` step declared it.
+ * @property {object} shape - JSON Schema the answer is forced to satisfy.
+ * @property {string} [model] - the model alias/name to judge with.
+ * @property {string} [effort] - one of `judge-spawn.mjs`'s `EFFORT_LEVELS`.
+ * @property {number|null} [budget] - a hard USD ceiling, or `null` for none.
+ * @property {string} [runId] - run identity, for a deterministic actor id.
+ * @property {string} [lens] - lens name, mixed into a panel's actor id alongside `runId`.
+ * @property {string[]} [allowedTools] - a non-empty tool allow-list; omitted entirely for a tool-free juror.
+ * @property {string} [cwd] - the juror's lane. Required by a real provider whenever `allowedTools` is set.
+ */
+
+/**
+ * @typedef {object} JudgeProviderOutcome
+ * @property {object} value - the juror's answer, already validated against `shape`.
+ * @property {string} [sessionId] - which actor judged.
+ * @property {number} [costUsd]
+ * @property {number} [durationMs]
+ * @property {number} [wallMs]
+ * @property {number} [numTurns]
+ * @property {string} [stopReason]
+ * @property {object} [usage]
+ * @property {number} [loadedContextTokens]
+ * @property {boolean} [timedOut]
+ */
+
+/**
+ * @typedef {(request: JudgeProviderRequest) => Promise<JudgeProviderOutcome>} JudgeProvider
+ *
+ * THE PORT (#3370, under #3369). This is the engine's `judge(request) → outcome` contract, named as a
+ * stable boundary rather than left as an inferred function signature: what a provider RECEIVES
+ * (`JudgeProviderRequest`, the same request shape a declaration already builds) and what it must RETURN
+ * (`JudgeProviderOutcome`, the shape `parseJudgeOutcome` produces today) — independent of any CLI's argv
+ * or stdout format. `judgeSpawn` (`we:scripts/lib/judge-spawn.mjs`) is ONE implementation of this port, not
+ * the port itself: its Claude-specific argv construction and stdout parsing stay exactly where they are,
+ * and a second implementation (#3371) satisfies this same shape without either side of `judgeSpawn`
+ * changing. `createDefaultJudge` below is the only place a provider is bound to the engine.
+ */
+
+/**
  * The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}.
  *
  * IT RETURNS WHAT THE SPAWN COST, not only what the juror said. `judgeSpawn` reports `costUsd`, `sessionId`,
@@ -455,13 +496,14 @@ export function unwrapJudgeOutcome(returned) {
  * back through {@link judgeOutcome} onto the run record, which is where a completed run and `--json` read them.
  *
  * @param {object} [o]
- * @param {Function} [o.spawn] - the spawner, injected for tests.
+ * @param {JudgeProvider} [o.provider] - the provider port implementation, injected for tests. Defaults to
+ *   `judgeSpawn`, today's only implementation.
  * @param {string|null} [o.cwd] - the lane the juror runs in. Passed only when set, so a tool-free juror is
  *   unaffected and a tool-bearing one hits `assertLaneCwd`'s refusal when nobody supplied a lane (#3151).
  * @param {string|null} [o.model] - an operator override for the model the DECLARATION asked for. Absent by
  *   default: the declared literal is the norm, and an override is a deliberate command-line act.
  */
-export function createDefaultJudge({ spawn = judgeSpawn, cwd, model } = {}) {
+export function createDefaultJudge({ provider = judgeSpawn, cwd, model } = {}) {
   return async (request) => {
     // THE OVERRIDE IS MERGED BEFORE THE GUARD RUNS, NEVER AFTER (#3151). `assertSafeJudgeRequest` is what stops
     // a flag-shaped `model` reaching argv, so asserting the declaration's request and then substituting the
@@ -470,7 +512,7 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd, model } = {}) {
     // factory, including one that builds it by hand.
     const effective = model ? { ...request, model } : request;
     assertSafeJudgeRequest(effective);
-    const outcome = await spawn({
+    const outcome = await provider({
       mandate: effective.mandate,
       input: effective.input,
       shape: effective.shape,
