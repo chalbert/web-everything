@@ -13,13 +13,13 @@
  * IT DECLARES OVER THE TICK CORE; IT DOES NOT RE-DERIVE IT. The conveyor's dispatch policy — the in-flight
  * build guard, the lane exclusion, the scope-lease arbitration, the TTLs, the union re-dispatch gate — is
  * `we:scripts/conveyor/tick-core.mjs#planTick`, which is pure and tested. This operation CONSUMES that core's
- * five launch lists — `decisions.spawnBuilds`, `decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`
- * (#3165), and `decisions.spawnFixes`, `decisions.spawnCiHeals` (#3332) — and refuses to invent a launch of
- * its own:
+ * six launch lists — `decisions.spawnBuilds`, `decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`
+ * (#3165), `decisions.spawnInvestigations` (#3567), and `decisions.spawnFixes`, `decisions.spawnCiHeals`
+ * (#3332) — and refuses to invent a launch of its own:
  *
  *   - ONE DISPATCH PER CALL, never a batch. `--num=<N>` resolves THAT item's kind and starts THAT item's
  *     agent. The tick already decides multiplicity; a loop here would be a second scheduler in front of it.
- *   - the KIND is never an input either. It is whichever of the five lists the core put this num in, and
+ *   - the KIND is never an input either. It is whichever of the six lists the core put this num in, and
  *     it selects the brief, the session slug and the lane scope together — see `shapeDispatchRead`.
  *
  *   - the LANE is never an input. A caller cannot ask for a lane; it dispatches the lane the core assigned, or
@@ -137,29 +137,33 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG'],
   prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
+  // `investigate` (#3567) fills the SAME five names as the two prepare kinds — it targets an ITEM (not an
+  // existing PR), same as `prepare`/`prepare-decision`, so it has no `PR_NUM`/`LANE_REF` to give either.
+  investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON'],
 });
 
 /**
- * THE FIVE AGENT KINDS THIS OPERATION CAN START (#3165 named three, #3332 the remaining two), in the order the
+ * THE SIX AGENT KINDS THIS OPERATION CAN START (#3165 named three, #3332 two more, #3567 the sixth), in the order the
  * shell resolves them.
  *
- * `planTick` returns FIVE launch lists — `spawnBuilds`, `spawnPrepareScope`, `spawnPrepareDecision`,
- * `spawnFixes`, `spawnCiHeals` — and until #3165 the operation launched only the first, and until #3332 the
- * last two were planned every tick and reached NO route at all: `briefPath` threw for any kind it did not
- * know, so a `fix`/`ci-heal` launch could not even be attempted, let alone dispatched. This list is the whole
- * connection, for all five.
+ * `planTick` returns SIX launch lists — `spawnBuilds`, `spawnPrepareScope`, `spawnPrepareDecision`,
+ * `spawnInvestigations`, `spawnFixes`, `spawnCiHeals` — and until #3165 the operation launched only the first,
+ * until #3332 two more reached a route, and until #3567 `spawnInvestigations` did too; before each of those, a
+ * launch of that kind was planned every tick and reached NO route at all: `briefPath` threw for any kind it
+ * did not know, so it could not even be attempted, let alone dispatched. This list is the whole connection,
+ * for all six.
  *
- * ONE ITEM IS IN AT MOST ONE LIST for the first three — an unscoped held item never reaches `spawnBuilds`, and
- * a decision is never an unshaped build — so the order below is a tie-break that no real tick exercises for
- * those, not a precedence rule. `fix` and `ci-heal` are keyed on a PR rather than an item (#3332's own
+ * ONE ITEM IS IN AT MOST ONE LIST for the first four — an unscoped held item never reaches `spawnBuilds`, a
+ * decision is never an unshaped build, and an investigation is never either — so the order below is a
+ * tie-break that no real tick exercises for those, not a precedence rule. `fix` and `ci-heal` are keyed on a PR rather than an item (#3332's own
  * `sessionSlugFor` docblock explains why), so in principle a bounced item mid-build could show up in a fix or
  * CI-heal list for an OLDER PR while a new one is elsewhere — the shell's `LAUNCH_LISTS` order still applies
  * first-match-wins, and is stated as data for the same reason: two files agreeing on the order by coincidence
  * is how they stop agreeing.
  */
-export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'fix', 'ci-heal']);
+export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
 
 /**
  * How long an in-flight dispatch record whose agent's LIVENESS CANNOT BE ESTABLISHED keeps holding its item
@@ -324,6 +328,7 @@ export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '') {
   const id = `${String(num).trim()}${attempt}`;
   if (kind === 'prepare-decision') return `prepare-decision-${id}`;
   if (kind === 'prepare') return `prepare-${id}`;
+  if (kind === 'investigate') return `investigate-${id}`;
   if (kind === 'fix') return `fix-${String(pr ?? num).trim()}`;
   if (kind === 'ci-heal') return `ci-heal-${String(pr ?? num).trim()}`;
   return `conveyor-${id}`;
@@ -815,8 +820,8 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       holdReason: suppressed
         ? `suppressed by the in-flight build guard (${suppressed.by === 'lane' ? `lane ${suppressed.lane} is held` : 'an agent is already in flight for this item'})`
         : 'the tick core did not clear this item for dispatch — it is not in `decisions.spawnBuilds`, '
-          + '`decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`, `decisions.spawnFixes` or '
-          + '`decisions.spawnCiHeals`',
+          + '`decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`, `decisions.spawnInvestigations`, '
+          + '`decisions.spawnFixes` or `decisions.spawnCiHeals`',
     };
   }
 

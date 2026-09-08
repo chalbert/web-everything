@@ -110,6 +110,14 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
  *  state (`state.decisions[].prepared`): UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks
  *  (artefact + the ruling surface) for ratification. The operator gloss is {@link NEEDS_DECISION_HINT}.
  *
+ *  `needs-investigation` (#3567): a cleared `kind:investigation`. An investigation is NOT build work either —
+ *  it is a single dispatched investigator (investigate -> synthesize -> report, optionally filing children),
+ *  never a two-phase prepare/present lifecycle the way a decision is. It has no `scope:`, so — same reason as
+ *  the decision case just above — it is held BEFORE the scope gate rather than mislabeled `unshaped-no-scope`.
+ *  UNLIKE a decision, there is no `prepared` flag to wait on: `we:scripts/conveyor/tick-core.mjs`'s `planTick`
+ *  spawns every `needs-investigation` hold directly (`spawnInvestigations`) the same tick it clears. The
+ *  operator gloss is {@link NEEDS_INVESTIGATION_HINT}.
+ *
  *  `already-done` (#3457/#3460): a queued item the IO shell's AGE-GATED ground-truth enrichment found a real
  *  merged PR already closing out (Fork 2(b) of #3457's ratified ruling). Checked FIRST, ahead of every other
  *  branch — see {@link dispatchPlan}'s own step 0 for why a real PR-history signal outranks a stale `blocked` /
@@ -139,7 +147,7 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
  *  touches an already-running lane — this pure core has no lease/lane-release knowledge at all. The operator
  *  gloss is {@link DISPATCH_PAUSED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -158,6 +166,12 @@ export const NEEDS_SLICE_HINT = 'epic — /slice into buildable child stories';
  *  decision is never a build. The reason TOKEN stays short (`needs-decision`) for stable matching; the
  *  prepared/unprepared split that routes prepare-vs-present is carried in `state.decisions[].prepared`. */
 export const NEEDS_DECISION_HINT = 'decision — prepare its forks, then present for ratify';
+
+/** The operator-facing gloss for a `needs-investigation` hold (#3567) — surfaced beside the token so a held
+ *  investigation always tells the operator WHAT the conveyor does with it: it is spawned directly
+ *  (`spawnInvestigations`), one dispatched agent, no separate prepare/present phase the way a decision has.
+ *  An investigation is never a build. */
+export const NEEDS_INVESTIGATION_HINT = 'investigation — dispatched to investigate, synthesize, and report';
 
 /** The operator-facing gloss for an `already-done` hold (#3457/#3460) — surfaced beside the token so a held
  *  item always tells the operator WHAT to do: check the named merged PR, and if it really does close the item
@@ -366,6 +380,18 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    A BLOCKED decision is still `blocked` (checked first): it can't be prepared until its blockers clear.
     if (item.kind === 'decision') {
       held.push({ num, reason: 'needs-decision' });
+      continue;
+    }
+    // 3.5. A cleared `kind:investigation` (#3567) — HOLD `needs-investigation`, ALWAYS. Analogous to the
+    //    decision branch just above: an investigation is never build work, so it is held BEFORE the scope
+    //    gate for the same reason a decision is — it carries no `scope:` at all, and without this branch it
+    //    would fall through to the scope gate and be mislabeled `unshaped-no-scope`. UNLIKE a decision, an
+    //    investigation has no separate prepare/present phase: `we:scripts/conveyor/tick-core.mjs`'s `planTick`
+    //    reads every `needs-investigation` hold straight off THIS `held` list and spawns it directly
+    //    (`spawnInvestigations`) the same tick it clears — a single dispatched investigator, not a two-phase
+    //    prepare-then-ratify lifecycle. A BLOCKED investigation is still `blocked` (checked first).
+    if (item.kind === 'investigation') {
+      held.push({ num, reason: 'needs-investigation' });
       continue;
     }
     // 4. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not

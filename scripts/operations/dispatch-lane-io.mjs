@@ -18,7 +18,7 @@
  *     the plan and the core all key on;
  *   - the item's slug and repo-qualified `scope:` come from the canonical backlog loader (`we:src/_data/backlog.js`),
  *     the same source `dispatch-plan.mjs` enriches its queue rows from;
- *   - the brief is whichever of the FIVE authored mandates the launch's KIND names — the delivery brief for
+ *   - the brief is whichever of the SIX authored mandates the launch's KIND names — the delivery brief for
  *     a build, `prepare-scope-agent-brief.md` / `prepare-decision-agent-brief.md` for a prepare (#3165), and
  *     `fix-agent-brief.md` / `fix-agent-ci-brief.md` for a fix / ci-heal repair (#3332) —
  *     read as text and filled by the declaration.
@@ -71,12 +71,13 @@ export function tickCli(root = REPO_ROOT) {
 }
 // THE AGENT-BRIEF TEMPLATE the declaration fills, PER KIND (#3165 wired the first three, #3332 the last two).
 //
-// All five briefs were authored well before any of them but the delivery brief was reachable: `briefPath` took
+// All briefs were authored well before any of them but the delivery brief was reachable: `briefPath` took
 // no kind at all until #3165, so `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md`
 // (18 KB) sat unrouted while the planner kept surfacing prepares nobody could dispatch — and even after #3165
 // added a kind argument, `fix-agent-brief.md` and `fix-agent-ci-brief.md` stayed unrouted for the SAME reason,
 // because #3165 was a three-kind card (`'build' | 'prepare' | 'prepare-decision'`) and never claimed the other
-// two. This map is the whole connection, now for all five.
+// two, and #3567 added `investigate` (`investigation-agent-brief.md`). This map is the whole connection,
+// now for all six.
 //
 // ONE FILE PER KIND, declared as data rather than as a string built from the kind: a computed name silently
 // resolves to a path that does not exist, and `readText` would then fail with `ENOENT` on a filename instead
@@ -85,6 +86,8 @@ const BRIEF_BY_KIND = Object.freeze({
   build: 'delivery-agent-brief.md',
   prepare: 'prepare-scope-agent-brief.md',
   'prepare-decision': 'prepare-decision-agent-brief.md',
+  // #3567 — the investigation dispatch's own brief, parallel to the two prepare briefs above.
+  investigate: 'investigation-agent-brief.md',
   fix: 'fix-agent-brief.md',
   'ci-heal': 'fix-agent-ci-brief.md',
 });
@@ -95,7 +98,7 @@ const BRIEF_BY_KIND = Object.freeze({
 // lane and a wrong PR.
 /**
  * @param {string} [root]
- * @param {'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
+ * @param {'build'|'prepare'|'prepare-decision'|'investigate'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
  *   pre-#3165 caller resolves the same path it always did.
  * @returns {string}
  */
@@ -161,7 +164,7 @@ export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
  * @param {(num: string) => {done: boolean, pr: object|null, checked: boolean}} [o.checkAlreadyDone] -
  *   injectable ALREADY-DONE ground-truth reader (#3457/#3460). Defaults to {@link defaultCheckAlreadyDone}.
  *   Called ONLY when the core actually cleared this item for SOME launch — see the call site below for why.
- * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null), alreadyDone: {done: boolean, pr: object|null, checked: boolean}}}
+ * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'investigate'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null), alreadyDone: {done: boolean, pr: object|null, checked: boolean}}}
  */
 export function readTick({
   num,
@@ -212,7 +215,7 @@ export function readTick({
   const item = findItem(key, loadItems);
   const nextState = tick && typeof tick.nextState === 'object' ? tick.nextState : null;
   // THE SELECTION happens here, with the tick's own normalizer — see the declaration's header for why it is
-  // not in the pure half. FIVE LISTS, not one (#3165 wired the first three; #3332 the last two): `planTick`
+  // not in the pure half. SIX LISTS, not one (#3165 wired the first three; #3332 two more; #3567 the sixth): `planTick`
   // plans builds, both prepare kinds, AND fix/CI-heal repairs, and launching only a subset is why
   // `dispatch-lane --num=<an item planned for one of the unwired kinds>` did nothing at all while the
   // operator's status line kept promising it would.
@@ -224,6 +227,7 @@ export function readTick({
     ['build', decisions.spawnBuilds],
     ['prepare', decisions.spawnPrepareScope],
     ['prepare-decision', decisions.spawnPrepareDecision],
+    ['investigate', decisions.spawnInvestigations],
     ['fix', decisions.spawnFixes],
     ['ci-heal', decisions.spawnCiHeals],
   ];
@@ -259,7 +263,7 @@ export function readTick({
 
   // THE PR's HEAD REF (`{{LANE_REF}}`), resolved ONLY when this launch is a `fix`/`ci-heal` AND actually carries
   // a `pr` (#3332). LAZY for the same cost-avoidance reason {@link inFlightDispatchesFor}'s own docblock states
-  // for itself: a build/prepare dispatch — four launches out of five — pays no extra `gh pr view` subprocess for
+  // for itself: a build/prepare/investigate dispatch — four launches out of six — pays no extra `gh pr view` subprocess for
   // a lookup it will never use, and this read sits synchronously inside a waker pass that promises to stay
   // fail-soft and fast per run.
   const laneRef = (launchKind === 'fix' || launchKind === 'ci-heal') && launch?.pr != null
