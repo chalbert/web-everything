@@ -190,11 +190,14 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  noticing it by hand), the parked-PR conflict watch (#xw0odtv — `we:scripts/conveyor/
  *  parked-pr-conflict-watch.mjs sweep`: labels + one-time-comments any review-parked PR that has drifted into a
  *  real merge conflict against `main`, catching exactly the axis branch-drift's single-branch watch and #2824's
- *  BEHIND-only freshness gate both leave uncovered), the review-reconcile pass (epic #3383, x5v8yy9 — reads
+ *  BEHIND-only freshness gate both leave uncovered), the general PR-landing-progress watch (we:3550 —
+ *  `we:scripts/conveyor/parked-pr-progress-watch.mjs sweep`: flags a review-parked PR sitting past a
+ *  configurable threshold with no independent review ever dispatched for it — the neglect axis neither
+ *  sibling watch above catches), the review-reconcile pass (epic #3383, x5v8yy9 — reads
  *  `conveyor/reconcile-pass.mjs`'s own decision and dispatches `operations/review-dispatch.mjs` for every PR it
  *  names, plus the purely-informative `review-round-tag.mjs`/`review-status-tag.mjs` labels — the review step
  *  is now actually mechanized, not merely planned; see {@link selectStatusCandidates} for which PRs the status
- *  refresh covers), and (#3421) the blocking-hiccup sink. All eight are best-effort: a failure is swallowed
+ *  refresh covers), and (#3421) the blocking-hiccup sink. All nine are best-effort: a failure is swallowed
  *  (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer to
  *  `main`.
  *
@@ -369,6 +372,14 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // skipped (the label's own presence is the durable marker, same idea as the conflict-watch line above,
     // reusing an existing label instead of minting a new one). See that file's own header for the full design.
     runQuiet('conveyor/duplicate-pr-watch.mjs', ['sweep']);
+    // we:3550 — sweeps every OPEN, review-parked PR (review:pending/review:changes/review:human) for the
+    // general neglect axis neither sibling watch above catches: no `review-<pr>`/`fix-<pr>` agent session has
+    // EVER been dispatched for it, and it has sat past a configurable threshold (default 24h,
+    // WE_PR_NEGLECT_THRESHOLD_HOURS), read off GitHub's own issue-events label timeline — no new state store.
+    // Posts a `review:changes` finding via reconcile-finding.mjs, same as the line above. Dedup: a PR already
+    // `review:changes` is skipped (that re-check is the separate follow-on we:3596, out of scope here). See
+    // that file's own header for the full design, ratified in we:3549.
+    runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep']);
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is

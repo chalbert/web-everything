@@ -3,8 +3,10 @@ bornAs: x7llsyo
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: [conveyor, review, pr-watch, alerting]
 scope:
   - we:scripts/conveyor/parked-pr-progress-watch.mjs
