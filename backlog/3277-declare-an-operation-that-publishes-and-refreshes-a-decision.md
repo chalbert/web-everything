@@ -6,6 +6,8 @@ parent: "3029"
 status: open
 dateOpened: "2026-08-25"
 tags: []
+scope:
+  - we:scripts/operations/
 ---
 
 # Declare an operation that publishes and refreshes a decision or architecture artifact
