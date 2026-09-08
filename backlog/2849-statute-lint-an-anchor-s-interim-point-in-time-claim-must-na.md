@@ -3,9 +3,10 @@ bornAs: xv2vosc
 kind: task
 parent: "2822"
 blockedBy: ["2854"]
-status: active
+status: resolved
 dateOpened: "2026-08-02"
 dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: [conveyor, statute-lint, prevention, temporal-token]
 scope:
   - we:scripts/lib/validate-rules-anchors.cjs
