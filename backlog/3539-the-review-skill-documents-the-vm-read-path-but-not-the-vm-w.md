@@ -6,6 +6,8 @@ status: open
 dateOpened: "2026-09-06"
 tags: []
 relatedTo: ["3267"]
+scope:
+  - we:skills-src/review/
 ---
 
 # The review skill documents the VM read path but not the VM write path, so a reviewer learns mid-clearance that the operation cannot finish
