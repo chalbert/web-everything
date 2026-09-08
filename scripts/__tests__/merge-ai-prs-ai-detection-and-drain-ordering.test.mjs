@@ -12,7 +12,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, buildDrainVerdicts, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, toMergeEntry, mergedEntry, failedEntry, parkedEntry, skippedEntry } from '../merge-ai-prs.mjs';
 import { decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { acquireDrainLease, drainLeaseStatus, localRepoSlug } from '../readiness/drain-lock.mjs';
 import { claudeCommit, humanCommit, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
@@ -88,6 +88,70 @@ describe('merge-ai-prs — classifyPr verdict', () => {
   });
   it('MERGES a PR with a real description', () => {
     expect(classifyPr(aiPr({ body: 'fixes the thing because reasons' })).decision).toBe('merge');
+  });
+});
+
+describe('merge-ai-prs — #2502 head SHA threading (buildDrainVerdicts attaches the tip oid)', () => {
+  // #2487 follow-on — the drain already fetches each PR's `commits` (for the AI-authorship gate) but never
+  // threaded the tip `oid` onto the verdict, so a downstream stuck detector had no way to tell a PR whose head
+  // keeps CHURNING (repeated force-push) from one that is simply waiting. This is the single attach site
+  // (`buildDrainVerdicts`, right after `classifyPr`) every emitted result bucket reads `.headSha` off of.
+  const prsByRepo = (prs) => new Map([[null, prs]]);
+
+  it('attaches the LAST commit oid from the read as v.headSha — the PR tip', () => {
+    const readOf = () => ({ commits: [{ oid: 'aaa111' }, { oid: 'bbb222' }], manifest: null });
+    const [v] = buildDrainVerdicts({ prsByRepo: prsByRepo([aiPr({ number: 42 })]), readOf, repos: [null] });
+    expect(v.headSha).toBe('bbb222');
+  });
+
+  it('is null (not undefined, not thrown) when the commits read is empty', () => {
+    const readOf = () => ({ commits: [], manifest: null });
+    const [v] = buildDrainVerdicts({ prsByRepo: prsByRepo([aiPr({ number: 42 })]), readOf, repos: [null] });
+    expect(v.headSha).toBeNull();
+  });
+
+  it('survives into the DEFERRED bucket — planLabelDrain never drops a verdict field it does not itself read', () => {
+    const readOf = () => ({ commits: [claudeCommit({ oid: 'beadfeed' })], manifest: null });
+    const [v] = buildDrainVerdicts({ prsByRepo: prsByRepo([aiPr({ number: 7 })]), readOf, repos: [null] });
+    expect(v.decision).toBe('merge'); // certified + green + mergeable — the precondition planLabelDrain's ready/deferred split requires
+    v.item = 2200;
+    v.blockedBy = [2199]; // an unresolved blocker forces this candidate into `deferred`, not `ready`
+    const blocker = { num: 1, item: 2199, decision: 'merge', blockedBy: [] }; // still OPEN → the edge holds
+    const { ready, deferred } = planLabelDrain([blocker, v]);
+    expect(ready.map((c) => c.num)).toEqual([1]);
+    expect(deferred).toEqual([{ num: 7, item: 2200, waitOn: [2199], headSha: 'beadfeed' }]);
+  });
+});
+
+describe('merge-ai-prs — #2502 result-bucket entry builders (the runCli assembly sites, extracted for direct testability)', () => {
+  it('toMergeEntry — num/repo/headSha, falling back to localSlug for a local-clone (repo:null) verdict', () => {
+    expect(toMergeEntry({ num: 41, repo: null, headSha: 'aaa' }, 'chalbert/web-everything')).toEqual({ num: 41, repo: 'chalbert/web-everything', headSha: 'aaa' });
+    expect(toMergeEntry({ num: 41, repo: 'chalbert/frontierui', headSha: 'aaa' }, 'chalbert/web-everything')).toEqual({ num: 41, repo: 'chalbert/frontierui', headSha: 'aaa' });
+  });
+
+  it('mergedEntry — num/repo/headSha off the landed candidate, repo passed through UNCHANGED (no localSlug fallback — a local-clone candidate keeps repo:null here, unlike toMergeEntry/parkedEntry/skippedEntry)', () => {
+    expect(mergedEntry({ num: 41, repo: 'chalbert/frontierui', headSha: 'bbb' })).toEqual({ num: 41, repo: 'chalbert/frontierui', headSha: 'bbb' });
+    expect(mergedEntry({ num: 41, repo: null, headSha: 'bbb' })).toEqual({ num: 41, repo: null, headSha: 'bbb' });
+  });
+
+  it('failedEntry — carries the merge-failure detail alongside num/repo/headSha', () => {
+    expect(failedEntry({ num: 41, repo: null, headSha: 'ccc' }, 'push rejected')).toEqual({ num: 41, repo: null, detail: 'push rejected', headSha: 'ccc' });
+  });
+
+  it('parkedEntry — humanRequired/reasons/headSha, repo falling back to localSlug', () => {
+    expect(parkedEntry({ num: 41, repo: null, headSha: 'ddd' }, { humanRequired: true, reasons: ['gate-self'], localSlug: 'chalbert/web-everything' }))
+      .toEqual({ num: 41, repo: 'chalbert/web-everything', humanRequired: true, reasons: ['gate-self'], headSha: 'ddd' });
+    // humanRequired is coerced to a strict boolean — one real call site passes `!!gate.humanRequired` (which
+    // can itself be undefined); the other two pass a literal `true` and need no coercion, but the helper
+    // coerces unconditionally so every caller gets the same guarantee.
+    expect(parkedEntry({ num: 41, repo: null, headSha: 'ddd' }, { humanRequired: undefined, reasons: [], localSlug: null }).humanRequired).toBe(false);
+  });
+
+  it('skippedEntry — reason/headSha, escalated/humanRequired only present when truthy (never a bare `false`/`undefined` key)', () => {
+    expect(skippedEntry({ num: 30, repo: 'r', reason: 'not AI-generated', headSha: 'eee' })).toEqual({ num: 30, repo: 'r', reason: 'not AI-generated', headSha: 'eee' });
+    expect(skippedEntry({ num: 30, repo: 'r', reason: 'x', headSha: 'eee', escalated: 'yes', humanRequired: true }))
+      .toEqual({ num: 30, repo: 'r', reason: 'x', headSha: 'eee', escalated: 'yes', humanRequired: true });
+    expect(skippedEntry({ num: 30, repo: 'r', reason: 'x', headSha: 'eee', humanRequired: false })).toEqual({ num: 30, repo: 'r', reason: 'x', headSha: 'eee' });
   });
 });
 

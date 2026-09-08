@@ -1294,6 +1294,21 @@ export async function readRemoteManifestViaApi({ exec, repo, headRef, apiArgs = 
 }
 
 /**
+ * #2502 — five of the six considered-PR result-bucket entry builders (the sixth, `deferred`, is built inline
+ * in `planLabelDrain` below — already exported and directly tested, so it needed no separate extraction).
+ * Extracted so runCli's assembly sites AND the test suite build the SAME shape (the same reason
+ * `buildDrainVerdicts` below is extracted): each was previously an inline object literal at its push/map call
+ * site, un-reachable from a unit test without mocking runCli()'s whole `gh`/exec-driven merge loop. Every
+ * entry carries `headSha` (the tip commit oid `buildDrainVerdicts` attaches to the verdict) alongside the
+ * fields the bucket already carried. Pure.
+ */
+export function toMergeEntry(v, localSlug = null) { return { num: v.num, repo: v.repo || localSlug, headSha: v.headSha }; }
+export function mergedEntry(c) { return { num: c.num, repo: c.repo, headSha: c.headSha }; }
+export function failedEntry(c, detail) { return { num: c.num, repo: c.repo, detail, headSha: c.headSha }; }
+export function parkedEntry(v, { humanRequired, reasons, localSlug = null } = {}) { return { num: v.num, repo: v.repo || localSlug, humanRequired: !!humanRequired, reasons, headSha: v.headSha }; }
+export function skippedEntry(v, localSlug = null) { return { num: v.num, repo: v.repo || localSlug, reason: v.reason, headSha: v.headSha, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) }; }
+
+/**
  * #xc7p3q9 — the couple half of the verdict build, extracted so runCli AND the test suite drive the SAME
  * narrowing→classify→attach path (Fix 4: the round-5 regressions all came from tests hand-building verdicts that
  * diverged from runCli's real wiring). Pure. `readOf(repo, num)` returns the per-PR `{ commits, manifest }` read.
@@ -1324,6 +1339,13 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       if (relief.passWide && !!label) v.reliefPassWide = true;
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
+      // #2502 — the tip commit's SHA (last entry — the same ordering `isAiGeneratedPr` above already trusts on
+      // this `commits` array), already in hand at no extra `gh` cost. Threaded onto the six considered-PR
+      // buckets (toMerge/merged/skipped/parked/deferred/failed — same six `parsePassResult`'s `consideredPrs`
+      // reads) via the entry builders above (toMergeEntry/mergedEntry/failedEntry/parkedEntry/skippedEntry,
+      // `deferred.push` in planLabelDrain below) — each directly unit-tested, not just this attach site. NOT
+      // onto rebased/pendingRebased/healed (bare-number bookkeeping, outside that taxonomy).
+      v.headSha = p.commits.at(-1)?.oid ?? null;
       attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
       v.prLabels = p.labels || [];
       verdicts.push(v);
@@ -1659,7 +1681,7 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
       // ALSO waits on a real blockedBy/stackParents edge, or that fails closed on degraded/truncated/incomplete
       // (which MAY clear on a re-fetch), is NOT flagged — the watch keeps polling.
       const heldCoupleOnly = blockWait.length === 0 && stackWait.length === 0 && blindWait.length === 0 && coupleDeferred && (c.coupleDeferReason === 'held' || c.coupleHumanTerminal === true);
-      deferred.push({ num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}) });
+      deferred.push({ num: c.num, item: c.item, waitOn, headSha: c.headSha, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}) });
     }
   }
   // Numeric items (landed NNNs) sort by number ascending, as before. A hash item has no numeric order yet
@@ -3954,7 +3976,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
+        parked.push(parkedEntry(v, { humanRequired: true, reasons: tamper.reasons, localSlug }));
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
         continue;
       }
@@ -4004,7 +4026,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
+        parked.push(parkedEntry(v, { humanRequired: true, reasons: gaming.reasons, localSlug }));
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
         continue;
       }
@@ -4270,7 +4292,7 @@ async function runCli() {
         v.reviewParked = durableRecorded;
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons });
+        parked.push(parkedEntry(v, { humanRequired: !!gate.humanRequired, reasons: parkReasons, localSlug }));
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${parkReasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
@@ -4465,7 +4487,7 @@ async function runCli() {
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
             continue;
           }
-          merged.push({ num: c.num, repo: c.repo }); progressed = true;
+          merged.push(mergedEntry(c)); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
           // #2393 — a WE-carrier merge (the PR carrying its OWN manifest = the resolve carrier + where `bornAs`
           // is stamped) PROVES the couple landed this run: record its item so a descendant that stackParents on
@@ -4497,7 +4519,7 @@ async function runCli() {
             pendingRebased.push(c.num);
             if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(c.repo)}${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
           } else {
-            failedMerges.push({ num: c.num, repo: c.repo, detail });
+            failedMerges.push(failedEntry(c, detail));
             if (!AS_JSON) process.stderr.write(`  ✗ ${repoTag(c.repo)}${c.num} merge failed: ${detail}\n`);
           }
         }
@@ -4719,7 +4741,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => toMergeEntry(v, localSlug)), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => skippedEntry(v, localSlug)) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 

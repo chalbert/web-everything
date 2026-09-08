@@ -2,8 +2,9 @@
 bornAs: xlklj7v
 kind: task
 parent: "2445"
-status: open
+status: active
 dateOpened: "2026-07-14"
+dateStarted: "2026-09-08"
 tags: [plateau-loop, drain-daemon, observability]
 scope:
   - we:scripts/merge-ai-prs.mjs
