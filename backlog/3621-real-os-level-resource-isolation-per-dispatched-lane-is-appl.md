@@ -78,6 +78,60 @@ depth rather than a real second line of defense, since the container's boundary 
 per-tool hook can. Net: build xfxt77w now for its own cheap, real interim value; treat it as scaffolding for
 this container work, not as permanent belt-and-suspenders alongside it.
 
+## Amendment (2026-09-08) — decouple lane count from CPU: low-cpu lane containers + a separate heavy-command core pool
+
+Folded in per the operator's own follow-up tonight, captured here rather than as a separate item, same
+discipline as the 2026-09-07 amendment above: a research/idea addendum only, ratifying nothing, changing no
+status, resolving no fork.
+
+**The idea:** a dispatched lane's own orchestration — the Claude/Codex CLI session itself, waiting on API
+responses, doing git operations, editing files — runs through Node's async event loop and is mostly I/O-bound,
+not CPU-bound: it spends the large majority of wall-clock time waiting on network I/O, during which it
+consumes near-zero CPU. The CPU-hungry part is specifically HEAVY COMMANDS — `test:unit` spinning up vitest
+workers, `check:standards`' static analysis, npm install/compile — a much smaller, distinct set of processes
+from "how many lanes are open."
+
+**Checked before writing this in:** we:scripts/lib/lane-concurrency.mjs's `DEFAULT_MAX_CONCURRENT_LANES = 8`
+(env-overridable via `WE_MAX_CONCURRENT_LANES`) caps concurrency by lane count, with no distinction between an
+idle-waiting-on-API lane and one mid-`test:unit`. we:scripts/readiness/heavy-admission.mjs already implements
+the LOGICAL half of this split — a `DEFAULT_ADMISSION_CAP = 2` (env-overridable via `WE_HEAVY_ADMISSION_CAP`),
+an in-process counting semaphore that heavy commands acquire "at invocation time, never at lane-acquire time"
+(the module's own header comment, citing #3461/#3456) — but it shares the same core pool as every other
+process on the host: it throttles how many heavy commands run at once, not how many CPU cores they get, and a
+lane can still be acquired freely regardless of the semaphore's state. So it is a soft, cooperative limit
+inside one shared pool, not a hard resource boundary between "lane orchestration" and "heavy command work."
+
+**Why this belongs on #3621 specifically, not filed separately:** this item's own researched mechanism — the
+`container` CLI plus Containerization framework, with `container run --cpus N --memory NgB` giving each
+container real, hypervisor-enforced resource allocation (see the Researched paragraph above) — is the exact
+tool that could implement this split, not merely a cooperative in-process semaphore. The refinement this
+amendment adds on top of the base decision's framing: rather than (or in addition to) giving each LANE's own
+container a resource cap, give lane containers a LOW cpu allocation (since orchestration is mostly idle/async)
+and route heavy commands specifically into a SEPARATE, properly-cored container pool. That specific split is
+not in this item's existing body above, which currently frames adoption as "each lane gets a container"
+without distinguishing the lane-orchestration part from the heavy-command part. If this holds, lane count
+could decouple from CPU almost entirely and scale much higher — limited by memory, disk, or provider API rate
+limits instead of cores — while a smaller number of dedicated cores get reserved specifically for heavy-command
+throughput. `we:scripts/readiness/heavy-admission.mjs`'s cap-of-2 semaphore is the natural sizing signal for
+how many cores that dedicated pool would need, if this is ever built.
+
+**Secondary implication, worth recording in the same amendment:** if this holds up, it could reshape how the
+operator's in-progress second-machine hardware purchase decision (a separate, not-yet-filed conversation about
+a Mac mini/Studio) gets sized — potentially one pool of machine(s)/cores for many cheap concurrent
+lane-orchestration sessions, and a smaller dedicated core allocation specifically for heavy-command throughput,
+rather than sizing hardware as if lane count and core count scale together 1:1. Not filing a new item for the
+hardware decision itself — it lives in conversation, not yet in the backlog — just noting the connection here
+so it isn't lost.
+
+**Explicitly not decided by this amendment:** whether lane orchestration is ACTUALLY as idle as claimed under
+real measurement (this is stated as a reasonable inference from Node's async I/O model, not a profiled claim
+against this repo's actual dispatched-lane workload — an open verification question for whenever this decision
+is prepared), how large the dedicated heavy-command pool should be, whether the split is even worth the added
+container-topology complexity over the base per-lane-container proposal, and how this interacts with the
+already-open tradeoffs above (Apple-Silicon-only requirement, migration cost against we:scripts/lane-pool.mjs,
+Docker Desktop/OrbStack as a simpler alternative, eventual Linux/Windows portability). Left as an open question
+for whoever prepares or ratifies this decision.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
