@@ -2219,7 +2219,7 @@ try {
 // until one exists.
 {
   const SKIP_DIRS = new Set(['node_modules', '.git', '__tests__', '__fixtures__']);
-  const isScannableScript = (name) => (name.endsWith('.mjs') || name.endsWith('.cjs')) && !name.endsWith('.test.mjs');
+  const isScannableScript = (name) => (name.endsWith('.mjs') || name.endsWith('.cjs')) && !name.endsWith('.test.mjs') && !name.endsWith('.test.cjs');
   const walkMjs = (dir, acc = []) => {
     for (const name of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, name.name);

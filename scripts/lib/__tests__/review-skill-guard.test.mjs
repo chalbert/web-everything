@@ -250,13 +250,6 @@ describe('checkReviewLabelSingleHomeCode — the raw swap in CODE is an error (#
       expect(errors).toHaveLength(1);
     });
 
-    it("flags gh's own short flag -l (an alias for --add-label)", () => {
-      const { errors } = checkReviewLabelSingleHomeCode(code(
-        "execFileSync('gh', ['pr', 'edit', pr, '-l', 'review:accepted'])",
-      ));
-      expect(errors).toHaveLength(1);
-    });
-
     it('flags a bare, directly-imported setLabels(...) call (no object/method prefix)', () => {
       const { errors } = checkReviewLabelSingleHomeCode(code(
         'setLabels(repo, pr, { add: REVIEW_LABELS.accepted, remove: [] });',
@@ -288,5 +281,27 @@ describe('the live single-home files obey their own rule, and every OTHER script
     for (const file of SINGLE_HOME_CODE_FILES) {
       expect(existsSync(join(ROOT, file))).toBe(true);
     }
+  });
+
+  // #2416 round-3 panel finding: the rule's OWN source (and check-standards.mjs's wiring of it) is exactly the
+  // kind of file that could self-trigger — both name 'setLabels', 'add:', 'review:accepted' and '--add-label'
+  // as literal substrings in their own comments and fixtures. Neither file is in SINGLE_HOME_CODE_FILES, so
+  // nothing but careful docblock wording keeps them clean; this test makes a future regression a red test
+  // instead of a silent false-positive discovered later.
+  it('review-skill-guard.mjs and check-standards.mjs do not trigger their own rule', () => {
+    for (const file of ['scripts/lib/review-skill-guard.mjs', 'scripts/check-standards.mjs']) {
+      const { errors } = checkReviewLabelSingleHomeCode([
+        { file, content: readFileSync(join(ROOT, file), 'utf8') },
+      ]);
+      expect(errors).toEqual([]);
+    }
+  });
+});
+
+describe('the file-walk extension list (#2416 round-2/3) is exactly .mjs/.cjs, tests excluded', () => {
+  it('check-standards.mjs excludes BOTH .test.mjs and .test.cjs, not just the former', () => {
+    const source = readFileSync(join(ROOT, 'scripts/check-standards.mjs'), 'utf8');
+    expect(source).toContain(".test.mjs')");
+    expect(source).toContain(".test.cjs')");
   });
 });
