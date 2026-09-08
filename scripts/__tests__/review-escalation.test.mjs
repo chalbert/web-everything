@@ -585,7 +585,7 @@ describe('#3044 write-site wiring (source-level contract)', () => {
   it('pr-land edits the body ONLY when the reconcile reports a change', () => {
     const src = readFileSync(resolve(HERE, '..', 'pr-land.mjs'), 'utf8');
     expect(src).toMatch(/const reconciled = reconcileEscalationReasonBlock\(liveBody, verdict\.reasons\)/);
-    expect(src).toMatch(/if \(reconciled\.changed\) ghC\(\['pr', 'edit'/);
+    expect(src).toMatch(/if \(reconciled\.changed\) forge\.editBody\(prNum, reconciled\.body\)/);
     // The old unguarded append (and its hand-rolled raw pre-check) stay gone — the guard lives in the
     // reconcile function now, so a second one here would be a fork of it.
     expect(src).not.toMatch(/liveBody \+ buildEscalationReasonBlock/);

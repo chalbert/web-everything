@@ -81,6 +81,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
+import { createGhLandProvider, buildCreateArgs } from './lib/forge-land-provider.mjs'; // #3585 — the forge-land port
+export { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildAddLabelArgs } from './lib/forge-land-provider.mjs'; // re-exported for backward compat — callers/tests still import these off pr-land.mjs
 import { numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs'; // JIT numbering + dirty-probe, shared single source (#2288/#xzxc92d/#2348)
 import { withNumberingLock } from './readiness/drain-lock.mjs'; // #2391 — the numbering-critical-section mutex (sole-serial-writer)
 export { isPostLandTreeDirty }; // re-exported for backward compat — callers/tests still import it off pr-land.mjs
@@ -318,39 +320,9 @@ export function pollVerdict({ state, checkStatus, requiredCount = 0, labelWhenGr
   return 'wait';
 }
 
-/** The `gh pr merge` method flag for a merge method (default merge = --no-ff history the drain wants). */
-export function mergeMethodFlag(method) {
-  switch (method) {
-    case 'squash': return '--squash';
-    case 'rebase': return '--rebase';
-    case 'merge':
-    default: return '--merge';
-  }
-}
-
-/** Build the `gh pr create` args for a self-approved PR (NO reviewer). Emits `--title`/`--body` when supplied
- *  and NEVER drops a body: a `--body` present with no title still ships (the #2170 dismissals audit trail).
- *  `--fill` is used ONLY when NEITHER title nor body is given. Note `--fill` is unusable for the lane-ref
- *  transport anyway (it autofills by diffing the head LOCALLY, but a lane/* head is remote-only — no local
- *  branch to diff — so gh errors "ambiguous argument origin/main...lane/…"); the CLI therefore always
- *  DERIVES a title from the source commit's subject, so the `--fill`-only branch is a bare-call fallback the
- *  lane path never hits. Pure — returns the argv array for `gh`.
- *
- *  HEADLESS-SAFE (#2176): the argv must NEVER be title-only. A bare `gh pr create --title …` (no `--body`,
- *  no `--fill`) drops into an interactive body prompt and, run headless, errors "Command failed". So when a
- *  title is present but no body is given, we pass an explicit empty `--body ""` — never `--fill` (unusable
- *  for a remote-only lane/* head). Result: the create is always non-interactive. (#2332: the CLI create path
- *  now REFUSES a bodyless open upstream via `prCreateBodyGuard`, so this empty-body branch is only ever
- *  reached by the dry-run plan render, never by a real `gh pr create`.) */
-export function buildCreateArgs({ base, head, title, body }) {
-  const args = ['pr', 'create', '--base', base, '--head', head];
-  if (title != null) args.push('--title', title);
-  // A title with no body must still carry a body — otherwise gh prompts interactively (fails headless, #2176).
-  if (body != null) args.push('--body', body);
-  else if (title != null) args.push('--body', '');
-  if (title == null && body == null) args.push('--fill');
-  return args;
-}
+// mergeMethodFlag / buildCreateArgs / buildMergeArgs / buildAddLabelArgs moved to
+// `./lib/forge-land-provider.mjs` (#3585 — the forge-land port) and re-exported below so every existing
+// importer of this module keeps resolving them unchanged.
 
 /**
  * #2332 — producer fail-fast: NEVER open a bodyless PR. An empty-body PR passes the producer, but the #2324
@@ -364,20 +336,6 @@ export function prCreateBodyGuard(body) {
   return hasNonEmptyBody(body)
     ? { ok: true }
     : { ok: false, reason: 'refusing to open a bodyless PR — pass --body-file=<path> (or --body) with a non-empty body (#2332: the #2324 drain gate rejects an empty body at land, stalling the queue)' };
-}
-
-/** Build the `gh pr merge` args — the drain merges ONE PR (not --auto on a native queue), deleting the
- *  lane ref after. Pure. */
-export function buildMergeArgs({ pr, method }) {
-  return ['pr', 'merge', String(pr), mergeMethodFlag(method), '--delete-branch'];
-}
-
-/** Build the `gh pr edit --add-label` args that apply the producer-certified `ready-to-merge` label (#2196).
- *  Returns null when labelling is disabled (`--no-label`) or no PR number is known, so the caller can skip.
- *  Pure — returns the `gh` argv array (or null). */
-export function buildAddLabelArgs({ pr, label }) {
-  if (!label || pr == null) return null;
-  return ['pr', 'edit', String(pr), '--add-label', label];
 }
 
 /**
@@ -612,7 +570,7 @@ function runCli() {
   // any OTHER (rogue/buggy) push to main stays blocked. The initial lane/* push does NOT use this (not main).
   const gitPushMain = (args) => execFileSync('git', ['push', ...args], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MAIN_PUSH_OK: '1' } }).toString().trim();
   const tryGit = (args) => { try { return gitC(args); } catch { return null; } };
-  const ghC = (args) => execFileSync('gh', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const forge = createGhLandProvider({ cwd: REPO }); // #3585 — every bare `gh` call below goes through this port
 
   // #2290 — the single-couple FAST DRAIN pr-land shells after labelling green so /pr still feels instant. The
   // drain is the sole writer to main; scoping it to this ONE PR (+ --this-repo) lands the couple immediately
@@ -699,7 +657,11 @@ function runCli() {
   // so the create never needs `--fill` and a `--body-file` (the #2170 dismissals) always ships. When the
   // source has multiple commits, its own HEAD subject is the natural PR title.
   const derivedTitle = TITLE ?? (tryGit(['log', '-1', '--format=%s', SRC]) || `land ${REF}`);
-  const createArgs = buildCreateArgs({ base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY });
+  // ONE source of truth for the create params — the dry-run render below still needs the built ARGV (via
+  // buildCreateArgs directly, nothing is executed there), while the real create goes through the port with
+  // these same semantic params so the two never drift apart.
+  const createParams = { base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY };
+  const createArgs = buildCreateArgs(createParams);
 
   if (DRY_RUN) {
     emit({
@@ -807,13 +769,13 @@ function runCli() {
 
   // 3. Find an existing open PR for this head, else create a self-approved one.
   let prNum = null;
-  try { prNum = JSON.parse(ghC(['pr', 'list', '--head', REF, '--state', 'open', '--json', 'number']))?.[0]?.number ?? null; } catch { /* gh may be absent */ }
+  try { prNum = forge.listOpenByHead(REF)?.[0]?.number ?? null; } catch { /* gh may be absent */ }
   if (prNum == null) {
     // #2332 — fail fast BEFORE creating: never open a bodyless PR (the #2324 drain gate would refuse to land
     // it, stalling the queue for a human to hand-fill the body). Create-path only — an existing PR is exempt.
     const bodyGuard = prCreateBodyGuard(BODY);
     if (!bodyGuard.ok) emit({ repo: REPO, merged: false, reason: 'empty-body', detail: `${bodyGuard.reason} (head ${REF})` }, 3);
-    try { const out = ghC(createArgs); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
+    try { const out = forge.create(createParams); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
     catch (e) { return onCreateFailed(e); }
   } else if (LANE_MANIFEST || AUTHOR_MARKER) {
     // xnsk54v — an existing PR (a re-run, or one opened before the manifest was ready) may lack the manifest
@@ -828,9 +790,9 @@ function runCli() {
     // position in a body carries no temporal meaning. So the two halves agree on the outcome (the re-runner
     // never becomes the recorded author) by different means, and neither one "picks the first stamp".
     try {
-      const liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || '';
+      const liveBody = forge.viewPr(prNum, 'body').body || '';
       const updated = composePrBody(liveBody);
-      if (updated !== liveBody) ghC(['pr', 'edit', String(prNum), '--body', updated]);
+      if (updated !== liveBody) forge.editBody(prNum, updated);
     } catch { /* best-effort — drain ref fallback covers a miss */ }
   }
   if (prNum == null) return ghFailed('could not determine the PR number after create');
@@ -849,10 +811,9 @@ function runCli() {
   // gh hiccup).
   let held = false;
   const applyLabel = () => {
-    const addLabelArgs = buildAddLabelArgs({ pr: prNum, label: LABEL });
-    if (!addLabelArgs) return;
-    try { ghC(['label', 'create', LABEL, '--color', '0E8A16', '--description', 'Producer-certified: required checks green, safe for the label lander (/drain) to merge']); } catch { /* already exists — fine */ }
-    try { ghC(addLabelArgs); labelApplied = true; }
+    if (!LABEL || prNum == null) return; // same guard buildAddLabelArgs applies internally — don't run it twice
+    try { forge.ensureLabel(LABEL, { color: '0E8A16', description: 'Producer-certified: required checks green, safe for the label lander (/drain) to merge' }); } catch { /* already exists — fine */ }
+    try { forge.addLabel(prNum, LABEL); labelApplied = true; }
     catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply label "${LABEL}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
   };
 
@@ -916,7 +877,7 @@ function runCli() {
     const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
-    try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
+    try { currentLabels = (forge.viewPr(prNum, 'labels').labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
     // #3343 — whether that cumulative basis is provably this PR's file set (merge-base / ancestry) or the
     // un-narrowed base TIP. `scored:false` means nothing was measured at all, which is a different fact from a
     // measurement taken on the wrong basis — don't stamp the un-narrowed reason on an empty score.
@@ -941,8 +902,8 @@ function runCli() {
 
     if (verdict.label && verdict.apply) {
       const meta = REVIEW_LABEL_META[verdict.label];
-      try { ghC(['label', 'create', verdict.label, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }
-      try { ghC(['pr', 'edit', String(prNum), '--add-label', verdict.label]); }
+      try { forge.ensureLabel(verdict.label, { color: meta.color, description: meta.description }); } catch { /* already exists — fine */ }
+      try { forge.addLabel(prNum, verdict.label); }
       catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply review label "${verdict.label}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
       // Stamp the WHY into the PR body (mirrors the drain's #2324 guarantee) so an operator sees it without
       // re-deriving the rubric — and, for #2635, so the roster-expansion re-alignment reason is trailed where
@@ -956,9 +917,9 @@ function runCli() {
       // fence) re-append on every pass, unboundedly.
       try {
         let liveBody = '';
-        try { liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || ''; } catch { /* fetch miss — augment from empty */ }
+        try { liveBody = forge.viewPr(prNum, 'body').body || ''; } catch { /* fetch miss — augment from empty */ }
         const reconciled = reconcileEscalationReasonBlock(liveBody, verdict.reasons);
-        if (reconciled.changed) ghC(['pr', 'edit', String(prNum), '--body', reconciled.body]);
+        if (reconciled.changed) forge.editBody(prNum, reconciled.body);
       } catch { /* best-effort — the label already carries the signal */ }
     }
     // #2832 — the producer applies `ready-to-merge` (applyLabel, on green) BEFORE this escalation verdict. When
@@ -978,7 +939,7 @@ function runCli() {
     const holdDecision = decideHoldReadyStrip(verdict.label, currentLabels, { labelApplied });
     if (holdDecision.held) held = true;
     if (holdDecision.strip) {
-      try { ghC(['pr', 'edit', String(prNum), '--remove-label', READY_TO_MERGE_LABEL]); labelApplied = false; }
+      try { forge.removeLabel(prNum, READY_TO_MERGE_LABEL); labelApplied = false; }
       catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · #${prNum} held ${verdict.label} — could not strip ${READY_TO_MERGE_LABEL} (${String(e.message || e).split('\n')[0]}); the drain reconcile will strip it (#2832)\n`); }
     }
     return verdict;
@@ -1009,8 +970,8 @@ function runCli() {
     const parkLabel = PLAN.parkLabel;
     const meta = REVIEW_LABEL_META[parkLabel];
     let parkApplied = false;
-    try { ghC(['label', 'create', parkLabel, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }
-    try { ghC(['pr', 'edit', String(prNum), '--add-label', parkLabel]); parkApplied = true; }
+    try { forge.ensureLabel(parkLabel, { color: meta.color, description: meta.description }); } catch { /* already exists — fine */ }
+    try { forge.addLabel(prNum, parkLabel); parkApplied = true; }
     catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply park label "${parkLabel}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — the PR IS open; set the label by hand\n`); }
     emit({
       repo: REPO, merged: false, reason: 'parked', pr: Number(prNum), ref: REF,
@@ -1036,9 +997,9 @@ function runCli() {
   const deadlineMs = Date.now() + (Number(flags['timeout-min'] || 15) * 60_000);
   for (;;) {
     let view = {};
-    try { view = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'mergeable,mergeStateStatus'])); } catch { view = {}; }
+    try { view = forge.viewPr(prNum, 'mergeable,mergeStateStatus'); } catch { view = {}; }
     let required = [];
-    try { required = JSON.parse(ghC(['pr', 'checks', String(prNum), '--required', '--json', 'state,bucket'])); } catch { required = []; }
+    try { required = forge.requiredChecks(prNum); } catch { required = []; }
     const reqVerdict = classifyChecks(required);
     const state = view.mergeStateStatus || 'UNKNOWN';
 
@@ -1065,7 +1026,7 @@ function runCli() {
   // back to the body this invocation supplied, defaulting to "no body confirmed" (fail-safe, never fail-open).
   if (PLAN.labelWhenGreen) {
     let liveBody = BODY;
-    try { const v = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])); if (typeof v.body === 'string') liveBody = v.body; } catch { /* gh miss — fall back to the body this invocation supplied, if any */ }
+    try { const v = forge.viewPr(prNum, 'body'); if (typeof v.body === 'string') liveBody = v.body; } catch { /* gh miss — fall back to the body this invocation supplied, if any */ }
     if (!hasNonEmptyBody(liveBody)) {
       emit({ repo: REPO, merged: false, reason: 'empty-body', pr: Number(prNum), detail: `PR #${prNum} has an empty/whitespace description — refusing to land it (pass --body-file with a real summary of what changed and why; #2324); ${BASE} left untouched` }, 3);
     }
