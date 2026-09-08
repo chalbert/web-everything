@@ -197,9 +197,13 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  `conveyor/reconcile-pass.mjs`'s own decision and dispatches `operations/review-dispatch.mjs` for every PR it
  *  names, plus the purely-informative `review-round-tag.mjs`/`review-status-tag.mjs` labels — the review step
  *  is now actually mechanized, not merely planned; see {@link selectStatusCandidates} for which PRs the status
- *  refresh covers), and (#3421) the blocking-hiccup sink. All nine are best-effort: a failure is swallowed
- *  (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer to
- *  `main`.
+ *  refresh covers), (#3421) the blocking-hiccup sink, and the CI queue-wait watch (#3574 — `we:scripts/
+ *  conveyor/ci-queue-watch.mjs sweep`: samples `gh run list`'s started-minus-created wait time and appends it
+ *  to a durable sidecar history, the SAME "piggyback on a pass this headless runner already ticks" shape
+ *  branch-drift above uses, so a genuine Actions run-queue regression becomes a visible trend instead of
+ *  invisible; purely informative — no dispatch gate reads its verdict). All ten are best-effort: a failure is
+ *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer
+ *  to `main`.
  *
  *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
  *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
@@ -262,6 +266,11 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // overridable. `runQuiet` still appends `--repo=<repo>` when this runner was given one — harmless, since
     // `branch-drift.mjs`'s CLI parses and simply ignores any flag it doesn't itself read.
     runQuiet('conveyor/branch-drift.mjs', ['sweep']);
+    // #3574 — samples `gh run list`'s started-minus-created wait time and appends it to the durable sidecar
+    // history, so a genuine Actions run-queue regression becomes a visible trend instead of invisible (this
+    // repo's own investigation found nothing tracking it over time). Purely informative — no dispatch gate
+    // reads its verdict, unlike branch-drift's `blocked` above.
+    runQuiet('conveyor/ci-queue-watch.mjs', ['sweep']);
     // #xw0odtv — sweeps every OPEN PR for a review-parked (review:human/pending/uncleared-changes) hold that
     // has drifted into a REAL merge conflict (mergeable === CONFLICTING) against main, applying an informative
     // `merge-status:conflicting` label + a one-time comment (self-clearing once the conflict resolves). Distinct
