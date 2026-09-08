@@ -101,7 +101,7 @@ no?" — a fair challenge that turned out to have a real answer: no, not structu
 default live only there — see that card, not this one, for the enforcement call.
 
 **2026-09-08 — the predicted gap actually happened, not hypothetically this time.** `#3623`/`#3624` landed on
-`origin/main` via two DIRECT commit+push events ("File #xkyisxe…", "WE: file backlog item…") that never went
+`origin/main` via two DIRECT commit+push events ("File #3623…", "WE: file backlog item…") that never went
 through a lane/PR/drain at all — exactly consequence 1 above, minus even needing `enforce_admins: false`
 (there was no PR to bypass review on; it was a raw push). Both sat stranded (hash-keyed, un-numbered) on
 `origin/main` for 44-92 minutes, blocking `check:standards` — and therefore every open PR — repo-wide until a
