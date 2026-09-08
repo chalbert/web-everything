@@ -2,10 +2,11 @@
 bornAs: xoghq8y
 kind: story
 size: 3
-status: active
+status: resolved
 scope: ["we:scripts/operations/review-pr.mjs"]
 dateOpened: "2026-09-06"
 dateStarted: "2026-09-07"
+dateResolved: "2026-09-08"
 tags: []
 ---
 
