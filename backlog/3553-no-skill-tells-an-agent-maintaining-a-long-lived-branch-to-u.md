@@ -6,6 +6,10 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:skills-src/conveyor/
+  - we:skills-src/finish/
+  - we:scripts/lib/__tests__/
 ---
 
 # no skill tells an agent maintaining a long-lived branch to use branch-sync instead of a hand-rolled loop
