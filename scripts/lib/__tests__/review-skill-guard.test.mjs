@@ -241,7 +241,7 @@ describe('checkReviewLabelSingleHomeCode — the raw swap in CODE is an error (#
     });
   });
 
-  // Round-2 panel review (#2416) traced three MORE idiomatic shapes past the round-1 fix.
+  // Round-2 panel review (#2416) traced two MORE idiomatic shapes past the round-1 fix.
   describe('idiomatic call shapes the round-2 panel found missing', () => {
     it("flags Node's async execFile (execFileSync's callback-based sibling)", () => {
       const { errors } = checkReviewLabelSingleHomeCode(code(

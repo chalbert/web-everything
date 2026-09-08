@@ -131,7 +131,7 @@ export const SINGLE_HOME_CODE_FILES = Object.freeze([
  * above: it does not care whether the gh args are array-form or ONE command string built with a template
  * literal or plain concatenation, whether the flag and the label are space-joined or `=`-joined, whether the
  * label is wrapped in an array, or whether it names the shared constant or the bare label string — a round-1
- * panel review of this rule (five findings, #2416) traced all four of those past the first cut, which only
+ * panel review of this rule (five findings, #2416) traced all five of those past the first cut, which only
  * matched the one call SHAPE visible in the single home's own existing caller. Bounded + newline-tolerant like
  * `RAW_SWAP_RE`, so a multi-line literal still matches; stops at a `)` so it cannot pair an unrelated call with
  * a mention of the label far below it.
@@ -147,10 +147,12 @@ export const SINGLE_HOME_CODE_FILES = Object.freeze([
  * holes" `RAW_SWAP_RE`'s own header already rejected once. This rule's job is to catch the ORDINARY
  * re-implementation an engineer (or agent) who doesn't know the single home exists would naturally write —
  * exactly how the #2882 doc instance shipped — not to defeat someone deliberately obfuscating a call to route
- * around a lint they know is watching. A round-2 panel pass (#2416) traced this exact boundary directly: three
+ * around a lint they know is watching. A round-2 panel pass (#2416) traced this exact boundary directly: two
  * MORE idiomatic-but-still-textual shapes (`execFile`, a bare non-method `setLabels(`) were
- * concrete gaps and are now covered below; a conditional/ternary label expression is the SAME residual as
- * variable indirection — filed as a follow-on rather than chased here, per we:backlog/xgewdfr-harden-the-2416-review-label-code-scan-gate-against-expressi.md.
+ * concrete gaps and are now covered below; a conditional/ternary label expression — and, per a round-3 pass,
+ * a nested function call anywhere in the intervening argv (which the `[^)]` filler cannot skip over) — are the
+ * SAME residual as variable indirection: no bounded regex traces data flow or balances parens. Filed as a
+ * follow-on rather than chased here, per we:backlog/xgewdfr-harden-the-2416-review-label-code-scan-gate-against-expressi.md.
  */
 const ACCEPTED_TOKEN = String.raw`\[?['"\`]?(?:review:accepted|REVIEW_LABELS\.accepted)`;
 const CODE_SWAP_RE = new RegExp(
