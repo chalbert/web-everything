@@ -7,6 +7,11 @@ blockedBy: ["3214"]
 status: open
 dateOpened: "2026-08-20"
 tags: []
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/lib/verdict-ledger.mjs
+  - we:scripts/__tests__/
+  - we:scripts/lib/__tests__/
 ---
 
 # Ledger the holds the drain applies itself, not just the review seam
