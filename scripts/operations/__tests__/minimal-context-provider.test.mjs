@@ -1,0 +1,307 @@
+/**
+ * @file minimal-context-provider.test.mjs — coverage for the shared primitives extracted out of
+ * `we:scripts/operations/deliver-item-wrapper.mjs` (#3627, PR #2107) for #xu2pp2m: the `CLAUDE_RESTRICTED_
+ * PROVIDER` argv shape, hooks-settings generation, lane acquire/release, and the gate-running pattern. Every
+ * behavior asserted here is byte-identical to what `deliver-item-wrapper.test.mjs` already proved for the
+ * pre-extraction code — this suite exists so the SHARED module has its own direct coverage too, independent of
+ * `deliver-item-wrapper.mjs`'s own (unchanged) 106 tests.
+ */
+import { describe, it, expect, vi } from 'vitest';
+
+// Mirrors `deliver-item-wrapper.test.mjs`'s own `vi.mock('node:fs', ...)` convention: `node:fs`'s real module
+// namespace is not spy-able in place (`vi.spyOn` on the live module object throws "Cannot redefine property"),
+// so the whole module is replaced with a fresh, mockable object instead — `mkdirSync`/`writeFileSync` become
+// `vi.fn()`s while every other export (`readFileSync`, etc.) stays real.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal();
+  const mocked = { ...actual, mkdirSync: vi.fn(), writeFileSync: vi.fn() };
+  return { ...mocked, default: mocked };
+});
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+
+import {
+  REPO_ROOT, RESTRICTED_PROVIDER_TOOLS, buildRestrictedProviderArgv, createHooksSettingsWriter,
+  persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, releaseAllPools, resolveLanePath,
+  runVerifyOperation,
+} from '../minimal-context-provider.mjs';
+
+describe('REPO_ROOT', () => {
+  // NOTE, mirroring `deliver-item-wrapper.test.mjs`'s own pre-existing comment on this exact point: this file's
+  // `import.meta.url`-derived `REPO_ROOT` does not resolve reliably inside vitest's SSR transform, so no test
+  // here calls a REPO_ROOT-relative real fs write directly — every such seam (`createHooksSettingsWriter`,
+  // `persistSpawnFailure`) is asserted at the injectable-seam / source level instead, the SAME convention the
+  // pre-existing suite already established.
+  it('is a non-empty string (script-location-resolved, never cwd-derived)', () => {
+    expect(typeof REPO_ROOT).toBe('string');
+    expect(REPO_ROOT.length).toBeGreaterThan(0);
+  });
+});
+
+describe('buildRestrictedProviderArgv', () => {
+  it('fresh spawn: --restricted, an explicit --tools allowlist, --strict-mcp-config, --disable-slash-commands, '
+    + 'the given --settings file, and -p/--session-id', () => {
+    const argv = buildRestrictedProviderArgv({
+      sessionId: 'session-1', prompt: 'do the thing', settingsFile: '/repo/.operations/hooks.json',
+    });
+    expect(argv).toEqual([
+      '--restricted', '--tools', RESTRICTED_PROVIDER_TOOLS, '--strict-mcp-config',
+      '--disable-slash-commands', '--settings', '/repo/.operations/hooks.json',
+      '-p', '--session-id', 'session-1', 'do the thing',
+    ]);
+  });
+
+  it('resume: --resume <id>, no -p/--session-id', () => {
+    const argv = buildRestrictedProviderArgv({
+      sessionId: 'ignored', resumeSessionId: 'resume-1', prompt: 'fix it', settingsFile: '/repo/.operations/hooks.json',
+    });
+    expect(argv).toContain('--resume');
+    expect(argv).toContain('resume-1');
+    expect(argv).not.toContain('-p');
+    expect(argv).not.toContain('--session-id');
+  });
+
+  it('never emits --bare or --safe-mode', () => {
+    const argv = buildRestrictedProviderArgv({ sessionId: 's', prompt: 'p', settingsFile: '/x.json' });
+    expect(argv).not.toContain('--bare');
+    expect(argv).not.toContain('--safe-mode');
+  });
+
+  it('`tools` is overridable — a future caller can narrow/widen the allowlist without a second argv builder', () => {
+    const argv = buildRestrictedProviderArgv({ sessionId: 's', prompt: 'p', settingsFile: '/x.json', tools: 'Bash' });
+    expect(argv).toEqual([
+      '--restricted', '--tools', 'Bash', '--strict-mcp-config', '--disable-slash-commands', '--settings', '/x.json',
+      '-p', '--session-id', 's', 'p',
+    ]);
+  });
+});
+
+describe('createHooksSettingsWriter', () => {
+  it('returns a function whose source literally writes with mkdirSync/writeFileSync and never guards on '
+    + 'existsSync — mirrors the #3627 bug-8 correctness fix (a stale on-disk file must never survive a schema '
+    + 'change just because the path "already exists")', () => {
+    const writer = createHooksSettingsWriter('some-file.json', { hooks: {} });
+    const source = writer.toString();
+    expect(source).toContain('mkdirSync');
+    expect(source).toContain('writeFileSync');
+    expect(source).not.toContain('existsSync');
+  });
+
+  it('two different (fileName, settings) pairs produce two independently-callable, distinct writer functions '
+    + '(same generated shape, closed over different content — never a shared mutable writer)', () => {
+    const a = createHooksSettingsWriter('a.json', { who: 'a' });
+    const b = createHooksSettingsWriter('b.json', { who: 'b' });
+    expect(typeof a).toBe('function');
+    expect(typeof b).toBe('function');
+    expect(a).not.toBe(b);
+    expect(a.toString()).toBe(b.toString()); // same generated source shape
+  });
+
+  it('the generated writer calls mkdirSync(<...>.operations, {recursive:true}) then writeFileSync with the '
+    + 'pretty-printed settings JSON at a path ending in `.operations/<fileName>` — spied at the mocked '
+    + '`node:fs` boundary rather than a real REPO_ROOT-relative write (REPO_ROOT does not resolve reliably '
+    + 'under vitest\'s SSR transform — the same limitation `deliver-item-wrapper.test.mjs` already documents)', () => {
+    mkdirSync.mockReset();
+    writeFileSync.mockReset();
+    const writer = createHooksSettingsWriter('probe-hooks.json', { hello: 'world' });
+    const path = writer();
+    expect(mkdirSync).toHaveBeenCalledTimes(1);
+    expect(mkdirSync.mock.calls[0][0]).toMatch(/\.operations$/);
+    expect(mkdirSync.mock.calls[0][1]).toEqual({ recursive: true });
+    expect(writeFileSync).toHaveBeenCalledTimes(1);
+    const [writtenPath, writtenContent] = writeFileSync.mock.calls[0];
+    expect(writtenPath).toMatch(/\.operations\/probe-hooks\.json$/);
+    expect(writtenPath).toBe(path);
+    expect(writtenContent).toBe(`${JSON.stringify({ hello: 'world' }, null, 2)}\n`);
+  });
+});
+
+describe('persistSpawnFailure', () => {
+  it('never throws even when the underlying write fails (best-effort — never mask the real spawn error)', () => {
+    mkdirSync.mockReset();
+    writeFileSync.mockReset();
+    mkdirSync.mockImplementation(() => { throw new Error('disk full'); });
+    expect(() => persistSpawnFailure('probe-dir', 's', new Error('boom'))).not.toThrow();
+    expect(persistSpawnFailure('probe-dir', 's', new Error('boom'))).toBe(null);
+  });
+
+  it('writes a JSON capture under `.operations/<dirName>/` named by sessionSlug + timestamp, and returns the '
+    + 'path — spied at the mocked `node:fs` boundary (same REPO_ROOT-under-vitest limitation noted above)', () => {
+    mkdirSync.mockReset();
+    writeFileSync.mockReset();
+    const path = persistSpawnFailure('probe-spawn-failures', 'sess-1', Object.assign(new Error('boom'), { stdout: 'out', stderr: 'err', status: 1, signal: null }));
+    expect(path).toMatch(/\.operations\/probe-spawn-failures\/sess-1-\d+\.json$/);
+    expect(writeFileSync).toHaveBeenCalledTimes(1);
+    const [writtenPath, writtenContent] = writeFileSync.mock.calls[0];
+    expect(writtenPath).toBe(path);
+    const parsed = JSON.parse(writtenContent);
+    expect(parsed.sessionSlug).toBe('sess-1');
+    expect(parsed.message).toBe('boom');
+    expect(parsed.stdout).toBe('out');
+    expect(parsed.stderr).toBe('err');
+  });
+
+  it('a resume tags the filename with -resume so it never clobbers the fresh spawn\'s own capture', () => {
+    mkdirSync.mockReset();
+    writeFileSync.mockReset();
+    const path = persistSpawnFailure('probe-spawn-failures', 'sess-2', new Error('boom'), { resumeSessionId: 'r' });
+    expect(path).toMatch(/sess-2-resume-\d+\.json$/);
+  });
+});
+
+describe('acquireLane', () => {
+  it('defaults `purpose` to `conveyor-delivery` — every pre-extraction call site (deliver-item-wrapper.mjs\'s '
+    + 'own `deliverItem`) is unaffected by the generalization', () => {
+    const run = vi.fn(() => '');
+    acquireLane({ lane: 3, sessionSlug: 's', scope: 'we:x', item: '1', claudeSessionId: 'id-1' }, { run });
+    const [, args] = run.mock.calls[0];
+    expect(args).toContain('--purpose=conveyor-delivery');
+  });
+
+  it('an explicit `purpose` overrides the default — a review dispatch acquires for `review-loop`, never '
+    + '`conveyor-delivery`', () => {
+    const run = vi.fn(() => '');
+    acquireLane({ lane: 1, sessionSlug: 'review-42', scope: '', item: '', claudeSessionId: 'id-2', purpose: 'review-loop' }, { run });
+    const [, args] = run.mock.calls[0];
+    expect(args).toContain('--purpose=review-loop');
+    expect(args).not.toContain('--purpose=conveyor-delivery');
+  });
+
+  it('stamps CLAUDE_CODE_SESSION_ID=<claudeSessionId> on the acquire subprocess\'s own env', () => {
+    const run = vi.fn(() => '');
+    acquireLane({ lane: 1, sessionSlug: 's', scope: '', item: '', claudeSessionId: 'id-3' }, { run });
+    const [, , opts] = run.mock.calls[0];
+    expect(opts.env.CLAUDE_CODE_SESSION_ID).toBe('id-3');
+  });
+
+  it('best-effort: a resolveLanePath/reset failure AFTER a successful acquire never throws — only the acquire '
+    + 'call itself (call 1) is un-guarded, mirroring `deliver-item-wrapper.test.mjs`\'s own acquireLane suite', () => {
+    // `run` succeeds (returns '') for every call, including the acquire itself; the post-acquire
+    // `lane-pool.mjs status` lookup then fails to parse '' as JSON, which the best-effort try/catch swallows —
+    // exactly 2 calls (acquire, then the failing status lookup), never a 3rd `verify-lane.mjs reset` call.
+    const run = vi.fn(() => '');
+    expect(() => acquireLane({ lane: 1, sessionSlug: 's', scope: '', item: '', claudeSessionId: 'id-4' }, { run })).not.toThrow();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  describe('the UNNUMBERED shape (`lane` omitted) — review-agent-brief.md step 1\'s own real acquire', () => {
+    it('omits --lane/--scope/--item entirely and reads the acquired path off the acquire call\'s OWN stdout '
+      + '(verified against the real CLI: lane-pool.mjs acquire prints ONLY the path to stdout, every '
+      + 'informational line goes to stderr)', () => {
+      const run = vi.fn(() => '/pool/lane-9\n');
+      const path = acquireLane({ sessionSlug: 'review-42', claudeSessionId: 'id-6', purpose: 'review-loop' }, { run });
+      expect(path).toBe('/pool/lane-9');
+      const [, args] = run.mock.calls[0];
+      expect(args).toEqual(['scripts/lane-pool.mjs', 'acquire', '--purpose=review-loop', '--session=review-42', '--adopt']);
+    });
+
+    it('adds --wait-ms=<n> when given', () => {
+      const run = vi.fn(() => '/pool/lane-9');
+      acquireLane({ sessionSlug: 'review-42', claudeSessionId: 'id-7', purpose: 'review-loop', waitMs: 30000 }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args).toEqual(['scripts/lane-pool.mjs', 'acquire', '--purpose=review-loop', '--session=review-42', '--wait-ms=30000', '--adopt']);
+    });
+
+    it('best-effort: a marker-reset failure never throws, and the resolved path still comes back', () => {
+      const run = vi.fn((cmd, args) => {
+        if (args[1] === 'acquire') return '/pool/lane-9';
+        throw new Error('reset refused');
+      });
+      let path;
+      expect(() => { path = acquireLane({ sessionSlug: 's', claudeSessionId: 'id-8', purpose: 'review-loop' }, { run }); }).not.toThrow();
+      expect(path).toBe('/pool/lane-9');
+    });
+  });
+});
+
+describe('resetStaleVerifyMarker', () => {
+  it('calls verify-lane.mjs reset --repo=<lanePath> --json with CLAUDE_CODE_SESSION_ID set', () => {
+    const run = vi.fn(() => JSON.stringify({ status: 'reset' }));
+    resetStaleVerifyMarker('/pool/lane-4', { run, claudeSessionId: 'id-5' });
+    const [cmd, args, opts] = run.mock.calls[0];
+    expect(cmd).toBe('node');
+    expect(args).toEqual(['scripts/verify-lane.mjs', 'reset', '--repo=/pool/lane-4', '--json']);
+    expect(opts.env.CLAUDE_CODE_SESSION_ID).toBe('id-5');
+  });
+
+  it('never throws on a refusal', () => {
+    const run = vi.fn(() => { throw new Error('refused'); });
+    expect(() => resetStaleVerifyMarker('/pool/lane-4', { run, claudeSessionId: 'x' })).not.toThrow();
+  });
+});
+
+describe('releaseLane', () => {
+  it('calls lane-pool.mjs release --lane=<N> --session=<slug>', () => {
+    const run = vi.fn(() => '');
+    releaseLane({ lane: 3, sessionSlug: 'review-42' }, { run });
+    expect(run).toHaveBeenCalledWith('node', ['scripts/lane-pool.mjs', 'release', '--lane=3', '--session=review-42'], {});
+  });
+
+  it('bestEffort=true swallows a release failure rather than throwing', () => {
+    const run = vi.fn(() => { throw new Error('boom'); });
+    expect(() => releaseLane({ lane: 3, sessionSlug: 's', bestEffort: true }, { run })).not.toThrow();
+  });
+
+  it('bestEffort=false (the default) propagates a release failure', () => {
+    const run = vi.fn(() => { throw new Error('boom'); });
+    expect(() => releaseLane({ lane: 3, sessionSlug: 's' }, { run })).toThrow('boom');
+  });
+});
+
+describe('releaseAllPools', () => {
+  it('calls lane-pool.mjs release --all-pools --session=<slug> — the review-agent-brief\'s own step-4 shape', () => {
+    const run = vi.fn(() => '');
+    releaseAllPools('review-42', { run });
+    expect(run).toHaveBeenCalledWith('node', ['scripts/lane-pool.mjs', 'release', '--all-pools', '--session=review-42']);
+  });
+
+  it('never throws (best-effort)', () => {
+    const run = vi.fn(() => { throw new Error('boom'); });
+    expect(() => releaseAllPools('s', { run })).not.toThrow();
+  });
+});
+
+describe('resolveLanePath', () => {
+  it('returns the matching lane\'s real path from lane-pool.mjs status --json', () => {
+    const run = vi.fn(() => JSON.stringify({ lanes: [{ lane: 4, path: '/pool/lane-4', exists: true }] }));
+    expect(resolveLanePath(4, { run })).toBe('/pool/lane-4');
+    expect(run).toHaveBeenCalledWith('node', ['scripts/lane-pool.mjs', 'status', '--json']);
+  });
+
+  it('throws a named error when no matching entry is reported', () => {
+    const run = vi.fn(() => JSON.stringify({ lanes: [{ lane: 1, path: '/pool/lane-1', exists: true }] }));
+    expect(() => resolveLanePath(2, { run })).toThrow(/no entry\/path for lane-2/);
+  });
+});
+
+describe('runVerifyOperation', () => {
+  it('reports `pass` for a green verdict', () => {
+    const run = vi.fn(() => JSON.stringify({ verdict: { ok: true, failed: 0, unrun: 0 } }));
+    const result = runVerifyOperation('/pool/lane-1', { run });
+    expect(result.outcome).toBe('pass');
+  });
+
+  it('reports `fail` when the verdict carries a real failure', () => {
+    const run = vi.fn(() => JSON.stringify({ verdict: { ok: false, failed: 1, unrun: 0, blocking: [] } }));
+    const result = runVerifyOperation('/pool/lane-1', { run });
+    expect(result.outcome).toBe('fail');
+  });
+
+  it('reports `unrun` (never `fail`) when nothing failed but the gate did not run', () => {
+    const run = vi.fn(() => JSON.stringify({ verdict: { ok: false, failed: 0, unrun: 1, blocking: [] } }));
+    const result = runVerifyOperation('/pool/lane-1', { run });
+    expect(result.outcome).toBe('unrun');
+  });
+
+  it('reports `unrun` when the operation itself throws (a refusal/crash)', () => {
+    const run = vi.fn(() => { throw new Error('refused'); });
+    const result = runVerifyOperation('/pool/lane-1', { run });
+    expect(result.outcome).toBe('unrun');
+  });
+
+  it('reports `unrun` when the output does not parse', () => {
+    const run = vi.fn(() => 'not json');
+    const result = runVerifyOperation('/pool/lane-1', { run });
+    expect(result.outcome).toBe('unrun');
+  });
+});
