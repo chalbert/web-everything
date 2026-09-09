@@ -84,6 +84,7 @@ import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
 import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/review-escalation.mjs';
+import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: REPO_ROOT, ...opts });
@@ -316,7 +317,10 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
 
     // ---- 8. Exit. Same "never merge, never release, the drain lands it" contract as today. -----------------
-    return { item, result: `PR #${prResult.number} (${parkDecision.label})` };
+    // `prResult` is `open-pr.mjs`'s `classifySubmit` shape (via `run.mjs open-pr --json`), which names the
+    // PR number `pr`, never `number` — `report.number` is always `undefined` and prior wording printed
+    // "PR #undefined" live even when the PR opened correctly (bug 13, confirmed live on real PR #2109).
+    return { item, result: `PR #${prResult.pr} (${parkDecision.label})` };
   } catch (e) {
     // A wrapper-side failure (acquire refused, claim refused, gate script itself threw) is NOT the agent's
     // outcome — it never reached the agent, or the agent's own report is irrelevant to it. Release what was
@@ -1223,6 +1227,61 @@ function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, juror
 }
 
 /**
+ * BUG-14 FIX. The real, live-diffed touched-file list for ONE converge round's commit — `git status
+ * --porcelain` in the lane, filtered to drop this wrapper's OWN `.converge-*` bookkeeping (the
+ * `.converge-state.json` / `.converge-material-r*.txt` / `.converge-panel-r*.json` / `.converge-redteam-r*.json`
+ * / `.converge-invite-r*.json` / `.converge-obs-*-*.json` / `.converge-commit-msg-r*.txt` files this SAME file
+ * writes into the lane every round, above) and the known lane-release scratch litter
+ * (`we:scripts/lib/lane-litter.mjs#LANE_RELEASE_LITTER_ALLOWLIST` — `.pr-body.md`/`.commit-msg.txt`/etc, in
+ * case any already exist in the lane at converge time). Neither is a real edit the editor made — committing
+ * either would bury the round's actual diff in wrapper noise, and the `.converge-*` files churn every round
+ * (a fresh `.converge-obs-<round>-<i>.json` per step), which would otherwise produce a spurious "changed" file
+ * on every single round even when the editor touched nothing. `run` is injectable for tests, same pattern as
+ * {@link computeLaneDiffStats}.
+ */
+export function convergeRoundTouchedFiles(lane, { run: runFn = run } = {}) {
+  const porcelain = runFn('git', ['status', '--porcelain'], { cwd: lane });
+  const paths = [];
+  for (const line of String(porcelain).split('\n')) {
+    if (!line.trim()) continue;
+    const path = line.slice(3).trim();
+    if (!path) continue;
+    if (path.startsWith('.converge-')) continue; // this wrapper's own per-round bookkeeping, not a real edit
+    if (isAllowlistedLitterPath(path)) continue; // known delivery-pipeline scratch litter, same reason
+    paths.push(path);
+  }
+  return paths;
+}
+
+/**
+ * BUG-14 FIX. Commit ONE converge round's genuinely accepted edits — explicit paths, one commit, message
+ * written to a file rather than a bash heredoc (the SAME footgun `delivery-agent-brief.md` step 8 calls out:
+ * backticks in a heredoc run as a subshell). Mirrors that step's own "commit only this item's files, one
+ * commit, never `git add -A`" convention, applied per round instead of once at the very end — this wrapper,
+ * unlike a human/full-brief session, must commit BEFORE the next `converge-cli.mjs step` call reads the lane's
+ * state and BEFORE `openPr`'s `--sha=HEAD` reads HEAD, or a genuinely accepted editor revision never reaches
+ * the PR (#3627 bug 14, confirmed live on attempt 6: the backlog-card nuance section and the `.gitignore` line
+ * the editor added were both real, accepted edits that PR #2109 shipped without, because nothing had committed
+ * them). No-ops (returns `{committed: false}`) when there is nothing real to commit — an `advanced: false`
+ * round, or a round whose only touched paths are this file's own `.converge-*` bookkeeping — so a round with
+ * no accepted edit never creates an empty/spurious commit.
+ */
+export function commitConvergeRound(
+  { lane, item, round },
+  { run: runFn = run, writeFile = writeFileSync, touchedFiles = convergeRoundTouchedFiles } = {},
+) {
+  const paths = touchedFiles(lane, { run: runFn });
+  if (!paths.length) return { committed: false, paths: [] };
+  const msgFile = `${lane}/.converge-commit-msg-r${round}.txt`;
+  const message = `WE #${item}: converge round ${round} revision\n\n`
+    + 'Commits the accepted editor findings from this round of the #3627 delivery-pipeline converge loop '
+    + '(runConvergeEdit reported advanced:true) before the loop continues and before the PR opens.\n';
+  writeFile(msgFile, message);
+  runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
+  return { committed: true, paths };
+}
+
+/**
  * THE LOOP. Drives `converge-cli.mjs` `init` → repeated `step` calls, executing whatever action each call
  * prints, until the action is genuinely `land` or `escalate` — replacing the sketch's single `step` call.
  * `run` is injectable (defaults to this file's own `run`) so the whole loop is testable against a scripted
@@ -1267,6 +1326,12 @@ export function runConverge({ lane, item, goal }, { run: runFn = run, ensureSett
       obs.redTeamResult = runConvergeRedTeam(step.redTeam, { lane, item, round: step.round, material, run: runFn });
     } else if (step.action === 'edit') {
       obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile });
+      // BUG-14 FIX — commit a genuinely accepted round's real edits NOW, before the `step` call below reads
+      // the lane's state (`converge-cli.mjs`'s own `read` action re-reads the lane fresh each round, so a
+      // later round must see THIS round's commit, not just uncommitted working-tree changes it happens to
+      // still be sitting on) and before any later `openPr --sha=HEAD` could run against a stale HEAD. A
+      // dismissed-only round (`advanced: false`) commits nothing — see {@link commitConvergeRound}.
+      if (obs.editResult.advanced) obs.commitResult = commitConvergeRound({ lane, item, round: step.round }, { run: runFn });
     } else if (step.action === 'invite') {
       obs.invite = step.invite;
       obs.inviteEcho = runConvergeInvite(step.invite, {

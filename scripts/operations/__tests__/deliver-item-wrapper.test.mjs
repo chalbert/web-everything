@@ -18,16 +18,55 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { SPAWN_TIMEOUT_MS } from '../dispatch-lane-io.mjs';
+// ================================================================================================
+// #3627 bug 13/14 — `deliverItem` itself has NO injection points for its own internal calls (acquireLane,
+// claimItem, runAgentToCompletion, runGateWithOneRetry, runConverge, openPr, … all use this file's own
+// module-level `run`/`readFileSync`, not a param `deliverItem` threads through). The ONLY way to drive
+// `deliverItem`'s real, unmodified success path in a test is to mock its cross-module dependencies at their
+// own boundary: `node:child_process#execFileSync` (every `run` call bottoms out here), `node:fs#readFileSync`
+// (only for the one real file it reads — the v2 brief template; every other fs call in the success path
+// writes to a REAL temp lane dir, so `writeFileSync`/`mkdirSync`/etc are left real via the `actual` spread),
+// and `findItem`/`tryReadDeliveryReport` (genuinely separate modules, cleanly mockable via `vi.mock`).
+// `findItem` wraps the REAL implementation by default (`vi.fn(actual.findItem)`) so every OTHER describe
+// block below that relies on real `findItem` behavior (via `resolveItemSpecPathBasename`/`fillMinimalBrief`)
+// is unaffected — only the `deliverItem` describe block at the bottom overrides it per-test.
+// ================================================================================================
+vi.mock('../dispatch-lane-io.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, findItem: vi.fn(actual.findItem) };
+});
+vi.mock('../delivery-report-store.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, tryReadDeliveryReport: vi.fn() };
+});
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal();
+  const mocked = { ...actual, execFileSync: vi.fn() };
+  return { ...mocked, default: mocked };
+});
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal();
+  const readFileSync = vi.fn((path, ...rest) => {
+    if (String(path).includes('delivery-agent-brief-v2.md')) return 'Build item {{ITEM_SPEC_PATH_BASENAME}}.';
+    return actual.readFileSync(path, ...rest);
+  });
+  const mocked = { ...actual, readFileSync };
+  return { ...mocked, default: mocked };
+});
+
+import { execFileSync } from 'node:child_process';
+import { SPAWN_TIMEOUT_MS, findItem } from '../dispatch-lane-io.mjs';
+import { tryReadDeliveryReport } from '../delivery-report-store.mjs';
 import {
   DELIVERY_AGENT_PROVIDERS, DELIVERY_AGENT_SPAWN_TIMEOUT_MS, buildRestrictedProviderArgv,
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
+  convergeRoundTouchedFiles, commitConvergeRound,
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
-  resetStaleVerifyMarker, runVerifyOperation,
+  resetStaleVerifyMarker, runVerifyOperation, deliverItem,
 } from '../deliver-item-wrapper.mjs';
 
 // A real UUID, hardcoded for deterministic assertions (mirrors `crypto.randomUUID()`'s own output shape). Tests
@@ -462,8 +501,15 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
    *  many times any one action's sub-driver calls it internally. `steps` is consumed in order for `step` calls
    *  only (the ONE sequence genuinely order-dependent: each `step` answers "what happens after the observation
    *  I was just fed"). */
-  function fakeRun({ init, read = 'diff --git a/x b/x\n+hi\n', panel, redTeamPanel, editor, steps }) {
+  // `gitStatus` answers `git status --porcelain` for #3627 bug 14's per-round commit
+  // (`convergeRoundTouchedFiles`) — defaults to '' (nothing touched), which keeps every pre-existing test in
+  // this block byte-identical (an `advanced: true` editor reply with an empty status makes `commitConvergeRound`
+  // a no-op, so it records a `git status` call but never a `git commit`). A string answers every call the same
+  // way; a function `(callIndex) => string` answers per-call, for a test that needs different rounds to see
+  // different porcelain output.
+  function fakeRun({ init, read = 'diff --git a/x b/x\n+hi\n', panel, redTeamPanel, editor, steps, gitStatus = '' }) {
     let stepIdx = 0;
+    let gitStatusCallIdx = 0;
     const calls = [];
     const fn = vi.fn((cmd, args = [], opts) => {
       calls.push({ cmd, args, opts });
@@ -474,6 +520,10 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
         return isRedTeam ? redTeamPanel : panel;
       }
       if (cmd === 'claude') return editor;
+      if (cmd === 'git' && args[0] === 'status') {
+        return typeof gitStatus === 'function' ? gitStatus(gitStatusCallIdx++) : gitStatus;
+      }
+      if (cmd === 'git' && args[0] === 'commit') return '';
       if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'step') {
         if (stepIdx >= steps.length) throw new Error(`fakeRun: no scripted step left for call #${stepIdx + 1}`);
         return steps[stepIdx++];
@@ -556,6 +606,148 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
 
     expect(() => runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' }))
       .toThrow(/action this loop does not know how to run.*teleport/s);
+  });
+
+  // ==============================================================================================
+  // #3627 bug 14 — an editor round's genuinely ACCEPTED edits (`advanced: true`) were never committed, so
+  // `openPr`'s `--sha=HEAD` shipped the PR without them (confirmed live on attempt 6/PR #2109: the backlog-card
+  // nuance section and the `.gitignore` line the editor added were both real, accepted, and both missing from
+  // the PR). Fixed by committing explicit, real touched paths right after an `advanced: true` edit round,
+  // before the loop's next `step` call.
+  // ==============================================================================================
+  it('commits an accepted round\'s real touched files via explicit paths (`git commit -F <msgfile> -- <paths>`, '
+    + 'never `git add -A`) BEFORE the next `step` call reads the lane (#3627 bug 14)', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    // A real edit (`src/foo.mjs`) alongside this SAME wrapper's own per-round bookkeeping/litter — none of the
+    // latter should ever reach the commit.
+    const porcelain = ' M src/foo.mjs\n?? .converge-obs-1-0.json\n?? .pr-body.md\n';
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }),
+      steps: [landStep], gitStatus: porcelain,
+    });
+
+    runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    const commitCallIdx = run.calls.findIndex((c) => c.cmd === 'git' && c.args[0] === 'commit');
+    const stepCallIdx = run.calls.findIndex((c) => c.cmd === 'node' && c.args[1] === 'step');
+    expect(commitCallIdx).toBeGreaterThan(-1);
+    expect(stepCallIdx).toBeGreaterThan(-1);
+    expect(commitCallIdx).toBeLessThan(stepCallIdx); // committed before the NEXT step call reads the lane
+
+    const commitCall = run.calls[commitCallIdx];
+    expect(commitCall.args).toEqual(['commit', '-F', `${lane}/.converge-commit-msg-r1.txt`, '--', 'src/foo.mjs']);
+    expect(commitCall.args).not.toContain('-A');
+    expect(commitCall.args).not.toContain('.converge-obs-1-0.json'); // this wrapper's own bookkeeping, never committed
+    expect(commitCall.args).not.toContain('.pr-body.md'); // known lane-release scratch litter, never committed
+  });
+
+  it('creates NO commit for a round the editor did NOT advance (`advanced: false`, dismissed-only) — no empty/'
+    + 'spurious commit (#3627 bug 14)', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init,
+      editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [{ summary: 'x', reason: 'not real' }] }) }),
+      steps: [landStep], gitStatus: ' M src/foo.mjs\n', // even with real untracked changes sitting in the lane
+    });
+
+    runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    expect(run.calls.some((c) => c.cmd === 'git' && c.args[0] === 'status')).toBe(false); // never even checked
+    expect(run.calls.some((c) => c.cmd === 'git' && c.args[0] === 'commit')).toBe(false);
+  });
+
+  it('commits MULTIPLE accepted rounds separately — one commit per round, each before that round\'s own `step` '
+    + 'call, each referencing its own round number (#3627 bug 14)', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix findings' } });
+    const editStep2 = JSON.stringify({ action: 'edit', round: 2, roundCap: 5, edit: { prompt: 'fix more findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 2, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }),
+      steps: [editStep2, landStep], gitStatus: ' M src/foo.mjs\n',
+    });
+
+    runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    const indexed = run.calls.map((c, i) => ({ ...c, i }));
+    const commitCalls = indexed.filter((c) => c.cmd === 'git' && c.args[0] === 'commit');
+    const stepCalls = indexed.filter((c) => c.cmd === 'node' && c.args[1] === 'step');
+    expect(commitCalls.length).toBe(2); // one per accepted round, not one for the whole run
+    expect(commitCalls[0].args).toContain(`${lane}/.converge-commit-msg-r1.txt`);
+    expect(commitCalls[1].args).toContain(`${lane}/.converge-commit-msg-r2.txt`);
+    // round 1's commit precedes round 1's own `step` call (which is what hands back round 2's edit action —
+    // matches `converge-cli.mjs`'s own `read` action re-reading the lane fresh each round: round 2 must see
+    // round 1's commit, not just uncommitted working-tree changes it happens to still be sitting on).
+    expect(commitCalls[0].i).toBeLessThan(stepCalls[0].i);
+    expect(commitCalls[1].i).toBeGreaterThan(stepCalls[0].i);
+    expect(commitCalls[1].i).toBeLessThan(stepCalls[1].i);
+  });
+});
+
+describe('convergeRoundTouchedFiles (#3627 bug 14 helper — the real touched-file list for one round\'s commit)', () => {
+  it('drops this wrapper\'s own `.converge-*` per-round bookkeeping and known lane-release scratch litter, '
+    + 'keeps real edits (both modified-tracked and untracked-new files)', () => {
+    const porcelain = [
+      ' M src/foo.mjs',
+      '?? new-file.mjs',
+      '?? .converge-obs-1-0.json',
+      '?? .converge-state.json',
+      '?? .converge-material-r1.txt',
+      '?? .converge-panel-r1.json',
+      '?? .converge-redteam-r1.json',
+      '?? .converge-invite-r1.json',
+      '?? .converge-commit-msg-r1.txt',
+      '?? .pr-body.md',
+      '?? .commit-msg.txt',
+      '',
+    ].join('\n');
+    const run = vi.fn(() => porcelain);
+    const paths = convergeRoundTouchedFiles('/some/lane', { run });
+    expect(paths).toEqual(['src/foo.mjs', 'new-file.mjs']);
+    expect(run).toHaveBeenCalledWith('git', ['status', '--porcelain'], { cwd: '/some/lane' });
+  });
+
+  it('returns an empty list when the only changes present are this wrapper\'s own bookkeeping', () => {
+    const run = vi.fn(() => '?? .converge-obs-1-0.json\n?? .converge-state.json\n');
+    expect(convergeRoundTouchedFiles('/lane', { run })).toEqual([]);
+  });
+
+  it('returns an empty list for a genuinely clean lane', () => {
+    const run = vi.fn(() => '');
+    expect(convergeRoundTouchedFiles('/lane', { run })).toEqual([]);
+  });
+});
+
+describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round commit)', () => {
+  it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the round', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitConvergeRound(
+      { lane: '/lane', item: '1234', round: 2 },
+      { run, writeFile, touchedFiles: () => ['a.mjs', 'b.md'] },
+    );
+    expect(result).toEqual({ committed: true, paths: ['a.mjs', 'b.md'] });
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const [msgFile, message] = writeFile.mock.calls[0];
+    expect(msgFile).toBe('/lane/.converge-commit-msg-r2.txt');
+    expect(message).toMatch(/round 2/);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith('git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run.mock.calls[0][1]).not.toContain('-A');
+    expect(run.mock.calls[0][1]).not.toContain('--all');
+  });
+
+  it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitConvergeRound(
+      { lane: '/lane', item: '1234', round: 1 },
+      { run, writeFile, touchedFiles: () => [] },
+    );
+    expect(result).toEqual({ committed: false, paths: [] });
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
@@ -1412,5 +1604,70 @@ describe('resetStaleVerifyMarker (#3627 attempt-5 finding — shells verify-lane
   it('never throws when the underlying `run` throws (best-effort, matching a `reset` refusal or a missing lane)', () => {
     const run = vi.fn(() => { throw new Error('boom'); });
     expect(() => resetStaleVerifyMarker('/real/pool/lane-4', { run, claudeSessionId: 'x' })).not.toThrow();
+  });
+});
+
+// ================================================================================================
+// #3627 bug 13 — `deliverItem`'s success-path result string read `prResult.number`, but `openPr`'s return is
+// `open-pr.mjs`'s `classifySubmit` shape (`run.mjs open-pr --json`), which names the PR `pr`, never `number` —
+// confirmed by reading `classifySubmit` itself (`we:scripts/operations/open-pr.mjs` lines ~305-346): every
+// return path uses `pr:`, and `open-pr-io.mjs` prints that exact object as the CLI's `--json` output. Live on
+// attempt 6/PR #2109 this printed "PR #undefined" even though the PR opened correctly. `deliverItem` itself has
+// no injection points for its own internal calls (see the file-top mock block for why every dependency here is
+// mocked at ITS OWN boundary — `execFileSync`/`readFileSync`/`findItem`/`tryReadDeliveryReport` — rather than
+// deliverItem's signature), so this drives the REAL, unmodified `deliverItem` end to end.
+// ================================================================================================
+describe('deliverItem (#3627 bug 13 — the success-path result string names the real PR field)', () => {
+  let lane;
+
+  beforeEach(() => {
+    lane = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-deliveritem-'));
+    findItem.mockReturnValue({ num: '9999', slug: 'bug13-fix', specPath: 'backlog/9999-bug13-fix.md', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'], reason: 'did it' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: { ok: true, cwd: lane, suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/converge-cli.mjs' && a[1] === 'init') {
+        // land immediately — no edit round needed; bug 14's own commit path has its own dedicated tests above.
+        return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+      }
+      if (cmd === 'git') return ''; // decideParkMode's own diff-stats read; empty is a safe, real answer
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'open-pr') {
+        // the real classifySubmit shape: `pr`, never `number` — the exact repro for bug 13.
+        return JSON.stringify({ pr: 4321, url: 'https://example/pr/4321' });
+      }
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+  });
+
+  afterEach(() => {
+    rmSync(lane, { recursive: true, force: true });
+    // `mockClear()`, never `mockReset()` — `findItem` was created as `vi.fn(actual.findItem)` (see the file-top
+    // mock block) so every OTHER describe block above that relies on real `findItem` behavior keeps working;
+    // `mockReset()` would strip that default real implementation for the rest of the file.
+    findItem.mockClear();
+    tryReadDeliveryReport.mockReset();
+    execFileSync.mockReset();
+  });
+
+  it('uses the real `pr` field — never `number` — so the result names the actual PR, not "PR #undefined"', async () => {
+    const result = await deliverItem(
+      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+    expect(result.result).toContain('PR #4321');
+    expect(result.result).not.toContain('undefined');
   });
 });
