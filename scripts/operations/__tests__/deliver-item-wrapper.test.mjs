@@ -774,10 +774,45 @@ describe('DELIVERY_HOOKS_SETTINGS permissions.allow (#3627 bug 8)', () => {
     }
   });
 
-  it('the hooks block is unchanged by the permissions addition — still exactly guard-lane.mjs + guard-bash.mjs', () => {
+  it('the hooks block still has exactly two PreToolUse matcher groups — Edit|Write and Bash', () => {
     expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse).toHaveLength(2);
     expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[0].matcher).toBe('Edit|Write');
     expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[1].matcher).toBe('Bash');
+  });
+
+  it('the Bash matcher group is unchanged by the locus/backlog-guard addition — still exactly guard-bash.mjs', () => {
+    expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[1].hooks).toEqual([
+      { type: 'command', command: 'node scripts/guard-bash.mjs' },
+    ]);
+  });
+});
+
+// ================================================================================================
+// #3627 bug 11 (live #3371 attempt 4, confirmed 2026-09-09) — the generated hooks-only settings file's
+// Edit|Write matcher carried only guard-lane.mjs. A real live delivery attempt against backlog item #3371 had
+// its delivery agent write real evidence into its own `backlog/3371-...md` card (as the brief instructs: "Keep
+// its `## Progress` section synced as you go") and introduced a bare code-path reference missing a `we:` locus
+// prefix — a violation only caught afterward via the agent's own `check:standards` run, costing an avoidable
+// extra fix-and-recheck cycle. `lint-locus-prefix.mjs --pre` and `backlog-guard.mjs --pre` are the real
+// PreToolUse(Edit|Write) gates (`we:.claude/settings.json`) that would have denied both classes of mistake at
+// write-time; `check-memory.mjs` and `guard-backward-edge.mjs` stay OUT — no evidence the delivery agent's own
+// writes ever touch agent-memory or backward-edge-relevant paths.
+// ================================================================================================
+describe('DELIVERY_HOOKS_SETTINGS Edit|Write hooks (#3627 bug 11 — lint-locus-prefix.mjs + backlog-guard.mjs)', () => {
+  it('the Edit|Write matcher group carries guard-lane.mjs, lint-locus-prefix.mjs --pre, and backlog-guard.mjs '
+    + '--pre — in that order, matching this repo\'s own .claude/settings.json convention', () => {
+    expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[0].hooks).toEqual([
+      { type: 'command', command: 'node scripts/guard-lane.mjs' },
+      { type: 'command', command: 'node scripts/lint-locus-prefix.mjs --pre' },
+      { type: 'command', command: 'node scripts/backlog-guard.mjs --pre' },
+    ]);
+  });
+
+  it('does NOT carry check-memory.mjs or guard-backward-edge.mjs — no evidence the delivery agent\'s own '
+    + 'writes ever touch agent-memory or backward-edge-relevant paths', () => {
+    const commands = DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[0].hooks.map((h) => h.command);
+    expect(commands.some((c) => c.includes('check-memory.mjs'))).toBe(false);
+    expect(commands.some((c) => c.includes('guard-backward-edge.mjs'))).toBe(false);
   });
 });
 

@@ -104,12 +104,29 @@ const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
 // 0. The minimal-context hook settings file — REAL SCHEMA, closes the "cost 1" gap the first draft of this
 //    sketch left open. `we:.claude/settings.json` (read directly from this repo, verbatim shape below) is
 //    the REAL hook-registration schema Claude Code loads; this is the SAME shape, trimmed to carry ONLY the
-//    two hooks a delivery agent's own Bash/Edit/Write calls still need for safety — `guard-lane.mjs` (refuses
-//    an Edit/Write from a foreign session onto a lane it does not own) and `guard-bash.mjs` (the destructive-
-//    git-op / main-push / backgrounded-verification-set denials) — dropping the other three Edit|Write hooks
-//    the real settings.json also carries (`lint-locus-prefix.mjs`, `check-memory.mjs`, `backlog-guard.mjs`,
-//    `guard-backward-edge.mjs`), none of which apply to a minimal delivery agent that never touches
-//    `backlog/*.md`/`reports/*.md`/agent-memory files itself (the wrapper owns claim/release/scaffold).
+//    FOUR hooks a delivery agent's own Bash/Edit/Write calls actually need for safety — `guard-lane.mjs`
+//    (refuses an Edit/Write from a foreign session onto a lane it does not own), `guard-bash.mjs` (the
+//    destructive-git-op / main-push / backgrounded-verification-set denials), `lint-locus-prefix.mjs --pre`
+//    (denies an Edit/Write that would introduce a bare code-path reference — missing a `we:` locus prefix —
+//    into `backlog/*.md`/`reports/*.md` before it lands), and `backlog-guard.mjs --pre` (denies an Edit/Write
+//    with a derived-empty summary, or a hand-authored new backlog file, scoped to the same `backlog/*.md`
+//    writes the agent legitimately makes) — dropping only the remaining two Edit|Write hooks the real
+//    settings.json also carries (`check-memory.mjs`, `guard-backward-edge.mjs`), which stay dropped because
+//    there is no evidence the delivery agent's own writes ever touch agent-memory or backward-edge-relevant
+//    paths.
+//
+//    CORRECTED PREMISE (bug 11, live #3371 attempt 4, confirmed 2026-09-09) — an earlier revision of this
+//    comment dropped `lint-locus-prefix.mjs`/`backlog-guard.mjs` too, on the claim that "none of [the four
+//    dropped hooks] apply to a minimal delivery agent that never touches `backlog/*.md`/`reports/*.md`/
+//    agent-memory files itself." That premise was factually wrong, and a real live run proved it: the brief
+//    (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) explicitly instructs the agent to "Keep its
+//    `## Progress` section synced as you go" — i.e. the agent itself edits its own `backlog/NNNN-*.md` card,
+//    not just the wrapper. Attempt 4 did exactly that and, in the same run, introduced a bare code-path
+//    reference missing its `we:` locus prefix — a violation `lint-locus-prefix.mjs --pre` would have denied
+//    at write-time had it been present, but which instead was only caught afterward via the agent's own
+//    `check:standards` run, costing an avoidable extra fix-and-recheck cycle. Do not reintroduce the "agent
+//    never touches backlog files" premise — it is disproved by the brief's own instructions and by this
+//    real attempt.
 //
 //    `--restricted`'s own help text says explicitly that "managed settings and `--settings` still apply" even
 //    though it "ignores user, project and local settings files" — and unlike an earlier draft's `--bare`
@@ -120,8 +137,8 @@ const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
 //    trail). So `--restricted --settings=<this file>` is REAL and VERIFIED as a combination, not a guess:
 //    `--restricted` (plus the explicit `--tools` allowlist and `--strict-mcp-config` the provider below also
 //    passes) strips CLAUDE.md/skill-discovery/stray-MCP-surface down to nothing, and this file re-adds ONLY
-//    the two safety hooks, nothing else — no memory, no doctrine, no skill discovery leaks back in through the
-//    settings layer.
+//    the four safety hooks above, nothing else — no memory, no doctrine, no skill discovery leaks back in
+//    through the settings layer.
 //
 //    BUG 8 (live #3371 attempt, confirmed 2026-09-09) — this settings file ALSO now carries `permissions.allow`.
 //    Under `--restricted` the CLI ignores the repo's normal project/user permissions files entirely (same
@@ -163,7 +180,14 @@ const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
 export const DELIVERY_HOOKS_SETTINGS = Object.freeze({
   hooks: {
     PreToolUse: [
-      { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'node scripts/guard-lane.mjs' }] },
+      {
+        matcher: 'Edit|Write',
+        hooks: [
+          { type: 'command', command: 'node scripts/guard-lane.mjs' },
+          { type: 'command', command: 'node scripts/lint-locus-prefix.mjs --pre' },
+          { type: 'command', command: 'node scripts/backlog-guard.mjs --pre' },
+        ],
+      },
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'node scripts/guard-bash.mjs' }] },
     ],
   },
