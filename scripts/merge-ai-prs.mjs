@@ -131,6 +131,9 @@ import { deliveredItemNumsFromPr } from './lib/open-pr-items.mjs'; // #3441 — 
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
 import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.mjs';
+// #3215 — the drain applies holds of its own (a fresh park, a #2409 stale-acceptance re-park); this is the
+// same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
+import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -1964,6 +1967,42 @@ export const LAND_REASON = 'landing — recording the acted-on manifest escalati
  *  `blockedBy`, so passing the whole verdict is safe — its extra keys are ignored. Collapses the identical
  *  park/skip/land call sites into one. */
 const auditLineFor = (x) => x.hasManifest ? manifestAuditLine(x) : undefined;
+
+/**
+ * #3215 — RECORD, THROUGH THE LEDGER'S SINGLE OWNER, A HOLD THE DRAIN APPLIES ON ITS OWN.
+ *
+ * `review-set-label.mjs` already writes the review-seam verdict through `buildVerdictRecord`/`appendVerdict`;
+ * this is the SAME format, the SAME two calls, for the OTHER seam the ledger did not yet cover — a fresh park
+ * or a #2409 stale-acceptance re-park the drain applies with no reviewer in the loop. Without this, every
+ * drain-applied hold is `unledgered` (`we:scripts/review-ledger-check.mjs`), and a Phase-2 gate reading only
+ * the ledger would merge straight past a hold that never made it in — "the hold that didn't hold" (#2750,
+ * #2820, #2745) re-opened from the other side.
+ *
+ * `applyLabel` is the SAME label string `decideReviewGate` returned (`REVIEW_LABELS.pending` /
+ * `REVIEW_LABELS.human`) — never a hand-picked verdict. `labelVerdictOf` is the one place a label becomes a
+ * {@link VERDICTS} member, the SAME function `review-ledger-check`'s comparator uses to read a PR's live
+ * label, so this row can never disagree with what the checker itself would derive from the label the drain
+ * just applied.
+ *
+ * FAIL-SOFT, same posture as `review-set-label.mjs`'s Phase-1 write: a ledger miss must never block the drain
+ * pass. The label write is the thing that holds the PR; this only makes that hold legible to the ledger.
+ *
+ * @param {{repo: string, pr: number|string, applyLabel: string, reason?: string, headSha?: string|null}} o
+ * @returns {{ok: boolean, errors: string[]}}
+ */
+export function recordDrainVerdict({ repo, pr, applyLabel, reason = '', headSha = null } = {}) {
+  const verdict = labelVerdictOf([applyLabel]);
+  if (!verdict) return { ok: false, errors: [`no VERDICTS member for label ${JSON.stringify(applyLabel)}`] };
+  try {
+    const appended = appendVerdict(buildVerdictRecord({
+      repo, pr, verdict, at: new Date().toISOString(), reason, headSha,
+      declaredActor: 'drain', source: 'merge-ai-prs',
+    }));
+    return appended.ok ? { ok: true, errors: [] } : { ok: false, errors: appended.errors };
+  } catch (e) {
+    return { ok: false, errors: [String((e && e.message) || e).split('\n')[0]] };
+  }
+}
 
 /**
  * #2333 — should a PARK stamp its escalation reason as a PR comment (#2313)? ONLY for a NON-human
@@ -4171,6 +4210,13 @@ async function runCli() {
         // producer- and drain-applied verdicts can never drift on what "already labelled" means.
         if (gate.applyLabel && !DRY_RUN) {
           if (shouldApplyReviewLabel(gate.applyLabel, v.prLabels)) {
+            // #3215 — the ledger is written FIRST, before the `gh` transport call, same ordering rationale as
+            // `review-set-label.mjs`'s Phase-1 write: this hold is already DECIDED (the gate verdict above is
+            // final), so a `gh` failure below must not un-form it — only the durable record of it. Fail-soft:
+            // `recordDrainVerdict` never throws, and a miss costs `review-ledger-check`'s `unledgered` count,
+            // never this park.
+            const ledgered = recordDrainVerdict({ repo: v.repo || localSlug, pr: v.num, applyLabel: gate.applyLabel, reason: v.reason, headSha: v.headSha ?? null });
+            if (!ledgered.ok && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} verdict-ledger append (#3215, drain hold, non-fatal) — ${ledgered.errors.join('; ')}\n`);
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // #xmnl36p — A CLEARANCE REVOCATION IS NEVER SILENT, and this is the ONE path that guarantees it.

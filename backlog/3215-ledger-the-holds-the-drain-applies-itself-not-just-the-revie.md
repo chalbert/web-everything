@@ -4,8 +4,10 @@ kind: story
 size: 3
 parent: "2405"
 blockedBy: ["3214"]
-status: open
+status: resolved
 dateOpened: "2026-08-20"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: []
 scope:
   - we:scripts/merge-ai-prs.mjs
@@ -42,3 +44,17 @@ Every hold the drain applies itself appends a ledger record through the format's
 (`we:scripts/lib/verdict-ledger.mjs`), `review-ledger-check`'s `unledgered` count can reach zero on a live
 board, and a test drives a drain-applied re-park and asserts the row exists with the drain named as its
 author.
+
+## Progress
+
+Added `recordDrainVerdict` in `we:scripts/merge-ai-prs.mjs` — the drain's own writer through the ledger's
+single owner (`buildVerdictRecord`/`appendVerdict`), mirroring `we:scripts/review-set-label.mjs`'s Phase-1
+write for the review seam: same fail-soft posture, `source: 'merge-ai-prs'`, `declaredActor: 'drain'`. Wired it into the
+ONE site the drain applies a hold label on its own (`gate.applyLabel` inside `shouldApplyReviewLabel`), ahead
+of the `gh pr edit --add-label` transport call, so a fresh park and a #2409 stale-acceptance re-park both
+ledger before they touch GitHub. The verdict is derived from the SAME label `decideReviewGate` returned via
+`labelVerdictOf`, so it can never disagree with what `review-ledger-check`'s comparator would read from the
+label. Covered by `we:scripts/__tests__/merge-ai-prs-drain-verdict-ledger.test.mjs` (unit behavior for
+pending/human/unknown labels + the stale-acceptance re-park, using the real `appendVerdict`/`readVerdictLedger`
+against a temp ledger dir) and a source-contract wiring test (the established pattern for this file's
+un-executed `runCli` park loop) pinning the call site's ordering and arguments.
