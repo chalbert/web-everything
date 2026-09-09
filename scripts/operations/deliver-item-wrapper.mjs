@@ -223,6 +223,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER)
 // 1. Lane + claim — REAL, lifted verbatim from the live brief's step 1/2 CLI surface.
 // ================================================================================================
 
+// #3627 follow-up — raw script call, not routed through `run.mjs`: no `lane-pool` operation is registered
+// yet (`we:scripts/operations/registry.mjs` has no `acquire`/`release` declaration for lane-pool at all —
+// unlike `claim`/`verify`/`open-pr`, which do exist and are what `claimItem`/`runGateWithOneRetry`/`openPr`
+// route through in this file). Would need one built first (see #3627 follow-up) before this could move off
+// the raw `scripts/lane-pool.mjs` CLI — out of scope for this hardening pass; not built here.
 /** REAL. Same flags the live brief's step 1 documents. */
 function acquireLane({ lane, sessionSlug, scope, item }) {
   run('node', [
@@ -231,11 +236,34 @@ function acquireLane({ lane, sessionSlug, scope, item }) {
   ]);
 }
 
-/** REAL. Same flags the live brief's step 2 documents. */
-function claimItem({ item, sessionSlug }) {
-  run('node', ['scripts/backlog.mjs', 'claim', String(item), `--session=${sessionSlug}`]);
+/**
+ * REAL — routed through the DECLARED `claim` operation (`scripts/operations/claim.mjs`, wired into
+ * `run.mjs`) instead of a raw `backlog.mjs claim` shell-out (#3627 follow-up: `run.mjs <op>` is the
+ * sanctioned, OS-agnostic, traceable interface for a mechanical caller — `openPr` below already does this
+ * for `open-pr`). Exported, and takes an injectable `run` (mirrors `resolveLanePath`/`openPr`'s own
+ * pattern), for the same "argv IS the contract" reason those are.
+ *
+ * THE REAL INPUT SCHEMA (read from `claimOperation` in `claim.mjs`, not guessed): `ref` (required string),
+ * `as` (optional, default `'active'`, enum `active|preparing`), `force` (optional boolean, default `false`).
+ * THERE IS NO `session` FIELD. The `--session` bookkeeping the raw `backlog.mjs claim` CLI does around this
+ * SAME operation — the gate-attribution claims-registry baseline (`recordClaim`), the reservation-clear-on-
+ * claim, `recordCliTouch`, and the background/stop-for-rename UX — all live in `backlog.mjs`'s OWN
+ * `claimViaOperation` wrapper AROUND the operation, never in the operation itself, so none of it is reachable
+ * through `run.mjs claim`. `sessionSlug` is accepted here only so the caller's shape is unchanged and is
+ * deliberately not forwarded — this pipeline's own gate call (`runGateWithOneRetry` → `run.mjs verify`) does
+ * not use claims-registry scoping either, so nothing this delivery flow depends on is lost by the omission,
+ * but it IS a real behavioral difference from a raw `backlog.mjs claim --session=…` call and is called out
+ * here rather than silently dropped.
+ */
+export function claimItem({ item, sessionSlug }, { run: runFn = run } = {}) {
+  void sessionSlug; // accepted, not forwarded — see the docblock above for why.
+  runFn('node', ['scripts/operations/run.mjs', 'claim', `--ref=${item}`, '--json']);
 }
 
+// #3627 follow-up — both calls below are raw script calls, not routed through `run.mjs`: `release` has no
+// registered operation (only `claim`, its OPEN, is declared — `resolve`/`scaffold` exist but neither is
+// `release`) and `lane-pool` has no registered operation at all (same gap `acquireLane` notes above). Would
+// need one — or two — built first (see #3627 follow-up); out of scope for this hardening pass.
 /** REAL (release flags lifted from the live brief's Escalations case-0 mechanism). */
 function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
   const opts = best_effort ? { stdio: 'ignore' } : {};
@@ -372,7 +400,17 @@ const CLAUDE_RESTRICTED_PROVIDER = {
   spawn({ sessionId, prompt, resumeSessionId = null }) {
     const settingsFile = ensureDeliveryHooksSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
-    defaultSpawnAgent(argv, {}); // BLOCKS until the agent's own run ends — this line is the only "wait".
+    // #3627 hardening — stamp `WE_DISPATCH_KIND=delivery` onto the agent's own process env. Every hook that
+    // fires inside the agent's own Bash tool calls inherits this (the same inheritance
+    // `we:scripts/guard-bash.mjs`'s #3105 arm already relies on for a mechanically-dispatched build/fix/
+    // ci-heal agent), and `guard-bash.mjs` now reads it to deny the delivery agent from ever running the
+    // mechanical lifecycle commands this wrapper drives itself (lane-pool/backlog-claim/gh-pr/open-pr/
+    // pr-land/learnings-drop/converge-cli/verify-lane/review-core-cli — see guard-bash.mjs's own #3627 arm).
+    // REUSES the existing `WE_DISPATCH_KIND` channel rather than inventing a second session-type signal — but
+    // note nothing else in this repo stamps that var onto a real spawn yet (the build/fix/ci-heal emitter side
+    // in `dispatch-lane-io.mjs` is a separate, not-yet-landed graduation, #3488); this is the first live
+    // caller of it, scoped to only this spawn.
+    defaultSpawnAgent(argv, { env: { ...process.env, WE_DISPATCH_KIND: 'delivery' } }); // BLOCKS — the only "wait".
   },
 };
 
@@ -471,40 +509,70 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
 }
 
 // ================================================================================================
-// 3. The gate — REAL insight, SKETCH call. The load-bearing claim: `we:scripts/guard-bash.mjs`'s
-//    verification-set deny is a `PreToolUse(Bash)` HOOK — it only fires inside a live Claude Code session's
-//    OWN tool calls. This wrapper is a plain Node process the conveyor runs; it is not a Claude Code session
-//    and has no Bash TOOL calls for any hook to intercept, so it can shell `verify-lane.mjs` SYNCHRONOUSLY
-//    and just block for the 150-350s it takes — no `request`/`check` split, no polling, at all. This is the
-//    single biggest concrete win the #3621 push-not-poll idea buys here: the request→poll dance in the live
-//    brief's steps 5/8 exists ONLY because the agent's own tool call is what's constrained; a wrapper process
-//    was never subject to that constraint to begin with.
+// 3. The gate — REAL insight, REAL call (#3627 follow-up graduated this from a raw `verify-lane.mjs` shell-out
+//    to the declared `verify` operation — see `runVerifyOperation` below). The load-bearing claim is
+//    unchanged: `we:scripts/guard-bash.mjs`'s verification-set deny is a `PreToolUse(Bash)` HOOK — it only
+//    fires inside a live Claude Code session's OWN tool calls. This wrapper is a plain Node process the
+//    conveyor runs; it is not a Claude Code session and has no Bash TOOL calls for any hook to intercept, so
+//    it can run the gate SYNCHRONOUSLY and just block for the 150-350s it takes — no `request`/`check` split,
+//    no polling, at all. This is the single biggest concrete win the #3621 push-not-poll idea buys here: the
+//    request→poll dance in the live brief's steps 5/8 exists ONLY because the agent's own tool call is what's
+//    constrained; a wrapper process was never subject to that constraint to begin with.
 // ================================================================================================
 
-/** SKETCH (exact flags for `--gate=` overrides not re-verified here; the bare invocation is REAL — see the
- *  live brief's own step-5 prose, `we:scripts/verify-lane.mjs`'s header). One resume-and-retry, not an
- *  unbounded loop — mirrors the live brief's own "red gate is a hard stop" bar, but gives the agent exactly
- *  one chance to fix ITS OWN gate failure before that stop applies, since a transient/self-inflicted red on
- *  a fresh diff is common and cheap to hand back once. */
+/**
+ * REAL — routed through the DECLARED `verify` operation (`scripts/operations/verify.mjs`, wired into
+ * `run.mjs`) instead of a raw `verify-lane.mjs --json` shell-out (#3627 follow-up: `run.mjs <op>` is the
+ * sanctioned, OS-agnostic, traceable interface — `openPr` above already does this for `open-pr`).
+ *
+ * THE REAL INPUT SCHEMA (read from `verifyOperation` in `verify.mjs`, not guessed): `checkout` (required
+ * string — the tree to verify; NOT `cwd`, which is the adapter's own control flag for a tool-bearing juror's
+ * lane and would collide), `mode` (optional, default `'run'`, enum `run|check`), `gate` (optional string,
+ * the suite command forwarded to the home's own `--gate`; empty means the home's default).
+ *
+ * UNLIKE THE RAW HOME, THE EXIT CODE DOES NOT CARRY THE VERDICT. `verify-lane.mjs --json` exits 2 on a red
+ * gate, which is what let the old `try`/`catch` around `runFn` stand in for "did it pass". The `verify`
+ * OPERATION is a `compute`-only declaration with no `confirm`/`judge`, so it reports `stopped: 'complete'`
+ * (exit 0) whenever it successfully RAN the checks, red or green — a red gate is a successfully completed
+ * verdict, not a failed run. So `runVerifyOperation` below reads `verdict.ok` out of the `--json` envelope
+ * instead of relying on `runFn` throwing.
+ */
+function runVerifyOperation(lanePath, { run: runFn = run } = {}) {
+  let out;
+  try {
+    out = runFn('node', ['scripts/operations/run.mjs', 'verify', `--checkout=${lanePath}`, '--json']);
+  } catch (e) {
+    // A non-zero exit here means the OPERATION itself could not complete (a refusal/crash), not a red gate —
+    // still `unrun`-shaped, not a `pass`, so this correctly reads as not-ok.
+    return { ok: false, detail: String(e.stdout || e.message || e) };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    return { ok: false, detail: String(out) };
+  }
+  const verdict = parsed.verdict || {};
+  if (verdict.ok === true) return { ok: true, detail: null };
+  return { ok: false, detail: JSON.stringify(verdict.blocking ?? verdict, null, 2) };
+}
+
+/** One resume-and-retry, not an unbounded loop — mirrors the live brief's own "red gate is a hard stop" bar,
+ *  but gives the agent exactly one chance to fix ITS OWN gate failure before that stop applies, since a
+ *  transient/self-inflicted red on a fresh diff is common and cheap to hand back once. */
 export function runGateWithOneRetry(
   { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER },
   { run: runFn = run } = {},
 ) {
   const lanePath = resolveLanePath(lane, { run: runFn });
-  try {
-    runFn('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
-    return { status: 'green', lanePath };
-  } catch (firstFailure) {
-    const failureOutput = String(firstFailure.stdout || firstFailure.message || '');
-    resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider }); // SKETCH — see below
-    const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
-    try {
-      runFn('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
-      return { status: 'green', lanePath, retryReport };
-    } catch {
-      return { status: 'red', lanePath };
-    }
-  }
+  const first = runVerifyOperation(lanePath, { run: runFn });
+  if (first.ok) return { status: 'green', lanePath };
+
+  resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput: first.detail, provider }); // SKETCH — see below
+  const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
+  const second = runVerifyOperation(lanePath, { run: runFn });
+  if (second.ok) return { status: 'green', lanePath, retryReport };
+  return { status: 'red', lanePath };
 }
 
 /** SKETCH — this is the concrete "push, don't poll" moment for the gate specifically, and it is a firm
@@ -612,6 +680,8 @@ function runConvergePanel(panelEntries, { lane, item, round, material, run: runF
   const payloadFile = writeFile(`${lane}/.converge-panel-r${round}.json`, {
     subject: 'pr-diff', subjectNoun: 'diff', round, materialFile, jurors,
   });
+  // #3627 follow-up — raw script call, not routed through `run.mjs`: no `panel-fanout`/`jury` operation is
+  // registered yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass.
   const out = runFn('node', [
     'skills-src/jury/panel-fanout.mjs', `--payload-file=${payloadFile}`, `--depth=${CONVERGE_PANEL_DEPTH}`,
     `--max-depth=${CONVERGE_PANEL_MAX_DEPTH}`, `--max-total-budget-usd=${CONVERGE_PANEL_MAX_BUDGET_USD}`,
@@ -637,6 +707,8 @@ function runConvergeRedTeam(redTeam, { lane, item, round, material, run: runFn, 
   const payloadFile = writeFile(`${lane}/.converge-redteam-r${round}.json`, {
     subject: 'pr-diff', subjectNoun: 'diff', round, materialFile, jurors,
   });
+  // #3627 follow-up — raw script call, not routed through `run.mjs`: no `panel-fanout`/`jury` operation is
+  // registered yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass.
   const out = runFn('node', [
     'skills-src/jury/panel-fanout.mjs', `--payload-file=${payloadFile}`, `--depth=${CONVERGE_PANEL_DEPTH}`,
     `--max-depth=${CONVERGE_PANEL_MAX_DEPTH}`, `--max-total-budget-usd=${CONVERGE_PANEL_MAX_BUDGET_USD}`,
@@ -700,6 +772,8 @@ function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, juror
   const payloadFile = writeFile(`${lane}/.converge-invite-r${round}.json`, {
     careLevel, seatedLenses, jurorsPerLens, invitedLens: invite.lens, citedFinding: invite.citedFinding,
   });
+  // #3627 follow-up — raw script call, not routed through `run.mjs`: no `review-core-cli`/`invite` operation
+  // is registered yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass.
   try {
     const out = runFn('node', ['scripts/review-core-cli.mjs', 'invite', `--file=${payloadFile}`, '--json']);
     return JSON.parse(out);
@@ -716,6 +790,9 @@ function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, juror
  */
 export function runConverge({ lane, item, goal }, { run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile } = {}) {
   const state = `${lane}/.converge-state.json`;
+  // #3627 follow-up — raw script call, not routed through `run.mjs`: no `converge` operation is registered
+  // yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass. Same for the
+  // `step` call further down this loop.
   const initOut = JSON.parse(runFn('node', [
     'scripts/converge-cli.mjs', 'init', `--lane=${lane}`, `--state=${state}`, '--care=elevated',
     `--goal=${goal || `deliver item ${item} to spec`}`,
@@ -901,6 +978,8 @@ export function openPr({ item, attemptTag, lane, park, report, slug }, { run: ru
   return JSON.parse(out);
 }
 
+// #3627 follow-up — raw script call, not routed through `run.mjs`: no `learnings-drop` operation is
+// registered yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass.
 /** REAL (flags lifted verbatim from the live brief's step 9). */
 function dropLearning({ sessionSlug, learning }) {
   run('node', [

@@ -24,7 +24,7 @@ import {
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv,
   decideParkMode, computeLaneDiffStats,
-  resolveLanePath, runGateWithOneRetry,
+  resolveLanePath, runGateWithOneRetry, claimItem,
 } from '../deliver-item-wrapper.mjs';
 
 describe('buildRestrictedProviderArgv', () => {
@@ -515,15 +515,30 @@ describe('resolveLanePath (#3627 bug 2 — real lane-pool.mjs status --json look
   });
 });
 
-describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through to resolveLanePath)', () => {
-  it('uses the injected run for BOTH the lane-pool.mjs status lookup and the gate itself, and runs the gate in the resolved (not hardcoded) lane path', () => {
-    const run = vi.fn((cmd, args, opts) => {
+describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through to resolveLanePath; '
+  + '#3627 follow-up — routed through the declared `verify` operation, never raw verify-lane.mjs)', () => {
+  const verifyOkJson = () => JSON.stringify({
+    runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+    verdict: { ok: true, cwd: '/real/pool/lane-3', suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+  });
+  const verifyRedJson = () => JSON.stringify({
+    runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+    verdict: {
+      ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+      checks: [{ name: 'test:unit', outcome: 'fail' }],
+      blocking: [{ check: 'test:unit', why: 'failed', detail: '3 error(s)' }],
+    },
+  });
+
+  it('uses the injected run for BOTH the lane-pool.mjs status lookup and the gate itself, calling '
+    + '`run.mjs verify --checkout=<resolved lane path> --json` — never raw verify-lane.mjs', () => {
+    const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
-      if (args[0] === 'scripts/verify-lane.mjs') {
-        expect(opts.cwd).toBe('/real/pool/lane-3'); // the RESOLVED path, never the hardcoded ../.lanes guess
-        return '{"status":"green"}';
+      if (args[0] === 'scripts/operations/run.mjs') {
+        expect(args).toEqual(['scripts/operations/run.mjs', 'verify', '--checkout=/real/pool/lane-3', '--json']);
+        return verifyOkJson();
       }
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
@@ -532,5 +547,50 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
     const statusCall = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/lane-pool.mjs');
     expect(statusCall).toBeDefined();
     expect(statusCall[1]).toEqual(['scripts/lane-pool.mjs', 'status', '--json']);
+  });
+
+  it('reads `verdict.ok` from the JSON envelope rather than relying on a non-zero exit code — the `verify` '
+    + 'OPERATION reports `stopped: complete` (exit 0) even for a red gate (compute-only, no confirm/judge), '
+    + 'unlike the raw `verify-lane.mjs` home which exits 2', () => {
+    let verifyCalls = 0;
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') { verifyCalls += 1; return verifyRedJson(); } // exit 0, verdict.ok=false
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() }; // stub — never spawns a real `claude`
+    const result = runGateWithOneRetry(
+      { lane: 3, item: '3371', sessionSlug: 'test-3627-fake-session-no-report', provider },
+      { run },
+    );
+    expect(result.status).toBe('red');
+    expect(verifyCalls).toBe(2); // the first attempt, then exactly one retry after the resume
+    expect(provider.spawn).toHaveBeenCalledTimes(1); // the one resume-with-gate-failure call
+  });
+});
+
+describe('claimItem (#3627 follow-up — routed through the declared `claim` operation, never raw backlog.mjs claim)', () => {
+  it('calls `run.mjs claim --ref=<item> --json` — the exact argv the `claim` operation\'s real input schema '
+    + '(`ref` required, `as`/`force` optional) accepts', () => {
+    const run = vi.fn(() => '{}');
+    claimItem({ item: '1234', sessionSlug: 'conveyor-1234' }, { run });
+    expect(run).toHaveBeenCalledWith('node', ['scripts/operations/run.mjs', 'claim', '--ref=1234', '--json']);
+  });
+
+  it('never runs a raw `backlog.mjs claim` shell-out', () => {
+    const run = vi.fn(() => '{}');
+    claimItem({ item: '1234', sessionSlug: 'conveyor-1234' }, { run });
+    const [, args] = run.mock.calls[0];
+    expect(args.join(' ')).not.toMatch(/backlog\.mjs/);
+  });
+
+  it('never passes `--session` — the claim operation\'s real input schema (`claimOperation` in claim.mjs) has '
+    + 'no such field; only `ref`/`as`/`force`', () => {
+    const run = vi.fn(() => '{}');
+    claimItem({ item: '1234', sessionSlug: 'conveyor-1234' }, { run });
+    const [, args] = run.mock.calls[0];
+    expect(args.some((a) => a.startsWith('--session'))).toBe(false);
   });
 });
