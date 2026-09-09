@@ -196,8 +196,14 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER)
     const parkDecision = decideParkMode({ report, convergeVerdict, filesTouched: report.filesTouched, lanePath: gate.lanePath });
 
     // ---- 6. Open the PR through the SAME canonical producer the live brief already uses — REAL CLI surface,
-    // verbatim from the live brief's own step 8. ------------------------------------------------------------
-    const prResult = openPr({ item, attemptTag, lane: gate.lanePath, park: parkDecision, report });
+    // verbatim from the live brief's own step 8. `openPr` is a PURE function of its params (no hidden
+    // `findItem`/backlog-loader dependency of its own) — the item's REAL slug is resolved ONCE, here, the SAME
+    // way `resolveItemSpecPathBasename` resolves it for the brief, and passed straight through. -----------------
+    const foundForPr = findItem(String(item), () => defaultLoadItems(REPO_ROOT));
+    if (!foundForPr) {
+      throw new Error(`deliver-item-wrapper: could not resolve a slug for item #${item} — findItem returned nothing`);
+    }
+    const prResult = openPr({ item, attemptTag, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug });
 
     // ---- 7. Forward the optional learning, if the agent supplied one (REAL CLI surface). --------------------
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
@@ -480,17 +486,20 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
  *  unbounded loop — mirrors the live brief's own "red gate is a hard stop" bar, but gives the agent exactly
  *  one chance to fix ITS OWN gate failure before that stop applies, since a transient/self-inflicted red on
  *  a fresh diff is common and cheap to hand back once. */
-function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER }) {
-  const lanePath = resolveLanePath(lane); // PLACEHOLDER — lane number → clone path lookup, real form TBD
+export function runGateWithOneRetry(
+  { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER },
+  { run: runFn = run } = {},
+) {
+  const lanePath = resolveLanePath(lane, { run: runFn });
   try {
-    run('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
+    runFn('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
     return { status: 'green', lanePath };
   } catch (firstFailure) {
     const failureOutput = String(firstFailure.stdout || firstFailure.message || '');
     resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider }); // SKETCH — see below
     const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
     try {
-      run('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
+      runFn('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
       return { status: 'green', lanePath, retryReport };
     } catch {
       return { status: 'red', lanePath };
@@ -514,11 +523,27 @@ function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider
   provider.spawn({ sessionId: sessionSlug, prompt, resumeSessionId: sessionSlug }); // BLOCKS.
 }
 
-function resolveLanePath(lane) {
-  // PLACEHOLDER — `we:scripts/lib/lane-pool-paths.mjs` almost certainly already owns this lookup (seen
-  // imported by `verify-lane.mjs` itself); not re-derived here since this file's job is shape, not a second
-  // copy of that resolution.
-  return `${REPO_ROOT}/../.lanes/web-everything/lane-${lane}`;
+/**
+ * REAL (was PLACEHOLDER — a hardcoded `${REPO_ROOT}/../.lanes/web-everything/lane-${lane}` computation that
+ * only resolved correctly by coincidence when this file happened to be imported from the PRIMARY checkout
+ * root; it silently computed the WRONG path when run from an isolated worktree/clone, e.g.
+ * `.../webeverything/.claude/worktrees/<name>/scripts/operations/deliver-item-wrapper.mjs` resolving to
+ * `.../worktrees/.lanes/web-everything/lane-N` instead of the real pool path). Shells
+ * `scripts/lane-pool.mjs status --json` — the SAME single source of truth `we:scripts/lib/lane-pool-paths.mjs`/
+ * `verify-lane.mjs` already trust — and reads the `path` field off the entry whose `lane` matches, rather than
+ * re-deriving path math a second time (this file's job is shape, not a second copy of that resolution). `run`
+ * is injectable (mirrors `computeLaneDiffStats`/`decideParkMode`'s own `{ run }` pattern) so this is testable
+ * without a real lane-pool clone on disk.
+ */
+export function resolveLanePath(lane, { run: runFn = run } = {}) {
+  const out = runFn('node', ['scripts/lane-pool.mjs', 'status', '--json']);
+  const parsed = JSON.parse(out);
+  const rows = Array.isArray(parsed.lanes) ? parsed.lanes : [];
+  const found = rows.find((r) => Number(r.lane) === Number(lane));
+  if (!found || !found.path) {
+    throw new Error(`deliver-item-wrapper: lane-pool.mjs status --json reported no entry/path for lane-${lane}`);
+  }
+  return found.path;
 }
 
 // ================================================================================================
@@ -852,9 +877,19 @@ export function writePrBody({ item, lane, report }, { writeFile = writeFileSync 
   return bodyFile;
 }
 
-/** REAL (flags lifted verbatim from the live brief's step 8, both branches). */
-function openPr({ item, attemptTag, lane, park, report }) {
-  const ref = `lane/${item}${attemptTag ?? ''}-<slug>`; // <slug> — PLACEHOLDER, same free-text the live brief already leaves to the caller
+/** REAL (was PLACEHOLDER — `<slug>` was dead, never-substituted text that would have produced an invalid ref
+ *  like `lane/3371-<slug>`). PURE function of its params — deliberately does NOT call `findItem` or import the
+ *  backlog loader itself; the caller (`deliverItem`) resolves the item's REAL slug ONCE, the SAME way
+ *  `resolveItemSpecPathBasename` resolves it for the brief, and passes it straight through as `slug` (already
+ *  the canonical `<num>-<slug>.md` basename's slug half — never re-derived from the title via
+ *  `scaffold.mjs#slugFor`). `run` is injectable (mirrors `computeLaneDiffStats`/`decideParkMode`'s own
+ *  pattern), so this is testable with no hidden dependency and no real `open-pr` process. Flags otherwise
+ *  lifted verbatim from the live brief's step 8, both branches. */
+export function openPr({ item, attemptTag, lane, park, report, slug }, { run: runFn = run } = {}) {
+  if (!slug) {
+    throw new Error(`deliver-item-wrapper: openPr needs the item's real slug for #${item} — never substitutes a literal placeholder`);
+  }
+  const ref = `lane/${item}${attemptTag ?? ''}-${slug}`;
   const bodyFile = writePrBody({ item, lane, report }); // REAL — was a PLACEHOLDER path nothing wrote.
   const args = [
     'scripts/operations/run.mjs', 'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main',
@@ -862,7 +897,7 @@ function openPr({ item, attemptTag, lane, park, report }) {
   ];
   args.push(park.mode === 'park' ? `--mode=park` : '--mode=label-on-green');
   if (park.mode === 'park') args.push(`--parkLabel=${park.label}`);
-  const out = run('node', args, { cwd: lane });
+  const out = runFn('node', args, { cwd: lane });
   return JSON.parse(out);
 }
 

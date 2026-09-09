@@ -21,9 +21,10 @@ import { join } from 'node:path';
 import {
   DELIVERY_AGENT_PROVIDERS, buildRestrictedProviderArgv,
   resolveItemSpecPathBasename, fillMinimalBrief,
-  buildPrBody, writePrBody,
+  buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv,
   decideParkMode, computeLaneDiffStats,
+  resolveLanePath, runGateWithOneRetry,
 } from '../deliver-item-wrapper.mjs';
 
 describe('buildRestrictedProviderArgv', () => {
@@ -421,5 +422,115 @@ describe('decideParkMode (#3627 gap 4 — the real scoreEscalation rubric)', () 
     const run = vi.fn(() => { throw new Error('git exploded'); });
     const stats = computeLaneDiffStats('/lanes/lane-1', { run });
     expect(stats).toEqual({ changedFiles: [], diffLines: 0 });
+  });
+});
+
+// ================================================================================================
+// Bug 1 (found re-reading the file end-to-end before the first real #3371 run) — `openPr`'s PR ref carried a
+// literal, never-substituted `<slug>` placeholder (`lane/${item}${attemptTag}-<slug>`), which would have
+// produced an invalid ref like `lane/3371-<slug>`. `openPr` is now a PURE function of its params — the caller
+// resolves the item's real slug (via `findItem`, same as `resolveItemSpecPathBasename`) and passes it in.
+// ================================================================================================
+describe('openPr (#3627 bug 1 — the real slug, never the literal <slug> placeholder)', () => {
+  // `openPr` writes a real PR-body file via `writePrBody`'s default `writeFileSync` (gap 2's own fix), so
+  // these use a real temp dir for `lane` — the same pattern the `runConverge` describe block above uses.
+  let lane;
+  beforeEach(() => { lane = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-openpr-')); });
+  afterEach(() => { rmSync(lane, { recursive: true, force: true }); });
+
+  it('builds the PR ref using the REAL slug handed in, never the literal "<slug>" placeholder text', () => {
+    const run = vi.fn(() => JSON.stringify({ number: 42, url: 'https://example/pr/42' }));
+    const report = { reason: 'x', filesTouched: [] };
+    const result = openPr(
+      { item: '3371', attemptTag: '', lane, park: { mode: 'label-on-green' }, report, slug: 'some-real-slug' },
+      { run },
+    );
+    expect(result).toEqual({ number: 42, url: 'https://example/pr/42' });
+    const openPrCall = run.mock.calls.find((c) => c[1]?.[1] === 'open-pr');
+    expect(openPrCall).toBeDefined();
+    const refFlag = openPrCall[1].find((a) => a.startsWith('--ref='));
+    expect(refFlag).toBe('--ref=lane/3371-some-real-slug');
+    expect(refFlag).not.toContain('<slug>');
+  });
+
+  it('includes the attemptTag between the item number and the real slug when one is given', () => {
+    const run = vi.fn(() => JSON.stringify({ number: 1 }));
+    openPr(
+      { item: '3371', attemptTag: 'b', lane, park: { mode: 'label-on-green' }, report: { reason: 'x', filesTouched: [] }, slug: 'do-the-thing' },
+      { run },
+    );
+    const openPrCall = run.mock.calls.find((c) => c[1]?.[1] === 'open-pr');
+    const refFlag = openPrCall[1].find((a) => a.startsWith('--ref='));
+    expect(refFlag).toBe('--ref=lane/3371b-do-the-thing');
+  });
+
+  it('refuses (throws a named error) rather than opening a PR with no real slug', () => {
+    expect(() => openPr({ item: '3371', attemptTag: '', lane, park: { mode: 'label-on-green' }, report: { reason: 'x', filesTouched: [] } }))
+      .toThrow(/needs the item's real slug/);
+  });
+
+  it('never calls findItem/the backlog loader itself — openPr is a pure function of its params (the caller resolves the slug)', () => {
+    // No `loadItems` is threaded through `openPr` at all (removed from its signature on purpose) — this test
+    // simply asserts the call succeeds with a bare `run` mock and no backlog-loading machinery in play.
+    const run = vi.fn(() => JSON.stringify({ number: 7 }));
+    expect(() => openPr(
+      { item: '1234', attemptTag: '', lane, park: { mode: 'park', label: 'review:human' }, report: { reason: 'x', filesTouched: [] }, slug: 'x' },
+      { run },
+    )).not.toThrow();
+  });
+});
+
+// ================================================================================================
+// Bug 2 (found in the same re-read) — `resolveLanePath(lane)` was a hardcoded, relative-path placeholder
+// (`${REPO_ROOT}/../.lanes/web-everything/lane-${lane}`) that only resolved correctly when this file happened
+// to be imported from the primary checkout root; run from an isolated worktree/clone it silently computed the
+// WRONG path. It now shells `scripts/lane-pool.mjs status --json` (the single source of truth
+// `lane-pool-paths.mjs`/`verify-lane.mjs` already trust) via an injectable `run` and reads the real `path`
+// field off the matching lane entry — never a second, re-derived path computation.
+// ================================================================================================
+describe('resolveLanePath (#3627 bug 2 — real lane-pool.mjs status --json lookup, not hardcoded path math)', () => {
+  const statusJson = (lanes) => JSON.stringify({ repo: 'web-everything', root: '/pool', lanes });
+
+  it('calls lane-pool.mjs status --json (via the injected run) and returns the matching lane\'s real path', () => {
+    const run = vi.fn(() => statusJson([
+      { lane: 1, path: '/Users/op/workspace/.lanes/web-everything/lane-1', exists: true },
+      { lane: 4, path: '/Users/op/workspace/.lanes/web-everything/lane-4', exists: true },
+    ]));
+    const path = resolveLanePath(4, { run });
+    expect(path).toBe('/Users/op/workspace/.lanes/web-everything/lane-4');
+    expect(run).toHaveBeenCalledWith('node', ['scripts/lane-pool.mjs', 'status', '--json']);
+  });
+
+  it('never derives the path from hardcoded relative-path math — the returned path need not even look like ../.lanes/web-everything/lane-N', () => {
+    const run = vi.fn(() => statusJson([
+      { lane: 9, path: '/completely/different/pool/location/lane-9', exists: true },
+    ]));
+    const path = resolveLanePath(9, { run });
+    expect(path).toBe('/completely/different/pool/location/lane-9');
+  });
+
+  it('throws a named error when no matching lane entry is reported, rather than falling back to a computed path', () => {
+    const run = vi.fn(() => statusJson([{ lane: 1, path: '/pool/lane-1', exists: true }]));
+    expect(() => resolveLanePath(2, { run })).toThrow(/no entry\/path for lane-2/);
+  });
+});
+
+describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through to resolveLanePath)', () => {
+  it('uses the injected run for BOTH the lane-pool.mjs status lookup and the gate itself, and runs the gate in the resolved (not hardcoded) lane path', () => {
+    const run = vi.fn((cmd, args, opts) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/verify-lane.mjs') {
+        expect(opts.cwd).toBe('/real/pool/lane-3'); // the RESOLVED path, never the hardcoded ../.lanes guess
+        return '{"status":"green"}';
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const result = runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371' }, { run });
+    expect(result).toEqual({ status: 'green', lanePath: '/real/pool/lane-3' });
+    const statusCall = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/lane-pool.mjs');
+    expect(statusCall).toBeDefined();
+    expect(statusCall[1]).toEqual(['scripts/lane-pool.mjs', 'status', '--json']);
   });
 });
