@@ -26,6 +26,7 @@ import {
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion,
+  buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
 } from '../deliver-item-wrapper.mjs';
 
 // A real UUID, hardcoded for deterministic assertions (mirrors `crypto.randomUUID()`'s own output shape). Tests
@@ -125,9 +126,14 @@ describe('DELIVERY_AGENT_PROVIDERS registry', () => {
 // no real `claude` process.
 // ================================================================================================
 describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
+  // #3627 bug 7 — `spawn` now also resolves the real lane path (via the injectable `resolveLane` seam) before
+  // it can build `cwd`/`env`, so every fake `io` in this describe block needs a `resolveLane` stub too (never
+  // the real `resolveLanePath`, which would shell a real `lane-pool.mjs status --json` this suite's sandboxed
+  // environment cannot run).
   const fakeIo = () => ({
     ensureSettingsFile: vi.fn(() => '/fake/.operations/delivery-agent-hooks-settings.json'),
     spawnAgent: vi.fn(),
+    resolveLane: vi.fn(() => '/fake/pool/lane-3'),
   });
 
   it('passes an explicit `timeout` to the underlying spawn call, distinct from and far larger than '
@@ -135,7 +141,7 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
     + '`claude --bg` caller)', () => {
     const io = fakeIo();
     DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
-      { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'build item #3371' },
+      { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       io,
     );
 
@@ -157,22 +163,154 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
     + 'unaffected by the timeout fix)', () => {
     const io = fakeIo();
     DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
-      { sessionId: '66666666-6666-4666-8666-666666666666', prompt: 'build item #3371' },
+      { sessionId: '66666666-6666-4666-8666-666666666666', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       io,
     );
     const [, opts] = io.spawnAgent.mock.calls[0];
     expect(opts.env.WE_DISPATCH_KIND).toBe('delivery');
   });
 
-  it('the un-overridden `io` defaults name the REAL `ensureDeliveryHooksSettingsFile`/`defaultSpawnAgent` — '
-    + 'a source-level check (rather than a real fs/process call, which this suite\'s environment cannot make '
-    + 'reliably against this file\'s `import.meta.url`-derived REPO_ROOT) that the injected seam is opt-in for '
-    + 'tests only, never a second code path production takes', () => {
+  it('the un-overridden `io` defaults name the REAL `ensureDeliveryHooksSettingsFile`/`defaultSpawnAgent`/'
+    + '`resolveLanePath`/`run` — a source-level check (rather than a real fs/process call, which this suite\'s '
+    + 'environment cannot make reliably against this file\'s `import.meta.url`-derived REPO_ROOT) that every '
+    + 'injected seam is opt-in for tests only, never a second code path production takes', () => {
     const spawnSource = DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn.toString();
     expect(spawnSource).toContain('ensureSettingsFile = ensureDeliveryHooksSettingsFile');
-    // The test transform rewrites the imported `defaultSpawnAgent` reference to a namespaced
-    // `__vite_ssr_import_N__.defaultSpawnAgent` — assert on the stable suffix, not the whole identifier.
+    // The test transform rewrites imported references to a namespaced `__vite_ssr_import_N__.<name>` —
+    // assert on the stable suffix, not the whole identifier.
     expect(spawnSource).toMatch(/spawnAgent = [\w.]*\bdefaultSpawnAgent\b/);
+    expect(spawnSource).toMatch(/resolveLane = [\w.]*\bresolveLanePath\b/);
+    expect(spawnSource).toMatch(/run: runFn = [\w.]*\brun\b/);
+  });
+});
+
+// ================================================================================================
+// #3627 bug 7 (live #3371 attempt, confirmed 2026-09-09) — `CLAUDE_RESTRICTED_PROVIDER.spawn` (and
+// `runConvergeEdit`'s own `claude` spawn) never passed a `cwd`, so the spawned agent inherited whatever
+// directory the WRAPPER's own node process happened to run from — never the lane clone — and `--restricted`
+// confines its file tools to the process's own working directories, so the agent was sandboxed into the wrong
+// repo entirely. Separately, the brief's `$LANE`/`$DELIVERY_SESSION`/`$DELIVERY_ITEM` env vars
+// (`skills-src/conveyor/delivery-agent-brief-v2.md` uses them directly, e.g. `--session=$DELIVERY_SESSION`)
+// were only ever appended as literal TEXT at the end of the prompt, never set as real process env. This suite
+// asserts both fixes at the one place a stubbed `provider.spawn` (every OTHER describe block in this file)
+// would silently miss them: the real options object handed to the underlying spawn call.
+// ================================================================================================
+describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => {
+  const fakeIo = (overrides = {}) => ({
+    ensureSettingsFile: vi.fn(() => '/fake/.operations/delivery-agent-hooks-settings.json'),
+    spawnAgent: vi.fn(),
+    resolveLane: vi.fn(() => '/real/pool/lane-3'),
+    ...overrides,
+  });
+
+  it('resolves the real lane path via the injected `resolveLane` (mirrors `resolveLanePath`\'s own `run` '
+    + 'seam) and passes it as `cwd` to the underlying spawn call — never the wrapper\'s own REPO_ROOT', () => {
+    const io = fakeIo();
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '77777777-7777-4777-8777-777777777777', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
+      io,
+    );
+    expect(io.resolveLane).toHaveBeenCalledWith(3, expect.objectContaining({ run: expect.any(Function) }));
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.cwd).toBe('/real/pool/lane-3');
+  });
+
+  it('the spawn\'s `env` carries all four real DELIVERY_SESSION/DELIVERY_ITEM/LANE/ATTEMPT_TAG values — real '
+    + 'process env vars, never only the old text-appended `[env: ...]` prompt footer', () => {
+    const io = fakeIo();
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '88888888-8888-4888-8888-888888888888', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: 'b' },
+      io,
+    );
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.env.DELIVERY_SESSION).toBe('conveyor-3371');
+    expect(opts.env.DELIVERY_ITEM).toBe('3371');
+    expect(opts.env.LANE).toBe('/real/pool/lane-3'); // the RESOLVED path, never the bare lane number
+    expect(opts.env.ATTEMPT_TAG).toBe('b');
+  });
+
+  it('ATTEMPT_TAG falls back to the empty string, matching the old footer\'s `attemptTag ?? \'\'` behavior', () => {
+    const io = fakeIo();
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '99999999-9999-4999-8999-999999999999', prompt: 'p', lane: 3, sessionSlug: 's', item: '1' },
+      io,
+    );
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.env.ATTEMPT_TAG).toBe('');
+  });
+
+  it('captures the spawned child\'s stdout/stderr and persists them via the injected `persistFailure` seam '
+    + 'when the underlying spawn throws — the observability fix, so a future failure does not require hunting '
+    + 'down the agent\'s own transcript by UUID', () => {
+    const failure = Object.assign(new Error('spawnSync claude ETIMEDOUT'), {
+      stdout: 'partial agent output before the timeout\n',
+      stderr: 'some stderr line\n',
+      status: null,
+      signal: 'SIGKILL',
+    });
+    const io = fakeIo({ spawnAgent: vi.fn(() => { throw failure; }) });
+    const persistFailure = vi.fn();
+
+    expect(() => DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', prompt: 'p', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
+      { ...io, persistFailure },
+    )).toThrow('spawnSync claude ETIMEDOUT');
+
+    expect(persistFailure).toHaveBeenCalledTimes(1);
+    const [sessionSlugArg, errorArg, optsArg] = persistFailure.mock.calls[0];
+    expect(sessionSlugArg).toBe('conveyor-3371');
+    expect(errorArg).toBe(failure);
+    expect(errorArg.stdout).toContain('partial agent output');
+    expect(errorArg.stderr).toContain('some stderr line');
+    expect(optsArg.resumeSessionId).toBe(null);
+  });
+
+  it('still throws the original error after capturing it — the capture is observability, never a swallow', () => {
+    const io = fakeIo({ spawnAgent: vi.fn(() => { throw new Error('boom'); }) });
+    expect(() => DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', prompt: 'p', lane: 3, sessionSlug: 's', item: '1', attemptTag: '' },
+      { ...io, persistFailure: vi.fn() },
+    )).toThrow('boom');
+  });
+
+  it('a resume\'s captured failure is tagged with the resumeSessionId (so it never clobbers the fresh spawn\'s '
+    + 'own capture, which uses the same sessionSlug)', () => {
+    const io = fakeIo({ spawnAgent: vi.fn(() => { throw new Error('resume boom'); }) });
+    const persistFailure = vi.fn();
+    expect(() => DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      {
+        sessionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', resumeSessionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        prompt: 'fix the gate failure', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '',
+      },
+      { ...io, persistFailure },
+    )).toThrow('resume boom');
+    const [, , optsArg] = persistFailure.mock.calls[0];
+    expect(optsArg.resumeSessionId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+  });
+});
+
+// `persistDeliverySpawnFailure`'s actual real-fs behavior (what it writes, and that it never throws) is
+// exercised end-to-end above via the injectable `persistFailure` seam (`CLAUDE_RESTRICTED_PROVIDER.spawn real
+// cwd + env` describe block) — the SAME "assert the seam is invoked correctly, never the real REPO_ROOT-backed
+// fs write" convention this suite already established for `ensureSettingsFile`/`spawnAgent`/`resolveLane`
+// (their own real defaults are checked at the SOURCE level just below, not by actually calling them: this
+// file's `import.meta.url`-derived `REPO_ROOT` does not resolve reliably inside vitest's SSR transform — see
+// the pre-existing "un-overridden `io` defaults" test's own comment for why). This block asserts the same
+// thing for `persistDeliverySpawnFailure`'s un-overridden default and for the removed stale-file guard.
+describe('persistDeliverySpawnFailure / ensureDeliveryHooksSettingsFile un-overridden defaults (#3627 bug 7/8, '
+  + 'source-level — see the comment above for why this suite checks these at the source level)', () => {
+  it('CLAUDE_RESTRICTED_PROVIDER.spawn\'s un-overridden `persistFailure` default names the REAL '
+    + '`persistDeliverySpawnFailure`, not a second, untested code path', () => {
+    const spawnSource = DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn.toString();
+    expect(spawnSource).toMatch(/persistFailure = [\w.]*\bpersistDeliverySpawnFailure\b/);
+  });
+
+  it('ensureDeliveryHooksSettingsFile no longer guards the write behind `if (!existsSync(path))` — the bug 8 '
+    + 'correctness fix: a stale pre-fix file (no permissions.allow) must never survive a later call', () => {
+    const source = ensureDeliveryHooksSettingsFile.toString();
+    expect(source).not.toContain('existsSync');
+    expect(source).toContain('writeFileSync');
+    expect(source).toContain('mkdirSync');
   });
 });
 
@@ -492,6 +630,100 @@ describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old rea
     );
     const argv = run.mock.calls[0][1];
     expect(argv[argv.indexOf('--session-id') + 1]).toBe('fixed-uuid-for-test');
+  });
+
+  // #3627 bug 7 — this spawn never passed a `cwd`, so it inherited the wrapper's own REPO_ROOT (the module
+  // `run` helper's own default) instead of the lane, hitting the exact same `--restricted`
+  // confined-to-working-directory sandboxing bug 7's delivery-agent spawn did.
+  it('(#3627 bug 7) passes `lane` as the real `cwd` to the underlying run call — never the wrapper\'s own '
+    + 'REPO_ROOT', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '1234', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json' },
+    );
+    const [, , opts] = run.mock.calls[0];
+    expect(opts.cwd).toBe('/real/pool/lane-3');
+  });
+
+  it('(#3627 bug 7) stamps WE_DISPATCH_KIND=delivery on the editor spawn too, same channel as the delivery '
+    + 'agent\'s own spawn', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '1234', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json' },
+    );
+    const [, , opts] = run.mock.calls[0];
+    expect(opts.env.WE_DISPATCH_KIND).toBe('delivery');
+  });
+});
+
+describe('buildDeliveryAgentEnv (#3627 bug 7 helper — the real env vars the brief actually needs)', () => {
+  it('returns all four real values plus the existing WE_DISPATCH_KIND stamp', () => {
+    const env = buildDeliveryAgentEnv({
+      sessionSlug: 'conveyor-3371', item: '3371', lanePath: '/real/pool/lane-3', attemptTag: 'b',
+    });
+    expect(env).toEqual({
+      WE_DISPATCH_KIND: 'delivery',
+      DELIVERY_SESSION: 'conveyor-3371',
+      DELIVERY_ITEM: '3371',
+      LANE: '/real/pool/lane-3',
+      ATTEMPT_TAG: 'b',
+    });
+  });
+
+  it('LANE is the RESOLVED path, never the bare lane number — the brief runs `cd $LANE`/`printenv LANE` and '
+    + 'expects a real directory', () => {
+    const env = buildDeliveryAgentEnv({ sessionSlug: 's', item: '1', lanePath: '/real/pool/lane-9', attemptTag: '' });
+    expect(env.LANE).toBe('/real/pool/lane-9');
+    expect(env.LANE).not.toBe(9);
+    expect(env.LANE).not.toBe('9');
+  });
+
+  it('ATTEMPT_TAG falls back to the empty string when omitted, matching the old footer\'s behavior', () => {
+    const env = buildDeliveryAgentEnv({ sessionSlug: 's', item: '1', lanePath: '/lane' });
+    expect(env.ATTEMPT_TAG).toBe('');
+  });
+
+  it('DELIVERY_ITEM is always a string, even when item is handed in as a number', () => {
+    const env = buildDeliveryAgentEnv({ sessionSlug: 's', item: 1234, lanePath: '/lane', attemptTag: '' });
+    expect(env.DELIVERY_ITEM).toBe('1234');
+  });
+});
+
+// ================================================================================================
+// #3627 bug 8 (live #3371 attempt, confirmed 2026-09-09) — the generated hooks-only settings file carried only
+// a `hooks` block. Under `--restricted` the CLI ignores the repo's normal project/user permissions files
+// entirely, so with no `permissions.allow` in THIS file, an ordinary headless command (confirmed live: even
+// `git --version`, `node -e ...`) came back "This command requires approval" with nobody there to approve it —
+// this blocked the ONE sanctioned output channel the brief describes (`delivery-report-cli.mjs report`).
+// ================================================================================================
+describe('DELIVERY_HOOKS_SETTINGS permissions.allow (#3627 bug 8)', () => {
+  it('carries a non-empty permissions.allow', () => {
+    expect(Array.isArray(DELIVERY_HOOKS_SETTINGS.permissions?.allow)).toBe(true);
+    expect(DELIVERY_HOOKS_SETTINGS.permissions.allow.length).toBeGreaterThan(0);
+  });
+
+  it('allow is exactly the same six bare tool names granted via --tools (RESTRICTED_PROVIDER_TOOLS) — broad '
+    + 'enough to stop ordinary build/test/git commands from needing interactive approval, but never wider than '
+    + 'the tool set --restricted already exposes; a hand-enumerated narrower "safe command" allowlist is '
+    + 'deliberately NOT what this is (see the constant\'s own docblock: guard-bash.mjs/guard-lane.mjs are the '
+    + 'real safety boundary, not this list)', () => {
+    expect(DELIVERY_HOOKS_SETTINGS.permissions.allow).toEqual(['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep']);
+  });
+
+  it('every allow entry is a BARE tool name (this repo\'s own .claude/settings.json real syntax for an '
+    + 'unconditional per-tool allow), never a narrower Tool(pattern:*) entry that would just be the brittle '
+    + 'hand-enumerated list this fix is deliberately avoiding', () => {
+    for (const entry of DELIVERY_HOOKS_SETTINGS.permissions.allow) {
+      expect(entry).not.toContain('(');
+    }
+  });
+
+  it('the hooks block is unchanged by the permissions addition — still exactly guard-lane.mjs + guard-bash.mjs', () => {
+    expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse).toHaveLength(2);
+    expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[0].matcher).toBe('Edit|Write');
+    expect(DELIVERY_HOOKS_SETTINGS.hooks.PreToolUse[1].matcher).toBe('Bash');
   });
 });
 

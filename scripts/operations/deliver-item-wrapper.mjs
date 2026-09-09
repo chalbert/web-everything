@@ -76,7 +76,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // REAL — every one of these is an existing exported function this session read directly.
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
@@ -87,6 +87,18 @@ import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/revi
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: REPO_ROOT, ...opts });
+
+/** The tool allowlist `--restricted` needs handed back explicitly (verified: `--tools=default` does NOT
+ *  restore what `--restricted` removes — a probe asking for a Bash call under `--tools=default` came back
+ *  "no shell tool available"). This is exactly what this wrapper's agent needs to build + report; extend it
+ *  here, in the one place, if a future brief needs more.
+ *
+ *  Declared here (moved up from its original spot beside `buildRestrictedProviderArgv` below) so
+ *  `DELIVERY_HOOKS_SETTINGS`'s `permissions.allow` (bug 8, see that constant's own docblock) can derive from
+ *  this SAME string rather than hand-duplicating the tool list a second time and risking the two drifting
+ *  apart — a top-level `const` used before its declaration in file order is a TDZ crash, so the ordering here
+ *  is load-bearing, not cosmetic. */
+const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
 
 // ================================================================================================
 // 0. The minimal-context hook settings file — REAL SCHEMA, closes the "cost 1" gap the first draft of this
@@ -110,29 +122,76 @@ const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8'
 //    passes) strips CLAUDE.md/skill-discovery/stray-MCP-surface down to nothing, and this file re-adds ONLY
 //    the two safety hooks, nothing else — no memory, no doctrine, no skill discovery leaks back in through the
 //    settings layer.
+//
+//    BUG 8 (live #3371 attempt, confirmed 2026-09-09) — this settings file ALSO now carries `permissions.allow`.
+//    Under `--restricted` the CLI ignores the repo's normal project/user permissions files entirely (same
+//    sentence in `--restricted`'s own help text as the settings carve-out above), so with no `permissions.allow`
+//    in THIS file, an ordinary headless command — confirmed live: even `git --version`, `node -e ...` — comes
+//    back "This command requires approval" with nobody there in a headless run to approve it. That blocked the
+//    ONE sanctioned output channel the brief describes (`delivery-report-cli.mjs report`) outright.
+//
+//    THE SHAPE, AND WHY: `we:.claude/settings.json` (read again, for this specific question) shows this CLI's
+//    real `permissions.allow` syntax accepts BARE tool names ("Bash", "Edit", "Write" appear literally, with no
+//    `(pattern)` suffix) alongside narrower `Tool(sub-pattern:*)` entries — confirmed by `claude --help`'s own
+//    `--allowedTools` doc, which gives exactly one example of each shape ("Bash(git *) Edit"). A bare tool name
+//    is an unconditional allow for that whole tool, so `allow: RESTRICTED_PROVIDER_TOOLS.split(',')` grants
+//    exactly the six tools `--tools` already exposed to this agent — nothing broader (there is no seventh tool
+//    for a wider grant to reach) and nothing narrower (a hand-enumerated subset of "safe" argv patterns would
+//    be the exact brittle, ever-incomplete allowlist the operator's own stated intent for this fix rejects).
+//    The REAL safety boundary is deliberately left to `guard-bash.mjs`'s `PreToolUse(Bash)` hook (registered
+//    just below) and `guard-lane.mjs`'s `PreToolUse(Edit|Write)` hook — both still fire on every call regardless
+//    of what `permissions.allow` grants, matching this repo's own "hookable vs judgment: script-decidable stays
+//    a hook" doctrine: `permissions.allow` only decides whether a human would be ASKED, never whether a command
+//    is SAFE.
+//
+//    HONESTY CHECK, READ THIS — `guard-bash.mjs` does NOT yet actually deny the mechanical CLIs (lane-pool,
+//    backlog claim/release, `gh pr`, `pr-land`, `converge-cli`, `verify-lane`, `learnings-drop`,
+//    `review-core-cli`) for a `WE_DISPATCH_KIND=delivery` session on this branch as of this commit — this
+//    session grepped `scripts/guard-bash.mjs` directly and found no `WE_DISPATCH_KIND`/`delivery` reference at
+//    all, despite this file's OWN section-2 comment (`CLAUDE_RESTRICTED_PROVIDER.spawn`, below) describing that
+//    arm as already landed "in an earlier round." It is not on this branch, and this branch is fully current
+//    with `origin/main` (checked directly: `git merge-base HEAD origin/main` equals `origin/main`'s own tip),
+//    so it has not landed anywhere else either. Broadening `permissions.allow` to these six tools is still the
+//    right call GIVEN the operator's own explicit design direction (a hand-enumerated "safe command" allowlist
+//    is worse, not safer — see above), but until that `guard-bash.mjs` arm is actually built, this settings
+//    file's `permissions.allow` is, for real, the ONLY enforcement layer standing between a delivery agent and
+//    the mechanical lifecycle commands (lane-pool/claim/PR/converge/etc.) this wrapper is supposed to own
+//    exclusively. Flagged here loudly, and again in this change's own PR/report, rather than silently assumed
+//    fixed by a hook that does not exist yet — building that `guard-bash.mjs` arm is real follow-up work, out
+//    of scope for this pass (which is bugs 7/8 + observability, not a guard-bash.mjs rewrite).
 // ================================================================================================
-const DELIVERY_HOOKS_SETTINGS = Object.freeze({
+export const DELIVERY_HOOKS_SETTINGS = Object.freeze({
   hooks: {
     PreToolUse: [
       { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'node scripts/guard-lane.mjs' }] },
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'node scripts/guard-bash.mjs' }] },
     ],
   },
+  permissions: {
+    allow: RESTRICTED_PROVIDER_TOOLS.split(','),
+  },
 });
 
 /**
  * SKETCH (the write itself is straightforward REAL fs code; what's unverified is whether a real cutover
  * wants this materialized once per-repo, once per-lane, or fresh per-spawn — left as the simplest correct
- * choice for this sketch: idempotent, written once to a fixed path under the SAME `.operations/` sidecar
- * family `we:scripts/operations/delivery-report-store.mjs` already uses). Returns the settings file's path.
+ * choice for this sketch: written to a fixed path under the SAME `.operations/` sidecar family
+ * `we:scripts/operations/delivery-report-store.mjs` already uses). Returns the settings file's path.
+ *
+ * #3627 bug 8 fix-adjacent correctness note: this now WRITES EVERY CALL rather than skipping when the path
+ * already exists. The original `if (!existsSync(path))` guard meant that on any machine where a PRIOR run had
+ * already materialized this file under the pre-bug-8 schema (hooks only, no `permissions`), this fix's new
+ * `permissions.allow` block would never actually reach disk — the file would look "already there" and the
+ * stale, pre-fix content would keep being handed to every future `--settings=<path>` spawn, silently. The
+ * content is a pure function of `DELIVERY_HOOKS_SETTINGS` (a frozen constant), so re-writing it every call is
+ * still idempotent in the sense that matters (same bytes out every time) and costs one cheap fs write per
+ * delivery-agent spawn — not a real cost against a call that is about to block for up to an hour.
  */
-function ensureDeliveryHooksSettingsFile() {
+export function ensureDeliveryHooksSettingsFile() {
   const dir = `${REPO_ROOT}.operations`;
   const path = `${dir}/delivery-agent-hooks-settings.json`;
-  if (!existsSync(path)) {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path, `${JSON.stringify(DELIVERY_HOOKS_SETTINGS, null, 2)}\n`);
-  }
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(DELIVERY_HOOKS_SETTINGS, null, 2)}\n`);
   return path;
 }
 
@@ -383,12 +442,6 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
  * a key, hooks firing, `--resume` preserving both) hold for this exact argv, not inferred from the fresh-spawn
  * case alone.
  */
-/** The tool allowlist `--restricted` needs handed back explicitly (verified: `--tools=default` does NOT
- *  restore what `--restricted` removes — a probe asking for a Bash call under `--tools=default` came back
- *  "no shell tool available"). This is exactly what this wrapper's agent needs to build + report; extend it
- *  here, in the one place, if a future brief needs more. */
-const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
-
 /**
  * DELIVERY_AGENT_SPAWN_TIMEOUT_MS — the timeout budget for {@link CLAUDE_RESTRICTED_PROVIDER}'s ONE blocking
  * `execFileSync` call (bug 6, live #3371 attempt, confirmed 2026-09-09 by source read, not inference).
@@ -438,34 +491,118 @@ export function buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId
     : [...RESTRICTED_FLAGS, '-p', '--session-id', String(sessionId), prompt];
 }
 
+/**
+ * PURE. The real environment variables bug 7 (live #3371 attempt, confirmed 2026-09-09) found the delivery
+ * brief genuinely needs — `we:skills-src/conveyor/delivery-agent-brief-v2.md` tells the agent these ARE real
+ * shell env vars (`$LANE`, `$DELIVERY_SESSION`, `$DELIVERY_ITEM`; it even says to run `printenv LANE`) and uses
+ * them directly inside bash commands (`--session=$DELIVERY_SESSION --item=$DELIVERY_ITEM`), but the wrapper was
+ * only ever appending `[env: DELIVERY_SESSION=... LANE=...]` as literal TEXT at the end of the prompt string —
+ * it reads like a shell env line and is not one. Confirmed live: the agent correctly diagnosed it had no real
+ * `$LANE` to `cd` into. Exported for the same "the contract is the thing a test can pin" reason
+ * `buildRestrictedProviderArgv` is.
+ *
+ * `lanePath` is the RESOLVED, absolute lane clone directory — the SAME value handed to `spawnAgent` as `cwd`
+ * (see `CLAUDE_RESTRICTED_PROVIDER.spawn`) — never the bare lane NUMBER `deliverItem`'s own `launch.lane` field
+ * carries: the brief's own prose ("`$LANE` is your working directory... `cd`'d you into it") means `$LANE` has
+ * to be a real path an agent can `cd`/`printenv` into, not a number with nothing to resolve it against.
+ * `WE_DISPATCH_KIND: 'delivery'` is carried alongside the other four (unchanged from the pre-bug-7 stamp) —
+ * still the same channel `we:scripts/guard-bash.mjs` is INTENDED to read to deny the delivery agent the
+ * mechanical lifecycle commands this wrapper owns itself; see `DELIVERY_HOOKS_SETTINGS`'s own docblock (bug 8,
+ * above) for the honest state of that arm as of this commit — it is not built yet.
+ */
+export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag }) {
+  return {
+    WE_DISPATCH_KIND: 'delivery',
+    DELIVERY_SESSION: sessionSlug,
+    DELIVERY_ITEM: String(item),
+    LANE: lanePath,
+    ATTEMPT_TAG: attemptTag ?? '',
+  };
+}
+
+/**
+ * Observability fix — small, per the operator's own framing ("a capture-and-write, not a new subsystem").
+ * `defaultSpawnAgent`'s `execFileSync` call discards the spawned child's stdout/stderr entirely today; the
+ * live #3371 attempt's two real blocking bugs (7 and 8, both in this file) were only found by manually hunting
+ * down the agent's own separately-persisted Claude Code session transcript by UUID — real diagnostic time this
+ * would have saved outright. `execFileSync` attaches whatever the child wrote to `error.stdout`/`error.stderr`
+ * on ANY thrown failure (a non-zero exit, or the `timeout`/`killSignal: 'SIGKILL'` path bug 6 already relies
+ * on), so this captures both and writes them under `.operations/` (the same sidecar family
+ * `ensureDeliveryHooksSettingsFile`/`delivery-report-store.mjs` already use), named by `sessionSlug` — with a
+ * `-resume` suffix when this was a resume (so a resume's failure never clobbers the fresh spawn's own record)
+ * plus a timestamp (so repeated failures for the same session don't clobber each other either). Best-effort,
+ * on purpose: a failure to WRITE the capture must never mask the real spawn error it exists to explain, so this
+ * never throws — it degrades to `null` and lets the original error propagate untouched.
+ */
+function persistDeliverySpawnFailure(sessionSlug, error, { resumeSessionId = null } = {}) {
+  try {
+    const dir = `${REPO_ROOT}.operations/delivery-spawn-failures`;
+    mkdirSync(dir, { recursive: true });
+    const path = `${dir}/${sessionSlug}${resumeSessionId ? '-resume' : ''}-${Date.now()}.json`;
+    writeFileSync(path, `${JSON.stringify({
+      sessionSlug,
+      resumeSessionId,
+      at: new Date().toISOString(),
+      message: error && error.message ? String(error.message) : null,
+      status: error && 'status' in error ? error.status : null,
+      signal: error && 'signal' in error ? error.signal : null,
+      stdout: error && error.stdout != null ? String(error.stdout) : null,
+      stderr: error && error.stderr != null ? String(error.stderr) : null,
+    }, null, 2)}\n`);
+    return path;
+  } catch {
+    return null; // best-effort — never let the CAPTURE itself mask the real spawn failure.
+  }
+}
+
 const CLAUDE_RESTRICTED_PROVIDER = {
   name: 'claude-restricted',
   // `io` is injectable ONLY so a test can assert what this spawns without touching the real filesystem or a
   // real `claude` process — mirrors this file's existing `{ run: runFn = run }` pattern (e.g.
-  // `runGateWithOneRetry`, `runConvergeEdit`). Both real call sites (`runAgentToCompletion`,
-  // `resumeAgentWithGateFailure`) pass only `{ sessionId, prompt, resumeSessionId? }`, so this is
-  // backward-compatible, not a behavior change.
-  spawn({ sessionId, prompt, resumeSessionId = null }, { ensureSettingsFile = ensureDeliveryHooksSettingsFile, spawnAgent = defaultSpawnAgent } = {}) {
+  // `runGateWithOneRetry`, `runConvergeEdit`). Real call sites (`runAgentToCompletion`,
+  // `resumeAgentWithGateFailure`) pass `{ sessionId, prompt, resumeSessionId?, lane, sessionSlug, item,
+  // attemptTag }` — `lane`/`sessionSlug`/`item`/`attemptTag` added by bug 7's fix, below.
+  spawn(
+    { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
+    {
+      ensureSettingsFile = ensureDeliveryHooksSettingsFile,
+      spawnAgent = defaultSpawnAgent,
+      resolveLane = resolveLanePath,
+      run: runFn = run,
+      persistFailure = persistDeliverySpawnFailure,
+    } = {},
+  ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
-    // #3627 hardening — stamp `WE_DISPATCH_KIND=delivery` onto the agent's own process env. Every hook that
-    // fires inside the agent's own Bash tool calls inherits this (the same inheritance
-    // `we:scripts/guard-bash.mjs`'s #3105 arm already relies on for a mechanically-dispatched build/fix/
-    // ci-heal agent), and `guard-bash.mjs` now reads it to deny the delivery agent from ever running the
-    // mechanical lifecycle commands this wrapper drives itself (lane-pool/backlog-claim/gh-pr/open-pr/
-    // pr-land/learnings-drop/converge-cli/verify-lane/review-core-cli — see guard-bash.mjs's own #3627 arm).
-    // REUSES the existing `WE_DISPATCH_KIND` channel rather than inventing a second session-type signal — but
-    // note nothing else in this repo stamps that var onto a real spawn yet (the build/fix/ci-heal emitter side
-    // in `dispatch-lane-io.mjs` is a separate, not-yet-landed graduation, #3488); this is the first live
-    // caller of it, scoped to only this spawn.
-    // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
-    // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without this
-    // override `defaultSpawnAgent` silently applies its own 60s default here too, SIGKILLing a real build+gate+
-    // converge turn before it can finish — see `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`'s own docblock above.
-    spawnAgent(argv, {
-      env: { ...process.env, WE_DISPATCH_KIND: 'delivery' },
-      timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
-    }); // BLOCKS — the only "wait".
+    // #3627 bug 7(a) (live #3371 attempt) — resolve the REAL lane clone path through the SAME single source
+    // of truth `resolveLanePath` already gives every other caller in this file (`runGateWithOneRetry`), never
+    // a second, re-derived path computation. Without this the child inherited whatever directory the
+    // WRAPPER's own node process happened to run from (this repo's primary checkout) — never the lane — and
+    // `--restricted` confines its file tools to the process's OWN working directories (`claude --help`:
+    // "confines the file tools to the working directories"), so a wrong cwd here is not cosmetic: the agent
+    // is sandboxed into editing the wrong repo entirely. Confirmed live: the agent correctly diagnosed it had
+    // no real `$LANE` to `cd` into and was sandboxed into the wrong directory under this exact model.
+    const lanePath = resolveLane(lane, { run: runFn });
+    // #3627 bug 7(b) — REAL env vars (see `buildDeliveryAgentEnv`'s own docblock), not the old text-appended
+    // `[env: ...]` footer `fillMinimalBrief` still also appends below (kept — see that function's own comment
+    // — the brief's prose reads naturally either way, and real env vars are what the CLI actually needs).
+    const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag });
+    try {
+      // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
+      // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without
+      // this override `defaultSpawnAgent` silently applies its own 60s default here too, SIGKILLing a real
+      // build+gate+converge turn before it can finish — see `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`'s own docblock.
+      spawnAgent(argv, {
+        cwd: lanePath,
+        env: { ...process.env, ...deliveryEnv },
+        timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
+      }); // BLOCKS — the only "wait".
+    } catch (e) {
+      // Observability fix — capture what the child actually said before this bubbles up further (see
+      // `persistDeliverySpawnFailure`'s own docblock for why this exists and exactly what it captures).
+      persistFailure(sessionSlug, e, { resumeSessionId });
+      throw e;
+    }
   },
 };
 
@@ -533,7 +670,10 @@ export async function runAgentToCompletion(
   const briefTemplate = readBrief();
   const prompt = fillMinimalBrief(briefTemplate, { item, sessionSlug, lane, attemptTag }, { loadItems }); // SKETCH — see below
 
-  provider.spawn({ sessionId: claudeSessionId, prompt }); // BLOCKS — see DeliveryAgentProvider's own docblock.
+  // #3627 bug 7 — `lane`/`sessionSlug`/`item`/`attemptTag` threaded through so the provider can resolve the
+  // real lane path (`cwd`) and mint the real env vars the brief needs (`buildDeliveryAgentEnv`) — see
+  // `CLAUDE_RESTRICTED_PROVIDER.spawn`'s own docblock.
+  provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // BLOCKS — see DeliveryAgentProvider's own docblock.
 
   const report = readReport(sessionSlug);
   if (!report || report.status !== 'done') {
@@ -645,7 +785,9 @@ export function runGateWithOneRetry(
   // through from `deliverItem` — never `sessionSlug`. A `--resume` must target the exact CLI session the fresh
   // spawn created; resuming with a fresh/different id (or a non-UUID slug) is exactly the class of bug this
   // fix closes. See `resumeAgentWithGateFailure` and `deliverItem`'s own docblocks for the full reasoning.
-  resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput: first.detail, provider, claudeSessionId }); // SKETCH — see below
+  // #3627 bug 7 — `item`/`attemptTag` threaded through too (both already in scope here), same reasoning as
+  // `runAgentToCompletion`'s fresh-spawn call: the provider needs them to mint the real env vars.
+  resumeAgentWithGateFailure({ sessionSlug, lane, item, attemptTag, failureOutput: first.detail, provider, claudeSessionId }); // SKETCH — see below
   const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.ok) return { status: 'green', lanePath, retryReport };
@@ -662,13 +804,16 @@ export function runGateWithOneRetry(
  *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
-function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId }) {
+function resumeAgentWithGateFailure({ sessionSlug, lane, item, attemptTag, failureOutput, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId }) {
   const prompt = `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
     + `\`done\` report exactly as before.`;
   // BUG-5 FIX: both `sessionId` and `resumeSessionId` are `claudeSessionId` — the real UUID minted once in
   // `deliverItem` and reused by the fresh spawn — never `sessionSlug`. `--resume <id>` must name the SAME CLI
   // session the fresh spawn created, and that id must itself be a UUID (CLI-enforced).
-  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId }); // BLOCKS.
+  // #3627 bug 7 — this prompt says `$LANE` above, same as the fresh brief, so this resume needs the SAME real
+  // cwd/env treatment (`lane`/`sessionSlug`/`item`/`attemptTag` threaded through to the provider) or a resumed
+  // agent hits the identical "no real $LANE to cd into" failure the fresh spawn did.
+  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag }); // BLOCKS.
 }
 
 /**
@@ -846,15 +991,31 @@ export function parseConvergeEditResult(rawOut) {
  * one resume, a NEW UUID minted per round is correct here — nothing downstream keys off the old readable id
  * (the editor's result comes back parsed straight from `--output-format json`, never looked up by session id).
  * `newSessionId` is injectable only so a test can assert a deterministic value.
+ *
+ * #3627 bug 7 — this spawn had the SAME real-cwd gap `CLAUDE_RESTRICTED_PROVIDER.spawn` did: no `cwd` was ever
+ * passed, so the editor inherited the WRAPPER's own working directory (this file's module-level `run` helper
+ * defaults `cwd` to `REPO_ROOT`), not the lane — and `--restricted` confines its file tools to the process's
+ * own working directories, so this editor was sandboxed away from the very files `applyRevision`'s own prompt
+ * (`converge-transports.mjs`) tells it to edit "in place" at an absolute lane path. Fixed the same way: `lane`
+ * — ALREADY the real, resolved lane path here (`runConverge`'s own `lane` param is `gate.lanePath` from
+ * `deliverItem`, never a bare lane number — see that function's own `const state = ${lane}/...` usage above,
+ * which already assumes exactly this) — is passed straight through as `cwd`, no `resolveLanePath` call needed.
+ * `WE_DISPATCH_KIND: 'delivery'` is stamped too, for the same reason `CLAUDE_RESTRICTED_PROVIDER.spawn` stamps
+ * it (see `DELIVERY_HOOKS_SETTINGS`'s own honesty note on the state of `guard-bash.mjs`'s matching arm). The
+ * OTHER three delivery env vars (`DELIVERY_SESSION`/`DELIVERY_ITEM`/`ATTEMPT_TAG`) are deliberately NOT added
+ * here: unlike the delivery brief and `resumeAgentWithGateFailure`'s resume prompt, this editor's own prompt
+ * (`applyRevision`, `converge-transports.mjs`) never references `$LANE`/`$DELIVERY_SESSION` — it hardcodes the
+ * absolute lane path directly into the instruction text — so nothing in this call's actual prompt would read
+ * them; adding unused env vars here would be padding, not a fix for a real gap this prompt has.
  */
 export function runConvergeEdit(
   editInstruction,
-  { item, round, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID },
+  { item, round, lane, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID },
 ) {
   const settingsFile = ensureSettingsFile();
   const sessionId = newSessionId();
   const argv = buildConvergeEditorArgv({ sessionId, prompt: editInstruction.prompt, settingsFile });
-  const out = runFn('claude', argv);
+  const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: 'delivery' } });
   return parseConvergeEditResult(out);
 }
 
@@ -919,7 +1080,7 @@ export function runConverge({ lane, item, goal }, { run: runFn = run, ensureSett
       obs.lensResults = lastLensResults;
       obs.redTeamResult = runConvergeRedTeam(step.redTeam, { lane, item, round: step.round, material, run: runFn });
     } else if (step.action === 'edit') {
-      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, run: runFn, ensureSettingsFile });
+      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile });
     } else if (step.action === 'invite') {
       obs.invite = step.invite;
       obs.inviteEcho = runConvergeInvite(step.invite, {
