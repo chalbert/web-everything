@@ -390,6 +390,36 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
 const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
 
 /**
+ * DELIVERY_AGENT_SPAWN_TIMEOUT_MS — the timeout budget for {@link CLAUDE_RESTRICTED_PROVIDER}'s ONE blocking
+ * `execFileSync` call (bug 6, live #3371 attempt, confirmed 2026-09-09 by source read, not inference).
+ *
+ * DELIBERATELY SEPARATE from `dispatch-lane-io.mjs`'s own `SPAWN_TIMEOUT_MS` (60s) — that constant is correctly
+ * sized for its OTHER caller in that file, `defaultClaudeProvider`, which fires a fire-and-forget `claude --bg`
+ * dispatch meant to return almost instantly. `CLAUDE_RESTRICTED_PROVIDER.spawn` is the OPPOSITE shape: per this
+ * file's own comment at the call site below ("BLOCKS — the only 'wait'"), it is DESIGNED to block for the
+ * delivery agent's entire real turn — build + the `verify-lane` gate + the full converge loop this same agent
+ * drives inside that one turn (`runConverge`, further down this file). Passing no override here means silently
+ * inheriting the 60s budget meant for the OTHER caller — exactly the confirmed bug: two real live #3371 attempts
+ * both died at ~60-64s (`spawnSync claude ETIMEDOUT` / SIGKILL) before any real build work could complete. This
+ * is load-bearing: no real delivery build can ever finish under the inherited 60s budget, regardless of how the
+ * build itself is going.
+ *
+ * SIZING — grounded in a real observed number, not picked arbitrarily. Neither `verify-lane.mjs`'s own header
+ * nor any other doc in this repo states a numeric upper bound for a full build+gate+converge cycle, but
+ * `docs/agent/platform-decisions.md` (the #2908 amendment, ratified) cites the review-convergence loop's first
+ * real run, PR #1018 (`care: elevated`): 16 agents, 1.08M tokens, **56 minutes**, for the converge loop ALONE.
+ * This wrapper's one blocking spawn covers build + gate + that SAME converge loop end to end, so a 56-minute
+ * figure for convergence by itself is a FLOOR, not a ceiling, for the whole call. 60 minutes is a generous but
+ * still-bounded budget above that observed floor — not unlimited: `execFileSync`'s `killSignal: 'SIGKILL'`
+ * still fires past it, so a genuinely wedged agent is still reclaimed, just on a realistic clock instead of one
+ * sized for an unrelated fire-and-forget caller.
+ *
+ * NEVER collapse this back into `SPAWN_TIMEOUT_MS` — see that constant's own caller (`defaultClaudeProvider`,
+ * `dispatch-lane-io.mjs`) for why 60s is correct THERE, and only there.
+ */
+export const DELIVERY_AGENT_SPAWN_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+
+/**
  * PURE argv builder for {@link CLAUDE_RESTRICTED_PROVIDER}, exported for the same reason
  * `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` is: "the argv IS the contract with the CLI and
  * a test that asserts it is the only thing standing between a flag rename and a silent non-dispatch." No
@@ -410,8 +440,13 @@ export function buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId
 
 const CLAUDE_RESTRICTED_PROVIDER = {
   name: 'claude-restricted',
-  spawn({ sessionId, prompt, resumeSessionId = null }) {
-    const settingsFile = ensureDeliveryHooksSettingsFile();
+  // `io` is injectable ONLY so a test can assert what this spawns without touching the real filesystem or a
+  // real `claude` process — mirrors this file's existing `{ run: runFn = run }` pattern (e.g.
+  // `runGateWithOneRetry`, `runConvergeEdit`). Both real call sites (`runAgentToCompletion`,
+  // `resumeAgentWithGateFailure`) pass only `{ sessionId, prompt, resumeSessionId? }`, so this is
+  // backward-compatible, not a behavior change.
+  spawn({ sessionId, prompt, resumeSessionId = null }, { ensureSettingsFile = ensureDeliveryHooksSettingsFile, spawnAgent = defaultSpawnAgent } = {}) {
+    const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
     // #3627 hardening — stamp `WE_DISPATCH_KIND=delivery` onto the agent's own process env. Every hook that
     // fires inside the agent's own Bash tool calls inherits this (the same inheritance
@@ -423,7 +458,14 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // note nothing else in this repo stamps that var onto a real spawn yet (the build/fix/ci-heal emitter side
     // in `dispatch-lane-io.mjs` is a separate, not-yet-landed graduation, #3488); this is the first live
     // caller of it, scoped to only this spawn.
-    defaultSpawnAgent(argv, { env: { ...process.env, WE_DISPATCH_KIND: 'delivery' } }); // BLOCKS — the only "wait".
+    // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
+    // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without this
+    // override `defaultSpawnAgent` silently applies its own 60s default here too, SIGKILLing a real build+gate+
+    // converge turn before it can finish — see `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`'s own docblock above.
+    spawnAgent(argv, {
+      env: { ...process.env, WE_DISPATCH_KIND: 'delivery' },
+      timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
+    }); // BLOCKS — the only "wait".
   },
 };
 

@@ -18,8 +18,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { SPAWN_TIMEOUT_MS } from '../dispatch-lane-io.mjs';
 import {
-  DELIVERY_AGENT_PROVIDERS, buildRestrictedProviderArgv,
+  DELIVERY_AGENT_PROVIDERS, DELIVERY_AGENT_SPAWN_TIMEOUT_MS, buildRestrictedProviderArgv,
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
@@ -107,6 +108,71 @@ describe('DELIVERY_AGENT_PROVIDERS registry', () => {
   it('keeps the codex seam a named, deliberately-throwing placeholder (provider parity, #3627 requirement 6)', () => {
     expect(DELIVERY_AGENT_PROVIDERS.codex).toBeDefined();
     expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn()).toThrow(/no real implementation/);
+  });
+});
+
+// ================================================================================================
+// #3627 bug 6 (live #3371 attempt, confirmed 2026-09-09) — `CLAUDE_RESTRICTED_PROVIDER.spawn` passed only
+// `env` to `defaultSpawnAgent`, so it silently inherited `dispatch-lane-io.mjs`'s `SPAWN_TIMEOUT_MS` (60s) —
+// correct for that file's OTHER, fire-and-forget caller (`defaultClaudeProvider`'s `claude --bg`), but fatal
+// here: this spawn is a BLOCKING call for the delivery agent's entire build+gate+converge turn (this file's
+// own "BLOCKS — the only 'wait'" comment). Two real attempts died at ~60-64s (`ETIMEDOUT`/SIGKILL) before any
+// build work could finish. This suite asserts the fix at the one place a mock generically covering the spawn
+// call (as every other test in this file does via a stubbed `provider.spawn`) would silently miss it: the
+// actual options object `CLAUDE_RESTRICTED_PROVIDER.spawn` hands to its underlying spawn call — exercised via
+// the `spawn`/`ensureSettingsFile` `io` seam this fix added (mirrors this file's existing `{ run: runFn = run }`
+// injection pattern, e.g. `runGateWithOneRetry`), so the real code path runs with no real filesystem write and
+// no real `claude` process.
+// ================================================================================================
+describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
+  const fakeIo = () => ({
+    ensureSettingsFile: vi.fn(() => '/fake/.operations/delivery-agent-hooks-settings.json'),
+    spawnAgent: vi.fn(),
+  });
+
+  it('passes an explicit `timeout` to the underlying spawn call, distinct from and far larger than '
+    + 'SPAWN_TIMEOUT_MS (the 60s budget correct only for defaultClaudeProvider\'s fire-and-forget '
+    + '`claude --bg` caller)', () => {
+    const io = fakeIo();
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'build item #3371' },
+      io,
+    );
+
+    expect(io.spawnAgent).toHaveBeenCalledTimes(1);
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.timeout).toBeDefined();
+    expect(opts.timeout).not.toBe(SPAWN_TIMEOUT_MS);
+    expect(opts.timeout).toBeGreaterThan(SPAWN_TIMEOUT_MS);
+    expect(opts.timeout).toBe(DELIVERY_AGENT_SPAWN_TIMEOUT_MS);
+  });
+
+  it('DELIVERY_AGENT_SPAWN_TIMEOUT_MS itself is a generous-but-bounded budget (at least 30 real minutes, '
+    + 'never Infinity/unlimited — a genuinely wedged agent must still be reclaimed)', () => {
+    expect(DELIVERY_AGENT_SPAWN_TIMEOUT_MS).toBeGreaterThanOrEqual(30 * 60 * 1000);
+    expect(Number.isFinite(DELIVERY_AGENT_SPAWN_TIMEOUT_MS)).toBe(true);
+  });
+
+  it('still forwards the WE_DISPATCH_KIND=delivery env stamp alongside the timeout override (#3627 hardening, '
+    + 'unaffected by the timeout fix)', () => {
+    const io = fakeIo();
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '66666666-6666-4666-8666-666666666666', prompt: 'build item #3371' },
+      io,
+    );
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.env.WE_DISPATCH_KIND).toBe('delivery');
+  });
+
+  it('the un-overridden `io` defaults name the REAL `ensureDeliveryHooksSettingsFile`/`defaultSpawnAgent` — '
+    + 'a source-level check (rather than a real fs/process call, which this suite\'s environment cannot make '
+    + 'reliably against this file\'s `import.meta.url`-derived REPO_ROOT) that the injected seam is opt-in for '
+    + 'tests only, never a second code path production takes', () => {
+    const spawnSource = DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn.toString();
+    expect(spawnSource).toContain('ensureSettingsFile = ensureDeliveryHooksSettingsFile');
+    // The test transform rewrites the imported `defaultSpawnAgent` reference to a namespaced
+    // `__vite_ssr_import_N__.defaultSpawnAgent` — assert on the stable suffix, not the whole identifier.
+    expect(spawnSource).toMatch(/spawnAgent = [\w.]*\bdefaultSpawnAgent\b/);
   });
 });
 
