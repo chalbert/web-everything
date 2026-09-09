@@ -46,16 +46,30 @@
  *      no lanes, no dispatch, no PR mechanics, not even that a "conveyor" exists. Not just the operator's
  *      PERSONAL `~/.claude/CLAUDE.md` (interactive-collaboration preferences, irrelevant to an autonomous
  *      build) — the repo's own `we:CLAUDE.md` → `we:AGENTS.md` → `we:docs/agent/*.md` doctrine chain and the
- *      project's `.claude/skills/` auto-discovery listing too. See `CLAUDE_BARE_PROVIDER` below for the
- *      concrete, VERIFIED mechanism (`--bare` + `--disable-slash-commands` + a TRIMMED `--settings` file
- *      carrying ONLY `guard-lane.mjs`/`guard-bash.mjs`, updated in this revision to close the safety-hooks gap
- *      requirement 6 below names) and the one honest cost that remains after that fix.
+ *      project's `.claude/skills/` auto-discovery listing too. See `CLAUDE_RESTRICTED_PROVIDER` below for the
+ *      concrete, VERIFIED mechanism (`--restricted` + an explicit `--tools` allowlist + `--strict-mcp-config`
+ *      + `--disable-slash-commands` + a TRIMMED `--settings` file carrying ONLY `guard-lane.mjs`/
+ *      `guard-bash.mjs`). A PRIOR revision of this file used `--bare` for this, then a REAL prerequisite gap
+ *      surfaced (`--bare` requires `ANTHROPIC_API_KEY`/`apiKeyHelper` — it never reads the keychain, so it
+ *      cannot ride the operator's own OAuth/subscription auth). The FIRST replacement candidate, `--safe-mode`,
+ *      was independently smoke-tested (not just help-text-read) and FAILED the safety-hooks requirement: a
+ *      `--settings=<hooks file>` layered on top of `--safe-mode` never fires — confirmed by running a real
+ *      denied command (a hand-set git-commit identity override, which `guard-bash.mjs` denies) through
+ *      `claude --safe-mode --settings=<real hooks file> -p ...` and observing it actually EXECUTE (git ran
+ *      for real and failed only because nothing was staged — `permission_denials: []`, no hook fired) where
+ *      the identical command under `--restricted --tools=<allowlist> --settings=<same file>` was correctly
+ *      BLOCKED with `guard-bash.mjs`'s own deny text. `--restricted`'s own `claude --help` text is the reason:
+ *      it explicitly documents "managed settings and --settings still apply", where `--safe-mode`'s help text
+ *      lists hooks among the customizations it disables and makes no such carve-out for `--settings`. See
+ *      `CLAUDE_RESTRICTED_PROVIDER`'s own docblock below for the full verification trail (auth-without-a-key,
+ *      hooks-firing, and `--resume`, each independently re-run against the real CLI, not assumed from a single
+ *      earlier text-only probe).
  *   6. PROVIDER PARITY — the minimal-context spawn mechanism must be a swappable PORT, not Claude-CLI flags
  *      hardcoded into this file's core control flow, mirroring the SAME provider-port pattern already
  *      extracted for `we:scripts/operations/dispatch-lane-io.mjs`'s dispatcher seam (#3579, `provider` param
  *      on `createDispatchSinks`) and `we:scripts/operations/cli-adapter.mjs`'s judge seam (#3370,
  *      `createDefaultJudge`'s injected implementation) — both landed, both real. Applied here: see
- *      `DeliveryAgentProvider` below — `CLAUDE_BARE_PROVIDER` is the REAL, Claude-verified implementation;
+ *      `DeliveryAgentProvider` below — `CLAUDE_RESTRICTED_PROVIDER` is the REAL, Claude-verified implementation;
  *      `CODEX_PROVIDER` is a NAMED SEAM ONLY, deliberately left throwing, because this session has NOT
  *      independently verified Codex CLI's actual flags for minimal-context spawning or whether it has any
  *      hook-equivalent at all — inventing those flags here would be worse than leaving the gap explicit.
@@ -66,7 +80,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 // REAL — every one of these is an existing exported function this session read directly.
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
 import { tryReadDeliveryReport } from './delivery-report-store.mjs';
-import { isStatutePath, isPolicyCorePath } from '../lib/gate-config.mjs';
+import { isPolicyCorePath } from '../lib/gate-config.mjs';
+import { isStatutePath } from '../lib/review-escalation.mjs';
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: REPO_ROOT, ...opts });
@@ -82,13 +97,17 @@ const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8'
 //    `guard-backward-edge.mjs`), none of which apply to a minimal delivery agent that never touches
 //    `backlog/*.md`/`reports/*.md`/agent-memory files itself (the wrapper owns claim/release/scaffold).
 //
-//    `--bare`'s own help text lists `--settings` among what a caller may layer BACK ON TOP of it ("Explicitly
-//    provide context via: ... --settings ..."), and `--settings <file-or-json>` is documented as loading
-//    "ADDITIONAL settings" (not a replacement) — both re-confirmed directly against `claude --help` on the
-//    installed CLI (v2.1.266) before writing this in. So `--bare --settings=<this file>` is REAL and
-//    VERIFIED as a combination, not a guess: `--bare` strips CLAUDE.md/memory/skills/hooks/plugins down to
-//    nothing, and this file re-adds ONLY the two safety hooks, nothing else — no memory, no doctrine, no
-//    skill discovery leaks back in through the settings layer.
+//    `--restricted`'s own help text says explicitly that "managed settings and `--settings` still apply" even
+//    though it "ignores user, project and local settings files" — and unlike an earlier draft's `--bare`
+//    (which makes the same textual claim but was never checked against a real denied command), THIS claim was
+//    checked for real: a command `guard-bash.mjs` denies, run through `--restricted --settings=<this file>`,
+//    came back blocked with the hook's own deny text; the SAME command through `--safe-mode --settings=<this
+//    file>` did NOT — it executed for real (see `CLAUDE_RESTRICTED_PROVIDER`'s own docblock below for the full
+//    trail). So `--restricted --settings=<this file>` is REAL and VERIFIED as a combination, not a guess:
+//    `--restricted` (plus the explicit `--tools` allowlist and `--strict-mcp-config` the provider below also
+//    passes) strips CLAUDE.md/skill-discovery/stray-MCP-surface down to nothing, and this file re-adds ONLY
+//    the two safety hooks, nothing else — no memory, no doctrine, no skill discovery leaks back in through the
+//    settings layer.
 // ================================================================================================
 const DELIVERY_HOOKS_SETTINGS = Object.freeze({
   hooks: {
@@ -123,12 +142,12 @@ function ensureDeliveryHooksSettingsFile() {
  *   the SAME launch-entry shape `dispatch-lane.mjs` already receives from `planTick`'s `spawnBuilds` list —
  *   this wrapper does not change what feeds it, only what it does with it.
  * @param {DeliveryAgentProvider} [provider] — which CLI spawns and resumes this delivery agent (FIRM
- *   REQUIREMENT 6, provider parity). Defaults to `CLAUDE_BARE_PROVIDER`, the only real implementation today;
+ *   REQUIREMENT 6, provider parity). Defaults to `CLAUDE_RESTRICTED_PROVIDER`, the only real implementation today;
  *   pass `DELIVERY_AGENT_PROVIDERS.codex` once that provider is actually built. Threaded through unchanged to
  *   every call that spawns or resumes the agent (`runAgentToCompletion`, `runGateWithOneRetry` →
  *   `resumeAgentWithGateFailure`) — nothing else in this function's control flow is provider-specific.
  */
-export async function deliverItem(launch, provider = CLAUDE_BARE_PROVIDER) {
+export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER) {
   const { item, lane, scope, sessionSlug, attemptTag } = launch;
 
   // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
@@ -245,53 +264,107 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
  */
 
 /**
- * CLAUDE_BARE_PROVIDER — the REAL, Claude-verified implementation of {@link DeliveryAgentProvider}.
+ * CLAUDE_RESTRICTED_PROVIDER — the REAL, INDEPENDENTLY-VERIFIED implementation of {@link DeliveryAgentProvider}.
+ * This revision REPLACES an earlier `--bare`-based draft (`CLAUDE_BARE_PROVIDER`); see below for exactly why,
+ * with evidence, not assertion — this file has already been burned once by an unverified assumption about
+ * flag interaction, so every claim here was re-run against the real CLI (v2.1.266) immediately before writing
+ * it in, several of them TWICE (once to confirm the defect, once against the fix).
  *
- * `-p`/`--session-id` are the real, documented flags; `--bare`+`--settings` is a REAL, VERIFIED combination
- * (`--bare`'s own help text lists `--settings` among what may be layered back on top of it; `--settings
- * <file-or-json>` is documented as loading ADDITIONAL settings, not a replacement — both re-confirmed
- * directly against `claude --help` on the installed CLI, v2.1.266, immediately before writing this). Their
- * exact interaction with `--resume`/`-p` together is NOT independently verified against the CLI's own argv
- * parser — flagged rather than asserted.
+ * WHY NOT `--bare` (the previous draft). `--bare`'s own help text: "Anthropic auth is strictly
+ * ANTHROPIC_API_KEY or apiKeyHelper via --settings (OAuth and keychain are never read)." Confirmed on this
+ * machine: no `ANTHROPIC_API_KEY` and no `apiKeyHelper` configured — every dispatched sessions today
+ * authenticates via the operator's own OAuth/subscription login, which `--bare` cannot use at all. Switching
+ * to `--bare` would require provisioning a separate, real, pay-per-token API key with no such budget line
+ * today — a genuine added cost, not a config nit.
  *
- * THE PERSONAL/PROJECT-CLAUDE.MD LEAK — INVESTIGATED, NOT ASSUMED. Checked whether
- * `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` (the REAL function `dispatch-lane.mjs` calls
- * TODAY) suppresses `~/.claude/CLAUDE.md` / project `CLAUDE.md` / skill auto-discovery for a spawned agent:
- * it does NOT — its `--bg` branch passes only `--session-id`/`-n`/`--append-system-prompt-file`, none of
- * which touch CLAUDE.md loading, hooks, or skill discovery. So TODAY, every dispatched delivery agent —
- * including under the LIVE 527-line brief, not just a hypothetical v2 — auto-loads the operator's personal
- * `~/.claude/CLAUDE.md` and this repo's own `we:CLAUDE.md` → `we:AGENTS.md` → `we:docs/agent/*.md` doctrine
- * chain, plus the full project `.claude/skills/` auto-discovery listing, exactly like an interactive session
- * does. This is a REAL, confirmed gap in the CURRENT system, not a v2-only concern.
+ * WHY NOT `--safe-mode` either (the FIRST replacement candidate — REJECTED after real testing, not on the
+ * operator's earlier text-only smoke test). `--safe-mode`'s own help text: "Start with all customizations
+ * (CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands and agents, output styles, workflows,
+ * custom themes, keybindings, and more) disabled ... Admin-managed (policy) settings still apply." Unlike
+ * `--bare`'s help text (which explicitly lists `--settings` among what may be layered back on top),
+ * `--safe-mode`'s text makes NO such carve-out for an ad-hoc `--settings` file — only "admin-managed (policy)"
+ * settings, a fixed system location this file never writes to. That reading was CONFIRMED empirically, not
+ * left as a documentation ambiguity: ran a command `we:scripts/guard-bash.mjs` denies for real — a hand-set
+ * git-commit identity override (`git commit --author=...`), which the deny table blocks with a named reason
+ * — through `claude --safe-mode --settings=<the real ensureDeliveryHooksSettingsFile() output> -p ...`
+ * (`ANTHROPIC_API_KEY` unset in the test shell). The command EXECUTED — `git` ran for real and only failed
+ * because nothing was staged (`no changes added to commit`); `permission_denials` in the JSON result was
+ * `[]`. No hook fired. This is exactly the gap the operator's OWN earlier smoke test could not have caught: it
+ * used a pure-text prompt that never invoked the Bash tool at all, so it verified auth and nothing else. A
+ * `--safe-mode` swap would have fixed auth while SILENTLY dropping `we:scripts/guard-lane.mjs`/
+ * `we:scripts/guard-bash.mjs` protection entirely — destructive-git-op guard, the `main`-push block, lane
+ * ownership — for every delivery agent it spawned, which is a regression, not a fix.
  *
- * `--bare` (verbatim from `claude --help`): "Minimal mode: skip hooks, LSP, plugin sync, attribution,
- * auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery." — paired with
- * `--disable-slash-commands` ("Disable all skills") as defense in depth, so even a brief that accidentally
- * NAMES a skill can't invoke one.
+ * THE ACTUAL FIX: `--restricted`. Its own help text: "removes the built-in tools that run commands or code
+ * (Bash, PowerShell, REPL and the other code-running tools) and WebFetch unless `--tools` names them, and
+ * ignores user, project and local settings files (**managed settings and `--settings` still apply**; add
+ * `--strict-mcp-config` to skip MCP servers too)." That explicit `--settings`-still-applies carve-out is
+ * exactly what `--safe-mode` lacked, and it was CONFIRMED to hold for hooks specifically, not just read from
+ * the help text: the identical denied git-commit-identity-override command, run through
+ * `claude --restricted --tools=Bash,Edit,Write,Read,Glob,Grep --strict-mcp-config --disable-slash-commands
+ * --settings=<same real hooks file> -p ...` (again `ANTHROPIC_API_KEY` unset), came back BLOCKED with
+ * `guard-bash.mjs`'s own deny text verbatim. A second, POSITIVE-path run of an undenied command
+ * (`` `echo test` ``) through the same argv returned its real output (`` `test` ``) — confirming the hook
+ * layer does not over-block ordinary commands either.
  *
- * THE SAFETY-HOOKS GAP — NOW CLOSED, not just flagged. An earlier draft of this file left `--bare` bare: it
- * skips hooks entirely, which would also drop `we:scripts/guard-bash.mjs`'s general safety nets
- * (destructive-git-op protection, the `main`-push block) alongside the lane-mechanics awareness this design
- * wants gone — an unnecessary all-or-nothing tradeoff. The fix: `--settings=<ensureDeliveryHooksSettingsFile()>`
- * layers `DELIVERY_HOOKS_SETTINGS` (above) back on top of `--bare` — ONLY `guard-lane.mjs`/`guard-bash.mjs`,
- * nothing else — so the agent keeps its safety net without any of the CLAUDE.md/memory/skill/doctrine surface
- * `--bare` was chosen to remove in the first place.
+ * `--tools` IS REQUIRED EXPLICITLY — verified, not assumed: `--restricted --tools=default` still reported "no
+ * shell tool available" for a Bash request (`"default"` does not restore what `--restricted` removed); only a
+ * literal tool-name allowlist does. `Bash,Edit,Write,Read,Glob,Grep` is the set this wrapper's agent actually
+ * needs (build + report); extend it here, in one place, if a future brief needs more.
  *
- * ONE HONEST COST REMAINING (the settings-file fix above resolves the other one from the prior draft):
- * `--bare`'s own text states plainly: "Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via
- * --settings (OAuth and keychain are never read)." If today's dispatched sessions currently authenticate via
- * an interactive OAuth/keychain session (not independently confirmed either way in this sketch), switching to
- * `--bare` requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper`) to be available in whatever environment spawns
- * this wrapper — a real prerequisite to check before this is ever wired in, not an assumption to build on.
+ * `--strict-mcp-config` closes a DIFFERENT leak `--restricted` alone does NOT: without it, a `--restricted`
+ * session still surfaced this operator's own personal MCP tool defs (Gmail/Calendar/Drive) in the agent's
+ * tool list — `--restricted`'s own help text says as much ("add `--strict-mcp-config` to skip MCP servers
+ * too"). With it, a follow-up probe asking the agent to list every skill/tool it could see in context showed
+ * none of that — no skill names, no slash-command list, no personal MCP surface, and (separately probed) no
+ * CLAUDE.md/AGENTS.md content either (confirmed by asking the agent directly whether either was loaded; it
+ * reported neither was, and could only quote their contents after reading them itself, on request, via Bash —
+ * i.e. a deliberate read it performed, not auto-loaded context). `--disable-slash-commands` ("Disable all
+ * skills") is KEPT as defense in depth: `--restricted`'s own help text, unlike `--safe-mode`'s, never mentions
+ * skills at all, so unlike under `--safe-mode` (where the two flags plausibly overlapped completely) this flag
+ * is doing real, independent, unverified-to-be-redundant work here — cheap to keep, not proven safe to drop.
+ *
+ * `--resume` UNDER THIS COMBINATION — independently verified, not assumed from the `--bare` draft's own
+ * unresolved flag. Started a real session with `-p --session-id <uuid>`, then resumed it with the FULL
+ * `--restricted`/`--tools`/`--strict-mcp-config`/`--disable-slash-commands`/`--settings` argv plus
+ * `--resume <same uuid>` and a fresh prompt (no `-p` in the resume branch, matching the code below) — it
+ * returned the SAME `session_id` in its result (a genuine resume, not a fresh session), completed with no
+ * hang despite the missing `-p` (this CLI treats non-TTY/redirected stdout as non-interactive on its own,
+ * confirmed by inspecting `claude --help`'s own note on `-p`/print mode), and — run a second time with a
+ * denied command instead of a benign one — the hook STILL fired on the resumed turn. All three (auth without
+ * a key, hooks firing, `--resume` preserving both) hold for this exact argv, not inferred from the fresh-spawn
+ * case alone.
  */
-const CLAUDE_BARE_PROVIDER = {
-  name: 'claude-bare',
+/** The tool allowlist `--restricted` needs handed back explicitly (verified: `--tools=default` does NOT
+ *  restore what `--restricted` removes — a probe asking for a Bash call under `--tools=default` came back
+ *  "no shell tool available"). This is exactly what this wrapper's agent needs to build + report; extend it
+ *  here, in the one place, if a future brief needs more. */
+const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
+
+/**
+ * PURE argv builder for {@link CLAUDE_RESTRICTED_PROVIDER}, exported for the same reason
+ * `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` is: "the argv IS the contract with the CLI and
+ * a test that asserts it is the only thing standing between a flag rename and a silent non-dispatch." No
+ * `-p` in the resume branch — verified, not a bug: a real `--resume <uuid> "<prompt>"` run with redirected
+ * (non-TTY) stdout and no `-p` completed as a clean headless turn and returned the SAME `session_id`, because
+ * this CLI treats non-interactive stdout as non-interactive on its own (see `CLAUDE_RESTRICTED_PROVIDER`'s
+ * own docblock for the full verification trail).
+ */
+export function buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId = null, settingsFile }) {
+  const RESTRICTED_FLAGS = [
+    '--restricted', '--tools', RESTRICTED_PROVIDER_TOOLS, '--strict-mcp-config',
+    '--disable-slash-commands', '--settings', settingsFile,
+  ];
+  return resumeSessionId
+    ? [...RESTRICTED_FLAGS, '--resume', String(resumeSessionId), prompt]
+    : [...RESTRICTED_FLAGS, '-p', '--session-id', String(sessionId), prompt];
+}
+
+const CLAUDE_RESTRICTED_PROVIDER = {
+  name: 'claude-restricted',
   spawn({ sessionId, prompt, resumeSessionId = null }) {
     const settingsFile = ensureDeliveryHooksSettingsFile();
-    const BARE_FLAGS = ['--bare', '--disable-slash-commands', '--settings', settingsFile];
-    const argv = resumeSessionId
-      ? [...BARE_FLAGS, '--resume', String(resumeSessionId), prompt]
-      : [...BARE_FLAGS, '-p', '--session-id', String(sessionId), prompt];
+    const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
     defaultSpawnAgent(argv, {}); // BLOCKS until the agent's own run ends — this line is the only "wait".
   },
 };
@@ -300,7 +373,8 @@ const CLAUDE_BARE_PROVIDER = {
  * CODEX_PROVIDER — A NAMED SEAM ONLY, deliberately NOT implemented (per operator follow-up: provider parity
  * must be an architectural requirement now, even where this session cannot verify a second CLI's real
  * mechanism yet). What is genuinely UNRESEARCHED, stated plainly rather than guessed at: Codex CLI's actual
- * flags (if any) for a minimal-context, no-project-doctrine, no-auto-memory spawn equivalent to `--bare`;
+ * flags (if any) for a minimal-context, no-project-doctrine, no-auto-memory, hooks-still-active spawn
+ * equivalent to Claude's `--restricted` (+ `--tools`/`--strict-mcp-config`/`--settings`) combination;
  * whether Codex has any hook-equivalent mechanism at all, and if so its config schema (so a
  * `DELIVERY_HOOKS_SETTINGS`-equivalent trimmed-safety-net file could be written for it); and whether Codex's
  * CLI exposes a synchronous/foreground invocation this wrapper's blocking `spawn` contract can rely on the
@@ -313,7 +387,7 @@ const CODEX_PROVIDER = {
   spawn() {
     throw new Error(
       'deliver-item-wrapper: CODEX_PROVIDER has no real implementation yet. Needed before use: Codex CLI\'s '
-      + 'own minimal-context/no-auto-memory spawn flags (the --bare equivalent), whether it has any '
+      + 'own minimal-context/no-auto-memory spawn flags (the --restricted equivalent), whether it has any '
       + 'hook-equivalent enforcement mechanism (the guard-lane.mjs/guard-bash.mjs equivalent), and whether it '
       + 'supports a blocking/foreground invocation this wrapper\'s spawn contract can rely on. This is the '
       + 'named PORT (see DeliveryAgentProvider), not a guess at Codex\'s actual mechanism — see this '
@@ -323,9 +397,9 @@ const CODEX_PROVIDER = {
 };
 
 /** The provider registry — swap which CLI a delivery agent runs under by changing which key `deliverItem`
- *  is called with (default `'claude-bare'`), never by editing this file's control flow. */
+ *  is called with (default `'claude-restricted'`), never by editing this file's control flow. */
 export const DELIVERY_AGENT_PROVIDERS = Object.freeze({
-  'claude-bare': CLAUDE_BARE_PROVIDER,
+  'claude-restricted': CLAUDE_RESTRICTED_PROVIDER,
   codex: CODEX_PROVIDER,
 });
 
@@ -337,7 +411,7 @@ export const DELIVERY_AGENT_PROVIDERS = Object.freeze({
  * nothing extra because this process was already going to sit idle for exactly as long as the agent's run
  * takes, poll loop or not.
  */
-async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider = CLAUDE_BARE_PROVIDER }) {
+async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER }) {
   const briefTemplate = readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8');
   const prompt = fillMinimalBrief(briefTemplate, { item, sessionSlug, lane, attemptTag }); // SKETCH — see below
 
@@ -378,7 +452,7 @@ function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag }) {
  *  unbounded loop — mirrors the live brief's own "red gate is a hard stop" bar, but gives the agent exactly
  *  one chance to fix ITS OWN gate failure before that stop applies, since a transient/self-inflicted red on
  *  a fresh diff is common and cheap to hand back once. */
-function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider = CLAUDE_BARE_PROVIDER }) {
+function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER }) {
   const lanePath = resolveLanePath(lane); // PLACEHOLDER — lane number → clone path lookup, real form TBD
   try {
     run('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
@@ -406,7 +480,7 @@ function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider = C
  *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
-function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider = CLAUDE_BARE_PROVIDER }) {
+function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider = CLAUDE_RESTRICTED_PROVIDER }) {
   const prompt = `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
     + `\`done\` report exactly as before.`;
   provider.spawn({ sessionId: sessionSlug, prompt, resumeSessionId: sessionSlug }); // BLOCKS.
