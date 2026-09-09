@@ -211,4 +211,34 @@ describe('dispatchReviewMechanical', () => {
     const result = dispatchReviewMechanical({ pr: 1234, repo: 'chalbert/web-everything' }, { run, newActorId: () => 'actor-1' });
     expect(result.classified.outcome).toBe('blocked-on-infra');
   });
+
+  // #xu2pp2m secondary finding (live #2108 run) — `reportStarted` runs before `acquireLane`, so a THROWN
+  // acquire (lane-pool.mjs itself crashed/refused — distinct from the clean "no free lane" `!lanePath` case
+  // above) used to propagate straight out of `dispatchReviewMechanical` with nothing catching it, leaving that
+  // `started` completion record stranded forever with no matching done/failed write.
+  it('when acquireLane THROWS (lane-pool.mjs crashed/refused, not just "no free lane"), still reports a done '
+    + 'completion record (blocked-on-infra, never left stranded at started) carrying the real error, releases '
+    + 'whatever might have been partially claimed, and rethrows rather than swallowing the failure', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/operations/completion-cli.mjs') return '{}';
+      if (args[0] === 'scripts/lane-pool.mjs' && args[1] === 'acquire') throw new Error('lane-pool.mjs: no lanes provisioned for "web-everything" under /scratch/.lanes');
+      if (args[0] === 'scripts/lane-pool.mjs' && args[1] === 'release') return '';
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    expect(() => dispatchReviewMechanical({ pr: 1234, repo: 'chalbert/web-everything' }, { run, newActorId: () => 'actor-1' }))
+      .toThrow(/no lanes provisioned/);
+
+    // review-loop-cli.mjs must never have been reached — the acquire never produced a lane to run it in.
+    expect(run.mock.calls.some((c) => c[1]?.[0] === 'scripts/operations/review-loop-cli.mjs')).toBe(false);
+
+    // A done record WAS written (never left stranded at started), reporting blocked-on-infra with the real
+    // error message attached as `label`.
+    const doneCall = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/operations/completion-cli.mjs' && c[1]?.includes('--status=done'));
+    expect(doneCall).toBeTruthy();
+    expect(doneCall[1]).toEqual(expect.arrayContaining(['--outcome=blocked-on-infra']));
+    expect(doneCall[1].some((a) => a.startsWith('--label=') && a.includes('no lanes provisioned'))).toBe(true);
+
+    // Whatever the acquire attempt might have partially claimed is still best-effort released.
+    expect(run.mock.calls.some((c) => c[1]?.[1] === 'release')).toBe(true);
+  });
 });

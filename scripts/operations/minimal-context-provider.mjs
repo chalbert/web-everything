@@ -35,12 +35,59 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 /** The repo root, resolved by SCRIPT LOCATION (this file lives in `scripts/operations/`, same depth as
- *  `deliver-item-wrapper.mjs`, so this resolves to the identical path that file's own `REPO_ROOT` did). */
+ *  `deliver-item-wrapper.mjs`, so this resolves to the identical path that file's own `REPO_ROOT` did). Used
+ *  for reading/writing THIS module's own files (`.operations/`, etc.) — never as the cwd for a spawned
+ *  mechanical-CLI subprocess; see {@link resolveRunCwd} for why those two needs diverge. */
 export const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 
+/** Best-effort `git rev-parse --show-toplevel` — mirrors `scripts/lane-pool.mjs`'s own private `tryGit`
+ *  helper (not exported from there, so re-derived here identically rather than importing a CLI module that
+ *  runs its argv parsing at import time). `null` on any failure: not a git checkout, no `git` binary, a `cwd`
+ *  that no longer exists — callers degrade to a safe fallback rather than propagate. */
+function tryGitToplevel(cwd, execFn = execFileSync) {
+  try {
+    return execFn('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PURE — the cwd every mechanical-CLI subprocess `run()` spawns (`lane-pool.mjs`, `verify-lane.mjs`,
+ * `operations/run.mjs`) should run from: `git rev-parse --show-toplevel` of `processCwd`, when that resolves;
+ * {@link REPO_ROOT} (this module's OWN checkout, via `import.meta.url`) only as the fallback for a
+ * `processCwd` that is not inside any git checkout at all.
+ *
+ * THE BUG THIS CLOSES (#xu2pp2m, live run against real PR #2108 from an isolated scratch clone, driver-
+ * confirmed). `run()` used to hardcode its subprocess `cwd` to `REPO_ROOT` unconditionally — the checkout
+ * THIS FILE happens to live in, derived from its own `import.meta.url` — never the checkout the wrapper is
+ * actually being run FROM. `lane-pool.mjs acquire` derives ITS OWN pool root from ITS cwd (`CHECKOUT_ROOT =
+ * git rev-parse --show-toplevel` against whatever cwd it is spawned with, then `POOL_ROOT = <that checkout's
+ * workspace>/.lanes` — see `scripts/lib/lane-pool-paths.mjs#defaultPoolRoot`). Handing it `REPO_ROOT` when
+ * this module's own file happens to sit in a throwaway scratch clone that was never provisioned with its own
+ * sibling `.lanes` pool makes it look for lanes in a directory that was never provisioned — exact repro: `✗ no
+ * lanes provisioned for "web-everything" under <scratch-clone-parent>/.lanes ... run provision --count=N
+ * first`. Resolving from `processCwd` instead — the SAME source `lane-pool.mjs` itself trusts for its own
+ * `CHECKOUT_ROOT` — fixes it: an operator/orchestrator whose OWN working checkout is the real, provisioned
+ * one gets the pool `lane-pool.mjs` would resolve if invoked directly, even while the wrapper's `.mjs` file
+ * itself lives elsewhere. Matches `docs/agent/prototype-based-dev.md`'s Portability note and the
+ * `scripts/lib/lane-pool-paths.mjs` doctrine it points at — resolve through the existing path-resolution
+ * helpers (or the repo root), never a hand-rolled relative path off this file's own location.
+ *
+ * @param {string} [processCwd] - typically `process.cwd()`.
+ * @param {(cwd: string) => (string|null)} [gitToplevel] - injectable for tests (mirrors this file's own
+ *   `run`-injection convention) — defaults to a real `git rev-parse --show-toplevel`.
+ * @returns {string}
+ */
+export function resolveRunCwd(processCwd = process.cwd(), gitToplevel = tryGitToplevel) {
+  return gitToplevel(processCwd) || REPO_ROOT;
+}
+
 /** The one blocking `execFileSync` wrapper every mechanical CLI call in this file (and every caller of it)
- *  goes through — cwd defaults to {@link REPO_ROOT}, matching `deliver-item-wrapper.mjs`'s own `run` verbatim. */
-export const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: REPO_ROOT, ...opts });
+ *  goes through — cwd defaults to {@link resolveRunCwd}'s answer (the ACTUAL working checkout, never this
+ *  module's own script-location-derived `REPO_ROOT` alone — see that function's docblock for the bug this
+ *  fixes), still overridable per-call via `opts.cwd` exactly as before. */
+export const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: resolveRunCwd(), ...opts });
 
 /** The tool allowlist `--restricted` needs handed back explicitly (verified against the real CLI while writing
  *  `deliver-item-wrapper.mjs`: `--tools=default` does NOT restore what `--restricted` removes — a probe asking

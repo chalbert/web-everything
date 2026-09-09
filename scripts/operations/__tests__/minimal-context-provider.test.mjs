@@ -23,7 +23,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   REPO_ROOT, RESTRICTED_PROVIDER_TOOLS, buildRestrictedProviderArgv, createHooksSettingsWriter,
   persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, releaseAllPools, resolveLanePath,
-  runVerifyOperation,
+  runVerifyOperation, resolveRunCwd,
 } from '../minimal-context-provider.mjs';
 
 describe('REPO_ROOT', () => {
@@ -35,6 +35,36 @@ describe('REPO_ROOT', () => {
   it('is a non-empty string (script-location-resolved, never cwd-derived)', () => {
     expect(typeof REPO_ROOT).toBe('string');
     expect(REPO_ROOT.length).toBeGreaterThan(0);
+  });
+});
+
+// #xu2pp2m — bug found live (driver run against real PR #2108 from an isolated scratch clone): `run()` used
+// to hardcode every subprocess's `cwd` to `REPO_ROOT` (THIS file's own script-location-derived checkout),
+// never the checkout the wrapper is actually being invoked FROM — which silently breaks `lane-pool.mjs
+// acquire` whenever `REPO_ROOT` happens to be a throwaway scratch clone with no sibling `.lanes` pool of its
+// own. `resolveRunCwd` is the fix: `run()`'s cwd now resolves from `process.cwd()`'s own git toplevel first,
+// falling back to `REPO_ROOT` only when `process.cwd()` is not inside a git checkout at all.
+describe('resolveRunCwd', () => {
+  it('prefers the git toplevel of the given processCwd — the ACTUAL working checkout the wrapper is being '
+    + 'run from — over REPO_ROOT (this file\'s own script-location-derived checkout)', () => {
+    const gitToplevel = vi.fn(() => '/some/other/checkout/entirely');
+    const cwd = resolveRunCwd('/some/other/checkout/entirely/scripts', gitToplevel);
+    expect(gitToplevel).toHaveBeenCalledWith('/some/other/checkout/entirely/scripts');
+    expect(cwd).toBe('/some/other/checkout/entirely');
+    expect(cwd).not.toBe(REPO_ROOT);
+  });
+
+  it('falls back to REPO_ROOT when processCwd is not inside any git checkout (gitToplevel resolves null) — '
+    + 'never leaves run() with no valid cwd at all', () => {
+    const gitToplevel = vi.fn(() => null);
+    const cwd = resolveRunCwd('/tmp/not-a-checkout', gitToplevel);
+    expect(cwd).toBe(REPO_ROOT);
+  });
+
+  it('defaults processCwd to process.cwd() and gitToplevel to a real git call when not injected (production '
+    + 'shape — the injected form above is what every test exercises)', () => {
+    expect(typeof resolveRunCwd()).toBe('string');
+    expect(resolveRunCwd().length).toBeGreaterThan(0);
   });
 });
 

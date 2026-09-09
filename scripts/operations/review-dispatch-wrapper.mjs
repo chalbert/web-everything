@@ -163,11 +163,16 @@ function reportStarted({ sessionSlug, pr }, { run: runFn = run } = {}) {
   ]);
 }
 
-/** REAL — the `--status=done` completion report, carrying the classified outcome/verdict/runId. */
+/** REAL — the `--status=done` completion report, carrying the classified outcome/verdict/runId/label.
+ *  `label` (a short optional string on the record, `completion-record.mjs`'s own schema) carries a real error
+ *  message when the dispatch never reached a genuine review verdict (#xu2pp2m secondary finding, see
+ *  `dispatchReviewMechanical`'s acquire-failure branch below) — completion records have no separate `failed`
+ *  status (`COMPLETION_STATUSES` is only `['started', 'done']`), so this is the established way to attach one. */
 function reportDone({ sessionSlug, classified }, { run: runFn = run } = {}) {
   const args = ['scripts/operations/completion-cli.mjs', 'report', `--session=${sessionSlug}`, '--status=done', `--outcome=${classified.outcome}`];
   if (classified.loopOutcome) args.push(`--verdict=${classified.loopOutcome}`);
   if (classified.runId) args.push(`--runId=${classified.runId}`);
+  if (classified.label) args.push(`--label=${classified.label}`);
   runFn('node', args);
 }
 
@@ -191,10 +196,32 @@ export function dispatchReviewMechanical({ pr, repo } = {}, { run: runFn = run, 
   // CLAUDE_CODE_SESSION_ID (if any). See the file header's verification point 2: any process may set this.
   const reviewActorId = String(newActorId());
 
-  const lanePath = acquireLane(
-    { sessionSlug: planned.sessionSlug, claudeSessionId: reviewActorId, purpose: REVIEW_LOOP_LANE_PURPOSE, waitMs },
-    { run: runFn },
-  );
+  let lanePath;
+  try {
+    lanePath = acquireLane(
+      { sessionSlug: planned.sessionSlug, claudeSessionId: reviewActorId, purpose: REVIEW_LOOP_LANE_PURPOSE, waitMs },
+      { run: runFn },
+    );
+  } catch (e) {
+    // #xu2pp2m secondary finding (live #2108 run) — a THROWN acquire (lane-pool.mjs itself crashed/refused;
+    // NOT the same as "no free lane after the bounded wait", the clean/expected `!lanePath` case just below)
+    // used to propagate straight out of this function with nothing catching it, leaving the `reportStarted`
+    // record above STRANDED at `status: started` forever — no matching done/failed write, because the throw
+    // skipped every `reportDone` call downstream. Reports `blocked-on-infra` here too (the established
+    // vocabulary for "the review loop itself could not genuinely run" — see the `!lanePath` branch and
+    // `reportDone`'s own docblock for why that stands in for a `failed` status this record shape does not
+    // have), carrying the real error as `label`, then best-effort releases whatever the acquire attempt might
+    // have partially claimed before rethrowing — mirrors `deliver-item-wrapper.mjs#deliverItem`'s own
+    // catch-all (`releaseClaimAndLane(..., best_effort: true); throw e;`): a wrapper-side failure is never the
+    // review's own verdict, so it is surfaced to the caller, never swallowed.
+    const classified = {
+      outcome: 'blocked-on-infra', verdict: null, loopOutcome: null, runId: null,
+      label: String((e && e.message) || e).slice(0, 500),
+    };
+    reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
+    releaseAllPools(planned.sessionSlug, { run: runFn });
+    throw e;
+  }
   if (!lanePath) {
     // The pool genuinely has no free lane after the bounded wait — report and stop, exactly as the brief's own
     // step 1 does; no retry loop here either.
