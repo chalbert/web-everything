@@ -26,8 +26,8 @@
  * on `runGate` below), and only asks the agent to do the one thing that is actually judgment: build the item
  * and report a three-value outcome.
  *
- * FIVE FIRM REQUIREMENTS, applied throughout (not open questions — stated by the operator across two rounds
- * of follow-up after this session's first draft, and this version is written to satisfy all five):
+ * SIX FIRM REQUIREMENTS, applied throughout (not open questions — stated by the operator across three rounds
+ * of follow-up after this session's first draft, and this version is written to satisfy all six):
  *   1. The agent never initiates `/converge` or any review of its own diff — see `runConverge` below, called
  *      ONLY by this wrapper, never by the agent.
  *   2. The agent never opens or watches its own PR — see `openPr` below, likewise wrapper-only.
@@ -46,12 +46,22 @@
  *      no lanes, no dispatch, no PR mechanics, not even that a "conveyor" exists. Not just the operator's
  *      PERSONAL `~/.claude/CLAUDE.md` (interactive-collaboration preferences, irrelevant to an autonomous
  *      build) — the repo's own `we:CLAUDE.md` → `we:AGENTS.md` → `we:docs/agent/*.md` doctrine chain and the
- *      project's `.claude/skills/` auto-discovery listing too. See `buildForegroundAgentArgv` below for the
- *      concrete, VERIFIED mechanism (`--bare` + `--disable-slash-commands`) and the two honest costs that come
- *      with it.
+ *      project's `.claude/skills/` auto-discovery listing too. See `CLAUDE_BARE_PROVIDER` below for the
+ *      concrete, VERIFIED mechanism (`--bare` + `--disable-slash-commands` + a TRIMMED `--settings` file
+ *      carrying ONLY `guard-lane.mjs`/`guard-bash.mjs`, updated in this revision to close the safety-hooks gap
+ *      requirement 6 below names) and the one honest cost that remains after that fix.
+ *   6. PROVIDER PARITY — the minimal-context spawn mechanism must be a swappable PORT, not Claude-CLI flags
+ *      hardcoded into this file's core control flow, mirroring the SAME provider-port pattern already
+ *      extracted for `we:scripts/operations/dispatch-lane-io.mjs`'s dispatcher seam (#3579, `provider` param
+ *      on `createDispatchSinks`) and `we:scripts/operations/cli-adapter.mjs`'s judge seam (#3370,
+ *      `createDefaultJudge`'s injected implementation) — both landed, both real. Applied here: see
+ *      `DeliveryAgentProvider` below — `CLAUDE_BARE_PROVIDER` is the REAL, Claude-verified implementation;
+ *      `CODEX_PROVIDER` is a NAMED SEAM ONLY, deliberately left throwing, because this session has NOT
+ *      independently verified Codex CLI's actual flags for minimal-context spawning or whether it has any
+ *      hook-equivalent at all — inventing those flags here would be worse than leaving the gap explicit.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // REAL — every one of these is an existing exported function this session read directly.
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
@@ -61,6 +71,50 @@ import { isStatutePath, isPolicyCorePath } from '../lib/gate-config.mjs';
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: REPO_ROOT, ...opts });
 
+// ================================================================================================
+// 0. The minimal-context hook settings file — REAL SCHEMA, closes the "cost 1" gap the first draft of this
+//    sketch left open. `we:.claude/settings.json` (read directly from this repo, verbatim shape below) is
+//    the REAL hook-registration schema Claude Code loads; this is the SAME shape, trimmed to carry ONLY the
+//    two hooks a delivery agent's own Bash/Edit/Write calls still need for safety — `guard-lane.mjs` (refuses
+//    an Edit/Write from a foreign session onto a lane it does not own) and `guard-bash.mjs` (the destructive-
+//    git-op / main-push / backgrounded-verification-set denials) — dropping the other three Edit|Write hooks
+//    the real settings.json also carries (`lint-locus-prefix.mjs`, `check-memory.mjs`, `backlog-guard.mjs`,
+//    `guard-backward-edge.mjs`), none of which apply to a minimal delivery agent that never touches
+//    `backlog/*.md`/`reports/*.md`/agent-memory files itself (the wrapper owns claim/release/scaffold).
+//
+//    `--bare`'s own help text lists `--settings` among what a caller may layer BACK ON TOP of it ("Explicitly
+//    provide context via: ... --settings ..."), and `--settings <file-or-json>` is documented as loading
+//    "ADDITIONAL settings" (not a replacement) — both re-confirmed directly against `claude --help` on the
+//    installed CLI (v2.1.266) before writing this in. So `--bare --settings=<this file>` is REAL and
+//    VERIFIED as a combination, not a guess: `--bare` strips CLAUDE.md/memory/skills/hooks/plugins down to
+//    nothing, and this file re-adds ONLY the two safety hooks, nothing else — no memory, no doctrine, no
+//    skill discovery leaks back in through the settings layer.
+// ================================================================================================
+const DELIVERY_HOOKS_SETTINGS = Object.freeze({
+  hooks: {
+    PreToolUse: [
+      { matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'node scripts/guard-lane.mjs' }] },
+      { matcher: 'Bash', hooks: [{ type: 'command', command: 'node scripts/guard-bash.mjs' }] },
+    ],
+  },
+});
+
+/**
+ * SKETCH (the write itself is straightforward REAL fs code; what's unverified is whether a real cutover
+ * wants this materialized once per-repo, once per-lane, or fresh per-spawn — left as the simplest correct
+ * choice for this sketch: idempotent, written once to a fixed path under the SAME `.operations/` sidecar
+ * family `we:scripts/operations/delivery-report-store.mjs` already uses). Returns the settings file's path.
+ */
+function ensureDeliveryHooksSettingsFile() {
+  const dir = `${REPO_ROOT}.operations`;
+  const path = `${dir}/delivery-agent-hooks-settings.json`;
+  if (!existsSync(path)) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, `${JSON.stringify(DELIVERY_HOOKS_SETTINGS, null, 2)}\n`);
+  }
+  return path;
+}
+
 /**
  * SKETCH — top-level entry the conveyor's tick would call in place of today's direct `claude --bg` spawn
  * (`we:scripts/operations/dispatch-lane.mjs`'s build-launch branch). One call = one item = one attempt.
@@ -68,8 +122,13 @@ const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8'
  * @param {{ item: string, lane: number, scope: string, sessionSlug: string, attemptTag: string, briefPath: string }} launch
  *   the SAME launch-entry shape `dispatch-lane.mjs` already receives from `planTick`'s `spawnBuilds` list —
  *   this wrapper does not change what feeds it, only what it does with it.
+ * @param {DeliveryAgentProvider} [provider] — which CLI spawns and resumes this delivery agent (FIRM
+ *   REQUIREMENT 6, provider parity). Defaults to `CLAUDE_BARE_PROVIDER`, the only real implementation today;
+ *   pass `DELIVERY_AGENT_PROVIDERS.codex` once that provider is actually built. Threaded through unchanged to
+ *   every call that spawns or resumes the agent (`runAgentToCompletion`, `runGateWithOneRetry` →
+ *   `resumeAgentWithGateFailure`) — nothing else in this function's control flow is provider-specific.
  */
-export async function deliverItem(launch) {
+export async function deliverItem(launch, provider = CLAUDE_BARE_PROVIDER) {
   const { item, lane, scope, sessionSlug, attemptTag } = launch;
 
   // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
@@ -78,7 +137,7 @@ export async function deliverItem(launch) {
     claimItem({ item, sessionSlug });
 
     // ---- 2. Spawn the MINIMAL agent, wait for its structured report (SKETCH) -----------------------------
-    const report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag });
+    const report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider });
 
     // ---- 3. Act on the report — every branch below is what USED TO be the agent's own job -----------------
     if (report.outcome === 'blocked' && (!report.filesTouched || report.filesTouched.length === 0)) {
@@ -100,7 +159,7 @@ export async function deliverItem(launch) {
 
     // outcome is 'done' or 'needs-human-judgment' from here — both have a real diff. Run the gate FIRST in
     // either case: a needs-human-judgment report still needs a green gate before anyone reviews it.
-    const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag });
+    const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider });
     if (gate.status === 'red') {
       releaseClaimAndLane({ item, lane, sessionSlug });
       return { item, result: 'gate-red' };
@@ -159,48 +218,130 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
 }
 
 // ================================================================================================
-// 2. Spawn + get the structured report — SKETCH shell over a REAL primitive. `defaultSpawnAgent` (REAL,
-//    imported below) blocks via `execFileSync` until its child process exits — the fact this whole
-//    no-polling design rests on. `buildAgentArgv` (also REAL, same file) is NOT used here because it
-//    hardcodes `--bg` on every branch, which is exactly what would make the call return early and force a
-//    poll loop back in; `buildForegroundAgentArgv` below is an un-verified sibling written for this
-//    synchronous topology instead — see its own docblock for what's unverified about it.
+// 2. Spawn + get the structured report, THROUGH A PROVIDER PORT — SKETCH shell over a REAL primitive, now
+//    restructured (per operator follow-up) to mirror the SAME provider-port extraction already landed for
+//    #3579 (`createDispatchSinks`'s `provider` param, `we:scripts/operations/dispatch-lane-io.mjs`) and #3370
+//    (`createDefaultJudge`'s injected implementation, `we:scripts/operations/cli-adapter.mjs`). Those two
+//    extractions named the SAME shape this file needs: "the CLI-specific argv construction and spawn call
+//    stay exactly where they are; only what sits BETWEEN them and the call site becomes a named port." Here,
+//    the port is `DeliveryAgentProvider` — one provider per CLI a delivery agent might run under.
 //
-//    FIRM OPERATOR REQUIREMENT: no polling anywhere in this flow, by the agent OR by the wrapper standing in
-//    for it. Earlier drafts of this sketch had the wrapper poll the delivery-report sidecar in a loop after a
-//    backgrounded (`--bg`) spawn — that is NOT what "push, not poll" means; it is exactly the poll it was
-//    supposed to replace, just moved to a different process. The fix below is structural, not a nicer poll:
-//    spawn the agent WITHOUT `--bg`, so the parent call does not return until the run is genuinely over.
+//    `defaultSpawnAgent` (REAL, imported below) blocks via `execFileSync` until its child process exits — the
+//    fact this whole no-polling design rests on (FIRM REQUIREMENT 4) — and stays the shared low-level spawn
+//    primitive every provider's `spawn` ultimately calls; what varies PER PROVIDER is only the argv/settings
+//    a given CLI needs to achieve "minimal context, no hooks lost, no polling."
 // ================================================================================================
 
 /**
- * SKETCH. Spawns the minimal-brief agent and BLOCKS until it exits — no separate wait step, because there is
- * nothing left to wait for once the blocking call itself returns. This is the wrapper side of true push (a
- * firm operator requirement on #3627, not the earlier "wrapper polls instead of the agent" draft): the AGENT
- * never polls anything — it runs once, reports once, and exits — and neither does the WRAPPER; the single
- * blocking call below IS the wait, and it costs nothing extra because this process was already going to sit
- * idle for exactly as long as the agent's run takes, poll loop or not.
+ * @typedef {object} DeliveryAgentProvider
+ * @property {string} name
+ * @property {(request: {sessionId: string, prompt: string, resumeSessionId?: string|null}) => void} spawn
+ *   BLOCKS until the agent's own turn ends (FIRM REQUIREMENT 4 — no polling, ever). No return value is
+ *   needed: the delivery-report contract (`we:scripts/operations/delivery-report-cli.mjs`) is
+ *   PROVIDER-AGNOSTIC BY DESIGN — whichever CLI a provider spawns, the AGENT shells the same report CLI
+ *   inside its own run, so `runAgentToCompletion`/`resumeAgentWithGateFailure` always read the result via
+ *   `tryReadDeliveryReport`, never via anything provider-specific. This is exactly why the port can be this
+ *   small: "minimal-context spawn" is the only CLI-specific behavior a provider owns.
  */
-async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag }) {
+
+/**
+ * CLAUDE_BARE_PROVIDER — the REAL, Claude-verified implementation of {@link DeliveryAgentProvider}.
+ *
+ * `-p`/`--session-id` are the real, documented flags; `--bare`+`--settings` is a REAL, VERIFIED combination
+ * (`--bare`'s own help text lists `--settings` among what may be layered back on top of it; `--settings
+ * <file-or-json>` is documented as loading ADDITIONAL settings, not a replacement — both re-confirmed
+ * directly against `claude --help` on the installed CLI, v2.1.266, immediately before writing this). Their
+ * exact interaction with `--resume`/`-p` together is NOT independently verified against the CLI's own argv
+ * parser — flagged rather than asserted.
+ *
+ * THE PERSONAL/PROJECT-CLAUDE.MD LEAK — INVESTIGATED, NOT ASSUMED. Checked whether
+ * `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` (the REAL function `dispatch-lane.mjs` calls
+ * TODAY) suppresses `~/.claude/CLAUDE.md` / project `CLAUDE.md` / skill auto-discovery for a spawned agent:
+ * it does NOT — its `--bg` branch passes only `--session-id`/`-n`/`--append-system-prompt-file`, none of
+ * which touch CLAUDE.md loading, hooks, or skill discovery. So TODAY, every dispatched delivery agent —
+ * including under the LIVE 527-line brief, not just a hypothetical v2 — auto-loads the operator's personal
+ * `~/.claude/CLAUDE.md` and this repo's own `we:CLAUDE.md` → `we:AGENTS.md` → `we:docs/agent/*.md` doctrine
+ * chain, plus the full project `.claude/skills/` auto-discovery listing, exactly like an interactive session
+ * does. This is a REAL, confirmed gap in the CURRENT system, not a v2-only concern.
+ *
+ * `--bare` (verbatim from `claude --help`): "Minimal mode: skip hooks, LSP, plugin sync, attribution,
+ * auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery." — paired with
+ * `--disable-slash-commands` ("Disable all skills") as defense in depth, so even a brief that accidentally
+ * NAMES a skill can't invoke one.
+ *
+ * THE SAFETY-HOOKS GAP — NOW CLOSED, not just flagged. An earlier draft of this file left `--bare` bare: it
+ * skips hooks entirely, which would also drop `we:scripts/guard-bash.mjs`'s general safety nets
+ * (destructive-git-op protection, the `main`-push block) alongside the lane-mechanics awareness this design
+ * wants gone — an unnecessary all-or-nothing tradeoff. The fix: `--settings=<ensureDeliveryHooksSettingsFile()>`
+ * layers `DELIVERY_HOOKS_SETTINGS` (above) back on top of `--bare` — ONLY `guard-lane.mjs`/`guard-bash.mjs`,
+ * nothing else — so the agent keeps its safety net without any of the CLAUDE.md/memory/skill/doctrine surface
+ * `--bare` was chosen to remove in the first place.
+ *
+ * ONE HONEST COST REMAINING (the settings-file fix above resolves the other one from the prior draft):
+ * `--bare`'s own text states plainly: "Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via
+ * --settings (OAuth and keychain are never read)." If today's dispatched sessions currently authenticate via
+ * an interactive OAuth/keychain session (not independently confirmed either way in this sketch), switching to
+ * `--bare` requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper`) to be available in whatever environment spawns
+ * this wrapper — a real prerequisite to check before this is ever wired in, not an assumption to build on.
+ */
+const CLAUDE_BARE_PROVIDER = {
+  name: 'claude-bare',
+  spawn({ sessionId, prompt, resumeSessionId = null }) {
+    const settingsFile = ensureDeliveryHooksSettingsFile();
+    const BARE_FLAGS = ['--bare', '--disable-slash-commands', '--settings', settingsFile];
+    const argv = resumeSessionId
+      ? [...BARE_FLAGS, '--resume', String(resumeSessionId), prompt]
+      : [...BARE_FLAGS, '-p', '--session-id', String(sessionId), prompt];
+    defaultSpawnAgent(argv, {}); // BLOCKS until the agent's own run ends — this line is the only "wait".
+  },
+};
+
+/**
+ * CODEX_PROVIDER — A NAMED SEAM ONLY, deliberately NOT implemented (per operator follow-up: provider parity
+ * must be an architectural requirement now, even where this session cannot verify a second CLI's real
+ * mechanism yet). What is genuinely UNRESEARCHED, stated plainly rather than guessed at: Codex CLI's actual
+ * flags (if any) for a minimal-context, no-project-doctrine, no-auto-memory spawn equivalent to `--bare`;
+ * whether Codex has any hook-equivalent mechanism at all, and if so its config schema (so a
+ * `DELIVERY_HOOKS_SETTINGS`-equivalent trimmed-safety-net file could be written for it); and whether Codex's
+ * CLI exposes a synchronous/foreground invocation this wrapper's blocking `spawn` contract can rely on the
+ * same way it relies on `defaultSpawnAgent`'s `execFileSync` for Claude. Inventing plausible-looking flags
+ * here would be worse than leaving this an explicit, loud gap — so `spawn` throws, naming exactly what is
+ * missing, rather than silently no-op'ing or guessing.
+ */
+const CODEX_PROVIDER = {
+  name: 'codex (UNRESEARCHED — not implemented)',
+  spawn() {
+    throw new Error(
+      'deliver-item-wrapper: CODEX_PROVIDER has no real implementation yet. Needed before use: Codex CLI\'s '
+      + 'own minimal-context/no-auto-memory spawn flags (the --bare equivalent), whether it has any '
+      + 'hook-equivalent enforcement mechanism (the guard-lane.mjs/guard-bash.mjs equivalent), and whether it '
+      + 'supports a blocking/foreground invocation this wrapper\'s spawn contract can rely on. This is the '
+      + 'named PORT (see DeliveryAgentProvider), not a guess at Codex\'s actual mechanism — see this '
+      + 'function\'s own docblock.',
+    );
+  },
+};
+
+/** The provider registry — swap which CLI a delivery agent runs under by changing which key `deliverItem`
+ *  is called with (default `'claude-bare'`), never by editing this file's control flow. */
+export const DELIVERY_AGENT_PROVIDERS = Object.freeze({
+  'claude-bare': CLAUDE_BARE_PROVIDER,
+  codex: CODEX_PROVIDER,
+});
+
+/**
+ * SKETCH. Spawns the minimal-brief agent through the given provider and BLOCKS until it exits — no separate
+ * wait step, because there is nothing left to wait for once the blocking call itself returns. This is the
+ * wrapper side of true push (FIRM REQUIREMENT 4): the AGENT never polls anything — it runs once, reports
+ * once, and exits — and neither does the WRAPPER; the single blocking call below IS the wait, and it costs
+ * nothing extra because this process was already going to sit idle for exactly as long as the agent's run
+ * takes, poll loop or not.
+ */
+async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider = CLAUDE_BARE_PROVIDER }) {
   const briefTemplate = readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8');
   const prompt = fillMinimalBrief(briefTemplate, { item, sessionSlug, lane, attemptTag }); // SKETCH — see below
 
-  // FIRM OPERATOR REQUIREMENT, applied here: true push, not "the wrapper polls instead of the agent". The
-  // agent's own CLI process, run WITHOUT `--bg`, is a single blocking call from the wrapper's point of view —
-  // `execFileSync` (inside `defaultSpawnAgent`, REAL) does not return until the WHOLE agentic run has ended
-  // (the agent wrote its `done` report and its own process exited). That return IS the notification; there is
-  // no separate channel to poll and nothing to check in a loop. `--bg` exists in `buildAgentArgv` ONLY because
-  // `dispatch-lane.mjs` itself must return quickly to plan its NEXT lane in the same tick — this wrapper has no
-  // such constraint (it is already the thing the conveyor backgrounds, one per item), so it can let the child
-  // run to its own natural completion and simply resume executing the next line once it does.
-  //
-  // SKETCH gap, stated plainly: `buildAgentArgv` (REAL, imported above) hardcodes `--bg` on every branch — it
-  // was built for the always-background dispatch topology. A real implementation needs either a foreground
-  // variant of it (drop `--bg`, keep `--session-id`/`--append-system-prompt-file`) or a new sibling builder;
-  // `buildForegroundAgentArgv` below is that sibling, written from the same flag set but NOT itself verified
-  // against the real CLI the way `buildAgentArgv` was (I read its output shape, not its argv-parsing code).
-  const argv = buildForegroundAgentArgv({ sessionId: sessionSlug, payload: prompt, systemPromptFile: null });
-  defaultSpawnAgent(argv, {}); // BLOCKS here until the agent's own run ends — this line is the only "wait".
+  provider.spawn({ sessionId: sessionSlug, prompt }); // BLOCKS — see DeliveryAgentProvider's own docblock.
 
   const report = tryReadDeliveryReport(sessionSlug);
   if (!report || report.status !== 'done') {
@@ -210,61 +351,6 @@ async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag }) {
     throw new Error(`deliver-item-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }
   return report;
-}
-
-/**
- * SKETCH shell over a REAL, VERIFIED flag: `--bare`. NOT the real `buildAgentArgv` (that function is REAL but
- * `--bg`-only, see the comment above) — a foreground sibling, same flags minus `--bg`, so the parent's
- * `execFileSync` genuinely blocks for the run's full duration instead of returning the instant a background
- * daemon forks. `-p`/`--session-id` are the real, documented flags; their exact interaction with `--bare`
- * here is NOT independently verified against the CLI's own argv parser — flagged rather than asserted.
- *
- * THE PERSONAL/PROJECT-CLAUDE.MD LEAK — INVESTIGATED, NOT ASSUMED. Ran `claude --help` directly against this
- * machine's installed CLI (v2.1.266) to check: does `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv`
- * (the REAL function `dispatch-lane.mjs` calls today) suppress `~/.claude/CLAUDE.md` / project `CLAUDE.md` /
- * skill auto-discovery for a spawned agent? Read its full body — it does NOT: the `--bg` branch passes only
- * `--session-id`/`-n`/`--append-system-prompt-file`, none of which touch CLAUDE.md loading, hooks, or skill
- * discovery. So TODAY, every dispatched delivery agent — including under the LIVE 527-line brief, not just a
- * hypothetical v2 — auto-loads the operator's personal `~/.claude/CLAUDE.md` (timezone, response-format,
- * planning-style preferences meant for interactive collaboration, not an autonomous build) and this repo's own
- * `we:CLAUDE.md` → `we:AGENTS.md` → `we:docs/agent/*.md` doctrine chain, plus the full project
- * `.claude/skills/` auto-discovery listing, exactly like this interactive session does. This is a REAL,
- * confirmed gap in the CURRENT system, not a v2-only concern.
- *
- * `claude --help`'s own `--bare` entry is the fix, and it is a REAL flag on the installed CLI, verbatim:
- * "Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain
- * reads, and CLAUDE.md auto-discovery. Sets CLAUDE_CODE_SIMPLE=1. ... Skills still resolve via /skill-name.
- * Explicitly provide context via: --system-prompt[-file], --append-system-prompt[-file], --add-dir (CLAUDE.md
- * dirs), --mcp-config, --settings, --agents, --plugin-dir." Paired with `--disable-slash-commands` (also REAL
- * — "Disable all skills") as defense in depth, so even a brief that accidentally NAMES a skill can't invoke
- * one: this agent's entire world becomes the prompt text below plus whatever `--add-dir`/`--mcp-config` are
- * explicitly given (neither is given here — no MCP servers, no extra dirs — on purpose, per the operator's
- * "literally nothing about how the mechanical system works" requirement).
- *
- * TWO HONEST COSTS OF `--bare`, NOT PAPERED OVER:
- *   1. `--bare` ALSO skips hooks — so `we:scripts/guard-bash.mjs`'s general safety nets (destructive-git-op
- *      protection, the `main`-push block, etc.) would be OFF for this session, not just the lane-mechanics
- *      awareness this design wants removed. `--bare`'s own help text says a caller may still layer in
- *      "context" via `--settings <file-or-json>` — a real, documented flag independent of `--bare` — which
- *      *could* reinstate JUST a `PreToolUse(Bash)` hook pointing at `guard-bash.mjs` without reintroducing
- *      CLAUDE.md/memory/skills. I did NOT verify the exact settings-JSON hook schema well enough to write that
- *      injection correctly here — flagged as a real open task for whoever wires this in, not asserted as done.
- *   2. `--bare`'s own text states plainly: "Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via
- *      --settings (OAuth and keychain are never read)." If today's dispatched sessions currently authenticate
- *      via an interactive OAuth/keychain session (not independently confirmed either way in this sketch),
- *      switching to `--bare` requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper`) to be available in whatever
- *      environment spawns this wrapper — a real prerequisite to check before this is ever wired in, not an
- *      assumption to build on.
- */
-function buildForegroundAgentArgv({ sessionId, payload, systemPromptFile = null, resumeSessionId = null }) {
-  const BARE_FLAGS = ['--bare', '--disable-slash-commands'];
-  if (resumeSessionId) return [...BARE_FLAGS, '--resume', String(resumeSessionId), payload];
-  return [
-    ...BARE_FLAGS,
-    '-p', '--session-id', String(sessionId),
-    ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
-    payload,
-  ];
 }
 
 /** PLACEHOLDER — real placeholder substitution would reuse `we:scripts/operations/dispatch-lane.mjs#fillBrief`
@@ -292,14 +378,14 @@ function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag }) {
  *  unbounded loop — mirrors the live brief's own "red gate is a hard stop" bar, but gives the agent exactly
  *  one chance to fix ITS OWN gate failure before that stop applies, since a transient/self-inflicted red on
  *  a fresh diff is common and cheap to hand back once. */
-function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag }) {
+function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider = CLAUDE_BARE_PROVIDER }) {
   const lanePath = resolveLanePath(lane); // PLACEHOLDER — lane number → clone path lookup, real form TBD
   try {
     run('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
     return { status: 'green', lanePath };
   } catch (firstFailure) {
     const failureOutput = String(firstFailure.stdout || firstFailure.message || '');
-    resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput }); // SKETCH — see below
+    resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider }); // SKETCH — see below
     const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
     try {
       run('node', ['scripts/verify-lane.mjs', '--json'], { cwd: lanePath });
@@ -315,17 +401,15 @@ function runGateWithOneRetry({ lane, item, sessionSlug, attemptTag }) {
  *  it built, reported `done`, and its process already exited (see `runAgentToCompletion`, above). THIS
  *  function is the mechanical layer actively handing the agent a NEW turn, carrying the actual result, only
  *  because there is now a real result to hand it — never a resume-to-ask-"are-you-done-yet". The call below
- *  BLOCKS (same `defaultSpawnAgent`/`execFileSync` reasoning as `runAgentToCompletion`) until that new turn
- *  itself ends, so the caller (`runGateWithOneRetry`) can safely read the agent's fresh report the very next
- *  line with no loop of its own either. Real `buildAgentArgv`'s own `resumeSessionId` branch hardcodes `--bg`
- *  (built for the always-background dispatch topology); `buildForegroundAgentArgv`'s `resumeSessionId` branch
- *  is the un-verified foreground sibling used here instead, for the same reason `runAgentToCompletion` needed
- *  one for the initial spawn. */
-function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput }) {
+ *  BLOCKS (same reasoning as `runAgentToCompletion`) until that new turn itself ends, so the caller
+ *  (`runGateWithOneRetry`) can safely read the agent's fresh report the very next line with no loop of its
+ *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
+ *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
+ *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
+function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider = CLAUDE_BARE_PROVIDER }) {
   const prompt = `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
     + `\`done\` report exactly as before.`;
-  const argv = buildForegroundAgentArgv({ sessionId: sessionSlug, payload: prompt, resumeSessionId: sessionSlug });
-  defaultSpawnAgent(argv, {}); // BLOCKS until the resumed turn itself ends — the fresh report is ready right after.
+  provider.spawn({ sessionId: sessionSlug, prompt, resumeSessionId: sessionSlug }); // BLOCKS.
 }
 
 function resolveLanePath(lane) {

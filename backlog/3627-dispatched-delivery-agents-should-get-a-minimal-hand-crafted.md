@@ -191,13 +191,48 @@ cross-locus couple path, the `blocked`/`needs-human-judgment` paths, or the gate
 had a real historical instance handy tonight to trace against.
 
 **What is explicitly NOT resolved by this amendment:** whether to actually cut over (a real, separate
-ratification decision); the `--settings`-based hook-reinstatement mechanism for `--bare` (cost 5a above); the
-`ANTHROPIC_API_KEY` auth prerequisite (cost 5b above); the `blocked-mid-build` partial-work case the wrapper
-sketch flags as genuinely new ground with no existing analogue; and the full `runConverge`/`decideParkMode`
-wiring against `we:converge-cli.mjs`'s and `we:review-escalation.mjs`'s REAL output shapes (both used here as
-SKETCH-level approximations of APIs this session read partially, not verified end-to-end). Left for whoever
-takes this from prototype to real cutover, per the operator's own "review and decide, not deploy tonight"
-framing.
+ratification decision); the `ANTHROPIC_API_KEY` auth prerequisite (cost 5b above, still open after the
+revision below closed cost 5a); the `blocked-mid-build` partial-work case the wrapper sketch flags as
+genuinely new ground with no existing analogue; and the full `runConverge`/`decideParkMode` wiring against
+`we:converge-cli.mjs`'s and `we:review-escalation.mjs`'s REAL output shapes (both used here as SKETCH-level
+approximations of APIs this session read partially, not verified end-to-end). Left for whoever takes this from
+prototype to real cutover, per the operator's own "review and decide, not deploy tonight" framing.
+
+## Revision (same session, folded into PR #2104) — the safety-hooks gap closed; provider parity made structural
+
+Two operator follow-ups on the design above, both applied directly to the same PR rather than filed
+separately, per the operator's own instruction (the design is still a prototype, not yet merged).
+
+**1. The safety-hooks tradeoff (cost "a" above) is CLOSED, not just flagged, via a verified `--settings`
+combination.** Re-checked `claude --help` directly: `--bare`'s own text lists `--settings` among what a caller
+may explicitly layer BACK ON TOP of it, and `--settings <file-or-json>` is documented as loading ADDITIONAL
+settings — not a replacement. So `--bare --settings=<file>` is a REAL, VERIFIED combination, not a guess.
+`we:scripts/operations/deliver-item-wrapper.mjs` now defines `DELIVERY_HOOKS_SETTINGS` — the SAME hook-schema
+shape read directly from this repo's own `we:.claude/settings.json`, trimmed to carry ONLY the two hooks a
+delivery agent's own tool calls still need for safety: `we:guard-lane.mjs` (Edit|Write matcher) and
+`we:guard-bash.mjs` (Bash matcher) — dropping the other three Edit|Write hooks the real settings file also
+carries (`we:lint-locus-prefix.mjs`, `we:check-memory.mjs`, `we:backlog-guard.mjs`, `we:guard-backward-edge.mjs`), none
+of which a minimal delivery agent needs since it never touches `backlog/*.md`/`reports/*.md`/agent-memory files
+itself. `CLAUDE_BARE_PROVIDER`'s `spawn` now passes `--settings=<the materialized file>` alongside
+`--bare --disable-slash-commands`. Net: the agent still gets zero `we:CLAUDE.md`-style memory/doctrine/skill surface, but
+keeps its safety net — the all-or-nothing tradeoff the original design left open is gone. Cost "b" (the
+`ANTHROPIC_API_KEY` auth prerequisite) is unaffected by this fix and remains open.
+
+**2. Provider parity is now structural, mirroring #3579/#3370's own extracted ports.** The operator's explicit
+requirement: whatever spawns a minimal delivery agent must have the SAME provider-port shape already landed
+for `we:scripts/operations/dispatch-lane-io.mjs`'s dispatcher seam (#3579, `provider` param on
+`createDispatchSinks`) and `we:scripts/operations/cli-adapter.mjs`'s judge seam (#3370, `createDefaultJudge`'s
+injected implementation) — both real, both already shipped. The wrapper sketch is restructured accordingly: a
+`DeliveryAgentProvider` port (`spawn({sessionId, prompt, resumeSessionId}) → void`, blocking — the delivery-
+report contract stays provider-agnostic by design, since whichever CLI a provider spawns, the agent shells the
+SAME `we:delivery-report-cli.mjs` inside its own run) with `CLAUDE_BARE_PROVIDER` as the one REAL
+implementation and a `CODEX_PROVIDER` that is a NAMED SEAM ONLY — it throws, naming exactly what is
+unresearched (Codex CLI's actual minimal-context spawn flags, whether it has any hook-equivalent mechanism at
+all, and whether it supports a blocking/foreground invocation this wrapper's contract needs) rather than
+inventing plausible-looking Codex flags. `deliverItem`/`runAgentToCompletion`/`runGateWithOneRetry`/
+`resumeAgentWithGateFailure` all take the provider as a parameter (defaulting to `CLAUDE_BARE_PROVIDER`) and
+contain zero Claude-CLI-specific logic themselves — swapping providers is a call-site change, not a rewrite of
+the wrapper's control flow.
 
 ## Done when
 

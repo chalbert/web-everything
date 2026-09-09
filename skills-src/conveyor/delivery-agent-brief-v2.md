@@ -13,11 +13,15 @@
 > the artifact that amendment cites, not a restatement of the reasoning.
 >
 > **This text is meant to be the agent's ENTIRE world, not an addition on top of the usual context.** The
-> wrapper spawns the agent with `--bare --disable-slash-commands` (real, verified flags — see
-> `deliver-item-wrapper.mjs#buildForegroundAgentArgv`), which skips `~/.claude/CLAUDE.md`, this repo's own
-> `CLAUDE.md`/`AGENTS.md`/`docs/agent/*.md` doctrine chain, and all skill auto-discovery. So this brief cannot
-> lean on anything from that stack being present — no cited convention, no doctrine reference, no assumption
-> the agent has read `AGENTS.md`. If it needs to be said, it needs to be said HERE.
+> wrapper spawns the agent through a swappable provider port (`deliver-item-wrapper.mjs#DeliveryAgentProvider`
+> — see the file for why: provider parity with Codex/other CLIs matters, so the spawn mechanism is never
+> hardcoded Claude-CLI flags in the wrapper's own control flow). The Claude implementation
+> (`CLAUDE_BARE_PROVIDER`) uses `--bare --disable-slash-commands --settings=<hooks-only file>` (real, verified
+> flags), which skips `~/.claude/CLAUDE.md`, this repo's own `CLAUDE.md`/`AGENTS.md`/`docs/agent/*.md` doctrine
+> chain, and all skill auto-discovery, while the `--settings` file re-adds ONLY the two safety hooks
+> (`guard-lane.mjs`/`guard-bash.mjs`) — no memory, no doctrine, no skill discovery comes back with them. So
+> this brief cannot lean on anything from that stack being present — no cited convention, no doctrine
+> reference, no assumption the agent has read `AGENTS.md`. If it needs to be said, it needs to be said HERE.
 
 ## What's already true when you (the agent) start
 
