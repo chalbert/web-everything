@@ -1033,7 +1033,11 @@ function cmdAcquire(repo) {
   // marker (via tryClaimLane) AND used for the strictly-non-blocking overlap warning below. It NEVER gates.
   const declaredScope = parseScopeFlag(flags.scope);
   const lanes = existingLanes(repo);
-  if (lanes.length === 0) fail(`no lanes provisioned for "${repo.name}" — run \`provision --count=N\` first`);
+  // #3627 follow-up (secondary finding) — name the RESOLVED pool root in the failure: a caller whose cwd sits
+  // outside the expected workspace root (e.g. a scratch clone) silently resolves `repo.poolDir` to an empty or
+  // wrong location, and "no lanes provisioned" alone gives no way to tell "never provisioned" apart from
+  // "looking in the wrong place" (the latter is fixed with `LANE_POOL_ROOT`, but only once it's diagnosable).
+  if (lanes.length === 0) fail(`no lanes provisioned for "${repo.name}" under ${repo.poolDir} — run \`provision --count=N\` first (if this pool root looks wrong, see LANE_POOL_ROOT)`);
 
   // Candidate infos from LOCAL refs (no per-lane fetch): `dirty` is live (working tree), `ahead` is vs the
   // last-known origin — conservative (over-protects an ahead lane). We fetch+reset only the winner.
