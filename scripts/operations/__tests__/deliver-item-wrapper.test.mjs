@@ -22,10 +22,14 @@ import {
   DELIVERY_AGENT_PROVIDERS, buildRestrictedProviderArgv,
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr,
-  runConverge, parseConvergeEditResult, buildConvergeEditorArgv,
+  runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
   decideParkMode, computeLaneDiffStats,
-  resolveLanePath, runGateWithOneRetry, claimItem,
+  resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion,
 } from '../deliver-item-wrapper.mjs';
+
+// A real UUID, hardcoded for deterministic assertions (mirrors `crypto.randomUUID()`'s own output shape). Tests
+// that need "some UUID, any UUID" instead assert against this regex.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 describe('buildRestrictedProviderArgv', () => {
   it('fresh spawn: uses --restricted (never --bare), an explicit --tools allowlist, --strict-mcp-config, '
@@ -332,6 +336,100 @@ describe('buildConvergeEditorArgv (#3627 gap 3 helper)', () => {
 });
 
 // ================================================================================================
+// Bug 5 — a live #3371 attempt failed with `Error: Invalid session ID. Must be a valid UUID.` because the
+// Claude CLI's own `--session-id`/`--resume` flag was fed the human-readable dispatch id (`sessionSlug`, e.g.
+// `conveyor-3371`) instead of a real UUID. Fixed by minting a UUID once per delivery attempt and threading it
+// through as `claudeSessionId`, kept entirely separate from `sessionSlug` (which keeps its existing job
+// everywhere else — claim/release, the delivery-report lookup, the brief's own env footer, lane-pool's
+// `--session=`).
+// ================================================================================================
+describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sessionSlug)', () => {
+  const fakeLoadItems = () => [{ num: '1234', slug: 'do-the-thing', scope: [] }];
+
+  it('passes claudeSessionId — a real UUID — as `sessionId` to provider.spawn, never sessionSlug', async () => {
+    const claudeSessionId = '11111111-1111-4111-8111-111111111111';
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'] }));
+
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId },
+      { readBrief: () => 'Read backlog/{{ITEM_SPEC_PATH_BASENAME}}.', readReport, loadItems: fakeLoadItems },
+    );
+
+    expect(provider.spawn).toHaveBeenCalledTimes(1);
+    const call = provider.spawn.mock.calls[0][0];
+    expect(call.sessionId).toBe(claudeSessionId);
+    expect(call.sessionId).toMatch(UUID_RE);
+    expect(call.sessionId).not.toBe('conveyor-1234');
+  });
+
+  it('still looks up the delivery report by sessionSlug, not by claudeSessionId — the report sidecar is keyed '
+    + 'by the human-readable dispatch id', async () => {
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'ignored-in-this-assertion' },
+      { readBrief: () => 'x', readReport, loadItems: fakeLoadItems },
+    );
+    expect(readReport).toHaveBeenCalledWith('conveyor-1234');
+  });
+
+  it('the brief env footer still carries sessionSlug (DELIVERY_SESSION), never claudeSessionId', async () => {
+    const provider = { spawn: vi.fn() };
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId: '22222222-2222-4222-8222-222222222222' },
+      { readBrief: () => '{{ITEM_SPEC_PATH_BASENAME}}', readReport: () => ({ status: 'done', outcome: 'done', filesTouched: [] }), loadItems: fakeLoadItems },
+    );
+    const { prompt } = provider.spawn.mock.calls[0][0];
+    expect(prompt).toMatch(/\[env: DELIVERY_SESSION=conveyor-1234 /);
+    expect(prompt).not.toContain('22222222-2222-4222-8222-222222222222');
+  });
+
+  it('throws when no done report comes back, unchanged from before this fix', async () => {
+    await expect(runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'x' },
+      { readBrief: () => 'x', readReport: () => null, loadItems: fakeLoadItems },
+    )).rejects.toThrow(/exited with no done report/);
+  });
+});
+
+describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old readable per-round string)', () => {
+  it('spawns with a real-UUID --session-id, never the old `${item}-converge-editor-r${round}` literal', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '1234', round: 1, run, ensureSettingsFile: () => '/fake/hooks.json' },
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    const [cmd, argv] = run.mock.calls[0];
+    expect(cmd).toBe('claude');
+    const idIdx = argv.indexOf('--session-id');
+    expect(idIdx).toBeGreaterThanOrEqual(0);
+    expect(argv[idIdx + 1]).toMatch(UUID_RE);
+    expect(argv[idIdx + 1]).not.toBe('1234-converge-editor-r1');
+  });
+
+  it('mints a fresh UUID per call (each converge round is its own, never-resumed session)', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }));
+    const deps = { item: '1234', round: 1, run, ensureSettingsFile: () => '/fake/hooks.json' };
+    runConvergeEdit({ prompt: 'a' }, deps);
+    runConvergeEdit({ prompt: 'b' }, deps);
+    const id1 = run.mock.calls[0][1][run.mock.calls[0][1].indexOf('--session-id') + 1];
+    const id2 = run.mock.calls[1][1][run.mock.calls[1][1].indexOf('--session-id') + 1];
+    expect(id1).not.toBe(id2);
+  });
+
+  it('accepts an injected newSessionId for a deterministic assertion', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '1234', round: 2, run, ensureSettingsFile: () => '/fake/hooks.json', newSessionId: () => 'fixed-uuid-for-test' },
+    );
+    const argv = run.mock.calls[0][1];
+    expect(argv[argv.indexOf('--session-id') + 1]).toBe('fixed-uuid-for-test');
+  });
+});
+
+// ================================================================================================
 // Gap 4 — decideParkMode skipped the real `scoreEscalation` rubric (statute-touch + needs-human-judgment only).
 // It now wires in the FULL real `scoreEscalation` (`scripts/lib/review-escalation.mjs`), including diff-size
 // and dismissed-finding signals, via the SAME `producerReviewLabel` mapping `pr-land.mjs` itself uses.
@@ -568,6 +666,55 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
     expect(result.status).toBe('red');
     expect(verifyCalls).toBe(2); // the first attempt, then exactly one retry after the resume
     expect(provider.spawn).toHaveBeenCalledTimes(1); // the one resume-with-gate-failure call
+  });
+
+  it('(#3627 bug 5) resumes with claudeSessionId — a real UUID — as BOTH sessionId and resumeSessionId, '
+    + 'never sessionSlug (the CLI validates --session-id/--resume as a UUID and rejects a human-readable slug)', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return verifyRedJson();
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const claudeSessionId = '33333333-3333-4333-8333-333333333333';
+    runGateWithOneRetry(
+      { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider, claudeSessionId },
+      { run },
+    );
+    expect(provider.spawn).toHaveBeenCalledTimes(1);
+    const call = provider.spawn.mock.calls[0][0];
+    expect(call.sessionId).toBe(claudeSessionId);
+    expect(call.resumeSessionId).toBe(claudeSessionId);
+    expect(call.sessionId).not.toBe('conveyor-3371');
+    expect(call.resumeSessionId).not.toBe('conveyor-3371');
+  });
+
+  it('(#3627 bug 5) the SAME claudeSessionId a fresh spawn used is what the resume targets — a resume must '
+    + 'never mint or receive a different id than the session it is resuming', () => {
+    const claudeSessionId = '44444444-4444-4444-8444-444444444444';
+
+    // The fresh spawn (mirrors what deliverItem's runAgentToCompletion call does).
+    const freshProvider = { spawn: vi.fn() };
+    freshProvider.spawn({ sessionId: claudeSessionId, prompt: 'build it' });
+
+    // The resume, driven through the real runGateWithOneRetry with the SAME id threaded in, as deliverItem
+    // threads it (both calls originate from one claudeSessionId minted once at the top of deliverItem).
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return verifyRedJson();
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider: freshProvider, claudeSessionId }, { run });
+
+    expect(freshProvider.spawn).toHaveBeenCalledTimes(2); // the fresh spawn above + the one resume
+    const [freshCall, resumeCall] = freshProvider.spawn.mock.calls.map((c) => c[0]);
+    expect(freshCall.sessionId).toBe(claudeSessionId);
+    expect(resumeCall.sessionId).toBe(claudeSessionId);
+    expect(resumeCall.resumeSessionId).toBe(claudeSessionId);
   });
 });
 

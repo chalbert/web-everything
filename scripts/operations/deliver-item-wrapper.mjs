@@ -75,6 +75,7 @@
  *      hook-equivalent at all — inventing those flags here would be worse than leaving the gap explicit.
  */
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // REAL — every one of these is an existing exported function this session read directly.
@@ -147,9 +148,21 @@ function ensureDeliveryHooksSettingsFile() {
  *   pass `DELIVERY_AGENT_PROVIDERS.codex` once that provider is actually built. Threaded through unchanged to
  *   every call that spawns or resumes the agent (`runAgentToCompletion`, `runGateWithOneRetry` →
  *   `resumeAgentWithGateFailure`) — nothing else in this function's control flow is provider-specific.
+ * @param {{ newSessionId?: () => string }} [deps] — REAL, bug-5 fix. `newSessionId` (default `randomUUID` from
+ *   `node:crypto`) mints the Claude CLI's OWN `--session-id`/`--resume` value: the current CLI validates that
+ *   flag as a real UUID and rejects a human-readable slug outright (confirmed live: a real #3371 attempt failed
+ *   with `Error: Invalid session ID. Must be a valid UUID.` before any paid agent turn ran). This is a SEPARATE
+ *   identifier from `sessionSlug` — `sessionSlug` keeps meaning exactly what it already means everywhere else in
+ *   this file (claim/release, `tryReadDeliveryReport` lookup, the brief's own `$DELIVERY_SESSION` env value,
+ *   lane-pool's `--session=`) and is never touched by this change. Minted ONCE per delivery attempt, here, and
+ *   threaded down into both the fresh spawn (`runAgentToCompletion`) and its one resume (`runGateWithOneRetry` →
+ *   `resumeAgentWithGateFailure`) as `claudeSessionId`, so a resume targets the SAME CLI session the fresh spawn
+ *   used rather than minting a second one. `newSessionId` is injectable only so a test can assert on a
+ *   deterministic value instead of a fresh random UUID every run.
  */
-export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER) {
+export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER, { newSessionId = randomUUID } = {}) {
   const { item, lane, scope, sessionSlug, attemptTag } = launch;
+  const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
 
   // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
   acquireLane({ lane, sessionSlug, scope, item });
@@ -157,7 +170,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER)
     claimItem({ item, sessionSlug });
 
     // ---- 2. Spawn the MINIMAL agent, wait for its structured report (SKETCH) -----------------------------
-    const report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider });
+    const report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
 
     // ---- 3. Act on the report — every branch below is what USED TO be the agent's own job -----------------
     if (report.outcome === 'blocked' && (!report.filesTouched || report.filesTouched.length === 0)) {
@@ -179,7 +192,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER)
 
     // outcome is 'done' or 'needs-human-judgment' from here — both have a real diff. Run the gate FIRST in
     // either case: a needs-human-judgment report still needs a green gate before anyone reviews it.
-    const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider });
+    const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
     if (gate.status === 'red') {
       releaseClaimAndLane({ item, lane, sessionSlug });
       return { item, result: 'gate-red' };
@@ -455,14 +468,32 @@ export const DELIVERY_AGENT_PROVIDERS = Object.freeze({
  * once, and exits — and neither does the WRAPPER; the single blocking call below IS the wait, and it costs
  * nothing extra because this process was already going to sit idle for exactly as long as the agent's run
  * takes, poll loop or not.
+ *
+ * BUG-5 FIX: `provider.spawn`'s `sessionId` is `claudeSessionId` — the caller-minted REAL UUID (see
+ * `deliverItem`'s own docblock) — never `sessionSlug`. The current Claude CLI validates `--session-id` as a
+ * UUID and rejects a human-readable slug like `conveyor-3371` outright; this is the exact failure a live
+ * #3371 attempt hit. `sessionSlug` still drives everything it already drove — the brief fill
+ * (`fillMinimalBrief`, unchanged below) and the `tryReadDeliveryReport` lookup, since the delivery-report
+ * sidecar is keyed by the human-readable dispatch id, not the CLI's own session id.
+ *
+ * Exported (was module-private) so its wiring is directly testable; `readBrief`/`readReport` are injectable
+ * (mirrors this file's own `{ run: runFn = run }` convention) so a test can assert on the exact `sessionId`
+ * handed to `provider.spawn` without touching the real filesystem.
  */
-async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER }) {
-  const briefTemplate = readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8');
-  const prompt = fillMinimalBrief(briefTemplate, { item, sessionSlug, lane, attemptTag }); // SKETCH — see below
+export async function runAgentToCompletion(
+  { item, sessionSlug, lane, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
+  {
+    readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8'),
+    readReport = tryReadDeliveryReport,
+    loadItems,
+  } = {},
+) {
+  const briefTemplate = readBrief();
+  const prompt = fillMinimalBrief(briefTemplate, { item, sessionSlug, lane, attemptTag }, { loadItems }); // SKETCH — see below
 
-  provider.spawn({ sessionId: sessionSlug, prompt }); // BLOCKS — see DeliveryAgentProvider's own docblock.
+  provider.spawn({ sessionId: claudeSessionId, prompt }); // BLOCKS — see DeliveryAgentProvider's own docblock.
 
-  const report = tryReadDeliveryReport(sessionSlug);
+  const report = readReport(sessionSlug);
   if (!report || report.status !== 'done') {
     // The agent's process exited without ever sending a `done` report — a crash, per #3436's own precedent.
     // Nothing to poll for: the process is gone, so there is nothing further to wait on. This is itself a
@@ -561,14 +592,18 @@ function runVerifyOperation(lanePath, { run: runFn = run } = {}) {
  *  but gives the agent exactly one chance to fix ITS OWN gate failure before that stop applies, since a
  *  transient/self-inflicted red on a fresh diff is common and cheap to hand back once. */
 export function runGateWithOneRetry(
-  { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER },
+  { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
   { run: runFn = run } = {},
 ) {
   const lanePath = resolveLanePath(lane, { run: runFn });
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.ok) return { status: 'green', lanePath };
 
-  resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput: first.detail, provider }); // SKETCH — see below
+  // BUG-5 FIX: `claudeSessionId` is the SAME real UUID `runAgentToCompletion`'s fresh spawn used — threaded
+  // through from `deliverItem` — never `sessionSlug`. A `--resume` must target the exact CLI session the fresh
+  // spawn created; resuming with a fresh/different id (or a non-UUID slug) is exactly the class of bug this
+  // fix closes. See `resumeAgentWithGateFailure` and `deliverItem`'s own docblocks for the full reasoning.
+  resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput: first.detail, provider, claudeSessionId }); // SKETCH — see below
   const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.ok) return { status: 'green', lanePath, retryReport };
@@ -585,10 +620,13 @@ export function runGateWithOneRetry(
  *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
-function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider = CLAUDE_RESTRICTED_PROVIDER }) {
+function resumeAgentWithGateFailure({ sessionSlug, lane, failureOutput, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId }) {
   const prompt = `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
     + `\`done\` report exactly as before.`;
-  provider.spawn({ sessionId: sessionSlug, prompt, resumeSessionId: sessionSlug }); // BLOCKS.
+  // BUG-5 FIX: both `sessionId` and `resumeSessionId` are `claudeSessionId` — the real UUID minted once in
+  // `deliverItem` and reused by the fresh spawn — never `sessionSlug`. `--resume <id>` must name the SAME CLI
+  // session the fresh spawn created, and that id must itself be a UUID (CLI-enforced).
+  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId }); // BLOCKS.
 }
 
 /**
@@ -755,11 +793,24 @@ export function parseConvergeEditResult(rawOut) {
   }
 }
 
-/** Spawn ONE fresh restricted editor session for this round. See the section header above for why this goes
- *  through this file's own `--restricted` argv rather than `judge-spawn.mjs`. */
-function runConvergeEdit(editInstruction, { item, round, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile }) {
+/**
+ * Spawn ONE fresh restricted editor session for this round. See the section header above for why this goes
+ * through this file's own `--restricted` argv rather than `judge-spawn.mjs`.
+ *
+ * BUG-5 FIX: `sessionId` was the human-readable `${item}-converge-editor-r${round}` string, which the current
+ * Claude CLI's `--session-id` validation rejects (same failure class as `runAgentToCompletion`'s — see
+ * `deliverItem`'s docblock). This spawn is always fresh (never `--resume` — a converge round is self-contained,
+ * per this function's own header comment above), so unlike the delivery agent's single UUID reused across its
+ * one resume, a NEW UUID minted per round is correct here — nothing downstream keys off the old readable id
+ * (the editor's result comes back parsed straight from `--output-format json`, never looked up by session id).
+ * `newSessionId` is injectable only so a test can assert a deterministic value.
+ */
+export function runConvergeEdit(
+  editInstruction,
+  { item, round, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID },
+) {
   const settingsFile = ensureSettingsFile();
-  const sessionId = `${item}-converge-editor-r${round}`;
+  const sessionId = newSessionId();
   const argv = buildConvergeEditorArgv({ sessionId, prompt: editInstruction.prompt, settingsFile });
   const out = runFn('claude', argv);
   return parseConvergeEditResult(out);
