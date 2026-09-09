@@ -3,7 +3,7 @@ bornAs: xf3djp7
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["3627", "2630", "2275", "3369", "3580"]
+relatedTo: ["3627", "2630", "2275", "3369", "3580", "xu2pp2m"]
 dateOpened: "2026-09-08"
 tags: [conveyor, dispatch, lane-pool, mechanical-delivery-doctrine]
 ---
@@ -19,6 +19,26 @@ A real, unresolved tension this generalization needs to answer, not just extend:
 Checked and ruled out as already covering this, so this is genuinely new scope: we:backlog/2275-generalize-the-lane-pool-into-a-use-agnostic-leased-checkout.md (resolved) made the lane-pool ALLOCATOR itself use-agnostic — any consumer (drain, merge, prepare, decision, batch, solo) can acquire/release the SAME primitive instead of hand-rolling a bespoke clone. That is a different axis entirely from this proposal: #2275 is about the allocator serving any CONSUMER TYPE; this proposal is about WHO ISSUES THE ACQUIRE CALL for one consumer (a dispatched agent calling it on itself vs. a wrapper calling it on the agent's behalf, mechanically, before the agent ever starts). #2275's own text and slices never raise or anticipate the wrapper-drives-acquisition question. we:backlog/3369-decouple-agent-dispatch-from-the-claude-cli-introduce-a-mult.md and we:backlog/3580-decouple-the-delivery-agent-dispatcher-from-the-claude-cli-s.md (both open) are also a different axis — decoupling the dispatcher from the Claude CLI SPECIFICALLY (which binary gets spawned, multi-provider), not who calls we:lane-pool.mjs or when. Neither anticipates this generalization. we:scripts/capability-search.mjs run before filing (verdict: partial — found #3627 and #2275 as the two nearest neighbors, neither an exact match) confirms no existing item already states "generalize mechanical lane acquisition to every dispatched agent type."
 
 Explicit sequencing, per the operator's own framing tonight: this is downstream of #3627, a generalization to CONSIDER once the wrapper pattern is proven for build (one agent type), not a call to redesign build/review/fix/prepare dispatch all at once. NOT YET DECIDED — record only, no ratification, no build should start from this card until it is prepared and ratified, same posture #3627 itself uses for its own amendment.
+
+## Amendment (2026-09-09) — this item's own open question, partially answered by a sibling design pass
+
+we:backlog/xu2pp2m-review-and-fix-dispatch-should-get-the-same-minimal-context.md (filed same day, downstream
+of #3627, now that #3627's own wrapper was proven live end-to-end against real item #3371 — see
+we:docs/agent/prototype-based-dev.md) is a full minimal-context/wrapper design pass specifically for review and
+fix dispatch, not just the narrower "who calls we:scripts/lane-pool.mjs acquire" slice this card scopes itself
+to. It bears directly on this card's own still-open question above ("whether the same foreground-blocking trick
+even applies to a backgrounded, fire-and-forget review dispatch"): that item's finding is that a review
+dispatch may not need a live Claude session in the critical path AT ALL — we:scripts/operations/review-loop-cli.mjs
+already prints a structured verdict and already runs its own independent jurors, and the identity check
+we:scripts/lib/review-independence.mjs's self-clear refusal keys on (`CLAUDE_CODE_SESSION_ID`) is an env var any
+process can set, not something that requires a live agent turn to satisfy. If that holds up under the empirical
+verification that item itself flags as still owed (mirroring #3627's own "never assert a CLI-flag interaction
+without running it for real" discipline), this card's own foreground-vs-background tension dissolves for
+review specifically — there is no backgrounded agent spawn left to make foreground, because there is no agent
+spawn in the review-dispatch wrapper's own critical path at all. It remains fully open for FIX, which performs
+real code-editing judgment (unlike review) and should inherit #3627's proven never-`--bg`, foreground-blocking
+pattern directly, mirroring we:scripts/operations/deliver-item-wrapper.mjs's own `CLAUDE_RESTRICTED_PROVIDER`.
+Record only — this amendment does not ratify either card; both stay NOT YET DECIDED.
 
 ## Done when
 
