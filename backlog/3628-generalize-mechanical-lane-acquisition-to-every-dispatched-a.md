@@ -3,7 +3,7 @@ bornAs: xf3djp7
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["3627", "2630", "2275", "3369", "3580", "xu2pp2m"]
+relatedTo: ["3627", "2630", "2275", "3369", "3580", "3629"]
 dateOpened: "2026-09-08"
 tags: [conveyor, dispatch, lane-pool, mechanical-delivery-doctrine]
 ---
@@ -22,7 +22,7 @@ Explicit sequencing, per the operator's own framing tonight: this is downstream 
 
 ## Amendment (2026-09-09) — this item's own open question, partially answered by a sibling design pass
 
-we:backlog/xu2pp2m-review-and-fix-dispatch-should-get-the-same-minimal-context.md (filed same day, downstream
+we:backlog/3629-review-and-fix-dispatch-should-get-the-same-minimal-context.md (filed same day, downstream
 of #3627, now that #3627's own wrapper was proven live end-to-end against real item #3371 — see
 we:docs/agent/prototype-based-dev.md) is a full minimal-context/wrapper design pass specifically for review and
 fix dispatch, not just the narrower "who calls we:scripts/lane-pool.mjs acquire" slice this card scopes itself
