@@ -25,7 +25,7 @@ import {
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
   decideParkMode, computeLaneDiffStats,
-  resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion,
+  resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
 } from '../deliver-item-wrapper.mjs';
 
@@ -239,6 +239,40 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     expect(opts.env.ATTEMPT_TAG).toBe('');
   });
 
+  // #3627 bug 9 (live #3371 attempt 4, confirmed 2026-09-09) — `resolveDeliveryReportsDir` is resolved ONCE,
+  // in THIS spawn (the wrapper's own process), via the injectable `resolveReportsDir` seam (mirrors
+  // `resolveLane`'s own convention), and handed to the spawned agent as `OPERATION_DELIVERY_REPORTS_DIR` — the
+  // env override `delivery-report-store.mjs#resolveDeliveryReportsDir` checks FIRST. Without this, the wrapper
+  // read reports back from ITS OWN script-location default while the agent (running in a SEPARATE lane clone,
+  // its own physical copy of the script) wrote to a DIFFERENT script-location default — the exact false
+  // negative ("exited with no done report") that rejected a real, successfully-completed #3371 attempt 4.
+  it('resolves the reports dir via the injected `resolveReportsDir` and passes it as '
+    + 'OPERATION_DELIVERY_REPORTS_DIR to the underlying spawn call', () => {
+    const io = fakeIo({ resolveReportsDir: vi.fn(() => '/real/repo/.operations/delivery-reports') });
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'p', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
+      io,
+    );
+    expect(io.resolveReportsDir).toHaveBeenCalledTimes(1);
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.env.OPERATION_DELIVERY_REPORTS_DIR).toBe('/real/repo/.operations/delivery-reports');
+  });
+
+  it('a resume (resumeAgentWithGateFailure\'s own call shape) gets the SAME OPERATION_DELIVERY_REPORTS_DIR '
+    + 'treatment — both call sites go through this one spawn, so both need the agent\'s report to land where '
+    + 'the wrapper reads it', () => {
+    const io = fakeIo({ resolveReportsDir: vi.fn(() => '/real/repo/.operations/delivery-reports') });
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      {
+        sessionId: '66666666-6666-4666-8666-666666666666', resumeSessionId: '66666666-6666-4666-8666-666666666666',
+        prompt: 'fix the gate failure', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '',
+      },
+      io,
+    );
+    const [, opts] = io.spawnAgent.mock.calls[0];
+    expect(opts.env.OPERATION_DELIVERY_REPORTS_DIR).toBe('/real/repo/.operations/delivery-reports');
+  });
+
   it('captures the spawned child\'s stdout/stderr and persists them via the injected `persistFailure` seam '
     + 'when the underlying spawn throws — the observability fix, so a future failure does not require hunting '
     + 'down the agent\'s own transcript by UUID', () => {
@@ -311,6 +345,13 @@ describe('persistDeliverySpawnFailure / ensureDeliveryHooksSettingsFile un-overr
     expect(source).not.toContain('existsSync');
     expect(source).toContain('writeFileSync');
     expect(source).toContain('mkdirSync');
+  });
+
+  it('CLAUDE_RESTRICTED_PROVIDER.spawn\'s un-overridden `resolveReportsDir` default names the REAL '
+    + '`resolveDeliveryReportsDir` import (#3627 bug 9) — the same seam that must resolve, in the wrapper\'s '
+    + 'own process, to the SAME directory `runAgentToCompletion`\'s `tryReadDeliveryReport` call reads from', () => {
+    const spawnSource = DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn.toString();
+    expect(spawnSource).toMatch(/resolveReportsDir = [\w.]*\bresolveDeliveryReportsDir\b/);
   });
 });
 
@@ -659,9 +700,10 @@ describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old rea
 });
 
 describe('buildDeliveryAgentEnv (#3627 bug 7 helper — the real env vars the brief actually needs)', () => {
-  it('returns all four real values plus the existing WE_DISPATCH_KIND stamp', () => {
+  it('returns all four real values plus the existing WE_DISPATCH_KIND stamp and the reports-dir override', () => {
     const env = buildDeliveryAgentEnv({
       sessionSlug: 'conveyor-3371', item: '3371', lanePath: '/real/pool/lane-3', attemptTag: 'b',
+      reportsDir: '/real/repo/.operations/delivery-reports',
     });
     expect(env).toEqual({
       WE_DISPATCH_KIND: 'delivery',
@@ -669,6 +711,7 @@ describe('buildDeliveryAgentEnv (#3627 bug 7 helper — the real env vars the br
       DELIVERY_ITEM: '3371',
       LANE: '/real/pool/lane-3',
       ATTEMPT_TAG: 'b',
+      OPERATION_DELIVERY_REPORTS_DIR: '/real/repo/.operations/delivery-reports',
     });
   });
 
@@ -688,6 +731,17 @@ describe('buildDeliveryAgentEnv (#3627 bug 7 helper — the real env vars the br
   it('DELIVERY_ITEM is always a string, even when item is handed in as a number', () => {
     const env = buildDeliveryAgentEnv({ sessionSlug: 's', item: 1234, lanePath: '/lane', attemptTag: '' });
     expect(env.DELIVERY_ITEM).toBe('1234');
+  });
+
+  // #3627 bug 9 (live #3371 attempt 4) — OPERATION_DELIVERY_REPORTS_DIR is what makes the wrapper's own
+  // `tryReadDeliveryReport` read (in the wrapper's process) and the spawned agent's `delivery-report-cli.mjs`
+  // write (in a SEPARATE lane clone, its own physical copy of the script) resolve to the SAME directory —
+  // see this function's own docblock and `delivery-report-store.mjs#resolveDeliveryReportsDir`.
+  it('carries the caller-resolved reportsDir through verbatim as OPERATION_DELIVERY_REPORTS_DIR', () => {
+    const env = buildDeliveryAgentEnv({
+      sessionSlug: 's', item: '1', lanePath: '/lane', attemptTag: '', reportsDir: '/wrapper/root/.operations/delivery-reports',
+    });
+    expect(env.OPERATION_DELIVERY_REPORTS_DIR).toBe('/wrapper/root/.operations/delivery-reports');
   });
 });
 
@@ -1037,5 +1091,48 @@ describe('claimItem (#3627 follow-up — routed through the declared `claim` ope
     claimItem({ item: '1234', sessionSlug: 'conveyor-1234' }, { run });
     const [, args] = run.mock.calls[0];
     expect(args.some((a) => a.startsWith('--session'))).toBe(false);
+  });
+});
+
+// #3627 secondary finding (live #3371 attempt 4 transcript, confirmed 2026-09-09 by source read of
+// `lane-pool.mjs#tryClaimLane` and `guard-lane.mjs`'s occupant check) — `acquireLane`'s `--adopt` must stamp
+// the delivery agent's own FUTURE session id (`claudeSessionId`, already minted before acquire runs — see
+// `deliverItem`), never whatever `CLAUDE_CODE_SESSION_ID` the wrapper's own process happened to inherit from
+// its caller. Left unfixed, `--adopt` stamps the DRIVER session's identity as the lane's occupant, and
+// `guard-lane.mjs` then refuses the delivery agent's own Edit/Write tool calls in that exact lane because the
+// occupant it stamped never matches the session the delivery agent's own spawned CLI actually runs under.
+describe('acquireLane (#3627 secondary finding — --adopt must stamp the delivery agent\'s own future session id)', () => {
+  it('passes CLAUDE_CODE_SESSION_ID=<claudeSessionId> in the acquire subprocess\'s env — never left to inherit '
+    + 'whatever the wrapper\'s own process ambiently carries', () => {
+    const run = vi.fn(() => '');
+    acquireLane(
+      { lane: 3, sessionSlug: 'conveyor-3371', scope: 'we:scripts/lib/foo.mjs', item: '3371', claudeSessionId: '77777777-7777-4777-8777-777777777777' },
+      { run },
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    const [, args, opts] = run.mock.calls[0];
+    expect(args).toEqual([
+      'scripts/lane-pool.mjs', 'acquire', '--lane=3', '--purpose=conveyor-delivery',
+      '--session=conveyor-3371', '--scope=we:scripts/lib/foo.mjs', '--item=3371', '--adopt',
+    ]);
+    expect(opts.env.CLAUDE_CODE_SESSION_ID).toBe('77777777-7777-4777-8777-777777777777');
+  });
+
+  it('still carries the rest of the wrapper\'s own inherited env — the override adds one key, never replaces '
+    + 'the whole env', () => {
+    const previous = process.env.WE_ACQUIRE_LANE_TEST_MARKER;
+    process.env.WE_ACQUIRE_LANE_TEST_MARKER = 'present';
+    try {
+      const run = vi.fn(() => '');
+      acquireLane(
+        { lane: 3, sessionSlug: 's', scope: 'we:x', item: '1', claudeSessionId: '88888888-8888-4888-8888-888888888888' },
+        { run },
+      );
+      const [, , opts] = run.mock.calls[0];
+      expect(opts.env.WE_ACQUIRE_LANE_TEST_MARKER).toBe('present');
+    } finally {
+      if (previous === undefined) delete process.env.WE_ACQUIRE_LANE_TEST_MARKER;
+      else process.env.WE_ACQUIRE_LANE_TEST_MARKER = previous;
+    }
   });
 });

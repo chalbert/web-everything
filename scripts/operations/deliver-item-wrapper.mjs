@@ -81,7 +81,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 // REAL — every one of these is an existing exported function this session read directly.
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
-import { tryReadDeliveryReport } from './delivery-report-store.mjs';
+import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
 import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/review-escalation.mjs';
 
@@ -224,7 +224,10 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
 
   // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
-  acquireLane({ lane, sessionSlug, scope, item });
+  // `claudeSessionId` threaded through — see `acquireLane`'s own docblock (#3627 secondary finding, live
+  // #3371 attempt 4) for why `--adopt` needs the delivery agent's own future session id, not whatever this
+  // wrapper process itself inherited.
+  acquireLane({ lane, sessionSlug, scope, item, claudeSessionId });
   try {
     claimItem({ item, sessionSlug });
 
@@ -300,12 +303,36 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
 // unlike `claim`/`verify`/`open-pr`, which do exist and are what `claimItem`/`runGateWithOneRetry`/`openPr`
 // route through in this file). Would need one built first (see #3627 follow-up) before this could move off
 // the raw `scripts/lane-pool.mjs` CLI — out of scope for this hardening pass; not built here.
-/** REAL. Same flags the live brief's step 1 documents. */
-function acquireLane({ lane, sessionSlug, scope, item }) {
-  run('node', [
+/**
+ * REAL. Same flags the live brief's step 1 documents.
+ *
+ * #3627 secondary finding (live #3371 attempt 4 transcript) — `--adopt` (see `lane-pool.mjs#tryClaimLane`)
+ * stamps the lane's `workerSession` occupant from `process.env.CLAUDE_CODE_SESSION_ID` READ INSIDE THE
+ * `lane-pool.mjs acquire` SUBPROCESS ITSELF. That subprocess is spawned here, by THIS wrapper's own process,
+ * BEFORE the delivery agent exists — so, left to inherit `process.env` unmodified (this file's `run` helper's
+ * default), it stamps whatever session id the WRAPPER's own process happened to inherit from ITS caller (the
+ * driver session that launched the wrapper), never the delivery agent's own identity. `guard-lane.mjs` later
+ * denies the delivery agent's own Edit/Write tool calls in this exact lane because that stamped occupant does
+ * not match the session id the delivery agent's OWN spawned CLI process presents to its own hooks — confirmed
+ * exactly this way against real backlog item #3371 attempt 4 (worked around via Bash only; Edit/Write refused).
+ *
+ * THE FIX: `claudeSessionId` (`deliverItem`'s freshly minted `--session-id` UUID, the SAME id the delivery
+ * agent's own spawned CLI session will run under — see `CLAUDE_RESTRICTED_PROVIDER.spawn`/
+ * `buildRestrictedProviderArgv`) is already known BEFORE this acquire runs (minted first thing in `deliverItem`,
+ * passed down here). Explicitly overriding `CLAUDE_CODE_SESSION_ID` in this ONE subprocess's env to that same
+ * UUID — rather than leaving it to whatever the wrapper process itself inherited — makes `--adopt` stamp the
+ * occupant with the delivery agent's OWN real, future identity, so it matches what `guard-lane.mjs` sees once
+ * the agent is actually running and editing files in this lane.
+ *
+ * Exported, with an injectable `run` (mirrors `claimItem`/`resolveLanePath`'s own `{ run: runFn = run }`
+ * convention), for the same "the argv AND the env are the contract" reason those are — a test can assert the
+ * exact `CLAUDE_CODE_SESSION_ID` override without shelling a real `lane-pool.mjs`.
+ */
+export function acquireLane({ lane, sessionSlug, scope, item, claudeSessionId }, { run: runFn = run } = {}) {
+  runFn('node', [
     'scripts/lane-pool.mjs', 'acquire', `--lane=${lane}`, '--purpose=conveyor-delivery',
     `--session=${sessionSlug}`, `--scope=${scope}`, `--item=${item}`, '--adopt',
-  ]);
+  ], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: claudeSessionId } });
 }
 
 /**
@@ -509,14 +536,34 @@ export function buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId
  * still the same channel `we:scripts/guard-bash.mjs` is INTENDED to read to deny the delivery agent the
  * mechanical lifecycle commands this wrapper owns itself; see `DELIVERY_HOOKS_SETTINGS`'s own docblock (bug 8,
  * above) for the honest state of that arm as of this commit — it is not built yet.
+ *
+ * `OPERATION_DELIVERY_REPORTS_DIR` (bug 9, live #3371 attempt 4, confirmed 2026-09-09 by source read) — the
+ * env override `we:scripts/operations/delivery-report-store.mjs#resolveDeliveryReportsDir` checks FIRST, before
+ * its script-location-relative default. That default resolves `import.meta.url` relative to WHICHEVER PHYSICAL
+ * COPY of the script is running — the wrapper's own process (this repo's primary checkout, or wherever the
+ * wrapper itself was started from) resolves to ITS root, while the spawned agent runs
+ * `scripts/operations/delivery-report-cli.mjs` with `cwd=lanePath`, an entirely separate `git clone`
+ * (`lane-pool.mjs`'s pooled lanes are clones, not worktrees — every lane has its OWN copy of every file under
+ * `scripts/`), so ITS `import.meta.url` resolves to the LANE's root instead. Left unset, the two processes
+ * silently agree on nothing: the agent's `done` report lands under `<lanePath>/.operations/delivery-reports/`
+ * while `runAgentToCompletion`'s `tryReadDeliveryReport` call (running in the WRAPPER's own process) looks
+ * under the wrapper's own root, finds nothing, and reports a false-negative "no done report (crash or refused
+ * effect)" — even though the agent genuinely finished and wrote its report. Confirmed exactly this way against
+ * real backlog item #3371 attempt 4: build, gate, and report all completed for real; the wrapper still rejected
+ * ~11 minutes later. The fix: resolve the reports dir ONCE, in the WRAPPER's own process (so it always names
+ * the SAME absolute directory `runAgentToCompletion`'s own `tryReadDeliveryReport` call resolves to by
+ * default), and hand it down explicitly so the spawned agent's `delivery-report-cli.mjs` — regardless of which
+ * clone's own physical copy of the script it runs — writes to that same directory instead of recomputing its
+ * own, different, script-relative default.
  */
-export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag }) {
+export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir }) {
   return {
     WE_DISPATCH_KIND: 'delivery',
     DELIVERY_SESSION: sessionSlug,
     DELIVERY_ITEM: String(item),
     LANE: lanePath,
     ATTEMPT_TAG: attemptTag ?? '',
+    OPERATION_DELIVERY_REPORTS_DIR: reportsDir,
   };
 }
 
@@ -570,6 +617,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
       resolveLane = resolveLanePath,
       run: runFn = run,
       persistFailure = persistDeliverySpawnFailure,
+      resolveReportsDir = resolveDeliveryReportsDir,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
@@ -583,10 +631,17 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // is sandboxed into editing the wrong repo entirely. Confirmed live: the agent correctly diagnosed it had
     // no real `$LANE` to `cd` into and was sandboxed into the wrong directory under this exact model.
     const lanePath = resolveLane(lane, { run: runFn });
+    // #3627 bug 9 (live #3371 attempt 4) — resolve the delivery-reports sidecar directory ONCE, in the
+    // WRAPPER's OWN process, via the same `resolveDeliveryReportsDir` this file's own `tryReadDeliveryReport`
+    // call (`runAgentToCompletion`) uses to read the report back — never leave it to the spawned agent's copy
+    // of `delivery-report-store.mjs` to recompute its own script-location-relative default, which resolves to
+    // a DIFFERENT directory because `lanePath` is a separate `git clone`, not a worktree (see
+    // `buildDeliveryAgentEnv`'s own docblock for the full mechanism and the false-negative this fixes).
+    const reportsDir = resolveReportsDir();
     // #3627 bug 7(b) — REAL env vars (see `buildDeliveryAgentEnv`'s own docblock), not the old text-appended
     // `[env: ...]` footer `fillMinimalBrief` still also appends below (kept — see that function's own comment
     // — the brief's prose reads naturally either way, and real env vars are what the CLI actually needs).
-    const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag });
+    const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
     try {
       // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
       // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without
