@@ -78,10 +78,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // REAL — every one of these is an existing exported function this session read directly.
-import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
+import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
-import { isStatutePath } from '../lib/review-escalation.mjs';
+import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/review-escalation.mjs';
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: REPO_ROOT, ...opts });
@@ -192,11 +193,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER)
     // ---- 5. Map outcome + convergeVerdict + statute-touch to a park mode, via the EXISTING deterministic
     // rubric (`review-escalation.mjs`) — REAL import, SKETCH call (the real `scoreEscalation` signature takes
     // more inputs — diff stats, dismissed-finding counts — than sketched here). -------------------------------
-    const parkDecision = decideParkMode({ report, convergeVerdict, filesTouched: report.filesTouched });
+    const parkDecision = decideParkMode({ report, convergeVerdict, filesTouched: report.filesTouched, lanePath: gate.lanePath });
 
     // ---- 6. Open the PR through the SAME canonical producer the live brief already uses — REAL CLI surface,
     // verbatim from the live brief's own step 8. ------------------------------------------------------------
-    const prResult = openPr({ item, attemptTag, lane: gate.lanePath, park: parkDecision });
+    const prResult = openPr({ item, attemptTag, lane: gate.lanePath, park: parkDecision, report });
 
     // ---- 7. Forward the optional learning, if the agent supplied one (REAL CLI surface). --------------------
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
@@ -427,13 +428,40 @@ async function runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provi
   return report;
 }
 
-/** PLACEHOLDER — real placeholder substitution would reuse `we:scripts/operations/dispatch-lane.mjs#fillBrief`
- *  against a v2-specific required-names list, not a hand-rolled replace. Sketched inline only so this file
- *  reads standalone. */
-function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag }) {
-  return template
-    .replaceAll('{{ITEM_SPEC_PATH_BASENAME}}', `<item's actual backlog filename for #${item}>`)
-    + `\n\n[env: DELIVERY_SESSION=${sessionSlug} DELIVERY_ITEM=${item} LANE=${lane} ATTEMPT_TAG=${attemptTag ?? ''}]`;
+/**
+ * REAL (was PLACEHOLDER) — the v2 brief's ONLY placeholder (`{{ITEM_SPEC_PATH_BASENAME}}`,
+ * `we:skills-src/conveyor/delivery-agent-brief-v2.md`) is a name `dispatch-lane.mjs`'s own
+ * {@link BRIEF_PLACEHOLDERS} has never heard of — this fill does not need it to have: {@link fillBrief}'s
+ * substitution branch keys on `requiredNames.includes(name)` for the EXACT-SPELLING match, never on the wider
+ * canonical/misspelling table, so a v2-only name substitutes correctly through the SAME function every other
+ * kind's fill already trusts. This is the fix the file's own prior docblock named: "real placeholder
+ * substitution would reuse `dispatch-lane.mjs#fillBrief` against a v2-specific required-names list, not a
+ * hand-rolled replace" — done exactly that way, not a second `String#replaceAll`.
+ */
+const V2_BRIEF_REQUIRED_NAMES = Object.freeze(['ITEM_SPEC_PATH_BASENAME']);
+const V2_BRIEF_OPTIONAL_NAMES = Object.freeze([]);
+
+/**
+ * The item's own backlog filename basename (`we:backlog/<num>-<slug>.md`'s `<num>-<slug>.md`), resolved the
+ * SAME way `we:scripts/operations/dispatch-lane-io.mjs#findItem` already resolves `ITEM_SPEC_PATH` for every
+ * other launch kind — never a second, hand-rolled lookup. `loadItems` is injectable (mirrors `findItem`'s own
+ * signature) so a test can hand this a synthetic backlog without touching `src/_data/backlog.js`.
+ */
+export function resolveItemSpecPathBasename(item, loadItems = () => defaultLoadItems(REPO_ROOT)) {
+  const found = findItem(String(item), loadItems);
+  if (!found) {
+    throw new Error(`deliver-item-wrapper: could not resolve a backlog filename for item #${item} — findItem returned nothing`);
+  }
+  return found.specPath.split('/').pop();
+}
+
+/** REAL. Substitutes the v2 brief's ONE placeholder through `fillBrief`, then appends the same env footer the
+ *  sketch already carried (not a placeholder — this repo has no shared "env footer" convention to reuse; it is
+ *  plain text outside the brief's own template, never itself a `{{TOKEN}}`). */
+export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag }, { loadItems } = {}) {
+  const basename = resolveItemSpecPathBasename(item, loadItems);
+  const { prompt } = fillBrief(template, { ITEM_SPEC_PATH_BASENAME: basename }, V2_BRIEF_REQUIRED_NAMES, V2_BRIEF_OPTIONAL_NAMES);
+  return `${prompt}\n\n[env: DELIVERY_SESSION=${sessionSlug} DELIVERY_ITEM=${item} LANE=${lane} ATTEMPT_TAG=${attemptTag ?? ''}]`;
 }
 
 // ================================================================================================
@@ -494,51 +522,340 @@ function resolveLanePath(lane) {
 }
 
 // ================================================================================================
-// 4. Converge — SKETCH. Driven by the wrapper now, not the agent; substance (panel/red-team/editor) unchanged.
+// 4. Converge — REAL LOOP (was SKETCH — a single `step` call mistaken for the whole loop). Verified against
+//    `scripts/converge-cli.mjs`'s own source (not assumed): `init`'s action is always `read`; `step` prints
+//    `{action, round, roundCap, verdict, outcome, reason, lensVerdicts, findings, dismissed, dialOverrides,
+//    invite, ...instruction}`, where `instruction` carries exactly the field the printed `action` needs
+//    (`read`/`panel`/`redTeam`/`edit`/`escalation`). This loop executes EVERY action
+//    `we:skills-src/converge/SKILL.md`'s action table names and keeps calling `step` — stamped with the
+//    `round` it just printed, per the SKILL's own bolded warning — until the action is genuinely `land` or
+//    `escalate`, never stopping after the first call.
+//
+//    WHO RUNS EACH ACTION, AND WHY THAT MATCHES THE SKILL'S OWN INVARIANTS EVEN THOUGH THIS IS A PLAIN NODE
+//    PROCESS WITH NO AGENT TOOL:
+//      - `read`   — shell the printed `read.command` (verified real: `converge-transports.mjs#readMaterial`
+//                    returns `{kind:'shell', command, cwd}` — read directly, not assumed).
+//      - `panel` / `red-team` — seat headless jurors through `skills-src/jury/panel-fanout.mjs`, THE SAME shim
+//                    the SKILL requires ("never the Agent tool") — this wrapper has no Agent tool to misuse
+//                    either way, but the underlying reason (independence is a property of the JUDGE, not of
+//                    who launched it) is identical, so the same non-subagent path applies.
+//      - `edit`   — the ONE tool-bearing spawn. Goes through THIS FILE's own verified `--restricted` +
+//                    hooks-settings argv (see `CLAUDE_RESTRICTED_PROVIDER`'s docblock above), NEVER
+//                    `judge-spawn.mjs`'s `--safe-mode` argv — that combination was independently confirmed
+//                    elsewhere in this file to drop `guard-lane.mjs`/`guard-bash.mjs` enforcement for a
+//                    TOOL-BEARING spawn, which is exactly the protection an editor writing into the lane needs.
+//      - `invite` — shell `scripts/review-core-cli.mjs invite` for the growth delta.
+//    Every sub-driver takes an injectable `run` (mirrors this file's own `run` helper) so the loop is
+//    unit-testable without spawning a real `claude`/`node` child.
 // ================================================================================================
 
-/** SKETCH — the live brief's own step 6 documents `init`/`step` to `land`/`escalate`; this wrapper drives
- *  that same loop instead of the agent, which is the concrete form of this session's step-6 design call (see
- *  `we:backlog/3627-*.md`'s amendment): KEEP the review, MOVE who drives it. Not verified against
- *  `converge-cli.mjs`'s real `step` output shape. */
-function runConverge({ lane, item }) {
-  const state = `${lane}/.converge-state.json`;
-  run('node', [
-    'scripts/converge-cli.mjs', 'init', `--lane=${lane}`, `--state=${state}`, '--care=elevated',
-    `--goal=deliver item ${item} to spec`,
+const CONVERGE_PANEL_DEPTH = 0; // this wrapper is the top-level driver, never itself a nested panel seat.
+const CONVERGE_PANEL_MAX_DEPTH = 2; // `skills-src/converge/SKILL.md`'s own worked `panel-fanout.mjs` example.
+const CONVERGE_PANEL_MAX_BUDGET_USD = 8; // same worked example's aggregate ceiling.
+// Defensive backstop ONLY. The REAL termination bound is `converge-core.mjs`'s own round cap
+// (`deriveNegotiationOutcome`), which guarantees a `land`/`escalate` verdict long before this could fire — if
+// it ever does, that is a bug in this loop (or in the core), not a legitimately long real run.
+const CONVERGE_MAX_LOOP_STEPS = 200;
+
+function writeJsonFile(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  return path;
+}
+
+/**
+ * Seat one headless panel over the round's material, through `panel-fanout.mjs` (REAL — verified against that
+ * file's own `panelFanout`/`panelJurors` source: payload is `{subject, subjectNoun, round, materialFile,
+ * jurors:[{id, lens, mandate}]}`, the result's `seats` array carries `{lens, ok, findings, ...}` per seat).
+ *
+ * A touch-set perspective lens (`a11y`/`visual-vs-target`/`perf`) that `converge-cli.mjs` seated with a
+ * GROUNDING METHOD instead of a mandate (`entry.mandate === null`) is reported `ok:false` with no findings —
+ * this wrapper has no browser/vision tooling to run that method, and the SKILL states that is non-blocking for
+ * an advisory lens ("the driver runs that tool and reports the lens `ok: false` if it cannot").
+ */
+function runConvergePanel(panelEntries, { lane, item, round, material, run: runFn, writeFile = writeJsonFile }) {
+  const jurors = [];
+  const groundingOnly = [];
+  for (const entry of panelEntries || []) {
+    if (entry.mandate === null) { groundingOnly.push({ lens: entry.lens, ok: false, findings: [] }); continue; }
+    for (let slot = 1; slot <= (entry.jurors || 1); slot += 1) {
+      jurors.push({ id: `${entry.lens}#${slot}`, lens: entry.lens, mandate: entry.mandate });
+    }
+  }
+  if (!jurors.length) return { lensResults: groundingOnly };
+  const materialFile = `${lane}/.converge-material-r${round}.txt`;
+  writeFileSync(materialFile, material ?? '');
+  const payloadFile = writeFile(`${lane}/.converge-panel-r${round}.json`, {
+    subject: 'pr-diff', subjectNoun: 'diff', round, materialFile, jurors,
+  });
+  const out = runFn('node', [
+    'skills-src/jury/panel-fanout.mjs', `--payload-file=${payloadFile}`, `--depth=${CONVERGE_PANEL_DEPTH}`,
+    `--max-depth=${CONVERGE_PANEL_MAX_DEPTH}`, `--max-total-budget-usd=${CONVERGE_PANEL_MAX_BUDGET_USD}`,
+    `--run-id=converge-${item}-r${round}`,
   ]);
-  // PLACEHOLDER — real loop would read `step`'s own printed state and repeat until `land`/`escalate`, per
-  // `we:skills-src/converge/SKILL.md`'s action table (not re-read in full for this sketch).
-  const stepOut = run('node', ['scripts/converge-cli.mjs', 'step', `--state=${state}`]);
-  return JSON.parse(stepOut); // e.g. { verdict: 'land' } | { verdict: 'escalate', reason: '...' }
+  const result = JSON.parse(out);
+  const seated = (result.seats || []).map((s) => ({ lens: s.lens, ok: s.ok, findings: s.findings || [] }));
+  return { lensResults: [...seated, ...groundingOnly] };
+}
+
+/**
+ * Ratify (or fail to ratify) the panel's accept — an independent adversary judging the SAME material with no
+ * visibility into the panel's own reasoning (#2707). Same shim, a DISTINCT `--run-id` per the SKILL's stated
+ * invariant: reusing the panel's run id would mint the red-team the identity of the juror it must be able to
+ * contradict.
+ */
+function runConvergeRedTeam(redTeam, { lane, item, round, material, run: runFn, writeFile = writeJsonFile }) {
+  const jury = (redTeam && Array.isArray(redTeam.jury)) ? redTeam.jury : [];
+  if (!jury.length) return { ran: false, findings: [] };
+  const materialFile = `${lane}/.converge-material-r${round}.txt`;
+  writeFileSync(materialFile, material ?? '');
+  const jurors = jury.map((j) => ({ id: `${j.lens}#redteam`, lens: j.lens, mandate: j.prompt }));
+  const payloadFile = writeFile(`${lane}/.converge-redteam-r${round}.json`, {
+    subject: 'pr-diff', subjectNoun: 'diff', round, materialFile, jurors,
+  });
+  const out = runFn('node', [
+    'skills-src/jury/panel-fanout.mjs', `--payload-file=${payloadFile}`, `--depth=${CONVERGE_PANEL_DEPTH}`,
+    `--max-depth=${CONVERGE_PANEL_MAX_DEPTH}`, `--max-total-budget-usd=${CONVERGE_PANEL_MAX_BUDGET_USD}`,
+    `--run-id=converge-${item}-r${round}-redteam`,
+  ]);
+  const result = JSON.parse(out);
+  const findings = (result.seats || []).flatMap((s) => (s.ok ? (s.findings || []) : []));
+  return { ran: true, findings };
+}
+
+/** PURE. The argv for the converge editor's one-off, tool-bearing, `--output-format json` spawn — a SIBLING of
+ *  {@link buildRestrictedProviderArgv}, not a reuse of it: the editor always spawns fresh (never `--resume`,
+ *  a converge round is self-contained) and needs `--output-format json` for a parseable reply, which the
+ *  delivery-agent argv has no reason to carry. Exported for the same "argv IS the contract" reason
+ *  {@link buildRestrictedProviderArgv} is exported. */
+export function buildConvergeEditorArgv({ sessionId, prompt, settingsFile }) {
+  return [
+    '--restricted', '--tools', RESTRICTED_PROVIDER_TOOLS, '--strict-mcp-config', '--disable-slash-commands',
+    '--settings', settingsFile, '--output-format', 'json',
+    '-p', '--session-id', String(sessionId), prompt,
+  ];
+}
+
+/**
+ * Best-effort parse of the editor's `--output-format json` reply into `{advanced, dismissed}`. Two JSON
+ * layers: the CLI's own envelope (`{result: "<the editor's own text>", ...}`), and the editor's own text —
+ * the transport's prompt (`converge-transports.mjs#applyRevision`) told it to return PURE JSON. Either layer
+ * failing to parse degrades to `{advanced:false, dismissed:[]}` rather than throwing — the SAME fail-closed
+ * direction `deriveRoundObservations` already takes for a stalled editor (an unadvanced round escalates; it
+ * does not crash the driver). Exported so this degradation is asserted directly, not only through the loop.
+ */
+export function parseConvergeEditResult(rawOut) {
+  try {
+    const envelope = JSON.parse(String(rawOut));
+    const text = typeof envelope.result === 'string' ? envelope.result : String(rawOut);
+    const match = text.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : text);
+    return {
+      advanced: parsed.advanced === true,
+      dismissed: Array.isArray(parsed.dismissed) ? parsed.dismissed : [],
+    };
+  } catch {
+    return { advanced: false, dismissed: [] };
+  }
+}
+
+/** Spawn ONE fresh restricted editor session for this round. See the section header above for why this goes
+ *  through this file's own `--restricted` argv rather than `judge-spawn.mjs`. */
+function runConvergeEdit(editInstruction, { item, round, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile }) {
+  const settingsFile = ensureSettingsFile();
+  const sessionId = `${item}-converge-editor-r${round}`;
+  const argv = buildConvergeEditorArgv({ sessionId, prompt: editInstruction.prompt, settingsFile });
+  const out = runFn('claude', argv);
+  return parseConvergeEditResult(out);
+}
+
+/** Shell `review-core-cli.mjs invite` for the jury-growth delta (#2640), per the SKILL's `invite` row. A
+ *  crashed/unparseable answer reports back as `null` — exactly what the SKILL says to do ("Report
+ *  `inviteEcho: null` if the invite agent crashed"), extended here to any answer this driver could not parse. */
+function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, jurorsPerLens, run: runFn, writeFile = writeJsonFile }) {
+  const payloadFile = writeFile(`${lane}/.converge-invite-r${round}.json`, {
+    careLevel, seatedLenses, jurorsPerLens, invitedLens: invite.lens, citedFinding: invite.citedFinding,
+  });
+  try {
+    const out = runFn('node', ['scripts/review-core-cli.mjs', 'invite', `--file=${payloadFile}`, '--json']);
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE LOOP. Drives `converge-cli.mjs` `init` → repeated `step` calls, executing whatever action each call
+ * prints, until the action is genuinely `land` or `escalate` — replacing the sketch's single `step` call.
+ * `run` is injectable (defaults to this file's own `run`) so the whole loop is testable against a scripted
+ * fake CLI without spawning real processes.
+ */
+export function runConverge({ lane, item, goal }, { run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile } = {}) {
+  const state = `${lane}/.converge-state.json`;
+  const initOut = JSON.parse(runFn('node', [
+    'scripts/converge-cli.mjs', 'init', `--lane=${lane}`, `--state=${state}`, '--care=elevated',
+    `--goal=${goal || `deliver item ${item} to spec`}`,
+  ]));
+
+  let step = initOut;
+  const careLevel = initOut.careLevel;
+  let seatedLenses = initOut.seatableLenses || initOut.lenses || [];
+  let jurorsPerLens = initOut.jurorsPerLens;
+  let material = '';
+  let lastLensResults = [];
+
+  for (let i = 0; i < CONVERGE_MAX_LOOP_STEPS; i += 1) {
+    if (step.action === 'land' || step.action === 'escalate') return step;
+
+    const obs = { round: step.round };
+    if (step.action === 'read') {
+      const out = runFn('bash', ['-c', step.read.command], { cwd: step.read.cwd, maxBuffer: 64 * 1024 * 1024 });
+      material = out;
+      obs.readResult = { material: out };
+    } else if (step.action === 'panel') {
+      const { lensResults } = runConvergePanel(step.panel, { lane, item, round: step.round, material, run: runFn });
+      lastLensResults = lensResults;
+      obs.lensResults = lensResults;
+      // #2640 juror-invite-on-discovery needs a GROUNDED citation from a tool this wrapper ran — it runs no
+      // grounding-method tooling of its own (see `runConvergePanel`'s docblock), so it has nothing to invite
+      // on. REAL, not a stub: reporting none here is the honest answer for a driver with no such tool, exactly
+      // as a human driver who ran no invite-eligible tool would report none.
+      obs.invites = [];
+    } else if (step.action === 'red-team') {
+      obs.lensResults = lastLensResults;
+      obs.redTeamResult = runConvergeRedTeam(step.redTeam, { lane, item, round: step.round, material, run: runFn });
+    } else if (step.action === 'edit') {
+      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, run: runFn, ensureSettingsFile });
+    } else if (step.action === 'invite') {
+      obs.invite = step.invite;
+      obs.inviteEcho = runConvergeInvite(step.invite, {
+        lane, round: step.round, careLevel, seatedLenses, jurorsPerLens, run: runFn,
+      });
+    } else {
+      throw new Error(`deliver-item-wrapper: converge-cli reported an action this loop does not know how to run: ${JSON.stringify(step.action)}`);
+    }
+
+    const obsPath = writeJsonFile(`${lane}/.converge-obs-${step.round}-${i}.json`, obs);
+    const stepOut = JSON.parse(runFn('node', ['scripts/converge-cli.mjs', 'step', `--state=${state}`, `--obs=${obsPath}`]));
+    if (Array.isArray(stepOut.lenses)) seatedLenses = stepOut.lenses;
+    if (Number.isFinite(stepOut.jurorsPerLens)) jurorsPerLens = stepOut.jurorsPerLens;
+    step = stepOut;
+  }
+  throw new Error(
+    `deliver-item-wrapper: the converge loop for item #${item} exceeded ${CONVERGE_MAX_LOOP_STEPS} steps `
+    + 'without a land/escalate verdict — converge-core\'s own round cap should have terminated it long before '
+    + 'this; treat as a bug in this loop (or in converge-core), not as a legitimately long real run.',
+  );
 }
 
 // ================================================================================================
-// 5. Escalation mapping — REAL rubric imports, SKETCH glue. This is the piece that most directly replaces
-//    today's live brief's Escalations section (7 cases, 3 exit codes, park-mode prose) with a table the
-//    WRAPPER evaluates instead of the agent reasoning through prose.
+// 5. Escalation mapping — REAL rubric, REAL glue (was: real imports over a SKETCH two-input stand-in). Wires in
+//    the FULL `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) — diff stats and dismissed-finding
+//    count included, not just path-shape — via `producerReviewLabel`, the SAME mapping
+//    `we:scripts/pr-land.mjs`'s own producer-time label derivation uses, so this wrapper's park decision agrees
+//    with the label a normal `open-pr --mode=label-on-green` PR would have been scored with at open.
 // ================================================================================================
 
-/** SKETCH glue over REAL rubric primitives (`isStatutePath`/`isPolicyCorePath` from `gate-config.mjs`, both
- *  actually imported above) — a real implementation would call the FULL `scoreEscalation` from
- *  `we:scripts/lib/review-escalation.mjs` (diff stats + dismissed-finding counts, not just path-shape),
- *  simplified here to the two inputs this sketch actually has in scope. */
-function decideParkMode({ report, convergeVerdict, filesTouched }) {
+/** Real, cheap diff stats for `scoreEscalation`'s `changedFiles`/`diffLines` inputs — the SAME shape
+ *  `git diff --numstat` produces, read directly off the lane clone (mirrors `converge-cli.mjs`'s own
+ *  `laneChangedFiles`, read above while verifying `runConverge`'s `read` action). `run` is injectable so this
+ *  is testable without a real git checkout. Fails soft to an empty/zero reading — a wrapper-side git failure
+ *  here must not crash the whole delivery; it just means `scoreEscalation` sees no size/blast-radius signal,
+ *  which is the safe direction for a signal that only ever ADDS review capacity, never blocks (#3320). */
+export function computeLaneDiffStats(lanePath, { run: runFn = run, baseRef = 'origin/main' } = {}) {
+  try {
+    const mergeBase = runFn('git', ['-C', lanePath, 'merge-base', 'HEAD', baseRef]).trim();
+    const numstat = runFn('git', ['-C', lanePath, 'diff', '--numstat', mergeBase]);
+    const changedFiles = [];
+    let diffLines = 0;
+    for (const line of numstat.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const [add, del, ...pathParts] = trimmed.split('\t');
+      const path = pathParts.join('\t');
+      if (path) changedFiles.push(path);
+      const a = Number(add);
+      const d = Number(del);
+      if (Number.isFinite(a)) diffLines += a;
+      if (Number.isFinite(d)) diffLines += d;
+    }
+    return { changedFiles, diffLines };
+  } catch {
+    return { changedFiles: [], diffLines: 0 };
+  }
+}
+
+/**
+ * REAL. `touchesStatute` stays as a cheap, explicit up-front check — it is a DIFFERENT rubric surface from
+ * `scoreEscalation`'s own statute/leash signal (`isPolicyCorePath`, from `gate-config.mjs`, is not one of
+ * `scoreEscalation`'s own terms), so it is kept alongside the full rubric rather than folded into or replaced
+ * by it. `report.outcome === 'needs-human-judgment'` and `convergeVerdict.verdict === 'escalate'` are likewise
+ * kept as their own forcing reasons: they are signals `scoreEscalation` has no way to know about (the agent's
+ * own self-reported call, and converge's own independent-panel verdict), not duplicates of anything it scores.
+ * On top of all three, the FULL rubric now runs for real: diff stats read off the lane
+ * ({@link computeLaneDiffStats}) plus the round's dismissed-finding count feed `scoreEscalation`, and
+ * `producerReviewLabel` — the same function `pr-land.mjs` itself uses — turns its verdict into a label.
+ */
+export function decideParkMode({ report, convergeVerdict, filesTouched, lanePath, crossRepo = false }, { run: runFn = run } = {}) {
   const touchesStatute = (filesTouched || []).some((f) => isStatutePath(f) || isPolicyCorePath(f));
   if (touchesStatute) return { mode: 'park', label: 'review:human', reason: 'statute/policy-core path touched' };
   if (report.outcome === 'needs-human-judgment') return { mode: 'park', label: 'review:human', reason: report.reason };
   if (convergeVerdict.verdict === 'escalate') return { mode: 'park', label: 'review:human', reason: convergeVerdict.reason };
-  return { mode: 'label-on-green', label: 'ready-to-merge', reason: null };
+
+  const dismissedFindings = Array.isArray(convergeVerdict.dismissed) ? convergeVerdict.dismissed.length : 0;
+  const diffStats = lanePath ? computeLaneDiffStats(lanePath, { run: runFn }) : { changedFiles: filesTouched || [], diffLines: 0 };
+  const score = scoreEscalation({
+    changedFiles: diffStats.changedFiles, diffLines: diffStats.diffLines, dismissedFindings, crossRepo,
+  });
+  const scoreLabel = producerReviewLabel(score);
+  if (scoreLabel) {
+    return { mode: 'park', label: scoreLabel, reason: `scoreEscalation: ${score.reasons.join('; ') || 'escalated'}`, score };
+  }
+  return { mode: 'label-on-green', label: 'ready-to-merge', reason: null, score };
 }
 
 // ================================================================================================
 // 6/7. PR + learnings — REAL CLI surfaces, lifted verbatim from the live brief's own step 8/9.
 // ================================================================================================
 
+/**
+ * REAL (was PLACEHOLDER) — `openPr`'s `--bodyFile` names `${lane}/.pr-body.md`, and this is the writer that
+ * actually puts a real body there before `openPr` reads it. `open-pr.mjs#planOpen` REFUSES a create with no
+ * body (`prCreateBodyGuard`, "the drain gate rejects a bodyless PR at land"), so the ENOENT this file's own
+ * honesty label warned about was never merely cosmetic — the very next real run would have thrown here.
+ *
+ * MINIMAL, ON PURPOSE. `we:scripts/pr-land.mjs#composePrBody` is the FULLER body composer (it also embeds a
+ * lane manifest and the #2844 author-actor stamp), but it is scoped to `pr-land.mjs`'s own CLI invocation —
+ * it reads `process.argv`/`currentActorId()` at module load, so importing it here would run a second,
+ * unrelated CLI's flag parsing as a side effect of this file's own import. `pr-land.mjs` (which `open-pr`
+ * shells) applies its OWN author stamp to whatever body it is handed, so this generator does not need to
+ * duplicate that half — only the human-readable content pr-land does not invent on its own.
+ *
+ * The one-line summary is pulled from the delivery agent's own report (`report.reason` — the only prose field
+ * {@link DELIVERY_REPORT_VERSION}'s schema carries; optional on a `done` outcome, so a report that supplied
+ * none falls back to a generic, still-accurate line rather than an empty body section).
+ */
+export function buildPrBody({ item, report }) {
+  const summary = (report && typeof report.reason === 'string' && report.reason.trim())
+    || `Delivers item #${item} per its backlog spec.`;
+  const filesLine = (report && Array.isArray(report.filesTouched) && report.filesTouched.length)
+    ? `\n\nFiles touched:\n${report.filesTouched.map((f) => `- ${f}`).join('\n')}`
+    : '';
+  return `## #${item}\n\n${summary}${filesLine}\n\n---\nDelivered by the #3627 minimal delivery-agent pipeline `
+    + '(the mechanical wrapper drove review/gate/PR — the agent only built and reported).\n';
+}
+
+/** REAL — writes {@link buildPrBody}'s content to the exact path `openPr`'s `--bodyFile` reads, so the file
+ *  genuinely exists (with real content) by the time `openPr` runs. `writeFile` is injectable for tests. */
+export function writePrBody({ item, lane, report }, { writeFile = writeFileSync } = {}) {
+  const bodyFile = `${lane}/.pr-body.md`;
+  writeFile(bodyFile, buildPrBody({ item, report }));
+  return bodyFile;
+}
+
 /** REAL (flags lifted verbatim from the live brief's step 8, both branches). */
-function openPr({ item, attemptTag, lane, park }) {
+function openPr({ item, attemptTag, lane, park, report }) {
   const ref = `lane/${item}${attemptTag ?? ''}-<slug>`; // <slug> — PLACEHOLDER, same free-text the live brief already leaves to the caller
-  const bodyFile = `${lane}/.pr-body.md`; // PLACEHOLDER — body authoring itself is out of this sketch's scope
+  const bodyFile = writePrBody({ item, lane, report }); // REAL — was a PLACEHOLDER path nothing wrote.
   const args = [
     'scripts/operations/run.mjs', 'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main',
     `--bodyFile=${bodyFile}`, '--requireVerified=true', '--json',

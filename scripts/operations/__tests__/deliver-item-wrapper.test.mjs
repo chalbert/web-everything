@@ -13,9 +13,18 @@
  * assumed) verification trail behind the swap — a `--safe-mode` swap was tried FIRST and independently
  * REJECTED after a real smoke test showed a `--settings=<hooks file>` layered on top of it never fires.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { DELIVERY_AGENT_PROVIDERS, buildRestrictedProviderArgv } from '../deliver-item-wrapper.mjs';
+import {
+  DELIVERY_AGENT_PROVIDERS, buildRestrictedProviderArgv,
+  resolveItemSpecPathBasename, fillMinimalBrief,
+  buildPrBody, writePrBody,
+  runConverge, parseConvergeEditResult, buildConvergeEditorArgv,
+  decideParkMode, computeLaneDiffStats,
+} from '../deliver-item-wrapper.mjs';
 
 describe('buildRestrictedProviderArgv', () => {
   it('fresh spawn: uses --restricted (never --bare), an explicit --tools allowlist, --strict-mcp-config, '
@@ -93,5 +102,324 @@ describe('DELIVERY_AGENT_PROVIDERS registry', () => {
   it('keeps the codex seam a named, deliberately-throwing placeholder (provider parity, #3627 requirement 6)', () => {
     expect(DELIVERY_AGENT_PROVIDERS.codex).toBeDefined();
     expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn()).toThrow(/no real implementation/);
+  });
+});
+
+// ================================================================================================
+// Gap 1 — fillMinimalBrief was a PLACEHOLDER that left `{{ITEM_SPEC_PATH_BASENAME}}`'s literal token-name
+// text in the agent's prompt. It now reuses `dispatch-lane.mjs#fillBrief` for real substitution, resolving the
+// item's actual backlog filename through the SAME `findItem` every other launch kind uses.
+// ================================================================================================
+describe('fillMinimalBrief / resolveItemSpecPathBasename (#3627 gap 1)', () => {
+  const fakeLoadItems = () => [
+    { num: '1234', slug: 'do-the-thing', scope: ['we:scripts/lib/foo.mjs'] },
+  ];
+
+  it('resolveItemSpecPathBasename resolves the REAL backlog filename basename via findItem, not a guess', () => {
+    expect(resolveItemSpecPathBasename('1234', fakeLoadItems)).toBe('1234-do-the-thing.md');
+  });
+
+  it('resolveItemSpecPathBasename throws a named error when the item cannot be found — never substitutes a placeholder', () => {
+    expect(() => resolveItemSpecPathBasename('9999', fakeLoadItems)).toThrow(/could not resolve a backlog filename for item #9999/);
+  });
+
+  it('fillMinimalBrief substitutes the REAL filename into the brief — never the literal placeholder-name string the sketch left behind', () => {
+    const template = 'Read your spec at backlog/{{ITEM_SPEC_PATH_BASENAME}}. Build exactly that.';
+    const prompt = fillMinimalBrief(
+      template,
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '' },
+      { loadItems: fakeLoadItems },
+    );
+    expect(prompt).toContain('backlog/1234-do-the-thing.md');
+    expect(prompt).not.toContain('{{ITEM_SPEC_PATH_BASENAME}}');
+    expect(prompt).not.toContain("item's actual backlog filename for #1234");
+  });
+
+  it('fillMinimalBrief still appends the env footer after the real fillBrief substitution', () => {
+    const prompt = fillMinimalBrief(
+      '{{ITEM_SPEC_PATH_BASENAME}}',
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: 'b' },
+      { loadItems: fakeLoadItems },
+    );
+    expect(prompt).toMatch(/\[env: DELIVERY_SESSION=conveyor-1234 DELIVERY_ITEM=1234 LANE=7 ATTEMPT_TAG=b\]$/);
+  });
+
+  it('fillMinimalBrief refuses (via the real fillBrief) rather than substituting a value with unsafe characters', () => {
+    const unsafeLoadItems = () => [{ num: '1234', slug: 'x`echo pwned`y', scope: [] }];
+    expect(() => fillMinimalBrief(
+      '{{ITEM_SPEC_PATH_BASENAME}}',
+      { item: '1234', sessionSlug: 's', lane: 1, attemptTag: '' },
+      { loadItems: unsafeLoadItems },
+    )).toThrow(/characters the brief cannot carry safely/);
+  });
+});
+
+// ================================================================================================
+// Gap 2 — openPr read `${lane}/.pr-body.md`, a file nothing ever wrote (ENOENT the moment a real run reached
+// PR-open). `buildPrBody`/`writePrBody` now generate and write a real, minimal body first.
+// ================================================================================================
+describe('buildPrBody / writePrBody (#3627 gap 2)', () => {
+  it('pulls the one-line summary from the delivery agent\'s own report reason, and names the item', () => {
+    const body = buildPrBody({ item: '1234', report: { reason: 'Implements the missing FooBar validator.', filesTouched: [] } });
+    expect(body).toContain('#1234');
+    expect(body).toContain('Implements the missing FooBar validator.');
+  });
+
+  it('falls back to a generic, still-accurate summary when the report carries no reason (allowed on a `done` outcome)', () => {
+    const body = buildPrBody({ item: '5678', report: { outcome: 'done', reason: null, filesTouched: [] } });
+    expect(body).toContain('#5678');
+    expect(body).toMatch(/Delivers item #5678/);
+  });
+
+  it('lists filesTouched when the report carries them', () => {
+    const body = buildPrBody({ item: '1234', report: { reason: null, filesTouched: ['scripts/lib/foo.mjs', 'scripts/lib/__tests__/foo.test.mjs'] } });
+    expect(body).toContain('scripts/lib/foo.mjs');
+    expect(body).toContain('scripts/lib/__tests__/foo.test.mjs');
+  });
+
+  it('carries a standard footer identifying the mechanical pipeline', () => {
+    const body = buildPrBody({ item: '1234', report: { reason: 'x', filesTouched: [] } });
+    expect(body).toMatch(/#3627 minimal delivery-agent pipeline/);
+  });
+
+  it('writePrBody writes buildPrBody\'s exact content to `${lane}/.pr-body.md` and returns that path', () => {
+    const writeFile = vi.fn();
+    const report = { reason: 'Implements the thing.', filesTouched: [] };
+    const path = writePrBody({ item: '1234', lane: '/lanes/lane-1', report }, { writeFile });
+    expect(path).toBe('/lanes/lane-1/.pr-body.md');
+    expect(writeFile).toHaveBeenCalledWith('/lanes/lane-1/.pr-body.md', buildPrBody({ item: '1234', report }));
+  });
+});
+
+// ================================================================================================
+// Gap 3 — runConverge called `converge-cli.mjs step` exactly once and returned it as if that were the whole
+// loop. It now calls `init`, then loops `step` — executing whatever action is printed (`read`/`panel`/
+// `edit`/`red-team`/`invite`) — until the action is genuinely `land` or `escalate`.
+// ================================================================================================
+describe('runConverge (#3627 gap 3 — the real loop)', () => {
+  let lane;
+
+  beforeEach(() => {
+    lane = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-converge-'));
+  });
+
+  afterEach(() => {
+    rmSync(lane, { recursive: true, force: true });
+  });
+
+  /** A scripted fake `run` — routes on argv shape, never on call order, so it stays correct regardless of how
+   *  many times any one action's sub-driver calls it internally. `steps` is consumed in order for `step` calls
+   *  only (the ONE sequence genuinely order-dependent: each `step` answers "what happens after the observation
+   *  I was just fed"). */
+  function fakeRun({ init, read = 'diff --git a/x b/x\n+hi\n', panel, redTeamPanel, editor, steps }) {
+    let stepIdx = 0;
+    const calls = [];
+    const fn = vi.fn((cmd, args = [], opts) => {
+      calls.push({ cmd, args, opts });
+      if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'init') return init;
+      if (cmd === 'bash') return read;
+      if (cmd === 'node' && args[0] === 'skills-src/jury/panel-fanout.mjs') {
+        const isRedTeam = args.some((a) => String(a).includes('-redteam'));
+        return isRedTeam ? redTeamPanel : panel;
+      }
+      if (cmd === 'claude') return editor;
+      if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'step') {
+        if (stepIdx >= steps.length) throw new Error(`fakeRun: no scripted step left for call #${stepIdx + 1}`);
+        return steps[stepIdx++];
+      }
+      throw new Error(`fakeRun: unexpected run(${cmd}, ${JSON.stringify(args)})`);
+    });
+    fn.calls = calls;
+    return fn;
+  }
+
+  it('loops through read → panel → edit → red-team → land, calling `step` MORE THAN ONCE (the actual gap)', () => {
+    const init = JSON.stringify({
+      action: 'read', round: 1, careLevel: 'elevated', jurorsPerLens: 1, roundCap: 5,
+      lenses: ['correctness'], seatableLenses: ['correctness'], mandatoryLenses: ['correctness'],
+      read: { command: 'git diff', cwd: lane },
+    });
+    const panelStep = JSON.stringify({
+      action: 'panel', round: 1, roundCap: 5,
+      panel: [{ lens: 'correctness', jurors: 1, mandatory: true, mandate: 'judge it' }],
+    });
+    const editStep = JSON.stringify({
+      action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' },
+    });
+    const redTeamStep = JSON.stringify({
+      action: 'red-team', round: 2, roundCap: 5,
+      redTeam: { jury: [{ lens: 'correctness', prompt: 'try to break it' }] },
+    });
+    const landStep = JSON.stringify({ action: 'land', round: 2, roundCap: 5, verdict: 'land', dismissed: [] });
+
+    const run = fakeRun({
+      init,
+      panel: JSON.stringify({ seats: [{ lens: 'correctness', ok: true, findings: [] }] }),
+      redTeamPanel: JSON.stringify({ seats: [{ lens: 'correctness', ok: true, findings: [] }] }),
+      editor: JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }),
+      steps: [panelStep, editStep, redTeamStep, landStep],
+    });
+
+    const result = runConverge(
+      { lane, item: '1234', goal: 'ship the thing' },
+      { run, ensureSettingsFile: () => '/fake/hooks-settings.json' },
+    );
+
+    expect(result.action).toBe('land');
+    expect(result.verdict).toBe('land');
+
+    const stepCalls = run.calls.filter((c) => c.cmd === 'node' && c.args[1] === 'step');
+    expect(stepCalls.length).toBe(4); // proves the loop, not a single call mistaken for the whole thing
+    const initCalls = run.calls.filter((c) => c.cmd === 'node' && c.args[1] === 'init');
+    expect(initCalls.length).toBe(1);
+    expect(run.calls.some((c) => c.cmd === 'claude')).toBe(true); // the editor round actually ran
+    expect(run.calls.filter((c) => c.cmd === 'node' && c.args[0] === 'skills-src/jury/panel-fanout.mjs').length).toBe(2); // panel + red-team
+  });
+
+  it('stops on `escalate` without ever needing an edit/panel round', () => {
+    const init = JSON.stringify({
+      action: 'read', round: 1, careLevel: 'elevated', jurorsPerLens: 1, roundCap: 5,
+      lenses: ['correctness'], seatableLenses: ['correctness'], mandatoryLenses: ['correctness'],
+      read: { command: 'git diff', cwd: lane },
+    });
+    const escalateStep = JSON.stringify({
+      action: 'escalate', round: 1, roundCap: 5, verdict: null,
+      reason: 'mandatory-lens-absent', dismissed: [],
+    });
+    const run = fakeRun({ init, steps: [escalateStep] });
+
+    const result = runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    expect(result.action).toBe('escalate');
+    expect(result.reason).toBe('mandatory-lens-absent');
+  });
+
+  it('throws a named error if converge-cli reports an action this loop does not recognize (fails loud, not silently)', () => {
+    const init = JSON.stringify({
+      action: 'read', round: 1, careLevel: 'elevated', jurorsPerLens: 1, roundCap: 5,
+      lenses: [], seatableLenses: [], mandatoryLenses: [],
+      read: { command: 'git diff', cwd: lane },
+    });
+    const weirdStep = JSON.stringify({ action: 'teleport', round: 1, roundCap: 5 });
+    const run = fakeRun({ init, steps: [weirdStep] });
+
+    expect(() => runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' }))
+      .toThrow(/action this loop does not know how to run.*teleport/s);
+  });
+});
+
+describe('parseConvergeEditResult (#3627 gap 3 helper)', () => {
+  it('parses the two JSON layers of a real --output-format json editor reply', () => {
+    const raw = JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [{ summary: 'x', reason: 'not real' }] }) });
+    expect(parseConvergeEditResult(raw)).toEqual({ advanced: true, dismissed: [{ summary: 'x', reason: 'not real' }] });
+  });
+
+  it('degrades to {advanced:false, dismissed:[]} on unparseable output — fail-closed, matches an editor-stall escalation, never throws', () => {
+    expect(parseConvergeEditResult('not json at all')).toEqual({ advanced: false, dismissed: [] });
+  });
+});
+
+describe('buildConvergeEditorArgv (#3627 gap 3 helper)', () => {
+  it('is a FRESH restricted spawn (never --resume) carrying --output-format json for a parseable reply', () => {
+    const argv = buildConvergeEditorArgv({ sessionId: 'item-converge-editor-r1', prompt: 'fix it', settingsFile: '/f.json' });
+    expect(argv).toContain('--restricted');
+    expect(argv).not.toContain('--safe-mode');
+    expect(argv).not.toContain('--resume');
+    expect(argv).toEqual(expect.arrayContaining(['--output-format', 'json']));
+    expect(argv[argv.length - 1]).toBe('fix it');
+  });
+});
+
+// ================================================================================================
+// Gap 4 — decideParkMode skipped the real `scoreEscalation` rubric (statute-touch + needs-human-judgment only).
+// It now wires in the FULL real `scoreEscalation` (`scripts/lib/review-escalation.mjs`), including diff-size
+// and dismissed-finding signals, via the SAME `producerReviewLabel` mapping `pr-land.mjs` itself uses.
+// ================================================================================================
+describe('decideParkMode (#3627 gap 4 — the real scoreEscalation rubric)', () => {
+  const noVerdict = { verdict: 'land', dismissed: [] };
+
+  it('still parks review:human on a statute-path touch (kept as its own cheap, explicit check)', () => {
+    const result = decideParkMode({
+      report: { outcome: 'done' }, convergeVerdict: noVerdict,
+      filesTouched: ['docs/agent/platform-decisions.md'],
+    });
+    expect(result).toEqual({ mode: 'park', label: 'review:human', reason: 'statute/policy-core path touched' });
+  });
+
+  it('still parks review:human on the agent\'s own needs-human-judgment outcome', () => {
+    const result = decideParkMode({
+      report: { outcome: 'needs-human-judgment', reason: 'a genuine taste call' }, convergeVerdict: noVerdict,
+      filesTouched: ['scripts/lib/foo.mjs'],
+    });
+    expect(result).toEqual({ mode: 'park', label: 'review:human', reason: 'a genuine taste call' });
+  });
+
+  it('still parks review:human when converge itself escalated', () => {
+    const result = decideParkMode({
+      report: { outcome: 'done' }, convergeVerdict: { verdict: 'escalate', reason: 'red-team broke it', dismissed: [] },
+      filesTouched: ['scripts/lib/foo.mjs'],
+    });
+    expect(result).toEqual({ mode: 'park', label: 'review:human', reason: 'red-team broke it' });
+  });
+
+  // NOTE — these use `reports/*.md` paths, not `scripts/*`: `scripts/` is itself a real blast-radius surface
+  // in `scoreEscalation` (verified directly against `isBlastRadiusPath`), so a `scripts/` path would trip the
+  // rubric for a reason unrelated to what each test below is isolating (size, dismissed-findings).
+
+  it('calls the REAL scoreEscalation for a clean small diff and labels ready-to-merge (label-on-green)', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args.includes('merge-base')) return 'abc123\n';
+      if (args.includes('diff')) return '2\t1\treports/2026-09-09-note.md\n';
+      throw new Error(`unexpected: ${cmd} ${args}`);
+    });
+    const result = decideParkMode(
+      { report: { outcome: 'done' }, convergeVerdict: noVerdict, filesTouched: ['reports/2026-09-09-note.md'], lanePath: '/lanes/lane-1' },
+      { run },
+    );
+    expect(result.mode).toBe('label-on-green');
+    expect(result.label).toBe('ready-to-merge');
+    expect(result.score.escalate).toBe(false);
+  });
+
+  it('a LARGE real diff (>= the real 400-line threshold) escalates to review:pending via the real rubric, never silently clears', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args.includes('merge-base')) return 'abc123\n';
+      if (args.includes('diff')) return '300\t200\treports/2026-09-09-big.md\n';
+      throw new Error(`unexpected: ${cmd} ${args}`);
+    });
+    const result = decideParkMode(
+      { report: { outcome: 'done' }, convergeVerdict: noVerdict, filesTouched: ['reports/2026-09-09-big.md'], lanePath: '/lanes/lane-1' },
+      { run },
+    );
+    expect(result.mode).toBe('park');
+    expect(result.label).toBe('review:pending');
+    expect(result.score.escalate).toBe(true);
+    expect(result.score.signals.size).toBeGreaterThanOrEqual(400);
+  });
+
+  it('dismissed converge findings (from the real convergeVerdict.dismissed) escalate to review:pending via scoreEscalation', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args.includes('merge-base')) return 'abc123\n';
+      if (args.includes('diff')) return '2\t1\treports/2026-09-09-note.md\n';
+      throw new Error(`unexpected: ${cmd} ${args}`);
+    });
+    const result = decideParkMode(
+      {
+        report: { outcome: 'done' },
+        convergeVerdict: { verdict: 'land', dismissed: [{ summary: 'a finding the editor dismissed', reason: 'not real' }] },
+        filesTouched: ['reports/2026-09-09-note.md'],
+        lanePath: '/lanes/lane-1',
+      },
+      { run },
+    );
+    expect(result.mode).toBe('park');
+    expect(result.label).toBe('review:pending');
+    expect(result.score.signals.dismissedFindings).toBe(1);
+  });
+
+  it('computeLaneDiffStats fails soft to {changedFiles:[], diffLines:0} when git itself fails — never crashes the park decision', () => {
+    const run = vi.fn(() => { throw new Error('git exploded'); });
+    const stats = computeLaneDiffStats('/lanes/lane-1', { run });
+    expect(stats).toEqual({ changedFiles: [], diffLines: 0 });
   });
 });
