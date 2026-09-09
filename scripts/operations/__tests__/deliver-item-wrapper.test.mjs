@@ -27,6 +27,7 @@ import {
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
+  resetStaleVerifyMarker, runVerifyOperation,
 } from '../deliver-item-wrapper.mjs';
 
 // A real UUID, hardcoded for deterministic assertions (mirrors `crypto.randomUUID()`'s own output shape). Tests
@@ -1105,6 +1106,178 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
   });
 });
 
+// #3627 attempt-5 live-run finding (real run against backlog #3371) — `runVerifyOperation` used to collapse
+// EVERY non-`ok` verdict to one flat `{ok:false}`, so a gate that never RAN (a stale/foreign verify marker,
+// `verify-lane.mjs` exit 3 `superseded`) looked identical to a gate that ran and genuinely failed. The `verify`
+// operation's own `assessChecks` (`scripts/operations/verify.mjs`) already keeps these apart in
+// `verdict.{failed,unrun}` — this is the caller finally reading that distinction instead of throwing it away.
+describe('runVerifyOperation (#3627 attempt-5 finding — three-valued outcome: pass/fail/unrun, never a flat ok/not-ok)', () => {
+  it('reports `pass` for a green verdict', () => {
+    const run = vi.fn(() => JSON.stringify({
+      verdict: { ok: true, cwd: '/lane', suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+    }));
+    const result = runVerifyOperation('/lane', { run });
+    expect(result.outcome).toBe('pass');
+  });
+
+  it('reports `fail` when the suites actually ran and a check failed (verdict.failed > 0)', () => {
+    const run = vi.fn(() => JSON.stringify({
+      verdict: {
+        ok: false, cwd: '/lane', suite: 'run', passed: 1, failed: 1, unrun: 0,
+        checks: [{ name: 'test:unit', outcome: 'fail' }],
+        blocking: [{ check: 'test:unit', why: 'failed', detail: '3 error(s)' }],
+      },
+    }));
+    const result = runVerifyOperation('/lane', { run });
+    expect(result.outcome).toBe('fail');
+  });
+
+  it('reports `unrun`, never `fail`, when nothing failed but the gate did not complete for this commit '
+    + '(verdict.unrun > 0, verdict.failed === 0 — the stale/foreign-marker shape #3627 attempt 5 hit)', () => {
+    const run = vi.fn(() => JSON.stringify({
+      verdict: {
+        ok: false, cwd: '/lane', suite: 'run', passed: 0, failed: 0, unrun: 1,
+        checks: [{ name: 'verify-lane', outcome: 'unrun', reason: 'marker status "superseded"' }],
+        blocking: [{ check: 'verify-lane', why: 'did-not-run', detail: 'usage/git error (exit 3): superseded' }],
+      },
+    }));
+    const result = runVerifyOperation('/lane', { run });
+    expect(result.outcome).toBe('unrun');
+    expect(result.detail).toMatch(/did-not-run/);
+  });
+
+  it('reports `unrun` when the `run.mjs verify` invocation itself throws (operation-level crash/refusal)', () => {
+    const run = vi.fn(() => { const e = new Error('spawn failed'); e.status = 1; throw e; });
+    const result = runVerifyOperation('/lane', { run });
+    expect(result.outcome).toBe('unrun');
+  });
+
+  it('reports `unrun` when stdout is not parseable JSON', () => {
+    const run = vi.fn(() => 'not json');
+    const result = runVerifyOperation('/lane', { run });
+    expect(result.outcome).toBe('unrun');
+  });
+});
+
+// #3627 attempt-5 live-run finding — the resumed agent's own SECOND report must be read and honored: a
+// `blocked` self-diagnosis (the gate problem was not in its own diff) must surface as its own distinct
+// `gate-blocked` status, never be silently mapped to `gate-red` regardless of what the second verify said.
+describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agent\'s second `blocked` report '
+  + 'instead of collapsing every further non-ok verify into `red`)', () => {
+  const verifyUnrunJson = () => JSON.stringify({
+    verdict: {
+      ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 0, failed: 0, unrun: 1,
+      checks: [{ name: 'verify-lane', outcome: 'unrun', reason: 'superseded' }],
+      blocking: [{ check: 'verify-lane', why: 'did-not-run', detail: 'usage/git error (exit 3): superseded' }],
+    },
+  });
+
+  it('returns `gate-blocked` (carrying the agent\'s own reason) when the resumed agent\'s second report says '
+    + '`outcome: "blocked"` — even though the second verify is STILL non-ok', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({
+      status: 'done', outcome: 'blocked',
+      reason: 'the gate never ran — a stale verify marker for an unrelated sha; nothing in my diff to fix',
+    }));
+    const result = runGateWithOneRetry(
+      { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider },
+      { run, readReport },
+    );
+    expect(result.status).toBe('gate-blocked');
+    expect(result.reason).toMatch(/stale verify marker/);
+    expect(result.retryReport.outcome).toBe('blocked');
+    expect(provider.spawn).toHaveBeenCalledTimes(1); // still exactly one resume, never a second/unbounded retry
+  });
+
+  it('still returns `red` when the resumed agent\'s second report says `outcome: "done"` but the gate is '
+    + 'still genuinely failing — a `done` report never overrides a real red', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return JSON.stringify({
+        verdict: {
+          ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+          checks: [{ name: 'test:unit', outcome: 'fail' }],
+          blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
+        },
+      });
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'] }));
+    const result = runGateWithOneRetry(
+      { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider },
+      { run, readReport },
+    );
+    expect(result.status).toBe('red');
+  });
+
+  it('still returns `red` (not `gate-blocked`) when no second report is available at all — an absent report '
+    + 'is not a `blocked` self-diagnosis', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => null);
+    const result = runGateWithOneRetry(
+      { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider },
+      { run, readReport },
+    );
+    expect(result.status).toBe('red');
+  });
+
+  it('sends the resumed agent an HONEST prompt for an `unrun` first gate — never "your gate failed, fix it" '
+    + '— and explicitly invites a `blocked` report when nothing in its own diff explains it', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => null);
+    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
+    const prompt = provider.spawn.mock.calls[0][0].prompt;
+    expect(prompt).not.toMatch(/Your gate failed/);
+    expect(prompt).toMatch(/could not RUN/);
+    expect(prompt).toMatch(/outcome: 'blocked'/);
+  });
+
+  it('sends the resumed agent the ORIGINAL "your gate failed, fix it" prompt for a genuine `fail` first gate', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return JSON.stringify({
+        verdict: {
+          ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+          checks: [{ name: 'test:unit', outcome: 'fail' }],
+          blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
+        },
+      });
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => null);
+    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
+    const prompt = provider.spawn.mock.calls[0][0].prompt;
+    expect(prompt).toMatch(/Your gate failed/);
+  });
+});
+
 describe('claimItem (#3627 follow-up — routed through the declared `claim` operation, never raw backlog.mjs claim)', () => {
   it('calls `run.mjs claim --ref=<item> --json` — the exact argv the `claim` operation\'s real input schema '
     + '(`ref` required, `as`/`force` optional) accepts', () => {
@@ -1139,12 +1312,15 @@ describe('claimItem (#3627 follow-up — routed through the declared `claim` ope
 describe('acquireLane (#3627 secondary finding — --adopt must stamp the delivery agent\'s own future session id)', () => {
   it('passes CLAUDE_CODE_SESSION_ID=<claudeSessionId> in the acquire subprocess\'s env — never left to inherit '
     + 'whatever the wrapper\'s own process ambiently carries', () => {
+    // `run` returns '' for every call here (including the post-acquire `lane-pool.mjs status` lookup), so
+    // `resolveLanePath` throws on the unparseable '' and acquireLane's own best-effort try/catch swallows it —
+    // exactly 2 calls (acquire, then the status lookup that fails), never a 3rd `verify-lane.mjs reset` call.
     const run = vi.fn(() => '');
     acquireLane(
       { lane: 3, sessionSlug: 'conveyor-3371', scope: 'we:scripts/lib/foo.mjs', item: '3371', claudeSessionId: '77777777-7777-4777-8777-777777777777' },
       { run },
     );
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(2);
     const [, args, opts] = run.mock.calls[0];
     expect(args).toEqual([
       'scripts/lane-pool.mjs', 'acquire', '--lane=3', '--purpose=conveyor-delivery',
@@ -1169,5 +1345,72 @@ describe('acquireLane (#3627 secondary finding — --adopt must stamp the delive
       if (previous === undefined) delete process.env.WE_ACQUIRE_LANE_TEST_MARKER;
       else process.env.WE_ACQUIRE_LANE_TEST_MARKER = previous;
     }
+  });
+
+  // #3627 attempt-5 live-run finding (backlog #3371) — a fresh acquire must clear a STALE `.git/.lane-verify`
+  // marker left by a prior occupant of the same lane, or `verify-lane.mjs verify` refuses to even START the
+  // gate for this attempt's own commit (exit 3, `superseded`), which the `verify` operation then misreports as
+  // `unrun`. See `scripts/verify-lane.mjs`'s own `reset` subcommand docblock for the real marker path/shape
+  // this reuses instead of guessing at a `rm -rf`.
+  it('resolves the just-acquired lane\'s real path and clears any stale verify marker via `verify-lane.mjs '
+    + 'reset`, using the SAME CLAUDE_CODE_SESSION_ID override the acquire call itself used', () => {
+    const calls = [];
+    const run = vi.fn((cmd, args, opts) => {
+      calls.push(args);
+      if (args[0] === 'scripts/lane-pool.mjs' && args[1] === 'acquire') return '';
+      if (args[0] === 'scripts/lane-pool.mjs' && args[1] === 'status') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/verify-lane.mjs' && args[1] === 'reset') {
+        expect(opts.env.CLAUDE_CODE_SESSION_ID).toBe('99999999-9999-4999-8999-999999999999');
+        return JSON.stringify({ status: 'reset' });
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    acquireLane(
+      { lane: 3, sessionSlug: 'conveyor-3371', scope: 'we:x', item: '3371', claudeSessionId: '99999999-9999-4999-8999-999999999999' },
+      { run },
+    );
+    expect(calls).toEqual([
+      ['scripts/lane-pool.mjs', 'acquire', '--lane=3', '--purpose=conveyor-delivery', '--session=conveyor-3371', '--scope=we:x', '--item=3371', '--adopt'],
+      ['scripts/lane-pool.mjs', 'status', '--json'],
+      ['scripts/verify-lane.mjs', 'reset', '--repo=/real/pool/lane-3', '--json'],
+    ]);
+  });
+
+  it('swallows a `reset` refusal (e.g. a live foreign lease) rather than failing the whole acquire', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs' && args[1] === 'acquire') return '';
+      if (args[0] === 'scripts/lane-pool.mjs' && args[1] === 'status') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/verify-lane.mjs' && args[1] === 'reset') {
+        const err = new Error('refused: active-lease');
+        err.status = 3;
+        throw err;
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    expect(() => acquireLane(
+      { lane: 3, sessionSlug: 'conveyor-3371', scope: 'we:x', item: '3371', claudeSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { run },
+    )).not.toThrow();
+  });
+});
+
+describe('resetStaleVerifyMarker (#3627 attempt-5 finding — shells verify-lane.mjs\'s own sanctioned `reset`)', () => {
+  it('calls `verify-lane.mjs reset --repo=<lanePath> --json` with CLAUDE_CODE_SESSION_ID set to claudeSessionId', () => {
+    const run = vi.fn(() => JSON.stringify({ status: 'reset' }));
+    resetStaleVerifyMarker('/real/pool/lane-4', { run, claudeSessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' });
+    expect(run).toHaveBeenCalledTimes(1);
+    const [cmd, args, opts] = run.mock.calls[0];
+    expect(cmd).toBe('node');
+    expect(args).toEqual(['scripts/verify-lane.mjs', 'reset', '--repo=/real/pool/lane-4', '--json']);
+    expect(opts.env.CLAUDE_CODE_SESSION_ID).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  });
+
+  it('never throws when the underlying `run` throws (best-effort, matching a `reset` refusal or a missing lane)', () => {
+    const run = vi.fn(() => { throw new Error('boom'); });
+    expect(() => resetStaleVerifyMarker('/real/pool/lane-4', { run, claudeSessionId: 'x' })).not.toThrow();
   });
 });

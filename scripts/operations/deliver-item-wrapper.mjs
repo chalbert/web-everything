@@ -283,6 +283,14 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       releaseClaimAndLane({ item, lane, sessionSlug });
       return { item, result: 'gate-red' };
     }
+    if (gate.status === 'gate-blocked') {
+      // #3627 attempt-5 finding — the resumed agent's own honest `blocked` self-diagnosis (see
+      // `runGateWithOneRetry`'s docblock), never collapsed into `gate-red`. Same release shape as a real red
+      // gate — this attempt did not produce a landable diff either way — but the reported result names the
+      // agent's own reason instead of pretending the gate itself failed.
+      releaseClaimAndLane({ item, lane, sessionSlug });
+      return { item, result: `gate-blocked (${gate.reason || 'no reason reported'})` };
+    }
 
     // ---- 4. Converge — driven BY THE WRAPPER, not the agent (this session's call on step 6, see the design
     // amendment on #3627: KEEP the substance, MOVE the driving). SKETCH — the exact init/step loop shape is
@@ -357,6 +365,53 @@ export function acquireLane({ lane, sessionSlug, scope, item, claudeSessionId },
     'scripts/lane-pool.mjs', 'acquire', `--lane=${lane}`, '--purpose=conveyor-delivery',
     `--session=${sessionSlug}`, `--scope=${scope}`, `--item=${item}`, '--adopt',
   ], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: claudeSessionId } });
+
+  // #3627 (attempt-5 live-run finding, backlog #3371) — a freshly acquired lane must never inherit a STALE
+  // `.git/.lane-verify` marker from a PRIOR occupant's run. Left in place, `verify-lane.mjs verify`'s own
+  // START-write guard (see its header — refuses to overwrite a TERMINAL record for a FOREIGN sha) refuses to
+  // even START the gate for this attempt's own commit: exit 3, `status: 'superseded'` — which the `verify`
+  // operation then classifies as `unrun` (`verify-io.mjs#classifyVerifyResult`, "usage/git error (exit 3)").
+  // That is not a red gate the agent can fix by changing code; it is a leftover from a DIFFERENT delivery
+  // attempt that reused this same lane earlier. This is a narrower, wrapper-scoped fix for exactly that
+  // shape — NOT the broader `backlog/3538-...md` case (a marker for a sha that DID land and outlives its PR),
+  // which this deliberately does not attempt to solve.
+  //
+  // The wrapper has exclusive ownership of this lane for this one delivery attempt from the moment `--adopt`
+  // above stamps `claudeSessionId` as its occupant, so there is no reason to preserve whatever the PRIOR
+  // occupant's marker says. Rather than blindly `rm -rf`ing `.git/.lane-verify` (guessing the filename/shape),
+  // this shells `verify-lane.mjs`'s OWN sanctioned `reset` subcommand (see its header docblock, `x4jcqm4`) —
+  // the single home that already knows the marker's real path/shape and already applies the correct
+  // lease-aware safety check (refuses only when a genuinely live FOREIGN lease holds the lane; a no-marker
+  // lane is a no-op; our own just-acquired lease reads as confirmed-own via the SAME `CLAUDE_CODE_SESSION_ID`
+  // override used above, so it never self-refuses).
+  //
+  // Best-effort: `resolveLanePath` can throw if the pool hasn't caught up with the acquire yet, and `reset`
+  // itself can refuse (exit 3) if a sibling session's lease is somehow still live. Neither should fail the
+  // whole acquire — a marker that could not be cleared here just means `verify` may report `unrun` later,
+  // which `runVerifyOperation`/`runGateWithOneRetry` below now handle correctly instead of mis-reporting it as
+  // a red gate.
+  try {
+    const lanePath = resolveLanePath(lane, { run: runFn });
+    resetStaleVerifyMarker(lanePath, { run: runFn, claudeSessionId });
+  } catch {
+    // best-effort — see docblock above.
+  }
+}
+
+/**
+ * REAL — shells `verify-lane.mjs reset` (its own sanctioned marker-clear subcommand) against the just-acquired
+ * lane. Exported and separated from `acquireLane` so the reset call itself is directly testable (exact argv +
+ * env) without a real `lane-pool.mjs status` round trip. Swallows a refusal/crash rather than throwing: a
+ * `reset` refusal is EITHER "no marker to clear" (already a no-op inside `verify-lane.mjs` itself) OR "a live
+ * foreign lease holds this lane" (a real reason to leave it alone, not something to fail the acquire over).
+ */
+export function resetStaleVerifyMarker(lanePath, { run: runFn = run, claudeSessionId } = {}) {
+  try {
+    runFn('node', ['scripts/verify-lane.mjs', 'reset', `--repo=${lanePath}`, '--json'],
+      { env: { ...process.env, CLAUDE_CODE_SESSION_ID: claudeSessionId } });
+  } catch {
+    // best-effort — see acquireLane's docblock above for why a refusal here must not fail the whole acquire.
+  }
 }
 
 /**
@@ -828,37 +883,63 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
  * (exit 0) whenever it successfully RAN the checks, red or green — a red gate is a successfully completed
  * verdict, not a failed run. So `runVerifyOperation` below reads `verdict.ok` out of the `--json` envelope
  * instead of relying on `runFn` throwing.
+ *
+ * THREE-VALUED, NOT TWO (#3627 attempt-5 live-run finding). The `verify` operation's own `assessChecks`
+ * (`scripts/operations/verify.mjs`) already keeps `unrun` apart from `fail` in its `verdict.{failed,unrun}`
+ * counts and `verdict.blocking[].why` (`'did-not-run'` vs `'failed'`) — this function used to throw that
+ * distinction away by collapsing every non-`ok` verdict to one flat `{ok:false}`. A `verdict.unrun > 0` with
+ * `verdict.failed === 0` means the gate never actually RAN for this commit (a stale/foreign marker, a corrupt
+ * marker, a usage/git error — see `verify-io.mjs#classifyVerifyResult`'s own header) — that is a wrapper/
+ * environment problem, not evidence of anything wrong in the agent's diff, and must be reported as `unrun`,
+ * never folded into `fail`. A genuine `verdict.failed > 0` (the suites ran and found problems) is `fail`. An
+ * operation-level crash/refusal (a throw, or output that didn't parse) is `unrun` too — nothing ran, so it is
+ * not a `fail` either.
  */
-function runVerifyOperation(lanePath, { run: runFn = run } = {}) {
+export function runVerifyOperation(lanePath, { run: runFn = run } = {}) {
   let out;
   try {
     out = runFn('node', ['scripts/operations/run.mjs', 'verify', `--checkout=${lanePath}`, '--json']);
   } catch (e) {
-    // A non-zero exit here means the OPERATION itself could not complete (a refusal/crash), not a red gate —
-    // still `unrun`-shaped, not a `pass`, so this correctly reads as not-ok.
-    return { ok: false, detail: String(e.stdout || e.message || e) };
+    // The OPERATION itself could not complete (a refusal/crash) — nothing ran, so this is `unrun`, never `fail`.
+    return { outcome: 'unrun', detail: String(e.stdout || e.message || e), verdict: null };
   }
   let parsed;
   try {
     parsed = JSON.parse(out);
   } catch {
-    return { ok: false, detail: String(out) };
+    return { outcome: 'unrun', detail: String(out), verdict: null };
   }
   const verdict = parsed.verdict || {};
-  if (verdict.ok === true) return { ok: true, detail: null };
-  return { ok: false, detail: JSON.stringify(verdict.blocking ?? verdict, null, 2) };
+  if (verdict.ok === true) return { outcome: 'pass', detail: null, verdict };
+  // A real failure (suites ran, at least one check actually failed) outranks an unrun one in the outcome —
+  // `verdict.blocking` already carries both kinds of entry, so no information is lost by picking `fail` here
+  // when both are present; there is something concrete for the agent to look at either way. Only when NOTHING
+  // failed (purely `unrun`/`corrupt`/`emptySuite`, exactly the stale-marker shape this fix exists for) does
+  // this read as `unrun`.
+  const outcome = (Number(verdict.failed) || 0) > 0 ? 'fail' : 'unrun';
+  return { outcome, detail: JSON.stringify(verdict.blocking ?? verdict, null, 2), verdict };
 }
 
 /** One resume-and-retry, not an unbounded loop — mirrors the live brief's own "red gate is a hard stop" bar,
  *  but gives the agent exactly one chance to fix ITS OWN gate failure before that stop applies, since a
- *  transient/self-inflicted red on a fresh diff is common and cheap to hand back once. */
+ *  transient/self-inflicted red on a fresh diff is common and cheap to hand back once.
+ *
+ *  #3627 attempt-5 live-run finding — the resumed agent's own SECOND report is now read and honored BEFORE a
+ *  second failing/unrun verify is allowed to collapse straight to `red`. A resumed agent that correctly
+ *  self-diagnoses the gate problem is not in its own diff — an environment/infra failure it cannot fix by
+ *  editing code, e.g. the exact stale-marker `unrun` this fix's part A targets — reports `outcome: 'blocked'`
+ *  with a precise `reason`, not a code fix; that honest self-report must survive to the caller as its own
+ *  distinct `gate-blocked` status rather than being silently discarded and mapped to `red` regardless of what
+ *  it said (the bug: `second.ok` used to be the ONLY thing this function looked at after the resume).
+ *  `readReport` is injectable (mirrors `runAgentToCompletion`'s own `readReport = tryReadDeliveryReport`
+ *  convention) so this second-report branch is testable without a real delivery-report sidecar on disk. */
 export function runGateWithOneRetry(
   { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
-  { run: runFn = run } = {},
+  { run: runFn = run, readReport = tryReadDeliveryReport } = {},
 ) {
   const lanePath = resolveLanePath(lane, { run: runFn });
   const first = runVerifyOperation(lanePath, { run: runFn });
-  if (first.ok) return { status: 'green', lanePath };
+  if (first.outcome === 'pass') return { status: 'green', lanePath };
 
   // BUG-5 FIX: `claudeSessionId` is the SAME real UUID `runAgentToCompletion`'s fresh spawn used — threaded
   // through from `deliverItem` — never `sessionSlug`. A `--resume` must target the exact CLI session the fresh
@@ -866,11 +947,23 @@ export function runGateWithOneRetry(
   // fix closes. See `resumeAgentWithGateFailure` and `deliverItem`'s own docblocks for the full reasoning.
   // #3627 bug 7 — `item`/`attemptTag` threaded through too (both already in scope here), same reasoning as
   // `runAgentToCompletion`'s fresh-spawn call: the provider needs them to mint the real env vars.
-  resumeAgentWithGateFailure({ sessionSlug, lane, item, attemptTag, failureOutput: first.detail, provider, claudeSessionId }); // SKETCH — see below
-  const retryReport = tryReadDeliveryReport(sessionSlug); // agent's fresh `done` report after fixing
+  // #3627 attempt-5 finding — `gateOutcome` threaded through so the resume prompt itself can stop telling an
+  // agent "your gate failed, fix it" when the true outcome is `unrun` (nothing in its diff to fix) — see
+  // `resumeAgentWithGateFailure` below.
+  resumeAgentWithGateFailure({
+    sessionSlug, lane, item, attemptTag, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
+  }); // SKETCH — see below
+  const retryReport = readReport(sessionSlug); // agent's fresh report after the resume — 'done' (fixed) or 'blocked' (couldn't)
   const second = runVerifyOperation(lanePath, { run: runFn });
-  if (second.ok) return { status: 'green', lanePath, retryReport };
-  return { status: 'red', lanePath };
+  if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
+
+  // THE FIX: honor the resumed agent's own second report before assuming `red`. An honest `blocked`
+  // self-diagnosis outranks a second non-passing verify — it is reported as its OWN distinct status, carrying
+  // the agent's own reason, rather than being silently collapsed into `gate-red`.
+  if (retryReport && retryReport.outcome === 'blocked') {
+    return { status: 'gate-blocked', lanePath, retryReport, reason: retryReport.reason || null };
+  }
+  return { status: 'red', lanePath, retryReport };
 }
 
 /** SKETCH — this is the concrete "push, don't poll" moment for the gate specifically, and it is a firm
@@ -883,9 +976,23 @@ export function runGateWithOneRetry(
  *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
-function resumeAgentWithGateFailure({ sessionSlug, lane, item, attemptTag, failureOutput, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId }) {
-  const prompt = `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
-    + `\`done\` report exactly as before.`;
+function resumeAgentWithGateFailure({
+  sessionSlug, lane, item, attemptTag, failureOutput, gateOutcome = 'fail', provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId,
+}) {
+  // #3627 attempt-5 finding — an `unrun` gate gets an HONEST prompt, not "your gate failed, fix it": that
+  // wording is nonsensical when the gate never ran at all (a wrapper/environment problem, e.g. the stale
+  // verify marker part A now clears at acquire time), and it is exactly what pushed a real agent to spend a
+  // turn correctly explaining there was nothing in its own diff to fix. Explicitly inviting a `blocked` report
+  // here is what `runGateWithOneRetry` above now reads and honors, instead of that self-diagnosis happening
+  // only by the agent's own initiative against a misleading prompt.
+  const prompt = gateOutcome === 'unrun'
+    ? `The verification gate could not RUN for your commit in $LANE (this looks like a wrapper/environment `
+      + `problem, not necessarily a problem in your own diff):\n\n${failureOutput}\n\nIf you can see something `
+      + `genuinely wrong in your own change, fix it, commit again, and send a fresh \`done\` report exactly as `
+      + `before. If you cannot find anything wrong in your own diff, do not guess at a code change — send a `
+      + `report with \`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
+    : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
+      + `\`done\` report exactly as before.`;
   // BUG-5 FIX: both `sessionId` and `resumeSessionId` are `claudeSessionId` — the real UUID minted once in
   // `deliverItem` and reused by the fresh spawn — never `sessionSlug`. `--resume <id>` must name the SAME CLI
   // session the fresh spawn created, and that id must itself be a UUID (CLI-enforced).
