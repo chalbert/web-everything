@@ -1886,7 +1886,16 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return `Never renumber a backlog item (${srcN} → ${dstN}) — NNN is immutable. A new item takes the next free number; yield this one.`;
   }
 
-  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && CORPUS_MD.test(s)))
+  // #3390 — the sed/tee/perl half used to test CORPUS_MD against the WHOLE command string `s`, so a
+  // purely read-only invocation that merely NAMES a backlog/reports path (`sed -n '1,200p' backlog/x.md`,
+  // `perl -ne 'print' backlog/x.md`) was denied even with no `-i`/`--in-place`/write flag anywhere — a
+  // false positive on a benign read, reproduced live twice in one night on two different files. Reuse
+  // `fileWriteTargets`, the SAME real-write-target extractor `primaryTreeWriteReason` above already calls
+  // via `isFileWriteRedirect(s)` for this exact segment — it correctly parses `-i`/`--in-place`/a short
+  // cluster containing `i` for sed/perl and real `tee` targets, so only an ACTUAL write target is tested
+  // against CORPUS_MD, never the raw command text. `atCommand` still scopes this to sed/tee/perl
+  // invocations (a `>>` from any other command is caught by the first half of this OR, untouched).
+  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && fileWriteTargets(s).some((f) => CORPUS_MD.test(f))))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
   // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
