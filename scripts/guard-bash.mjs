@@ -1317,6 +1317,62 @@ function fileOperands(args, optsWithArg = new Set()) {
   return files;
 }
 
+/** sed's `w` write mechanism embedded in the SCRIPT TEXT itself — no `-i`/`--in-place` needed. Two shapes:
+ *  a trailing `w <file>` flag on an `s///` command (`s/x/y/w file`, `s/x/y/gw file`), and a standalone
+ *  address-command (`/pat/w file`, `3,5w file`) with no `s` at all. Either way sed opens `<file>` and writes
+ *  to it on a match — a real write the flag-only scan above (in-place / tee operands) never looks at, because
+ *  it only inspects ARGV flags, never the script TEXT. Not full sed grammar (no `{...}` blocks, no `;`-aware
+ *  splitting) — good enough to catch both shapes above without chasing sed's whole command language. */
+const SED_SUB_W = /s(.)(?:\\.|(?!\1).)*?\1(?:\\.|(?!\1).)*?\1[a-zA-Z0-9]*w[ \t]+(\S.*)$/;
+const SED_ADDR_W = /^[ \t]*(?:\$|\d+(?:,(?:\d+|\$))?|\/(?:\\.|[^\/\\])*\/(?:,\/(?:\\.|[^\/\\])*\/)?)[ \t]*w[ \t]+(\S.*)$/;
+
+/** The file(s) one sed SCRIPT TEXT writes via an embedded `w` — see `SED_SUB_W`/`SED_ADDR_W` above. Pure.
+ *  Scanned per PHYSICAL LINE (`-e` script fragments join on `\n`, same as sed itself reads them) since `w`
+ *  consumes the rest of its line as the filename, so a later command on the SAME line can never be its own
+ *  match target. */
+function sedWriteTargets(scriptText) {
+  const out = [];
+  for (const line of String(scriptText).split('\n')) {
+    // group 1 of SED_SUB_W is the `s///` DELIMITER (`\1` backreferences need it captured); the filename is
+    // group 2 — `sub[1]` would silently push the delimiter character itself as the "target" instead.
+    const sub = line.match(SED_SUB_W);
+    if (sub) out.push(sub[2].trim());
+    const addr = line.match(SED_ADDR_W);
+    if (addr) out.push(addr[1].trim());
+  }
+  return out;
+}
+
+/** The sed/perl SCRIPT TEXT(s) a tokenized `args` list passes INLINE — every `-e`/`--expression` operand, or
+ *  (when neither `-e`/`--expression` nor `-f`/`--file` appears at all) the first bare operand, which sed/perl
+ *  read as the script itself (`sed 's/x/y/' file`, `sed -n '/pat/p' file`). A `-f`/`--file` script lives in
+ *  an external file this guard cannot see, so its presence is noted (to skip the implicit-first-operand
+ *  fallback) but its content is never guessed at. Pure. */
+function sedScriptTexts(args) {
+  const texts = [];
+  let sawInlineOrFile = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.quoted) continue;
+    if (a.text === '-e' || a.text === '--expression') {
+      sawInlineOrFile = true;
+      if (args[i + 1]) { texts.push(args[i + 1].text); i += 1; }
+      continue;
+    }
+    if (/^--expression=/.test(a.text)) { sawInlineOrFile = true; texts.push(a.text.slice('--expression='.length)); continue; }
+    if (a.text === '-f' || a.text === '--file' || /^--file=/.test(a.text)) {
+      sawInlineOrFile = true;
+      if (a.text === '-f' || a.text === '--file') i += 1; // skip the external script-file operand
+      continue;
+    }
+  }
+  if (!sawInlineOrFile) {
+    const first = args.find((a) => a.quoted || !a.text.startsWith('-'));
+    if (first) texts.push(first.text);
+  }
+  return texts;
+}
+
 /** EVERY file path `segment` writes via a shell redirect / `tee` / an in-place editor (`sed -i`, `perl -pi`),
  *  scratch paths INCLUDED. Pure.
  *
@@ -1370,6 +1426,18 @@ export function fileWriteTargets(segment) {
       const files = fileOperands(args, new Set(scriptOpts));
       out.push(...(has(...scriptOpts) ? files : files.slice(1)));
     }
+  }
+  // A security review on #2108 found the block above blind to sed's OTHER write mechanism: a `w` write
+  // embedded in the SCRIPT TEXT (a trailing `s///w file` flag, or a standalone `/addr/w file` command) needs
+  // NO `-i`/`--in-place` — `sed 's/x/y/w backlog/x.md' file` and `sed -n '/pat/w backlog/x.md' file` both
+  // genuinely write `backlog/x.md` with no in-place flag anywhere, so the `inPlace`-gated scan above (which
+  // only ever reads ARGV FLAGS) misses both entirely. This runs unconditionally — not gated on `inPlace` —
+  // and scans the actual script TEXT via `sedScriptTexts`/`sedWriteTargets` above. Perl has no equivalent
+  // NARROW write directive in its script text — a perl one-liner can only write a file via arbitrary
+  // `open`/`print` code, which is unparseable general-purpose Perl, not a structured directive like sed's
+  // `w` — so this stays sed/gsed-only by design, not an oversight.
+  if (prog === 'sed' || prog === 'gsed') {
+    for (const script of sedScriptTexts(args)) out.push(...sedWriteTargets(script));
   }
   if (prog === 'tee') out.push(...fileOperands(args, new Set(['--output-error', '-p'])));
   return out;

@@ -578,6 +578,22 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
     denied('sed -i s/x/y/ /tmp/scratch.md backlog/2200-a.md');
     denied("tee -a backlog/2200-a.md < /tmp/in.txt");
   });
+
+  // Security review on #2108 — sed's `w` write mechanism needs NO `-i`/`--in-place`: a trailing `w <file>`
+  // flag on an `s///` command, or a standalone `/addr/w <file>` address-command, both genuinely write
+  // `<file>` from the script text alone. Verified directly against real sed: pre-fix, `fileWriteTargets`
+  // only ever read ARGV flags (never the script TEXT), so both commands below returned `[]` and were
+  // allowed — a real regression the flag-only rewrite introduced while fixing the mere-mention false
+  // positive above.
+  it('denies a sed `w`-command/`w`-flag write into backlog|reports with NO -i anywhere (#2108 security finding)', () => {
+    denied("sed 's/x/y/w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/w backlog/2200-a.md' file.txt");
+  });
+
+  it('does NOT deny a sed `w`-command/`w`-flag write whose target is NOT backlog|reports', () => {
+    allowed("sed 's/x/y/w /tmp/scratch.md' file.txt");
+    allowed("sed -n '/pat/w /tmp/scratch.md' file.txt");
+  });
 });
 
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
