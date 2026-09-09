@@ -21,7 +21,8 @@
  *     2-input simplification. (The prior sketch's import of `isStatutePath` from `gate-config.mjs` was a real
  *     bug — that function lives in `review-escalation.mjs`, not `gate-config.mjs`; gone now that
  *     `scoreEscalation` is used directly, which computes the same statute/policy-core signals internally.)
- *   - PR ref/slug/body       → real slug derivation from the item's title and a real minimal PR body template.
+ *   - PR ref/slug/body       → real slug derivation from the item's own backlog slug and a real minimal PR
+ *     body template.
  * See each function's own docblock for the verification trail (what was read, what was checked against real
  * output, what remains genuinely open).
  *
@@ -772,7 +773,7 @@ export async function runCli(argv, root = REPO_ROOT) {
   );
 }
 
-const IS_CLI = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   runCli(process.argv.slice(2)).then((result) => {
     writeAllSync(1, `${JSON.stringify(result, null, 2)}\n`);
