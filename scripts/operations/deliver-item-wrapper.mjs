@@ -1035,12 +1035,24 @@ export function parseConvergeEditResult(rawOut) {
  */
 export function runConvergeEdit(
   editInstruction,
-  { item, round, lane, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID },
+  {
+    item, round, lane, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID,
+    dispatchKind = 'delivery',
+  },
 ) {
   const settingsFile = ensureSettingsFile();
   const sessionId = newSessionId();
   const argv = buildConvergeEditorArgv({ sessionId, prompt: editInstruction.prompt, settingsFile });
-  const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: 'delivery' } });
+  // `dispatchKind` GENERALIZED (#xu2pp2m fixer, mechanically-generalized, not behaviourally changed — default
+  // stays `'delivery'`, so every existing caller of `runConverge`/`runConvergeEdit` is byte-identical). This
+  // used to hardcode `WE_DISPATCH_KIND: 'delivery'` unconditionally, which was correct for the ONLY caller
+  // that existed (the delivery wrapper's own converge loop) but would mislabel a FIX dispatch's converge-edit
+  // round the same way if reused as-is — `scripts/guard-bash.mjs`'s dispatch-kind deny arm reads this exact
+  // env var to decide which mechanical lifecycle commands a dispatched agent may not run itself (see that
+  // file's own header); a fixer's converge-edit spawn should identify as `fix`, not `delivery`, once a
+  // matching `fix` arm exists there (open follow-up — see `fix-dispatch-wrapper.mjs`'s own header for the
+  // honest state of that gap as of this commit).
+  const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: dispatchKind } });
   return parseConvergeEditResult(out);
 }
 
@@ -1122,7 +1134,10 @@ export function commitConvergeRound(
  * `run` is injectable (defaults to this file's own `run`) so the whole loop is testable against a scripted
  * fake CLI without spawning real processes.
  */
-export function runConverge({ lane, item, goal }, { run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile } = {}) {
+export function runConverge(
+  { lane, item, goal },
+  { run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile, dispatchKind = 'delivery' } = {},
+) {
   const state = `${lane}/.converge-state.json`;
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `converge` operation is registered
   // yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass. Same for the
@@ -1160,7 +1175,7 @@ export function runConverge({ lane, item, goal }, { run: runFn = run, ensureSett
       obs.lensResults = lastLensResults;
       obs.redTeamResult = runConvergeRedTeam(step.redTeam, { lane, item, round: step.round, material, run: runFn });
     } else if (step.action === 'edit') {
-      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile });
+      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile, dispatchKind });
       // BUG-14 FIX — commit a genuinely accepted round's real edits NOW, before the `step` call below reads
       // the lane's state (`converge-cli.mjs`'s own `read` action re-reads the lane fresh each round, so a
       // later round must see THIS round's commit, not just uncommitted working-tree changes it happens to

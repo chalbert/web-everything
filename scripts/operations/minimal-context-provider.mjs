@@ -228,17 +228,19 @@ export function persistSpawnFailure(dirName, sessionSlug, error, { resumeSession
  *     `1>file 2>file` redirect), so this branch reads that stdout directly as the lane path and RETURNS it —
  *     there is no lane number to re-resolve a path from afterward.
  *
- * @param {{lane?: (number|string), sessionSlug: string, scope?: string, item?: (string|number), claudeSessionId: string, purpose?: string, waitMs?: number}} o
+ * @param {{lane?: (number|string), sessionSlug: string, scope?: string, item?: (string|number), claudeSessionId: string, purpose?: string, waitMs?: number, base?: string}} o
  *   `purpose` defaults to `'conveyor-delivery'` — the delivery wrapper's own pre-existing behaviour, unchanged.
  *   `lane` omitted (undefined/null) selects the UNNUMBERED shape; `waitMs` (only meaningful there) adds
  *   `--wait-ms=<n>`, matching the review brief's own `--wait-ms=30000` self-healing-momentary-capacity-flicker
- *   reasoning (see that brief's step 1 for the full account).
+ *   reasoning (see that brief's step 1 for the full account). `base` (only meaningful there too, #xu2pp2m
+ *   fixer) adds `--base=<ref>`, landing the acquired clone on a predecessor lane's pushed tip (a `lane/*` ref)
+ *   instead of `origin/main` — see the UNNUMBERED branch's own comment below for why a fixer needs this.
  * @param {{run?: Function}} [io]
  * @returns {string|undefined} the acquired lane's real path for the UNNUMBERED shape; `undefined` for the
  *   NUMBERED shape (unchanged — callers there already re-resolve via `resolveLanePath`).
  */
 export function acquireLane(
-  { lane, sessionSlug, scope, item, claudeSessionId, purpose = 'conveyor-delivery', waitMs } = {},
+  { lane, sessionSlug, scope, item, claudeSessionId, purpose = 'conveyor-delivery', waitMs, base } = {},
   { run: runFn = run } = {},
 ) {
   const env = { ...process.env, CLAUDE_CODE_SESSION_ID: claudeSessionId };
@@ -250,9 +252,20 @@ export function acquireLane(
       `--session=${sessionSlug}`, `--scope=${scope}`, `--item=${item}`, '--adopt',
     ], { env });
   } else {
-    // UNNUMBERED — the real review-brief shape: no --lane/--scope/--item, optional --wait-ms.
+    // UNNUMBERED — the real review-brief shape: no --lane/--scope/--item, optional --wait-ms. GENERALIZED
+    // (#xu2pp2m fixer) with an optional `--base=<ref>` — the real, verified `lane-pool.mjs acquire` flag
+    // (`scripts/lane-pool.mjs`'s own usage string, `#2386`) that lands the freshly-acquired clone on a
+    // PREDECESSOR LANE'S PUSHED TIP instead of `origin/main` — exactly what a fixer needs to reconstitute a
+    // bounced PR's `lane/*` ref rather than rebuild from scratch (`we:skills-src/conveyor/fix-agent-brief.md`
+    // step 1's own `--base={{LANE_REF}}` shape, now generalized onto the shared unnumbered acquire path a
+    // PR-dispatched wrapper uses — a fixer has no pre-assigned lane NUMBER from a tick plan, same as a review
+    // dispatch, so it takes whatever free lane the pool hands back and points it at the PR's own ref via
+    // `--base`). Omitted (`undefined`) for every existing caller (review dispatch, and the delivery wrapper's
+    // own NUMBERED branch, which never reaches this branch at all) — behavior for every caller that does not
+    // pass `base` is byte-for-byte unchanged.
     const args = ['scripts/lane-pool.mjs', 'acquire', `--purpose=${purpose}`, `--session=${sessionSlug}`];
     if (waitMs != null) args.push(`--wait-ms=${waitMs}`);
+    if (base != null) args.push(`--base=${base}`);
     args.push('--adopt');
     acquireOut = runFn('node', args, { env });
   }

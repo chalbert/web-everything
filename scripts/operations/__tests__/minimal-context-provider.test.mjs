@@ -241,6 +241,25 @@ describe('acquireLane', () => {
       expect(() => { path = acquireLane({ sessionSlug: 's', claudeSessionId: 'id-8', purpose: 'review-loop' }, { run }); }).not.toThrow();
       expect(path).toBe('/pool/lane-9');
     });
+
+    // #xu2pp2m fixer — `--base=<ref>` reconstitutes a bounced PR's own lane/* ref instead of resetting to
+    // origin/main (the real, verified lane-pool.mjs acquire flag, #2386).
+    it('adds --base=<ref> when given, after --wait-ms and before --adopt', () => {
+      const run = vi.fn(() => '/pool/lane-9');
+      acquireLane({ sessionSlug: 'fix-2108', claudeSessionId: 'id-9', purpose: 'conveyor-fix', waitMs: 30000, base: 'lane/2108-foo' }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args).toEqual([
+        'scripts/lane-pool.mjs', 'acquire', '--purpose=conveyor-fix', '--session=fix-2108',
+        '--wait-ms=30000', '--base=lane/2108-foo', '--adopt',
+      ]);
+    });
+
+    it('omits --base entirely when not given — every existing caller (review dispatch) is byte-for-byte unchanged', () => {
+      const run = vi.fn(() => '/pool/lane-9');
+      acquireLane({ sessionSlug: 'review-42', claudeSessionId: 'id-10', purpose: 'review-loop' }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args.some((a) => a.startsWith('--base='))).toBe(false);
+    });
   });
 });
 

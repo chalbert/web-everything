@@ -642,6 +642,23 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     expect(commitCall.args).not.toContain('.pr-body.md'); // known lane-release scratch litter, never committed
   });
 
+  // #xu2pp2m fixer — end-to-end threading through the LOOP (not just the unit test on runConvergeEdit above):
+  // the fixer's own dispatch calls `runConverge({...}, {..., dispatchKind: 'fix'})`, and that option must reach
+  // the editor sub-spawn's env, not just be silently dropped between `runConverge` and `runConvergeEdit`.
+  it('threads an explicit `dispatchKind` option from runConverge down through the loop into the editor spawn\'s env', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }),
+      steps: [landStep],
+    });
+
+    runConverge({ lane, item: '2108' }, { run, ensureSettingsFile: () => '/fake/hooks.json', dispatchKind: 'fix' });
+
+    const editorCall = run.calls.find((c) => c.cmd === 'claude');
+    expect(editorCall.opts.env.WE_DISPATCH_KIND).toBe('fix');
+  });
+
   it('creates NO commit for a round the editor did NOT advance (`advanced: false`, dismissed-only) — no empty/'
     + 'spurious commit (#3627 bug 14)', () => {
     const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
@@ -889,6 +906,19 @@ describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old rea
     );
     const [, , opts] = run.mock.calls[0];
     expect(opts.env.WE_DISPATCH_KIND).toBe('delivery');
+  });
+
+  // #xu2pp2m fixer — GENERALIZED, additive `dispatchKind` param (default stays 'delivery', so every existing
+  // call site above is byte-for-byte unchanged): a fixer's own converge-edit round should stamp WE_DISPATCH_KIND
+  // as 'fix', not 'delivery', on the shared `runConverge`/`runConvergeEdit` this second wrapper reuses.
+  it('an explicit `dispatchKind` overrides the WE_DISPATCH_KIND stamp — never behaviourally required, purely additive', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '2108', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json', dispatchKind: 'fix' },
+    );
+    const [, , opts] = run.mock.calls[0];
+    expect(opts.env.WE_DISPATCH_KIND).toBe('fix');
   });
 });
 
