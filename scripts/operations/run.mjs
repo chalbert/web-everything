@@ -241,7 +241,8 @@ export const OPERATIONS = Object.freeze({
 });
 
 /**
- * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model` become a juror's spawn options (#3151).
+ * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model`/`--provider` become a juror's spawn
+ * options (#3151, extended for `--provider` by #xqa9ttq).
  *
  * EXPORTED SO THE TEST DRIVES THIS FUNCTION AND NOT A COPY OF IT. The first cut inlined the arrow below and the
  * suite re-created the same expression, so the precedence was ASSERTED, never EXERCISED: deleting the flags
@@ -249,17 +250,22 @@ export const OPERATIONS = Object.freeze({
  * `env || cwd` would silently make `--cwd` lose to a stale environment variable and reopen #3151 with the gate
  * still green. One copy, imported by both.
  *
+ * `--provider` FOLLOWS THE SAME FLAG-WINS-ENV-FALLBACK SHAPE as `--cwd`, via `JUDGE_PROVIDER` — an operator who
+ * wants every juror in a session to default to Codex without typing `--provider=codex` on each command sets
+ * the env var once, exactly the workflow `JUDGE_LANE_CWD` already supports for the lane.
+ *
  * @param {object} [o]
- * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD` from.
+ * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD`/`JUDGE_PROVIDER` from.
  * @param {(o: object) => Function} [o.factory] - the judge builder, injected so a test can supply the spawn.
- * @returns {(flags: {cwd: (string|null), model: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
+ * @returns {(flags: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
  */
 export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge } = {}) {
   // THE FLAG WINS, and the env var is the fallback — the explicit act beats the ambient one. `|| null` on both,
   // never a fallback to this process's directory: see the `makeJudge` note at the call site.
-  return ({ cwd, model } = {}) => factory({
+  return ({ cwd, model, provider } = {}) => factory({
     cwd: cwd || env.JUDGE_LANE_CWD || null,
     model: model || null,
+    providerName: provider || env.JUDGE_PROVIDER || 'claude',
   });
 }
 
