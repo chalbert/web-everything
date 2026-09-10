@@ -63,6 +63,9 @@ export function buildIsolationCloneArgv(sourceCwd, destination) {
  * @param {(file: string, argv: string[], options: object) => Promise<unknown>} [options.execFn]
  *   execFile-compatible promise function; must reject on nonzero exit. Injected for tests.
  * @returns {IsolationProvider}
+ * @test-only-export-ok: production wiring is deliberately deferred (see file header) — this is the
+ *  first real backend of a new port, proven by #3371 Probes 10/11's direct evidence, not yet wired into
+ *  any dispatch call site. isolation-provider.test.mjs is its only consumer until that wiring lands.
  */
 export function createMacosDeletionIsolationProvider({ execFn = promisify(execFile) } = {}) {
   return async ({ sourceCwd, scratchParent = tmpdir() }) => {
