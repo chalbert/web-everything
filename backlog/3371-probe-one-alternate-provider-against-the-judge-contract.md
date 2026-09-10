@@ -400,3 +400,218 @@ evidence and a verdict, per Done-when 3.
 ## Progress
 
 - 2026-09-09 — Probed Codex CLI 0.153.4 against a real ChatGPT subscription. Ten probes run (0 through 9), all recorded above with their commands and raw output. Verdict written: buildable, with the schema transform as a hard prerequisite. No code wired in.
+
+## Probe 10 — tool-bearing doctrine isolation, attempted 2026-09-10
+
+**Verdict: no approach qualified for implementation in this execution environment.** This is an
+inconclusive Codex before/after comparison, not evidence that deletion or Seatbelt cannot work on an
+unrestricted host. Both ordinary nested Codex runs failed before producing any model response; even an
+allow-all Seatbelt control failed before executing its payload. No isolation port, backend, tests, or
+pipeline wiring was built. Probe 9 above remains the prior successful context-loading evidence.
+
+This narrowly tests doctrine visibility, not resource caps or a lane-container migration. The existing
+container research remains [#3621](3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md),
+open and unchanged. Apple's `container` remains unavailable (`command -v container` exited 1 with no
+output), so it was not tested or assumed into a design.
+
+### Environment and available reference code
+
+```
+$ codex --version
+WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)
+codex-cli 0.153.4
+$ codex login status
+Logged in using ChatGPT
+```
+
+This run itself has restricted filesystem/network access and no permission escalation available.
+`JudgeProviderRequest`, `JudgeProviderOutcome`, and the function-type port in
+`we:scripts/operations/cli-adapter.mjs` were read, along with the existing injectable-spawn tests in
+`we:scripts/lib/__tests__/judge-spawn.test.mjs`. The requested `we:scripts/lib/codex-judge-spawn.mjs`,
+`we:scripts/__tests__/codex-direct-task.test.mjs`, and `we:scripts/codex-direct-task.mjs` are absent in this
+checkout. `git branch -a --list '*xqa9ttq*'` and the following history query returned no entries:
+
+```sh
+git log --all -1 --format='%h %s' -- scripts/lib/codex-judge-spawn.mjs scripts/codex-direct-task.mjs
+```
+
+ Their implementation
+was therefore not inspected, and this record makes no claims about it.
+
+### A — real scratch clone, file present versus deleted
+
+All scratch material lived outside the working checkout under
+`/private/tmp/we-doctrine-probe-_hmte5hj`, allocated with Python `tempfile.mkdtemp`. A preliminary
+`git init -q` scratch directory with the real we:AGENTS.md produced the same Codex initialization error
+as the clone below. The actual cloned-repository comparison followed:
+
+```sh
+git clone --local --no-hardlinks --quiet . /private/tmp/we-doctrine-probe-_hmte5hj/clone
+# exit 0; stderr:
+# warning: source repository is shallow, ignoring --local
+# warning: --local is ignored
+```
+
+The repository's real we:AGENTS.md was copied byte-for-byte with `shutil.copyfile` into the scratch clone
+before the baseline (16,636 bytes in this checkout). `work.txt` initially contained `before\n`.
+The exact prompt, supplied through stdin and then closed, was:
+
+```text
+First, using only your already loaded instructions and no tools, quote the first numbered Hard rule in AGENTS.md verbatim, or say NOT LOADED if absent. Then use shell tools inside the current directory: read AGENTS.md if present and report its first Hard rule; edit work.txt from before to after; create proof.txt containing shell-ok; run git status --short and cat work.txt proof.txt. Do not commit or access other directories. Report actual tool results separately from initially loaded instructions.
+```
+
+Commands below are shell renderings of the actual Python `subprocess.run` argv calls. The parent supplied
+that prompt via `input=...`, captured stdout/stderr separately, and imposed a 45-second timeout on each
+clone run (neither hit it).
+
+```sh
+codex exec --json --ephemeral -s workspace-write -C /private/tmp/we-doctrine-probe-_hmte5hj/clone -
+# Python Path.unlink() then removed clone/AGENTS.md, before the second child started.
+codex exec --json --ephemeral -s workspace-write -C /private/tmp/we-doctrine-probe-_hmte5hj/clone -
+```
+
+**Both runs: exit 1, stdout empty, identical stderr:**
+
+```text
+WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)
+Error: failed to initialize in-process app-server client: Operation not permitted (os error 1)
+```
+
+No `thread.started`, answer, usage, or tool-execution event was emitted. There is no evidence here of
+successful baseline loading, successful exclusion, or preserved Codex tools. Authentication status alone
+was insufficient to establish a usable nested session. The particular denied initialization operation
+was not diagnosed; the error must not be recast as a model/API failure or a doctrine-loading failure.
+
+Separate **parent-shell controls**, after deletion, did work:
+
+```text
+$ git -C /private/tmp/we-doctrine-probe-_hmte5hj/clone status --short
+ D AGENTS.md
+?? work.txt
+
+$ /bin/sh -c "printf 'after\n' > work.txt; printf 'shell-ok\n' > proof.txt; cat work.txt proof.txt"
+# cwd = scratch clone; exit 0
+after
+shell-ok
+
+$ git -C /private/tmp/we-doctrine-probe-_hmte5hj/clone show HEAD:AGENTS.md
+# exit 0; 16,636 bytes; trimmed to the first hard rule:
+1. **Design-first**: document in JSON/njk before implementing. Respect `designDecisions`; discuss before overriding one.
+```
+
+Thus deletion did not prevent Git status or ordinary parent-shell edits, but **it did not make the doctrine
+inaccessible to a tool-bearing process**: Git's object database retains it. This does not settle whether
+removal is sufficient to prevent automatic initial loading. A successful repeat must distinguish that
+weaker guarantee from filesystem confidentiality. Renaming the file within the same readable tree would
+likewise leave a readable copy; no separate rename run was performed.
+
+### B — real Seatbelt profile and controls
+
+The original we:AGENTS.md was restored in the scratch clone before these tests. The exact profile written
+to `/private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb` was:
+
+```scheme
+(version 1)
+(allow default)
+(deny file-read* (literal "/private/tmp/we-doctrine-probe-_hmte5hj/clone/AGENTS.md"))
+```
+
+This is a minimal deny-read experiment. Its default allow does not itself restrict writes to the scope;
+Codex's requested workspace-write mode is separate. It leaves networking allowed by the profile, but
+network reachability was not proven. No claim about alternate paths, Git objects, ancestor/global
+instructions, configured fallback filenames, or other ambient doctrine follows from this profile.
+
+```sh
+/usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true
+/usr/bin/sandbox-exec -f /private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb /bin/cat /private/tmp/we-doctrine-probe-_hmte5hj/clone/AGENTS.md
+/usr/bin/sandbox-exec -f /private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb /bin/sh -c 'cat work.txt; touch seatbelt-proof.txt'
+/usr/bin/sandbox-exec -f /private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb codex exec --json --ephemeral -s workspace-write -C /private/tmp/we-doctrine-probe-_hmte5hj/clone -
+```
+
+The three file-profile invocations ran with cwd set to the scratch clone; the Codex invocation received
+the same closed-stdin prompt. All four emitted:
+
+```text
+sandbox-exec: sandbox_apply: Operation not permitted
+```
+
+Each custom-profile invocation exited 71 with empty stdout. Even the allow-all control could not run
+`true`, so these results prove **sandbox application is unavailable here**, not that the deny rule
+correctly blocks we:AGENTS.md, nor that Codex's own sandbox composes with it.
+
+### Build gate and next executable proof
+
+No working child session means no implementation under the explicit build-only-after-proof constraint.
+A repeat needs an execution environment that can initialize nested Codex and, to test Seatbelt, apply a
+Seatbelt profile. Run the same baseline and stripped clone prompt there first; require actual quotation
+before tools in the baseline and actual edit/read/exec events in the stripped run. Do not substitute
+mocked tests or parent-shell success for that evidence. If a backend is eventually justified, specify
+whether it excludes automatic doctrine discovery or enforces read denial, including recovery via Git.
+All scratch directories, logs, the location marker, and the experimental profile were removed after
+recording the evidence. No commit, push, or PR was made.
+
+## Probe 11 — dispatching session's unsandboxed deletion proof, 2026-09-10
+
+**Evidence supplied by the dispatching session from an unsandboxed parent shell**, not re-run by the
+implementing agent. Probe 10 remains an accurate inconclusive nested probe. The dispatching session
+attributes its failure to nesting macOS Seatbelt: an already sandboxed process cannot apply a second
+sandbox to a child. No nested Codex or Seatbelt probe was repeated for this follow-up.
+
+All three supplied runs used `codex exec --json --ephemeral -s workspace-write
+--skip-git-repo-check -C <clone> -` with a closed stdin prompt; all exited 0.
+
+- **A, baseline:** `git clone --quiet <repo> ./clone-baseline`. Asked to quote Hard rule 1 solely from
+  already-loaded context, before any tool, the last agent message was exactly:
+  `1. **Design-first**: document in JSON/njk before implementing. Respect `designDecisions`; discuss before overriding one.`
+- **B, stripped:** copied the baseline clone and removed its root we:AGENTS.md before
+  starting the child (command below). With the identical prompt the entire last agent message was `NOT LOADED`.
+- **C, tools:** a separate child in the stripped clone created `isolation-test-proof.txt`, read it,
+  and ran `git status --short` in a real `command_execution` item. The dispatching session independently
+  read the file (`isolation-test-ok`, no newline) and independently confirmed status:
+  the root we:AGENTS.md deleted and `isolation-test-proof.txt` untracked (raw output below).
+
+```sh
+cp -R ./clone-baseline ./clone-stripped && rm ./clone-stripped/AGENTS.md
+# Independently verified git status --short after C:
+ D AGENTS.md
+?? isolation-test-proof.txt
+```
+
+This positive evidence justifies implementing removal before launch to prevent **automatic loading of
+the root we:AGENTS.md in the tested setup** while preserving tool-bearing work. It does not establish read
+denial: Git show or checkout can recover it (commands below). Ancestor/global doctrine,
+nested instruction files, override/fallback names, explicit prompt context, and adversarial agents are
+not covered. Resource caps remain out of scope under #3621. No positive Seatbelt deny-profile result was
+supplied; these are deletion results only.
+
+```sh
+git show HEAD:AGENTS.md
+git checkout -- AGENTS.md
+```
+
+### Isolation port design (documented before implementation)
+
+`we:scripts/lib/isolation-provider.mjs` names `IsolationProviderRequest`, `IsolationProviderOutcome`,
+and the function-type `IsolationProvider`, following the port shape in
+`we:scripts/operations/cli-adapter.mjs`. This is dispatch tooling, not a new WE standard or glossary term.
+
+The request supplies an absolute local repository `sourceCwd` and optional absolute `scratchParent`.
+The provider prepares a fresh, owned scratch clone of committed HEAD, deletes only its root we:AGENTS.md
+before resolving, and returns `cwd`, `excludedPaths`, the narrow `guarantee`, and async `cleanup()`.
+Uncommitted/ignored source files are not copied. Callers await preparation before starting the child,
+keep the clone exclusively owned until that child exits, extract any needed results, and then await
+cleanup in `finally`. Preparation rejects on failure and removes partial scratch material. Cleanup is
+idempotent; failures are surfaced, including a cleanup failure during preparation.
+
+The first backend is `createMacosDeletionIsolationProvider({ execFn })`: injected argv-based Git exec
+for tests, actual filesystem operations in owned temporary directories. The function-type port has no
+Codex, Seatbelt, or platform-specific request fields, so future Linux/Windows preparation backends can
+implement the same lifecycle. None are built or auto-selected here. The outcome is a prepared directory,
+not an OS sandbox or a process launcher; stronger execution/resource isolation needs a separate contract.
+The caller still owns child argv, sandbox policy, authentication, timeout, and cancellation. The clone
+is not a pooled lane and does not satisfy the existing judge lane validator: production wiring is deferred.
+
+Unit tests exercise argv boundaries, preparation ordering, source preservation, failure cleanup, and
+real filesystem effects without a model spawn. Their success is not a new live Codex proof of this module;
+the supplied A/B/C evidence proves the underlying technique. End-to-end production graduation remains
+subject to `we:docs/agent/prototype-based-dev.md`.
