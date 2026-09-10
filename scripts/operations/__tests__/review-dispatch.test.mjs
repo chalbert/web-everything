@@ -59,9 +59,12 @@ describe('reviewSessionSlug', () => {
 });
 
 describe('fillReviewBrief', () => {
-  const values = { PR: 1234, REPO: 'chalbert/web-everything', SESSION_SLUG: 'review-1234' };
+  const values = {
+    PR: 1234, REPO: 'chalbert/web-everything', SESSION_SLUG: 'review-1234', JUDGE_PROVIDER: 'claude',
+  };
 
-  it('substitutes all three placeholders and reports (never refuses) an unrelated bracketed token', () => {
+  it('substitutes the placeholders the template actually uses, and reports (never refuses) an unrelated '
+    + 'bracketed token', () => {
     const { prompt, unknownTokens } = fillReviewBrief(REAL_TEMPLATE_STUB, values);
     expect(prompt).toContain('# brief for 1234 in chalbert/web-everything');
     expect(prompt).toContain('--session=review-1234');
@@ -93,8 +96,14 @@ describe('fillReviewBrief', () => {
     expect(canonicalReviewPlaceholder('bogus')).toBeNull();
   });
 
-  it('the placeholder roster is exactly PR, REPO, SESSION_SLUG', () => {
-    expect(REVIEW_BRIEF_PLACEHOLDERS).toEqual(['PR', 'REPO', 'SESSION_SLUG']);
+  it('the placeholder roster is exactly PR, REPO, SESSION_SLUG, JUDGE_PROVIDER (#xqa9ttq)', () => {
+    expect(REVIEW_BRIEF_PLACEHOLDERS).toEqual(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
+  });
+
+  it('refuses a missing JUDGE_PROVIDER value exactly like any other declared placeholder (#xqa9ttq)', () => {
+    expect(() => fillReviewBrief('{{PR}} {{REPO}} {{SESSION_SLUG}} {{JUDGE_PROVIDER}}', {
+      PR: 1, REPO: 'o/r', SESSION_SLUG: 'review-1',
+    })).toThrow(/no value for the brief placeholder \{\{JUDGE_PROVIDER\}\}/);
   });
 });
 
@@ -200,6 +209,56 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     expect(calls[0].argv[promptFileIdx + 1]).toBe(REVIEW_DISPATCH_SYSTEM_PROMPT_FILE);
     const disallowedIdx = calls[0].argv.findIndex((a) => a.startsWith('--disallowedTools='));
     expect(disallowedIdx).toBeGreaterThan(promptFileIdx);
+  });
+});
+
+// #xqa9ttq — the dispatched session's OWN `review-loop-cli.mjs` invocation (brief step 2) is the seam that
+// carries an opt-in Codex judge provider selection out to the dispatcher-shaped "fix-dispatch path" #3581's
+// ratified sequencing names — NOT a tool-bearing dispatch of Codex itself (see `dispatchReview`'s own header
+// note on what this does and does not do).
+describe('dispatchReview — judgeProvider (#xqa9ttq)', () => {
+  const JUDGE_PROVIDER_TEMPLATE = [
+    '# brief for {{PR}} in {{REPO}}',
+    'run: node scripts/operations/review-loop-cli.mjs --pr={{PR}} --repo={{REPO}} --provider={{JUDGE_PROVIDER}}',
+  ].join('\n');
+
+  it('defaults to claude when omitted — additive, never a default flip', () => {
+    const calls = [];
+    const result = dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => JUDGE_PROVIDER_TEMPLATE,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
+    });
+    expect(result.judgeProvider).toBe('claude');
+    expect(calls[0].argv.at(-1)).toContain('--provider=claude');
+  });
+
+  it('fills the opted-in codex provider into the dispatched session\'s own review-loop-cli.mjs command', () => {
+    const calls = [];
+    const result = dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => JUDGE_PROVIDER_TEMPLATE,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
+      judgeProvider: 'codex',
+    });
+    expect(result.judgeProvider).toBe('codex');
+    expect(calls[0].argv.at(-1)).toContain('--provider=codex');
+  });
+
+  it('refuses an unrecognised provider name BEFORE reading the brief or spawning', () => {
+    let readBriefCalls = 0;
+    expect(() => dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => { readBriefCalls += 1; return JUDGE_PROVIDER_TEMPLATE; },
+      spawnAgent: () => { throw new Error('must not be called'); },
+      checkStaleness: FRESH,
+      judgeProvider: 'gemini',
+    })).toThrow(/judgeProvider.*must be one of claude\|codex/);
+    expect(readBriefCalls).toBe(0);
   });
 });
 
