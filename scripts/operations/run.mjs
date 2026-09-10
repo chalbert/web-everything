@@ -30,7 +30,7 @@ import { createRegistry } from './registry.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
-import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
+import { reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
 import { stagePrViewOperation, STAGE_PR_VIEW_OP } from './stage-pr-view.mjs';
 import { createPayloadReader, createStagePrViewSinks, defaultViewDir } from './stage-pr-view-io.mjs';
@@ -89,8 +89,14 @@ export const OPERATIONS = Object.freeze({
   // no-op for them. See `createReviewPrSinks`'s own `json` doc (`we:scripts/operations/review-pr-io.mjs`) for
   // WHY this exists: a `--json` caller's stdout must stay pure JSON even when the `record` step's notice
   // effect fires mid-run.
+  //
+  // #xqa9ttq — `codexAdvisory` reads `REVIEW_PR_CODEX_ADVISORY=1` off the environment (`codexAdvisoryFromEnv`,
+  // `we:scripts/operations/review-pr.mjs`), OFF by default — see that flag's own docs for why it is an env
+  // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
+  // `record-verdict-io.mjs`'s registration below reads the SAME env var. It composes with `json` above
+  // rather than replacing it: the two knobs are independent (one shapes stdout, the other seats a juror).
   [REVIEW_PR_OP]: ({ json = false } = {}) => ({
-    declaration: reviewPrOperation({ readPr: createReviewPrReader() }),
+    declaration: reviewPrOperation({ readPr: createReviewPrReader(), codexAdvisory: codexAdvisoryFromEnv() }),
     sinks: createReviewPrSinks({ json }),
   }),
   // backlog/xzdi27a-* — the sibling of `review-pr` for a BACKLOG CARD instead of a PR diff (no `gh`, no diff,
