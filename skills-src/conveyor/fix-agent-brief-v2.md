@@ -45,6 +45,12 @@ anywhere below:
 - Wrote you a session slug and told you the PR number (and, when known, the backlog item number). All three
   are in your environment as `FIX_SESSION`, `FIX_PR`, and `FIX_ITEM` — use them exactly as given in the one
   command below; never invent your own.
+- Resolved the ABSOLUTE path to the reporting CLI itself and handed it to you as `FIX_REPORT_CLI_PATH`. Use
+  `node "$FIX_REPORT_CLI_PATH" report ...` exactly as shown below — never `node scripts/operations/
+  fix-report-cli.mjs` (a lane-relative path). `$LANE` is reset to the bounced PR's own ref, which is based on
+  ordinary `main` — it does not contain `fix-report-cli.mjs` at all until this dispatch mechanism itself has
+  merged, so the lane-relative path does not exist in your checkout even though it exists in the one that
+  wrote this brief.
 
 You do not run `lane-pool.mjs`, `gh`, `rearm-review.mjs`, or `stand-down.mjs` yourself. What the wrapper's
 mechanical steps CANNOT do — deciding whether the finding is safe to apply as a straightforward code change,
@@ -90,7 +96,7 @@ exactly one `done` report as your last:
 
 ```bash
 # first action, before you touch any code:
-node scripts/operations/fix-report-cli.mjs report \
+node "$FIX_REPORT_CLI_PATH" report \
   --session=$FIX_SESSION --pr=$FIX_PR --item=$FIX_ITEM --status=started
 
 # last action, exactly one of the four shapes below — never more than one `done` report:
@@ -99,7 +105,7 @@ node scripts/operations/fix-report-cli.mjs report \
 **You fixed it.** The finding is repaired, tested, and committed in `$LANE`:
 
 ```bash
-node scripts/operations/fix-report-cli.mjs report \
+node "$FIX_REPORT_CLI_PATH" report \
   --session=$FIX_SESSION --status=done --outcome=fixed \
   --files=<comma-joined, repo-relative, e.g. scripts/foo.mjs,scripts/foo.test.mjs>
 ```
@@ -109,7 +115,7 @@ to already be moot, or a runtime dependency you need is unavailable. Name the sp
 no reason is not accepted:
 
 ```bash
-node scripts/operations/fix-report-cli.mjs report \
+node "$FIX_REPORT_CLI_PATH" report \
   --session=$FIX_SESSION --status=done --outcome=blocked \
   --reason="<short, specific — e.g. 'the flagged code path was already removed by a later commit on main'>"
 ```
@@ -119,7 +125,7 @@ concrete shape, or resolving it requires a taste/product/policy call you cannot 
 IS; "genuine uncertainty" alone is refused:
 
 ```bash
-node scripts/operations/fix-report-cli.mjs report \
+node "$FIX_REPORT_CLI_PATH" report \
   --session=$FIX_SESSION --status=done --outcome=escalated-needs-judgment \
   --reason="<the ONE specific call — e.g. 'finding asks to reject invalid input but names no concrete shapes; which ones is a product call'>"
 ```
@@ -130,7 +136,7 @@ regenerate-derived-artifacts / take-main-for-coordination-JSON case — those yo
 the repair above):
 
 ```bash
-node scripts/operations/fix-report-cli.mjs report \
+node "$FIX_REPORT_CLI_PATH" report \
   --session=$FIX_SESSION --status=done --outcome=escalated-conflict \
   --reason="<one line — what made the overlap unsafe to resolve automatically>"
 ```

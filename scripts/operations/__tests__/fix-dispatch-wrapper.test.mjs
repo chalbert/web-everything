@@ -29,10 +29,11 @@ vi.mock('node:fs', async (importOriginal) => {
 
 import {
   FIX_LANE_PURPOSE, FIX_LOOP_ACQUIRE_WAIT_MS, FIX_FINDING_SCRATCH_FILENAME, CHANGES_REQUESTED_MARKERS,
+  FIX_REPORT_CLI_PATH,
   planFixDispatchWrapper, findLatestChangesRequestedComment, resolveFixTarget, buildFixAgentEnv,
   pushLaneRef, rearmReview, standDown, runFixGateWithOneRetry, dispatchFix,
 } from '../fix-dispatch-wrapper.mjs';
-import { newFixReport, writeFixReport } from '../fix-report-store.mjs';
+import { newFixReport, writeFixReport, tryReadFixReport } from '../fix-report-store.mjs';
 
 describe('planFixDispatchWrapper', () => {
   it('accepts a positive integer PR and an owner/repo slug, deriving the fix-<pr> session slug', () => {
@@ -117,17 +118,52 @@ describe('resolveFixTarget', () => {
 });
 
 describe('buildFixAgentEnv', () => {
-  it('returns all real env vars the brief reads, plus the WE_DISPATCH_KIND=fix stamp and reports-dir override', () => {
+  it('returns all real env vars the brief reads, plus the WE_DISPATCH_KIND=fix stamp, reports-dir override, '
+    + 'and the absolute fix-report-cli.mjs path (bug #xu2pp2m/1)', () => {
     const env = buildFixAgentEnv({ sessionSlug: 'fix-2108', pr: 2108, item: '3629', lanePath: '/pool/lane-3', reportsDir: '/repo/.operations/fix-reports' });
     expect(env).toEqual({
       WE_DISPATCH_KIND: 'fix', FIX_SESSION: 'fix-2108', FIX_PR: '2108', FIX_ITEM: '3629',
       LANE: '/pool/lane-3', OPERATION_FIX_REPORTS_DIR: '/repo/.operations/fix-reports',
+      FIX_REPORT_CLI_PATH,
     });
   });
 
   it('FIX_ITEM is an empty string, never "null"/"undefined", when item is not given', () => {
     const env = buildFixAgentEnv({ sessionSlug: 'fix-1', pr: 1, item: null, lanePath: '/p', reportsDir: '/r' });
     expect(env.FIX_ITEM).toBe('');
+  });
+});
+
+describe('FIX_REPORT_CLI_PATH — bug #xu2pp2m/1 regression', () => {
+  // NOTE, mirroring `minimal-context-provider.test.mjs`'s own documented convention: `REPO_ROOT`'s
+  // `import.meta.url`-derived value does not resolve reliably inside vitest's SSR transform, so this suite
+  // never asserts real-fs existence against a REPO_ROOT-relative path directly (that would pass under plain
+  // `node` and fail here for reasons unrelated to the fix). Real existence is instead confirmed against a
+  // `process.cwd()`-relative path (which DOES resolve correctly under vitest — see below), while the exported
+  // constant itself is asserted at the shape/source level.
+  it('is an ABSOLUTE path derived from REPO_ROOT, not the lane-relative literal the brief used to hardcode', () => {
+    expect(FIX_REPORT_CLI_PATH.startsWith('/')).toBe(true);
+    expect(FIX_REPORT_CLI_PATH).not.toBe('scripts/operations/fix-report-cli.mjs');
+    expect(FIX_REPORT_CLI_PATH.endsWith('scripts/operations/fix-report-cli.mjs')).toBe(true);
+  });
+
+  it('the file it points at genuinely exists in THIS checkout — the whole point of resolving it in the '
+    + 'wrapper\'s own process rather than leaving the agent to find it lane-relatively (structurally absent '
+    + 'pre-merge from the target PR\'s own lane clone, which is based on ordinary `main`)', () => {
+    const realAbsolutePath = join(process.cwd(), 'scripts', 'operations', 'fix-report-cli.mjs');
+    expect(existsSync(realAbsolutePath)).toBe(true);
+  });
+
+  it('the brief no longer tells the agent to invoke the CLI via a lane-relative path', async () => {
+    // `node:fs` is mocked at the top of this file so `readFileSync` on `fix-agent-brief-v2.md` returns a fake
+    // stub (mirroring `deliver-item-wrapper.test.mjs`'s own convention) — bypass it here via `importActual` so
+    // this assertion reads the REAL brief text, not the stub. `process.cwd()` (not an `import.meta.url`-derived
+    // path) resolves correctly under vitest's SSR transform — see this describe block's own top note.
+    const { readFileSync: actualReadFileSync } = await vi.importActual('node:fs');
+    const briefPath = join(process.cwd(), 'skills-src', 'conveyor', 'fix-agent-brief-v2.md');
+    const brief = actualReadFileSync(briefPath, 'utf8');
+    expect(brief).not.toContain('node scripts/operations/fix-report-cli.mjs');
+    expect(brief).toContain('$FIX_REPORT_CLI_PATH');
   });
 });
 
@@ -448,5 +484,59 @@ describe('dispatchFix', () => {
     const doneCall = run.mock.calls.find((c) => c[1]?.includes('--status=done'));
     expect(doneCall[1]).toEqual(expect.arrayContaining(['--outcome=blocked-on-infra']));
     expect(run.mock.calls.some((c) => c[1]?.[1] === 'release')).toBe(true);
+  });
+
+  // ==============================================================================================
+  // Bug #xu2pp2m/2 regression (confirmed live on real PR #2027, 2026-09-09): a report left over from a PRIOR
+  // dispatch attempt at the SAME PR (same `sessionSlug`, `fix-2108`) must never be mistaken for the CURRENT
+  // attempt's outcome when the current attempt's agent fails to write a fresh one.
+  // ==============================================================================================
+  describe('stale fix-report staleness guard', () => {
+    it('a report left over from a prior attempt is cleared before dispatch — a crashing CURRENT agent still '
+      + 'reports blocked-on-infra (never the stale prior outcome)', async () => {
+      // Simulate attempt 1: it wrote a `fixed` report for this exact session slug.
+      writeFixReport({
+        ...newFixReport({ session: 'fix-2108', pr: 2108, item: null }),
+        status: 'done', outcome: 'fixed', filesTouched: ['unrelated-attempt-1-file.mjs'],
+      });
+      expect(tryReadFixReport('fix-2108')).not.toBeNull();
+
+      const run = fakeRun();
+      const provider = { spawn: vi.fn() }; // attempt 2's agent never writes a fresh report (the bug-1 failure mode)
+      await expect(dispatchFix({ pr: 2108, repo: 'chalbert/web-everything' }, provider, { run, newSessionId: () => 's2' }))
+        .rejects.toThrow(/exited with no done report/);
+
+      // The wrapper must report ITS OWN attempt as blocked-on-infra — never re-report attempt 1's stale
+      // `fixed` outcome as if it belonged to attempt 2.
+      const doneCall = run.mock.calls.find((c) => c[1]?.includes('--status=done'));
+      expect(doneCall[1]).toEqual(expect.arrayContaining(['--outcome=blocked-on-infra']));
+      expect(doneCall[1]).not.toEqual(expect.arrayContaining(['--outcome=re-armed']));
+      // Never pushed/re-armed on the strength of the stale report.
+      expect(run.mock.calls.some((c) => c[0] === 'git' && c[1][0] === 'push')).toBe(false);
+      expect(run.mock.calls.some((c) => c[1]?.[0] === 'scripts/conveyor/rearm-review.mjs')).toBe(false);
+    });
+
+    it('the stale report is gone from disk once the new attempt starts, even before the agent spawns', async () => {
+      writeFixReport({
+        ...newFixReport({ session: 'fix-2108', pr: 2108, item: null }),
+        status: 'done', outcome: 'fixed', filesTouched: ['unrelated-attempt-1-file.mjs'],
+      });
+      const run = fakeRun();
+      const provider = fakeProvider('fixed'); // attempt 2 succeeds for real this time
+      const result = await dispatchFix({ pr: 2108, repo: 'chalbert/web-everything' }, provider, { run, newSessionId: () => 's2' });
+      expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+      // The report now on disk is attempt 2's own fresh one, not a leftover mix.
+      const finalReport = tryReadFixReport('fix-2108');
+      expect(finalReport.outcome).toBe('fixed');
+      expect(finalReport.filesTouched).toEqual(['a.mjs']); // fakeProvider's default, not attempt 1's file
+    });
+
+    it('a genuine first attempt (no pre-existing report) is unaffected — deleteFixReport is a no-op', async () => {
+      expect(tryReadFixReport('fix-2108')).toBeNull();
+      const run = fakeRun();
+      const provider = fakeProvider('fixed');
+      const result = await dispatchFix({ pr: 2108, repo: 'chalbert/web-everything' }, provider, { run, newSessionId: () => 's1' });
+      expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+    });
   });
 });

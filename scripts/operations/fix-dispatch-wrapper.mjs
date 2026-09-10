@@ -84,8 +84,30 @@ import {
 } from './minimal-context-provider.mjs';
 import { runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS } from './deliver-item-wrapper.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
-import { tryReadFixReport, resolveFixReportsDir } from './fix-report-store.mjs';
+import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+
+/**
+ * ABSOLUTE path to THIS CHECKOUT's own `fix-report-cli.mjs` (bug #xu2pp2m/1, confirmed live on real PR #2027,
+ * 2026-09-09). `dispatchFix` resets the spawned agent's `$LANE`/cwd to the TARGET PR's own `headRefName` (via
+ * `acquireLane`'s `base` — correct, that's how it edits the right code), but that ref is based on ordinary
+ * `main`, which — PRE-MERGE of this very branch — does not yet contain `fix-report-cli.mjs`/
+ * `fix-report-store.mjs`/`fix-report-record.mjs` at all: they exist ONLY on this unmerged
+ * `lane/xu2pp2m-review-dispatch-wrapper` branch. `we:skills-src/conveyor/fix-agent-brief-v2.md` told the
+ * dispatched agent to invoke `node scripts/operations/fix-report-cli.mjs` relative to `$LANE` — a path that is
+ * structurally ABSENT from the target PR's own lane clone until this branch merges. One real live attempt got
+ * lucky finding it via a fragile absolute-path workaround it invented on the spot; a second attempt correctly
+ * concluded the file was genuinely missing and gave up on reporting at all, which is exactly the false-negative
+ * `runFixAgentToCompletion`'s `!report` branch below then reports as a crash.
+ *
+ * THE FIX: same class of problem `we:scripts/operations/deliver-item-wrapper.mjs` already solved for
+ * `OPERATION_DELIVERY_REPORTS_DIR` (bug 9, live #3371 attempt 4) — resolve the real, absolute path ONCE in the
+ * WRAPPER's own process (this checkout, which — unlike the target PR's lane — DOES have every file this branch
+ * added, because it IS this branch) and hand it down as a real env var (`buildFixAgentEnv`, below) rather than
+ * a lane-relative path the agent has to guess at or invent a workaround for. `fix-agent-brief-v2.md` now reads
+ * `$FIX_REPORT_CLI_PATH` instead of the lane-relative literal.
+ */
+export const FIX_REPORT_CLI_PATH = resolve(REPO_ROOT, 'scripts/operations/fix-report-cli.mjs');
 
 /** The lane-pool `--purpose` this wrapper's acquire carries — matches
  *  `we:skills-src/conveyor/fix-agent-brief.md` step 1's own `--purpose=conveyor-fix`. */
@@ -220,11 +242,15 @@ export const ensureFixHooksSettingsFile = createHooksSettingsWriter('fix-agent-h
 export const FIX_AGENT_SPAWN_TIMEOUT_MS = DELIVERY_AGENT_SPAWN_TIMEOUT_MS;
 
 /** PURE — the real env vars `we:skills-src/conveyor/fix-agent-brief-v2.md` reads directly (`$LANE`,
- *  `$FIX_SESSION`, `$FIX_PR`, `$FIX_ITEM`), mirroring `deliver-item-wrapper.mjs#buildDeliveryAgentEnv`'s own
- *  real-env-vars fix (#3627 bug 7) from day one rather than repeating that bug's text-footer mistake.
- *  `OPERATION_FIX_REPORTS_DIR` resolved ONCE in the WRAPPER's own process (mirrors bug 9's fix) so the
- *  spawned agent's `fix-report-cli.mjs` — running out of a SEPARATE lane clone, a different `git clone`, not
- *  a worktree — writes to the SAME directory this wrapper's own `tryReadFixReport` call reads back. */
+ *  `$FIX_SESSION`, `$FIX_PR`, `$FIX_ITEM`, `$FIX_REPORT_CLI_PATH`), mirroring
+ *  `deliver-item-wrapper.mjs#buildDeliveryAgentEnv`'s own real-env-vars fix (#3627 bug 7) from day one rather
+ *  than repeating that bug's text-footer mistake. `OPERATION_FIX_REPORTS_DIR` resolved ONCE in the WRAPPER's
+ *  own process (mirrors bug 9's fix) so the spawned agent's `fix-report-cli.mjs` — running out of a SEPARATE
+ *  lane clone, a different `git clone`, not a worktree — writes to the SAME directory this wrapper's own
+ *  `tryReadFixReport` call reads back. `FIX_REPORT_CLI_PATH` (bug #xu2pp2m/1 — see that constant's own
+ *  docblock) is the ABSOLUTE path to THIS checkout's `fix-report-cli.mjs`, handed down because the target PR's
+ *  own lane clone — reset to its `headRefName`, based on ordinary `main` — does not contain that file at all
+ *  pre-merge; a lane-relative invocation is structurally unreachable. */
 export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }) {
   return {
     WE_DISPATCH_KIND: 'fix',
@@ -233,6 +259,7 @@ export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }
     FIX_ITEM: item ?? '',
     LANE: lanePath,
     OPERATION_FIX_REPORTS_DIR: reportsDir,
+    FIX_REPORT_CLI_PATH,
   };
 }
 
@@ -411,6 +438,20 @@ export async function dispatchFix(
 ) {
   const planned = planFixDispatchWrapper({ pr, repo, item });
   const claudeSessionId = String(newSessionId());
+
+  // Bug #xu2pp2m/2 (confirmed live on real PR #2027, 2026-09-09): `sessionSlug` is `fix-<pr>` — IDENTICAL
+  // across EVERY dispatch attempt at the same PR (there is no per-attempt suffix in this grammar). A fix
+  // report is keyed purely by that slug (`fix-report-store.mjs#fixReportPath`), so if a PRIOR attempt left a
+  // report on disk and the CURRENT attempt's agent fails to write a fresh one (crash, or — see bug 1's fix,
+  // above — an agent that could not even find the reporting CLI), `runFixAgentToCompletion`'s
+  // `readReport(sessionSlug)` call below would silently read the prior attempt's stale, unrelated outcome and
+  // the wrapper would act on it as if it were fresh. Confirmed exactly this way: a real wrong stand-down
+  // comment landed on PR #2027 describing attempt 2 using attempt 1's actual (unrelated) outcome. Deleting any
+  // pre-existing report for THIS session slug before this attempt ever spawns the agent makes a missing fresh
+  // report unambiguously "no report" — the existing `!report` branch in `runFixAgentToCompletion` already
+  // throws correctly for that case — never "whichever attempt happened to run last". `deleteFixReport` is a
+  // no-op when nothing is there yet (a genuine first attempt), so this is safe on every call.
+  deleteFixReport(planned.sessionSlug);
 
   // Durable trace BEFORE anything else can fail (mirrors review-dispatch-wrapper.mjs's own step-0 reasoning).
   reportStarted(planned, { run: runFn });
