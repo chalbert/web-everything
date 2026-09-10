@@ -551,36 +551,73 @@ export function resolveJudgeProvider(name) {
  *
  * @param {object} [o]
  * @param {JudgeProvider} [o.provider] - the provider port implementation, injected for tests. Defaults to
- *   `resolveJudgeProvider(providerName)`, so an operator who supplies `providerName` alone (the normal command
+ *   `resolveProvider(providerName)`, so an operator who supplies `providerName` alone (the normal command
  *   line case) never has to also know what function that name resolves to.
  * @param {string|null} [o.providerName] - #xqa9ttq — `'claude'` (default) or `'codex'`, one of
  *   `JUDGE_PROVIDER_NAMES`. IGNORED once `provider` is explicitly supplied — that is what keeps every existing
- *   test that injects a stub `provider` untouched by this card.
+ *   test that injects a stub `provider` untouched by this card. IGNORED, per call, whenever THAT call's own
+ *   `request.providerName` is set — see the per-request override note below.
  * @param {string|null} [o.cwd] - the lane the juror runs in. Passed only when set, so a tool-free juror is
  *   unaffected and a tool-bearing one hits `assertLaneCwd`'s refusal when nobody supplied a lane (#3151).
  * @param {string|null} [o.model] - an operator override for the model the DECLARATION asked for. Absent by
- *   default: the declared literal is the norm, and an override is a deliberate command-line act.
+ *   default: the declared literal is the norm, and an override is a deliberate command-line act. Never merged
+ *   onto a request whose EFFECTIVE provider (request-level or factory-level) is `codex` — see below.
+ * @param {(name: string) => JudgeProvider} [o.resolveProvider] - #xqa9ttq — how a per-request `providerName`
+ *   (and, absent one, the factory's own `providerName`) becomes a provider FUNCTION. Defaults to the real
+ *   {@link resolveJudgeProvider}; injectable so a test can substitute BOTH providers at once without touching
+ *   the `codex-judge-spawn.mjs` module boundary — the seam `judge-provider-selection.test.mjs` already uses at
+ *   the `resolveJudgeProvider` layer, extended here to the per-request path.
  */
-export function createDefaultJudge({ provider, providerName = 'claude', cwd, model } = {}) {
-  const resolvedProvider = provider ?? resolveJudgeProvider(providerName);
+export function createDefaultJudge({
+  provider, providerName = 'claude', cwd, model, resolveProvider = resolveJudgeProvider,
+} = {}) {
   return async (request) => {
+    // #xqa9ttq — A REQUEST MAY PIN ITS OWN PROVIDER (`request.providerName`), overriding this factory's. This
+    // is what lets ONE run seat a tool-free Codex juror (`review-pr`'s opt-in `judgeAdvisory` seat) while its
+    // OTHER judge steps stay on the factory's own provider (`claude` by default, or whatever `--provider`
+    // chose) — a single `--provider` for the WHOLE run cannot do this: `review-pr`'s two existing seats set
+    // `allowedTools` unconditionally, and Codex structurally refuses a tool-bearing request (the guard below),
+    // so `--provider=codex` against a real run fails at the first tool-bearing seat — confirmed live against a
+    // real run before this seam existed.
+    if (request?.providerName !== undefined && !JUDGE_PROVIDER_NAMES.includes(request.providerName)) {
+      throw new Error(
+        `operations: unknown judge provider ${JSON.stringify(request.providerName)} on a judge request — one of `
+        + `${JUDGE_PROVIDER_NAMES.join('|')}`,
+      );
+    }
+    const effectiveProviderName = request?.providerName ?? providerName;
     // THE OVERRIDE IS MERGED BEFORE THE GUARD RUNS, NEVER AFTER (#3151). `assertSafeJudgeRequest` is what stops
     // a flag-shaped `model` reaching argv, so asserting the declaration's request and then substituting the
     // operator's value would check one string and spawn another — the guard would be decorative. The CLI
     // adapter's parse refuses a `-`-leading value too; this is the seam that binds every caller of this
     // factory, including one that builds it by hand.
-    const effective = model ? { ...request, model } : request;
+    //
+    // #xqa9ttq — NEVER MERGED ONTO AN EFFECTIVELY-CODEX REQUEST. `model` here is a Claude model name (the
+    // declaration's `JUDGE_MODEL` literal, or whatever the operator typed for the seat(s) they are steering
+    // with `--model`); a request whose effective provider is `codex` (via `request.providerName` or this
+    // factory's own) would otherwise carry that Claude model name onto Codex's `-m` flag verbatim.
+    const effective = (model && effectiveProviderName !== 'codex') ? { ...request, model } : request;
     assertSafeJudgeRequest(effective);
     // #xqa9ttq — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside `codex-judge-spawn.mjs`. A caller that
-    // injects its own `provider` function bypasses `resolveJudgeProvider` entirely, so this check is the one
+    // injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the one
     // place that catches "codex + tool-bearing" regardless of HOW the codex provider got here — the same
     // belt-and-braces reasoning `assertNoForbiddenArgv`'s "reachable through judgeSpawn too" note already uses.
-    if (providerName === 'codex' && effective.allowedTools) {
+    // Reads `effectiveProviderName` (request-level override included), not the factory's own `providerName`
+    // alone — otherwise a factory defaulted to `claude` with a request pinned to `codex` would sail past this.
+    if (effectiveProviderName === 'codex' && effective.allowedTools) {
       throw new Error(
         'operations: refusing `--provider=codex` with a TOOL-BEARING judge request — the Codex provider is '
         + 'seated as a TOOL-FREE panelist only (#3581). Use the default `claude` provider for a tool-bearing role.',
       );
     }
+    // #xqa9ttq — RESOLUTION ORDER. A REQUEST-level `providerName` always resolves via `resolveProvider` (the
+    // real one by default) — it names a concrete provider the request itself insists on, so an unrelated
+    // `provider` stub injected at the FACTORY level (there for a DIFFERENT seat's test) must not silently
+    // intercept it. Absent a request-level override, behaviour is BYTE-IDENTICAL to before this card: the
+    // factory's own injected `provider` wins over its own `providerName`.
+    const resolvedProvider = request?.providerName !== undefined
+      ? resolveProvider(request.providerName)
+      : (provider ?? resolveProvider(providerName));
     const outcome = await resolvedProvider({
       mandate: effective.mandate,
       input: effective.input,
