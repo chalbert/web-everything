@@ -1,10 +1,12 @@
 ---
 kind: decision
 parent: "3369"
-status: open
-scope: ["we:scripts/lib/codex-judge-spawn.mjs", "we:docs/agent/backlog-workflow.md", "we:agent-memory-src/always-set-subagent-model-explicitly.md"]
+status: resolved
+scope: ["we:scripts/lib/codex-judge-spawn.mjs", "we:scripts/codex-direct-task.mjs", "we:docs/agent/backlog-workflow.md", "we:agent-memory-src/always-set-subagent-model-explicitly.md"]
 dateOpened: "2026-09-11"
 preparedDate: "2026-09-11"
+dateResolved: "2026-09-11"
+codifiedIn: "docs/agent/backlog-workflow.md#codex-model-routing"
 tags: [operations, dispatch, multi-provider, model-routing, cost]
 ---
 
@@ -217,6 +219,67 @@ CLI that fetches its model catalogue from the server will keep changing what `<d
 a claim that must be re-measured. That is real, and it is the argument for re-running these probes on a CLI
 upgrade rather than for leaving the choice implicit: an unpinned default also changes, it just changes
 without anyone noticing.
+
+## Ratified (all 4 forks) — 2026-09-11
+
+**Ratified 2026-09-11 by the operator (Nicolas Gilbert).**
+
+**Fork 1 — (b) pin, taken as ruled.** Every Codex invocation names its model explicitly — never the CLI's own
+implicit default (measured live as silently resolving to the top rung, `gpt-6-astra`, today).
+
+**Fork 2 — (b) one model, AMENDED at ratification.** The card's own recommended default — one model for every
+Codex role, with effort as the only dial — is taken, but with the routing vocabulary made concrete rather
+than left as "effort is already a knob": the Claude-side three-rung ladder (Haiku/Sonnet/Opus-equivalent,
+we:agent-memory-src/always-set-subagent-model-explicitly.md) is **kept as a routing category**, not
+collapsed to one undifferentiated tier — but for NOW all three categories resolve to the SAME real Codex
+model. The card's own measurement forecloses a model-based split (three of four probes scored identically
+across six of seven current-generation models; the one real separation found was by model *generation*, not
+marketing tier), so building a three-model ladder anyway would encode an unmeasured assumption as doctrine.
+What the evidence DOES support differentiating on is reasoning **effort**: the card's own "Effort moved
+correctness where the model did not" table shows raising a weak model's `model_reasoning_effort` from its
+default (`medium`) to `high` rescued it from 4/8 to 4/4 on the same probe, and dropping the strongest model to
+`low` cost nothing. So the three rungs differentiate on effort, not model: `haiku → low`, `sonnet → medium`
+(Codex's own measured default — unchanged, just made explicit), `opus → high`. This preserves the routing
+interface/semantics for when real per-model capability evidence exists later, without inventing a tier split
+today's data doesn't support. See we:docs/agent/backlog-workflow.md § Codex model routing for the codified
+rule and we:scripts/codex-direct-task.mjs (`CODEX_TIER_EFFORT`/`resolveCodexEffort`) for the implementation.
+
+**Fork 3 — (a) `gpt-6-astra`, taken as ruled.** Top score on every probe (8/8), lowest reasoning-token burn
+among the perfect scorers, a named/stable catalogue entry (not `gpt-reserve`/`codex-auto-review`, the two
+hidden/undocumented models that could disappear without notice), and it shares its weekly quota bucket with
+the operator's own interactive Codex use — directly relevant given the operator is usage-conscious after a
+real token-exhaustion incident (7 identical back-to-back runs moved that shared bucket by 0, versus
+`gpt-5.3-codex-spark`'s measurably separate, faster-draining bucket).
+
+**Fork 4 — (b) surface the quota signal, taken as ruled, with the card's own suggested fix.** Stop treating
+`costUsd: 0` as the whole story: a real per-plan `rate_limits` signal (`used_percent`/`window_minutes`/
+`resets_at`/`plan_type`) exists in a non-`--ephemeral` run's persisted rollout, and this matters directly for
+the operator's stated priority (avoiding another unexpected usage exhaustion). Resolved via the card's own
+suggested fix: write the rollout normally (drop `--ephemeral`), read the one quota record from it, then
+explicitly delete the rollout file afterward — same net cleanliness as `--ephemeral`, but the signal gets read
+first. Implemented as `collectAndClearRolloutQuota` in we:scripts/codex-direct-task.mjs.
+
+**Implementation note (scope discrepancy, recorded rather than silently resolved).** This card's `scope`
+names we:scripts/lib/codex-judge-spawn.mjs as the file whose `-m`/`--ephemeral` handling motivated this
+decision — that file is real (`#xqa9ttq`, its own header explicitly discusses hardcoding `--ephemeral` and a
+local `CODEX_EFFORT_MAP` copy) but lives only on the unmerged `origin/lane/xqa9ttq-review-pr-codex-advisory-
+seat` branch as of this ratification's landing, not on `main` or this lane. The ratified constants
+(`CODEX_MODEL`, `CODEX_TIER_EFFORT`, `resolveCodexEffort`) and the quota mechanism
+(`collectAndClearRolloutQuota`/`readRolloutQuota`/`findRolloutFile`/`parseRolloutQuota`) are implemented on
+we:scripts/codex-direct-task.mjs instead — the only real, currently-merged Codex CLI invocation in this
+codebase — with the general rule codified in we:docs/agent/backlog-workflow.md § Codex model routing so it
+applies uniformly once we:scripts/lib/codex-judge-spawn.mjs lands. One deliberate DIVERGENCE from the
+literal Fork-4 fix text ("drop `--ephemeral`... delete the rollout file") for THIS specific call site:
+we:scripts/codex-direct-task.mjs already does not pass `--ephemeral` by default, for a real, documented,
+pre-existing reason (`codex exec resume <thread-id>` — a human resuming a task that stopped short). Deleting
+the rollout after every run would silently remove that feature, which the fire-and-forget judge role Fork 4
+was written against does not have. So `codexDirectTask` reads the quota signal WITHOUT deleting by default
+(`readRolloutQuota`), and exposes the literal ratified read-then-delete shape (`collectAndClearRolloutQuota`)
+behind an explicit opt-in (`clearRolloutAfterRun: true`) for a caller with no resume need — including the
+future we:scripts/lib/codex-judge-spawn.mjs, whose fire-and-forget shape is exactly what Fork 4 was scoped
+against. **Follow-up, not done here:** when we:scripts/lib/codex-judge-spawn.mjs lands, it should import
+these same constants/functions (or their equivalent) rather than keeping its own separate `CODEX_EFFORT_MAP`
+copy, and should call `collectAndClearRolloutQuota` unconditionally (it has no resume feature to protect).
 
 ## Done when
 
