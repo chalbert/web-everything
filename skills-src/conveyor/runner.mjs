@@ -42,6 +42,7 @@ import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
+import { runGhSync } from '../../scripts/lib/gh-throttle.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
@@ -327,9 +328,13 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
           // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
           // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
           // do, so the common empty-plan tick never pays for an extra `gh` call.
+          // Throttled (#3621) — `we:scripts/lib/gh-throttle.mjs#runGhSync`, a byte-for-byte transparent
+          // `execFileSync('gh', args, opts)` replacement gated through the shared `gh`-call concurrency
+          // semaphore with rate-limit backoff. This is the runner's own direct `gh` call (not a script it
+          // shells), paid only when review work is actually owed this tick.
           const repoSlug = typeof repo === 'string' && repo
             ? repo
-            : execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+            : runGhSync(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
               encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
             }).trim();
           for (const d of reviewsOwed) {
