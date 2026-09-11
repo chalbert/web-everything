@@ -1,28 +1,45 @@
 /**
- * Directory preparation port for dispatchers (#3371), shaped like JudgeProvider in
+ * Directory/spawn preparation port for dispatchers (#3371), shaped like JudgeProvider in
  * scripts/operations/cli-adapter.mjs. This is tooling, not a WE standard.
  *
- * Evidence: #3371 Probe 11 records the dispatching session's UNSANDBOXED macOS tests:
- * baseline quoted the real rule; deletion before startup yielded NOT LOADED; a separate
- * stripped-clone child created/read a file and ran Git status, independently verified.
- * Those supplied observations justify this technique; this module was not itself run
- * through a live Codex session. Probe 10's nested sandbox failure remains inconclusive.
+ * THREE backends, kept side by side on purpose, not one replacing another — they hold
+ * materially different guarantees, each proven live, not assumed:
  *
- * Only the root AGENTS.md is removed. Git history, ancestor/global/nested instructions,
- * overrides/fallbacks and explicit prompt context remain accessible. This is NOT read
- * denial, adversarial isolation, resource capping (#3621), or a replacement OS sandbox.
+ * - `createMacosDeletionIsolationProvider` (Probes 10/11): the excluded path(s) are ABSENT from
+ *   the child's clone before it ever starts. A tool-bearing agent that later runs `cat AGENTS.md`
+ *   itself gets ENOENT — there is nothing on disk to read. Costs a full `git clone` per
+ *   invocation. Git history is untouched, so `git show HEAD:<path>` still recovers the file —
+ *   Probe 14a found this is actively counterproductive on its own: `git status` prints a
+ *   ` D <path>` signpost naming exactly what was removed, and a real tool-bearing Codex session
+ *   followed that signpost to `git show HEAD:AGENTS.md`, unprompted, on an ordinary task.
+ * - `createConfigOverrideIsolationProvider` (Probe 12): Codex CLI's own `-c
+ *   project_doc_max_bytes=0` suppresses its automatic startup read of the doctrine file into the
+ *   model's context. No clone, no filesystem mutation — it operates on `sourceCwd` directly. But
+ *   the file is still ON DISK: Probe 12 proved live that a tool-bearing agent told to `cat
+ *   AGENTS.md` recovers the full text verbatim, in both `-s read-only` and `-s workspace-write`
+ *   sandbox modes. This backend defeats only the CLI's *automatic* injection, not a deliberate
+ *   read — the weakest and cheapest of the three guarantees.
+ * - `createNativeDenyWithHistoryStripIsolationProvider` (Probe 14): the evidence-backed fix for
+ *   the deletion backend's git-history gap. Real git-history surgery (verified against every
+ *   object in the packfile, not just the working tree — see that function's own header) so there
+ *   is no `git status` signpost and no recoverable blob, PLUS the argv fragment for Codex's
+ *   undocumented native filesystem-deny permission so a direct read of the live path is denied
+ *   everywhere on the host, not just inside one clone. Neither half alone is a general
+ *   adversarial-isolation guarantee — see that function's own header for the residual gap (any
+ *   OTHER readable git repo on disk, e.g. this repo's own lane clones, still leaks the same way;
+ *   closing that is #3621's read-allowlist territory, not this port's).
  *
- * SECOND BACKEND (below): Probe 14 found the above is actively counterproductive on its own —
- * `git status` prints a ` D <path>` line naming exactly what was removed, and a real tool-bearing
- * Codex session followed that signpost to `git show HEAD:AGENTS.md` on an ordinary,
- * non-adversarial task (14a). `createNativeDenyWithHistoryStripIsolationProvider` is the
- * evidence-backed fix: real git-history surgery (14e, verified against all 8252 objects in a real
- * repo) so there is no signpost and no recoverable blob, PLUS the argv fragment for Codex's
- * undocumented native filesystem-deny permission (14f/14h) so a direct read of the live path is
- * denied everywhere on the host, not just inside one clone. Neither half alone is a general
- * adversarial-isolation guarantee — see that function's own header for the residual gap (any OTHER
- * readable git repo on disk, e.g. this repo's own lane clones, still leaks the same way; closing
- * that is #3621's read-allowlist territory, not this port's).
+ * Probe 9 (2026-09-09) concluded no context-strip flag existed for a tool-bearing Codex juror;
+ * Probe 12 (2026-09-11) found and live-verified `project_doc_max_bytes=0` and corrects that
+ * conclusion; Probe 14 (2026-09-11) found deletion's git-history gap is real and exploitable, and
+ * that Probe 14f's native deny is a stronger fix than an external Seatbelt wrapper. See #3371 for
+ * every probe's verbatim before/after commands and output. Pick the backend by the guarantee the
+ * call site actually needs — the doctrine cannot be read at all short of `git show HEAD:<path>`
+ * (deletion), the CLI does not hand the doctrine to the model unasked and cost/complexity is not
+ * worth paying for more (config-override), or the doctrine is unreachable by ANY means this port
+ * can express short of another readable repo on disk (native-deny + history-strip). None of the
+ * three is read denial in the adversarial sense, resource capping (#3621), or a replacement OS
+ * sandbox.
  */
 import { execFile } from 'node:child_process';
 import { mkdtemp, realpath, rm, unlink } from 'node:fs/promises';
@@ -35,26 +52,42 @@ import { promisify } from 'node:util';
  * @typedef {object} IsolationProviderRequest
  * @property {string} sourceCwd - Absolute local repository path; clone committed HEAD only.
  * @property {string} [scratchParent] - Absolute existing temporary parent; defaults to OS temp.
+ *   Ignored by backends that never clone (e.g. the config-override backend).
  * @property {string[]} [excludePaths] - Repo-relative doctrine-file path(s) this backend should
  * exclude/strip, e.g. `['AGENTS.md']` or a different repo's own convention (`['CLAUDE.md']`,
  * `['.github/copilot-instructions.md']`) plus any nested overrides. Defaults to `['AGENTS.md']`
  * when omitted — every existing caller and test that predates this field keeps working unchanged.
  * Every backend below reads this the same way (`normalizeExcludePaths`); none hardcodes the name.
+ * The config-override backend accepts and validates this field for interface consistency, but it
+ * has NO effect on that backend's behavior — see its own header for why.
  */
 
 /**
  * @typedef {object} IsolationProviderOutcome
- * @property {string} cwd - Owned prepared directory; launch the child here only after resolution.
- * @property {string[]} excludedPaths - Relative paths absent at handoff, not enduring read bans.
- * @property {'root-agents-absent-before-start'|'history-stripped-before-start'} guarantee - No
- * broader context-exclusion promise than the named value describes.
- * @property {string[]} [codexConfigArgs] - Backend-specific: present only on backends that also
- * hand back a Codex argv fragment for the CALLER to splice into its own `codex exec` invocation
- * (this module prepares directories; it never launches a child — see file header). Its own
- * guarantee is separate from `guarantee` above, which describes only what this function did
- * before returning.
+ * @property {string} cwd - Directory to launch the child in, only after resolution. For a
+ * cloning backend this is an owned, disposable directory; for a non-cloning backend it may be
+ * `sourceCwd` itself (realpath'd) — check `excludedPaths`/`guarantee`, not just this field's
+ * presence, to know what protection was actually applied.
+ * @property {string[]} excludedPaths - Repo-relative paths physically absent from `cwd` at
+ * handoff, not enduring read bans. Empty for a backend that suppresses context injection or
+ * denies reads without making the path physically absent.
+ * @property {'root-agents-absent-before-start'|'root-agents-doc-suppressed-in-cli-context'|'history-stripped-before-start'} guarantee -
+ * Which property actually holds. `root-agents-absent-before-start` means the file does not exist
+ * at `cwd` (git history and other copies are untouched). `root-agents-doc-suppressed-in-cli-context`
+ * is weaker: only the CLI's own automatic startup read was suppressed — the file may still be
+ * present and readable by any tool the child runs. `history-stripped-before-start` means the file
+ * is amended out of the clone's own git history (not just the working tree) — see
+ * `createNativeDenyWithHistoryStripIsolationProvider`'s own header for what it does and does not
+ * additionally close. Callers must not treat these as interchangeable.
+ * @property {string[]} extraCliArgs - CLI arguments the caller MUST splice into the child
+ * process's own argv for the guarantee to hold. Empty for a backend whose guarantee is already
+ * true by the time its promise resolves (e.g. deletion, history-strip). Non-empty for a backend
+ * whose guarantee is enforced by the CHILD reading a flag (e.g. Codex's `-c
+ * project_doc_max_bytes=0`, or the native-deny backend's permissions config) — no preparation step
+ * can substitute for the caller actually passing these through.
  * @property {() => Promise<void>} cleanup - Idempotent release. Call after child exit and result
- * extraction in finally; deletes all clone edits too. Rejects if release fails (safe to retry).
+ * extraction in finally. A no-op for a backend that never allocated anything. Rejects if release
+ * fails (safe to retry).
  */
 
 /**
@@ -62,10 +95,21 @@ import { promisify } from 'node:util';
  *
  * The function-type contract is backend-neutral, not a claim that preparation is pure.
  * Implementations reject on preparation failure, release partial resources, and return no
- * usable outcome until exclusions are applied. Callers must keep the directory exclusively
- * owned through child exit. Future Linux/Windows preparation backends use this same contract;
- * process/container execution and stronger guarantees need a separate execution contract.
+ * usable outcome until exclusions/suppressions are applied. Callers must keep an owned directory
+ * exclusively owned through child exit, and must always append `extraCliArgs` to the child's
+ * invocation. Future Linux/Windows preparation backends use this same contract; process/container
+ * execution and stronger guarantees need a separate execution contract.
  */
+
+/** Throws unless every named value is an absolute, NUL-free local path string. Shared by every
+ * backend below so path validation stays one rule, not one copy per backend. */
+function assertAbsoluteLocalPaths(named) {
+  for (const [name, value] of Object.entries(named)) {
+    if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) {
+      throw new TypeError(`isolation: ${name} must be an absolute local path without NUL`);
+    }
+  }
+}
 
 /**
  * Pure validator/normalizer for a request's `excludePaths`, shared by every backend so all of them
@@ -88,11 +132,7 @@ export function normalizeExcludePaths(excludePaths, fallback = ['AGENTS.md']) {
 
 /** Pure argv builder. Paths are single arguments; no shell interpolation or CLI options as paths. */
 export function buildIsolationCloneArgv(sourceCwd, destination) {
-  for (const [name, value] of Object.entries({ sourceCwd, destination })) {
-    if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) {
-      throw new TypeError(`isolation: ${name} must be an absolute local path without NUL`);
-    }
-  }
+  assertAbsoluteLocalPaths({ sourceCwd, destination });
   return ['clone', '--quiet', '--no-hardlinks', '--', sourceCwd, destination];
 }
 
@@ -136,7 +176,11 @@ export function createMacosDeletionIsolationProvider({
       // Confirm the clone exists even if a broken injected executor reports success.
       await realpath(cwd);
       return {
-        cwd, excludedPaths: [...paths], guarantee: 'root-agents-absent-before-start', cleanup,
+        cwd,
+        excludedPaths: [...paths],
+        guarantee: 'root-agents-absent-before-start',
+        extraCliArgs: [],
+        cleanup,
       };
     } catch (error) {
       try { await cleanup(); }
@@ -149,6 +193,62 @@ export function createMacosDeletionIsolationProvider({
 }
 
 /**
+ * Second backend: suppress Codex CLI's own automatic AGENTS.md ("project doc") injection via its
+ * `-c project_doc_max_bytes=0` config override — real and live-verified (#3371 Probe 12), not
+ * documentation-sourced. Probe 12 ran the exact override in both `-s read-only` and `-s
+ * workspace-write` (tool-bearing) modes against a real canary AGENTS.md: the child reported "NOT
+ * LOADED" for its automatic context in both, and real tool use (file create, `git status`) kept
+ * working normally in workspace-write mode. `project_doc_max_bytes` is a genuine Codex config key
+ * (default 32768 bytes; confirmed against the installed 0.153.4 binary), not a guessed flag name.
+ *
+ * No clone: this backend never mutates or copies anything, so it needs no scratch directory and
+ * no cleanup — it operates on `sourceCwd` directly and `scratchParent` is ignored if given.
+ *
+ * WEAKER guarantee than the deletion backend, on purpose, not by oversight, and this is the one
+ * thing this backend must not be trusted to do: AGENTS.md remains ON DISK and fully readable.
+ * Probe 12 proved this live too — the same session that reported "NOT LOADED" for its automatic
+ * context then ran `cat AGENTS.md` on request and recovered the canary text verbatim. Use this
+ * backend only when the goal is "the CLI does not hand the doctrine to the model unasked"; use
+ * the deletion backend when the goal is "the doctrine is not recoverable by the child at all
+ * short of `git show HEAD:AGENTS.md`," or the native-deny+history-strip backend when even that
+ * git-history route must be closed too.
+ *
+ * The guarantee is enforced by the CHILD PROCESS reading `extraCliArgs` — unlike the deletion
+ * backend, nothing this function does before returning makes the guarantee true. A caller that
+ * drops `outcome.extraCliArgs` from the child's invocation silently loses the guarantee entirely;
+ * there is no fallback enforcement here.
+ *
+ * `excludePaths` is accepted and validated for interface consistency with the other two backends,
+ * but has ZERO effect on this backend's behavior: `project_doc_max_bytes=0` suppresses whichever
+ * doctrine file Codex's OWN auto-loader resolves, not a caller-named path, so there is nothing for
+ * this backend to scope by filename. A caller that passes the same request shape across backends
+ * still gets the same fail-loud validation on a malformed list; it just never changes what this
+ * particular backend does.
+ *
+ * @param {object} [options]
+ * @param {string[]} [options.defaultExcludePaths] - Validated the same way as the other backends'
+ *   own option of the same name, purely for interface symmetry; never read otherwise.
+ * @returns {IsolationProvider}
+ * @test-only-export-ok: production wiring is deliberately deferred to #3630, the same open item
+ *  that defers createMacosDeletionIsolationProvider's wiring — this is a second backend of the
+ *  same not-yet-wired port. isolation-provider.test.mjs is its only consumer until that wiring lands.
+ */
+export function createConfigOverrideIsolationProvider({ defaultExcludePaths = ['AGENTS.md'] } = {}) {
+  return async ({ sourceCwd, excludePaths }) => {
+    normalizeExcludePaths(excludePaths, defaultExcludePaths); // validated, then deliberately unused
+    assertAbsoluteLocalPaths({ sourceCwd });
+    const cwd = await realpath(sourceCwd);
+    return {
+      cwd,
+      excludedPaths: [],
+      guarantee: 'root-agents-doc-suppressed-in-cli-context',
+      extraCliArgs: ['-c', 'project_doc_max_bytes=0'],
+      cleanup: async () => {},
+    };
+  };
+}
+
+/**
  * Pure argv builder for the history-surgery clone (#3371 Probe 14e). `--depth 1` collapses the
  * clone to a single grafted root commit — the fact that makes `buildHistorySurgeryCommands`'s
  * `commit --amend` below rewrite the ENTIRE history in one step, instead of needing a
@@ -157,11 +257,7 @@ export function createMacosDeletionIsolationProvider({
  * what Probe 14e measured (2s wall, then 0 hits across all 8252 objects after surgery).
  */
 export function buildHistorySurgeryCloneArgv(sourceCwd, destination) {
-  for (const [name, value] of Object.entries({ sourceCwd, destination })) {
-    if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) {
-      throw new TypeError(`isolation: ${name} must be an absolute local path without NUL`);
-    }
-  }
+  assertAbsoluteLocalPaths({ sourceCwd, destination });
   return ['clone', '--quiet', '--depth', '1', '--no-hardlinks', '--', pathToFileURL(sourceCwd).href, destination];
 }
 
@@ -206,7 +302,7 @@ export function buildHistorySurgeryCommands(targetPaths) {
  * — undocumented: absent from the public config-reference page, recovered by exhaustive search of
  * the CLI binary's own serde config tables (14h). This module never launches Codex itself (see file
  * header — preparation is this port's whole job); the returned flags are for the CALLER to splice
- * into its own `codex exec` argv.
+ * into its own `codex exec` argv (see `extraCliArgs` on the outcome this feeds).
  *
  * `project_doc_max_bytes=0` is INCLUDED UNCONDITIONALLY and is not an optional extra: the deny map
  * also denies Codex's own AGENTS.md auto-loader, and without the byte cap at 0 that loader trips its
@@ -265,23 +361,23 @@ export function buildNativeDenyCodexArgs(denyPaths) {
 }
 
 /**
- * Second backend (#3371 Probe 14): real git-history surgery on a scratch clone, plus the Codex
+ * Third backend (#3371 Probe 14): real git-history surgery on a scratch clone, plus the Codex
  * native-deny argv fragment — the combined, evidence-backed fix Probe 14's verdict recommends over
  * `createMacosDeletionIsolationProvider` above. Deletion alone is actively counterproductive: `git
  * status` prints a ` D <path>` signpost naming exactly what was removed, and a real tool-bearing
  * Codex session followed that signpost to `git show HEAD:AGENTS.md` unprompted, on an ordinary
  * non-adversarial task that never mentioned git, history, or recovery (14a). This backend leaves no
  * such signpost: the resolved `excludePaths` are amended out of the clone's own single grafted root
- * commit, so `git status` stays clean and `git show`/`git cat-file` on every object in the resulting packfile
- * come back empty — verified in Probe 14e against all 8252 objects in a real repository, and by this
- * module's own real-git integration test.
+ * commit, so `git status` stays clean and `git show`/`git cat-file` on every object in the resulting
+ * packfile come back empty — verified in Probe 14e against all 8252 objects in a real repository,
+ * and by this module's own real-git integration test.
  *
  * What this backend does NOT do: launch Codex, or apply the deny config to anything. Per the file
  * header, this port prepares a directory; it never owns child argv, sandbox policy, or launch. The
- * returned `codexConfigArgs` is `buildNativeDenyCodexArgs`'s output, ready for the CALLER to splice
+ * returned `extraCliArgs` is `buildNativeDenyCodexArgs`'s output, ready for the CALLER to splice
  * into its OWN `codex exec` invocation — the `guarantee` field describes only the history-surgery
  * half this function actually performs before returning; the filesystem-deny half only takes effect
- * once the caller actually launches Codex with `codexConfigArgs` included.
+ * once the caller actually launches Codex with `extraCliArgs` included.
  *
  * RESIDUAL GAP — stated plainly, do not read this backend as closing more than it does (14g/14h):
  * 1. **Any OTHER readable git repo on disk holding the same file still leaks.** Proved live, not
@@ -306,7 +402,7 @@ export function buildNativeDenyCodexArgs(denyPaths) {
  *   `excludePaths` entirely. Defaults to `['AGENTS.md']`; a request-level `excludePaths` always wins,
  *   so one factory instance can still serve callers with different doctrine-file conventions.
  * @param {string[]} [options.extraDenyPaths] - Additional absolute paths/globs folded into the
- *   returned `codexConfigArgs`, beyond the resolved exclude paths (as `/**\/<path>` globs) and the
+ *   returned `extraCliArgs`, beyond the resolved exclude paths (as `/**\/<path>` globs) and the
  *   source tree itself (both the exact path and a `/**` glob under it).
  * @returns {IsolationProvider}
  */
@@ -332,7 +428,7 @@ export function createNativeDenyWithHistoryStripIsolationProvider({
       for (const argv of buildHistorySurgeryCommands(paths)) {
         await execFn('git', argv, { cwd, encoding: 'utf8', shell: false });
       }
-      const codexConfigArgs = buildNativeDenyCodexArgs([
+      const extraCliArgs = buildNativeDenyCodexArgs([
         ...paths.map((path) => `/**/${path}`),
         source,
         `${source}/**`,
@@ -342,7 +438,7 @@ export function createNativeDenyWithHistoryStripIsolationProvider({
         cwd,
         excludedPaths: [...paths],
         guarantee: 'history-stripped-before-start',
-        codexConfigArgs,
+        extraCliArgs,
         cleanup,
       };
     } catch (error) {

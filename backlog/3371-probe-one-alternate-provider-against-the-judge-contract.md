@@ -617,6 +617,159 @@ real filesystem effects without a model spawn. Their success is not a new live C
 the supplied A/B/C evidence proves the underlying technique. End-to-end production graduation remains
 subject to `we:docs/agent/prototype-based-dev.md`.
 
+
+## Probe 12 — correction: Probe 9's "no such flag exists" conclusion was wrong, 2026-09-11
+
+**Probe 9 above is wrong and this section corrects it, in place, without altering Probe 9's own text** —
+per this repo's own convention (see Probes 10/11, which likewise never rewrote earlier sections). Probe 9
+tried `--ignore-user-config` and a bare `-C <lane>`, found ~3,900 extra tokens still loaded, and concluded
+*"there is no `--safe-mode` or `--bare` analogue"* and *"a tool-bearing [Codex juror] cannot have both
+properties at 0.153.4."* **That conclusion does not hold.** A real config override, `-c
+project_doc_max_bytes=0`, suppresses Codex's automatic doctrine-file ("project doc") injection, live-verified
+just now in both `-s read-only` and `-s workspace-write` (tool-bearing) sandbox modes, on the same
+installed `codex-cli 0.153.4` Probe 9 itself used.
+
+### The setup — a canary doctrine file outside this repo
+
+A throwaway scratch git repo (outside this checkout, so this correction never risked the real
+we:AGENTS.md) with a one-line canary rule:
+
+```text
+# Canary Instructions
+## Hard rule 1
+The canary phrase is: PURPLE-ELEPHANT-42
+```
+
+### Baseline — confirms the canary loads normally, same as Probe 9's finding
+
+```sh
+$ codex exec --json --ephemeral -s workspace-write --skip-git-repo-check -C <scratch> \
+    "Quote Hard rule 1 verbatim from your already-loaded instructions (no tools), or say NOT LOADED."
+```
+
+```json
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"## Hard rule 1\nThe canary phrase is: PURPLE-ELEPHANT-42"}}
+{"type":"turn.completed","usage":{"input_tokens":14995,"cached_input_tokens":11520,...}}
+```
+
+### Override, read-only — the flag Probe 9 says does not exist
+
+```sh
+$ codex exec --json --ephemeral -s read-only --skip-git-repo-check \
+    -c project_doc_max_bytes=0 -C <scratch> \
+    "Quote Hard rule 1 verbatim from your already-loaded instructions (no tools), or say NOT LOADED."
+```
+
+```json
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"NOT LOADED"}}
+{"type":"turn.completed","usage":{"input_tokens":14743,"cached_input_tokens":11520,...}}
+```
+
+### Override, workspace-write (tool-bearing) — the exact case Probe 9 said was impossible
+
+```sh
+$ codex exec --json --ephemeral -s workspace-write --skip-git-repo-check \
+    -c project_doc_max_bytes=0 -C <scratch> \
+    "Quote Hard rule 1 verbatim from your already-loaded instructions (no tools), or say NOT LOADED.
+     Then create a file proof.txt containing ok and run git status --short."
+```
+
+```json
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"NOT LOADED\n\nI'll create `proof.txt` containing `ok` and run `git status --short`.\n"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc \"printf 'ok' > proof.txt\"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/bash -lc 'git status --short'","aggregated_output":"?? proof.txt\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"NOT LOADED\n\nCreated `proof.txt` containing `ok`. `git status --short` returned:\n\n```text\n?? proof.txt\n```"}}
+```
+
+`proof.txt` on disk afterward contained `ok`; `git status --short` in the scratch repo independently showed
+`?? proof.txt`. **The report is not "NOT LOADED, and by the way tools silently broke" — real tool-bearing
+work (file create, shell exec, git status) worked exactly as it does without the override**, same as
+Probe 9's own baseline claimed for the no-strip case. Reran with `-s read-only` too and got the same
+`NOT LOADED`, confirming the suppression is not sandbox-mode-dependent.
+
+### The flag is real, not a guessed name that happened to parse
+
+`-c key=value` is Codex's documented generic config-override flag (`codex exec --help`). Whether
+`project_doc_max_bytes` is a real key, not something that silently no-ops, was checked directly against
+the installed binary rather than assumed:
+
+```sh
+$ strings /opt/homebrew/bin/codex | grep -o 'project_doc_max_bytes = [0-9]*'
+project_doc_max_bytes = 32768
+$ strings /opt/homebrew/bin/codex | grep -o 'project doc exceeds remaining budget; truncating'
+project doc exceeds remaining budget; truncating
+```
+
+`project_doc_max_bytes` is a genuine `ConfigToml` field with a real default (32,768 bytes) and a real
+truncation code path behind it — exactly the byte-budget knob its name implies, not a coincidental no-op
+string. `--strict-config` (which errors on unrecognized keys) was not needed to establish this, but the
+binary's own embedded config schema already settles it.
+
+### Quantified: the token drop matches a fully-suppressed doc, same measurement Probe 9 used
+
+Probe 9 measured its finding in `input_tokens`. Repeating that method here on the identical trivial
+prompt (`"Say hi."`), same scratch dir, same 79-byte canary doctrine file:
+
+| | `input_tokens` |
+| --- | --- |
+| No override | 14,995 |
+| `-c project_doc_max_bytes=0` | 14,724 |
+
+271 fewer input tokens with the override — consistent with a fully suppressed small doctrine file, the
+same direction and mechanism Probe 9's own 3,900-token delta pointed at, just with the sign Probe 9
+concluded did not exist.
+
+### What is genuinely still true from Probe 9 — the honest limit of this correction
+
+One real finding from Probe 9 survives intact: **explicit, tool-mediated reads are not defeated.** Probed
+directly, in the same workspace-write, override-active session:
+
+```sh
+$ codex exec --json --ephemeral -s workspace-write --skip-git-repo-check \
+    -c project_doc_max_bytes=0 -C <scratch> \
+    "First say NOT LOADED if the doctrine file is not already in your context. Then use your shell tool
+     to run 'cat AGENTS.md' and quote whatever it prints."
+```
+
+```json
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"NOT LOADED"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'cat AGENTS.md'","aggregated_output":"# Canary Instructions\n\n## Hard rule 1\nThe canary phrase is: PURPLE-ELEPHANT-42\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"(same two lines, wrapped in a markdown code fence in the reply)"}}
+```
+
+The override suppresses only the CLI's own **automatic** startup read. A tool-bearing agent that decides
+(on its own, or under a crafted prompt) to read the doctrine file itself still recovers it in full — the
+file is never removed from disk. This is a real, load-bearing difference from the deletion backend
+(`createMacosDeletionIsolationProvider`, below), which removes the file so an explicit read gets ENOENT.
+Neither backend dominates the other; they hold different guarantees. See the design note in
+`we:scripts/lib/isolation-provider.mjs` for how this shaped the code decision.
+
+### Corrected conclusion — supersedes the tool-free-only guidance below, that paragraph's text is left as-is
+
+**Probe 9's "no context-strip flag exists ... a tool-bearing juror cannot have both properties at
+0.153.4" is WRONG.** A context-strip mechanism for a tool-bearing Codex session in a lane cwd does exist:
+`-c project_doc_max_bytes=0`. Consequently, the sentence in "Recommendation for `#3369` step 3" above that
+reads *"Seat the first Codex juror in a **tool-free** role: probe 9's context-strip/lane collision only
+binds tool-bearing jurors"* is **superseded by this probe** — that collision is resolved, and a
+tool-bearing Codex juror in a lane cwd is no longer blocked on this specific ground. (Whether a tool-bearing
+juror/fixer role is scoped at all is a separate question this probe does not answer, same caveat
+we:backlog/3630-wire-the-isolationprovider-macos-deletion-backend-into-a-rea.md already carries.)
+This also corrects the false premise
+we:backlog/xqa9ttq-wire-codex-cli-as-a-second-judge-provider-tool-free-panelist.md and PR #2117 (open,
+unmerged as of this writing, branch `lane/xqa9ttq-review-pr-codex-advisory-seat`) built on when they seated
+Codex tool-free-only for that reason — that PR's own review should re-check whether the tool-free
+constraint it carries is still warranted in light of this probe, not assume it still is.
+
+Built from this correction: `we:scripts/lib/isolation-provider.mjs` gained a second backend,
+`createConfigOverrideIsolationProvider`, alongside the existing `createMacosDeletionIsolationProvider` —
+added, not a replacement, for the explicit-read reason recorded two sections above.
+
+**See also Probe 13, immediately below** — an independent, deeper investigation (six live
+mutation-probe runs against the real judge mandate) that reaches the same correction on its own and
+goes further: whether a tool-bearing Codex juror is not just unblocked but actually usable. Its own
+13b finding sharpens the "explicit reads still recover the file" point directly above — 6/6 of its
+tool-bearing runs read the doctrine off disk when constructing their answer, not just when asked to.
+
 ## Probe 13 — can Codex do the TOOL-BEARING judge role? Six live runs against the real mandate, 2026-09-11
 
 Probe 9 concluded that a tool-bearing Codex juror could not also be context-stripped, and the verdict's
@@ -825,6 +978,12 @@ diff — that is the next probe, not this one's conclusion. Nothing was wired in
 
 ## Progress
 
+- 2026-09-11 — Probe 12: live-verified `-c project_doc_max_bytes=0` in both `read-only` and
+  `workspace-write` modes on Codex CLI 0.153.4, correcting Probe 9's wrong "no such flag" conclusion.
+  Confirmed the key is real against the installed binary, quantified the token drop, and confirmed the
+  one real remaining limit (explicit tool-mediated reads still recover the file). Added
+  `createConfigOverrideIsolationProvider` to `we:scripts/lib/isolation-provider.mjs` as a second backend
+  alongside the deletion backend, not a replacement.
 - 2026-09-11 — Probe 13 run: six live tool-bearing Codex judge runs against the real `buildPanelMandate`
   correctness mandate over four purpose-built scenarios, plus four like-for-like Claude runs. Codex performed
   a genuine mutation probe in 6/6 and reached the correct verdict in 6/6; Claude agreed on all four shared
@@ -1146,3 +1305,13 @@ unchanged.
   directory. Found an undocumented native Codex per-profile filesystem deny that beats an external wrapper,
   plus a 2-second clone-surgery recipe verified against all 8252 objects. Exhaustive native-surface search
   recorded (135 feature flags, all config keys, env vars, real docs). No code wired in.
+- 2026-09-11 — Probe 14's recommendation IMPLEMENTED: we:scripts/lib/isolation-provider.mjs gained
+  `createNativeDenyWithHistoryStripIsolationProvider` (real git-history surgery + the native-deny Codex
+  argv fragment), alongside a shared `excludePaths` request field threaded through all three backends
+  (deletion, config-override, native-deny). Real unit tests cover the surgery sequence (an exhaustive
+  packfile object scan, mirroring this probe's own "0/8252 objects" bar) and the argv construction. A real
+  end-to-end `codex exec` run confirmed direct reads and git-history reads of the denied file both fail
+  while real tool-bearing work still succeeds — and corrected one detail this probe's own text left
+  implicit: a sandbox-mode flag (`-s workspace-write`/`-s danger-full-access`) passed to `codex exec`
+  ALONGSIDE the native-deny config silently defeats it; the caller must omit it entirely. Still not wired
+  into any dispatch call site — see we:backlog/3630-wire-the-isolationprovider-macos-deletion-backend-into-a-rea.md.

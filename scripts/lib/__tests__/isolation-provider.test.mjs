@@ -13,6 +13,7 @@ import {
   buildHistorySurgeryCommands,
   buildIsolationCloneArgv,
   buildNativeDenyCodexArgs,
+  createConfigOverrideIsolationProvider,
   createMacosDeletionIsolationProvider,
   createNativeDenyWithHistoryStripIsolationProvider,
   normalizeExcludePaths,
@@ -76,6 +77,7 @@ describe('IsolationProvider preparation contract', () => {
     });
     expect(outcome.guarantee).toBe('root-agents-absent-before-start');
     expect(outcome.excludedPaths).toEqual(['AGENTS.md']);
+    expect(outcome.extraCliArgs).toEqual([]);
     await expect(lstat(join(outcome.cwd, 'AGENTS.md'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
     expect(await readFile(join(outcome.cwd, 'work.txt'), 'utf8')).toBe('work');
@@ -333,14 +335,14 @@ describe('createNativeDenyWithHistoryStripIsolationProvider (injected execFn)', 
 
     expect(outcome.guarantee).toBe('history-stripped-before-start');
     expect(outcome.excludedPaths).toEqual(['AGENTS.md']);
-    expect(outcome.codexConfigArgs).toEqual(
+    expect(outcome.extraCliArgs).toEqual(
       buildNativeDenyCodexArgs(['/**/AGENTS.md', source, `${source}/**`]),
     );
     await outcome.cleanup();
     expect(await readdir(scratch)).toEqual([]);
   });
 
-  it('folds extraDenyPaths and a factory-level defaultExcludePaths into codexConfigArgs and the rm list', async () => {
+  it('folds extraDenyPaths and a factory-level defaultExcludePaths into extraCliArgs and the rm list', async () => {
     const { execFn, calls } = historyExecutor();
     const provider = createNativeDenyWithHistoryStripIsolationProvider({
       execFn, defaultExcludePaths: ['AGENTS.md', 'nested/AGENTS.md'], extraDenyPaths: ['/other/tree'],
@@ -348,7 +350,7 @@ describe('createNativeDenyWithHistoryStripIsolationProvider (injected execFn)', 
     const outcome = await provider({ sourceCwd: source, scratchParent: scratch });
     const rmCall = calls.find((c) => c.argv[0] === 'rm');
     expect(rmCall.argv).toEqual(['rm', '--quiet', '--', 'AGENTS.md', 'nested/AGENTS.md']);
-    expect(outcome.codexConfigArgs).toEqual(buildNativeDenyCodexArgs([
+    expect(outcome.extraCliArgs).toEqual(buildNativeDenyCodexArgs([
       '/**/AGENTS.md', '/**/nested/AGENTS.md', source, `${source}/**`, '/other/tree',
     ]));
     await outcome.cleanup();
@@ -365,7 +367,7 @@ describe('createNativeDenyWithHistoryStripIsolationProvider (injected execFn)', 
     const rmCall = calls.find((c) => c.argv[0] === 'rm');
     expect(rmCall.argv).toEqual(['rm', '--quiet', '--', 'CLAUDE.md']);
     expect(outcome.excludedPaths).toEqual(['CLAUDE.md']);
-    expect(outcome.codexConfigArgs).toEqual(
+    expect(outcome.extraCliArgs).toEqual(
       buildNativeDenyCodexArgs(['/**/CLAUDE.md', source, `${source}/**`]),
     );
     await outcome.cleanup();
@@ -501,9 +503,9 @@ describe('createNativeDenyWithHistoryStripIsolationProvider — REAL git surgery
       expect(totalObjects).toBeGreaterThan(0);
       expect(hits).toBe(0);
       // The Codex argv fragment is present and denies both the file glob and the source tree.
-      expect(outcome.codexConfigArgs.join(' ')).toContain('/**/AGENTS.md');
-      expect(outcome.codexConfigArgs.join(' ')).toContain(realSource);
-      expect(outcome.codexConfigArgs).toContain('project_doc_max_bytes=0');
+      expect(outcome.extraCliArgs.join(' ')).toContain('/**/AGENTS.md');
+      expect(outcome.extraCliArgs.join(' ')).toContain(realSource);
+      expect(outcome.extraCliArgs).toContain('project_doc_max_bytes=0');
     } finally {
       await outcome.cleanup();
     }
@@ -518,4 +520,74 @@ describe('createNativeDenyWithHistoryStripIsolationProvider — REAL git surgery
     const after = await scanAllBlobsForMarker(realSource, MARKER);
     expect(after).toEqual(before);
   }, 20_000);
+});
+
+describe('createConfigOverrideIsolationProvider (#3371 Probe 12)', () => {
+  it.each(['relative', '', '--upload-pack=bad', 'https://example.com/repo', '/bad\0path', null])(
+    'rejects an invalid source path before any work: %s', async (sourceCwd) => {
+      await expect(createConfigOverrideIsolationProvider()({ sourceCwd })).rejects.toThrow(/absolute local path/);
+    },
+  );
+
+  it('returns the realpath of sourceCwd unchanged — no clone, no scratch directory touched', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source, scratchParent: scratch });
+    expect(outcome.cwd).toBe(await realpath(source));
+    expect(await readdir(scratch)).toEqual([]);
+  });
+
+  it('ignores scratchParent entirely — works with none given at all', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    expect(outcome.cwd).toBe(await realpath(source));
+  });
+
+  it('carries the config-override argv the caller must append, not a filesystem exclusion', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    expect(outcome.extraCliArgs).toEqual(['-c', 'project_doc_max_bytes=0']);
+    expect(outcome.excludedPaths).toEqual([]);
+    expect(outcome.guarantee).toBe('root-agents-doc-suppressed-in-cli-context');
+  });
+
+  it('never touches AGENTS.md on disk — the file a deliberate read would still recover', async () => {
+    await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
+  });
+
+  it('cleanup is a no-op safe to call repeatedly, since nothing was ever allocated', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    await expect(outcome.cleanup()).resolves.toBeUndefined();
+    await expect(outcome.cleanup()).resolves.toBeUndefined();
+    expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
+  });
+
+  it('rejects a missing source directory instead of returning an unreal cwd', async () => {
+    await expect(createConfigOverrideIsolationProvider()({ sourceCwd: join(root, 'does-not-exist') }))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  // #3371 follow-up: excludePaths is accepted for interface symmetry with the other two backends,
+  // but this backend's guarantee comes from a CLI flag that suppresses whatever doc Codex's own
+  // auto-loader resolves — there is no per-filename behavior for excludePaths to change here.
+  it('validates a request-level excludePaths the same way as the other backends, but it has no effect', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({
+      sourceCwd: source, excludePaths: ['CLAUDE.md', '.github/copilot-instructions.md'],
+    });
+    expect(outcome.extraCliArgs).toEqual(['-c', 'project_doc_max_bytes=0']);
+    expect(outcome.excludedPaths).toEqual([]);
+    expect(outcome.guarantee).toBe('root-agents-doc-suppressed-in-cli-context');
+    // Still on disk — excludePaths never made this backend touch the filesystem.
+    expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
+  });
+
+  it('rejects an invalid request-level excludePaths, same fail-loud rule as the other backends', async () => {
+    await expect(createConfigOverrideIsolationProvider()({ sourceCwd: source, excludePaths: [] }))
+      .rejects.toThrow(/non-empty array/);
+    await expect(createConfigOverrideIsolationProvider()({ sourceCwd: source, excludePaths: ['/absolute'] }))
+      .rejects.toThrow(/repo-relative path/);
+  });
+
+  it('a factory-level defaultExcludePaths is validated too, though never read', async () => {
+    const provider = createConfigOverrideIsolationProvider({ defaultExcludePaths: ['CLAUDE.md'] });
+    const outcome = await provider({ sourceCwd: source });
+    expect(outcome.extraCliArgs).toEqual(['-c', 'project_doc_max_bytes=0']);
+  });
 });
