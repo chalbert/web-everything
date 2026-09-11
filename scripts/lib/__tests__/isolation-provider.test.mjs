@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildIsolationCloneArgv, createMacosDeletionIsolationProvider } from '../isolation-provider.mjs';
+import {
+  buildIsolationCloneArgv, createConfigOverrideIsolationProvider, createMacosDeletionIsolationProvider,
+} from '../isolation-provider.mjs';
 
 let root, source, scratch;
 beforeEach(async () => {
@@ -61,6 +63,7 @@ describe('IsolationProvider preparation contract', () => {
     });
     expect(outcome.guarantee).toBe('root-agents-absent-before-start');
     expect(outcome.excludedPaths).toEqual(['AGENTS.md']);
+    expect(outcome.extraCliArgs).toEqual([]);
     await expect(lstat(join(outcome.cwd, 'AGENTS.md'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
     expect(await readFile(join(outcome.cwd, 'work.txt'), 'utf8')).toBe('work');
@@ -122,5 +125,48 @@ describe('IsolationProvider preparation contract', () => {
     expect(await readFile(join(second.cwd, 'work.txt'), 'utf8')).toBe('work');
     await second.cleanup();
     expect(await readdir(scratch)).toEqual([]);
+  });
+});
+
+describe('createConfigOverrideIsolationProvider (#3371 Probe 12)', () => {
+  it.each(['relative', '', '--upload-pack=bad', 'https://example.com/repo', '/bad\0path', null])(
+    'rejects an invalid source path before any work: %s', async (sourceCwd) => {
+      await expect(createConfigOverrideIsolationProvider()({ sourceCwd })).rejects.toThrow(/absolute local path/);
+    },
+  );
+
+  it('returns the realpath of sourceCwd unchanged — no clone, no scratch directory touched', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source, scratchParent: scratch });
+    expect(outcome.cwd).toBe(await realpath(source));
+    expect(await readdir(scratch)).toEqual([]);
+  });
+
+  it('ignores scratchParent entirely — works with none given at all', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    expect(outcome.cwd).toBe(await realpath(source));
+  });
+
+  it('carries the config-override argv the caller must append, not a filesystem exclusion', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    expect(outcome.extraCliArgs).toEqual(['-c', 'project_doc_max_bytes=0']);
+    expect(outcome.excludedPaths).toEqual([]);
+    expect(outcome.guarantee).toBe('root-agents-doc-suppressed-in-cli-context');
+  });
+
+  it('never touches AGENTS.md on disk — the file a deliberate read would still recover', async () => {
+    await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
+  });
+
+  it('cleanup is a no-op safe to call repeatedly, since nothing was ever allocated', async () => {
+    const outcome = await createConfigOverrideIsolationProvider()({ sourceCwd: source });
+    await expect(outcome.cleanup()).resolves.toBeUndefined();
+    await expect(outcome.cleanup()).resolves.toBeUndefined();
+    expect(await readFile(join(source, 'AGENTS.md'), 'utf8')).toBe('source doctrine');
+  });
+
+  it('rejects a missing source directory instead of returning an unreal cwd', async () => {
+    await expect(createConfigOverrideIsolationProvider()({ sourceCwd: join(root, 'does-not-exist') }))
+      .rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
