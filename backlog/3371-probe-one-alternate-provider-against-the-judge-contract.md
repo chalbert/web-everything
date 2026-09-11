@@ -3,10 +3,11 @@ bornAs: x356hzs
 kind: story
 size: 5
 parent: "3369"
-status: open
+status: resolved
 blockedBy: ["3370"]
 scope: ["we:scripts/lib/judge-spawn.mjs"]
 dateOpened: "2026-08-27"
+dateResolved: "2026-09-11"
 tags: [operations, multi-provider, probe]
 ---
 
@@ -400,3 +401,432 @@ evidence and a verdict, per Done-when 3.
 ## Progress
 
 - 2026-09-09 — Probed Codex CLI 0.153.4 against a real ChatGPT subscription. Ten probes run (0 through 9), all recorded above with their commands and raw output. Verdict written: buildable, with the schema transform as a hard prerequisite. No code wired in.
+
+## Probe 10 — tool-bearing doctrine isolation, attempted 2026-09-10
+
+**Verdict: no approach qualified for implementation in this execution environment.** This is an
+inconclusive Codex before/after comparison, not evidence that deletion or Seatbelt cannot work on an
+unrestricted host. Both ordinary nested Codex runs failed before producing any model response; even an
+allow-all Seatbelt control failed before executing its payload. No isolation port, backend, tests, or
+pipeline wiring was built. Probe 9 above remains the prior successful context-loading evidence.
+
+This narrowly tests doctrine visibility, not resource caps or a lane-container migration. The existing
+container research remains [#3621](3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md),
+open and unchanged. Apple's `container` remains unavailable (`command -v container` exited 1 with no
+output), so it was not tested or assumed into a design.
+
+### Environment and available reference code
+
+```
+$ codex --version
+WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)
+codex-cli 0.153.4
+$ codex login status
+Logged in using ChatGPT
+```
+
+This run itself has restricted filesystem/network access and no permission escalation available.
+`JudgeProviderRequest`, `JudgeProviderOutcome`, and the function-type port in
+`we:scripts/operations/cli-adapter.mjs` were read, along with the existing injectable-spawn tests in
+`we:scripts/lib/__tests__/judge-spawn.test.mjs`. The requested `we:scripts/lib/codex-judge-spawn.mjs`,
+`we:scripts/__tests__/codex-direct-task.test.mjs`, and `we:scripts/codex-direct-task.mjs` are absent in this
+checkout. `git branch -a --list '*xqa9ttq*'` and the following history query returned no entries:
+
+```sh
+git log --all -1 --format='%h %s' -- scripts/lib/codex-judge-spawn.mjs scripts/codex-direct-task.mjs
+```
+
+ Their implementation
+was therefore not inspected, and this record makes no claims about it.
+
+### A — real scratch clone, file present versus deleted
+
+All scratch material lived outside the working checkout under
+`/private/tmp/we-doctrine-probe-_hmte5hj`, allocated with Python `tempfile.mkdtemp`. A preliminary
+`git init -q` scratch directory with the real we:AGENTS.md produced the same Codex initialization error
+as the clone below. The actual cloned-repository comparison followed:
+
+```sh
+git clone --local --no-hardlinks --quiet . /private/tmp/we-doctrine-probe-_hmte5hj/clone
+# exit 0; stderr:
+# warning: source repository is shallow, ignoring --local
+# warning: --local is ignored
+```
+
+The repository's real we:AGENTS.md was copied byte-for-byte with `shutil.copyfile` into the scratch clone
+before the baseline (16,636 bytes in this checkout). `work.txt` initially contained `before\n`.
+The exact prompt, supplied through stdin and then closed, was:
+
+```text
+First, using only your already loaded instructions and no tools, quote the first numbered Hard rule in AGENTS.md verbatim, or say NOT LOADED if absent. Then use shell tools inside the current directory: read AGENTS.md if present and report its first Hard rule; edit work.txt from before to after; create proof.txt containing shell-ok; run git status --short and cat work.txt proof.txt. Do not commit or access other directories. Report actual tool results separately from initially loaded instructions.
+```
+
+Commands below are shell renderings of the actual Python `subprocess.run` argv calls. The parent supplied
+that prompt via `input=...`, captured stdout/stderr separately, and imposed a 45-second timeout on each
+clone run (neither hit it).
+
+```sh
+codex exec --json --ephemeral -s workspace-write -C /private/tmp/we-doctrine-probe-_hmte5hj/clone -
+# Python Path.unlink() then removed clone/AGENTS.md, before the second child started.
+codex exec --json --ephemeral -s workspace-write -C /private/tmp/we-doctrine-probe-_hmte5hj/clone -
+```
+
+**Both runs: exit 1, stdout empty, identical stderr:**
+
+```text
+WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)
+Error: failed to initialize in-process app-server client: Operation not permitted (os error 1)
+```
+
+No `thread.started`, answer, usage, or tool-execution event was emitted. There is no evidence here of
+successful baseline loading, successful exclusion, or preserved Codex tools. Authentication status alone
+was insufficient to establish a usable nested session. The particular denied initialization operation
+was not diagnosed; the error must not be recast as a model/API failure or a doctrine-loading failure.
+
+Separate **parent-shell controls**, after deletion, did work:
+
+```text
+$ git -C /private/tmp/we-doctrine-probe-_hmte5hj/clone status --short
+ D AGENTS.md
+?? work.txt
+
+$ /bin/sh -c "printf 'after\n' > work.txt; printf 'shell-ok\n' > proof.txt; cat work.txt proof.txt"
+# cwd = scratch clone; exit 0
+after
+shell-ok
+
+$ git -C /private/tmp/we-doctrine-probe-_hmte5hj/clone show HEAD:AGENTS.md
+# exit 0; 16,636 bytes; trimmed to the first hard rule:
+1. **Design-first**: document in JSON/njk before implementing. Respect `designDecisions`; discuss before overriding one.
+```
+
+Thus deletion did not prevent Git status or ordinary parent-shell edits, but **it did not make the doctrine
+inaccessible to a tool-bearing process**: Git's object database retains it. This does not settle whether
+removal is sufficient to prevent automatic initial loading. A successful repeat must distinguish that
+weaker guarantee from filesystem confidentiality. Renaming the file within the same readable tree would
+likewise leave a readable copy; no separate rename run was performed.
+
+### B — real Seatbelt profile and controls
+
+The original we:AGENTS.md was restored in the scratch clone before these tests. The exact profile written
+to `/private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb` was:
+
+```scheme
+(version 1)
+(allow default)
+(deny file-read* (literal "/private/tmp/we-doctrine-probe-_hmte5hj/clone/AGENTS.md"))
+```
+
+This is a minimal deny-read experiment. Its default allow does not itself restrict writes to the scope;
+Codex's requested workspace-write mode is separate. It leaves networking allowed by the profile, but
+network reachability was not proven. No claim about alternate paths, Git objects, ancestor/global
+instructions, configured fallback filenames, or other ambient doctrine follows from this profile.
+
+```sh
+/usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true
+/usr/bin/sandbox-exec -f /private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb /bin/cat /private/tmp/we-doctrine-probe-_hmte5hj/clone/AGENTS.md
+/usr/bin/sandbox-exec -f /private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb /bin/sh -c 'cat work.txt; touch seatbelt-proof.txt'
+/usr/bin/sandbox-exec -f /private/tmp/we-doctrine-probe-_hmte5hj/deny-agents.sb codex exec --json --ephemeral -s workspace-write -C /private/tmp/we-doctrine-probe-_hmte5hj/clone -
+```
+
+The three file-profile invocations ran with cwd set to the scratch clone; the Codex invocation received
+the same closed-stdin prompt. All four emitted:
+
+```text
+sandbox-exec: sandbox_apply: Operation not permitted
+```
+
+Each custom-profile invocation exited 71 with empty stdout. Even the allow-all control could not run
+`true`, so these results prove **sandbox application is unavailable here**, not that the deny rule
+correctly blocks we:AGENTS.md, nor that Codex's own sandbox composes with it.
+
+### Build gate and next executable proof
+
+No working child session means no implementation under the explicit build-only-after-proof constraint.
+A repeat needs an execution environment that can initialize nested Codex and, to test Seatbelt, apply a
+Seatbelt profile. Run the same baseline and stripped clone prompt there first; require actual quotation
+before tools in the baseline and actual edit/read/exec events in the stripped run. Do not substitute
+mocked tests or parent-shell success for that evidence. If a backend is eventually justified, specify
+whether it excludes automatic doctrine discovery or enforces read denial, including recovery via Git.
+All scratch directories, logs, the location marker, and the experimental profile were removed after
+recording the evidence. No commit, push, or PR was made.
+
+## Probe 11 — dispatching session's unsandboxed deletion proof, 2026-09-10
+
+**Evidence supplied by the dispatching session from an unsandboxed parent shell**, not re-run by the
+implementing agent. Probe 10 remains an accurate inconclusive nested probe. The dispatching session
+attributes its failure to nesting macOS Seatbelt: an already sandboxed process cannot apply a second
+sandbox to a child. No nested Codex or Seatbelt probe was repeated for this follow-up.
+
+All three supplied runs used `codex exec --json --ephemeral -s workspace-write
+--skip-git-repo-check -C <clone> -` with a closed stdin prompt; all exited 0.
+
+- **A, baseline:** `git clone --quiet <repo> ./clone-baseline`. Asked to quote Hard rule 1 solely from
+  already-loaded context, before any tool, the last agent message was exactly:
+  `1. **Design-first**: document in JSON/njk before implementing. Respect `designDecisions`; discuss before overriding one.`
+- **B, stripped:** copied the baseline clone and removed its root we:AGENTS.md before
+  starting the child (command below). With the identical prompt the entire last agent message was `NOT LOADED`.
+- **C, tools:** a separate child in the stripped clone created `isolation-test-proof.txt`, read it,
+  and ran `git status --short` in a real `command_execution` item. The dispatching session independently
+  read the file (`isolation-test-ok`, no newline) and independently confirmed status:
+  the root we:AGENTS.md deleted and `isolation-test-proof.txt` untracked (raw output below).
+
+```sh
+cp -R ./clone-baseline ./clone-stripped && rm ./clone-stripped/AGENTS.md
+# Independently verified git status --short after C:
+ D AGENTS.md
+?? isolation-test-proof.txt
+```
+
+This positive evidence justifies implementing removal before launch to prevent **automatic loading of
+the root we:AGENTS.md in the tested setup** while preserving tool-bearing work. It does not establish read
+denial: Git show or checkout can recover it (commands below). Ancestor/global doctrine,
+nested instruction files, override/fallback names, explicit prompt context, and adversarial agents are
+not covered. Resource caps remain out of scope under #3621. No positive Seatbelt deny-profile result was
+supplied; these are deletion results only.
+
+```sh
+git show HEAD:AGENTS.md
+git checkout -- AGENTS.md
+```
+
+### Isolation port design (documented before implementation)
+
+`we:scripts/lib/isolation-provider.mjs` names `IsolationProviderRequest`, `IsolationProviderOutcome`,
+and the function-type `IsolationProvider`, following the port shape in
+`we:scripts/operations/cli-adapter.mjs`. This is dispatch tooling, not a new WE standard or glossary term.
+
+The request supplies an absolute local repository `sourceCwd` and optional absolute `scratchParent`.
+The provider prepares a fresh, owned scratch clone of committed HEAD, deletes only its root we:AGENTS.md
+before resolving, and returns `cwd`, `excludedPaths`, the narrow `guarantee`, and async `cleanup()`.
+Uncommitted/ignored source files are not copied. Callers await preparation before starting the child,
+keep the clone exclusively owned until that child exits, extract any needed results, and then await
+cleanup in `finally`. Preparation rejects on failure and removes partial scratch material. Cleanup is
+idempotent; failures are surfaced, including a cleanup failure during preparation.
+
+The first backend is `createMacosDeletionIsolationProvider({ execFn })`: injected argv-based Git exec
+for tests, actual filesystem operations in owned temporary directories. The function-type port has no
+Codex, Seatbelt, or platform-specific request fields, so future Linux/Windows preparation backends can
+implement the same lifecycle. None are built or auto-selected here. The outcome is a prepared directory,
+not an OS sandbox or a process launcher; stronger execution/resource isolation needs a separate contract.
+The caller still owns child argv, sandbox policy, authentication, timeout, and cancellation. The clone
+is not a pooled lane and does not satisfy the existing judge lane validator: production wiring is deferred.
+
+Unit tests exercise argv boundaries, preparation ordering, source preservation, failure cleanup, and
+real filesystem effects without a model spawn. Their success is not a new live Codex proof of this module;
+the supplied A/B/C evidence proves the underlying technique. End-to-end production graduation remains
+subject to `we:docs/agent/prototype-based-dev.md`.
+
+## Probe 13 — can Codex do the TOOL-BEARING judge role? Six live runs against the real mandate, 2026-09-11
+
+Probe 9 concluded that a tool-bearing Codex juror could not also be context-stripped, and the verdict's
+recommendation ("seat the first Codex juror in a **tool-free** role") rests entirely on that. This probe
+tests the question that premise was blocking: **does a tool-bearing Codex juror actually perform the
+MUTATION PROBE the real mandate demands** — break the line, run the suite, name the test that reddens — or
+does it merely assert findings the way a tool-free juror must?
+
+Everything below was executed on this machine. The four scenarios were built on `we:scripts/lib/diff-hunks.mjs`
+and its 17-test `we:scripts/lib/__tests__/diff-hunks.test.mjs`, each committed into its own throwaway clone so
+`git diff HEAD~1 HEAD` reproduces the reviewed diff. No probe touched a lane or the primary checkout.
+
+### 13a — probe 9's blocker is lifted, and it is a CONFIG flag, not clone surgery
+
+Re-confirmed independently of the sessions that first found it, in `workspace-write` (tool-bearing) mode,
+against a clone whose root `we:AGENTS.md` is 16,636 bytes and PRESENT:
+
+```
+$ codex exec --json -s workspace-write --skip-git-repo-check --ephemeral -C base "Reply with exactly the word: ping" < /dev/null
+{"type":"turn.completed","usage":{"input_tokens":19393,"cached_input_tokens":11520,…,"output_tokens":5,…}}
+
+$ codex exec --json -s workspace-write --skip-git-repo-check --ephemeral -c project_doc_max_bytes=0 -C base "…same…" < /dev/null
+{"type":"turn.completed","usage":{"input_tokens":15102,"cached_input_tokens":11520,…,"output_tokens":5,…}}
+```
+
+**19,393 → 15,102 input tokens, a 4,291-token drop** matching the file. Tool use is unaffected: the same
+flags plus a three-part ask produced a real `command_execution` item, wrote a file, and reported its own
+context state — raw:
+
+```
+{"item":{"type":"command_execution","command":"/bin/bash -lc 'git status --porcelain'","aggregated_output":"?? node_modules\n","exit_code":0,"status":"completed"}}
+{"item":{"type":"agent_message","text":"… 2. Wrote `probe-tooluse.txt` containing exactly `OK`.\n3. No AGENTS.md or CLAUDE.md content was supplied in my system context before tool use. I did not read either file from disk."}}
+```
+
+So probe 9's "there is no `--safe-mode` analogue" is superseded — and it needs no clone mutation, which makes
+it strictly cheaper than probe 11's deletion technique for the AUTO-LOAD half.
+
+### 13b — BUT: the flag is a token saving, NOT isolation. 6/6 runs read the doctrine anyway
+
+**In every one of the six judge runs below, the Codex juror shelled `cat` on the clone's root `we:AGENTS.md`,
+unprompted**, inside its first two tool calls. The mandate never mentions the file. This is the same gap
+probe 11 admits about deletion ("it does not establish read denial: Git show or checkout can recover it"),
+observed happening rather than hypothesised — and it is worse than probe 11 assumed, because the model does
+not need to *recover* the file, it simply looks for it. The single Claude juror run captured with a visible
+tool trace (scenario B, below) did NOT read it.
+
+**Consequence, stated rather than papered over:** for a TOOL-BEARING juror, neither
+`-c project_doc_max_bytes=0` nor probe 11's deletion is a context-isolation guarantee. Only deletion makes
+the bytes absent at all; the config flag leaves them one `cat` away. Both are worth having for the token
+saving. Neither should be described to a caller as isolation.
+
+### The four scenarios, and the ground truth established BEFORE any juror saw them
+
+| | the diff | suite at HEAD | correct answer |
+| --- | --- | --- | --- |
+| **A** | `overCap`'s `>= cap` → `> cap`, plus new prose claiming no payload reaching the cap can escape | **1 RED** | blocker; name the reddened test |
+| **B** | the two fidelity flags lifted into a frozen `DIFF_FIDELITY_FLAGS` constant — behaviour-preserving | 17 green | CLEAR, zero findings |
+| **C** | `--no-color` added to argv with a new prose guarantee; no test written for it | 17 green | coverage finding; **NO named test reddens** |
+| **D** | `rmSync(dir, {recursive:true, force:true})` → `rmSync(dir, {force:true})`, prose calls the teardown "total" | 17 green | blocker; **NO named test reddens** |
+
+A's named test, verbatim: `#2890-review-fix finding 2 — the over-maxBuffer diff is BOUNDED and DISTINGUISHABLE >
+a TRUNCATED exit-1 stdout that reaches the cap is treated as too-large, never returned as a complete diff`.
+D's defect is a real leak, measured on the defective build before any juror ran: five calls, five surviving
+`we-write-diff-*` directories in `tmpdir()`, with the suite fully green.
+
+### The spawn — the real mandate, not an easier one
+
+The prompt is `buildPanelMandate({lens:'correctness', netChangedFiles, goal, fenced:true})` and
+`renderJudgeInput(...)` from `we:scripts/lib/review-core.mjs` / `we:scripts/operations/review-pr.mjs`,
+byte-for-byte, folded into the positional slot (probe 7's finding: Codex has no `--append-system-prompt`).
+The schema is `REVIEW_JUDGE_SHAPE` run through probe 4's all-keys-required transform. One added paragraph
+tells the juror its cwd IS its throwaway clone — the fact `assertLaneCwd` establishes structurally on the
+Claude path.
+
+```
+$ codex exec --json \
+    --output-schema review-shape.json -o last-A.json \
+    -s workspace-write \
+    -c project_doc_max_bytes=0 -c model_reasoning_effort=high \
+    --skip-git-repo-check --ephemeral -C scA \
+    "$(cat prompt-A.txt)" < /dev/null
+```
+
+### 13c — the answer: YES, it really performs the mutation probe. 6/6.
+
+**Scenario A** — four tool calls, two of them `npx vitest`. It ran the suite (red), then wrote a Python
+harness that **reverted `>` to `>=`, re-ran (17/17 green), re-applied `>`, re-ran (1 failed)**, and restored
+the file. Raw, from the harness's own stdout, then the finding it produced:
+
+```
+BASE COMPARISON: 0
+ ✓ scripts/lib/__tests__/diff-hunks.test.mjs  (17 tests) 150ms
+ Test Files  1 passed (1)
+MUTATION >= TO >: 1
+ ❯ scripts/lib/__tests__/diff-hunks.test.mjs  (17 tests | 1 failed)
+```
+
+```
+"Mutation probe: restoring >= passes all 17 tests; changing it back to > reddens the existing named test
+ 'a TRUNCATED exit-1 stdout that reaches the cap is treated as too-large, never returned as a complete diff'."
+```
+
+with `verdict: CONFIRMED`, `impactIfUnfixed: broken`, `introduced`/`worseThanBase` true, `parallelizable`
+false → `blocker`. Correct.
+
+**Scenario B** — zero findings, correct. And it did not simply observe green: it mutated **three** ways
+(`--text` removed → 2 named tests red; `--no-ext-diff` removed → red; both moved after `--end-of-options` →
+red), then ran `git diff --exit-code` to prove it had restored the tree.
+
+**Scenario D — the hardest case, and the one that separates proof from assertion.** It wrote a Node probe with
+an injected `exec` that captures the temp dir and checks `existsSync` on BOTH the success and the thrown-exec
+paths:
+
+```
+HEAD behavior
+{"fail":false,"result":{"text":"diff","scored":true},"directoryRemains":true}
+cleanup error: ERR_FS_EISDIR
+{"fail":true,"result":{"text":"","scored":false,"reason":"diff-failed"},"directoryRemains":true}
+BASE cleanup behavior
+{"fail":false,…,"directoryRemains":false}
+{"fail":true,…,"directoryRemains":false}
+```
+
+then mutated cleanup to a no-op and reported, verbatim:
+
+```
+"Mutation probe: replacing cleanup with a no-op still passed all 17 tests in
+ scripts/lib/__tests__/diff-hunks.test.mjs; NO named test reddens."
+```
+
+`blocker`. That is the mandate's "say plainly that NO named test reddens if none does" answered in those words,
+with the empirical work behind it.
+
+**Scenario C** — it went past the mandate: a real-git probe with `color.ui=always` proving the new flag's
+guarantee is TRUE, then removed the flag and re-ran (17/17 green):
+
+```
+{"removeFlag":false,"scored":true,"hasEscapes":false,"hasPlainHunkHeader":true,"includesTerm":true}
+{"removeFlag":true,"scored":true,"hasEscapes":true,"hasPlainHunkHeader":false,"includesTerm":true}
+```
+
+→ `category: coverage`, `NO named test reddens`, `worseThanBase:false` / `parallelizable:true` →
+`carve-out`. Correct routing for a coverage gap on new work.
+
+**Variance.** A and D were re-run. Both returned the same verdict, same disposition, same named-test result,
+with the mutation probe performed again (A2: 5 tool calls / 3 vitest; D2: 7 / 2). **Six runs, six correct
+answers, six genuine mutation probes. No run asserted a defect without running something.** All four clones
+were `git status --porcelain` clean afterwards — no juror left litter behind.
+
+### 13d — cost and latency against a like-for-like Claude juror
+
+The `~$1.10/6min` and `~$0.68/5.5min` figures on record are from real PR diffs, far larger than these 1–2 KB
+scenarios, so they are NOT a fair yardstick. The same four scenarios were therefore run through a real
+tool-bearing Claude juror using `buildJudgeArgv`'s actual recipe (`claude` 2.1.269, `-p --output-format json
+--safe-mode --allowedTools Bash Read Grep Glob --model sonnet --effort high --no-session-persistence
+--session-id … --append-system-prompt <mandate> --json-schema <REVIEW_JUDGE_SHAPE>`, input on stdin, cwd = the
+same clone):
+
+| scenario | Codex wall | Codex tool calls | Claude wall | Claude cost | Claude turns | same verdict? |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | 44s | 4 | 66s | $0.3729 | 8 | yes |
+| B | 40s | 6 | 15s | $0.1351 | 5 | yes |
+| C | 45s | 9 | 73s | $0.4382 | 11 | yes |
+| D | 54s | 6 | 83s | $0.2383 | 9 | yes |
+| A2 | 40s | 5 | — | — | — | — |
+| D2 | 62s | 7 | — | — | — | — |
+| **mean** | **47.5s** | | **59.3s** | **$0.296** | | **4/4 agree** |
+
+**On dollars, no honest "cheaper" claim is available.** Codex emits no USD anywhere (the `costUsd` hole above),
+and on a ChatGPT subscription there is no per-run charge at all — usage draws on a plan allowance whose
+remaining balance the CLI does not report either. So the comparison is "$0.296/run of Claude API spend"
+against "an unpriced draw on a subscription", and which is cheaper depends on facts this probe cannot see.
+What IS measurable: **Codex was ~20% faster in wall time (47.5s vs 59.3s) and did equal or more verification
+work per run.** The one case Claude won decisively was the clean diff (B: 15s / $0.135), and it won it by
+doing less — it ran the suite green and stopped, where Codex ran three mutations to prove the guards were
+real. On the two genuine-defect scenarios Claude was slower (66s/83s vs 44s/54s).
+
+Claude's prose is materially richer at the same verdict — its D failure scenario explains the
+`force`-versus-`recursive` semantics and quotes before/after temp-dir counts; Codex's is terse but complete.
+Both filled all fourteen finding fields. Notably **no Codex answer contained a single `null`** across six
+runs, so probe 4's null-stripping note, while still required in general, did not bite here.
+
+### 13e — a NEW port hole probe 4 did not surface
+
+`--json` never names the resolved model. `thread.started` carries only `thread_id`, `turn.completed` only
+token counts, and no `-m` was passed; asked directly, the model answered *"I'm Codex, based on GPT-6; my exact
+runtime model identifier isn't exposed to me."* So a `JudgeProviderOutcome` **cannot record which model
+judged** — the same class of reporting hole as `costUsd`, and it must be admitted rather than filled with the
+string a caller *intended*. Pin `-m` explicitly if a run record has to name a model.
+
+### What this CORRECTS in the verdict above
+
+The "Recommendation for `#3369` step 3" says to *"seat the first Codex juror in a **tool-free** role"*, on
+probe 9's ground that a tool-bearing juror could not be context-stripped. **That ground no longer holds**
+(13a), and the tool-bearing role is now the one with live evidence behind it, at the real mandate's bar, six
+times. The rest of the verdict stands unchanged — the schema transform is still a hard prerequisite, and
+`costUsd` is still unfillable (now joined by the model id).
+
+**Verdict on the tool-bearing question: READY, WITH CAVEATS.** Codex genuinely performs the mutation-probe
+discipline, and did so more thoroughly than the Claude juror on the clean diff. The caveats are real and
+none of them is about judging quality: (1) context isolation is NOT solved for a tool-bearing juror — 6/6
+read the doctrine off disk (13b); (2) no `costUsd` and no model id on the run record (13e); (3) six runs on
+one small module is enough to justify building the provider, and not enough to claim parity on a 48 KB PR
+diff — that is the next probe, not this one's conclusion. Nothing was wired in;
+`we:scripts/lib/judge-spawn.mjs` is unchanged.
+
+## Progress
+
+- 2026-09-11 — Probe 13 run: six live tool-bearing Codex judge runs against the real `buildPanelMandate`
+  correctness mandate over four purpose-built scenarios, plus four like-for-like Claude runs. Codex performed
+  a genuine mutation probe in 6/6 and reached the correct verdict in 6/6; Claude agreed on all four shared
+  scenarios. Confirms `-c project_doc_max_bytes=0` lifts probe 9's blocker, and records that it is a token
+  saving rather than isolation. Corrects the verdict's tool-free recommendation. No code wired in.
