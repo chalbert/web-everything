@@ -616,3 +616,217 @@ Unit tests exercise argv boundaries, preparation ordering, source preservation, 
 real filesystem effects without a model spawn. Their success is not a new live Codex proof of this module;
 the supplied A/B/C evidence proves the underlying technique. End-to-end production graduation remains
 subject to `we:docs/agent/prototype-based-dev.md`.
+
+## Probe 13 — can Codex do the TOOL-BEARING judge role? Six live runs against the real mandate, 2026-09-11
+
+Probe 9 concluded that a tool-bearing Codex juror could not also be context-stripped, and the verdict's
+recommendation ("seat the first Codex juror in a **tool-free** role") rests entirely on that. This probe
+tests the question that premise was blocking: **does a tool-bearing Codex juror actually perform the
+MUTATION PROBE the real mandate demands** — break the line, run the suite, name the test that reddens — or
+does it merely assert findings the way a tool-free juror must?
+
+Everything below was executed on this machine. The four scenarios were built on `we:scripts/lib/diff-hunks.mjs`
+and its 17-test `we:scripts/lib/__tests__/diff-hunks.test.mjs`, each committed into its own throwaway clone so
+`git diff HEAD~1 HEAD` reproduces the reviewed diff. No probe touched a lane or the primary checkout.
+
+### 13a — probe 9's blocker is lifted, and it is a CONFIG flag, not clone surgery
+
+Re-confirmed independently of the sessions that first found it, in `workspace-write` (tool-bearing) mode,
+against a clone whose root `we:AGENTS.md` is 16,636 bytes and PRESENT:
+
+```
+$ codex exec --json -s workspace-write --skip-git-repo-check --ephemeral -C base "Reply with exactly the word: ping" < /dev/null
+{"type":"turn.completed","usage":{"input_tokens":19393,"cached_input_tokens":11520,…,"output_tokens":5,…}}
+
+$ codex exec --json -s workspace-write --skip-git-repo-check --ephemeral -c project_doc_max_bytes=0 -C base "…same…" < /dev/null
+{"type":"turn.completed","usage":{"input_tokens":15102,"cached_input_tokens":11520,…,"output_tokens":5,…}}
+```
+
+**19,393 → 15,102 input tokens, a 4,291-token drop** matching the file. Tool use is unaffected: the same
+flags plus a three-part ask produced a real `command_execution` item, wrote a file, and reported its own
+context state — raw:
+
+```
+{"item":{"type":"command_execution","command":"/bin/bash -lc 'git status --porcelain'","aggregated_output":"?? node_modules\n","exit_code":0,"status":"completed"}}
+{"item":{"type":"agent_message","text":"… 2. Wrote `probe-tooluse.txt` containing exactly `OK`.\n3. No AGENTS.md or CLAUDE.md content was supplied in my system context before tool use. I did not read either file from disk."}}
+```
+
+So probe 9's "there is no `--safe-mode` analogue" is superseded — and it needs no clone mutation, which makes
+it strictly cheaper than probe 11's deletion technique for the AUTO-LOAD half.
+
+### 13b — BUT: the flag is a token saving, NOT isolation. 6/6 runs read the doctrine anyway
+
+**In every one of the six judge runs below, the Codex juror shelled `cat` on the clone's root `we:AGENTS.md`,
+unprompted**, inside its first two tool calls. The mandate never mentions the file. This is the same gap
+probe 11 admits about deletion ("it does not establish read denial: Git show or checkout can recover it"),
+observed happening rather than hypothesised — and it is worse than probe 11 assumed, because the model does
+not need to *recover* the file, it simply looks for it. The single Claude juror run captured with a visible
+tool trace (scenario B, below) did NOT read it.
+
+**Consequence, stated rather than papered over:** for a TOOL-BEARING juror, neither
+`-c project_doc_max_bytes=0` nor probe 11's deletion is a context-isolation guarantee. Only deletion makes
+the bytes absent at all; the config flag leaves them one `cat` away. Both are worth having for the token
+saving. Neither should be described to a caller as isolation.
+
+### The four scenarios, and the ground truth established BEFORE any juror saw them
+
+| | the diff | suite at HEAD | correct answer |
+| --- | --- | --- | --- |
+| **A** | `overCap`'s `>= cap` → `> cap`, plus new prose claiming no payload reaching the cap can escape | **1 RED** | blocker; name the reddened test |
+| **B** | the two fidelity flags lifted into a frozen `DIFF_FIDELITY_FLAGS` constant — behaviour-preserving | 17 green | CLEAR, zero findings |
+| **C** | `--no-color` added to argv with a new prose guarantee; no test written for it | 17 green | coverage finding; **NO named test reddens** |
+| **D** | `rmSync(dir, {recursive:true, force:true})` → `rmSync(dir, {force:true})`, prose calls the teardown "total" | 17 green | blocker; **NO named test reddens** |
+
+A's named test, verbatim: `#2890-review-fix finding 2 — the over-maxBuffer diff is BOUNDED and DISTINGUISHABLE >
+a TRUNCATED exit-1 stdout that reaches the cap is treated as too-large, never returned as a complete diff`.
+D's defect is a real leak, measured on the defective build before any juror ran: five calls, five surviving
+`we-write-diff-*` directories in `tmpdir()`, with the suite fully green.
+
+### The spawn — the real mandate, not an easier one
+
+The prompt is `buildPanelMandate({lens:'correctness', netChangedFiles, goal, fenced:true})` and
+`renderJudgeInput(...)` from `we:scripts/lib/review-core.mjs` / `we:scripts/operations/review-pr.mjs`,
+byte-for-byte, folded into the positional slot (probe 7's finding: Codex has no `--append-system-prompt`).
+The schema is `REVIEW_JUDGE_SHAPE` run through probe 4's all-keys-required transform. One added paragraph
+tells the juror its cwd IS its throwaway clone — the fact `assertLaneCwd` establishes structurally on the
+Claude path.
+
+```
+$ codex exec --json \
+    --output-schema review-shape.json -o last-A.json \
+    -s workspace-write \
+    -c project_doc_max_bytes=0 -c model_reasoning_effort=high \
+    --skip-git-repo-check --ephemeral -C scA \
+    "$(cat prompt-A.txt)" < /dev/null
+```
+
+### 13c — the answer: YES, it really performs the mutation probe. 6/6.
+
+**Scenario A** — four tool calls, two of them `npx vitest`. It ran the suite (red), then wrote a Python
+harness that **reverted `>` to `>=`, re-ran (17/17 green), re-applied `>`, re-ran (1 failed)**, and restored
+the file. Raw, from the harness's own stdout, then the finding it produced:
+
+```
+BASE COMPARISON: 0
+ ✓ scripts/lib/__tests__/diff-hunks.test.mjs  (17 tests) 150ms
+ Test Files  1 passed (1)
+MUTATION >= TO >: 1
+ ❯ scripts/lib/__tests__/diff-hunks.test.mjs  (17 tests | 1 failed)
+```
+
+```
+"Mutation probe: restoring >= passes all 17 tests; changing it back to > reddens the existing named test
+ 'a TRUNCATED exit-1 stdout that reaches the cap is treated as too-large, never returned as a complete diff'."
+```
+
+with `verdict: CONFIRMED`, `impactIfUnfixed: broken`, `introduced`/`worseThanBase` true, `parallelizable`
+false → `blocker`. Correct.
+
+**Scenario B** — zero findings, correct. And it did not simply observe green: it mutated **three** ways
+(`--text` removed → 2 named tests red; `--no-ext-diff` removed → red; both moved after `--end-of-options` →
+red), then ran `git diff --exit-code` to prove it had restored the tree.
+
+**Scenario D — the hardest case, and the one that separates proof from assertion.** It wrote a Node probe with
+an injected `exec` that captures the temp dir and checks `existsSync` on BOTH the success and the thrown-exec
+paths:
+
+```
+HEAD behavior
+{"fail":false,"result":{"text":"diff","scored":true},"directoryRemains":true}
+cleanup error: ERR_FS_EISDIR
+{"fail":true,"result":{"text":"","scored":false,"reason":"diff-failed"},"directoryRemains":true}
+BASE cleanup behavior
+{"fail":false,…,"directoryRemains":false}
+{"fail":true,…,"directoryRemains":false}
+```
+
+then mutated cleanup to a no-op and reported, verbatim:
+
+```
+"Mutation probe: replacing cleanup with a no-op still passed all 17 tests in
+ scripts/lib/__tests__/diff-hunks.test.mjs; NO named test reddens."
+```
+
+`blocker`. That is the mandate's "say plainly that NO named test reddens if none does" answered in those words,
+with the empirical work behind it.
+
+**Scenario C** — it went past the mandate: a real-git probe with `color.ui=always` proving the new flag's
+guarantee is TRUE, then removed the flag and re-ran (17/17 green):
+
+```
+{"removeFlag":false,"scored":true,"hasEscapes":false,"hasPlainHunkHeader":true,"includesTerm":true}
+{"removeFlag":true,"scored":true,"hasEscapes":true,"hasPlainHunkHeader":false,"includesTerm":true}
+```
+
+→ `category: coverage`, `NO named test reddens`, `worseThanBase:false` / `parallelizable:true` →
+`carve-out`. Correct routing for a coverage gap on new work.
+
+**Variance.** A and D were re-run. Both returned the same verdict, same disposition, same named-test result,
+with the mutation probe performed again (A2: 5 tool calls / 3 vitest; D2: 7 / 2). **Six runs, six correct
+answers, six genuine mutation probes. No run asserted a defect without running something.** All four clones
+were `git status --porcelain` clean afterwards — no juror left litter behind.
+
+### 13d — cost and latency against a like-for-like Claude juror
+
+The `~$1.10/6min` and `~$0.68/5.5min` figures on record are from real PR diffs, far larger than these 1–2 KB
+scenarios, so they are NOT a fair yardstick. The same four scenarios were therefore run through a real
+tool-bearing Claude juror using `buildJudgeArgv`'s actual recipe (`claude` 2.1.269, `-p --output-format json
+--safe-mode --allowedTools Bash Read Grep Glob --model sonnet --effort high --no-session-persistence
+--session-id … --append-system-prompt <mandate> --json-schema <REVIEW_JUDGE_SHAPE>`, input on stdin, cwd = the
+same clone):
+
+| scenario | Codex wall | Codex tool calls | Claude wall | Claude cost | Claude turns | same verdict? |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | 44s | 4 | 66s | $0.3729 | 8 | yes |
+| B | 40s | 6 | 15s | $0.1351 | 5 | yes |
+| C | 45s | 9 | 73s | $0.4382 | 11 | yes |
+| D | 54s | 6 | 83s | $0.2383 | 9 | yes |
+| A2 | 40s | 5 | — | — | — | — |
+| D2 | 62s | 7 | — | — | — | — |
+| **mean** | **47.5s** | | **59.3s** | **$0.296** | | **4/4 agree** |
+
+**On dollars, no honest "cheaper" claim is available.** Codex emits no USD anywhere (the `costUsd` hole above),
+and on a ChatGPT subscription there is no per-run charge at all — usage draws on a plan allowance whose
+remaining balance the CLI does not report either. So the comparison is "$0.296/run of Claude API spend"
+against "an unpriced draw on a subscription", and which is cheaper depends on facts this probe cannot see.
+What IS measurable: **Codex was ~20% faster in wall time (47.5s vs 59.3s) and did equal or more verification
+work per run.** The one case Claude won decisively was the clean diff (B: 15s / $0.135), and it won it by
+doing less — it ran the suite green and stopped, where Codex ran three mutations to prove the guards were
+real. On the two genuine-defect scenarios Claude was slower (66s/83s vs 44s/54s).
+
+Claude's prose is materially richer at the same verdict — its D failure scenario explains the
+`force`-versus-`recursive` semantics and quotes before/after temp-dir counts; Codex's is terse but complete.
+Both filled all fourteen finding fields. Notably **no Codex answer contained a single `null`** across six
+runs, so probe 4's null-stripping note, while still required in general, did not bite here.
+
+### 13e — a NEW port hole probe 4 did not surface
+
+`--json` never names the resolved model. `thread.started` carries only `thread_id`, `turn.completed` only
+token counts, and no `-m` was passed; asked directly, the model answered *"I'm Codex, based on GPT-6; my exact
+runtime model identifier isn't exposed to me."* So a `JudgeProviderOutcome` **cannot record which model
+judged** — the same class of reporting hole as `costUsd`, and it must be admitted rather than filled with the
+string a caller *intended*. Pin `-m` explicitly if a run record has to name a model.
+
+### What this CORRECTS in the verdict above
+
+The "Recommendation for `#3369` step 3" says to *"seat the first Codex juror in a **tool-free** role"*, on
+probe 9's ground that a tool-bearing juror could not be context-stripped. **That ground no longer holds**
+(13a), and the tool-bearing role is now the one with live evidence behind it, at the real mandate's bar, six
+times. The rest of the verdict stands unchanged — the schema transform is still a hard prerequisite, and
+`costUsd` is still unfillable (now joined by the model id).
+
+**Verdict on the tool-bearing question: READY, WITH CAVEATS.** Codex genuinely performs the mutation-probe
+discipline, and did so more thoroughly than the Claude juror on the clean diff. The caveats are real and
+none of them is about judging quality: (1) context isolation is NOT solved for a tool-bearing juror — 6/6
+read the doctrine off disk (13b); (2) no `costUsd` and no model id on the run record (13e); (3) six runs on
+one small module is enough to justify building the provider, and not enough to claim parity on a 48 KB PR
+diff — that is the next probe, not this one's conclusion. Nothing was wired in;
+`we:scripts/lib/judge-spawn.mjs` is unchanged.
+
+## Progress
+
+- 2026-09-11 — Probe 13 run: six live tool-bearing Codex judge runs against the real `buildPanelMandate`
+  correctness mandate over four purpose-built scenarios, plus four like-for-like Claude runs. Codex performed
+  a genuine mutation probe in 6/6 and reached the correct verdict in 6/6; Claude agreed on all four shared
+  scenarios. Confirms `-c project_doc_max_bytes=0` lifts probe 9's blocker, and records that it is a token
+  saving rather than isolation. Corrects the verdict's tool-free recommendation. No code wired in.
