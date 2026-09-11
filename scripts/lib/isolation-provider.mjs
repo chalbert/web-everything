@@ -35,6 +35,11 @@ import { promisify } from 'node:util';
  * @typedef {object} IsolationProviderRequest
  * @property {string} sourceCwd - Absolute local repository path; clone committed HEAD only.
  * @property {string} [scratchParent] - Absolute existing temporary parent; defaults to OS temp.
+ * @property {string[]} [excludePaths] - Repo-relative doctrine-file path(s) this backend should
+ * exclude/strip, e.g. `['AGENTS.md']` or a different repo's own convention (`['CLAUDE.md']`,
+ * `['.github/copilot-instructions.md']`) plus any nested overrides. Defaults to `['AGENTS.md']`
+ * when omitted — every existing caller and test that predates this field keeps working unchanged.
+ * Every backend below reads this the same way (`normalizeExcludePaths`); none hardcodes the name.
  */
 
 /**
@@ -62,6 +67,25 @@ import { promisify } from 'node:util';
  * process/container execution and stronger guarantees need a separate execution contract.
  */
 
+/**
+ * Pure validator/normalizer for a request's `excludePaths`, shared by every backend so all of them
+ * fail closed on the same bad input the same way, and so "no field passed" resolves to exactly
+ * `['AGENTS.md']` everywhere rather than each backend re-deriving its own default. `fallback` lets a
+ * factory set its OWN default (still validated) for callers that never pass the request field at all.
+ */
+export function normalizeExcludePaths(excludePaths, fallback = ['AGENTS.md']) {
+  const paths = excludePaths === undefined ? fallback : excludePaths;
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new TypeError('isolation: excludePaths must be a non-empty array of repo-relative paths');
+  }
+  for (const path of paths) {
+    if (typeof path !== 'string' || path.length === 0 || isAbsolute(path) || path.includes('\0')) {
+      throw new TypeError('isolation: each excludePath must be a non-empty repo-relative path without NUL');
+    }
+  }
+  return paths;
+}
+
 /** Pure argv builder. Paths are single arguments; no shell interpolation or CLI options as paths. */
 export function buildIsolationCloneArgv(sourceCwd, destination) {
   for (const [name, value] of Object.entries({ sourceCwd, destination })) {
@@ -81,14 +105,19 @@ export function buildIsolationCloneArgv(sourceCwd, destination) {
  * @param {object} [options]
  * @param {(file: string, argv: string[], options: object) => Promise<unknown>} [options.execFn]
  *   execFile-compatible promise function; must reject on nonzero exit. Injected for tests.
+ * @param {string[]} [options.defaultExcludePaths] - This factory's own default when a request omits
+ *   `excludePaths` entirely. Defaults to `['AGENTS.md']`; a request-level `excludePaths` always wins.
  * @returns {IsolationProvider}
  * @test-only-export-ok: production wiring is deliberately deferred (see file header) — this is the
  *  first real backend of a new port, proven by #3371 Probes 10/11's direct evidence, not yet wired into
  *  any dispatch call site. isolation-provider.test.mjs is its only consumer until that wiring lands.
  */
-export function createMacosDeletionIsolationProvider({ execFn = promisify(execFile) } = {}) {
-  return async ({ sourceCwd, scratchParent = tmpdir() }) => {
+export function createMacosDeletionIsolationProvider({
+  execFn = promisify(execFile), defaultExcludePaths = ['AGENTS.md'],
+} = {}) {
+  return async ({ sourceCwd, scratchParent = tmpdir(), excludePaths }) => {
     // Validate before allocating or executing anything, even with an injected execFn.
+    const paths = normalizeExcludePaths(excludePaths, defaultExcludePaths);
     buildIsolationCloneArgv(sourceCwd, scratchParent);
     const source = await realpath(sourceCwd);
     const parent = await realpath(scratchParent);
@@ -100,12 +129,14 @@ export function createMacosDeletionIsolationProvider({ execFn = promisify(execFi
         cwd: parent, encoding: 'utf8', shell: false,
       });
       // Unlink a symlink itself, never its target. A directory/error fails closed.
-      try { await unlink(join(cwd, 'AGENTS.md')); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      for (const path of paths) {
+        try { await unlink(join(cwd, path)); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
       // Confirm the clone exists even if a broken injected executor reports success.
       await realpath(cwd);
       return {
-        cwd, excludedPaths: ['AGENTS.md'], guarantee: 'root-agents-absent-before-start', cleanup,
+        cwd, excludedPaths: [...paths], guarantee: 'root-agents-absent-before-start', cleanup,
       };
     } catch (error) {
       try { await cleanup(); }
@@ -240,8 +271,8 @@ export function buildNativeDenyCodexArgs(denyPaths) {
  * status` prints a ` D <path>` signpost naming exactly what was removed, and a real tool-bearing
  * Codex session followed that signpost to `git show HEAD:AGENTS.md` unprompted, on an ordinary
  * non-adversarial task that never mentioned git, history, or recovery (14a). This backend leaves no
- * such signpost: `targetPaths` are amended out of the clone's own single grafted root commit, so
- * `git status` stays clean and `git show`/`git cat-file` on every object in the resulting packfile
+ * such signpost: the resolved `excludePaths` are amended out of the clone's own single grafted root
+ * commit, so `git status` stays clean and `git show`/`git cat-file` on every object in the resulting packfile
  * come back empty — verified in Probe 14e against all 8252 objects in a real repository, and by this
  * module's own real-git integration test.
  *
@@ -271,20 +302,22 @@ export function buildNativeDenyCodexArgs(denyPaths) {
  * @param {object} [options]
  * @param {(file: string, argv: string[], options: object) => Promise<unknown>} [options.execFn]
  *   execFile-compatible promise function; must reject on nonzero exit. Injected for tests.
- * @param {string[]} [options.targetPaths] - Repo-relative paths to strip from history. Defaults to
- *   `['AGENTS.md']` (the root doctrine file Probe 14 targets).
+ * @param {string[]} [options.defaultExcludePaths] - This factory's own default when a request omits
+ *   `excludePaths` entirely. Defaults to `['AGENTS.md']`; a request-level `excludePaths` always wins,
+ *   so one factory instance can still serve callers with different doctrine-file conventions.
  * @param {string[]} [options.extraDenyPaths] - Additional absolute paths/globs folded into the
- *   returned `codexConfigArgs`, beyond `targetPaths` (as `/**\/<path>` globs) and the source tree
- *   itself (both the exact path and a `/**` glob under it).
+ *   returned `codexConfigArgs`, beyond the resolved exclude paths (as `/**\/<path>` globs) and the
+ *   source tree itself (both the exact path and a `/**` glob under it).
  * @returns {IsolationProvider}
  */
 export function createNativeDenyWithHistoryStripIsolationProvider({
-  execFn = promisify(execFile), targetPaths = ['AGENTS.md'], extraDenyPaths = [],
+  execFn = promisify(execFile), defaultExcludePaths = ['AGENTS.md'], extraDenyPaths = [],
 } = {}) {
-  return async ({ sourceCwd, scratchParent = tmpdir() }) => {
+  return async ({ sourceCwd, scratchParent = tmpdir(), excludePaths }) => {
     // Validate before allocating or executing anything, even with an injected execFn.
+    const paths = normalizeExcludePaths(excludePaths, defaultExcludePaths);
     buildHistorySurgeryCloneArgv(sourceCwd, scratchParent);
-    buildHistorySurgeryCommands(targetPaths);
+    buildHistorySurgeryCommands(paths);
     const source = await realpath(sourceCwd);
     const parent = await realpath(scratchParent);
     const ownedRoot = await mkdtemp(join(parent, 'we-isolation-native-'));
@@ -296,18 +329,18 @@ export function createNativeDenyWithHistoryStripIsolationProvider({
       });
       // Confirm the clone exists even if a broken injected executor reports success.
       await realpath(cwd);
-      for (const argv of buildHistorySurgeryCommands(targetPaths)) {
+      for (const argv of buildHistorySurgeryCommands(paths)) {
         await execFn('git', argv, { cwd, encoding: 'utf8', shell: false });
       }
       const codexConfigArgs = buildNativeDenyCodexArgs([
-        ...targetPaths.map((path) => `/**/${path}`),
+        ...paths.map((path) => `/**/${path}`),
         source,
         `${source}/**`,
         ...extraDenyPaths,
       ]);
       return {
         cwd,
-        excludedPaths: [...targetPaths],
+        excludedPaths: [...paths],
         guarantee: 'history-stripped-before-start',
         codexConfigArgs,
         cleanup,

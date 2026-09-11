@@ -15,6 +15,7 @@ import {
   buildNativeDenyCodexArgs,
   createMacosDeletionIsolationProvider,
   createNativeDenyWithHistoryStripIsolationProvider,
+  normalizeExcludePaths,
 } from '../isolation-provider.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -137,6 +138,72 @@ describe('IsolationProvider preparation contract', () => {
     await second.cleanup();
     expect(await readdir(scratch)).toEqual([]);
   });
+
+  // #3371 follow-up: excludePaths is a REQUEST field, not a hardcoded 'AGENTS.md' literal, so this
+  // same backend serves a different repo's own doctrine-file convention (or more than one file).
+  it('defaults to AGENTS.md when the request omits excludePaths (backward compatible)', async () => {
+    const execFn = executor(async (cwd) => { await writeFile(join(cwd, 'AGENTS.md'), 'clone doctrine'); });
+    const outcome = await createMacosDeletionIsolationProvider({ execFn })({
+      sourceCwd: source, scratchParent: scratch,
+    });
+    expect(outcome.excludedPaths).toEqual(['AGENTS.md']);
+    await outcome.cleanup();
+  });
+
+  it('removes a request-level excludePaths list instead of the AGENTS.md default', async () => {
+    const execFn = executor(async (cwd) => {
+      await writeFile(join(cwd, 'CLAUDE.md'), 'clone doctrine');
+      await mkdir(join(cwd, '.github'));
+      await writeFile(join(cwd, '.github', 'copilot-instructions.md'), 'clone doctrine');
+      // AGENTS.md is deliberately absent here — this repo's own convention is CLAUDE.md instead.
+    });
+    const outcome = await createMacosDeletionIsolationProvider({ execFn })({
+      sourceCwd: source, scratchParent: scratch,
+      excludePaths: ['CLAUDE.md', '.github/copilot-instructions.md'],
+    });
+    await expect(lstat(join(outcome.cwd, 'CLAUDE.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(lstat(join(outcome.cwd, '.github', 'copilot-instructions.md')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect(outcome.excludedPaths).toEqual(['CLAUDE.md', '.github/copilot-instructions.md']);
+    await outcome.cleanup();
+  });
+
+  it('a factory-level defaultExcludePaths is used only when the request omits the field', async () => {
+    const execFn = executor(async (cwd) => { await writeFile(join(cwd, 'CLAUDE.md'), 'clone doctrine'); });
+    const provider = createMacosDeletionIsolationProvider({ execFn, defaultExcludePaths: ['CLAUDE.md'] });
+    const outcome = await provider({ sourceCwd: source, scratchParent: scratch });
+    expect(outcome.excludedPaths).toEqual(['CLAUDE.md']);
+    await expect(lstat(join(outcome.cwd, 'CLAUDE.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await outcome.cleanup();
+  });
+
+  it('rejects an invalid excludePaths before any exec', async () => {
+    const execFn = executor();
+    await expect(createMacosDeletionIsolationProvider({ execFn })({
+      sourceCwd: source, scratchParent: scratch, excludePaths: [],
+    })).rejects.toThrow(/non-empty array/);
+    expect(execFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('normalizeExcludePaths', () => {
+  it('defaults to AGENTS.md when excludePaths is undefined', () => {
+    expect(normalizeExcludePaths(undefined)).toEqual(['AGENTS.md']);
+  });
+
+  it('honors a caller-supplied fallback when excludePaths is undefined', () => {
+    expect(normalizeExcludePaths(undefined, ['CLAUDE.md'])).toEqual(['CLAUDE.md']);
+  });
+
+  it('passes through an explicit list, ignoring the fallback', () => {
+    expect(normalizeExcludePaths(['a.md', 'b/c.md'], ['CLAUDE.md'])).toEqual(['a.md', 'b/c.md']);
+  });
+
+  it.each([[], null, ['', 'ok'], ['/absolute'], [null], ['has\0nul']])(
+    'rejects invalid excludePaths: %j', (excludePaths) => {
+      expect(() => normalizeExcludePaths(excludePaths)).toThrow();
+    },
+  );
 });
 
 // #3371 Probe 14 — the real fix. Pure argv builders first (zero cost), then the injected-execFn
@@ -273,10 +340,10 @@ describe('createNativeDenyWithHistoryStripIsolationProvider (injected execFn)', 
     expect(await readdir(scratch)).toEqual([]);
   });
 
-  it('folds extraDenyPaths and custom targetPaths into codexConfigArgs and the rm list', async () => {
+  it('folds extraDenyPaths and a factory-level defaultExcludePaths into codexConfigArgs and the rm list', async () => {
     const { execFn, calls } = historyExecutor();
     const provider = createNativeDenyWithHistoryStripIsolationProvider({
-      execFn, targetPaths: ['AGENTS.md', 'nested/AGENTS.md'], extraDenyPaths: ['/other/tree'],
+      execFn, defaultExcludePaths: ['AGENTS.md', 'nested/AGENTS.md'], extraDenyPaths: ['/other/tree'],
     });
     const outcome = await provider({ sourceCwd: source, scratchParent: scratch });
     const rmCall = calls.find((c) => c.argv[0] === 'rm');
@@ -285,6 +352,44 @@ describe('createNativeDenyWithHistoryStripIsolationProvider (injected execFn)', 
       '/**/AGENTS.md', '/**/nested/AGENTS.md', source, `${source}/**`, '/other/tree',
     ]));
     await outcome.cleanup();
+  });
+
+  it('a REQUEST-level excludePaths overrides the factory default (a different repo convention)', async () => {
+    const { execFn, calls } = historyExecutor();
+    // The factory was built with the AGENTS.md default; this call is for a repo whose doctrine
+    // file is CLAUDE.md instead — proving one factory instance serves both conventions.
+    const provider = createNativeDenyWithHistoryStripIsolationProvider({ execFn });
+    const outcome = await provider({
+      sourceCwd: source, scratchParent: scratch, excludePaths: ['CLAUDE.md'],
+    });
+    const rmCall = calls.find((c) => c.argv[0] === 'rm');
+    expect(rmCall.argv).toEqual(['rm', '--quiet', '--', 'CLAUDE.md']);
+    expect(outcome.excludedPaths).toEqual(['CLAUDE.md']);
+    expect(outcome.codexConfigArgs).toEqual(
+      buildNativeDenyCodexArgs(['/**/CLAUDE.md', source, `${source}/**`]),
+    );
+    await outcome.cleanup();
+  });
+
+  it('a request excludePaths list can also strip more than one doctrine file at once', async () => {
+    const { execFn, calls } = historyExecutor();
+    const provider = createNativeDenyWithHistoryStripIsolationProvider({ execFn });
+    const outcome = await provider({
+      sourceCwd: source, scratchParent: scratch,
+      excludePaths: ['AGENTS.md', '.github/copilot-instructions.md'],
+    });
+    const rmCall = calls.find((c) => c.argv[0] === 'rm');
+    expect(rmCall.argv).toEqual(['rm', '--quiet', '--', 'AGENTS.md', '.github/copilot-instructions.md']);
+    expect(outcome.excludedPaths).toEqual(['AGENTS.md', '.github/copilot-instructions.md']);
+    await outcome.cleanup();
+  });
+
+  it('rejects an invalid request-level excludePaths before any exec', async () => {
+    const { execFn } = historyExecutor();
+    await expect(createNativeDenyWithHistoryStripIsolationProvider({ execFn })({
+      sourceCwd: source, scratchParent: scratch, excludePaths: ['/absolute/not/allowed'],
+    })).rejects.toThrow(/repo-relative path/);
+    expect(execFn).not.toHaveBeenCalled();
   });
 
   it('rejects invalid inputs before any exec, same as the deletion provider', async () => {
