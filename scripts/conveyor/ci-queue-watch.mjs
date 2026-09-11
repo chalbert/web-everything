@@ -41,11 +41,11 @@
 import {
   existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync, statSync, unlinkSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, resolve } from 'node:path';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 
 // ── TUNING (exported so a caller/test can override) ─────────────────────────────────────────────────────────
 
@@ -179,11 +179,14 @@ export function serializeHistory(history) {
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const CI_QUEUE_ROOT = resolve(HERE, '..', '..');
 
-/** The `gh run list` sample. `exec` is injectable so the argv is assertable with no `gh` on PATH.
+/** The `gh run list` sample. `exec` is injectable so the argv is assertable with no `gh` on PATH. Default `exec`
+ *  is `we:scripts/lib/gh-throttle.mjs#execFileSyncThrottled` (#3621) — same `execFileSync(file, args, opts)`
+ *  3-arg shape as the real thing, gated through the shared `gh`-call concurrency semaphore with rate-limit
+ *  backoff. This pass runs every conveyor-runner tick (#3574), one of the runner's highest-volume `gh` callers.
  * @param {{exec?:Function, repo?:string|null, limit?:number}} [o]
  * @returns {Array<{databaseId:number, status:string, createdAt:string, startedAt:string}>}
  */
-export function defaultListRuns({ exec = execFileSync, repo = null, limit = DEFAULT_SAMPLE_LIMIT } = {}) {
+export function defaultListRuns({ exec = execFileSyncThrottled, repo = null, limit = DEFAULT_SAMPLE_LIMIT } = {}) {
   const argv = ['run', 'list', '--limit', String(limit), '--json', 'databaseId,status,createdAt,startedAt'];
   if (repo) argv.push('--repo', repo);
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
