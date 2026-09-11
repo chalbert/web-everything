@@ -3,10 +3,11 @@ bornAs: x356hzs
 kind: story
 size: 5
 parent: "3369"
-status: open
+status: resolved
 blockedBy: ["3370"]
 scope: ["we:scripts/lib/judge-spawn.mjs"]
 dateOpened: "2026-08-27"
+dateResolved: "2026-09-11"
 tags: [operations, multi-provider, probe]
 ---
 
