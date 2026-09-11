@@ -205,6 +205,225 @@ mechanism in Idea 2 would be built on (a long-poll, a filesystem watch, a socket
 either idea interacts with the still-open lane-orchestration/heavy-command core split from the prior
 amendment. Left open for whoever prepares or ratifies this decision.
 
+## Amendment (2026-09-11) — LIVE test on this machine: the tool works and the cap is real, but it does NOT fix the Codex-isolation problem
+
+Same discipline as the three amendments above — evidence addendum only, ratifying nothing, changing no
+status, resolving no fork. Everything below was **run on this machine tonight**, replacing this item's
+prior documentation-only research with measurement. It was commissioned to answer one operator question:
+*"if the product needs containers anyway for #3621's reasons, should the Codex-isolation fix be built on
+top of that now, instead of point-fixing it twice?"*
+
+**The short answer, stated up front because the rest is detail: no — because containerizing does not fix
+the Codex-isolation problem.** The two concerns barely overlap. See "the headline negative result" below.
+
+### Is Apple's `container` actually usable here? Yes — confirmed live, not from docs
+
+`command -v container` exited 1 (not preinstalled), matching the parallel probe's earlier check. It is a
+plain Homebrew-core formula: `brew install container` installed **1.3.1** (400.8 MB), then
+`container system start --enable-kernel-install` pulled the kata-containers 3.32.0 arm64 static kernel
+(`vmlinux-6.18.35`). Host: macOS 26.6.2 (build 25G83), `uname -m` = **arm64**, 12 cores. Note for this
+item's own record: the body above cites "1.0.0 shipped 2026-06-09" — the tool is now three minor versions
+past that, so the desk research was current when written but the project is moving.
+
+- First run (`alpine`, cold, incl. image pull): **6s**. Warm start, three consecutive runs: **0.86 / 0.86 / 0.88s**.
+- `--memory 1g` → guest sees 1102 MB total. Enforced.
+- `--cpus N` → guest `nproc` reports **N+1** (1→2, 2→3, 4→5). A real off-by-one; any sizing arithmetic
+  built on these flags must account for it rather than assume `--cpus N` means N visible CPUs.
+
+### The resource cap is REAL — measured against this item's own founding incident
+
+The #3594 busy-spin shape, reproduced deliberately: **8 infinite `while :; do :; done` spinners** inside
+one `--cpus 2 --memory 2g` container.
+
+| observed | value |
+| --- | --- |
+| host `com.apple.Virtualization.VirtualMachine` process | **188.3% CPU** |
+| `container stats` (guest's own view) | 214.66% CPU, 5.38 MiB / 2.00 GiB |
+| unconstrained equivalent on this 12-core host | ~800% CPU |
+
+The cap held: ~16% of the machine instead of ~two-thirds of it. **This is the first direct evidence for
+this item's central claim** — that a hypervisor-enforced ceiling contains an *already-running* runaway,
+which neither #3456/#3611's admission control nor #3593/#3594's static scanner can. The base proposal's
+core premise is now measured, not inferred.
+
+`--volume src:/ro:ro` also behaves as the 2026-09-07 amendment's mechanism 2 assumed: a write inside the
+container failed with `Read-only file system`, reads succeeded. Mount-level scope enforcement works.
+
+Outbound network works unmodified: `https://api.anthropic.com/v1/messages` → HTTP 405 (reachable; 405 is
+the correct answer to a GET), `https://api.github.com` → HTTP 200.
+
+### THE HEADLINE NEGATIVE RESULT — a container does not close the we:AGENTS.md leak
+
+The decisive test for the operator's question. A full clone with root we:AGENTS.md deleted (exactly
+#3371 Probe 11's technique, now shipped as `createMacosDeletionIsolationProvider` in
+we:scripts/lib/isolation-provider.mjs), bind-mounted read-write into a real container:
+
+```
+== 1. AGENTS.md present on mount? ==   ls: AGENTS.md: No such file or directory
+== 2. git show recovery INSIDE container ==
+     $ git show HEAD:AGENTS.md
+     # AGENTS.md — Web Everything …          ← RECOVERED, in full
+== 3. tool-bearing write ==   hello
+== 4. git status ==    D AGENTS.md / ?? container-write-proof.txt
+== 5. git commit ==   bb45168b test
+```
+
+The file is absent from the mount and real tool-bearing work is unaffected — **but the `git show` above
+printed the real doctrine text from inside the container, exactly as it does on the host.** The container
+changes nothing here, and the reason is structural: the leak lives in the mounted git object database, not
+in the process boundary, so putting a VM around the directory cannot touch it. #3371 Probe 13b's finding —
+6/6 tool-bearing Codex runs shelled `cat` on the doctrine file unprompted — is not mitigated by
+containerizing; such an agent would simply `git show` instead.
+
+Closing that leak means changing **what goes into the directory** (a `git archive` export, or a
+`file://`-URL `--depth 1` clone — measured tonight: a plain local `git clone --depth 1` is silently
+ignored, `warning: --depth is ignored in local clones; use file:// instead`, so the naive shallow-clone
+fix does not work). That change costs the same with or without a container around it.
+
+#3371's Probe 14 landed independently while this test was running and reaches the same conclusion from the
+other side, more strongly: given an *ordinary, non-adversarial* task, a tool-bearing Codex session ran a
+`git show` of the doctrine file at HEAD on its own initiative and recovered all 16,480 bytes — because
+`git status` advertises the deletion with a ` D` line that reads as a signpost. Two independent tests,
+same gap.
+
+### The one place the container IS structurally stronger — Probe 14's gap 3
+
+Probe 14b found a gap neither deletion nor this item had named: `-s workspace-write` restricts *writes*
+only, so a session read its way **out of its own clone** into a sibling directory (a `head` of the same
+filename in a sibling clone one level up), and the primary checkout sits at a well-known absolute path.
+Its conclusion: "no amount of clone-level hardening is isolation on its own."
+
+Tested tonight, because that gap is exactly the kind a filesystem namespace closes. The same escape,
+attempted from inside a container with only the clone mounted:
+
+```
+sibling dir (probe 14b route):            ../sibling-AGENTS.md: No such file or directory
+host primary checkout by absolute path:   /Users/…/webeverything/AGENTS.md: No such file or directory
+what IS visible above the mount:          bin dev etc home lib … usr var w
+```
+
+**Both routes are gone, structurally** — the sibling directory and the host path do not exist in the
+guest's filesystem at all, so there is nothing to deny and no profile to get right. This is a real win the
+container delivers that neither deletion nor a Seatbelt path-deny regex achieves as cleanly, and it should
+be weighed in this item's favour. It is also not urgent: Probe 14c proved Seatbelt *does* compose with a
+fully tool-bearing Codex session (under `-s danger-full-access`, letting the outer profile be the only
+sandbox), so gap 3 has a working cheaper interim answer today.
+
+**Net, and the answer to the operator's question.** The two problems are *mostly* disjoint, and the half
+that matters most right now is the half the container does not touch: gap 1 (history recovery) has to be
+fixed by changing what goes into the directory no matter what, at the same cost either way. The container
+is the eventually-cleanest answer to gap 3 only, which already has an interim fix. So there is no
+"point-fixing it twice" to avoid by waiting — building the Codex fix on containers would buy one gap's
+worth of elegance while inheriting the whole container migration's cost and its unresolved billing
+question. #3630's wiring of the deletion backend should proceed on its own terms.
+
+### Two real costs this item's desk research missed
+
+1. **The host lane's dependency tree is architecturally unusable inside a Linux container.** The body
+   above proposes to "bind-mount the lane's git worktree read-write"; that does not work as written.
+   This repo's installed tree carries an `@esbuild/darwin-arm64` build and a `rollup-darwin-arm64` build,
+   and running the real suite over the host mount dies with `MODULE_NOT_FOUND` out of rollup's own
+   native-binding loader. Every container needs its own linux-arm64 dependency tree. The cost is small
+   once measured — in-container `npm ci` took **14s**, produced 18,850 files with an
+   `@esbuild/linux-arm64` build, and bakes into an image once rather than per-lane — but a lane's on-disk
+   cost roughly doubles (a darwin tree for host tooling plus a linux tree for container work) and the two
+   cannot be shared.
+2. **Mount-bound I/O is measurably slower, which is in tension with the prior amendment's premise.**
+   With a correct linux tree in place, this repo's real
+   we:scripts/lib/__tests__/isolation-provider.test.mjs ran **15/15 green inside a real container**
+   (`--cpus 4 --memory 4g`, over a mounted lane-shaped clone) — the complete tool-bearing proof this
+   amendment was asked for. But it took **2.80s vs 779ms on the host**, ~3.6x, concentrated in
+   mount-bound file I/O (`environment 1.22s` vs `161ms`; `prepare 566ms` vs `110ms`). Bulk read of the
+   real 18,834-file / 447 MB installed dependency tree: **5s over a container mount vs 3.39s on the
+   host**, ~1.5x. This quantifies apple/container#948 for this repo rather than repeating its complaint.
+   It cuts against the 2026-09-08 core-split amendment, which assumed a dedicated core pool would *raise*
+   heavy-command throughput: containerizing heavy commands to protect host CPU makes those same heavy
+   commands slower. Whether the net is positive is now an open, measurable question, not an assumption.
+
+### Per-lane memory floor — a number for the core-split amendment's own open question
+
+Six concurrent idle `--cpus 1 --memory 1g` alpine containers, each with its own IP (192.168.64.16–21):
+**377–380 MB host RSS each, 2,270 MB across six.** At we:scripts/lib/lane-concurrency.mjs's current
+`DEFAULT_MAX_CONCURRENT_LANES = 8` that is ~3 GB of host RAM for *empty* VMs, before any agent session or
+dependency tree. This confirms the 2026-09-08 amendment's prediction that lane count would become bound by
+memory rather than cores — with a concrete floor of **~378 MB/lane** to size against, including for the
+second-machine hardware question that amendment flagged.
+
+### Auth: confirmed, and it is a billing decision, not a config flag
+
+The body above flags Keychain/OAuth as "the one real friction point." Confirmed and sharper than stated:
+`ANTHROPIC_API_KEY` is **not set** on this machine — dispatched sessions authenticate through the CLI's
+OAuth/keychain path — so the container route requires switching to API-key auth, which is a different
+*billing model* (metered API credits vs. the subscription the CLI uses), not just a different env var.
+`gh auth status` confirms the token lives in the macOS `(keyring)` with `Git operations protocol: ssh`, so
+a containerized lane additionally needs `GH_TOKEN` in its environment and an ssh key mounted in.
+
+**None of that applies to the heavy-command half.** `vitest` and `check:standards` need no credentials at
+all — which is exactly why tonight's in-container suite ran green with zero auth work. This is the single
+biggest asymmetry between the two halves of the core-split proposal.
+
+Mitigating, checked rather than assumed: this repo's 11 registered we:.claude/settings.json hooks are all
+repo-relative node scripts, so they follow the repo into a container and keep working — a containerized
+session does not silently lose the write-time guards, provided node and the linux dependency tree are present.
+
+### Grounded effort estimate, from reading the actual code
+
+we:scripts/lane-pool.mjs is 1,687 lines (`cmdAcquire` alone is 287); 31 files reference the pool-path
+module, 45 reference the acquire path. But two of the three seams this work needs **already exist as
+ports**, which materially lowers the estimate the body above implies:
+
+- we:scripts/lib/isolation-provider.mjs (landed via #3371 Probe 11 / PR #2118) — a backend-neutral
+  *directory preparation* port.
+- `defaultClaudeProvider` at we:scripts/operations/dispatch-lane-io.mjs:899 (#3579) — an already
+  CLI-independent *spawn* port.
+- The missing third piece is named by the isolation-provider's own header: *"process/container execution
+  and stronger guarantees need a separate execution contract."*
+
+**Per-lane containers (the base proposal): multiple days, and gated on a non-engineering decision.** A new
+ExecutionProvider port plus container backend at the #3579 seam; a container image (node, git, gh, the
+agent CLI, linux deps); the auth/billing migration above; and reconciling we:scripts/lane-pool.mjs's
+host-path lease/reap/port-registry machinery (we:.claude/lane-ports.json, `gh pr list`-driven reaping,
+`--reference` object sharing) against a guest filesystem.
+
+**Heavy-command containers only: plausibly 1–2 days for a working first cut.**
+we:scripts/readiness/heavy-admission.mjs already owns the invocation-time chokepoint, so the change is
+to route the command it admits through `container run --cpus N --memory Ng` against a prebuilt image
+instead of executing it on the host. No auth work, no spawn-seam change, no lane-pool surgery — and it is
+the half that directly answers #3594, the incident that opened this item.
+
+### Portability, restated plainly because it is permanent
+
+This machine is `arm64`, so nothing here was blocked. But Apple's project supports **Apple Silicon only,
+architecturally and permanently** — not a gap that closes. Adopting it means: an **Intel Mac cannot run
+the conveyor at all**; a **Linux host** already has native cgroups and needs a completely different
+backend (the tool is irrelevant there); a **Windows host** has neither. Full container-to-container
+networking additionally requires macOS 26. Whatever gets built must therefore be a *backend behind a
+platform-neutral execution port*, never a direct `container run` call sprinkled through the dispatcher —
+the same shape we:scripts/lib/isolation-provider.mjs already chose, and the fork this item's tradeoff (4)
+already names.
+
+### Also checked, so it is not re-discovered
+
+The 2026-09-08 git-manager idea (Idea 1 of the amendment above) is **not built**: no
+we:scripts/lib/gh-throttle.mjs exists and nothing under we:scripts/, we:docs/ or we:backlog/ references a
+git-manager or gh-throttle. It remains open as written.
+
+### This amendment does NOT stamp `preparedDate`, deliberately
+
+It closes real questions (is the tool usable; does the cap work; what does a lane cost; does the Codex
+question compose) but **opens** others: whether containerized heavy commands are net-positive given the
+~3.6x I/O penalty measured above, and whether the API-key billing change is acceptable. It also leaves this
+item's two pre-existing forks unresearched — Docker Desktop/OrbStack as the simpler mature alternative
+(tradeoff 3), and the platform-neutral-abstraction question (tradeoff 4). Stamping readiness now would be
+exactly the false stamp we:docs/agent/backlog-workflow.md's G4 / "never trust the stamp" rules warn about.
+
+**Recommended sequencing, as this research's own view rather than a ruling:** the operator's stated
+preference — wait until Codex and Gemini are hooked up — is well supported by the evidence, because the
+Codex work gains nothing from waiting for containers. If anything starts in parallel sooner, it should be
+the **heavy-command container pool**, not per-lane containers: it is the cheap half, needs no auth or
+billing change, answers this item's founding incident directly, and would produce the throughput
+measurement the prior amendment's core-split premise still lacks.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
