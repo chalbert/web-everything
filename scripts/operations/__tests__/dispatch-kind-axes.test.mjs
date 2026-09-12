@@ -169,7 +169,26 @@ describe('#3640 — guard-bash keys on the wrapper half, and only on it', () => 
       ['node scripts/backlog.mjs release 1234 --session=x', /backlog\.mjs release/],
       ['gh pr view 2108', /gh pr/],
       ['node scripts/operations/open-pr.mjs', /open-pr/],
-      ['node scripts/pr-land.mjs --pr=1234', /pr-land\.mjs/],
+      // THE POSTURE FLAG IS NOT DECORATION, and it is not a way past a gate. `#3321`'s caller sweep
+      // (`we:scripts/__tests__/lane-verify.test.mjs`) harvests every `pr-land` command string the TRACKED file
+      // set ships and fails any that declares no verification posture — deliberately with exactly ONE
+      // exclusion (pr-land's own `--help` banner), which that case says must be re-argued rather than silently
+      // widened. A NEGATIVE fixture is still a shipped command string, so it declares a posture like every
+      // other one instead of earning an exemption for being "only a test".
+      //
+      // `--no-require-verified` is the HONEST arm of the two, not the convenient one. The sweep's other arm
+      // (`--require-verified`) additionally demands a real `verify-lane` / `run.mjs verify` within three lines
+      // above, because that arm describes a lane-local landing arc where a fresh green marker is exactly what
+      // the arc produced. This string is not an arc and lands nothing: it is a command handed to `reason()` to
+      // assert the guard DENIES it. No marker is reachable for it, which is precisely the condition the
+      // opt-out arm exists to express ("the marker is structurally unreachable, so declare the opt-out").
+      //
+      // FLAG ORDER IS LOAD-BEARING, and only for the sweep's benefit: `PR_LAND_CMD` consumes `--flag` runs to
+      // end-of-match, so whichever flag is written LAST also swallows the string literal's closing `',` and
+      // parses as `pr=1234',` rather than `pr`. A posture flag written last is therefore invisible to the
+      // sweep. Written first it parses cleanly. Left here rather than "fixed" in the sweep, because that
+      // trailing-delimiter artifact belongs to that test, not this one.
+      ['node scripts/pr-land.mjs --no-require-verified --pr=1234', /pr-land\.mjs/],
       ['node scripts/conveyor/learnings-drop.mjs --kind=friction', /learnings-drop\.mjs/],
       ['node scripts/converge-cli.mjs step --state=/lane-3/.converge-state.json', /converge-cli\.mjs/],
       ['node scripts/verify-lane.mjs check', /verify-lane\.mjs/],
