@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3621"
 status: open
-scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/ci-queue-watch.mjs", "we:skills-src/conveyor/runner.mjs"]
+scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/ci-queue-watch.mjs", "we:skills-src/conveyor/runner.mjs", "we:scripts/review-set-label.mjs"]
 dateOpened: "2026-09-11"
 tags: []
 ---
@@ -16,3 +16,15 @@ Follow-up to #3621's amendment: the gh-throttle wrapper (we:scripts/lib/gh-throt
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Progress
+
+- **Slice landed (2026-09-11):** `we:scripts/review-set-label.mjs`'s own last bare `execFileSync` — the
+  `computeNetDiffText` exec closure at its `#x169fqe` net-diff read — now goes through
+  `we:scripts/lib/gh-throttle.mjs#execFileSyncThrottled`, the same importable seam
+  `we:scripts/conveyor/ci-queue-watch.mjs#defaultListRuns` already defaults to. This site was found live tonight:
+  two independent review sessions (`review-2121`, `review-2122`) ran a full jury to a genuine "accept" verdict
+  and then died at the label-recording step on `GraphQL: API rate limit already exceeded` (GitHub's secondary/
+  burst limit — the primary quota was fully available). This slice was not in the item's original scope list
+  above (added now) and does NOT resolve this item — the other ~78 call sites this item tracks are still
+  unthrottled.
