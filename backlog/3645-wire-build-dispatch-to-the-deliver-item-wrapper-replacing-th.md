@@ -1,7 +1,8 @@
 ---
+bornAs: xy2to9h
 kind: story
 size: 5
-parent: "x54akv4"
+parent: "3643"
 status: open
 relatedTo: ["3627", "3628"]
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:skills-src/conveyor/delivery-agent-brief.md", "we:scripts/guard-bash.mjs"]
