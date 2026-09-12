@@ -749,6 +749,34 @@ export function shapeReadFinding(raw, { pr, repo, careLevel } = {}) {
   const netChangedFiles = Array.isArray(net.paths) ? net.paths.map(String) : [];
   const degradedReason = net.scored === true ? '' : String(net.reason || 'unscored');
 
+  // #xu2pp2m — A DEGRADED BASIS THAT ALSO PRODUCED NO DIFF AT ALL IS `unrun`, NOT A REVIEW. THROWS.
+  //
+  // MEASURED, NOT HYPOTHESISED (2026-09-12, PR #2122 — and it MERGED on this). A mechanical review ran in a
+  // single-branch lane clone with no remote-tracking ref for the PR's head branch. `resolveNetDiffBasis` came
+  // back `ref-unresolved`, `computeNetDiffText` returned ZERO bytes, and nothing in this pipeline refused:
+  // `renderJudgeInput` handed all three seats `_(the net diff could not be resolved — see the degraded note)_`
+  // and the panel reduced their answers to a clean `accept` over 560 lines of script + test nobody read. Two
+  // of the three jurors only produced anything real because they independently went and FOUND the diff
+  // themselves with their own tools — and, starting from two different self-recovered bases, disagreed.
+  //
+  // WHY THIS DOES NOT REOPEN THE `exec-contract` / degrade SPLIT ABOVE. The other two misses
+  // (`ref-unresolved`, `diff-failed`) still DEGRADE whenever there is genuinely material to judge — that
+  // remains right, and this refusal is strictly narrower than "refuse every degrade": it fires only when the
+  // degrade produced NOTHING, where the alternative is not "a review on an imperfect basis" but "a verdict on
+  // an empty page". An EMPTY diff on a SCORED basis is untouched (a PR that is genuinely a no-op vs main is a
+  // real, honest read) — the conjunction is what makes this precise.
+  if (degradedReason !== '' && !String(diff.text || '').trim()) {
+    throw new Error(
+      `review-pr.read: the net-diff basis for ${repo}#${pr} is DEGRADED (\`${degradedReason}\`) AND the diff `
+      + 'came back EMPTY — there is nothing for a juror to review, so any verdict over it would be `unrun` '
+      + 'dressed as a finding (#xu2pp2m; PR #2122 merged on exactly this false accept). Refusing BEFORE the '
+      + '`judge` step, so no juror is paid to read an empty page. THE FIX IS ALMOST ALWAYS THE CHECKOUT: this '
+      + 'read takes its diff from LOCAL git rooted at the `--cwd` checkout, and a single-branch clone has no '
+      + `remote-tracking ref for this PR's head branch. Run review-pr from a checkout that can resolve it `
+      + `(\`git fetch origin <head-ref>\` in the lane, or pass a \`--cwd=\` that already has it).`,
+    );
+  }
+
   // #3335 — THE DECLARED SHAPE MEETS THE TOUCH-SET, at the first moment both exist. Refuses an UNDER-declaration
   // (see `assertDeclaredShapeHolds` for why only that direction), and returns the derived shape either way so
   // the write-up can state what the touch-set EARNED beside what actually SAT.
@@ -1654,6 +1682,13 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
         const verdict = derivePanelVerdict({
           lensVerdicts,
           humanRequired,
+          // #xu2pp2m — THE BASIS THIS PANEL ACTUALLY JUDGED ON. `read.degraded` is already the fact every
+          // rendering surface prints as "⚠️ DEGRADED BASIS"; until now it changed nothing about the VERDICT,
+          // so a panel that reviewed material it could not resolve still reduced to a clean, mechanically
+          // clearable `accept`. `shapeReadFinding` now refuses outright when the degrade produced NO diff at
+          // all; this covers the remaining shape — a degrade that yielded SOMETHING, but not the net basis the
+          // mandate told the jurors was ground truth. See `derivePanelVerdict`'s own docblock.
+          degradedBasis: read.degraded === true,
           mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
           // REQUIRED by the reducer, never defaulted (#2823 round-3 finding 1): the findings-derived prevention
           // scan is what catches an uncaptured guard that per-lens verdict flattening would hide.

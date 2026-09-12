@@ -10,9 +10,9 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
-  reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
-  REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
+  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, dispatchReviewCli, fillReviewBrief,
+  planReviewDispatch, reviewDispatchDisallowedToolsArgs, reviewSessionSlug, CODEX_JUDGE_PROVIDER_REFUSAL,
+  REVIEW_BRIEF_PLACEHOLDERS, REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
 } from '../review-dispatch.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
@@ -421,5 +421,116 @@ describe('#3331 — dispatchReview reports the id `claude --bg` assigned, not th
       checkStaleness: FRESH,
     });
     expect(result.agentId).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE LIVE PATH IS MECHANICAL. This block exists because every test ABOVE could stay green while
+// the thing `we:skills-src/conveyor/runner.mjs` actually shells still spawned an LLM agent: they all drive
+// `dispatchReview` DIRECTLY, so nothing in this file ever proved which path an unflagged CLI invocation takes.
+// That exact gap — "the wrapper is present" vs "the wrapper is EXERCISED" — is what these close.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path', () => {
+  const CLASSIFIED = (outcome, extra = {}) => ({
+    pr: 2122,
+    repo: 'chalbert/web-everything',
+    sessionSlug: 'review-2122',
+    lanePath: '/lanes/lane-3',
+    classified: { outcome, verdict: null, loopOutcome: null, runId: 'review-pr-abc', ...extra },
+    raw: {},
+  });
+
+  it('an unflagged `--pr/--repo` invocation calls the WRAPPER and never spawns an agent', () => {
+    const mechanicalCalls = [];
+    const agentCalls = [];
+    const out = [];
+    const res = dispatchReviewCli(['--pr=2122', '--repo=chalbert/web-everything'], {
+      dispatchMechanical: (o) => { mechanicalCalls.push(o); return CLASSIFIED('auto-cleared', { verdict: 'accept' }); },
+      dispatchAgent: (o) => { agentCalls.push(o); return {}; },
+      write: (t) => out.push(t),
+    });
+    // THE WHOLE POINT: the agent-spawning path is not merely de-prioritised, it is not reached at all.
+    expect(agentCalls).toEqual([]);
+    expect(mechanicalCalls).toEqual([{ pr: '2122', repo: 'chalbert/web-everything', codexAdvisory: false }]);
+    expect(res.mode).toBe('mechanical');
+    expect(res.code).toBe(0);
+    expect(out.join('')).toMatch(/no agent spawned/);
+  });
+
+  it('`--agent` still reaches the old spawn path, unchanged — the fallback is real, not vestigial', () => {
+    const agentCalls = [];
+    const res = dispatchReviewCli(['--pr=7', '--repo=o/r', '--agent'], {
+      dispatchMechanical: () => { throw new Error('the mechanical path must NOT run under --agent'); },
+      dispatchAgent: (o) => {
+        agentCalls.push(o);
+        return {
+          agentId: 'agent-1', sessionSlug: 'review-7', pr: 7, repo: 'o/r', unknownTokens: [], judgeProvider: 'claude',
+        };
+      },
+      write: () => {},
+    });
+    expect(agentCalls).toHaveLength(1);
+    expect(res.mode).toBe('agent');
+    expect(res.code).toBe(0);
+  });
+
+  it('`blocked-on-infra` exits NON-ZERO — `runner.mjs` must not advance a round label for a review that never ran', () => {
+    const out = [];
+    const res = dispatchReviewCli(['--pr=2122', '--repo=o/r'], {
+      dispatchMechanical: () => CLASSIFIED('blocked-on-infra', { runId: null }),
+      dispatchAgent: () => { throw new Error('unreachable'); },
+      write: (t) => out.push(t),
+    });
+    expect(res.code).toBe(1);
+    expect(out.join('')).toMatch(/could NOT review/);
+  });
+
+  it('a REAL verdict — bounced or parked, not only accepted — exits ZERO', () => {
+    for (const outcome of ['bounced', 'parked', 'auto-cleared']) {
+      const res = dispatchReviewCli(['--pr=1', '--repo=o/r'], {
+        dispatchMechanical: () => CLASSIFIED(outcome),
+        dispatchAgent: () => { throw new Error('unreachable'); },
+        write: () => {},
+      });
+      expect(res.code, outcome).toBe(0);
+    }
+  });
+
+  it('`--codex-advisory` is forwarded to the wrapper as the opt-in third seat', () => {
+    const seen = [];
+    dispatchReviewCli(['--pr=1', '--repo=o/r', '--codex-advisory'], {
+      dispatchMechanical: (o) => { seen.push(o.codexAdvisory); return CLASSIFIED('auto-cleared'); },
+      dispatchAgent: () => { throw new Error('unreachable'); },
+      write: () => {},
+    });
+    expect(seen).toEqual([true]);
+  });
+
+  it('REFUSES `--judge-provider=codex` at the command line instead of crashing mid-dispatch', () => {
+    // Measured live 2026-09-12: `--provider=codex` sets the provider for ALL seats, both MANDATORY seats are
+    // tool-bearing, and `createDefaultJudge` structurally refuses codex + tools (#3581) — so this always died
+    // minutes in, at the first judge step, on a constraint the operator never asked to violate.
+    const errs = [];
+    const res = dispatchReviewCli(['--pr=1', '--repo=o/r', '--judge-provider=codex'], {
+      dispatchMechanical: () => { throw new Error('must not reach the wrapper'); },
+      dispatchAgent: () => { throw new Error('must not reach the agent path'); },
+      write: () => {},
+      writeErr: (l) => errs.push(l),
+    });
+    expect(res.code).toBe(1);
+    expect(res.mode).toBe('refused');
+    // and it POINTS AT THE KNOB THAT WORKS, rather than only saying no.
+    expect(errs.join('')).toMatch(/--codex-advisory/);
+    expect(CODEX_JUDGE_PROVIDER_REFUSAL).toMatch(/tool-bearing/);
+  });
+
+  it('`--judge-provider=claude` is untouched — the refusal is codex-only', () => {
+    const res = dispatchReviewCli(['--pr=1', '--repo=o/r', '--judge-provider=claude'], {
+      dispatchMechanical: () => CLASSIFIED('auto-cleared'),
+      dispatchAgent: () => { throw new Error('unreachable'); },
+      write: () => {},
+    });
+    expect(res.code).toBe(0);
   });
 });

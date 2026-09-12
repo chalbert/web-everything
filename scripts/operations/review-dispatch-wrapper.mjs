@@ -8,14 +8,24 @@
  * (#3627), which spawns a real, tool-bearing delivery agent through `CLAUDE_RESTRICTED_PROVIDER`.
  *
  * ================================================================================================
- * HONESTY LABEL, SAME CONVENTION `deliver-item-wrapper.mjs` USES. This file is NOT wired into
- * `we:scripts/operations/review-dispatch.mjs` / `we:scripts/conveyor/reconcile-core.mjs`'s dispatch decision,
- * is NOT imported by production code, and has NOT been run against a real PR end to end — per
- * `we:docs/agent/prototype-based-dev.md`'s "park until genuinely exercised" rule, that live run (a driver +
- * observer pair, against a real PR) is EXPLICITLY the next phase, not this one. Every function below is REAL —
- * every CLI surface it shells was read directly from the live source it calls (`review-loop-cli.mjs`,
- * `completion-cli.mjs`, `lane-pool.mjs`) — but "the code is real" and "the pipeline has been proven end to
- * end" are different claims; only the second is what graduation requires.
+ * GRADUATED 2026-09-12 (#xu2pp2m). The honesty label this block used to carry — "NOT wired into
+ * `review-dispatch.mjs` …, NOT imported by production code, and has NOT been run against a real PR end to
+ * end" — is now out of date in all three respects, and both of the things that retired it are recorded here
+ * rather than quietly deleted:
+ *
+ *   1. IT WAS EXERCISED AGAINST A REAL PR (#2122). The live-fire run is what `prototype-based-dev.md`'s "park
+ *      until genuinely exercised" rule asked for, and it did its job: it found THREE real defects in the path
+ *      below rather than confirming it worked. See `we:scripts/operations/cli-adapter.mjs#cwdFlagValue` (the
+ *      `--cwd` that never reached the diff READER, so the review judged a ZERO-BYTE diff),
+ *      `we:scripts/lib/jury-core.mjs#derivePanelVerdict`'s `degradedBasis` arm (a tool-free seat's honest
+ *      ABSTENTION reduced to an accept vote), and `we:scripts/operations/review-loop-cli.mjs
+ *      #UNATTENDED_REVIEW_ACTOR` (a mechanical clear attributed to `operator`). All three are fixed; PR #2122
+ *      merged on the first of them before they were, which is the cost the label was insuring against.
+ *   2. IT IS NOW THE LIVE PATH. `we:scripts/operations/review-dispatch.mjs` calls
+ *      {@link dispatchReviewMechanical} by DEFAULT — the `claude --bg` agent-plus-brief layer it used to spawn
+ *      is retained behind `--agent` and is no longer what `we:skills-src/conveyor/runner.mjs`'s mechanical
+ *      pass runs. The redundancy that removed: that agent's entire sanctioned arc was `lane-pool acquire` →
+ *      `review-loop-cli.mjs` → `lane-pool release`, which is this file, done by hand inside an LLM turn.
  * ================================================================================================
  *
  * ============================== STEP 1'S VERIFICATION, RECORDED HERE (not asserted) ==============================
@@ -84,6 +94,28 @@ export const REVIEW_LOOP_LANE_PURPOSE = 'review-loop';
 export const REVIEW_LOOP_ACQUIRE_WAIT_MS = 30000;
 
 /**
+ * #xu2pp2m — THE ONE OUTCOME THAT MEANS "NO REVIEW HAPPENED". Every other member of the classified vocabulary
+ * (`bounced` / `auto-cleared` / `parked`) is a genuine review verdict; this one says the loop could not run at
+ * all. Exported because {@link ../../skills-src/conveyor/runner.mjs}'s mechanical pass needs the distinction
+ * to decide whether to advance a PR's `review-round:<N>` label, and `review-dispatch.mjs`'s CLI maps it to a
+ * non-zero exit for the same reason.
+ */
+export const BLOCKED_ON_INFRA = 'blocked-on-infra';
+
+/**
+ * #xu2pp2m — HOW THE OPT-IN CODEX ADVISORY SEAT IS ACTUALLY TURNED ON, and it is NOT `--provider=codex`.
+ *
+ * `review-pr`'s third seat (`judgeAdvisory`, `we:scripts/operations/review-pr.mjs`) is declared at
+ * DECLARATION-BUILD time, before any run's argv is parsed, so `run.mjs`/`review-loop-cli.mjs` read it off this
+ * env var (`codexAdvisoryFromEnv`) rather than off a flag. That is the mechanism that WORKS — measured live on
+ * PR #2122, where it only took effect at all because this wrapper forwards `...process.env` to its child.
+ * `--provider=codex` is a DIFFERENT and structurally broken thing for this operation: it sets the provider for
+ * ALL seats, and both mandatory seats are tool-bearing, which `createDefaultJudge` refuses outright (#3581).
+ * See `review-dispatch.mjs`'s own `--judge-provider` refusal.
+ */
+export const CODEX_ADVISORY_ENV = 'REVIEW_PR_CODEX_ADVISORY';
+
+/**
  * SHAPE one dispatch request. PURE — mirrors `we:scripts/operations/review-dispatch.mjs#planReviewDispatch`
  * (the SAME validation, deliberately not re-derived differently), so the two never silently diverge on what a
  * valid `--pr`/`--repo` looks like even though this file does not import that one (it is impure — importing it
@@ -148,7 +180,7 @@ export function classifyReviewLoopOutcome(parsed) {
   if (stopped === 'confirm') {
     return { outcome: 'parked', verdict, loopOutcome, runId };
   }
-  return { outcome: 'blocked-on-infra', verdict, loopOutcome, runId };
+  return { outcome: BLOCKED_ON_INFRA, verdict, loopOutcome, runId };
 }
 
 /**
@@ -182,11 +214,13 @@ function reportDone({ sessionSlug, classified }, { run: runFn = run } = {}) {
  * trail), run `review-loop-cli.mjs` exactly once, classify + report its structured verdict, release the lane,
  * return. NO Claude spawn anywhere in this function.
  *
- * @param {{pr: number|string, repo: string}} o
+ * @param {{pr: number|string, repo: string, codexAdvisory?: boolean}} o - `codexAdvisory` (#xu2pp2m) seats the
+ *   OPT-IN tool-free Codex panelist for this review, via {@link CODEX_ADVISORY_ENV} on the child's env. Off by
+ *   default, exactly as `review-pr` itself is.
  * @param {{run?: Function, newActorId?: () => string, waitMs?: number}} [io]
  * @returns {{pr: number, repo: string, sessionSlug: string, lanePath: string, classified: object, raw: object}}
  */
-export function dispatchReviewMechanical({ pr, repo } = {}, { run: runFn = run, newActorId = randomUUID, waitMs = REVIEW_LOOP_ACQUIRE_WAIT_MS } = {}) {
+export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {}, { run: runFn = run, newActorId = randomUUID, waitMs = REVIEW_LOOP_ACQUIRE_WAIT_MS } = {}) {
   const planned = planReviewDispatchWrapper({ pr, repo });
 
   // Durable trace BEFORE anything else can fail (mirrors the brief's own step-0 reasoning).
@@ -215,7 +249,7 @@ export function dispatchReviewMechanical({ pr, repo } = {}, { run: runFn = run, 
     // catch-all (`releaseClaimAndLane(..., best_effort: true); throw e;`): a wrapper-side failure is never the
     // review's own verdict, so it is surfaced to the caller, never swallowed.
     const classified = {
-      outcome: 'blocked-on-infra', verdict: null, loopOutcome: null, runId: null,
+      outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null,
       label: String((e && e.message) || e).slice(0, 500),
     };
     reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
@@ -225,7 +259,7 @@ export function dispatchReviewMechanical({ pr, repo } = {}, { run: runFn = run, 
   if (!lanePath) {
     // The pool genuinely has no free lane after the bounded wait — report and stop, exactly as the brief's own
     // step 1 does; no retry loop here either.
-    const classified = { outcome: 'blocked-on-infra', verdict: null, loopOutcome: null, runId: null };
+    const classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null };
     reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
     return { ...planned, lanePath: null, classified, raw: null };
   }
@@ -236,7 +270,19 @@ export function dispatchReviewMechanical({ pr, repo } = {}, { run: runFn = run, 
     const out = runFn('node', [
       'scripts/operations/review-loop-cli.mjs', `--pr=${planned.pr}`, `--repo=${planned.repo}`,
       `--cwd=${lanePath}`, '--json',
-    ], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: reviewActorId } });
+    ], {
+      env: {
+        ...process.env,
+        CLAUDE_CODE_SESSION_ID: reviewActorId,
+        // #xu2pp2m — DECLARED, not inherited by accident. The live PR #2122 run seated the Codex advisory seat
+        // only because this call forwards `...process.env` and the OPERATOR happened to have
+        // `REVIEW_PR_CODEX_ADVISORY=1` exported — nothing in either CLI surfaced the knob, so what actually
+        // ran was undocumented and unrepeatable. `--codex-advisory` on `review-dispatch.mjs` / this file's own
+        // CLI now names it; an ambient env var still works as the fallback (`|| process.env[...]`), matching
+        // how `--cwd`/`JUDGE_LANE_CWD` and `--provider`/`JUDGE_PROVIDER` already behave.
+        ...(codexAdvisory ? { [CODEX_ADVISORY_ENV]: '1' } : {}),
+      },
+    });
     raw = JSON.parse(out);
     classified = classifyReviewLoopOutcome(raw);
   } catch (e) {
@@ -244,7 +290,7 @@ export function dispatchReviewMechanical({ pr, repo } = {}, { run: runFn = run, 
     // for the completion record's own detail, mirroring `runVerifyOperation`'s "an operation-level crash is
     // reported, never silently swallowed" discipline (`we:scripts/operations/minimal-context-provider.mjs`).
     raw = { error: String(e && (e.stdout || e.message) || e) };
-    classified = { outcome: 'blocked-on-infra', verdict: null, loopOutcome: null, runId: null };
+    classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null };
   }
 
   reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
@@ -261,7 +307,12 @@ if (IS_CLI) {
     return hit ? hit.slice(name.length + 3) : undefined;
   };
   try {
-    const result = dispatchReviewMechanical({ pr: flag('pr'), repo: flag('repo') });
+    const result = dispatchReviewMechanical({
+      pr: flag('pr'),
+      repo: flag('repo'),
+      // #xu2pp2m — a bare `--codex-advisory` (no `=`), with the ambient env var as the fallback.
+      codexAdvisory: argv.includes('--codex-advisory') || process.env[CODEX_ADVISORY_ENV] === '1',
+    });
     writeAllSync(1, `${JSON.stringify(result, null, 2)}\n`);
   } catch (e) {
     writeLineSync(2, `error: ${String(e?.message ?? e)}`);

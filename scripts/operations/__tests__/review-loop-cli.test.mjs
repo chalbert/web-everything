@@ -25,7 +25,9 @@ import { createRegistry } from '../registry.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { judgeOutcome } from '../cli-adapter.mjs';
 import { REVIEW_EFFECTS, reviewPrOperation } from '../review-pr.mjs';
-import { runReviewLoopOnce } from '../review-loop-cli.mjs';
+import {
+  applyUnattendedActorDefault, runReviewLoopOnce, UNATTENDED_REVIEW_ACTOR,
+} from '../review-loop-cli.mjs';
 import { createReviewPrSinks } from '../review-pr-io.mjs';
 
 const NET_PATHS = ['scripts/operations/review-pr.mjs'];
@@ -525,5 +527,57 @@ describe('runReviewLoopOnce — parse refusals still work, same as the human CLI
     });
     expect(out.code).toBe(0);
     expect(out.stopped).toBe('help');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — AN UNATTENDED CLEAR MUST NOT SIGN ITSELF `operator`.
+//
+// MEASURED on the live PR #2122 review: a fully mechanical accept — no human anywhere in it, `attemptedBy:
+// 'agent'` already threaded into `driveRun` by this very file — recorded its durable verdict as
+// `Recorded by operator.` and its notice as `PR … — human review accepted by operator.`, because `actor` is a
+// declared `review-pr` input whose default is `'operator'`. Right for `run.mjs review-pr` (a person at a
+// terminal); wrong for every run through THIS entry point.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — the unattended driver attributes its own clears to an agent', () => {
+  it('stamps an AGENT actor on the label + ledger + notice when the caller named nobody', async () => {
+    const seen = [];
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-actor-default',
+    });
+    expect(out.stopped).toBe('complete');
+    expect(out.run.input.actor).toBe(UNATTENDED_REVIEW_ACTOR);
+    // Every durable surface, not just the run record — the label comment, the verdict ledger row and the
+    // operator notice each interpolate `actor` separately.
+    const actors = seen.map((e) => e.payload.actor).filter(Boolean);
+    expect(actors.length).toBeGreaterThan(0);
+    for (const actor of actors) expect(actor).toBe(UNATTENDED_REVIEW_ACTOR);
+    // THE REGRESSION, named: this is the string that used to be there, and it must not be.
+    for (const actor of actors) expect(actor).not.toBe('operator');
+    const notice = seen.find((e) => e.payload.notice)?.payload.notice ?? '';
+    expect(notice).not.toMatch(/by operator/);
+  });
+
+  it('an EXPLICIT `--actor=` still wins — the human `--resume --answer=accept` ceremony is unchanged', async () => {
+    const seen = [];
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: [...BASE_ARGV, '--actor=nic'], store, sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-actor-explicit',
+    });
+    expect(out.run.input.actor).toBe('nic');
+  });
+
+  it('`applyUnattendedActorDefault` reads RAW argv, because the declaration default has already been applied', () => {
+    // The distinction the fix turns on: by the time `parseOperationArgv` returns, `actor: 'operator'` is
+    // indistinguishable between "nobody said" and "somebody typed it". Only argv still knows.
+    expect(applyUnattendedActorDefault({ actor: 'operator' }, ['--pr=1']).actor).toBe(UNATTENDED_REVIEW_ACTOR);
+    expect(applyUnattendedActorDefault({ actor: 'operator' }, ['--actor=operator']).actor).toBe('operator');
+    expect(applyUnattendedActorDefault({ actor: 'nic' }, ['--actor', 'nic']).actor).toBe('nic');
   });
 });

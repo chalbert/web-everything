@@ -4,6 +4,40 @@
  * @description `#3279` — DISPATCH AN INDEPENDENT REVIEW OF A PR TO A FRESH SESSION.
  *
  *   node scripts/operations/review-dispatch.mjs --pr=1234 --repo=chalbert/web-everything
+ *   node scripts/operations/review-dispatch.mjs --pr=1234 --repo=chalbert/web-everything --agent
+ *
+ * ================================================================================================
+ * MECHANICAL BY DEFAULT SINCE 2026-09-12 (#xu2pp2m, epic #3383). READ THIS BEFORE THE REST OF THE HEADER —
+ * everything below it describes the `--agent` path, which is no longer what an unflagged invocation runs.
+ *
+ * WHAT CHANGED. This file used to do exactly one thing: spawn a `claude --bg` session carrying
+ * `we:skills-src/review/review-agent-brief.md`. That brief's ENTIRE sanctioned arc is three commands —
+ * `lane-pool.mjs acquire`, ONE `review-loop-cli.mjs` run, `lane-pool.mjs release` — and its own step 2 forbids
+ * the session from interpreting, improvising or retrying anything. So the LLM turn was spending a whole
+ * tool-bearing agent to type three commands it was given verbatim and forbidden to deviate from.
+ * `we:scripts/operations/review-dispatch-wrapper.mjs#dispatchReviewMechanical` is those three commands as pure
+ * Node, and it is now what {@link dispatchReviewCli} runs.
+ *
+ * NO JUDGMENT WAS REMOVED, AND THIS IS THE LOAD-BEARING CLAIM. The REVIEW'S judgment never lived in this
+ * layer: `review-loop-cli.mjs` spawns its own two independent, tool-bearing jurors (`judge-spawn.mjs`) and
+ * reduces their verdicts, and it still does, unchanged, under the wrapper. What is gone is the OUTER agent
+ * that read their answer out loud. The wrapper's own header carries the source-read trail for this.
+ *
+ * THE CONTRACT IS UNCHANGED FOR CALLERS. Same argv (`--pr=`, `--repo=`, `--judge-provider=`, plus
+ * `WE_DISPATCH_AGENT_ARGS`), same exit-0-means-it-worked, so `we:skills-src/conveyor/runner.mjs`'s mechanical
+ * pass needed no edit to its `execFileSync` call. TWO honest differences a caller should know:
+ *   • IT BLOCKS. The old call returned the moment `claude --bg` forked; this one returns when the review has a
+ *     verdict. That is why `runner.mjs`'s call now runs through its heartbeating spawner (the same treatment
+ *     #3404 gave `verify-dispatch.mjs`) rather than a bare `execFileSync` — a multi-minute pass must not sit
+ *     inside a 15-minute singleton lease without heartbeating it.
+ *   • EXIT 1 NOW MEANS "NO REVIEW HAPPENED" MORE PRECISELY. A `blocked-on-infra` classification (no free lane,
+ *     a crashed `review-loop-cli.mjs`) exits non-zero, so `runner.mjs`'s `dispatched` flag — which gates the
+ *     `review-round:<N>` label — is now keyed on a review having genuinely RUN, not merely on a session having
+ *     been forked. That is strictly closer to what that flag already claimed to mean (#x5v8yy9).
+ *
+ * `--agent` KEEPS THE OLD PATH REACHABLE rather than deleting it: {@link dispatchReview} below is unchanged,
+ * fully tested, and remains the right answer if the mechanical arc ever needs a live session to fall back on.
+ * ================================================================================================
  *
  * THE GAP THIS CLOSES, PRECISELY. `review-pr` (via `we:scripts/operations/review-loop-cli.mjs`, #3072) already
  * runs a review UNATTENDED end to end — spawn two independent jurors, reduce their verdicts, bounce a `changes`
@@ -125,6 +159,9 @@ import {
 // cannot silently drift out of step with what `review-loop-cli.mjs` (which the dispatched session runs)
 // actually accepts.
 import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
+// #xu2pp2m — THE MECHANICAL ARC THIS FILE NOW DEFAULTS TO. See the header block: the wrapper IS the three
+// commands `review-agent-brief.md` told a spawned agent to type, done as pure Node with no LLM turn.
+import { BLOCKED_ON_INFRA, dispatchReviewMechanical } from './review-dispatch-wrapper.mjs';
 
 /** The review-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
  *  (`#xy8di3v`, extending `#3418`/`#xqyyoje`'s fix to the review-dispatch path). Passed via
@@ -422,43 +459,117 @@ export function dispatchReview({
   };
 }
 
-const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (IS_CLI) {
-  const argv = process.argv.slice(2);
+/**
+ * #xu2pp2m — WHY `--judge-provider=codex` IS REFUSED HERE RATHER THAN LEFT TO FAIL LATER.
+ *
+ * It is a GUARANTEED crash, not a risky option, and this was measured (live run, 2026-09-12): `--provider`
+ * sets the factory provider for ALL of `review-pr`'s seats (`createCliJudgeFactory` →
+ * `createDefaultJudge({providerName})`), BOTH mandatory seats set `allowedTools` unconditionally
+ * (`buildReviewJudgeRequest`), and `createDefaultJudge` structurally refuses codex + tool-bearing (#3581). So
+ * the run dies at its FIRST judge step, minutes into a dispatch, with an error about a constraint the operator
+ * never asked to violate.
+ *
+ * WHAT THE OPERATOR ALMOST CERTAINLY WANTED is `--codex-advisory`: `review-pr`'s opt-in THIRD seat, which IS
+ * tool-free and IS pinned to codex per-request (`buildReviewAdvisoryJudgeRequest`'s `providerName: 'codex'`).
+ * That is also the mechanism that actually ran on the live PR #2122 review — via `REVIEW_PR_CODEX_ADVISORY=1`,
+ * an env var neither CLI exposed, which the wrapper picked up only because it forwards `...process.env`. Named
+ * as a real flag now, on both this file and the wrapper, so what runs is what was asked for.
+ *
+ * `--judge-provider=claude` (the default, and the only other member of `JUDGE_PROVIDER_NAMES`) is untouched.
+ */
+export const CODEX_JUDGE_PROVIDER_REFUSAL =
+  'review-dispatch: `--judge-provider=codex` cannot work and is refused here rather than mid-dispatch — it '
+  + 'sets the provider for EVERY `review-pr` seat, and both MANDATORY seats are tool-bearing, which the Codex '
+  + 'provider structurally refuses (#3581). Seating Codex as the TOOL-FREE advisory panelist is a different, '
+  + 'working knob: pass `--codex-advisory` instead (it sets `REVIEW_PR_CODEX_ADVISORY=1` for the review run).';
+
+/**
+ * THE CLI, AS A FUNCTION. Extracted from the `IS_CLI` block below so the mechanical-vs-agent routing, the
+ * exit-code mapping and the `--judge-provider=codex` refusal are all reachable from a test WITHOUT a
+ * subprocess — the same reason every impure primitive in this file is injected rather than imported at the
+ * call site.
+ *
+ * @param {string[]} argv
+ * @param {{dispatchMechanical?: Function, dispatchAgent?: Function, write?: Function, writeErr?: Function}} [io]
+ * @returns {{code: number, mode: string, result: object|null}}
+ */
+export function dispatchReviewCli(argv = [], {
+  dispatchMechanical = dispatchReviewMechanical,
+  dispatchAgent = dispatchReview,
+  write = (text) => writeAllSync(1, text),
+  writeErr = (line) => writeLineSync(2, line),
+} = {}) {
   const flag = (name) => {
     const hit = argv.find((a) => a.startsWith(`--${name}=`));
     return hit ? hit.slice(name.length + 3) : undefined;
   };
+  const judgeProvider = flag('judge-provider');
   try {
-    // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): with `extraArgs` now actually forwarded (see `dispatchReview`),
-    // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
-    // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
-    // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
-    // #xqa9ttq — `--judge-provider` is OPTIONAL; `dispatchReview`'s own `judgeProvider = 'claude'` default
-    // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
-    // case, not a gap.
-    const result = dispatchReview({
-      pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
+    if (judgeProvider === 'codex') throw new Error(CODEX_JUDGE_PROVIDER_REFUSAL);
+
+    // THE AGENT PATH IS NOW OPT-IN. See the file header: an unflagged dispatch runs the wrapper's pure-Node
+    // arc, which is what the brief told the spawned agent to do by hand anyway.
+    if (argv.includes('--agent')) {
+      // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): with `extraArgs` now actually forwarded (see `dispatchReview`),
+      // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
+      // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
+      // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
+      // #xqa9ttq — `--judge-provider` is OPTIONAL; `dispatchReview`'s own `judgeProvider = 'claude'` default
+      // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
+      // case, not a gap.
+      const result = dispatchAgent({
+        pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider,
+      });
+      // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
+      // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
+      // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
+      // that will not be found — the session slug is still a real handle in that case (`claude agents --json`
+      // carries `-n` verbatim).
+      write(
+        (result.agentId
+          ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
+            + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
+            + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
+          : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
+            + `(judge provider: ${result.judgeProvider}), `
+            + 'but could NOT read its id off `claude --bg`\'s output\n'
+            + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
+        + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
+      );
+      return { code: 0, mode: 'agent', result };
+    }
+
+    const result = dispatchMechanical({
+      pr: flag('pr'),
+      repo: flag('repo'),
+      codexAdvisory: argv.includes('--codex-advisory'),
     });
-    // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
-    // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
-    // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
-    // that will not be found — the session slug is still a real handle in that case (`claude agents --json`
-    // carries `-n` verbatim).
-    writeAllSync(
-      1,
-      (result.agentId
-        ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
-          + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
-          + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
-        : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
-          + `(judge provider: ${result.judgeProvider}), `
-          + 'but could NOT read its id off `claude --bg`\'s output\n'
-          + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
-      + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
+    const { outcome, verdict, loopOutcome, runId } = result.classified ?? {};
+    // #xu2pp2m — `blocked-on-infra` IS A NON-ZERO EXIT, and that is the one deliberate sharpening of this
+    // file's exit contract. `we:skills-src/conveyor/runner.mjs` treats exit 0 as "dispatched" and advances the
+    // PR's `review-round:<N>` label on it; under the old spawn path that flag only ever proved a session had
+    // been FORKED (#x5v8yy9's own comment says as much). Here it can prove more — the review ran and reached a
+    // verdict — so a pool with no free lane, or a crashed `review-loop-cli.mjs`, no longer advances a round
+    // label for a round that never happened.
+    const blocked = outcome === BLOCKED_ON_INFRA;
+    write(
+      `dispatch-review: ${blocked ? 'could NOT review' : 'reviewed'} ${result.repo}#${result.pr} mechanically `
+      + `(no agent spawned) — outcome: ${outcome}${verdict ? `, verdict: ${verdict}` : ''}`
+      + `${loopOutcome ? `, loop: ${loopOutcome}` : ''}${runId ? `, run: ${runId}` : ''}\n`
+      + (blocked
+        ? `the review loop itself could not run for ${result.sessionSlug} — nothing was judged and no verdict `
+          + 'was recorded. Retry once the pool has a free lane.\n'
+        : `trace it: node scripts/operations/completion-cli.mjs list --session=${result.sessionSlug}\n`),
     );
+    return { code: blocked ? 1 : 0, mode: 'mechanical', result };
   } catch (e) {
-    writeLineSync(2, `error: ${String(e?.message ?? e)}`);
-    process.exitCode = 1;
+    writeErr(`error: ${String(e?.message ?? e)}`);
+    return { code: 1, mode: judgeProvider === 'codex' ? 'refused' : 'error', result: null };
   }
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  const { code } = dispatchReviewCli(process.argv.slice(2));
+  process.exitCode = code;
 }

@@ -124,13 +124,25 @@ open; resolving is the ratify turn's job.
 
 ### 4. Run the gate GREEN
 
+**You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
+well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
+auto-backgrounded by the tool itself, and you stall with no error. This is not just guidance — a
+`PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`, #3105) **DENIES** a dispatched agent from running the
+verification set (`verify-lane` / `run.mjs verify` / `check:standards` / `test:unit`) directly, in any form.
+The runner's own long-lived process (unbound by your turn's window) runs the gate for you. Request it, then
+poll across turns:
+
 ```bash
-npm run check:standards
+node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
+# … on a LATER turn (the runner picks it up on its own tick, ~120s cadence) …
+node scripts/verify-lane.mjs check --json          # poll until status settles; `running` is NOT a failure — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 ```
+
+Only `green` clears you to proceed.
 
 The gate enforces the item shape and that the new `/research/` topic renders (the `researchTopics.json` entry +
 the `.njk` write-up parse). A red gate is a hard stop — fix the authoring (usually a malformed research topic or
-a fork missing its required lines) until it is green. Confirm a `relatedReport` link exists.
+a fork missing its required lines) and re-request until it is green. Confirm a `relatedReport` link exists.
 
 ### 5. Review your prepared forks — spawn an adversarial review subagent (converge BEFORE the PR)
 

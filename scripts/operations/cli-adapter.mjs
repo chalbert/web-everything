@@ -300,6 +300,41 @@ export function hasJsonFlag(argv = []) {
 }
 
 /**
+ * WHAT `--cwd` ON THIS ARGV NAMES, or `null`. The EXACT sibling of {@link hasJsonFlag} above — same "usable
+ * before a declaration exists" reason, same deliberate narrowness (it answers one question and refuses
+ * nothing; `parseOperationArgv` still owns rejection).
+ *
+ * WHY IT HAD TO EXIST (live-caught 2026-09-12 against PR #2122, which merged ON the defect). `--cwd` reached
+ * ONLY the judge factory (`we:scripts/operations/run.mjs#createCliJudgeFactory`, via `parsed.control.cwd`),
+ * never the READER — `OPERATIONS[review-pr]` built `createReviewPrReader()` with no arguments, so the diff was
+ * always taken from `REPO_ROOT` whatever lane the caller named. In a single-branch lane clone with no
+ * remote-tracking ref for the PR's head branch that resolved to `degraded: true, degradedReason:
+ * 'ref-unresolved'` and a ZERO-LENGTH diff, and every seat "reviewed" nothing. The reader is built inside
+ * `resolveOperation`, which runs BEFORE `parseOperationArgv` (it is what supplies the declaration that parse
+ * needs), so the value has to be read off raw argv here exactly as `--json` is.
+ *
+ * BOTH SPELLINGS, `--cwd <value>` included: `parseOperationArgv` accepts the space-separated form for control
+ * flags, so a reader that only understood `--cwd=<value>` would silently fall back to `REPO_ROOT` for the very
+ * invocation shape that DID name a lane.
+ *
+ * @param {string[]} [argv]
+ * @returns {string|null}
+ */
+export function cwdFlagValue(argv = []) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (typeof token !== 'string' || !token.startsWith('--')) continue;
+    const eq = token.indexOf('=');
+    const name = eq === -1 ? token.slice(2) : token.slice(2, eq);
+    if (name !== 'cwd') continue;
+    const value = eq === -1 ? argv[i + 1] : token.slice(eq + 1);
+    if (typeof value !== 'string' || !value.trim() || value.startsWith('--')) return null;
+    return value.trim();
+  }
+  return null;
+}
+
+/**
  * PARSE argv against a declaration. PURE — no process, no env. Unknown flags are REFUSED (the declaration is
  * the whole surface, and `validateInput` already fails closed in both directions; this makes the message
  * arrive before a run exists).

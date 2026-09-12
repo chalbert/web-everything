@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
 import { readLockEntry } from '../../../scripts/readiness/file-locks.mjs';
 import {
   RUNNER_LEASE_PATH,
@@ -30,10 +31,31 @@ import {
 // (§below, x5v8yy9 review finding), so the module itself must be mocked rather than the binding. Keeps every
 // other real export (via `importOriginal`) — several modules this test file pulls in transitively (e.g.
 // `scripts/lib/output-mix.mjs`) import `node:child_process` themselves and need its real shape.
+// #xu2pp2m — `spawn` IS MOCKED TOO, because the review-dispatch call moved onto it. `review-dispatch.mjs` is
+// now a BLOCKING mechanical review rather than a fork-and-return `claude --bg` spawn, so the runner runs it
+// through `runQuietHeartbeating` — which must use `spawn`, since `execFileSync` blocks the event loop and no
+// heartbeat timer could fire during a multi-minute pass. A test mocking only `execFileSync` therefore stopped
+// seeing the dispatch at all.
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, execFileSync: vi.fn() };
+  return { ...actual, execFileSync: vi.fn(), spawn: vi.fn() };
 });
+
+/**
+ * A `spawn` stand-in for the heartbeating passes: records the argv into the SAME list the `execFileSync`
+ * router uses (so assertions read one list), then resolves with `exitCodeFor(joinedArgs)`. Shaped the way
+ * `runQuietHeartbeating` actually consumes a child — `.stderr.on('data')`, `.on('error')`, `.on('exit')`.
+ */
+function makeSpawnRouter(calls, exitCodeFor = () => 0) {
+  return (cmd, args) => {
+    calls.push([cmd, ...args]);
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    // Asynchronously, so the caller has attached its listeners before the exit lands.
+    setImmediate(() => child.emit('exit', exitCodeFor(args.join(' '))));
+    return child;
+  };
+}
 
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
 const MIN = 60_000;
@@ -449,22 +471,25 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
         const joined = args.join(' ');
         if (joined.includes('reconcile-pass.mjs')) return JSON.stringify(plan);
         if (cmd === 'gh' && args.includes('repo') && args.includes('view')) return 'owner/repo';
-        if (joined.includes('review-dispatch.mjs')) {
-          if (dispatchThrows) throw new Error('review-dispatch.mjs: assertMainNotStale tripped');
-          return '';
-        }
         return ''; // every other best-effort pass (infra-blocked, lease-reaper, review-round-tag, review-status-tag, ...)
       }),
+      // #xu2pp2m — the dispatch is a SPAWN now, and its EXIT CODE is the signal: a non-zero exit means
+      // `blocked-on-infra` (the review loop could not run), which is exactly what must not advance the round
+      // label. `dispatchThrows` keeps its original meaning — "this dispatch produced no review".
+      spawn: vi.fn(makeSpawnRouter(calls, (joined) => (
+        dispatchThrows && joined.includes('review-dispatch.mjs') ? 1 : 0
+      ))),
     };
   }
 
   it('SKIPS review-round-tag.mjs for a PR whose review-dispatch.mjs call threw', async () => {
-    const { execFileSync, calls } = makeExecFileSyncRouter({
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
       dispatchThrows: true,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
@@ -476,12 +501,13 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
   });
 
   it('DOES run review-round-tag.mjs when the dispatch actually succeeds', async () => {
-    const { execFileSync, calls } = makeExecFileSyncRouter({
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
       dispatchThrows: false,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 2 }], refusals: [] },
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
@@ -492,18 +518,52 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
   });
 
   it('still runs the informative review-status-tag.mjs sweep even when the dispatch above it failed', async () => {
-    const { execFileSync, calls } = makeExecFileSyncRouter({
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
       dispatchThrows: true,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
 
     const statusTagCalls = calls.filter((c) => c.join(' ').includes('review-status-tag.mjs'));
     expect(statusTagCalls).toHaveLength(1); // reviewsOwed still feeds selectStatusCandidates regardless
+  });
+
+  // #xu2pp2m — THE BLOCK NO LONGER REPORTS ITSELF FAILED WHEN IT SUCCEEDED.
+  //
+  // A duplicated copy of the two loops above (merge artifact `c014ef4`) sat outside
+  // `for (const d of reviewsOwed)` and still referenced `d`, whose scope ends with that loop — so reaching it
+  // ALWAYS threw `ReferenceError: d is not defined`. The work itself had already been done by then, so
+  // nothing went unlabelled; what broke was the LOG. Every tick with reviews owed ended in
+  // `⚠ mechanical pass review-reconcile dispatch failed (non-fatal): d is not defined`, a permanent false
+  // positive sitting exactly where an operator looks for a real dispatch failure.
+  it('does NOT log a review-reconcile failure on a tick where the dispatch actually SUCCEEDED', async () => {
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
+      dispatchThrows: false,
+      plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
+
+    const stderr = [];
+    const write = process.stderr.write;
+    process.stderr.write = (chunk) => { stderr.push(String(chunk)); return true; };
+    try {
+      await makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' })({ out: {} });
+    } finally {
+      process.stderr.write = write;
+    }
+
+    // The work DID happen (so this is not vacuously green on a block that never ran)…
+    expect(calls.filter((c) => c.join(' ').includes('review-round-tag.mjs'))).toHaveLength(1);
+    // …and it did not announce a failure while doing it.
+    expect(stderr.join('')).not.toMatch(/review-reconcile dispatch failed/);
+    expect(stderr.join('')).not.toMatch(/is not defined/);
   });
 });
 
@@ -527,6 +587,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });

@@ -89,6 +89,13 @@ function stubReader({
   // proceeds — so adding the guard changes nothing for a suite that is about something else. The
   // independence tests are the only ones that override them.
   body = 'the PR description', clearerId = undefined, createdAt = '',
+  // #xu2pp2m — WHAT A DEGRADED READ ACTUALLY CAME BACK WITH. This used to be hard-wired to `''` for every
+  // `netScored: false` case, which quietly conflated the TWO shapes a degrade can take: "the basis could not
+  // be pinned, but here IS a diff" (limp on and say so — the case the `ref-unresolved` tests below are
+  // actually about) and "the basis could not be pinned AND there is nothing at all" (`unrun`, refused since
+  // #xu2pp2m, because PR #2122 merged on a clean accept over exactly that). Defaulted to real diff text so
+  // the existing degrade tests keep testing the case they were written for; the empty-diff tests pass `''`.
+  degradedDiffText = '--- a/x\n+++ b/x\n+a line the degraded read still saw\n',
 } = {}) {
   return ({ pr, repo }) => ({
     state,
@@ -111,7 +118,9 @@ function stubReader({
     net: netScored
       ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
       : { paths: [], base: null, rev: null, scored: false, reason: netReason },
-    diff: netScored ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true } : { text: '', scored: false, reason: netReason },
+    diff: netScored
+      ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true }
+      : { text: degradedDiffText, scored: false, reason: netReason },
   });
 }
 
@@ -2666,5 +2675,104 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
       expect(floor.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
       expect(floor.seatsFloor).toBe(true);
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE PR #2122 FALSE ACCEPT, REPRODUCED AND CLOSED.
+//
+// WHAT ACTUALLY HAPPENED (2026-09-12, live, and the PR MERGED on it). A mechanical review ran in a
+// single-branch lane clone with no remote-tracking ref for the PR's head branch. The read came back
+// `degraded: true, degradedReason: 'ref-unresolved'` with a ZERO-BYTE diff; all three seats were handed
+// `_(the net diff could not be resolved …)_` as their entire material; nothing refused; and the panel reduced
+// to a clean `accept` over 560 lines of script + test that no juror had read. The tool-free Codex seat even
+// said so out loud — "the missing net diff prevents a substantive review of the changes" — and that honest
+// ABSTENTION, carrying no findings, counted as an accept vote.
+//
+// TWO INDEPENDENT GUARDS, because either alone leaves a hole:
+//   • `read` REFUSES a degrade that produced nothing — the exact measured shape, caught before a juror is paid.
+//   • `reduce` cannot return a CLEARABLE verdict on any degraded basis — the residual shape, where the degrade
+//     yielded something but not the net basis the mandate called ground truth.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — a review can no longer clear a PR on material it could not read', () => {
+  it('REFUSES at `read` when a degraded basis produced an EMPTY diff — before any juror is spawned', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved', degradedDiffText: '' });
+    expect(() => advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-empty-degraded', input: BASE_INPUT, registry }), { registry },
+    )).toThrow(/DEGRADED[\s\S]*EMPTY/);
+  });
+
+  it('the refusal names the CHECKOUT as the fix, because that is what it almost always is', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved', degradedDiffText: '' });
+    expect(() => advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-empty-degraded-msg', input: BASE_INPUT, registry }), { registry },
+    )).toThrow(/--cwd/);
+  });
+
+  it('an EMPTY diff on a SCORED basis is NOT refused — a genuine no-op PR is an honest read', () => {
+    // The conjunction is what makes the refusal precise. Narrowing it to "degraded" alone, or to "empty"
+    // alone, would either miss the measured case or reject a legitimate one.
+    const { registry } = registryFor({});
+    const reader = stubReader({});
+    const raw = reader({ pr: 1234, repo: 'chalbert/web-everything' });
+    const shaped = shapeReadFinding(
+      { ...raw, diff: { text: '', scored: true } },
+      { pr: 1234, repo: 'chalbert/web-everything' },
+    );
+    expect(shaped.degraded).toBe(false);
+    expect(registry).toBeTruthy();
+  });
+
+  it('a UNANIMOUS clean panel on a DEGRADED basis reduces to `needs-human`, never `accept`', () => {
+    // THE REGRESSION, stated as the before/after it is: with `degradedBasis` removed from the `reduce` call
+    // this run returns `accept` — the exact verdict PR #2122 merged on — and a `review:pending` PR carrying it
+    // is auto-cleared MECHANICALLY by `reviewLoopAutoConfirm`. `needs-human` is the one non-blocking verdict
+    // that parks instead.
+    const { run } = driveFixture({
+      correctness: CLEAN_ANSWER,
+      security: CLEAN_ANSWER,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.lensVerdicts[DEFAULT_LENS]).toBe('accept');
+    expect(run.verdict.lensVerdicts[SECURITY_LENS]).toBe('accept');
+    expect(run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('an ABSTAINING tool-free seat is not counted as an accept vote — the #3158 risk, as measured', () => {
+    // The Codex seat's real words from the live run. It has a summary (so the #x0p5k2q silent-juror refusal
+    // does not fire) and no findings (so `deriveVerdict` reads it as clean). Nothing in a PURE reducer can
+    // recognise that prose as an abstention — which is exactly why the guard keys on the INPUT being
+    // unreadable instead, and why this run parks rather than clearing.
+    const ABSTENTION = {
+      summary: 'the missing net diff prevents a substantive review of the changes',
+      findings: [],
+    };
+    const { run } = driveFixture({
+      correctness: CLEAN_ANSWER,
+      security: ABSTENTION,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(run.verdict.summary).toContain('prevents a substantive review');
+  });
+
+  it('a degraded basis still lets a REAL blocker bounce — the downgrade takes only the clearable outcomes', () => {
+    // Deliberately NOT "degrade ⇒ always needs-human": a bounce is more actionable than a park and costs
+    // nothing, so a mandatory seat that DID find something keeps its say. This is the pre-existing
+    // `ref-unresolved` behaviour, asserted here so the new arm cannot quietly swallow it.
+    const { run } = driveFixture({
+      correctness: BLOCKING_ANSWER,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.verdict).toBe(VERDICTS.CHANGES);
+  });
+
+  it('an UNDEGRADED clean panel is untouched — the guard costs an ordinary review nothing', () => {
+    const { run } = driveFixture({ correctness: CLEAN_ANSWER, security: CLEAN_ANSWER });
+    expect(run.findings.read.degraded).toBe(false);
+    expect(run.verdict.verdict).toBe(VERDICTS.ACCEPT);
   });
 });

@@ -2292,3 +2292,55 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
     expect(decide('node scripts/lane-pool.mjs acquire --lane=3')).toBeNull();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE DELIVERY LIFECYCLE TABLE MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT".
+//
+// WHY THIS BLOCK EXISTS. That generalization has now been proposed once, on a reading that is superficially
+// very plausible: `deliver-item-wrapper.mjs` is still unwired, so nothing stamps `'delivery'` in production
+// and the table above is, today, dead code. The conclusion drawn from that — "so widen the gate to the kinds
+// that ARE stamped (build/prepare/prepare-decision/investigate/fix/ci-heal) and it will finally fire" — is
+// wrong, and wrong in a way that would break every dispatched agent's FIRST STEP.
+//
+// The table is not "what a dispatched agent may not do". It is "what the delivery WRAPPER does on the agent's
+// behalf" — and the other six launch kinds have no wrapper owning their lifecycle; their briefs tell the agent
+// to do these things itself. Each command below is therefore asserted ALLOWED under the live kinds, with the
+// brief and step that requires it named, so a future widening goes RED here with the reason attached rather
+// than shipping and denying step 1 of every dispatch.
+//
+// (The complementary half — `npm run check:standards` IS already denied for all these kinds, by the #3105 arm
+// — is asserted at the top of this file and is why `we:skills-src/conveyor/*-brief.md` all use
+// `verify-lane request` + poll instead.)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — the lifecycle denylist stays delivery-scoped because the live briefs need those commands', () => {
+  /** `we:scripts/operations/dispatch-lane.mjs#LAUNCH_KINDS` — the kinds `dispatch-lane-io.mjs` actually stamps. */
+  const LIVE_LAUNCH_KINDS = ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'];
+
+  /** command → the brief step that requires it, so a red test says WHY rather than only WHAT. */
+  const REQUIRED_BY_LIVE_BRIEFS = [
+    ['node scripts/lane-pool.mjs acquire --lane=3 --purpose=conveyor-delivery', 'step 1 of ALL SIX briefs — acquire the lane clone'],
+    ['node scripts/verify-lane.mjs request', 'the SANCTIONED gate path (#3105) every brief now uses'],
+    ['node scripts/verify-lane.mjs check --json', 'the poll half of that same sanctioned gate path'],
+    ['node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x', 'the learnings step in five of the six briefs'],
+    ['gh pr view 1234 --json title,body,comments', 'fix-agent-brief.md step 2 — read the finding being repaired'],
+    ['gh pr checks 1234', 'fix-agent-ci-brief.md step 2 — find which required check is red'],
+    ['node scripts/operations/run.mjs open-pr --ref=lane/1234-x --sha=HEAD --base=main', 'how build/prepare/investigate open their PR at all'],
+  ];
+
+  for (const kind of LIVE_LAUNCH_KINDS) {
+    it(`allows every command a \`${kind}\` brief requires of the agent itself`, () => {
+      for (const [cmd, why] of REQUIRED_BY_LIVE_BRIEFS) {
+        expect(decide(cmd, { dispatchKind: kind }), `${cmd} — ${why}`).toBeNull();
+      }
+    });
+  }
+
+  it('and the SAME commands are still denied for `delivery`, where a wrapper genuinely owns them', () => {
+    // The scoping is the ruling, so both directions are asserted together: widening the gate and narrowing it
+    // are each a real change, and neither should be possible without one of these two going red.
+    for (const [cmd] of REQUIRED_BY_LIVE_BRIEFS) {
+      expect(decide(cmd, { dispatchKind: 'delivery' }), cmd).not.toBeNull();
+    }
+  });
+});

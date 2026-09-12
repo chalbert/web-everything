@@ -1,5 +1,12 @@
 # Independent-review agent brief (template) — review ONE PR, then exit (#3279)
 
+> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#xu2pp2m`).** An unflagged
+> `review-dispatch.mjs --pr=<n>` no longer spawns an agent with this brief at all: it runs the SAME three
+> commands below itself, as pure Node (`we:scripts/operations/review-dispatch-wrapper.mjs`), because this
+> brief's whole sanctioned arc — acquire a lane, run `review-loop-cli.mjs` once, release — is mechanical and
+> step 2 already forbids you from interpreting, improvising or retrying anything. You are reading this because
+> somebody passed `--agent`. Everything below still applies to you, unchanged.
+>
 > **This is a TEMPLATE, not a runnable skill.** `we:scripts/operations/review-dispatch.mjs` instantiates it —
 > filling the `{{PLACEHOLDERS}}` below with the PR this dispatch was asked to review — and passes the result as
 > the prompt for **one background session**, started fresh (`claude --bg --session-id=<a brand-new UUID>`),
@@ -16,7 +23,7 @@
 | `{{PR}}` | the PR number to review — e.g. `1234` |
 | `{{REPO}}` | the `owner/repo` the PR lives in — e.g. `chalbert/web-everything` |
 | `{{SESSION_SLUG}}` | a per-dispatch lane-lease slug, e.g. `review-1234` |
-| `{{JUDGE_PROVIDER}}` | which `JudgeProvider` the tool-free jurors below run as — `claude` (default) or `codex` (`#xqa9ttq`) |
+| `{{JUDGE_PROVIDER}}` | the run's `JudgeProvider`. Always `claude` in practice — `codex` is refused at the command line, see step 2 (`#xu2pp2m`) |
 
 ---
 
@@ -95,11 +102,19 @@ Then report that plainly (`blocked-on-infra`, no lane available) and exit.
 node scripts/operations/review-loop-cli.mjs --pr={{PR}} --repo={{REPO}} --cwd="$LANE" --provider={{JUDGE_PROVIDER}}
 ```
 
-**`--provider={{JUDGE_PROVIDER}}` picks the `JudgeProvider` for the TOOL-FREE jurors this step spawns — it is
-filled `claude` unless this dispatch specifically asked for `codex` (`#xqa9ttq`).** It never changes what YOU
-are (this session stays a tool-bearing Claude agent regardless): the two independent jurors `review-loop-cli.mjs`
-spawns underneath are the only thing this flag touches, and only while they stay tool-free (`#3581`'s ratified
-sequencing — a tool-bearing Codex juror does not exist yet).
+**`--provider={{JUDGE_PROVIDER}}` is filled `claude`, always, and `codex` is not a thing you can be handed
+here (`#xu2pp2m` — CORRECTING what this paragraph used to claim).** The old wording said this flag touched only
+the jurors "while they stay tool-free". That was wrong on the facts: `review-pr`'s two MANDATORY seats set
+`allowedTools` unconditionally (`buildReviewJudgeRequest`), `--provider` sets the provider for ALL seats, and
+`createDefaultJudge` structurally refuses codex + tool-bearing (`#3581`) — so `--provider=codex` is a
+GUARANTEED crash at the first judge step, measured live on 2026-09-12, not an option. `review-dispatch.mjs`
+now refuses `--judge-provider=codex` at the command line rather than letting it fail minutes into a dispatch.
+
+**Seating Codex as the tool-free ADVISORY panelist is a different, working knob**, and it is the one that
+actually ran in that live review: `review-pr`'s opt-in third seat (`judgeAdvisory`), which pins itself to codex
+per-request and carries no tools. It is turned on by `--codex-advisory` on `review-dispatch.mjs` / the wrapper
+(which sets `REVIEW_PR_CODEX_ADVISORY=1`), never by `--provider`. Either way, none of this changes what YOU
+are: this session stays a tool-bearing Claude agent.
 
 This runs the declared `review-pr` operation's ONE round — read the diff, judge it (correctness AND security,
 two independent jurors, both spawned by the operation, neither is you), reduce their findings to a verdict, and

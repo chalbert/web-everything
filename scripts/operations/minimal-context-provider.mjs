@@ -83,11 +83,21 @@ export function resolveRunCwd(processCwd = process.cwd(), gitToplevel = tryGitTo
   return gitToplevel(processCwd) || REPO_ROOT;
 }
 
+/** How much stdout a mechanical CLI call may produce before Node kills the child. #xu2pp2m: the default is
+ *  1 MB, and `review-loop-cli.mjs --json` emits the WHOLE run record — every finding's prose AND, on a
+ *  `read`-step finding, the net diff itself. A real PR overflows that, and `execFileSync`'s `ENOBUFS` throw
+ *  looks to `dispatchReviewMechanical`'s catch exactly like a crashed CLI: the review is misreported
+ *  `blocked-on-infra` and its genuine verdict is lost. 64 MB matches what `we:skills-src/conveyor/runner.mjs`
+ *  already allows its own `reconcile-pass.mjs --json` read. */
+export const RUN_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 /** The one blocking `execFileSync` wrapper every mechanical CLI call in this file (and every caller of it)
  *  goes through — cwd defaults to {@link resolveRunCwd}'s answer (the ACTUAL working checkout, never this
  *  module's own script-location-derived `REPO_ROOT` alone — see that function's docblock for the bug this
  *  fixes), still overridable per-call via `opts.cwd` exactly as before. */
-export const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', cwd: resolveRunCwd(), ...opts });
+export const run = (cmd, args, opts = {}) => execFileSync(cmd, args, {
+  encoding: 'utf8', cwd: resolveRunCwd(), maxBuffer: RUN_MAX_BUFFER_BYTES, ...opts,
+});
 
 /** The tool allowlist `--restricted` needs handed back explicitly (verified against the real CLI while writing
  *  `deliver-item-wrapper.mjs`: `--tools=default` does NOT restore what `--restricted` removes — a probe asking

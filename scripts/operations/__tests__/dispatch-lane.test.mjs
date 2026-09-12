@@ -21,6 +21,9 @@ import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { importGraph } from './import-graph.mjs';
+// #xu2pp2m — the REAL guard, so a brief's instructions and the harness's refusals are read in one place and
+// cannot drift apart silently. A brief is a prompt; nothing else in the suite would ever notice.
+import { decide } from '../../guard-bash.mjs';
 import { releaseSessionForNum } from '../../conveyor/tick-core.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
 import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
@@ -2622,5 +2625,70 @@ describe('#3331 — isHandleListed: prefix match, because a short handle is neve
     expect(isHandleListed('', [{ sessionId: 'anything' }])).toBe(false);
     expect(isHandleListed(null, [{ sessionId: 'anything' }])).toBe(false);
     expect(isHandleListed('x', null)).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — NO BRIEF MAY TELL A DISPATCHED AGENT TO RUN A COMMAND THE GUARD DENIES IT.
+//
+// THE DEFECT, LIVE TODAY AND MEASURED (not predicted). `we:scripts/guard-bash.mjs`'s #3105 arm denies the
+// verification set to a dispatched agent for ANY `WE_DISPATCH_KIND` — build, prepare, prepare-decision,
+// investigate, fix, ci-heal — and `dispatch-lane-io.mjs#defaultClaudeProvider` stamps exactly those. Yet FOUR
+// of the six briefs still carried a bare `npm run check:standards` fenced block as their "run the gate GREEN"
+// step: `prepare-scope`, `prepare-decision`, `fix` (v1, the one actually routed) and `fix-agent-ci`. So the
+// brief instructed a command the harness refuses before the model is consulted, on a step every one of those
+// dispatches has to pass. `delivery-agent-brief.md` and `investigation-agent-brief.md` already used the
+// sanctioned `verify-lane request` → poll `check` pattern; these four now match it.
+//
+// WHY THIS TEST IS A CONTENT ASSERTION AND NOT A LINT. The property is "this brief and the guard agree", and
+// both halves are read here — the REAL brief text off disk, and `decide()` itself — so neither can drift
+// without a red test. A brief is a prompt, so nothing else in the suite would ever notice.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — every dispatched brief steers to the gate path the guard actually allows', () => {
+  /** Read the REAL file, exactly as `dispatch-lane-io.mjs` would for that kind. */
+  const briefText = (kind) => readFileSync(briefPath(REPO_ROOT, kind), 'utf8');
+
+  /** A fenced shell line, i.e. something the brief is TELLING the agent to run — not prose about a command. */
+  const commandLines = (text) => text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('npm ') || l.startsWith('node ') || l.startsWith('gh '));
+
+  it('covers every live launch kind — the roster is read, never retyped', () => {
+    // If a seventh kind is added with a brief of its own, this list grows on its own and the assertions below
+    // start covering it. A hand-typed list would silently exempt the new one.
+    expect(LAUNCH_KINDS).toEqual(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+  });
+
+  for (const kind of ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']) {
+    it(`the \`${kind}\` brief instructs NO command the guard denies that very dispatch`, () => {
+      const denied = commandLines(briefText(kind))
+        .map((cmd) => [cmd, decide(cmd, { dispatchKind: kind })])
+        .filter(([, reason]) => reason);
+      expect(denied.map(([cmd, reason]) => `${cmd}\n  → ${String(reason).slice(0, 160)}`)).toEqual([]);
+    });
+
+    it(`the \`${kind}\` brief steers to the SANCTIONED gate path instead`, () => {
+      const text = briefText(kind);
+      // Both halves — `request` alone is a marker nobody reads back, `check` alone never asks for a run.
+      expect(text, 'must tell the agent to REQUEST the gate').toMatch(/node scripts\/verify-lane\.mjs request\b/);
+      expect(text, 'must tell the agent to POLL for the result').toMatch(/node scripts\/verify-lane\.mjs check\b/);
+    });
+  }
+
+  it('REGRESSION — a bare `npm run check:standards` in a brief WOULD have been caught', () => {
+    // The exact line the four briefs carried, proven denied for the kinds that ran them. This is the "did the
+    // bug exist" half: without it, the assertions above could pass over a guard that denies nothing.
+    for (const kind of LAUNCH_KINDS) {
+      expect(decide('npm run check:standards', { dispatchKind: kind }), kind)
+        .toMatch(/mechanically-dispatched .* agent may not run the verification set/);
+    }
+    // …and the SANCTIONED replacement is genuinely allowed, for every one of them — otherwise the fix would
+    // have swapped one denied command for another.
+    for (const kind of LAUNCH_KINDS) {
+      expect(decide('node scripts/verify-lane.mjs request', { dispatchKind: kind }), kind).toBeNull();
+      expect(decide('node scripts/verify-lane.mjs check --json', { dispatchKind: kind }), kind).toBeNull();
+    }
   });
 });

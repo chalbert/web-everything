@@ -302,10 +302,11 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
  *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
  *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
- *  flight for a PR simply does not appear in next tick's plan. Firing its per-PR `review-dispatch.mjs` spawns
+ *  flight for a PR simply does not appear in next tick's plan. Firing its per-PR `review-dispatch.mjs` calls
  *  SEQUENTIALLY mirrors `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state —
- *  parallel spawns have no benefit and this keeps one bad dispatch's blast radius the same as every other pass
- *  here.
+ *  parallel runs have no benefit and this keeps one bad dispatch's blast radius the same as every other pass
+ *  here. #xu2pp2m — each call is now a BLOCKING mechanical review rather than a fork-and-return `claude --bg`
+ *  spawn, so this pass (like verify-dispatch) heartbeats the lease while it runs.
  *
  *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
  *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
@@ -392,9 +393,15 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // is ever reached — so a review already in flight for a PR simply does not appear in next tick's plan.
     //
     // SEQUENTIAL, mirroring `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state:
-    // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
-    // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
-    // rest of the tick, or the tick itself).
+    // firing N reviews at once has no benefit and this keeps one bad dispatch's blast radius the same as every
+    // other pass here (best-effort — a single PR's dispatch failure never stops the rest of the tick, or the
+    // tick itself).
+    //
+    // #xu2pp2m — EACH ONE NOW BLOCKS UNTIL THE REVIEW HAS A VERDICT. `review-dispatch.mjs` no longer forks a
+    // `claude --bg` agent to type three commands out of a brief; it runs those three commands itself
+    // (`review-dispatch-wrapper.mjs`). So a tick with reviews owed is minutes longer than one without — which
+    // is fine here, exactly as it is for verify-dispatch (#3105/#3404), PROVIDED the singleton lease is
+    // heartbeated mid-pass. It is: see the `runQuietHeartbeating` call in the loop below.
     let plan = null;
     try {
       const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json'];
@@ -437,15 +444,29 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
             // `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
             // attempt itself threw and no session was ever spawned — so `review-round:<N>` kept advancing every
             // tick regardless of whether a review actually happened, misleading anyone reading the label.
-            let dispatched = false;
-            try {
-              execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
-                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
-              dispatched = true;
-            } catch (e) {
-              process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-            }
-            if (!dispatched) continue; // no session was spawned — never advance the round label for this PR
+            // #xu2pp2m — HEARTBEATED, not a bare `execFileSync`, because `review-dispatch.mjs` is now
+            // MECHANICAL and therefore BLOCKING. It used to return the instant `claude --bg` forked; it now
+            // returns when the review has an actual verdict, which is minutes. That is the SAME shape #3404
+            // already solved for `verify-dispatch.mjs`: a pass whose runtime can approach the 15-minute
+            // singleton lease TTL must heartbeat the lease WHILE it runs, and `execFileSync` structurally
+            // cannot (it blocks the event loop until the child exits, so no timer can fire). Without this the
+            // runner would lose its own lease mid-review and stop.
+            //
+            // `dispatched` now means MORE than it did, and that is deliberate — see `review-dispatch.mjs`'s
+            // header. Exit 0 from the mechanical path proves a review RAN and reached a verdict; a
+            // `blocked-on-infra` classification (no free lane, a crashed loop) exits non-zero. So the
+            // `review-round:<N>` label below finally advances on rounds that happened rather than on sessions
+            // that were forked, which is what #x5v8yy9's own comment always claimed for it.
+            const dispatched = await runQuietHeartbeating(
+              join(scriptsDir, 'operations', 'review-dispatch.mjs'),
+              {
+                repo: null, // the slug is passed explicitly below; `runQuietHeartbeating`'s own `--repo` append would duplicate it
+                args: [`--pr=${d.prNumber}`, `--repo=${repoSlug}`],
+                heartbeat,
+                label: `review-dispatch --pr=${d.prNumber}`,
+              },
+            );
+            if (!dispatched) continue; // no review actually ran — never advance the round label for this PR
             // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
             // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
             // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
@@ -468,32 +489,20 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
               process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
             }
           }
-          // PURELY INFORMATIVE (`we:scripts/conveyor/review-round-tag.mjs`) — a `review-round:<N>` label so a
-          // human scanning the PR list can see how many rounds a PR has been through with no click-through.
-          // `d.attempts` is `reconcile-pass.mjs`'s own durable re-arm count (#2643) for THIS PR — the round
-          // about to run is always one past that. Best-effort like every other step in this loop: a failed tag
-          // write never blocks a review from actually being dispatched, and nothing downstream reads this label
-          // to decide anything.
-          try {
-            execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
-              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-          } catch (e) {
-            process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-          }
         }
-        // PURELY INFORMATIVE (`we:scripts/conveyor/review-status-tag.mjs`) — "is a reviewer or a fixer actually
-        // working this PR right now, or is a live session stuck" (the operator: visibility into a crashed/hung
-        // agent, not just whether one was dispatched). A SEPARATE loop from the one above: it must ALSO cover
-        // PRs that are NOT being freshly dispatched this tick (an already-live session, or one that just
-        // finished and needs its stale label cleared) — `reviewsOwed` alone misses both.
-        for (const c of statusCandidates) {
-          try {
-            execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
-              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-          } catch (e) {
-            process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-          }
-        }
+        // #xu2pp2m — A DUPLICATED, ALWAYS-THROWING COPY OF THE TWO LOOPS ABOVE WAS DELETED HERE. It was a
+        // merge artifact (the branch's own cross-PR reconcile commit, `c014ef4`, landed the round-tag and
+        // status-tag loops twice): the second `review-round-tag.mjs` call sat OUTSIDE
+        // `for (const d of reviewsOwed)` and still referenced `d`, whose `let`-scope ends with that loop — so
+        // reaching it ALWAYS threw `ReferenceError: d is not defined`, every tick this branch ran.
+        //
+        // WHAT IT ACTUALLY COST, stated no wider than it was: the two loops above it had already done the real
+        // work, and the copy below the throw was redundant with the status sweep that had just run — so no
+        // label went unwritten. What was lost was the LOG: every such tick ended in
+        // `⚠ mechanical pass review-reconcile dispatch failed (non-fatal): d is not defined`, which reads as
+        // "the review pass failed" when the review pass had in fact succeeded. An operator debugging a real
+        // dispatch failure was looking at a permanent false positive. Found while wiring the mechanical
+        // dispatch through here, not looked for.
       }
     } catch (e) {
       process.stderr.write(`⚠ mechanical pass review-reconcile dispatch failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
@@ -541,16 +550,24 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
  * every {@link MECHANICAL_PASS_HEARTBEAT_MS} while it is still running, and resolving once it exits — best-
  * effort like `runQuiet` (a non-zero exit or spawn error is swallowed, logged to stderr, never thrown). The
  * heartbeat MUST run on an interval independent of the child's own completion — `execFileSync` cannot do this
- * at all (it blocks the caller until the child exits, so nothing else can run meanwhile), which is why this
- * pass alone needs `child_process.spawn` instead of the other two passes' synchronous call.
+ * at all (it blocks the caller until the child exits, so nothing else can run meanwhile), which is why these
+ * passes need `child_process.spawn` instead of the other passes' synchronous call.
+ *
+ * #xu2pp2m — RESOLVES `true` ON A CLEAN EXIT, `false` OTHERWISE, and takes explicit `args`. Both are for the
+ * second caller: `review-dispatch.mjs` became a BLOCKING mechanical review (so it needs the heartbeat) whose
+ * exit code gates the `review-round:<N>` label (so a swallowed failure must still be REPORTED to the caller,
+ * not only to stderr). `verify-dispatch.mjs`'s call ignores the return, exactly as before.
+ *
  * @param {string} scriptPath
- * @param {{ repo?:string|null, heartbeat:Function, label:string }} o
+ * @param {{ repo?:string|null, args?:string[], heartbeat:Function, label:string }} o
+ * @returns {Promise<boolean>} did the child exit 0?
  */
-async function runQuietHeartbeating(scriptPath, { repo = null, heartbeat = () => true, label } = {}) {
+async function runQuietHeartbeating(scriptPath, { repo = null, args: extraArgs = [], heartbeat = () => true, label } = {}) {
   const { spawn } = await import('node:child_process');
-  const args = [scriptPath];
+  const args = [scriptPath, ...extraArgs];
   if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
   let timer = null;
+  let ok = false;
   try {
     await new Promise((resolvePromise) => {
       const child = spawn('node', args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -565,12 +582,14 @@ async function runQuietHeartbeating(scriptPath, { repo = null, heartbeat = () =>
         if (code !== 0) {
           process.stderr.write(`⚠ mechanical pass ${label} failed (non-fatal): exit ${code} ${stderr.split('\n')[0]}\n`);
         }
+        ok = code === 0;
         resolvePromise();
       });
     });
   } finally {
     if (timer) clearInterval(timer);
   }
+  return ok;
 }
 
 /**

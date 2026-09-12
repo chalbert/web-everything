@@ -2084,6 +2084,30 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // interactive operator session (no `WE_DISPATCH_KIND` at all) and every other dispatch kind are unaffected —
   // this whole block is a no-op unless `dispatchKind` is literally `'delivery'`.
   //
+  // WHY THIS STAYS `'delivery'`-ONLY, AND MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT" (#xu2pp2m,
+  // 2026-09-12 — recorded here because the generalization has now been proposed once and is superficially very
+  // plausible: `deliver-item-wrapper.mjs` is still unwired, so nothing stamps `'delivery'` in production and
+  // this whole table is, today, dead code).
+  //
+  // THE TABLE IS NOT "WHAT A DISPATCHED AGENT MAY NOT DO". It is "what the DELIVERY WRAPPER does on the
+  // agent's behalf", and that ownership is the entire justification for every line in it. The other six
+  // `LAUNCH_KINDS` (`we:scripts/operations/dispatch-lane.mjs`) have NO wrapper owning their lifecycle — their
+  // briefs tell the agent to do these things ITSELF, and a `WE_DISPATCH_KIND=build|prepare|prepare-decision|
+  // investigate|fix|ci-heal` agent is running one of those briefs. Verified command by command against the
+  // live briefs rather than assumed: `lane-pool.mjs acquire` is step 1 of ALL SIX; `verify-lane.mjs
+  // request`/`check` is the SANCTIONED gate path #3105's arm above deliberately exempts and every brief now
+  // uses; `learnings-drop.mjs` is a named step in five of them; `gh pr view`/`gh pr checks` is how
+  // `fix-agent-brief.md`/`fix-agent-ci-brief.md` read the finding they exist to repair; `run.mjs open-pr` is
+  // how build/prepare/investigate open their PR at all. Flipping the gate to cover those kinds would deny
+  // every dispatched agent its own first step.
+  //
+  // A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'` ARM IS ADDED: `WE_DISPATCH_KIND=fix` is stamped by TWO
+  // different spawners for two INCOMPATIBLE agent contracts — `dispatch-lane-io.mjs#defaultClaudeProvider`
+  // (the live one, running `fix-agent-brief.md` v1, which runs its own lifecycle) and
+  // `fix-dispatch-wrapper.mjs` (unwired, running `fix-agent-brief-v2.md` under a wrapper that owns the
+  // lifecycle). One env value, two contracts. A `dispatchKind === 'fix'` deny arm cannot be correct for both,
+  // so that collision has to be resolved (a distinct kind, or a second signal) BEFORE one is written.
+  //
   // NO OVERRIDE. Every command below is something the WRAPPER runs itself, OUTSIDE the agent's own turn and
   // outside this hook's reach entirely (see this file's own `runGateWithOneRetry`/`runConverge`/`openPr`/
   // `dropLearning` — none of those are Claude Code Bash TOOL calls; they are the wrapper's own plain Node

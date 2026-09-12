@@ -97,14 +97,27 @@ scope:
 
 ### 4. Run the gate GREEN
 
-The scope shape is enforced by `check:standards` (array of non-empty strings; empty/`[]` is an error). Run it in
-the item's own locus (a WE item is `check:standards`; a cross-locus item runs `LOCI[item.locus]`'s gate):
+The scope shape is enforced by `check:standards` (array of non-empty strings; empty/`[]` is an error), run in
+the item's own locus (a WE item is `check:standards`; a cross-locus item runs `LOCI[item.locus]`'s gate).
+
+**You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
+well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
+auto-backgrounded by the tool itself, and you stall with no error. This is not just guidance — a
+`PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`, #3105) **DENIES** a dispatched agent from running the
+verification set (`verify-lane` / `run.mjs verify` / `check:standards` / `test:unit`) directly, in any form.
+The runner's own long-lived process (unbound by your turn's window) runs the gate for you. Request it, then
+poll across turns:
 
 ```bash
-npm run check:standards
+node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
+# … on a LATER turn (the runner picks it up on its own tick, ~120s cadence) …
+node scripts/verify-lane.mjs check --json          # poll until status settles; `running` is NOT a failure — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 ```
 
-A red gate is a hard stop — fix your frontmatter (usually a bad YAML shape or an empty array) until it is green.
+Only `green` clears you to proceed.
+
+A red gate is a hard stop — fix your frontmatter (usually a bad YAML shape or an empty array) and re-request
+until it is green.
 
 ### 5. Review your own scope prediction — spawn an adversarial review subagent (converge BEFORE the PR)
 
