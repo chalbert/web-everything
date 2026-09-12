@@ -1,4 +1,5 @@
 ---
+bornAs: xgdk2hq
 kind: story
 size: 5
 parent: "3369"
@@ -240,7 +241,7 @@ stderr: jetski: no output produced — a tool required the "command" permission 
 
 **Exit code 0. `status: "SUCCESS"`. `response: ""`. `structured_output` ABSENT.** The only honest signals are
 the `denied_actions` array and stderr. A parser that trusts either the exit code or `status` records a
-successful juror that said nothing — the exact `#x0p5k2q` shape `REVIEW_JUDGE_SHAPE`'s required `summary`
+successful juror that said nothing — the exact `#3241` shape `REVIEW_JUDGE_SHAPE`'s required `summary`
 exists to refuse, except here it never reaches the schema at all.
 
 **A provider MUST treat `structured_output` absent as a hard failure regardless of `status`,** and must fold
