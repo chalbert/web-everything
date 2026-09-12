@@ -46,6 +46,23 @@
  * runs inside a THROWAWAY CLONE pinned at the candidate sha — never in the driver's checkout, never in this
  * one — so a candidate that is broken enough to wreck a working tree wrecks only the throwaway:
  *
+ * THE CLONE IS A SIBLING OF THE SOURCE CHECKOUT, WITH THE SOURCE'S REAL `origin`. Both halves were learned the
+ * hard way, on the first `--full` run: 14 failures, none of them a property of the candidate, all of them a
+ * property of WHERE the clone sat and WHAT its remote was.
+ *
+ *   • 12 × `Failed to resolve import "@frontierui/…"` — `vite.config.mts` aliases the constellation's siblings
+ *     as `../frontierui/…` and `../plateau-app/…` relative to the repo root (memory rule 96). A clone under
+ *     `$TMPDIR`, where this used to go, has no siblings at all. {@link scratchRootFor}.
+ *   • 2 × `none of the git remotes configured for this repository point to a known GitHub host` — a clone made
+ *     from a local path has a DIRECTORY in `origin`, and two tests shell `gh`, which needs a real one.
+ *     {@link resolveUpstreamUrl}.
+ *
+ * NEITHER FIX WEAKENS THE GATE. Not one check, threshold or required-check name moved; the same five checks run
+ * the same commands over the same code. All that changed is that the clone now sits where the repo's own build
+ * config has always said a checkout sits, and carries the remote it was actually made from — so a red verdict
+ * now means the CANDIDATE is red. Making `--full` pass by narrowing what it runs would have been the other,
+ * wrong fix.
+ *
  *   1. `checkout`       — clone, detach at the candidate sha, and confirm the clone's HEAD IS that sha. A
  *                         clone that silently landed somewhere else would validate the wrong code.
  *   2. `deps`           — make `node_modules` present. `link` (symlink the source checkout's) when the
@@ -104,7 +121,6 @@ import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, symlinkSync
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 
 import { gitRun, notifyDesktop, defaultAppendLog } from './branch-sync.mjs';
 import { SHA_RE, readHead, parseFlags } from './driver-watchdog.mjs';
@@ -235,6 +251,67 @@ export function decideDeps({ sourceLock = null, candidateLock = null } = {}) {
     return { mode: 'install', reason: 'the candidate\'s package-lock.json differs from the source checkout\'s — a borrowed node_modules would not describe it' };
   }
   return { mode: 'link', reason: 'the candidate\'s package-lock.json is byte-identical to the source checkout\'s — its node_modules is the same tree' };
+}
+
+/**
+ * WHERE THE THROWAWAY CLONE GOES. PURE over the source checkout's path.
+ *
+ * THE PARENT OF THE SOURCE CHECKOUT — i.e. the clone is a DIRECT SIBLING of the source, and therefore of every
+ * other repo in the constellation. NOT `$TMPDIR`, which is what this used to be and which made `--full`
+ * unrunnable for two reasons that have nothing to do with the candidate:
+ *
+ *   1. THE SIBLING-ALIAS ASSUMPTION. `vite.config.mts` resolves `../frontierui/plugs`, `../frontierui/blocks`
+ *      and `../plateau-app/tools/dev-panel/vite-plugin` RELATIVE TO THE REPO ROOT — the constellation's
+ *      standing layout (memory rule 96), not something this file may opt out of. A clone under `$TMPDIR` has
+ *      no sibling `frontierui`/`plateau-app`, so every test that loads the vite config died on an unresolvable
+ *      import: 12 failures that were pure artefact of WHERE the clone sat.
+ *   2. Being a sibling is not the same as being UNDER a shared scratch parent. `<parent>/.we-validate/<sha>/`
+ *      would put the clone one level too deep and `../frontierui` would resolve to
+ *      `<parent>/.we-validate/frontierui`, which does not exist. The clone has to sit at the SAME depth as the
+ *      source checkout, so the leaf name carries the uniqueness instead of a containing directory.
+ *
+ * DOT-PREFIXED ({@link SCRATCH_DIR_PREFIX}) because the workspace parent is a directory humans and tooling
+ * both read: `lane-pool.mjs`, the sibling detection in `bootstrap-session.mjs` and every `wev-*` glob enumerate
+ * it, and a throwaway clone that showed up in those listings as a peer of the real checkouts would be a new
+ * footgun traded for the one being fixed.
+ *
+ * RESIDUAL, stated rather than hidden: this widens the blast radius from `$TMPDIR` to the workspace directory.
+ * It is bounded by the dot-prefix, by the unique `<sha12>-<timestamp>` leaf (no two runs collide), and by the
+ * fact that the clone is only ever removed by {@link decideCleanup} naming the exact path it created.
+ *
+ * @param {string} source - the checkout the candidate is cloned from (already absolute).
+ * @returns {string}
+ */
+export function scratchRootFor(source) {
+  return dirname(resolve(String(source ?? '.')));
+}
+
+/** Leaf-name prefix for a throwaway validation clone. Dot-prefixed — see {@link scratchRootFor}. */
+export const SCRATCH_DIR_PREFIX = '.we-validate-';
+
+/**
+ * IS THIS A REAL REMOTE URL, OR A LOCAL PATH? PURE.
+ *
+ * The throwaway clone is made from a LOCAL path (fast, hardlinked, no network), which leaves its `origin`
+ * pointing at a directory. Two tests in the suite parse `git remote get-url origin` into a repo slug and shell
+ * `gh` with it; a filesystem path yields no recognizable `owner/repo`, so both failed for a reason that was a
+ * property of the clone rather than of the candidate. {@link resolveUpstreamUrl} re-points `origin` at the real
+ * upstream afterwards, and this predicate is how it tells the two apart.
+ *
+ * Accepts the two shapes git uses for a network remote: a scheme (`https://`, `ssh://`, `git://`, `http://`)
+ * and the scp-like `user@host:path`. Everything else — an absolute path, a relative path, `file://` — is local.
+ *
+ * @param {string|null|undefined} url
+ * @returns {boolean}
+ */
+export function isRemoteUrl(url) {
+  const u = String(url ?? '').trim();
+  if (!u) return false;
+  if (/^file:\/\//i.test(u)) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return true;
+  // scp-like `git@github.com:owner/repo.git` — a host before the colon, and no `/` before it (which would make
+  // it a path containing a colon rather than a remote).
+  return /^[^/\\:]+@[^/\\:]+:[^\\]+$/.test(u);
 }
 
 /**
@@ -409,6 +486,43 @@ function excludeLocally(dir, pattern) {
   } catch { /* best-effort */ }
 }
 
+/** How many local-path `origin` hops {@link resolveUpstreamUrl} will follow before giving up. A lane clone of a
+ *  lane clone is real (this file's own fix was authored in one); a chain deeper than this is a loop or a mistake,
+ *  and following it forever would hang a validation on a directory walk. */
+export const MAX_ORIGIN_HOPS = 8;
+
+/**
+ * THE REAL UPSTREAM URL, followed out of however many local clones deep the source sits.
+ *
+ * A checkout's `origin` is normally the GitHub remote, in which case this is one git call. But a clone made
+ * from another clone has a filesystem path there instead, so this walks the chain — path → that repo's
+ * `origin` → … — until it finds something {@link isRemoteUrl} accepts, bounded by {@link MAX_ORIGIN_HOPS} and
+ * by a visited set so a pair of checkouts pointing at each other cannot spin.
+ *
+ * DERIVED, NEVER HARDCODED. Writing `chalbert/web-everything` in here would be a second, staler copy of a fact
+ * git already holds, and it would silently validate a fork against the wrong repo. Returning `null` (no
+ * reachable network remote) is a legitimate answer: {@link createScratchCheckout} then leaves `origin` alone
+ * rather than inventing one, and the two `gh` tests fail honestly instead of against a fabricated slug.
+ *
+ * @param {{source: string, git?: Function, maxHops?: number}} o
+ * @returns {string|null}
+ */
+export function resolveUpstreamUrl({ source, git = gitRun, maxHops = MAX_ORIGIN_HOPS }) {
+  const seen = new Set();
+  let at = resolve(String(source ?? '.'));
+  for (let hop = 0; hop < maxHops; hop += 1) {
+    if (seen.has(at)) return null;
+    seen.add(at);
+    const r = git(['remote', 'get-url', 'origin'], at);
+    if (!r?.ok) return null;
+    const url = String(r.stdout ?? '').trim();
+    if (!url) return null;
+    if (isRemoteUrl(url)) return url;
+    at = resolve(at, url); // a local path origin — follow it and ask the same question there.
+  }
+  return null;
+}
+
 /**
  * Run one check and shape its result. The ONE place a subprocess's exit status becomes a check row, so every
  * check reports identically and {@link classifyValidation} never has to special-case one.
@@ -454,11 +568,19 @@ export function runCheck({ name, cmd, args, cwd, env = undefined, timeoutMs = DE
  * Best-effort: a source with no remote-tracking refs at all (a bare driver checkout) simply keeps what the
  * clone gave it, and a fetch failure must not fail a validation by itself — the checks downstream still speak.
  *
+ * THEN, AND ONLY THEN, `origin` IS RE-POINTED AT THE REAL UPSTREAM. Order matters: the clone and the refspec
+ * fetch above both need `origin` to still be the local source path (that is what makes them fast and offline),
+ * so the re-point is the LAST thing done and never runs before the refs it would break are already copied. It
+ * exists because two tests in the suite parse `git remote get-url origin` into an `owner/repo` slug and shell
+ * `gh` with it — against a filesystem path there is no slug, and both failed on a property of the clone rather
+ * than of the candidate. Best-effort in the same sense as the fetch: a source with no reachable network remote
+ * ({@link resolveUpstreamUrl} returns `null`) keeps the local origin and those two tests fail honestly.
+ *
  * The final `rev-parse HEAD` is not ceremony: it is the assertion that the tree about to be validated is the
  * sha that was asked for, and a clone that landed elsewhere fails HERE rather than producing a green verdict
  * for the wrong code.
  */
-export function createScratchCheckout({ source, sha, dir, git = gitRun }) {
+export function createScratchCheckout({ source, sha, dir, git = gitRun, originUrl = undefined }) {
   const fail = (detail) => ({ name: 'checkout', ok: false, status: null, detail, output: '' });
 
   mkdirSync(dirname(dir), { recursive: true });
@@ -476,12 +598,27 @@ export function createScratchCheckout({ source, sha, dir, git = gitRun }) {
   const co = git(['checkout', '--detach', '--quiet', sha], dir);
   if (!co.ok) return fail(`could not check out ${sha} in the scratch clone — ${String(co.stderr).split('\n')[0]}`);
 
+  // LAST — see the header. Everything above needs `origin` to still be the local source path.
+  const upstream = originUrl === undefined ? resolveUpstreamUrl({ source, git }) : originUrl;
+  if (upstream) git(['remote', 'set-url', 'origin', upstream], dir);
+
   const head = git(['rev-parse', 'HEAD'], dir);
   const at = head.ok ? String(head.stdout).trim() : '';
   if (!SHA_RE.test(at) || !(at === sha || at.startsWith(sha) || sha.startsWith(at))) {
     return fail(`the scratch clone is at ${at || 'an unreadable commit'}, not the requested ${sha} — refusing to validate the wrong code`);
   }
-  return { name: 'checkout', ok: true, status: 0, detail: `scratch clone at ${at.slice(0, 12)} → ${dir}`, output: '', dir, sha: at };
+  return {
+    name: 'checkout',
+    ok: true,
+    status: 0,
+    // The origin is REPORTED, not just set: a green run whose clone still had a local-path origin and a green
+    // run against the real upstream are not the same evidence, exactly as with `deps`'s link-vs-install.
+    detail: `scratch clone at ${at.slice(0, 12)} → ${dir}${upstream ? ` (origin ${upstream})` : ' (origin left local — no reachable upstream)'}`,
+    output: '',
+    dir,
+    sha: at,
+    originUrl: upstream ?? null,
+  };
 }
 
 /**
@@ -645,7 +782,10 @@ export function validateAndPromote({
   driver,
   sha,
   source = CONTROL_REPO_ROOT,
-  scratchRoot = join(tmpdir(), 'we-validate-promote'),
+  // Defaulted FROM `source` (declared just above), so the throwaway clone is a direct sibling of the checkout
+  // it came from and the constellation's `../frontierui` / `../plateau-app` aliases resolve. See
+  // {@link scratchRootFor} for why `$TMPDIR` — what this used to be — cannot work.
+  scratchRoot = scratchRootFor(source),
   full = false,
   dryRun = false,
   keep = false,
@@ -677,7 +817,7 @@ export function validateAndPromote({
     return { driver: driverRoot, target: null, verdict: null, decision: { promote: false, guard: 'unknown-target', reason }, validation: null, promotion: null, scratch: null };
   }
 
-  const dir = join(scratchRoot, `${target.slice(0, 12)}-${nowMs}`);
+  const dir = join(scratchRoot, `${SCRATCH_DIR_PREFIX}${target.slice(0, 12)}-${nowMs}`);
   const validation = validate({ source, sha: target, dir, full, timeoutMs, git });
   const verdict = classifyValidation(validation.checks);
   line(verdict.validated ? 'validated' : 'failed', `${target.slice(0, 12)}: ${verdict.reason}`);

@@ -16,12 +16,15 @@
  * process and filesystem boundary is injected.
  */
 import { describe, it, expect } from 'vitest';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { importGraph } from '../../operations/__tests__/import-graph.mjs';
 import {
   DRIVER_SURFACE, REQUIRED_CHECKS, OUTPUT_TAIL_LINES, PROBE_FILENAME, DISPATCH_PROBE_SRC,
+  SCRATCH_DIR_PREFIX, MAX_ORIGIN_HOPS,
   outputTail, decideDeps, classifyValidation, decidePromotion, decideCleanup,
+  scratchRootFor, isRemoteUrl, resolveUpstreamUrl,
   recordGoodArgv, restartRunnerArgv,
   createScratchCheckout, ensureDeps, runCheck, runValidation, promoteDriver, validateAndPromote,
   promoteLogPath, CONTROL_REPO_ROOT, main,
@@ -563,6 +566,204 @@ describe('createScratchCheckout — validate the sha that was asked for, or noth
     const fetch = git.calls.find((c) => c.args[0] === 'fetch');
     expect(fetch.args).toContain('+refs/remotes/origin/*:refs/remotes/origin/*');
     expect(fetch.cwd).toBe('/tmp/s');
+  });
+});
+
+// ── WHERE THE CLONE GOES, AND WHAT ITS `origin` IS ──────────────────────────────────────────────────────────
+//
+// Both were found by the FIRST `--full` run, which produced 14 failures and not one of them a property of the
+// candidate: 12 × unresolvable `@frontierui/*` imports (a `$TMPDIR` clone has no sibling `frontierui`, which
+// `vite.config.mts` aliases as `../frontierui/…`) and 2 × `gh` refusing because a clone made from a local path
+// has a DIRECTORY in `origin` and no GitHub host. Pinned here so the gate can never regress into passing for
+// the wrong reason OR failing for one.
+
+describe('scratchRootFor — the throwaway clone is a SIBLING of the source, never under $TMPDIR', () => {
+  it('is the source checkout\'s PARENT, so the clone sits at the same depth as the source', () => {
+    expect(scratchRootFor('/Users/x/workspace/wev-driver-live')).toBe('/Users/x/workspace');
+  });
+
+  it('puts the clone at the depth `../frontierui` resolves from — NOT one level deeper', () => {
+    // The distinction that a "scratch subdirectory" fix would have got wrong: `<parent>/.we-validate/<sha>/`
+    // is a sibling of nothing, and `../frontierui` from there is `<parent>/.we-validate/frontierui`.
+    const source = '/Users/x/workspace/wev-driver-live';
+    const dir = join(scratchRootFor(source), `${SCRATCH_DIR_PREFIX}${TARGET.slice(0, 12)}-1`);
+    expect(dirname(dir)).toBe(dirname(source));
+    expect(join(dir, '..', 'frontierui')).toBe(join('/Users/x/workspace', 'frontierui'));
+  });
+
+  it('is not the system temp directory — the placement the 12 alias failures came from', () => {
+    expect(scratchRootFor('/Users/x/workspace/wev-driver-live').startsWith(tmpdir())).toBe(false);
+  });
+
+  it('normalises a relative or trailing-slash source rather than producing a relative root', () => {
+    expect(scratchRootFor('/Users/x/workspace/wev-driver-live/')).toBe('/Users/x/workspace');
+  });
+});
+
+describe('isRemoteUrl — a GitHub host git can reach, or a directory `gh` cannot make a slug out of', () => {
+  it('accepts the shapes a real remote takes', () => {
+    for (const u of [
+      'git@github.com:chalbert/web-everything.git',
+      'https://github.com/chalbert/web-everything.git',
+      'ssh://git@github.com/chalbert/web-everything.git',
+      'git://github.com/chalbert/web-everything.git',
+    ]) expect(isRemoteUrl(u), u).toBe(true);
+  });
+
+  it('rejects a local path, which is exactly what a clone-from-a-directory leaves in `origin`', () => {
+    for (const u of [
+      '/Users/x/workspace/wev-driver-live',
+      '../wev-driver-live',
+      'file:///Users/x/workspace/wev-driver-live',
+      '',
+      null,
+      undefined,
+    ]) expect(isRemoteUrl(u), String(u)).toBe(false);
+  });
+});
+
+describe('resolveUpstreamUrl — the real remote, DERIVED from the source, never hardcoded', () => {
+  it('returns the source\'s own origin when that is already a network remote', () => {
+    const git = gitStub({ 'remote get-url': { ok: true, stdout: 'git@github.com:chalbert/web-everything.git\n', stderr: '' } });
+    expect(resolveUpstreamUrl({ source: '/ws/we', git: git.fn })).toBe('git@github.com:chalbert/web-everything.git');
+  });
+
+  it('follows a LOCAL-PATH origin to the checkout it was cloned from', () => {
+    // A lane clone of a lane clone is a real shape — this fix was authored in one.
+    const answers = {
+      '/ws/a': '/ws/b',
+      '/ws/b': 'git@github.com:chalbert/web-everything.git',
+    };
+    const git = (args, cwd) => ({ ok: true, stdout: `${answers[cwd] ?? ''}\n`, stderr: '' });
+    expect(resolveUpstreamUrl({ source: '/ws/a', git })).toBe('git@github.com:chalbert/web-everything.git');
+  });
+
+  it('returns null on a cycle instead of walking forever', () => {
+    const answers = { '/ws/a': '/ws/b', '/ws/b': '/ws/a' };
+    const git = (args, cwd) => ({ ok: true, stdout: `${answers[cwd] ?? ''}\n`, stderr: '' });
+    expect(resolveUpstreamUrl({ source: '/ws/a', git })).toBe(null);
+  });
+
+  it('gives up after MAX_ORIGIN_HOPS rather than following an unbounded chain', () => {
+    let n = 0;
+    const git = () => { n += 1; return { ok: true, stdout: `/ws/hop${n}\n`, stderr: '' }; };
+    expect(resolveUpstreamUrl({ source: '/ws/a', git })).toBe(null);
+    expect(n).toBe(MAX_ORIGIN_HOPS);
+  });
+
+  it('returns null — not a guess — when the checkout has no origin at all', () => {
+    expect(resolveUpstreamUrl({ source: '/ws/a', git: gitStub({ 'remote get-url': { ok: false, stdout: '', stderr: 'no such remote' } }).fn })).toBe(null);
+    expect(resolveUpstreamUrl({ source: '/ws/a', git: gitStub({ 'remote get-url': { ok: true, stdout: '\n', stderr: '' } }).fn })).toBe(null);
+  });
+});
+
+describe('createScratchCheckout — the clone carries the SOURCE\'s real origin, re-pointed last', () => {
+  const headOk = () => ({ 'rev-parse': { ok: true, stdout: `${TARGET}\n`, stderr: '' } });
+
+  it('re-points `origin` at the resolved upstream, and reports it on the row', () => {
+    const git = gitStub(headOk());
+    const row = createScratchCheckout({
+      source: '/ws/we', sha: TARGET, dir: '/tmp/.we-validate-x', git: git.fn,
+      originUrl: 'git@github.com:chalbert/web-everything.git',
+    });
+    const setUrl = git.calls.find((c) => c.args[0] === 'remote' && c.args[1] === 'set-url');
+    expect(setUrl.args).toEqual(['remote', 'set-url', 'origin', 'git@github.com:chalbert/web-everything.git']);
+    expect(setUrl.cwd).toBe('/tmp/.we-validate-x');
+    expect(row.ok).toBe(true);
+    expect(row.originUrl).toBe('git@github.com:chalbert/web-everything.git');
+    expect(row.detail).toContain('git@github.com:chalbert/web-everything.git');
+  });
+
+  it('re-points AFTER the clone and AFTER the refspec fetch — order is the whole safety of it', () => {
+    // The fetch that restores `origin/main` needs `origin` to still BE the local source path. Re-pointing
+    // first would send it to the network and lose the #3383-era `origin/main` fix.
+    const git = gitStub(headOk());
+    createScratchCheckout({ source: '/ws/we', sha: TARGET, dir: '/tmp/.we-validate-x', git: git.fn, originUrl: 'git@github.com:o/r.git' });
+    const at = (pred) => git.calls.findIndex(pred);
+    const clone = at((c) => c.args[0] === 'clone');
+    const fetch = at((c) => c.args[0] === 'fetch');
+    const setUrl = at((c) => c.args[0] === 'remote' && c.args[1] === 'set-url');
+    expect(clone).toBeGreaterThanOrEqual(0);
+    expect(fetch).toBeGreaterThan(clone);
+    expect(setUrl).toBeGreaterThan(fetch);
+  });
+
+  it('leaves `origin` ALONE when no upstream resolves — an honest failure beats a fabricated slug', () => {
+    const git = gitStub(headOk());
+    const row = createScratchCheckout({ source: '/ws/we', sha: TARGET, dir: '/tmp/.we-validate-x', git: git.fn, originUrl: null });
+    expect(git.calls.some((c) => c.args[0] === 'remote' && c.args[1] === 'set-url')).toBe(false);
+    expect(row.originUrl).toBe(null);
+    expect(row.detail).toContain('origin left local');
+  });
+
+  it('resolves the upstream from the source itself when the caller does not supply one', () => {
+    const git = gitStub({
+      ...headOk(),
+      'remote get-url': { ok: true, stdout: 'git@github.com:chalbert/web-everything.git\n', stderr: '' },
+    });
+    const row = createScratchCheckout({ source: '/ws/we', sha: TARGET, dir: '/tmp/.we-validate-x', git: git.fn });
+    expect(row.originUrl).toBe('git@github.com:chalbert/web-everything.git');
+  });
+});
+
+describe('validateAndPromote — the DEFAULT scratch dir is a dot-prefixed sibling of the source', () => {
+  const dirUsed = (over = {}) => {
+    let seen = null;
+    validateAndPromote(baseRun({
+      source: '/Users/x/workspace/wev-driver-live',
+      scratchRoot: undefined, // take the default — the thing under test
+      validate: ({ sha, dir }) => { seen = dir; return { sha, dir, checks: greenChecks() }; },
+      promote: () => ({ recorded: true, reset: true, restarted: true, steps: [], error: null }),
+      ...over,
+    }));
+    return seen;
+  };
+
+  it('sits directly beside the source checkout, where `../frontierui` resolves', () => {
+    expect(dirname(dirUsed())).toBe('/Users/x/workspace');
+  });
+
+  it('is dot-prefixed, so it never shows up as a peer in the workspace\'s `wev-*` listings', () => {
+    expect(join(dirUsed(), '..', 'x')).toBe('/Users/x/workspace/x'); // sanity: really is at that depth
+    expect(dirUsed().startsWith(join('/Users/x/workspace', SCRATCH_DIR_PREFIX))).toBe(true);
+    expect(SCRATCH_DIR_PREFIX.startsWith('.')).toBe(true);
+  });
+
+  it('still names the candidate sha, and is unique per run', () => {
+    expect(dirUsed()).toContain(TARGET.slice(0, 12));
+    expect(dirUsed({ now: () => 1 })).not.toBe(dirUsed({ now: () => 2 }));
+  });
+
+  it('is NOT under $TMPDIR — the placement the 12 `@frontierui/*` failures came from', () => {
+    expect(dirUsed().startsWith(tmpdir())).toBe(false);
+  });
+
+  it('an explicit --scratchRoot still wins, so a caller can put it elsewhere deliberately', () => {
+    let seen = null;
+    validateAndPromote(baseRun({
+      scratchRoot: '/somewhere/else',
+      validate: ({ sha, dir }) => { seen = dir; return { sha, dir, checks: greenChecks() }; },
+      promote: () => ({ recorded: true, reset: true, restarted: true, steps: [], error: null }),
+    }));
+    expect(dirname(seen)).toBe('/somewhere/else');
+  });
+});
+
+describe('the fix did not weaken the gate — the five checks are untouched', () => {
+  it('still requires exactly the same five checks, all passing', () => {
+    expect([...REQUIRED_CHECKS]).toEqual(['checkout', 'deps', 'tests', 'standards', 'dispatch-probe']);
+  });
+
+  it('--full still means the WHOLE suite, not a narrowed one', () => {
+    const run = runStub();
+    runValidation({
+      source: '/repo', sha: TARGET, dir: '/tmp/.we-validate-x', full: true,
+      git: gitStub({ 'rev-parse': { ok: true, stdout: `${TARGET}\n`, stderr: '' } }).fn,
+      run: run.fn, linkFn: () => {}, readLock: () => 'same', writeProbe: () => {},
+    });
+    const tests = run.calls.find((c) => c.args.includes('test:unit'));
+    expect(tests.args).toEqual(['run', 'test:unit']);
+    expect(tests.args).not.toContain(DRIVER_SURFACE[0]);
   });
 });
 
