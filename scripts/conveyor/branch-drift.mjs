@@ -46,11 +46,19 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
+import { driftDefaults } from '../lib/poc-branches.mjs';
+
 /** Default long-lived branch this cadence watches (#3464's own subject) and its integration target. Both
  *  overridable (`--branch=` / `--target=`, or `WE_BRANCH_DRIFT_BRANCH` / `WE_BRANCH_DRIFT_TARGET`) so this stays
- *  a general tool, not a hardcoded one-off — the regression fixtures exercise it against throwaway branches. */
-export const DEFAULT_DRIFT_BRANCH = 'lane/mechanical-dispatcher';
-export const DEFAULT_DRIFT_TARGET = 'main';
+ *  a general tool, not a hardcoded one-off — the regression fixtures exercise it against throwaway branches.
+ *
+ *  #3637 — DERIVED FROM THE POC-BRANCH REGISTRY, not a literal. These two constants used to be declared here
+ *  AND again at `we:scripts/readiness/dispatch-plan.mjs`, so a change to one silently did not reach the other.
+ *  `we:scripts/lib/poc-branches.json` is now the single place a POC branch is named; both read it. `branch` is
+ *  `null` when NOTHING is registered (nothing to sweep) — `--branch=` is then required, which the CLI says. */
+const DRIFT_DEFAULTS = driftDefaults();
+export const DEFAULT_DRIFT_BRANCH = DRIFT_DEFAULTS.branch;
+export const DEFAULT_DRIFT_TARGET = DRIFT_DEFAULTS.target;
 
 /** Default hard ceiling (commits behind) past which further dispatch onto the drifting scope is held until a
  *  fresh reconciliation pass runs. Chosen well above the normal day-to-day drift a branch this active
@@ -127,9 +135,18 @@ function maxBehindFromFlags(flags) {
 }
 
 function branchFromFlags(flags) {
-  return typeof flags.branch === 'string' && flags.branch
+  const chosen = typeof flags.branch === 'string' && flags.branch
     ? flags.branch
     : process.env.WE_BRANCH_DRIFT_BRANCH || DEFAULT_DRIFT_BRANCH;
+  // #3637 — with an EMPTY POC-branch registry there is no default to fall back on. Refuse with the fix rather
+  // than sweeping `undefined` (which git would read as a ref named "undefined" and report as a drift error).
+  if (!chosen) {
+    throw new Error(
+      'branch-drift: no branch to sweep — no POC branch is registered in we:scripts/lib/poc-branches.json, so '
+      + 'there is no default. Pass --branch=<ref> (or set WE_BRANCH_DRIFT_BRANCH), or register the branch.',
+    );
+  }
+  return chosen;
 }
 
 function targetFromFlags(flags) {

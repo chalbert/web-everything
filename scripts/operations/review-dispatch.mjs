@@ -289,19 +289,35 @@ export function fillReviewBrief(template, values = {}) {
  * mutated) — so a stale checkout never silently dispatches. A fetch failure (offline) is fail-soft, matching
  * `we:scripts/lib/main-staleness.mjs`'s own philosophy: we cannot tell if it's stale, so we do not block on it.
  *
+ * #3637 — THE STALENESS TARGET IS NOW A PARAMETER, not the literal `main`. A checkout sitting on a POC
+ * branch (`#3637`'s delivery mode) is behind `origin/main` BY CONSTRUCTION and would be refused here forever,
+ * which that card's survey named as "the single most likely thing to silently block the bootstrap on day
+ * one". The question this guard actually wants to ask is "is this checkout behind ITS OWN delivery target",
+ * and `checkMainStaleness` already accepts a `base` — it was only ever this wrapper that hardcoded the
+ * default. `base` defaults to `'main'`, so every existing caller behaves byte-identically.
+ *
+ * (For the record, and checked rather than assumed: NEITHER of this guard's two callers — this file's
+ * `dispatchReview` and `we:scripts/conveyor/reconcile-fix-dispatch.mjs` — is on the POC landing path.
+ * `we:scripts/operations/poc-land.mjs` opens no PR and dispatches no review, and
+ * `we:scripts/operations/dispatch-lane.mjs` does not call this at all. The parameter exists so a FUTURE
+ * dispatcher running from a POC-branch checkout has the right question available, not because today's lander
+ * trips it.)
+ *
  * @param {string} root
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
  *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
+ * @param {{base?: string}} [o] - `base` is the delivery target to measure staleness against (default `main`).
  */
-export function assertMainNotStale(root, checkStaleness = (r) => checkMainStaleness({
-  autoFf: false, run: (args) => gitRun(args, { cwd: r }),
-})) {
-  const st = checkStaleness(root);
+export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {}) {
+  const check = checkStaleness ?? ((r) => checkMainStaleness({
+    base, autoFf: false, run: (args) => gitRun(args, { cwd: r }),
+  }));
+  const st = check(root);
   if (st && st.action === 'warn') {
     throw new Error(
-      `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/main — refusing to `
+      `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
       + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). Sync '
-      + '(git pull --ff-only) or dispatch from a fresh clone of origin/main and retry.',
+      + `(git pull --ff-only) or dispatch from a fresh clone of origin/${base} and retry.`,
     );
   }
   return st;

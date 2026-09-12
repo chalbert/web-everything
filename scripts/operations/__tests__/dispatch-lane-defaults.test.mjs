@@ -216,7 +216,7 @@ describe('LISTING_GRACE_MS is DERIVED, not a second literal that can drift from 
 
 describe('fillBrief: a token broken by an interior brace or newline is filled verbatim and unreported', () => {
   const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{SESSION_SLUG}} scoped {{SCOPE}}';
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b' };
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b', DELIVERY_BASE: 'main' };
 
   it('neither spelling matches BRIEF_TOKEN_RE at all — confirming why fillBrief cannot see it', () => {
     expect([...'{{ITEM_\nNUM}}'.matchAll(BRIEF_TOKEN_RE)]).toEqual([]);

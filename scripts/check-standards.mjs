@@ -75,6 +75,8 @@ import {
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
+// #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
+import { readRegistry as readPocRegistry } from './lib/poc-branches.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 // #3224 — the skill/operation wiring scan, and the map of what each operation declares over.
 // #3253 adds the call-site scan beside it: same subject, one module.
@@ -718,12 +720,14 @@ if (ctaless.length)
 // validator emit the SAME findings. One raw-body read per item feeds all four (was four separate passes).
 // The frontmatter unquoted-colon scan stays its own file-driven loop below (a malformed-YAML item is
 // dropped by the loader, so it isn't in `backlog` at all — it must be caught by scanning files directly).
+// #3637 — read the POC-branch registry ONCE for the whole loop, not per item.
+const pocRegistry = readPocRegistry();
 for (const item of backlog) {
   if (!item.id) continue;
   const p = join(ROOT, 'backlog', `${item.id}.md`);
   if (!existsSync(p)) continue;
   const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
-  const { errors: itemErr, warnings: itemWarn } = lintBacklogItemRendering({ item, body });
+  const { errors: itemErr, warnings: itemWarn } = lintBacklogItemRendering({ item, body, pocRegistry });
   for (const m of itemErr) err(m);
   for (const m of itemWarn) warn(m);
 }

@@ -286,6 +286,19 @@ describe('assertMainNotStale', () => {
   it('does not refuse when the staleness check is offline (fail-soft, matching main-staleness.mjs itself)', () => {
     expect(assertMainNotStale('/repo', () => ({ offline: true }))).toEqual({ offline: true });
   });
+
+  // #3637 — a checkout sitting on a POC branch is behind `origin/main` BY CONSTRUCTION, so the question this
+  // guard asks has to be "behind its own delivery target", not "behind main".
+  it('measures staleness against a NAMED base, and says which one it meant', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 7, ahead: 0, dirty: false, warning: 'stub' }), { base: 'lane/mechanical-dispatcher' }))
+      .toThrow(/7 commit\(s\) behind origin\/lane\/mechanical-dispatcher/);
+  });
+
+  it('defaults to main, so every pre-#3637 caller is byte-identical', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 1, ahead: 0, dirty: false, warning: 'stub' })))
+      .toThrow(/behind origin\/main/);
+    expect(assertMainNotStale('/repo', FRESH)).toEqual({ fresh: true, behind: 0 });
+  });
 });
 
 describe('dispatchReview — refuses to spawn from a stale checkout (#3439)', () => {

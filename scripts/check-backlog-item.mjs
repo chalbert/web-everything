@@ -24,6 +24,9 @@ import {
   lintBacklogItemRendering, findUnquotedColonScalars, DIGEST_MAX_WORDS, scanRepoLocusPrefixes,
 } from './check-standards-rules.mjs';
 import { TIERS } from './lib/build-queue.mjs';
+// #3637 — the declared POC branches, so this scoped lint validates `deliveryTarget:` with the SAME predicate
+// the whole-repo gate uses (a green scoped run must never disagree with `check:standards`).
+import { readRegistry as readPocRegistry } from './lib/poc-branches.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -69,7 +72,7 @@ if (!item) {
   const matter = require('gray-matter');
   const fm = matter(content).data || {};
   const firstPara = body.split('\n').find((l) => l.trim() && !l.startsWith('#')) || '';
-  item = { id, type: fm.type, status: fm.status, batchable: false, summary: firstPara.trim(), blockedBy: fm.blockedBy };
+  item = { id, type: fm.type, status: fm.status, batchable: false, summary: firstPara.trim(), blockedBy: fm.blockedBy, deliveryTarget: fm.deliveryTarget };
 }
 
 // ── Run the checks ──────────────────────────────────────────────────────────────
@@ -85,7 +88,7 @@ for (const h of findUnquotedColonScalars(content)) {
 }
 
 // Body rendering checks (raw HTML, bad links, buried fork, mis-flagged batchable) — shared with the gate.
-const rendering = lintBacklogItemRendering({ item, body });
+const rendering = lintBacklogItemRendering({ item, body, pocRegistry: readPocRegistry() });
 errors.push(...rendering.errors);
 warnings.push(...rendering.warnings);
 

@@ -18,6 +18,7 @@
 | `{{SESSION_SLUG}}` | a stable per-item session slug, e.g. `conveyor-{{ITEM_NUM}}` (ties `acquire`↔`release`, `claim`↔`resolve`) |
 | `{{SCOPE}}` | the item's predicted `scope:` frontmatter, repo-qualified & comma-joined — e.g. `we:scripts/conveyor,we:.claude/skills/conveyor` |
 | `{{ATTEMPT_TAG}}` | **#3110** — empty on a first attempt, a letter (`b`, `c`, …) on a retry of this same item. Fold it in EXACTLY where step 8 shows, right after `{{ITEM_NUM}}` in the branch name — this is what lets the observer tell your attempt's PR apart from a sibling retry's. Never invent your own retry marker in its place. |
+| `{{DELIVERY_BASE}}` | **#3637** — the branch this item forks from and lands on. `main` for almost everything (then every step below is exactly as written). A **registered POC branch** (e.g. `lane/mechanical-dispatcher`) when the item's `deliveryTarget:` names one — and then step 8 changes: **no PR at all**, see *“If `{{DELIVERY_BASE}}` is not `main`”* there. |
 
 > **Two kinds of placeholder.** `{{LIKE_THIS}}` are **conveyor-injected** — the skill substitutes them from the
 > launch entry before spawning you (the table above). `<like-this>` are **agent-runtime values** you produce as
@@ -41,7 +42,7 @@ diff to convergence with an adversarial subagent**, open a PR (`ready-to-merge`,
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
 LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-delivery \
-  --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}} --adopt) && cd "$LANE"
+  --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}} --base={{DELIVERY_BASE}} --adopt) && cd "$LANE"
 ```
 
 - `--adopt` stamps YOU (the process running this acquire) as the lane's declared occupant
@@ -56,6 +57,12 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-del
 - `--scope={{SCOPE}}` declares this lane's predicted file-scope into the lease marker. It is **advisory** — it
   NEVER gates the acquire (the whole-clone lease is the real lock), but the scope-lease collector reads it so
   the dispatch plan won't launch an overlapping sibling. All work happens in `$LANE`, never the primary.
+- `--base={{DELIVERY_BASE}}` (#3637) forks the lane from the branch this item delivers to. It is `main` for
+  almost every item, which is exactly what `acquire` already did before this flag was passed — so nothing
+  changes for a normal build. When it names a POC branch, the lane's CONTENT comes from that branch while its
+  local branch is still *named* `main` (`acquire` does `checkout -B main <baseRef>`), so never infer your
+  target from the local branch name — it is `{{DELIVERY_BASE}}`, full stop. The base is persisted into the
+  lease marker, so it survives the acquire.
 - `--item={{ITEM_NUM}}` records **this lane → this item** into the primary checkout's lane-ports registry
   (`we:.claude/lane-ports.json`), the SAME map `conveyor-state.mjs`'s health-stall scan reverse-derives lane→num
   from (#2616). A delivery agent leases its OWN lane and claims its OWN item, so nothing else maps it — without
@@ -285,9 +292,26 @@ node scripts/verify-lane.mjs request              # targets HEAD as of the commi
 # … poll on later turns …
 node scripts/verify-lane.mjs check --json          # proceed ONLY once status is `green`; `red` is a hard stop (see *Escalations*) — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 
-node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug> --sha=HEAD --base=main \
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug> --sha=HEAD --base={{DELIVERY_BASE}} \
   --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json
 ```
+
+#### If `{{DELIVERY_BASE}}` is not `main` — do NOT open a PR (#3637)
+
+A landing INSIDE a registered POC branch pays **no per-landing review of any shape** — no PR, no judge panel,
+no `converge` pass, no escalation label. That is the whole point of the mode (the operator's ruling on `#3637`:
+"we must not be slow by the same slow PR process, otherwise there is not benefit — real review will happen when
+the POC graduate"). Your commit's own verification above is the ONLY gate. Replace the `open-pr` call with:
+
+```bash
+node scripts/operations/poc-land.mjs --branch={{DELIVERY_BASE}} --json
+```
+
+It takes that branch's own write lock, fetches its current tip, fast-forward-pushes when the tip has not moved,
+and otherwise rebases onto the fresh tip, re-runs your tests and retries — bounded at 3 attempts. It **never**
+forces. A `conflict` or `exhausted` result is a hard stop to report, not something to work around by pushing by
+hand: you are never the writer of a POC branch, the lander is. Everything else in this brief (claim, converge,
+learnings, release the lane) is unchanged — only the landing transport differs.
 
 **`{{ATTEMPT_TAG}}` goes RIGHT THERE, between `{{ITEM_NUM}}` and your `-<slug>` — never anywhere else in the
 ref.** It is empty on a first attempt, so the ref is byte-identical to before this note existed; on a retry it

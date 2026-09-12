@@ -58,6 +58,7 @@ size: 3                            # Fibonacci points — ONLY on stories + unst
 parent: "049"                      # optional — NNN of the epic this rolls under (quote it: leading zeros)
 blockedBy: ["079", "092"]          # optional — NNN(s) this item can't start until they're resolved (quote: leading zeros)
 scope: ["src/backlog-view/", "docs/agent/"]   # optional — predicted touch-set (repo-relative path prefixes) a probe agent writes; the conveyor dispatcher reads it to hold overlapping items apart
+deliveryTarget: lane/mechanical-dispatcher   # optional — WHICH BRANCH this item lands on (#3637); absent/`main` = the normal PR-to-main path
 dateOpened: "YYYY-MM-DD"          # quote it — keeps it a string, not a parsed date
 dateResolved: "YYYY-MM-DD"        # required once status: resolved — the burndown plots this
 tags: [tag-a, tag-b]
@@ -73,6 +74,30 @@ The first paragraph is the summary shown on the index card. The rest of the
 body is the detail-page content. Keep the *deep* thinking in a report and link
 to it via `relatedReport`, rather than pasting a whole report in here.
 ```
+
+### `deliveryTarget:` — landing on a POC branch instead of `main` (#3637) {#delivery-target}
+
+Almost every item leaves this field off, and that is the normal path: the item is built in a lane forked from
+`main`, opens a PR against `main`, and lands through the drain with the full review process. Setting
+`deliveryTarget: <branch>` changes exactly one thing — **where the work lands** — and one consequence:
+
+- The lane is forked from that branch (`lane-pool.mjs acquire --base=<branch>`), not from `main`.
+- **There is no PR and no review pass of any shape.** No judge panel, no `converge` run, no escalation label.
+  The item's own tests/build (`verify-lane`) is the only gate. That is the whole point of the mode — the
+  operator's ruling on `#3637`: a landing into a POC branch must not pay a per-landing review tax, because
+  real review happens once, at graduation.
+- Landing runs `node scripts/operations/poc-land.mjs --branch=<branch>`, which takes that branch's own write
+  lock, fast-forwards when it can, and otherwise rebases onto the fresh tip, re-runs the tests and retries —
+  bounded at 3 attempts. It never forces.
+
+**The branch must be DECLARED.** `check:standards` (and the scoped `check:item`) reject a `deliveryTarget:`
+that is not in `we:scripts/lib/poc-branches.json`, and the dispatcher refuses the launch for the same reason.
+A POC branch's registry entry names what it is for, who graduates it, its graduation target and its scope —
+doctrine rule 10(c) in `we:skills-src/mechanical-delivery-doctrine/SKILL.md`. Register the branch first, then
+point items at it.
+
+**Graduating a POC branch to `main` is untouched by all of this** — that goes through the full existing
+process, undiluted, as its own item.
 
 **Repo-locus on code-path references.** Every code-path reference in the body (and in reports) must carry a
 `<repo>:` prefix so its constellation repo is unambiguous in chat / raw markdown: in-repo paths keep a

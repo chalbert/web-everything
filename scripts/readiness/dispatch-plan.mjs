@@ -80,6 +80,7 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
+import { driftDefaults } from '../lib/poc-branches.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -221,14 +222,20 @@ export const ALREADY_DONE_AGE_GATE_ENV = 'WE_DISPATCH_PLAN_ALREADY_DONE_AGE_MS';
  */
 /** The default drift-watched branch + its own live scope (#3464) — the SAME repo-qualified form `scope:`
  *  frontmatter and lease scopes already use, so it compares directly via `scopesOverlap`. Matches
- *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — kept as
- *  separate constants (not imported) because the IO shell only needs the SCOPE the branch is presumed to carry
- *  unreconciled changes in, not the branch-drift module's git-plumbing internals. Overridable via
+ *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — and since #3637
+ *  both are DERIVED from the same registry rather than separately declared here, so the two can no longer
+ *  drift apart (they had, silently, which is what made this a latent bug). Overridable via
  *  `--drift-scope=<repo:path,...>` for a future second long-lived branch, or `--no-drift-check` to skip the
  *  check entirely (mirrors `--no-ground-truth`). */
-export const DEFAULT_DRIFT_BRANCH = 'lane/mechanical-dispatcher';
-export const DEFAULT_DRIFT_TARGET = 'main';
-export const DEFAULT_DRIFT_SCOPE = Object.freeze(['we:scripts/conveyor/', 'we:skills-src/conveyor/']);
+// #3637 — all three now DERIVE from `we:scripts/lib/poc-branches.json`, the single place a POC branch is
+// declared, instead of being a second independent copy of `branch-drift.mjs`'s own constants. That duplication
+// was a latent bug (a change to one never reached the other) that #3637's survey found and named. `--drift-*`
+// still overrides every one of them, and the "future second long-lived branch" the comment above anticipated
+// is now simply a second registry entry.
+const DRIFT_DEFAULTS = driftDefaults();
+export const DEFAULT_DRIFT_BRANCH = DRIFT_DEFAULTS.branch;
+export const DEFAULT_DRIFT_TARGET = DRIFT_DEFAULTS.target;
+export const DEFAULT_DRIFT_SCOPE = DRIFT_DEFAULTS.scope;
 
 export function isStaleEnoughForGroundTruth(item, nowMs, ageGateMs = ALREADY_DONE_AGE_GATE_MS) {
   const at = Date.parse(String(item?.dateStarted || item?.dateOpened || ''));
@@ -629,6 +636,10 @@ async function main(argv) {
       const branch = typeof flags['drift-branch'] === 'string' ? flags['drift-branch'] : DEFAULT_DRIFT_BRANCH;
       const target = typeof flags['drift-target'] === 'string' ? flags['drift-target'] : DEFAULT_DRIFT_TARGET;
       const scope = typeof flags['drift-scope'] === 'string' ? flags['drift-scope'].split(',').filter(Boolean) : [...DEFAULT_DRIFT_SCOPE];
+      // #3637 — no branch to check (an EMPTY POC-branch registry and no `--drift-branch=`) means there is
+      // nothing carrying unreconciled drift, so there is nothing to hold on. Skip rather than shelling out
+      // with a `null` branch name and relying on the fail-open catch to clean it up.
+      if (!branch) throw new Error('no POC branch registered and no --drift-branch given — nothing to check');
       const out = execSync('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       const verdict = JSON.parse(out);
       if (verdict?.status === 'blocked') driftBlockedScope = scope;
