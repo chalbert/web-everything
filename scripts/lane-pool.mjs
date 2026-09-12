@@ -892,6 +892,12 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
       // #2350 — `acquire --reserve` stamps a PERMANENT reserved lease: `isLeaseStale` short-circuits it to
       // never-stale, so refresh/provision (even --force) never reset it and auto-pick never couples onto it.
       reserved: !!flags.reserve,
+      // #3637 — persist `--base=<ref>` (omitted when absent, so an ordinary acquire's marker is unchanged).
+      // Before this the base survived acquire ONLY in the `--json` payload and one stderr line, so a lane
+      // forked from a POC branch had nothing durable saying so — and the local branch name cannot say it
+      // either, because `checkout -B <repo.branch> <baseRef>` below leaves the lane on a branch named `main`
+      // whatever it was based on. `laneBaseRef` is the reader.
+      base: typeof flags.base === 'string' ? flags.base : undefined,
     }),
     null, 2,
   ) + '\n';
