@@ -123,8 +123,14 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     expect(calls).toHaveLength(1);
     expect(calls[0].opts).toEqual({ cwd: '/repo' });
     expect(calls[0].argv).toEqual([
-      // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
+      // #3331 — `--session-id` IS still emitted, and the id it carries is NOT the dispatch's identity.
+      // `claude --bg` discards the flag and assigns its own id (which `dispatchReview` now reads back off
+      // stdout as `agentId`); `buildAgentArgv` keeps passing it anyway because it costs nothing and a
+      // future CLI may honour it — see `buildAgentArgv`'s own docblock in
+      // `we:scripts/operations/dispatch-lane-io.mjs`. This branch's provider-port design (#3331's remedy
+      // here) fixes the REPORTED id, not the argv.
       '--bg',
+      '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
@@ -176,8 +182,14 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       checkStaleness: FRESH,
     });
     expect(calls[0].argv).toEqual([
-      // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
+      // #3331 — `--session-id` IS still emitted, and the id it carries is NOT the dispatch's identity.
+      // `claude --bg` discards the flag and assigns its own id (which `dispatchReview` now reads back off
+      // stdout as `agentId`); `buildAgentArgv` keeps passing it anyway because it costs nothing and a
+      // future CLI may honour it — see `buildAgentArgv`'s own docblock in
+      // `we:scripts/operations/dispatch-lane-io.mjs`. This branch's provider-port design (#3331's remedy
+      // here) fixes the REPORTED id, not the argv.
       '--bg',
+      '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,

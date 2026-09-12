@@ -2211,7 +2211,15 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
   });
 
   it('denies `pr-land.mjs` for a delivery-agent session', () => {
-    expect(reason('node scripts/pr-land.mjs --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
+    // The `--require-verified` flag is NOT what this case asserts — the deny keys on the script path alone and
+    // is flag-independent. It is spelled out because #3321's caller sweep (`we:scripts/__tests__/lane-verify.test.mjs`)
+    // harvests EVERY flagged pr-land.mjs command string any tracked file ships and requires each one to
+    // declare its verification posture. That sweep has exactly one exclusion (pr-land's own --help banner) and
+    // says in-file that the exclusion must be re-argued, never silently widened — so a deny FIXTURE carries the
+    // posture too rather than becoming exclusion number two. `--no-require-verified` is the sweep's own
+    // sanctioned flag arm (its mutation probe injects exactly that spelling), and it is the honest one for a
+    // fixture: this string is INPUT TO A DENY PREDICATE, never executed, so no verification is skipped by it.
+    expect(reason('node scripts/pr-land.mjs --no-require-verified --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
   });
 
   it('denies `learnings-drop.mjs` for a delivery-agent session', () => {
@@ -2240,7 +2248,7 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
       'node scripts/backlog.mjs claim 1234 --session=x',
       'gh pr view 1234',
       'node scripts/operations/run.mjs open-pr --ref=lane/1234-x',
-      'node scripts/pr-land.mjs --pr=1234',
+      'node scripts/pr-land.mjs --no-require-verified --pr=1234', // flag spelled out for #3321's sweep — see above
       'node scripts/conveyor/learnings-drop.mjs --kind=friction',
       'node scripts/converge-cli.mjs init --lane=/lane-3',
       'node scripts/verify-lane.mjs request',
