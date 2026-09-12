@@ -4,6 +4,7 @@ kind: story
 size: 5
 parent: "3643"
 status: open
+deliveryTarget: lane/mechanical-dispatcher
 relatedTo: ["3628"]
 scope: ["we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/guard-bash.mjs"]
 dateOpened: "2026-09-12"
