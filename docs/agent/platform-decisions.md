@@ -2918,6 +2918,53 @@ Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
 ---
 
+### A long-lived divergent branch is a declared "POC branch" delivery mode — landing inside it skips review; the full review runs once, at graduation {#poc-branch-declared-delivery-mode}
+
+**Ratified 2026-09-12 (operator, in conversation; #3637, amending epic #3383's own doctrine rule 10).** A
+long-lived divergent branch is a **DECLARED delivery mode** — a **"POC branch"** — not temporary scaffolding
+that must be wound down. What is forbidden is an **UNDECLARED, unreconciled** one. The operator's own words,
+verbatim: *"I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must
+not be slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+graduate."* Four clauses:
+
+1. **N POC branches may stand concurrently.** Each is a first-class delivery target an item declares
+   (`deliveryTarget: <branch>`), validated against a registry at filing time; each graduates to `main` on its
+   own timeline. This is a **durable, cross-cutting rule**, not a one-epic quirk scoped to `#3383` — any
+   epic/session may declare and use a POC branch as a delivery mode.
+2. **Landing INSIDE a POC branch skips the review gate entirely.** The item's own tests/build validation
+   (`we:scripts/operations/run.mjs verify` / `we:scripts/verify-lane.mjs`) is the **only** gate — no judge
+   panel, no escalation label, no per-landing review pass of any shape, not even a cheap direct-diff
+   `converge` pass. A landing tax of any shape, however small, is exactly the latency the operator ruled out.
+3. **The full review process runs once, undiluted, at graduation.** Moving a POC branch's content to `main`
+   goes through the FULL existing process, unchanged — a real PR to `main`,
+   [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)'s gate, the jury/judge panel, and `review:human`
+   where the diff touches gate machinery or the statute file. Nothing about landing INSIDE a POC branch
+   touches graduation.
+4. **What the original (narrower) framing got right, and still holds:** (a) the runner's own steady state is
+   still tracking `main` — a POC branch is a delivery TARGET for items that declare it, never the default
+   tracking ref; (b) build no more machinery than the POC in front of you actually needs; (c) every POC
+   branch must NAME what it is for and who graduates it — a registry entry: branch, graduation target, scope,
+   graduation item — an **unnamed** divergent branch is still exactly the failure mode that cost a ~40-minute
+   manual reconciliation and 15 hand-resolved conflicts when `origin/lane/mechanical-dispatcher` drifted 97
+   commits behind `main` behind a silently-failing auto-sync loop; (d) drift is still actively reconciled per
+   branch, never tolerated (`we:scripts/conveyor/branch-drift.mjs`) — a drifted branch still holds its own
+   items.
+
+**What this amendment DELETES from the prior rule.** The claim that a divergent branch is inherently "a
+temporary build tool, not the default steady state" that must be wound down, and the assumption that there is
+only ever one such branch at a time.
+
+**Lineage:** #3637 (ratified 2026-09-12, operator, in conversation; `bornAs: x7ppgg6`), amending epic
+`#3383`'s own operating doctrine rule 10 — the before/after and full design (transport, completion signal,
+registry shape) sit on `#3637` itself and in `we:skills-src/mechanical-delivery-doctrine/SKILL.md` (rule 10),
+which carries the epic-scoped operational detail and cites this anchor as the canonical statute. Composes
+with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the mechanism this rule exempts a POC landing
+from, and the one graduation still uses undiluted) and
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (tests/build validation is the
+deterministic gate that survives; judgment is deferred, not skipped).
+
+---
+
 ### PR ci-lifecycle state is a total, deterministic label function — no state read from a label's absence {#ci-lifecycle-total-label-function}
 
 **Ratified 2026-07-10 (#2281).** The **directive** (a 2026-07-04 user call, settled statute): a PR's lifecycle status is always reflected by a **deterministically-applied label**, never inferred from the *absence* of one. Today three ci-lifecycle states break this — a `--no-wait` open PR is left **unlabelled** (`we:scripts/pr-land.mjs:577-579`), a red required check is left **unlabelled** (`we:scripts/pr-land.mjs:603`), and **blocked-ness carries no label at all** (it lives only in the uncommitted `we:.lane-manifest.json`, re-derived per drain pass at `we:scripts/merge-ai-prs.mjs:756-758`). **Scope:** this governs the **ci-lifecycle dimension** (checks / blocked) — a *different axis* from the `ready-to-merge` **landing-gate**, whose absence-semantics (#2183 F1 "the signal is a PR label"; #2138 F4 "a local queued token") are **preserved, not overridden**; the two compose. **Fork 1 (granularity) — ratified (b) total coverage:** every ci-lifecycle state carries a deterministic label — `checking` (in-flight) / `ci:failed` (red) / `blocked` (manifest `blockedBy` open) / `ready-to-merge` (green) — and **exactly one** is present on every open AI PR. The labels are set by **generalizing the existing CI-truth reconcile pass** (`reconcileGreenLabels`, `we:scripts/merge-ai-prs.mjs:702-718`, already run every drain pass + `--watch` interval) from green-only to *all* lifecycle labels — a self-healing sweep, **not** a per-check-tick write path in `pr-land`. The lighter **(a) terminal-only** (leave "checks-in-flight" bare) was the directive-author's available *relaxation* but was **declined**: it reads one state from absence (the directive's exact prohibition), and it fails its own "bare ⟺ in-flight" totality claim anyway — a check going red *after* `pr-land` exits strands a **bare terminal** PR, and the fix for that is the very reconcile-pass generalization (b) needs, so (a)'s only advantage (less label churn) collapses. **Fork 2 (names) — ratified `ci:failed` + bare `blocked`:** `ci:failed` names the *deterministic* red-check fact and opens a `ci:*` state family (`checking` may namespace as `ci:running`); `blocked` stays **bare** to match its true lifecycle sibling, the also-bare `ready-to-merge` landing-gate label (the lifecycle family's precedent is *no* namespace, not `review:*`'s). Rejected: `needs-fix` (reads as human judgment, not "`test` is red") and `blocked:deps` (YAGNI — the manifest `blockedBy` is the only block source that exists). **Composition (codified, not re-decided):** lifecycle labels are **mutually exclusive among themselves** and **orthogonal to `review:*`** (a PR can be `blocked` + `review:pending`) — already how the code composes `ready-to-merge` + `review:*` (`we:scripts/pr-land.mjs:625-630`). **Build arm (successor, agent-ready — #2421):** generalize the reconcile transition table to `lifecycleLabelFromCiTruth` + mint the new labels idempotently in the existing `gh label create` loop (`we:scripts/merge-ai-prs.mjs:870-881`) + extend the transition-table tests (`we:scripts/__tests__/pr-land.test.mjs`, `we:scripts/__tests__/merge-ai-prs.test.mjs`). Relates #2199 (the on-green `ready-to-merge` precedent this generalizes), #2216 (the reconcile pass that makes (b) cheap and (a) unsound), #2262 (the `review:*` mint step the new labels join), #2183 F1 / #2138 F4 (the landing-gate absence-semantics preserved).

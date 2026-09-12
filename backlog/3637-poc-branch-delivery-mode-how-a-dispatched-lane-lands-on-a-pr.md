@@ -6,7 +6,7 @@ status: resolved
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lane-pool.mjs", "we:scripts/conveyor/branch-drift.mjs", "we:scripts/conveyor/branch-sync.mjs", "we:scripts/operations/open-pr.mjs", "we:skills-src/conveyor/runner.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-12"
 dateResolved: "2026-09-12"
-codifiedIn: "skills-src/mechanical-delivery-doctrine/SKILL.md"
+codifiedIn: "docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode"
 relatedTo: ["3443", "3634", "3464", "3467"]
 tags: []
 ---
