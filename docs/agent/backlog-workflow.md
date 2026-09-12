@@ -663,8 +663,8 @@ on what the brief actually asks the spawn to *do*, never on a field alone.
 
 ### Codex model routing — pin the model, differentiate on effort {#codex-model-routing}
 
-Ratified by [#x8wbivt](/backlog/x8wbivt-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher.md)
-(operator, 2026-09-11), on 89 logged `codex exec` runs across 8 selectable models (backlog `#x8wbivt`'s own
+Ratified by [#3635](/backlog/3635-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher.md)
+(operator, 2026-09-11), on 89 logged `codex exec` runs across 8 selectable models (backlog `#3635`'s own
 evidence). Two rules, deliberately different in shape from the Claude-side table above:
 
 1. **Every real Codex CLI invocation names its model explicitly**, the same "never inherit, never
