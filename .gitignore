@@ -82,6 +82,10 @@ commitment-policy/**/*.d.ts
 .conveyor/last-known-good.json
 .conveyor/watchdog-alert.json
 .conveyor/watchdog.log
+# The promotion trail that WRITES that fallback (epic #3383) — `validate-and-promote.mjs` appends one line per
+# pass (validated / refused / promoted / no-op) into the DRIVER's own checkout, beside the watchdog's log. Same
+# nature: a record of what a LOCAL process did to a LOCAL checkout, machine-disposable, never committed.
+.conveyor/promote.log
 # …and its advisory lock (serializes concurrent record/retry writes) — ephemeral (created+unlinked per
 # critical section), but ignore it so a crashed holder's leftover lock never shows as an untracked file.
 .conveyor/*.lock
