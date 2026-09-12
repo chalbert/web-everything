@@ -27,3 +27,9 @@ current dispatcher behavior or reviewing a PR against it (e.g. PR #1853 targets 
 `main`). This is an operator-set "for now" default — revisit once the branch's pieces are split out
 and landed to `main` for real (tracked across #3403/#3404/#3406 and this epic's own landing-order
 notes).
+
+**See [[default-to-prototype-for-mechanical-fixes]]** for where NEW work lands (not just where to
+read current behavior from) — including the 2026-09-12 incident where a plausible-sounding
+citation of a different ratified rule (doctrine rule 10's "fix the runner, not a POC branch"
+carve-out) was wrongly used to redirect still-unfinished prototype-stage harness work to `main`.
+The two notes are meant to be read together, not in isolation.
