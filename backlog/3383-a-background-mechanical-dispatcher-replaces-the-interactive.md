@@ -1464,6 +1464,11 @@ against.
 ## Working doctrine (2026-09-04, continued): rule 10 — the runner's normal operating mode is tracking `main`
 ## directly; a long-lived divergent branch is a temporary build tool, not the default steady state
 
+> **AMENDED 2026-09-12 — read this section together with "Working doctrine (2026-09-12): rule 10 amended"
+> below.** The operator ruled that N standing POC branches are a wanted, durable delivery mode. The
+> wind-down half of this section no longer holds; its drift/naming/short-lived-fix-lane reasoning does.
+> Kept unedited as the original record.
+
 Set the same night as rule 9 above, after a second, independent finding: `origin/lane/mechanical-dispatcher`
 itself — this epic's own prototype branch — had silently drifted 97 commits behind `origin/main`. The
 branch's own auto-sync loop (the mechanism meant to keep it current, per the `keep-prototype-branch-synced-
@@ -1596,3 +1601,47 @@ neither tracks the wiring itself. The self-hosting question this audit immediate
 prototype branch can build these six remaining kinds into ITSELF, via a lane forked from the prototype rather
 than from `main`, without a PR per increment — is filed separately as its own decision card; see the
 "POC-branch delivery mode" decision under this epic.
+
+## Working doctrine (2026-09-12): rule 10 amended — a long-lived divergent branch is a DECLARED delivery
+## mode ("POC branch"), N may stand at once, and landing inside one skips review until graduation
+
+The "POC-branch delivery mode" decision above was ruled by the operator the same day it was filed, and the
+ruling amends rule 10 rather than working around it. The operator's words, verbatim:
+
+> "I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must not be
+> slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+> graduate."
+
+**Before (rule 10 as set 2026-09-04).** "The runner's steady state is tracking `main` directly; a long-lived
+divergent branch is not the default operating mode." A divergent branch was framed as a temporary build tool
+to be wound down; `#3443` was that wind-down; only one such branch was contemplated, and having it at all was
+treated as a state to exit.
+
+**After (rule 10 as amended 2026-09-12).** "A long-lived divergent branch is a DECLARED delivery mode — a
+'POC branch' — not temporary scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one."
+N POC branches may stand concurrently, each a first-class delivery target an item can name
+(`deliveryTarget:`), each graduating to `main` on its own timeline. Landing INSIDE a POC branch skips the
+review gate entirely — the item's own tests/build validation is the only gate; the full review process (a real
+PR to `main`, the escalation gate, the jury/judge panel, `review:human`) applies once, at graduation.
+
+**What was preserved, and why it is not sentiment.** The 97-commit drift incident is real evidence, but of a
+narrower claim than the original rule drew from it: the branch was undeclared, unregistered, and its sync loop
+was failing silently with nothing watching. So the amended rule keeps (a) the runner's own steady state being
+`main` — a POC branch is a *target*, never the runner's default tracking ref; (b) the short-lived
+scratch-lane-off-current-`main` pattern for fixing the delivery machinery itself
+(`#1894`/`#1895`/`#1902`/`#1903`) — "I need a POC branch" is never the answer to "I need to fix the runner";
+(c) the requirement that every POC branch NAME what it is for and who graduates it, now as a registry entry;
+(d) active per-branch drift reconciliation via `we:scripts/conveyor/branch-drift.mjs`, with a drifted branch
+still holding its own items; and (e) build no more machinery than the POC in front of you needs.
+
+**What was deleted.** The claim that divergence is inherently temporary and must be wound down, and the
+assumption of a single branch. `#3443` remains real work — but as that one branch's own graduation, not as a
+wind-down of the mode, and the runner tracking it today is not a violation of anything.
+
+**Where it lives.** `we:skills-src/mechanical-delivery-doctrine/SKILL.md`, rule 10, plus that skill's own
+`description:` line which paraphrases it — edited there first, per the skill's own stated amendment path
+("If a rule itself changes, edit it here first, then note the change on the card"), and noted here second.
+
+**Left for a follow-on, not this ruling:** the build itself — the `poc-branches` registry, the
+`deliveryTarget:` field, the per-branch land lock, and the fast-forward-with-rebase-retry lander. The decision
+card names that item and deliberately builds none of it.

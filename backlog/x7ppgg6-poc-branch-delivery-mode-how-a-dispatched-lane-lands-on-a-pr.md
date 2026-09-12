@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lane-pool.mjs", "we:scripts/conveyor/branch-drift.mjs", "we:scripts/conveyor/branch-sync.mjs", "we:scripts/operations/open-pr.mjs", "we:skills-src/conveyor/runner.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-12"
+dateResolved: "2026-09-12"
+codifiedIn: "skills-src/mechanical-delivery-doctrine/SKILL.md"
+relatedTo: ["3443", "3634", "3464", "3467"]
 tags: []
 ---
 
@@ -79,7 +82,12 @@ none off `main`) and not landing (the drain already serializes it per repo); it 
 **review-label / escalation gate** in `we:scripts/lib/review-escalation.mjs`, which scores the diff and can
 park a PR for human review. That is the only part worth exempting, and it is exemptable by base.
 
-### The revised recommendation: C+ for the bootstrap
+### The revised recommendation: C+ for the bootstrap — **SUPERSEDED by the ruling below (2026-09-12)**
+
+> **Superseded, kept for the record.** C+ was recommended on a cost argument — it reuses machinery that
+> already exists. The operator ruled on a **latency** argument instead: a landing into a POC branch must not
+> pay any per-landing review pass, and C+ still does. C+'s *survey findings* below remain true and are
+> reused by the ruling; its *recommendation* is not what was taken. Read the "Ruling" section for what was.
 
 **C+ = retarget the PR at the POC branch, and exempt registered POC bases from the escalation/review-label
 gate, substituting a direct-diff `converge` review.** Concretely:
@@ -202,7 +210,14 @@ against adding a new long-lived daemon at all: `#3467` records that
 survives a `kill` until the 15-minute TTL and operators have been deleting lock directories by hand. A second
 resident lander would inherit that defect.
 
-## Part 3 — sequencing: build the bootstrap, defer the registry. My honest read.
+## Part 3 — sequencing: build the bootstrap, defer the registry. My honest read. **SUPERSEDED**
+
+> **Superseded by the ruling below (2026-09-12).** This section's whole case rests on premise 1 — "there is
+> no second POC branch to generalize FROM, and doctrine says there should not be." The operator ruled that
+> premise false in both halves: N POC branches ARE wanted, and doctrine rule 10 is amended to say so. Its
+> closing paragraph ("The counter-argument, stated so it is not buried") is the part that survived — it named
+> exactly the question the operator then answered, and answered the other way. Kept unedited so the reversal
+> is visible rather than quietly rewritten.
 
 **Build the narrow bootstrap now, as C+. Do not build the registry yet.**
 
@@ -252,6 +267,122 @@ capability quietly overturn a rule set after a real, costly incident.
    together · (iii) design only, build nothing yet. **Recommended: (i)**.
 5. **Does this amend doctrine rule 10?** Needs an explicit yes/no either way.
 
+## Ruling — 2026-09-12, Nicolas Gilbert (operator, in conversation)
+
+The operator's own words, verbatim:
+
+> "I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must not be
+> slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+> graduate."
+
+Three things are settled by that, and together they reverse this card's own recommendation.
+
+**(1) N standing POC branches is a WANTED, DURABLE feature — not a one-branch bootstrap.** "I do want N POC
+as new feature" is a direct answer to Part 3's framing that this might only ever be a narrow bootstrap for the
+one branch that exists today. It is not. A POC branch is a supported delivery mode with N concurrent
+instances, each graduating to `main` on its own timeline.
+
+**(2) Delivery INTO a POC branch must not pay a per-landing review tax — of any shape.** "we must not be slow
+by the same slow PR process, otherwise there is not benefit" rules out more than the GitHub-PR-shaped gate.
+It rules out **any** per-landing review pass, including C+'s substitute direct-diff `converge` review: an
+automated review is still real wall-clock time and real cost on every single landing, which is exactly the
+"benefit" the operator says would otherwise be gone. The only gate that survives on a POC landing is the
+item's own **tests/build validation** — correctness, not judgment.
+
+**(3) Real review happens ONCE, at graduation.** "real review will happen when the POC graduate." Moving a POC
+branch's content to `main` goes through the FULL existing process, unchanged and undiluted — a real PR to
+`main`, `we:scripts/lib/review-escalation.mjs`'s gate, the jury/judge panel, and `review:human` where the diff
+touches gate machinery or the statute file. **Nothing in this decision touches graduation.** This card governs
+only commits landing INSIDE a POC branch.
+
+### Fork 1 — Transport: **(A′) — the fastest safe landing. No PR, no review verdict, tests-only.**
+
+Not C+, and not B. The earlier rejection of A was correct about its *problems* and wrong about their *kind*:
+concurrent writers racing one ref, and collision with the live `we:scripts/conveyor/branch-sync.mjs` loop, are
+**engineering problems with known solutions**, not review-process problems. C+ answered a latency requirement
+with a cost argument, and a review pass — however cheap — is precisely the latency the operator ruled out.
+The redesigned shape is **A′** below.
+
+### Fork 5 — Does this amend doctrine rule 10? **YES — explicitly, and it is amended in this same change.**
+
+Answering the counter-argument Part 3 raised and refused to bury: "a long-lived divergent branch is not the
+steady state" and "the conveyor natively supports N of them" cannot both be true, so the ruling must say which
+wins. **The new capability wins, and rule 10 is amended rather than quietly overridden.** What the 97-commit
+drift incident actually proved is preserved; what it does not support is dropped. Amended text lives in
+`we:skills-src/mechanical-delivery-doctrine/SKILL.md` (rule 10) with the before/after recorded on `#3383`.
+
+### Forks 2, 3, 4 — consequences of the above, not independent calls
+
+- **Fork 2 (completion signal): (ii) — the git-ancestry axis, `startedAt`-guarded.** Forced by Fork 1: with no
+  PR object there is no `classifyDispatchPr` to reuse. The predicate is the one this card already specified —
+  `git merge-base --is-ancestor <lane commit> origin/<targetBranch>` **and** the landing commit date `>=`
+  `entry.startedAt` — and it is ground truth in the sense `#3457`/`#3460` require
+  (`we:docs/agent/platform-decisions.md#dispatch-status-ground-truth-check`). A lander-written receipt is
+  evidence, never the verdict.
+- **Fork 3 (how the target is declared): (i) — the `deliveryTarget:` frontmatter field.** Unchanged by the
+  ruling, and its reasoning holds: orthogonal to `kind`, and explicitly not `#3634`'s axis.
+- **Fork 4 (scope now): (ii) — bootstrap AND registry together.** Flipped from (i) by Fork 5. Part 3's only
+  argument for deferring the registry was that doctrine forbade a second branch; it no longer does, and a
+  registry is now the thing that makes a branch *declared* rather than *ad hoc* — which is what amended rule
+  10 requires of every POC branch. It also stays genuinely small: one JSON file replacing two already-
+  duplicated constants (`we:scripts/conveyor/branch-drift.mjs:52` vs
+  `we:scripts/readiness/dispatch-plan.mjs:229`, a latent bug to fix regardless) and three singleton call
+  sites becoming loops.
+
+### A′ — the redesigned transport: a lock-serialized, fast-forward-only lander
+
+One short-lived lander per landing, run at the end of a dispatch. Agents never push to the POC branch
+themselves — that part of A's original rejection stands.
+
+| Step | Mechanism | New code |
+|---|---|---|
+| Declare the target | `deliveryTarget: <branch>` on the item, validated against the registry at filing time | small |
+| Fork the lane from it | `we:scripts/lane-pool.mjs acquire --base=<poc-branch>` (`#2386`) | **none** |
+| Agent edits | unchanged | none |
+| **The only gate** | the item's own tests/build — `we:scripts/operations/run.mjs verify` / `we:scripts/verify-lane.mjs`. No judge panel, no `converge` pass, no escalation label, no PR | none |
+| Land it | a `poc-land` step: fetch `origin/<branch>`; if the lane's merge-base is the current tip, push (fast-forward, no merge commit); otherwise rebase onto the fresh tip, **re-run verify**, retry — bounded (3 attempts), then stop and surface the failure | **the one real new piece** |
+| Serialize the writers | the push runs inside a per-branch named lock, the same primitive `we:scripts/readiness/drain-lock.mjs` already provides (`withLandWriteLock` / `drainLeasePathFor(repoKey)`, `#2683`/`#3440`) — keyed per POC branch, not globally, so two branches never block each other | small |
+| Report success | Fork 2's ancestry predicate | small |
+
+**How A′ answers the two real objections to A, which were never about review:**
+
+1. **Concurrency — N agents racing one ref.** Only the lander writes, and only inside the per-branch lock, so
+   the pushes are serialized by construction. The loser of a race does not fail: it rebases onto the new tip,
+   re-runs the tests, and retries. The bounded retry count is what keeps a pathological conflict from spinning
+   — it stops and surfaces rather than resolving a conflict unattended.
+2. **Collision with the live `we:scripts/conveyor/branch-sync.mjs` loop.** That loop is the branch's *other*
+   automated writer, and its own file header documents its predecessor failing silently for hours. Fix: its
+   push takes the **same per-branch lock**. One lock, all writers to one ref — strictly better than today,
+   where the sync loop is an unsynchronized sole writer.
+
+**No new resident daemon, deliberately.** Option B needed one standing lander per branch; A′'s lander is a
+short-lived step inside an existing dispatch. That matters concretely: `#3467` records that
+`we:skills-src/conveyor/runner-lock.mjs`'s holder registers no `SIGTERM`/`SIGINT` handler, so its lease
+survives a `kill` until the 15-minute TTL and operators have been deleting lock directories by hand. A
+resident lander would inherit that defect; a short-lived one cannot.
+
+**What A′ honestly gives up, stated plainly.** No PR object per increment means no per-increment reviewed unit
+— the argument C+ leaned on for making `#3443`-style graduation easier. That cost is **accepted by the
+ruling**, not overlooked: review is deferred to graduation on purpose. Two things soften it without
+reintroducing latency: every landing is one commit carrying its item id in the message, and the lander writes
+a receipt in the `we:scripts/operations/delivery-report-record.mjs` shape. So graduation still gets a
+commit-by-commit trail to review — it is simply reviewed once, at the end, which is what was ruled. No CI is
+lost (`we:.github/workflows/ci.yml` only ever triggered on `main`).
+
+**All five blockers from the survey above still apply under A′, unchanged** — `assertMainNotStale`
+(`we:scripts/operations/review-dispatch.mjs:296`) refusing a dispatch from a checkout "behind `origin/main`";
+the literal `--base=main` in `we:skills-src/conveyor/delivery-agent-brief.md:288` plus `fillBrief`'s strict
+placeholder refusal; `we:scripts/lane-pool.mjs` not persisting the base in the lease marker; a POC-based lane
+still sitting on a local branch *named* `main`; and `we:scripts/readiness/lane-manifest.mjs:143` validating
+`base` as a hex SHA. Blocker 1 remains the single most likely thing to silently block day one.
+
+### Follow-on build item, to file — not built here
+
+**"Build the POC fast-lander and the `poc-branches` registry."** One card, `parent: 3383`, covering: the
+registry file, the `deliveryTarget:` field and its filing-time validation, the per-branch land lock, the
+fast-forward-with-rebase-retry lander, the ancestry completion axis, the five blockers above, and folding
+`we:scripts/conveyor/branch-sync.mjs`'s push under the same lock. This decision deliberately builds none of it.
+
 ## Relationships
 
 - **Parent** `#3383`; the 2026-09-12 delegation-audit section on that card is this item's origin.
@@ -259,16 +390,28 @@ capability quietly overturn a rule set after a real, costly incident.
   card is about how a dispatched agent WORKS on prototype infrastructure; this one is about WHERE its output
   lands. Found via `we:scripts/capability-search.mjs` before filing as the closest existing hit, and checked:
   genuinely a different axis.
-- **`#3443`** (graduate the branch to `main`) — the wind-down this design must not fight, and which C+ helps.
+- **`#3443`** (graduate the branch to `main`) — **reframed by the ruling**: no longer "the wind-down this
+  design must not fight", but one POC branch's own graduation, on its own timeline, and the place the full
+  review process applies. The mode itself is not being wound down.
 - **`#3464`** (no reconciliation cadence for a diverged branch) — produced `we:scripts/conveyor/branch-drift.mjs`.
 - **`#3629`** / **`#3627`** — the minimal-context/brief work next to the six un-harnessed kinds.
 - **`#3467`** — the missing signal handler on the runner lease, a caution against adding a second daemon.
 
 ## Done when
 
-1. **Executable** — `node we:scripts/backlog.mjs show <this item>` reports `status: resolved` with
+1. ~~**Executable** — `node we:scripts/backlog.mjs show <this item>` reports `status: resolved` with
    `codifiedIn:` set, and the ruling names, for each of the five forks above, the option taken and why —
-   including an explicit yes/no on whether doctrine rule 10 is amended.
-2. The ruling states whether the bootstrap is built now with the registry deferred, and if deferred, the
-   concrete trigger that reopens the generalization (recommended: the filing of a second item whose
-   `deliveryTarget` is not `main`).
+   including an explicit yes/no on whether doctrine rule 10 is amended.~~ **Done — see Ruling above.**
+   Fork 1 → **A′**; Fork 2 → **(ii)**; Fork 3 → **(i)**; Fork 4 → **(ii)**; Fork 5 → **YES**.
+2. ~~The ruling states whether the bootstrap is built now with the registry deferred, and if deferred, the
+   concrete trigger that reopens the generalization.~~ **Done — nothing is deferred.** Fork 4 ruled (ii):
+   the registry is built WITH the fast-lander, in one follow-on item, because amended rule 10 now requires
+   every POC branch to be a declared registry entry. There is no deferral and so no reopening trigger.
+3. **Not done here, by design** — the follow-on build item ("Build the POC fast-lander and the
+   `poc-branches` registry") is named in the ruling but deliberately not built by this decision.
+4. **Codified in `we:skills-src/mechanical-delivery-doctrine/SKILL.md`** — rule 10 amended (and the skill's
+   own `description:` line, which paraphrases it, updated to match), with the before/after and the reasoning
+   recorded in `#3383`'s "Working doctrine (2026-09-12): rule 10 amended" section. Not promoted to
+   `we:docs/agent/platform-decisions.md`: rule 10 is epic `#3383`'s scoped operating doctrine, and that
+   skill's own header states the amendment path — "If a rule itself changes, edit it here first, then note
+   the change on the card."
