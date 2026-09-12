@@ -33,6 +33,7 @@ import {
   dispatchProviderEntry,
 } from '../dispatch-provider-registry.mjs';
 import { deliverItemDetachedProvider } from '../dispatch-providers/build.mjs';
+import { fixDetachedProvider } from '../dispatch-providers/fix.mjs';
 import { BUILD_DISPATCH_MODE_ENV, createDispatchSinks, routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT, LAUNCH_KINDS } from '../dispatch-lane.mjs';
 
@@ -49,8 +50,9 @@ const buildPayload = (over = {}) => ({
 });
 
 /** THE LEDGER OF WHAT IS STILL ON THE AGENT PATH. One line flips per sibling lane — see the header.
- *  `prepare` left this list in #3641 (`we:scripts/operations/prepare-scope-wrapper.mjs`). */
-const UNREGISTERED_KINDS = ['prepare-decision', 'investigate', 'fix', 'ci-heal'];
+ *  `prepare` left this list in #3641 (`we:scripts/operations/prepare-scope-wrapper.mjs`), `fix` in #3640
+ *  (`we:scripts/operations/fix-dispatch-wrapper.mjs`). */
+const UNREGISTERED_KINDS = ['prepare-decision', 'investigate', 'ci-heal'];
 
 /** Every registered kind's mode with NOTHING set in the environment — derived from the table rather than
  *  written out, so a landing sibling lane edits the ledger above and nothing else (#3641). */
@@ -82,6 +84,15 @@ describe('the dispatch provider registry — the table', () => {
     expect(BUILD_DISPATCH_MODE_ENV).toBe(DISPATCH_PROVIDER_REGISTRY.build.modeEnv);
   });
 
+  it('holds `fix`, wired to the fix wrapper behind `WE_FIX_DISPATCH_MODE` (#3640)', () => {
+    expect(dispatchProviderEntry('fix')).toEqual({
+      kind: 'fix',
+      provider: fixDetachedProvider,
+      modeEnv: 'WE_FIX_DISPATCH_MODE',
+      defaultMode: 'mechanical',
+    });
+  });
+
   it('holds `build`, wired to the deliver-item wrapper behind `WE_BUILD_DISPATCH_MODE`', () => {
     expect(dispatchProviderEntry('build')).toEqual({
       kind: 'build',
@@ -109,8 +120,8 @@ describe('dispatchProviderEntry — FAIL CLOSED', () => {
   });
 
   it('looks up in the registry it is HANDED, so a test never has to mutate the frozen one', () => {
-    const fake = Object.freeze({ fix: { kind: 'fix', provider: () => 'x', modeEnv: null, defaultMode: 'mechanical' } });
-    expect(dispatchProviderEntry('fix', fake).kind).toBe('fix');
+    const fake = Object.freeze({ 'ci-heal': { kind: 'ci-heal', provider: () => 'x', modeEnv: null, defaultMode: 'mechanical' } });
+    expect(dispatchProviderEntry('ci-heal', fake).kind).toBe('ci-heal');
     expect(dispatchProviderEntry('build', fake)).toBeNull();
   });
 });
@@ -135,7 +146,7 @@ describe('dispatchModeFor — a typo must never pick a path', () => {
   });
 
   it('`modeEnv: null` means no opt-out at all — the default, with nothing read and nothing to typo', () => {
-    const noOptOut = { kind: 'fix', provider: () => 'x', modeEnv: null, defaultMode: 'mechanical' };
+    const noOptOut = { kind: 'ci-heal', provider: () => 'x', modeEnv: null, defaultMode: 'mechanical' };
     expect(dispatchModeFor(noOptOut, { WE_BUILD_DISPATCH_MODE: 'agent' })).toBe('mechanical');
     expect(dispatchModeFor(noOptOut, { FIX: 'nonsense' })).toBe('mechanical');
   });
@@ -145,6 +156,8 @@ describe('dispatchModesFromEnv — read ONCE, over every registered kind', () =>
   it('answers for every registered kind from the env it is handed', () => {
     expect(dispatchModesFromEnv({})).toEqual(defaultModes());
     expect(dispatchModesFromEnv({ WE_BUILD_DISPATCH_MODE: 'agent' })).toEqual({ ...defaultModes(), build: 'agent' });
+    // One kind's opt-out moves ONLY that kind — the reason the modes are a map and not a scalar (#3640).
+    expect(dispatchModesFromEnv({ WE_FIX_DISPATCH_MODE: 'agent' })).toEqual({ ...defaultModes(), fix: 'agent' });
     expect(Object.keys(dispatchModesFromEnv({}))).toEqual(Object.keys(DISPATCH_PROVIDER_REGISTRY));
   });
 
@@ -165,9 +178,9 @@ describe('dispatchModesFromEnv — read ONCE, over every registered kind', () =>
 
   it('walks the registry it is handed, not the real one', () => {
     const fake = Object.freeze({
-      fix: { kind: 'fix', provider: () => 'x', modeEnv: 'WE_FIX_DISPATCH_MODE', defaultMode: 'mechanical' },
+      'ci-heal': { kind: 'ci-heal', provider: () => 'x', modeEnv: 'WE_CI_HEAL_DISPATCH_MODE', defaultMode: 'mechanical' },
     });
-    expect(dispatchModesFromEnv({ WE_FIX_DISPATCH_MODE: 'agent' }, fake)).toEqual({ fix: 'agent' });
+    expect(dispatchModesFromEnv({ WE_CI_HEAL_DISPATCH_MODE: 'agent' }, fake)).toEqual({ 'ci-heal': 'agent' });
   });
 
   it('a typo in ANY kind\'s var throws HERE, before a single dispatch', () => {

@@ -94,15 +94,17 @@
  *     The parser now FAILS CLOSED instead. This denies nothing real: bash rejects the identical input
  *     (`unexpected EOF while looking for matching quote`), verified against `bash -c`. No override.
  *
- *   • the DELIVERY AGENT (#3627) — `dispatchKind === 'delivery'` (`WE_DISPATCH_KIND=delivery`, stamped by
- *     `deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER.spawn` onto the agent's own process env; the
- *     SAME channel #3105's dispatched-verification arm above already reads) may never run, ITSELF, any of the
- *     mechanical lifecycle commands its own wrapper drives end to end: `lane-pool.mjs`, `backlog.mjs claim`/
- *     `release`, `gh pr`, `run.mjs open-pr`/`open-pr.mjs`, `pr-land.mjs`, `learnings-drop.mjs`,
- *     `converge-cli.mjs`, `verify-lane.mjs` (in any mode, including `request`/`check`), and
- *     `review-core-cli.mjs`. The brief (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) already told the
- *     agent this in prose; nothing enforced it. Every other session (interactive, or any other
- *     `WE_DISPATCH_KIND`) is unaffected. No override.
+ *   • a WRAPPER-OWNED AGENT (#3627 `delivery`, #3640 `repair`) — `WRAPPER_OWNED_AGENT_KINDS.has(dispatchKind)`
+ *     (`WE_DISPATCH_KIND=delivery` stamped by `deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER.spawn`,
+ *     `WE_DISPATCH_KIND=repair` stamped by `fix-dispatch-wrapper.mjs`'s `buildFixAgentEnv`, onto the agent's
+ *     own process env; the SAME channel #3105's dispatched-verification arm above already reads) may never
+ *     run, ITSELF, any of the mechanical lifecycle commands its own wrapper drives end to end: `lane-pool.mjs`,
+ *     `backlog.mjs claim`/`release`, `gh pr`, `run.mjs open-pr`/`open-pr.mjs`, `pr-land.mjs`,
+ *     `learnings-drop.mjs`, `converge-cli.mjs`, `verify-lane.mjs` (in any mode, including `request`/`check`),
+ *     and `review-core-cli.mjs`. The briefs (`we:skills-src/conveyor/delivery-agent-brief-v2.md`,
+ *     `we:skills-src/conveyor/fix-agent-brief-v2.md`) already told the agent this in prose; nothing enforced
+ *     it. Every other session (interactive, or any LAUNCH-kind `WE_DISPATCH_KIND` — `build`, `fix`, `ci-heal`,
+ *     …, which name an agent running its OWN lifecycle from a full brief) is unaffected. No override.
  *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
@@ -1834,6 +1836,53 @@ export function gitAddEnumerationReason(command) {
  *  lease in the same pool shares its `ownerSession`) and whose minted per-holder slug is this string (computed
  *  by the CLI via the lease read + a sibling-lease scan) — gates the #2997 fail-closed destructive-op rule,
  *  which supersedes the #2367 ownerSession compare in exactly the topology where that compare cannot answer. */
+/**
+ * THE WRAPPER-OWNED AGENT KINDS, and — per kind — who owns each lifecycle command the table below denies.
+ *
+ * KEYED ON `WE_DISPATCH_KIND`'s WRAPPER-AGENT HALF (#3627 `delivery`, #3640 `repair`), never on a LAUNCH kind.
+ * See the deny block in {@link reason} for the full reasoning; in one line: a value in
+ * `we:scripts/operations/dispatch-lane.mjs#LAUNCH_KINDS` names an agent that IS the dispatch and runs its own
+ * lifecycle from a full brief, and a value here names a restricted worker whose wrapper runs that lifecycle
+ * for it. Only the second may be denied its own first step.
+ *
+ * THE PER-KIND TEXT IS NOT DECORATION. Each entry names the function in that kind's own wrapper that actually
+ * runs the denied command, so an agent that hits a deny is told who does the thing instead of it — and so a
+ * later reader can check the claim. The two kinds genuinely differ (a repair updates an EXISTING PR and never
+ * claims an item; a delivery opens a PR and does claim one), and a shared message would be false for one of
+ * them, which is precisely the class of stale note #3645 had to come back and correct here.
+ *
+ * THE KEYS ARE RE-STATED AS LITERALS RATHER THAN IMPORTED — the same trade `dispatch-lane-io.mjs`'s own
+ * `BUILD_DISPATCH_MODE_ENV` documents. This file is a `PreToolUse` hook that runs on EVERY Bash call in every
+ * session; it deliberately has no imports at all, and pulling in `dispatch-lane.mjs` (and its registry and
+ * step-kinds graph) to read two strings would put that whole graph on the hook's startup path. The no-drift
+ * guarantee is bought back by a test instead (`./__tests__/guard-bash.test.mjs` asserts these keys equal
+ * `WRAPPER_AGENT_KINDS`), which is where a static fact belongs.
+ */
+export const WRAPPER_OWNED_AGENTS = Object.freeze({
+  delivery: Object.freeze({
+    agent: 'delivery',
+    wrapper: 'deliver-item-wrapper.mjs',
+    laneFns: '`acquireLane`/`releaseClaimAndLane`',
+    gateFn: 'runGateWithOneRetry',
+    claim: 'the wrapper claims the item before the agent is ever spawned (`claimItem`); a second claim from inside the agent is redundant at best and a race at worst',
+    release: 'release is decided by the wrapper reading the agent\'s own structured report (`releaseClaimAndLane`), never by the agent releasing its own claim mid-build',
+    ghPr: 'it never opens, watches, labels, or merges its own PR (FIRM REQUIREMENT 2 in deliver-item-wrapper.mjs; `openPr` is the only caller, and only after the gate and converge have both run)',
+    openPr: 'opening the PR is the wrapper\'s own job (`openPr`), driven by a park decision the agent never computes',
+    converge: 'it never initiates review of its own diff (FIRM REQUIREMENT 1 in deliver-item-wrapper.mjs; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited)',
+  }),
+  repair: Object.freeze({
+    agent: 'repair (fix / ci-heal)',
+    wrapper: 'fix-dispatch-wrapper.mjs',
+    laneFns: '`acquireLane`/`releaseAllPools`',
+    gateFn: 'runFixGateWithOneRetry',
+    claim: 'a repair dispatch never claims a backlog item at all — it repairs an EXISTING PR, whose item was claimed (and is still held, or was already released) by the build that opened it',
+    release: 'a repair dispatch never holds a backlog claim to release — see `backlog.mjs claim` above; releasing one it does not hold would strip it from whoever does',
+    ghPr: 'the wrapper reads the PR itself (`resolveFixTarget`\'s own `gh pr view`) and hands the agent the reviewer\'s finding as a plain file in its lane, and it owns every label move through `rearm-review.mjs`/`stand-down.mjs`',
+    openPr: 'a repair never opens a PR — it re-pushes HEAD to the existing PR\'s own `lane/*` ref (`pushLaneRef`), and even that is the wrapper\'s call, made only after the gate and converge have both passed',
+    converge: 'it never initiates review of its own diff — that self-review-inside-the-agent\'s-own-turn step is exactly what #3629 moved OUT of the fixer\'s brief; the wrapper\'s own `runConverge` pass is the ratified replacement, and it runs after the agent has exited',
+  }),
+});
+
 export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
@@ -2109,12 +2158,18 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // how build/prepare/investigate open their PR at all. Flipping the gate to cover those kinds would deny
   // every dispatched agent its own first step.
   //
-  // A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'` ARM IS ADDED: `WE_DISPATCH_KIND=fix` is stamped by TWO
-  // different spawners for two INCOMPATIBLE agent contracts — `dispatch-lane-io.mjs#defaultClaudeProvider`
-  // (the live one, running `fix-agent-brief.md` v1, which runs its own lifecycle) and
-  // `fix-dispatch-wrapper.mjs` (unwired, running `fix-agent-brief-v2.md` under a wrapper that owns the
-  // lifecycle). One env value, two contracts. A `dispatchKind === 'fix'` deny arm cannot be correct for both,
-  // so that collision has to be resolved (a distinct kind, or a second signal) BEFORE one is written.
+  // THAT AMBIGUITY IS NOW RESOLVED (#3640), AND THIS IS WHY THERE IS STILL NO `'fix'` ARM. The note that used
+  // to sit here said `WE_DISPATCH_KIND=fix` was stamped by TWO spawners for two INCOMPATIBLE contracts —
+  // `dispatch-lane-io.mjs#defaultClaudeProvider` (the full-brief agent, which runs its own lifecycle) and
+  // `fix-dispatch-wrapper.mjs` (a restricted agent under a wrapper that owns the lifecycle) — and that a
+  // `dispatchKind === 'fix'` arm could not be correct for both. It could not, and one was never written.
+  // Instead the COLLISION was removed at the source: the fix wrapper now stamps `repair`, a WRAPPER-AGENT kind
+  // (`we:scripts/operations/dispatch-lane.mjs#WRAPPER_AGENT_KINDS`), exactly as the delivery wrapper has always
+  // stamped `delivery` rather than `build`. `WE_DISPATCH_KIND` therefore carries a LAUNCH kind when the agent
+  // IS the dispatch and a WRAPPER-AGENT kind when the agent is a restricted worker inside a wrapper — two
+  // disjoint lists, checked at module load by that file's `assertDispatchKindAxesDisjoint`. The table below
+  // keys on the second list ONLY, so `fix` (and `ci-heal`, and `build`) stay exempt on the agent path where
+  // their own briefs require these very commands.
   //
   // NO OVERRIDE. Every command below is something the WRAPPER runs itself, OUTSIDE the agent's own turn and
   // outside this hook's reach entirely (see this file's own `runGateWithOneRetry`/`runConverge`/`openPr`/
@@ -2123,27 +2178,33 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // for any of them from inside its own restricted turn, ever — not even the read-only-looking spellings
   // (`lane-pool.mjs status`, `verify-lane.mjs check`), because the agent has no business knowing any of this
   // machinery exists at all (FIRM REQUIREMENT 5 in `deliver-item-wrapper.mjs`'s own header).
-  if (dispatchKind === 'delivery') {
+  // `Object.hasOwn`, never a bare index — `dispatchKind` comes straight off the environment, and an inherited
+  // `toString`/`constructor` must not read as a registered wrapper kind (it would deny with `undefined` text).
+  // Same discipline `dispatch-provider-registry.mjs#dispatchProviderEntry` states for its own lookup.
+  const owner = dispatchKind && Object.hasOwn(WRAPPER_OWNED_AGENTS, dispatchKind)
+    ? WRAPPER_OWNED_AGENTS[dispatchKind]
+    : null;
+  if (owner) {
     if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
-      return 'a delivery agent may never run `lane-pool.mjs` itself — acquiring/releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseClaimAndLane` in deliver-item-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+      return `a ${owner.agent} agent may never run \`lane-pool.mjs\` itself — acquiring/releasing the lane is the wrapper's own job (${owner.laneFns} in ${owner.wrapper}), done before the agent is spawned and after it reports. There is no override.`;
     if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
-      return 'a delivery agent may never run `backlog.mjs claim` itself — the wrapper claims the item before the agent is ever spawned (`claimItem`); a second claim from inside the agent is redundant at best and a race at worst. There is no override.';
+      return `a ${owner.agent} agent may never run \`backlog.mjs claim\` itself — ${owner.claim}. There is no override.`;
     if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
-      return 'a delivery agent may never run `backlog.mjs release` itself — release is decided by the wrapper reading the agent\'s own structured report (`releaseClaimAndLane`), never by the agent releasing its own claim mid-build. There is no override.';
+      return `a ${owner.agent} agent may never run \`backlog.mjs release\` itself — ${owner.release}. There is no override.`;
     if (atCommand(/^gh\s+pr\b/))
-      return 'a delivery agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR (FIRM REQUIREMENT 2 in deliver-item-wrapper.mjs; `openPr` is the only caller, and only after the gate and converge have both run). There is no override.';
+      return `a ${owner.agent} agent may never run \`gh pr\` itself — ${owner.ghPr}. There is no override.`;
     if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
-      return 'a delivery agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openPr`), driven by a park decision the agent never computes. There is no override.';
+      return `a ${owner.agent} agent may never run \`open-pr.mjs\` / \`run.mjs open-pr\` itself — ${owner.openPr}. There is no override.`;
     if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
-      return 'a delivery agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+      return `a ${owner.agent} agent may never run \`pr-land.mjs\` itself — landing is the drain's job; neither the agent nor its own wrapper ever lands a PR. There is no override.`;
     if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
-      return 'a delivery agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report, and the wrapper is what drops it (`dropLearning`). There is no override.';
+      return `a ${owner.agent} agent may never run \`learnings-drop.mjs\` itself — the agent REPORTS a learning on its structured report, and the wrapper is what drops it (\`dropLearning\`). There is no override.`;
     if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
-      return 'a delivery agent may never run `converge-cli.mjs` itself — it never initiates review of its own diff (FIRM REQUIREMENT 1 in deliver-item-wrapper.mjs; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited). There is no override.';
+      return `a ${owner.agent} agent may never run \`converge-cli.mjs\` itself — ${owner.converge}. There is no override.`;
     if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
-      return 'a delivery agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+      return `a ${owner.agent} agent may never run \`verify-lane.mjs\` itself, in ANY mode (not even \`request\`/\`check\`) — the gate is run by the wrapper (\`${owner.gateFn}\`), synchronously, outside the agent's own turn; the agent reports \`done\` and is resumed with the result if the gate came back red. There is no override.`;
     if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
-      return 'a delivery agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
+      return `a ${owner.agent} agent may never run \`review-core-cli.mjs\` itself — the invite-on-discovery step is driven by the wrapper's own converge loop (\`runConvergeInvite\`), never by the agent. There is no override.`;
   }
 
   return null;

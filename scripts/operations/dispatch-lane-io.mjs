@@ -1112,6 +1112,14 @@ export function createDispatchSinks({
           // CLI-independent, exactly like `launchKind`.
           lane: payload?.lane,
           scope: payload?.scope,
+          // #3640 — THE PR A REPAIR DISPATCH REPAIRS, and (CI-heal only) WHY. Already on the effect payload
+          // since #3332 and until now read only by the brief's own fill; a PR-KEYED mechanical provider needs
+          // them as DATA, because it is the wrapper — not an agent reading a brief — that runs `gh pr view`.
+          // Part of the port's request for the same reason `lane`/`scope` are: "which PR, and why" is
+          // CLI-independent. `null` for build/prepare/prepare-decision/investigate, which never have one.
+          // `reason` is forwarded here rather than by #3642 so that lane adds a ROW and nothing else.
+          pr: payload?.pr,
+          reason: payload?.reason,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
         });

@@ -1,5 +1,26 @@
 # Conveyor fix-agent brief (template) — repair a `review:changes` bounce IN ITS OWN LANE, then hand back for re-review (#2630)
 
+> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#3640`, epic `#3383`).** A `fix` dispatch no
+> longer spawns an agent with this brief. It starts
+> [we:scripts/operations/fix-run.mjs](../../scripts/operations/fix-run.mjs) — a detached, per-dispatch process
+> running [we:scripts/operations/fix-dispatch-wrapper.mjs](../../scripts/operations/fix-dispatch-wrapper.mjs) —
+> which does the mechanical steps below ITSELF and spawns a MINIMAL agent
+> ([we:skills-src/conveyor/fix-agent-brief-v2.md](fix-agent-brief-v2.md)) for the one thing that is actually
+> judgment: read the reviewer's finding, apply the smallest repair, report a four-value outcome. You are
+> reading THIS brief because somebody set `WE_FIX_DISPATCH_MODE=agent`. Everything below still applies to you,
+> unchanged.
+>
+> **What the wrapper now owns on the default path:** the `gh pr view` read of the PR's head ref and of the
+> latest changes-requested comment (the finding reaches the agent as a plain file in its lane, never as a `gh`
+> command the agent runs); the lane acquire — reset to the bounced PR's own ref via `lane-pool acquire
+> --base=` — and the release; the gate, run in the wrapper's own process with exactly one resume-and-retry
+> handed back to the agent; **one converge pass on the repair, which REPLACES §5's agent-spawned adversarial
+> self-review entirely** (`#3629`: an agent judging its own diff is not independent); the re-push to the PR's
+> existing `lane/*` ref; the re-arm (`rearm-review.mjs`) or the stand-down marker (`stand-down.mjs`); and the
+> learnings drop, forwarded from the agent's own report.
+> **What the agent still does directly:** read the finding, judge whether it is a safe code change, a judgment
+> call, or a genuine conflict; apply the repair; commit; report.
+>
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2613) instantiates it when a
 > conveyor-launched PR is bounced `review:changes` (a human ran `/review` and requested changes). It fills the
 > `{{PLACEHOLDERS}}` below and passes the result as the prompt for **one background fix agent** spawned into

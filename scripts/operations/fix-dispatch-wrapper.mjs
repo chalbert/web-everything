@@ -15,14 +15,31 @@
  * second consumer.
  *
  * ================================================================================================
- * HONESTY LABEL, SAME CONVENTION `deliver-item-wrapper.mjs`/`review-dispatch-wrapper.mjs` USE. This file is
- * NOT wired into any live dispatch decision, is NOT imported by production code, and has NOT been run against
- * a real PR end to end — per `we:docs/agent/prototype-based-dev.md`'s "park until genuinely exercised" rule,
- * that live run (a driver + observer pair, against a real bounced PR) is EXPLICITLY the NEXT, SEPARATE phase,
- * not this one. Every function below is REAL — every CLI surface it shells was read directly from the live
- * source it calls (`gh pr view`, `we:scripts/conveyor/rearm-review.mjs`, `we:scripts/conveyor/stand-down.mjs`,
+ * HONESTY LABEL, SAME CONVENTION `deliver-item-wrapper.mjs`/`review-dispatch-wrapper.mjs` USE — UPDATED BY
+ * #3640, WHICH WIRED IT. This file is no longer unwired: a `fix` dispatch now routes
+ * `dispatch-lane-io.mjs#createDispatchSinks` → `dispatch-provider-registry.mjs` (the `fix` row) →
+ * `dispatch-providers/fix.mjs` → a DETACHED `we:scripts/operations/fix-run.mjs` → `dispatchFix` below, by
+ * DEFAULT, with the old full-brief agent path kept reachable behind `WE_FIX_DISPATCH_MODE=agent`. What has
+ * STILL not happened is the thing that actually graduates it: it has NOT been run against a real PR end to end.
+ * Per `we:docs/agent/prototype-based-dev.md`'s "park until genuinely exercised" rule, that live run (a driver +
+ * observer pair, against a real bounced PR) is EXPLICITLY the NEXT, SEPARATE phase, not this one. Every
+ * function below is REAL — every CLI surface it shells was read directly from the live source it calls (`gh pr
+ * view`, `we:scripts/conveyor/rearm-review.mjs`, `we:scripts/conveyor/stand-down.mjs`,
  * `we:scripts/operations/completion-cli.mjs`, `we:scripts/lane-pool.mjs`) — but "the code is real" and "the
  * pipeline has been proven end to end" are different claims; only the second is what graduation requires.
+ *
+ * ── WHAT `ci-heal` (#3642) REUSES FROM HERE, VERBATIM ───────────────────────────────────────────────────────
+ *
+ * `ci-heal` is the OTHER PR-keyed repair kind and its own card says the two "likely share most of a wrapper".
+ * The pieces below are deliberately kind-agnostic and are meant to be imported, not copied:
+ * {@link FIX_LANE_PURPOSE}-shaped acquire via `minimal-context-provider.mjs#acquireLane`,
+ * {@link FIX_HOOKS_SETTINGS}/{@link ensureFixHooksSettingsFile}, {@link buildFixAgentEnv} (whose
+ * `WE_DISPATCH_KIND: 'repair'` stamp is ALREADY the shared value — see its docblock),
+ * {@link runFixGateWithOneRetry}, {@link pushLaneRef}, {@link standDown}, and the `runConverge` call shape with
+ * `dispatchKind: REPAIR_AGENT_KIND`. What `ci-heal` must supply ITSELF: its own finding resolver (a CI failure
+ * is read from `gh pr checks`/run logs, not from a changes-requested COMMENT — so
+ * {@link findLatestChangesRequestedComment}/{@link resolveFixTarget} do NOT carry over), its own brief, and its
+ * own hand-back step (a healed CI run is not a `rearm-review`).
  *
  * THE RATIFIED DESIGN THIS FILE IMPLEMENTS (`we:backlog/3629-*.md`, operator-ratified — not re-litigated
  * here):
@@ -51,22 +68,22 @@
  * `review-dispatch-wrapper.mjs`'s entire flow, and is driven by this wrapper's own process, never by the
  * agent.
  *
- * ONE NAMED, NOT PAPERED-OVER GAP (mirrors `we:scripts/operations/deliver-item-wrapper.mjs`'s own honesty
- * notes on `DELIVERY_HOOKS_SETTINGS` and `we:scripts/operations/review-dispatch-wrapper.mjs`'s "one narrower
- * residual" section — the #2895 discipline). `we:scripts/guard-bash.mjs` DOES today carry a real
- * `dispatchKind === 'delivery'` deny arm (stamped via `WE_DISPATCH_KIND`) that blocks a delivery agent from
- * running the mechanical lifecycle commands its own wrapper drives — but that arm checks the LITERAL string
- * `'delivery'`, not `'fix'`. This wrapper stamps `WE_DISPATCH_KIND: 'fix'` on the agent's own spawn (see
- * `buildFixAgentEnv`) and threads `dispatchKind: 'fix'` into the reused `runConverge`'s converge-editor
- * sub-spawns (a small, additive, backward-compatible parameter this item added to `deliver-item-wrapper.mjs`
- * — its default stays `'delivery'`, so every existing caller is unchanged) — but until `guard-bash.mjs` grows
- * a MATCHING `dispatchKind === 'fix'` arm, that hook enforces NOTHING extra for a fix-dispatched agent beyond
- * what `--restricted`'s own `--tools` allowlist already does (the agent literally cannot invoke a non-Bash
- * tool it wasn't granted, but nothing stops it from shelling `gh`/`lane-pool.mjs`/etc. via the Bash tool it
- * DOES have). Building that `guard-bash.mjs` arm is real, valuable follow-up work — flagged here loudly,
- * exactly as `deliver-item-wrapper.mjs` already flagged the identical gap for `'delivery'` before its own
- * matching arm was later built — and deliberately NOT attempted in this pass (out of this item's own declared
- * scope, and `guard-bash.mjs` is a heavily-tested, security-relevant file this pass does not touch).
+ * THAT GAP IS NOW CLOSED (#3640), AND THE WAY IT WAS CLOSED IS THE INTERESTING PART. The note that used to sit
+ * here said `we:scripts/guard-bash.mjs`'s wrapper-owned deny table checked the LITERAL string `'delivery'`, not
+ * `'fix'`, so the hook enforced nothing extra on a fix-dispatched agent, and called a matching `'fix'` arm
+ * "real, valuable follow-up work". Writing that arm would have been a BUG, not a follow-up: `WE_DISPATCH_KIND
+ * =fix` is ALSO what `dispatch-lane-io.mjs#defaultClaudeProvider` stamps on the full-brief fix agent, whose own
+ * brief (`we:skills-src/conveyor/fix-agent-brief.md`) requires `lane-pool.mjs acquire`, `gh pr view` and
+ * `verify-lane` of the agent ITSELF — a `'fix'` arm would deny that agent its own step 1. `guard-bash.mjs`'s
+ * own note had spotted the same collision from the other side and refused to write the arm until it was
+ * resolved.
+ *
+ * THE RESOLUTION, and the reason nothing here needed a second env var: `WE_DISPATCH_KIND`'s value space ALREADY
+ * had two halves and the delivery wrapper had already used them — it stamps `delivery` (not a launch kind), not
+ * `build`. So a wrapper-spawned restricted agent is stamped with a WRAPPER-AGENT kind and this wrapper now
+ * stamps `repair` (see `buildFixAgentEnv`), covering `ci-heal` as well. The guard table keys on that half only,
+ * every deny in it is now true of this wrapper command-for-command, and the agent path is untouched.
+ * `we:scripts/operations/dispatch-lane.mjs#assertDispatchKindAxesDisjoint` makes the split machine-checked.
  *
  * IMPURE: `node:child_process` (via the shared module's `run`), `node:crypto` (fresh session ids), `node:fs`
  * (the finding-file scratch write/cleanup). Every impure call is injectable, mirroring
@@ -84,6 +101,7 @@ import {
 } from './minimal-context-provider.mjs';
 import { runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS } from './deliver-item-wrapper.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
+import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
@@ -253,7 +271,16 @@ export const FIX_AGENT_SPAWN_TIMEOUT_MS = DELIVERY_AGENT_SPAWN_TIMEOUT_MS;
  *  pre-merge; a lane-relative invocation is structurally unreachable. */
 export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }) {
   return {
-    WE_DISPATCH_KIND: 'fix',
+    // `repair`, NOT `fix` (#3640 — the two-spawner collision, resolved). This stamp used to carry the LAUNCH
+    // kind, which is also what `dispatch-lane-io.mjs#defaultClaudeProvider` stamps on the FULL-BRIEF fix agent
+    // that runs its own lifecycle — one env value naming two incompatible contracts, and the reason
+    // `we:scripts/guard-bash.mjs` could not write a `'fix'` deny arm at all (see its own note). A
+    // wrapper-spawned restricted agent is stamped with a WRAPPER-AGENT kind
+    // (`we:scripts/operations/dispatch-lane.mjs#WRAPPER_AGENT_KINDS`), exactly as
+    // `deliver-item-wrapper.mjs#buildDeliveryAgentEnv` has always stamped `delivery` rather than `build`.
+    // `repair` rather than a fix-only value because `ci-heal` (#3642) is the same wrapper shape and the guard
+    // table asserts the same ownership for both.
+    WE_DISPATCH_KIND: REPAIR_AGENT_KIND,
     FIX_SESSION: sessionSlug,
     FIX_PR: String(pr),
     FIX_ITEM: item ?? '',
@@ -429,12 +456,22 @@ function describeError(e) {
  *
  * @param {{pr: number|string, repo: string, item?: (number|string|null)}} o
  * @param {DeliveryAgentProvider} [provider]
- * @param {{newSessionId?: () => string, run?: Function, waitMs?: number}} [deps]
+ * `ensureSettingsFile` is injectable for the same reason every other impure call in this file is (see the
+ * header's own IMPURE note): it is an `mkdirSync`+`writeFileSync` into `${REPO_ROOT}.operations`, and it is the
+ * one impure call on this arc a caller could not previously reach — which made the converge EDIT branch (the
+ * only branch that calls it) untestable, and an untestable branch is one nothing holds. Default unchanged.
+ *
+ * @param {{pr: number|string, repo: string, item?: (number|string|null)}} o
+ * @param {DeliveryAgentProvider} [provider]
+ * @param {{newSessionId?: () => string, run?: Function, waitMs?: number, ensureSettingsFile?: Function}} [deps]
  */
 export async function dispatchFix(
   { pr, repo, item } = {},
   provider = FIX_AGENT_PROVIDER,
-  { newSessionId = randomUUID, run: runFn = run, waitMs = FIX_LOOP_ACQUIRE_WAIT_MS } = {},
+  {
+    newSessionId = randomUUID, run: runFn = run, waitMs = FIX_LOOP_ACQUIRE_WAIT_MS,
+    ensureSettingsFile = ensureFixHooksSettingsFile,
+  } = {},
 ) {
   const planned = planFixDispatchWrapper({ pr, repo, item });
   const claudeSessionId = String(newSessionId());
@@ -545,7 +582,11 @@ export async function dispatchFix(
   try {
     convergeVerdict = runConverge(
       { lane: lanePath, item: planned.pr, goal: `repair the review:changes finding on PR #${planned.pr}${planned.item ? ` (item #${planned.item})` : ''}` },
-      { run: runFn, ensureSettingsFile: ensureFixHooksSettingsFile, dispatchKind: 'fix' },
+      // `repair` for the same reason `buildFixAgentEnv` stamps it (#3640): the converge EDITOR is another
+      // restricted agent this wrapper spawns outside the fixer's own turn, so it is a wrapper-owned agent, not
+      // a `fix` LAUNCH. Passing the launch kind here would put the editor under a guard contract written for
+      // an agent that runs its own lifecycle.
+      { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND },
     );
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });

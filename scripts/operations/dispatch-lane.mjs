@@ -166,6 +166,85 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
 export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
 
 /**
+ * THE SECOND AXIS `WE_DISPATCH_KIND` CARRIES, named here because it was previously only implicit (#3640).
+ *
+ * ── THE COLLISION THIS RESOLVES ─────────────────────────────────────────────────────────────────────────────
+ *
+ * `WE_DISPATCH_KIND` is stamped on a spawned agent's env by THREE different spawners, and until this item they
+ * did not agree on what the value MEANS:
+ *
+ *   1. {@link ./dispatch-lane-io.mjs#defaultClaudeProvider} stamps `request.launchKind` — `build`, `fix`,
+ *      `ci-heal`, … — onto the full-brief `claude --bg` agent. That agent IS the whole dispatch: its brief
+ *      (`we:skills-src/conveyor/fix-agent-brief.md` and friends) tells it to run its OWN lifecycle —
+ *      `lane-pool.mjs acquire`, `gh pr view`, `verify-lane request`/`check`, `rearm-review.mjs`.
+ *   2. `we:scripts/operations/deliver-item-wrapper.mjs#buildDeliveryAgentEnv` stamps `delivery` — which is NOT
+ *      a launch kind — onto the RESTRICTED, minimal agent a wrapper spawns inside a `build` dispatch. That
+ *      agent runs none of the above; the wrapper does all of it, outside the agent's turn.
+ *   3. `we:scripts/operations/fix-dispatch-wrapper.mjs` used to stamp `fix` — a LAUNCH kind — onto its own
+ *      restricted minimal agent, i.e. shape 2's contract carrying shape 1's value.
+ *
+ * `we:scripts/guard-bash.mjs`'s wrapper-owned deny table keys on exactly this value, and its own note called
+ * the collision out as "a real ambiguity to settle before any `'fix'` arm is added": a `dispatchKind === 'fix'`
+ * arm would deny the AGENT-path fixer (shape 1) its own documented first step, and NOT adding one leaves the
+ * WRAPPER-path fixer (shape 3) unguarded. One value, two incompatible contracts.
+ *
+ * ── THE RESOLUTION: THE VALUE SPACE ALREADY HAD TWO HALVES, AND `delivery` IS THE PRECEDENT ─────────────────
+ *
+ * A value in {@link LAUNCH_KINDS} means "this agent is the whole dispatch and runs its own lifecycle". A value
+ * in this list means "this agent is a RESTRICTED WORKER inside a wrapper that owns the lifecycle". #3627
+ * already made that split when it chose `delivery` rather than `build` for the wrapper-spawned build agent; it
+ * was simply never written down, so the fix wrapper reached for its launch kind instead. This constant names
+ * the second half and {@link assertDispatchKindAxesDisjoint} makes the split machine-checked rather than a
+ * convention two files happen to share.
+ *
+ * `repair` covers BOTH PR-keyed repair kinds (`fix` #3640 and `ci-heal` #3642), deliberately: the two share a
+ * wrapper shape (`BRIEF_REQUIRED_BY_KIND` already groups them), and what the guard table asserts is the
+ * WRAPPER's ownership of the lifecycle, which is identical for both. A second value would have to justify a
+ * second deny table saying the same thing.
+ *
+ * NOT A LAUNCH KIND, AND NEVER DISPATCHABLE. Nothing routes on these; `dispatch-lane` refuses a `launchKind`
+ * outside `LAUNCH_KINDS` exactly as before.
+ *
+ * ── ONE KNOWN CASE STILL ON THE WRONG SIDE, NAMED RATHER THAN SILENTLY LEFT ─────────────────────────────────
+ *
+ * `we:scripts/operations/prepare-scope-wrapper.mjs` (#3641, landed on this branch alongside this item) stamps
+ * `WE_DISPATCH_KIND: 'prepare'` — a LAUNCH kind — on the restricted agent IT spawns, and its own docblock
+ * already calls that a "NAMED GAP". It is this exact defect, one path over. It is LATENT, not live:
+ * `we:scripts/guard-bash.mjs` has no `prepare` arm today, so nothing misfires. But the moment someone writes
+ * one it will deny the AGENT-path prepare agent its own brief's first step — precisely the failure #3640 was
+ * filed to resolve for `fix`. The fix is a one-line stamp change there plus a row in
+ * `guard-bash.mjs#WRAPPER_OWNED_AGENTS`, and it is deliberately NOT attempted here: that stamp is #3641's own
+ * file and its own call, and a guard row whose ownership claims nobody verified against
+ * `prepare-scope-wrapper.mjs` command-by-command would be the stale note this whole item is about. WHOEVER
+ * WRITES A `prepare` DENY ARM MUST MOVE THE STAMP FIRST.
+ */
+export const DELIVERY_AGENT_KIND = 'delivery';
+export const REPAIR_AGENT_KIND = 'repair';
+export const WRAPPER_AGENT_KINDS = Object.freeze([DELIVERY_AGENT_KIND, REPAIR_AGENT_KIND]);
+
+/**
+ * THE INVARIANT THE RESOLUTION RESTS ON — the two axes {@link WRAPPER_AGENT_KINDS} and {@link LAUNCH_KINDS}
+ * split must never overlap. Checked at module LOAD, for the same reason
+ * {@link ./dispatch-provider-registry.mjs}'s own key check is: a wrapper-agent kind that is ALSO a launch kind
+ * silently re-creates the exact collision #3640 resolved — the guard table would start firing on an agent-path
+ * agent that legitimately runs its own lifecycle — and nothing at dispatch time would notice.
+ */
+export function assertDispatchKindAxesDisjoint(launchKinds = LAUNCH_KINDS, wrapperKinds = WRAPPER_AGENT_KINDS) {
+  const overlap = wrapperKinds.filter((k) => launchKinds.includes(k));
+  if (overlap.length) {
+    throw new TypeError(
+      `dispatch-lane: ${JSON.stringify(overlap)} is both a LAUNCH kind and a WRAPPER-AGENT kind. `
+      + '`WE_DISPATCH_KIND` carries one value for two different questions — which dispatch this is, and which '
+      + 'kind of agent was spawned — and they are told apart ONLY by which list the value is in. An overlap '
+      + 're-creates the #3640 collision: `we:scripts/guard-bash.mjs`\'s wrapper-owned deny table would fire on '
+      + 'an agent-path agent whose own brief requires the very commands it denies.',
+    );
+  }
+  return true;
+}
+assertDispatchKindAxesDisjoint();
+
+/**
  * How long an in-flight dispatch record whose agent's LIVENESS CANNOT BE ESTABLISHED keeps holding its item
  * past the deadline it was given. See {@link dispatchStillHolds} — this is the backstop for an entry nothing
  * can be observed about, and it never overrules a listing that says the agent is alive.

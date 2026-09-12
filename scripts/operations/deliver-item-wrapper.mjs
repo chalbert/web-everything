@@ -1057,10 +1057,14 @@ export function runConvergeEdit(
   // used to hardcode `WE_DISPATCH_KIND: 'delivery'` unconditionally, which was correct for the ONLY caller
   // that existed (the delivery wrapper's own converge loop) but would mislabel a FIX dispatch's converge-edit
   // round the same way if reused as-is — `scripts/guard-bash.mjs`'s dispatch-kind deny arm reads this exact
-  // env var to decide which mechanical lifecycle commands a dispatched agent may not run itself (see that
-  // file's own header); a fixer's converge-edit spawn should identify as `fix`, not `delivery`, once a
-  // matching `fix` arm exists there (open follow-up — see `fix-dispatch-wrapper.mjs`'s own header for the
-  // honest state of that gap as of this commit).
+  // env var to decide which mechanical lifecycle commands a wrapper-owned agent may not run itself (see that
+  // file's own header). CORRECTED BY #3640: this note used to say a fixer's converge-edit spawn "should
+  // identify as `fix`, not `delivery`, once a matching `fix` arm exists there". It must NOT — `fix` is a
+  // LAUNCH kind, which `dispatch-lane-io.mjs#defaultClaudeProvider` also stamps on the full-brief fix agent
+  // that runs its OWN lifecycle, so an arm keyed on it would be wrong for one of the two (guard-bash's own
+  // note refused to write one for exactly that reason). The fix wrapper passes `repair`, a WRAPPER-AGENT kind
+  // (`dispatch-lane.mjs#WRAPPER_AGENT_KINDS`) — the same half of the value space this default's own
+  // `'delivery'` has always been in. The gap that note called an open follow-up is closed.
   const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: dispatchKind } });
   return parseConvergeEditResult(out);
 }

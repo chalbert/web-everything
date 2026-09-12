@@ -34,6 +34,7 @@ import {
   pushLaneRef, rearmReview, standDown, runFixGateWithOneRetry, dispatchFix,
 } from '../fix-dispatch-wrapper.mjs';
 import { newFixReport, writeFixReport, tryReadFixReport } from '../fix-report-store.mjs';
+import { REPAIR_AGENT_KIND } from '../dispatch-lane.mjs';
 
 describe('planFixDispatchWrapper', () => {
   it('accepts a positive integer PR and an owner/repo slug, deriving the fix-<pr> session slug', () => {
@@ -118,11 +119,13 @@ describe('resolveFixTarget', () => {
 });
 
 describe('buildFixAgentEnv', () => {
-  it('returns all real env vars the brief reads, plus the WE_DISPATCH_KIND=fix stamp, reports-dir override, '
+  it('returns all real env vars the brief reads, plus the WE_DISPATCH_KIND=repair stamp, reports-dir override, '
     + 'and the absolute fix-report-cli.mjs path (bug #xu2pp2m/1)', () => {
     const env = buildFixAgentEnv({ sessionSlug: 'fix-2108', pr: 2108, item: '3629', lanePath: '/pool/lane-3', reportsDir: '/repo/.operations/fix-reports' });
     expect(env).toEqual({
-      WE_DISPATCH_KIND: 'fix', FIX_SESSION: 'fix-2108', FIX_PR: '2108', FIX_ITEM: '3629',
+      // `repair`, NOT the LAUNCH kind `fix` — #3640's two-spawner resolution. The whole regression, and why a
+      // `fix` stamp here is a real defect rather than a naming preference, is `./dispatch-kind-axes.test.mjs`.
+      WE_DISPATCH_KIND: 'repair', FIX_SESSION: 'fix-2108', FIX_PR: '2108', FIX_ITEM: '3629',
       LANE: '/pool/lane-3', OPERATION_FIX_REPORTS_DIR: '/repo/.operations/fix-reports',
       FIX_REPORT_CLI_PATH,
     });
@@ -538,5 +541,74 @@ describe('dispatchFix', () => {
       const result = await dispatchFix({ pr: 2108, repo: 'chalbert/web-everything' }, provider, { run, newSessionId: () => 's1' });
       expect(result.result).toBe('PR #2108 (re-armed review:pending)');
     });
+  });
+});
+
+describe('#3640 — the wrapper arc, with a converge round that actually EDITS', () => {
+  // The pre-existing `./fix-dispatch-wrapper.test.mjs` drives `dispatchFix` with a converge `init` that lands
+  // immediately, so the converge EDITOR spawn — the third thing that stamps `WE_DISPATCH_KIND` on this path —
+  // never runs there. This drives a real edit round through the real `runConverge` loop so the stamp that spawn
+  // carries is OBSERVED rather than assumed.
+  it('stamps `repair` on the converge editor too, not the launch kind `fix`', async () => {
+    const reportsDir = mkdtempSync(join(tmpdir(), 'we-op-fix-axes-'));
+    const lane = mkdtempSync(join(tmpdir(), 'we-op-fix-axes-lane-'));
+    const previous = process.env.OPERATION_FIX_REPORTS_DIR;
+    process.env.OPERATION_FIX_REPORTS_DIR = reportsDir;
+    try {
+      const claudeCalls = [];
+      let convergeStep = 0;
+      const run = vi.fn((cmd, args = [], opts) => {
+        if (cmd === 'node' && args[0] === 'scripts/operations/completion-cli.mjs') return '{}';
+        if (cmd === 'gh') return JSON.stringify({ headRefName: 'lane/2108-foo', comments: [{ body: '🔁 review — changes requested\n\nfix it' }] });
+        if (cmd === 'node' && args[0] === 'scripts/lane-pool.mjs') return args[1] === 'acquire' ? lane : '';
+        if (cmd === 'node' && args[0] === 'scripts/verify-lane.mjs') return JSON.stringify({ status: 'reset' });
+        if (cmd === 'node' && args[0] === 'scripts/operations/run.mjs' && args[1] === 'verify') return JSON.stringify({ verdict: { ok: true } });
+        if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'init') {
+          return JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'apply the finding' } });
+        }
+        if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'step') {
+          convergeStep += 1;
+          return JSON.stringify({ action: 'land', round: 2, verdict: 'land', dismissed: [] });
+        }
+        if (cmd === 'claude') {
+          claudeCalls.push(opts);
+          return JSON.stringify({ result: JSON.stringify({ revised: true, advanced: true, dismissed: [], filesTouched: ['a.mjs'] }) });
+        }
+        if (cmd === 'git') return '';
+        if (cmd === 'node' && args[0] === 'scripts/conveyor/rearm-review.mjs') return '';
+        throw new Error(`unexpected run(${cmd}, ${JSON.stringify(args)})`);
+      });
+
+      const provider = {
+        spawn: vi.fn(({ sessionSlug, pr, item }) => {
+          writeFixReport({
+            ...newFixReport({ session: sessionSlug, pr, item }),
+            status: 'done', outcome: 'fixed', reason: null, filesTouched: ['a.mjs'], learning: null,
+          });
+        }),
+      };
+
+      const result = await dispatchFix(
+        { pr: 2108, repo: 'chalbert/web-everything', item: '3629' }, provider,
+        // `ensureSettingsFile` injected: its real default writes into `${REPO_ROOT}.operations`, which vitest's
+        // SSR-transformed `REPO_ROOT` makes an unwritable `/@fs/...` path — the same seam this file's own
+        // `node:fs` mock exists for. Nothing about the assertion below depends on the settings file's content.
+        { run, newSessionId: () => 'sess-1', ensureSettingsFile: () => '/fake/fix-hooks.json' },
+      );
+
+      expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+      expect(convergeStep).toBe(1);
+      // THE ASSERTION: the converge editor's own env stamp. `fix` here would put that spawn under a guard
+      // contract written for an agent that runs its own lifecycle.
+      expect(claudeCalls).toHaveLength(1);
+      expect(claudeCalls[0].env.WE_DISPATCH_KIND).toBe(REPAIR_AGENT_KIND);
+      // …and so does the fixer agent's own spawn, through the provider the wrapper installs by default.
+      expect(provider.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.OPERATION_FIX_REPORTS_DIR;
+      else process.env.OPERATION_FIX_REPORTS_DIR = previous;
+      rmSync(reportsDir, { recursive: true, force: true });
+      rmSync(lane, { recursive: true, force: true });
+    }
   });
 });

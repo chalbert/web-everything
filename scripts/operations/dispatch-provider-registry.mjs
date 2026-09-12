@@ -53,6 +53,7 @@
 
 import { LAUNCH_KINDS } from './dispatch-lane.mjs';
 import { deliverItemDetachedProvider } from './dispatch-providers/build.mjs';
+import { fixDetachedProvider } from './dispatch-providers/fix.mjs';
 import { prepareScopeDetachedProvider } from './dispatch-providers/prepare.mjs';
 
 /**
@@ -60,12 +61,13 @@ import { prepareScopeDetachedProvider } from './dispatch-providers/prepare.mjs';
  * the ONE place a kind's mechanical wiring is declared; every consumer looks up through the functions below
  * rather than reaching in with a literal key.
  *
- * TODAY IT HOLDS TWO ENTRIES, and that is the honest state of the system rather than a stub: #3645 wired
- * `build` and #3641 wired `prepare`, because those are the two kinds with a wrapper
- * (`we:scripts/operations/deliver-item-wrapper.mjs`, `we:scripts/operations/prepare-scope-wrapper.mjs`) owning
- * their lifecycle. The remaining FOUR — `prepare-decision`, `investigate`, `fix`, `ci-heal` — still spawn their
- * own agent from their own brief, whose first steps (`lane-pool acquire`, `verify-lane`, `gh pr view`,
- * `run.mjs open-pr`) the agent itself runs. Each sibling lane adds its row as it lands.
+ * TODAY IT HOLDS THREE ENTRIES, and that is the honest state of the system rather than a stub: #3645 wired
+ * `build`, #3641 wired `prepare` and #3640 wired `fix`, because those are the three kinds with a wrapper
+ * (`we:scripts/operations/deliver-item-wrapper.mjs`, `we:scripts/operations/prepare-scope-wrapper.mjs`,
+ * `we:scripts/operations/fix-dispatch-wrapper.mjs`) owning their lifecycle. The remaining THREE —
+ * `prepare-decision`, `investigate`, `ci-heal` — still spawn their own agent from their own brief, whose first
+ * steps (`lane-pool acquire`, `verify-lane`, `gh pr view`, `run.mjs open-pr`) the agent itself runs. Each
+ * sibling lane adds its row as it lands.
  *
  * @type {Readonly<Record<string, Readonly<{kind: string, provider: Function, modeEnv: string|null, defaultMode: 'mechanical'|'agent'}>>>}
  */
@@ -83,6 +85,14 @@ export const DISPATCH_PROVIDER_REGISTRY = Object.freeze({
     kind: 'prepare',
     provider: prepareScopeDetachedProvider,
     modeEnv: 'WE_PREPARE_DISPATCH_MODE',
+    defaultMode: 'mechanical',
+  }),
+  // #3640 — the fix wrapper. Its own opt-out brief is `we:skills-src/conveyor/fix-agent-brief.md`, which
+  // carries a header saying it is the path `WE_FIX_DISPATCH_MODE=agent` selects.
+  fix: Object.freeze({
+    kind: 'fix',
+    provider: fixDetachedProvider,
+    modeEnv: 'WE_FIX_DISPATCH_MODE',
     defaultMode: 'mechanical',
   }),
 });

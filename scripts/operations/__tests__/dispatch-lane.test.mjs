@@ -16,6 +16,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+
+import { DISPATCH_PROVIDER_REGISTRY } from '../dispatch-provider-registry.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,6 +178,10 @@ function runTo(read = tickRead(), input = { num: '3037' }) {
 }
 
 // ── 1. the declaration is registered, and it reaches nothing ────────────────────────────────────────────────
+
+/** Every REGISTERED mechanical kind, forced onto the AGENT path — derived from the table rather than listed,
+ *  so a sibling wiring lane (#3641/#3642/#3644) adding a row never has to edit a test that is not about it. */
+const AGENT_MODES = Object.fromEntries(Object.keys(DISPATCH_PROVIDER_REGISTRY).map((k) => [k, 'agent']));
 
 describe('the operation is callable at all', () => {
   it('is in the OPERATIONS table — an unregistered declaration is the defect `gate-health` shipped with', () => {
@@ -1943,8 +1949,10 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     if (!run.effects.length) return { run, spawned };
     const outcome = await applyPendingEffects(run, {
       sinks: createDispatchSinks({
-        // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
-        buildMode: 'agent',
+        // #3645/#3640 — the AGENT path, named. Every REGISTERED kind now defaults to its own mechanical
+        // wrapper, and these #3332 assertions are about the `claude` argv a full-brief agent is spawned with,
+        // so the whole table is forced onto the agent path rather than just `build`.
+        modes: AGENT_MODES,
         root: PRIMARY,
         spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
         mintSessionId: () => 'sess-3332',
