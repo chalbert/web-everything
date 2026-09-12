@@ -38,7 +38,7 @@ import { execFileSync } from 'node:child_process';
 
 import { withRealRepo, git } from '../../operations/__tests__/helpers/real-repo.mjs';
 import { withFakeClaude } from '../../operations/__tests__/helpers/fake-claude.mjs';
-import { defaultSpawnAgent, defaultListAgents } from '../../operations/dispatch-lane-io.mjs';
+import { defaultSpawnAgent, defaultListAgents, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE } from '../../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../../operations/dispatch-abort.mjs';
 import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
 
@@ -244,8 +244,11 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
         expect(result.resumed).toBe(false);
         expect(result.sessionId).toBe('ffffffff-0000-0000-0000-000000000000');
         // #3331 — no `--session-id` in the argv, and the ADDRESSABLE id is what the CLI printed back.
+        // #3606's missed path (f41f3b32d) — fix dispatch now carries the same standing-identity system
+        // prompt review-dispatch already had, so the argv gains `--append-system-prompt-file` too.
         expect(fake.lastArgv()).toEqual([
           '--bg', '-n', 'fix-8802',
+          '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
           expect.stringContaining('fix brief for 8802'),
         ]);
         expect(result.agentId).toBeTruthy();
