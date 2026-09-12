@@ -420,7 +420,6 @@ export function dispatchedAgentVerificationReason(command, dispatchKind) {
   return `a mechanically-dispatched ${dispatchKind} agent may not run the verification set (verify-lane / check:standards / test:unit) directly — the gate legitimately takes 150–350s, well past this tool's ~120s foreground window, so a direct run gets silently auto-backgrounded and the agent stalls with no error (#3105). Request it instead and poll for the result: \`node scripts/verify-lane.mjs request\` then \`node scripts/verify-lane.mjs check\` across your own turns — the runner's own process (unbound by this window) actually runs the gate. There is no override.`;
 }
 
-<<<<<<< HEAD
 /**
  * A truncating pipe on an operation's `--json`. Pure. Returns a reason when the command pipes a
  * `run.mjs … --json` into `head`/`tail`, else null.
@@ -439,9 +438,6 @@ export function truncatedOperationJsonReason(command) {
     + 'either way and survives whatever happens to stdout.';
 }
 
-||||||| parent of 55dbc60ec (The gate legitimately takes 150-350s, past the agent tool's ~120s foreground)
-=======
->>>>>>> 55dbc60ec (The gate legitimately takes 150-350s, past the agent tool's ~120s foreground)
 // #2749/#2788 — the 4th `#primary-read-only-lanes-only` guard arm: a build that WRITES the shared PRIMARY
 // tree, run at primary cwd. Three shapes; each pure/unit-tested below. Gated by `primaryCwd` in `reason()` —
 // i.e. by where the write LANDS, not by who is asking (no session/agent identity is read, #2335). A lane

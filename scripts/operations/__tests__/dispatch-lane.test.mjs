@@ -846,29 +846,42 @@ describe('the provider port — #3579', () => {
     const spawned = [];
     const handle = defaultClaudeProvider(
       { sessionId: 'sess-c9', cwd: PRIMARY, prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9', extraArgs: ['--model', 'sonnet'] },
-      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; } },
+      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return bgStdout('c9c9c9c9'); } },
     );
-    expect(handle).toBe('sess-c9');
-    expect(spawned).toEqual([{
-      argv: buildAgentArgv({
-        sessionId: 'sess-c9',
-        payload: { prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9' },
-        extraArgs: ['--model', 'sonnet'],
-      }),
-      opts: { cwd: PRIMARY },
-    }]);
+    // #3331 — the handle this port implementation answers with is the one the SPAWN printed, never the
+    // `sessionId` it was handed: `claude --bg` ignores `--session-id` and mints its own.
+    expect(handle).toBe('c9c9c9c9');
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].argv).toEqual(buildAgentArgv({
+      sessionId: 'sess-c9',
+      payload: { prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9' },
+      extraArgs: ['--model', 'sonnet'],
+    }));
+    // #3105 — the launch kind rides across as an env var on the spawn (defaulted when the request omits it).
+    expect(spawned[0].opts).toMatchObject({ cwd: PRIMARY });
+    expect(spawned[0].opts.env.WE_DISPATCH_KIND).toBe('build');
+  });
+
+  // #3331, through the DEFAULT provider — a spawn that exits 0 but prints no parseable confirmation is
+  // INDETERMINATE, never silently keyed on the minted id the CLI is proven to ignore.
+  it('defaultClaudeProvider REFUSES a spawn whose stdout carries no parseable handle, rather than falling back to the minted id', () => {
+    expect(() => defaultClaudeProvider(
+      { sessionId: 'sess-c0', cwd: PRIMARY, prompt: '# build #0', sessionSlug: 'conveyor-0', num: '0' },
+      { spawnAgent: () => 'not the shape we expect\n' },
+    )).toThrow(/no parseable session handle/);
   });
 
   it('a plain spawnAgent (the old CLI-argv-shaped stub) still drives the DEFAULT provider unmodified', async () => {
     const spawned = [];
     const sinks = createDispatchSinks({
       root: PRIMARY,
-      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return bgStdout('1e9ac11a'); },
       mintSessionId: () => 'sess-legacy',
     });
     const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #legacy', sessionSlug: 'conveyor-legacy', num: 'legacy' });
     expect(spawned).toHaveLength(1);
-    expect(result).toMatchObject({ handle: 'sess-legacy' });
+    // #3331 — the CLI's own printed handle, not the minted `sess-legacy` it was asked for.
+    expect(result).toMatchObject({ handle: '1e9ac11a' });
   });
 
   // #3579 review — a validation refusal from `buildAgentArgv` now runs INSIDE the provider call (moved there so
@@ -910,7 +923,7 @@ describe('the provider port — #3579', () => {
         sessionId: 'sess-parity', cwd: PRIMARY, prompt: richPayload.prompt, sessionSlug: richPayload.sessionSlug,
         num: richPayload.num, extraArgs: ['--model', 'sonnet'],
       },
-      { spawnAgent: (argv) => { spawned.push(argv); return ''; } },
+      { spawnAgent: (argv) => { spawned.push(argv); return bgStdout('42424242'); } },
     );
     expect(spawned[0]).toEqual(directArgv);
   });
