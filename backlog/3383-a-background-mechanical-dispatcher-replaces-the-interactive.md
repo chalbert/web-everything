@@ -1542,3 +1542,57 @@ and `we:skills-src/conveyor/runner.mjs`, both with unit + real-CLI-subprocess te
 `claude agents` listing reaped cleanly post-fix; the new tests prove the retry recovers within budget, still
 fails (bounded, not silently) once the budget is exhausted, never retries an already-`No job matching` answer,
 and that the error-summary no longer truncates a real multi-line failure to a bare "Command failed" line.
+
+## Session update (2026-09-12) — mechanical-harness delegation audit across all seven dispatch launch kinds:
+## exactly ONE (`review`) is actually wired; the other six still run their own lifecycle from a brief
+
+A delegation audit of every dispatch launch kind on `origin/lane/mechanical-dispatcher`, verified against tip
+`02d9af300`. The question asked was narrow and checkable: for each launch kind, does the dispatched agent still
+run its own lifecycle commands (`lane-pool acquire`, `open-pr`, `learnings-drop`, …) out of a full prose brief,
+or has that lifecycle moved into a mechanical harness the dispatcher calls directly? This is the concrete state
+of the epic's own founding bullet — "**Subagents only edit code.** Every command they'd otherwise run themselves
+is delegated to the mechanical layer" (see "The target shape" at the top of this card).
+
+**The answer: one of seven.** `review` is fully harnessed — no agent commands in its brief, a direct wrapper call
+to `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as the default path at
+`we:scripts/operations/review-dispatch.mjs:496` and `:542`. The other six all still hand the agent a full brief
+and let it drive its own lifecycle.
+
+| Launch kind | Agent runs lifecycle commands itself? | Wrapper | `we:scripts/guard-bash.mjs` coverage | Verdict |
+|---|---|---|---|---|
+| build | Yes | `we:scripts/operations/deliver-item-wrapper.mjs` exists, **unwired** | verification-only; lifecycle denylist dead | Not integrated |
+| prepare (scope) | Yes | none | verification-only; brief bug fixed | Not integrated |
+| prepare-decision | Yes | none | verification-only; brief bug fixed | Not integrated |
+| investigation | Yes | none | verification-only; never had the bug | Not integrated |
+| fix | Yes | `we:scripts/operations/fix-dispatch-wrapper.mjs` exists, **unwired**, brief still "PROTOTYPE" | verification-only; brief bug fixed; denylist arm blocked by a two-spawner conflict | Not integrated |
+| ci-heal | Yes | none | verification-only; brief bug fixed | Not integrated |
+| review | **No** | `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as default path | N/A by construction | **Fully integrated** |
+
+**Two wrappers exist but nothing calls them.** `we:scripts/operations/deliver-item-wrapper.mjs` (for `build`) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (for `fix`) are both written and both dead code on the dispatch
+path. The `fix` one is not merely un-wired-yet: it is blocked by a real, named conflict — `WE_DISPATCH_KIND=fix`
+is stamped by **two different spawners with incompatible contracts**, so wiring one wrapper behind that single
+env value would mis-harness the other spawner's agents. That conflict has to be resolved before the wrapper can
+be turned on at all; it is not a "just flip the flag" item.
+
+**`guard-bash`'s lifecycle denylist is correctly OFF for all six, and must stay off until each one is wired.**
+The denylist is what would mechanically enforce "the agent doesn't run its own lifecycle commands." Arming it
+today, for any of the six, would deny **step 1 of that kind's own brief** — `lane-pool acquire` — and break the
+dispatch outright. So the current state is self-consistent, not an oversight: the denylist can only be armed for
+a kind *after* that kind's lifecycle has moved into a harness. `guard-bash`'s coverage for the six is
+verification-only today, which is the correct setting for an unwired kind.
+
+**Why this matters for the epic, not just as a status line.** `review` being harnessed is the existence proof
+that the target shape works — the pattern is proven, once, end to end. But the epic's founding claim is about
+*every* command an agent would otherwise run, and six of seven kinds are still the old shape. The `review`
+wrapper is therefore the template to copy, and the remaining work is concrete and enumerable rather than
+open-ended: wire `deliver-item-wrapper` for `build`; resolve the two-spawner `WE_DISPATCH_KIND=fix` conflict and
+then wire `fix-dispatch-wrapper`; author wrappers for `prepare`, `prepare-decision`, `investigation`, `ci-heal`;
+arm `guard-bash`'s lifecycle denylist per kind, each time only after that kind's wrapper is live.
+
+**Related, already filed:** `#3629` (review and fix dispatch should get the same minimal context treatment) and
+`#3627` (dispatched delivery agents should get a minimal hand-crafted brief) both sit next to this finding but
+neither tracks the wiring itself. The self-hosting question this audit immediately raised — whether the
+prototype branch can build these six remaining kinds into ITSELF, via a lane forked from the prototype rather
+than from `main`, without a PR per increment — is filed separately as its own decision card; see the
+"POC-branch delivery mode" decision under this epic.
