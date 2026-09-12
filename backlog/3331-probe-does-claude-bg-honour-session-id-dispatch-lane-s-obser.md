@@ -179,6 +179,27 @@ report-path derivation still works (both sides use the minted id), but its liven
 - New regression cover: `we:scripts/operations/__tests__/dispatch-liveness-hardening.test.mjs` "hardening 6"
   (5 cases), plus `agentId` cases on the review and fix dispatch suites and the real-conflict integration test.
 
+### A SECOND, GENUINELY SEPARATE BUG found in the same live pass — and fixed here too (#3606's missed path)
+
+Not the same root cause, checked before concluding it: `we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix`
+passed **no `--append-system-prompt-file` at all** — the one dispatch path in the repo missing it.
+`createDispatchSinks` has always passed `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (so the tick-core fix dispatch was
+covered) and `we:scripts/operations/review-dispatch.mjs` passes its review-side twin (#xy8di3v), but this one
+passed nothing.
+
+`we:skills-src/conveyor/fix-agent-brief.md` opens with *"**This is a TEMPLATE, not a runnable skill.**"* and
+keeps `{{PLACEHOLDERS}}` / `{{LIKE_THIS}}` in its own explanatory prose — both legitimately unsubstituted,
+reported by `fillBrief` as non-fatal unknown tokens by design. So a CORRECTLY filled brief still READS as an
+unfilled template. **Live-confirmed 3/3 on 2026-09-11**: `fix-2127`, `fix-2130` and `fix-2003` each received a
+fully substituted 16.5 KB brief naming their real PR (verified by reading their transcripts — PR #2130 appears
+in the prompt; only `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` remain) and each replied *"I don't see an actual task or
+question in your message — just the fix-agent brief template (#2630) itself"* and did nothing. That is exactly
+#3606's `review-1998/2024/2027` failure recurring on the path the remedy was never wired into.
+
+Fixed by passing `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (the delivery-side file, not the review twin — a fix
+agent IS a `dispatch-lane`-shaped delivery agent: it acquires a lane, works an item, pushes to a PR), with an
+argv-order test. Recorded here rather than reopening the resolved #3606 because it rides this card's PR.
+
 **Live proof, not a theory.** `defaultClaudeProvider` run against the REAL installed CLI returned handle
 `f01e36ec`; `listedSessionIds(claude agents --json)` contained it on the first poll, and did NOT contain the
 minted `77777777-8888-4999-a000-bbbbbbbbbbbb`. A full `we:scripts/operations/review-dispatch.mjs --pr=<N>` run
