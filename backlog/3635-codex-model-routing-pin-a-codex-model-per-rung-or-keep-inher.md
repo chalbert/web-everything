@@ -290,3 +290,35 @@ copy, and should call `collectAndClearRolloutQuota` unconditionally (it has no r
    the rule instead of re-deriving it.
 2. The equivalence table above is either ratified as-is (including its non-finding) or superseded by a harder
    probe set, with lineage.
+
+## Follow-up correction to the codified rule — 2026-09-12 (PR #2122 re-review)
+
+A re-review of the landing PR found the codification had narrowed this card's own evidence. The RULINGS
+above are unchanged — this corrects how they are *justified* downstream, and one implementation detail that
+contradicted the catalogue table above.
+
+1. **The effort ladder was cited from one row.** Both we:docs/agent/backlog-workflow.md § *Codex model
+   routing* and `CODEX_TIER_EFFORT`'s code comment quoted only `gpt-5.5` `medium`→`high` (4/8 → **4/4**) and
+   omitted the two rows beside it in this card's own table: `gpt-5.3-codex-spark` default→`high` went 7/8 →
+   **3/4** (more effort scored WORSE), and `gpt-6-astra` — the model Fork 3 actually pinned — went 8/8 at
+   default and **4/4** at `low` (the ladder is a no-op on the model that ships). Both now carry all three
+   rows and state the honest claim: the rungs are kept because they make the routing choice explicit and
+   recorded, and as a cost/latency dial — *not* because higher effort is measurably more correct here.
+2. **`CODEX_EFFORT_MAP` contradicted the catalogue table above.** It clamped `xhigh`/`max` down to `high`
+   and rejected `ultra` outright — a convention copied from we:scripts/lib/codex-judge-spawn.mjs on the
+   assumption Codex stops at `high`. The catalogue table in *What is actually selectable* already refutes
+   that, and it was re-confirmed twice: `gpt-6-astra`'s `supported_reasoning_levels`, read from the CLI's own
+   server-fetched model cache under the Codex home (`client_version 0.153.4`), list
+   `low·medium·high·xhigh·max·ultra`; and a live
+   `codex exec -m gpt-6-astra -c model_reasoning_effort=<level>` ping for each of `xhigh`, `max` and `ultra`
+   completed normally (`turn.completed`, no 400). The clamp was silently downgrading an explicitly requested
+   level — the exact sin Fork 1 exists to close — so the map is now an **identity** over all six. The RUNGS
+   still stop at `high`: no probe exercised the levels above it, so mapping a rung onto one would invent
+   evidence. Reaching above `high` stays a deliberate per-call `effort`.
+3. **`resolveCodexEffort` now validates `effort`, symmetrically with `tier`** (it previously passed any
+   string through unchecked while `tier` threw), and its `@returns` no longer claims a `CODEX_TIER_EFFORT`
+   value — it returns a `CODEX_EFFORT_MAP` key, which for `xhigh`/`max`/`ultra` was never one.
+
+Also in that PR: the `codifiedIn` link in the doc shipped with a `.md` suffix the site permalink does not
+serve, and we:skills-src/use-codex/SKILL.md documented neither `--tier` nor `--clear-rollout-after-run`.
+Both fixed.

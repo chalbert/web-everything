@@ -72,7 +72,7 @@
  *
  * Flags: --task=<text> | --task-file=<path> (one required), --dir=<existing dir> (default: fresh scratch
  * clone), --repo-root=<path> (default: this script's own repo root — where a scratch clone is cloned FROM),
- * --model=<model>, --effort=low|medium|high|xhigh|max, --timeout-ms=<n> (default 30 min), --gate=none|
+ * --model=<model>, --effort=low|medium|high|xhigh|max|ultra, --timeout-ms=<n> (default 30 min), --gate=none|
  * standards|full (default none), --ephemeral, --no-stream (still logs to file, just not to stdout too),
  * --log=<path> (default: alongside the target dir), --json (machine-readable final report on stdout).
  */
@@ -88,15 +88,33 @@ import { join, resolve } from 'node:path';
 export const CODEX_CLI = 'codex';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — an open-ended coding task, not a quick judge call.
 
-/** Same clamp-down convention `codex-judge-spawn.mjs#CODEX_EFFORT_MAP` uses — RE-DERIVE if Codex adds a level
- * above `high`. Kept as a local copy (not imported) because `codex-judge-spawn.mjs` is a different, unmerged
- * lane's file at the time this was written — see this file's header for why these are deliberately separate. */
+/**
+ * The `model_reasoning_effort` levels this file accepts, and what each sends to Codex. **IDENTITY, not a
+ * clamp** — every key below is a real level the pinned `CODEX_MODEL` actually offers, so an explicitly
+ * requested level is sent through unchanged.
+ *
+ * This previously copied `codex-judge-spawn.mjs#CODEX_EFFORT_MAP`'s clamp-down (`xhigh`/`max` → `high`, no
+ * `ultra` at all), which assumed Codex stopped at `high`. `#x8wbivt`'s own catalogue table refutes that, and
+ * the assumption was re-checked against the CLI's server-fetched catalogue (`~/.codex/models_cache.json`,
+ * `client_version 0.153.4`): `gpt-6-astra`'s `supported_reasoning_levels` are
+ * `low·medium·high·xhigh·max·ultra`. Confirmed by EXECUTION, not just by catalogue — a live
+ * `codex exec -m gpt-6-astra -c model_reasoning_effort=<level>` ping for each of `xhigh`, `max` and `ultra`
+ * completed normally (`turn.completed`), so none of the three is a 400 the clamp was protecting against.
+ * Clamping them was therefore silently DOWNGRADING a caller's explicit choice and recording nothing — the
+ * exact failure mode `CODEX_MODEL`'s "never inherit, never implicit" ratification exists to close.
+ *
+ * PER-MODEL CAVEAT: the level set is a property of the MODEL, not of Codex. The pinned `CODEX_MODEL` offers
+ * all six; a caller who overrides `model` may name one the catalogue does not list for it (e.g. `gpt-5.5`
+ * offers only `low·medium·high·xhigh`), and Codex answers that with its own error. This map validates the
+ * vocabulary, not the entitlement. RE-DERIVE on a Codex CLI upgrade or a `CODEX_MODEL` change.
+ */
 export const CODEX_EFFORT_MAP = Object.freeze({
   low: 'low',
   medium: 'medium',
   high: 'high',
-  xhigh: 'high',
-  max: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  ultra: 'ultra',
 });
 
 /**
@@ -119,17 +137,30 @@ export const CODEX_MODEL = 'gpt-6-astra';
  * always-set-subagent-model-explicitly.md` — Haiku/Sonnet/Opus, routing on the *shape* of the work) is KEPT as
  * a routing vocabulary on the Codex side too, but it no longer selects a MODEL: the card's own measurement
  * (three of four probes scored identically across six of seven current-generation models; the one real
- * separation found was by model *generation*, not marketing tier) refuses a model-based ladder twice over. The
- * one axis effort measurably moved: raising a weak model's `model_reasoning_effort` from its default
- * (`medium`) to `high` rescued it from 4/8 to 4/4 on the same probe, and dropping the strongest model to `low`
- * cost nothing on that probe. So all three rungs below pin the SAME `CODEX_MODEL`, and only the reasoning
- * EFFORT differentiates them — the dimension the evidence actually supports. Mapped onto Codex's own
- * `model_reasoning_effort` values (confirmed real via a live `codex exec -c model_reasoning_effort=<level>`
- * run, not guessed from Claude's low/medium/high naming): `haiku` (a pointer verifiable in seconds) gets the
- * cheapest real effort Codex offers; `sonnet` (execution against a decided spec) gets Codex's own measured
- * *default* (`medium` — unchanged from today's un-pinned behaviour, just made explicit rather than inherited);
- * `opus` (judgment work) gets the effort level that measurably rescued the weakest model on this evidence.
- * RE-DERIVE if a harder probe finds a task shape effort does not rescue.
+ * separation found was by model *generation*, not marketing tier) refuses a model-based ladder twice over.
+ *
+ * WHAT THE EFFORT EVIDENCE ACTUALLY SAYS — all three rows of the card's "Effort moved correctness where the
+ * model did not" table, not just the flattering one (n=4 per raised-effort cell, one probe shape, one repo):
+ *   - `gpt-5.5` default (`medium`) 4/8 → `high` **4/4** — a real rescue, on a previous-generation model.
+ *   - `gpt-5.3-codex-spark` default 7/8 → `high` **3/4** — MORE effort scored WORSE. Effort is not monotonic.
+ *   - `gpt-6-astra` default (`medium`) 8/8 → `low` **4/4** — on the model this file actually pins, the ladder
+ *     is a NO-OP on this probe: the cheap rung scored the same as the default one.
+ * So the honest claim is NOT "effort buys correctness". It is: effort is the only axis on which ANY movement
+ * was observed at all, the movement was mixed in direction, and on the pinned model nothing moved. The ladder
+ * below is therefore kept because it makes the routing choice EXPLICIT AND RECORDED (the Fork-1 principle
+ * applied to the second axis) and preserves the rung vocabulary for when real evidence exists — NOT because
+ * `high` is measurably better than `low` here. Treat the rungs as a cost/latency dial with an unproven
+ * correctness effect, and do NOT cite the 4/8→4/4 row on its own as justification.
+ *
+ * Mapped onto Codex's own `model_reasoning_effort` values (confirmed real via a live
+ * `codex exec -c model_reasoning_effort=<level>` run, not guessed from Claude's low/medium/high naming):
+ * `haiku` (a pointer verifiable in seconds) gets the cheapest real effort Codex offers; `sonnet` (execution
+ * against a decided spec) gets Codex's own measured *default* (`medium` — unchanged from today's un-pinned
+ * behaviour, just made explicit rather than inherited); `opus` (judgment work) gets `high`, the level whose
+ * only measured rescue was on a weaker model than the one pinned here. Note the rungs deliberately stop at
+ * `high` and do not reach `xhigh`/`max`/`ultra` (all three real and reachable via an explicit `effort` —
+ * see `CODEX_EFFORT_MAP`): no probe exercised them, so mapping a rung onto one would invent evidence.
+ * RE-DERIVE if a harder probe finds a task shape effort does not rescue — or one where raising it hurts again.
  */
 export const CODEX_TIER_EFFORT = Object.freeze({
   haiku: 'low',
@@ -143,15 +174,30 @@ export const CODEX_TIER_EFFORT = Object.freeze({
  * specific than one naming a role), `tier` resolves through the ratified map above, and naming NEITHER pins
  * the `sonnet` rung's `medium` rather than leaving the CLI to infer its own default — the same "never
  * implicit" principle `CODEX_MODEL` applies to model, applied here to effort. PURE.
+ * Both inputs are VALIDATED and throw a `TypeError` on an unknown value — `effort` symmetrically with `tier`
+ * (it previously passed through unchecked, so a typo only surfaced later, inside `buildCodexDirectTaskArgv`,
+ * or not at all for a caller using this function on its own).
+ *
  * @param {object} [opts]
- * @param {'haiku'|'sonnet'|'opus'} [opts.tier]
- * @param {string} [opts.effort] - one of `CODEX_EFFORT_MAP`'s keys.
- * @returns {string} one of `CODEX_TIER_EFFORT`'s VALUES (a real Codex `model_reasoning_effort` level).
+ * @param {'haiku'|'sonnet'|'opus'} [opts.tier] - a `CODEX_TIER_EFFORT` key. Throws on anything else.
+ * @param {string} [opts.effort] - a `CODEX_EFFORT_MAP` key. Throws on anything else.
+ * @returns {'low'|'medium'|'high'|'xhigh'|'max'|'ultra'} a real Codex `model_reasoning_effort` level — always
+ *   a `CODEX_EFFORT_MAP` key, which is exactly what `buildCodexDirectTaskArgv` accepts as its `effort`. An
+ *   explicit `effort` is returned as given (the map is an identity, so "as given" and "mapped" coincide); a
+ *   `tier` returns that rung's `CODEX_TIER_EFFORT` value, which is a subset (`low`/`medium`/`high` only).
+ * @throws {TypeError} on an unknown `tier` or an unknown `effort`.
  */
 export function resolveCodexEffort({ tier, effort } = {}) {
-  if (effort !== undefined) return effort;
+  if (effort !== undefined) {
+    if (!Object.hasOwn(CODEX_EFFORT_MAP, effort)) {
+      throw new TypeError(`codex-direct-task: \`effort\` must be one of ${Object.keys(CODEX_EFFORT_MAP).join('|')}, got ${JSON.stringify(effort)}`);
+    }
+    return effort;
+  }
   if (tier !== undefined) {
-    const mapped = CODEX_TIER_EFFORT[tier];
+    // `Object.hasOwn`, not a truthiness test on the lookup: a bare object literal still inherits
+    // `constructor`/`toString`, so `CODEX_TIER_EFFORT['constructor']` is truthy and would sail through.
+    const mapped = Object.hasOwn(CODEX_TIER_EFFORT, tier) ? CODEX_TIER_EFFORT[tier] : undefined;
     if (!mapped) {
       throw new TypeError(`codex-direct-task: \`tier\` must be one of ${Object.keys(CODEX_TIER_EFFORT).join('|')}, got ${JSON.stringify(tier)}`);
     }
@@ -175,9 +221,12 @@ export function resolveCodexEffort({ tier, effort } = {}) {
  * @param {string} [opts.model] - #x8wbivt: defaults to the ratified `CODEX_MODEL` pin — a caller must pass an
  *   explicit different string to override it; there is no way to omit `-m` entirely any more; omitting the
  *   CLI's own implicit-default resolution was the whole point of the ratification.
- * @param {string} [opts.effort] - one of `CODEX_EFFORT_MAP`'s keys. #x8wbivt: defaults to the `sonnet` rung's
- *   `medium` (via `CODEX_TIER_EFFORT`) for the same "never implicit" reason as `model` — resolve a `tier`
- *   through `resolveCodexEffort` before calling this if the caller thinks in rungs rather than raw levels.
+ * @param {'low'|'medium'|'high'|'xhigh'|'max'|'ultra'} [opts.effort] - a `CODEX_EFFORT_MAP` key, forwarded
+ *   UNCHANGED as `-c model_reasoning_effort=<level>` (the map is an identity — nothing is clamped down to
+ *   `high` any more; see `CODEX_EFFORT_MAP`). Throws on any other value. #x8wbivt: defaults to the `sonnet`
+ *   rung's `medium` (via `CODEX_TIER_EFFORT`) for the same "never implicit" reason as `model` — resolve a
+ *   `tier` through `resolveCodexEffort` before calling this if the caller thinks in rungs rather than raw
+ *   levels.
  * @param {boolean} [opts.ephemeral] - forwards Codex's own `--ephemeral` (no session persistence). Default
  *   false — see file header for why this script's default differs from the judge role's.
  * @param {string[]} [opts.addDirs] - forwarded as repeated `--add-dir`, for a task that legitimately needs to
@@ -216,7 +265,7 @@ export function buildCodexDirectTaskArgv({
     argv.push('-m', model.trim());
   }
   if (effort !== undefined) {
-    const mapped = CODEX_EFFORT_MAP[effort];
+    const mapped = Object.hasOwn(CODEX_EFFORT_MAP, effort) ? CODEX_EFFORT_MAP[effort] : undefined;
     if (!mapped) {
       throw new TypeError(`codex-direct-task: \`effort\` must be one of ${Object.keys(CODEX_EFFORT_MAP).join('|')}, got ${JSON.stringify(effort)}`);
     }
@@ -822,7 +871,7 @@ async function main() {
   if (flags.help) {
     console.log(
       'usage: node scripts/codex-direct-task.mjs --task=<text>|--task-file=<path> [--dir=<checkout>] '
-      + '[--repo-root=<path>] [--model=<m>] [--effort=low|medium|high|xhigh|max] [--tier=haiku|sonnet|opus] '
+      + '[--repo-root=<path>] [--model=<m>] [--effort=low|medium|high|xhigh|max|ultra] [--tier=haiku|sonnet|opus] '
       + '[--timeout-ms=<n>] [--gate=none|standards|full] [--ephemeral] [--clear-rollout-after-run] '
       + '[--no-stream] [--log=<path>] [--no-install] [--json]\n'
       + '  --model defaults to the ratified CODEX_MODEL pin (#x8wbivt); --effort/--tier default to the '
