@@ -53,7 +53,32 @@ happened in between), and the CLI report says plainly if that happened.
 
 `--gate=none` (default, fastest) | `standards` (`check:standards` only) | `full` (`check:standards` +
 the whole `vitest run` suite — this does **not** try to scope tests to what changed; that's a real gap,
-not a silent claim). `--model=`/`--effort=` forward to Codex. `--timeout-ms=` (default 30 min) is a
-parent-imposed wall — Codex has no CLI-side timeout of its own. `--ephemeral` skips Codex's own session
-persistence (default: persisted, so a stalled run is resumable by hand via `codex exec resume <thread-id>`
-— the report prints the thread id).
+not a silent claim). `--timeout-ms=` (default 30 min) is a parent-imposed wall — Codex has no CLI-side
+timeout of its own. `--ephemeral` skips Codex's own session persistence (default: persisted, so a stalled
+run is resumable by hand via `codex exec resume <thread-id>` — the report prints the thread id).
+
+**Model / effort — nothing is ever left to Codex's own implicit default** (`#3635`, ratified; the rule is
+`we:docs/agent/backlog-workflow.md#codex-model-routing`):
+
+- `--model=<slug>` — forwarded as `-m`. **Defaults to `CODEX_MODEL` (`gpt-6-astra`)**; there is no way to
+  make the script omit `-m`. Override only with a slug the ChatGPT entitlement actually lists — a guessed
+  name is a hard 400, not a soft fallback.
+- `--effort=low|medium|high|xhigh|max|ultra` — forwarded as `-c model_reasoning_effort=<level>`, unchanged
+  (no clamping). Throws on any other value. The levels above `high` are real on `gpt-6-astra` but no probe
+  has exercised them, so reaching for one is a deliberate call — and a `--model` override may not offer all
+  six.
+- `--tier=haiku|sonnet|opus` — the rung vocabulary instead of a raw level, mapped by `CODEX_TIER_EFFORT` to
+  `low`/`medium`/`high`. **It selects effort only — all three rungs run the same model.** **Ignored when
+  `--effort` is also given** (an explicit level outranks a named rung). Pass neither and you get the
+  `sonnet` rung's `medium` — explicitly, not inherited. Read the routing rule before picking: the evidence
+  behind the rungs is mixed (raising effort scored *worse* on one model, and is a no-op on the pinned one),
+  so treat them as a cost/latency dial that gets recorded, not as a correctness ladder.
+
+**`--clear-rollout-after-run`** (default off) — `#3635` Fork 4. Every non-`--ephemeral` run reads a real
+quota signal (`used_percent` / `window_minutes` / `resets_at` / `plan_type`) out of Codex's persisted rollout
+file and prints it in the report; there is no USD figure anywhere in Codex's output, this is the closest
+thing. This flag switches that read to the ratified **read-then-delete** shape: read the one record, then
+delete the rollout file — same net cleanliness as `--ephemeral`, but the signal gets read first. **It costs
+you `codex exec resume`**, which is exactly why it is off by default here (a personal escape hatch's stalled
+run is worth resuming). Turn it on only for a fire-and-forget run you will never resume. It is a no-op
+alongside `--ephemeral`, which writes no rollout to read or delete in the first place.

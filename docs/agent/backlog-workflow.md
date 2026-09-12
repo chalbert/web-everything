@@ -663,9 +663,9 @@ on what the brief actually asks the spawn to *do*, never on a field alone.
 
 ### Codex model routing — pin the model, differentiate on effort {#codex-model-routing}
 
-Ratified by [#3635](/backlog/3635-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher.md)
+Ratified by [#3635](/backlog/3635-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher/)
 (operator, 2026-09-11), on 89 logged `codex exec` runs across 8 selectable models (backlog `#3635`'s own
-evidence). Two rules, deliberately different in shape from the Claude-side table above:
+evidence). Three rules, deliberately different in shape from the Claude-side table above:
 
 1. **Every real Codex CLI invocation names its model explicitly**, the same "never inherit, never
    default-cheap" discipline `agent-memory-src/always-set-subagent-model-explicitly.md` requires for a
@@ -674,13 +674,35 @@ evidence). Two rules, deliberately different in shape from the Claude-side table
    every constructed argv (`buildCodexDirectTaskArgv` defaults to it — there is no way to omit `-m`).
 2. **The three-rung Haiku/Sonnet/Opus vocabulary survives, but it selects EFFORT, not model.** The evidence
    refuses a model-based ladder (three of four probes scored identically across six of seven current-generation
-   models; the one real split was by model *generation*, not tier), but *effort* measurably moved correctness
-   on the one probe that separated anything at all — raising a weak model's `model_reasoning_effort` from
-   `medium` to `high` rescued it from 4/8 to 4/4. So all three rungs pin the SAME `CODEX_MODEL` and differ only
-   on Codex's own `model_reasoning_effort` (real values, confirmed via a live `-c model_reasoning_effort=<level>`
-   run — not Claude's low/medium/high names applied by assumption):
-   `scripts/codex-direct-task.mjs#CODEX_TIER_EFFORT` = `{ haiku: 'low', sonnet: 'medium', opus: 'high' }`,
-   resolved via `resolveCodexEffort({ tier, effort })` (an explicit `effort` always outranks a named `tier`).
+   models; the one real split was by model *generation*, not tier). Effort is the only axis on which *any*
+   movement was observed — but **the movement was mixed, and it is not a claim that more effort is better.**
+   All three rows of the card's effort table, n=4 per raised-effort cell, one probe shape:
+
+   | run | correct | what it shows |
+   |---|---|---|
+   | `gpt-5.5` default (`medium`) → `high` | 4/8 → **4/4** | a real rescue — on a *previous-generation* model |
+   | `gpt-5.3-codex-spark` default → `high` | 7/8 → **3/4** | **more effort scored WORSE** — effort is not monotonic |
+   | `gpt-6-astra` default (`medium`) → `low` | 8/8 → **4/4** | on the model actually pinned, the ladder is a **no-op** |
+
+   So: cite the ladder as **an explicit, recorded routing choice** (rule 1's principle applied to the second
+   axis) and as a cost/latency dial — never as "high effort is measurably more correct here". On `gpt-6-astra`,
+   the model every call site actually runs, no probe has yet distinguished `low` from `medium`. The rungs are
+   kept so the vocabulary survives for when real per-shape evidence exists, not because today's data separates
+   them. All three pin the SAME `CODEX_MODEL` and differ only on Codex's own `model_reasoning_effort` (real
+   values, confirmed via a live `-c model_reasoning_effort=<level>` run — not Claude's low/medium/high names
+   applied by assumption): `scripts/codex-direct-task.mjs#CODEX_TIER_EFFORT` =
+   `{ haiku: 'low', sonnet: 'medium', opus: 'high' }`, resolved via `resolveCodexEffort({ tier, effort })` (an
+   explicit `effort` always outranks a named `tier`; both throw on an unknown value).
+
+   **The rungs stop at `high`; the effort *vocabulary* does not.** `gpt-6-astra`'s catalogue entry
+   (`~/.codex/models_cache.json`, `supported_reasoning_levels`) offers `low·medium·high·xhigh·max·ultra`, and
+   all six are reachable through an explicit `effort` — `scripts/codex-direct-task.mjs#CODEX_EFFORT_MAP` is an
+   **identity**, not a clamp (an earlier copy folded `xhigh`/`max` down to `high` and rejected `ultra`
+   outright, silently discarding a caller's explicit choice; `xhigh`, `max` and `ultra` were each re-confirmed
+   live against `gpt-6-astra` before that was removed). No rung maps onto them because no probe exercised them
+   — reaching above `high` is a deliberate per-call decision, never something a named rung does for you. Note
+   the level set is a property of the **model**: a `--model` override may not offer all six (`gpt-5.5` lists
+   only `low·medium·high·xhigh`).
 3. **The quota-consumption signal is surfaced, not thrown away.** No USD figure exists anywhere in Codex's
    output, but a real `rate_limits` block (`used_percent`/`window_minutes`/`resets_at`/`plan_type`) is
    persisted in a non-`--ephemeral` run's rollout file as a `token_count` event. The ratified shape for a

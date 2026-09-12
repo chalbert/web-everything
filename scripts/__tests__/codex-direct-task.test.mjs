@@ -80,12 +80,32 @@ describe('buildCodexDirectTaskArgv — pure argv for agentic/workspace-write mod
     expect(() => buildCodexDirectTaskArgv({ cwd: '/d', model: '--danger' })).toThrow();
   });
 
-  it('maps effort through CODEX_EFFORT_MAP, clamping xhigh/max to high, and rejects unknown levels', () => {
+  it('forwards effort through CODEX_EFFORT_MAP unchanged and rejects unknown levels', () => {
     for (const [level, mapped] of Object.entries(CODEX_EFFORT_MAP)) {
       const argv = buildCodexDirectTaskArgv({ cwd: '/d', effort: level });
       expect(flagValue(argv, '-c')).toBe(`model_reasoning_effort=${mapped}`);
     }
-    expect(() => buildCodexDirectTaskArgv({ cwd: '/d', effort: 'ultra' })).toThrow();
+    expect(() => buildCodexDirectTaskArgv({ cwd: '/d', effort: 'enormous' })).toThrow(/effort/);
+  });
+
+  // #3635 follow-up: the map WAS a clamp (`xhigh`/`max` → `high`, no `ultra`), copied from a sibling file
+  // that assumed Codex stopped at `high`. `gpt-6-astra`'s own catalogue lists all six levels and a live
+  // `codex exec -c model_reasoning_effort=<level>` ping for `xhigh`/`max`/`ultra` each completed normally,
+  // so the clamp was silently downgrading an explicitly requested level. Pin the identity so it can't
+  // regress into a clamp again.
+  it('#3635: CODEX_EFFORT_MAP is an IDENTITY over the six real levels — nothing is clamped to high', () => {
+    expect(CODEX_EFFORT_MAP).toEqual({
+      low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max', ultra: 'ultra',
+    });
+    for (const level of ['xhigh', 'max', 'ultra']) {
+      expect(flagValue(buildCodexDirectTaskArgv({ cwd: '/d', effort: level }), '-c'))
+        .toBe(`model_reasoning_effort=${level}`);
+    }
+  });
+
+  it('#3635: an inherited Object.prototype key is not a valid effort', () => {
+    expect(() => buildCodexDirectTaskArgv({ cwd: '/d', effort: 'constructor' })).toThrow(/effort/);
+    expect(() => buildCodexDirectTaskArgv({ cwd: '/d', effort: 'toString' })).toThrow(/effort/);
   });
 
   // #x8wbivt — the ratified model/effort pin. The whole point is that a real constructed argv NEVER omits
@@ -129,6 +149,31 @@ describe('#x8wbivt — CODEX_TIER_EFFORT / resolveCodexEffort: the ratified thre
 
   it('rejects an unknown tier', () => {
     expect(() => resolveCodexEffort({ tier: 'fable' })).toThrow(/tier/);
+    expect(() => resolveCodexEffort({ tier: 'constructor' })).toThrow(/tier/);
+  });
+
+  // #3635 follow-up: `tier` was validated but `effort` sailed through unchecked, so a typo either surfaced
+  // late (inside buildCodexDirectTaskArgv) or not at all for a caller using this function standalone. The
+  // @returns contract was false for the same reason — `xhigh`/`max` came back unmapped while the doc
+  // claimed a CODEX_TIER_EFFORT value. Both halves are pinned here.
+  it('#3635: rejects an unknown effort, symmetrically with tier', () => {
+    expect(() => resolveCodexEffort({ effort: 'enormous' })).toThrow(/effort/);
+    expect(() => resolveCodexEffort({ effort: 'constructor' })).toThrow(/effort/);
+    expect(() => resolveCodexEffort({ tier: 'opus', effort: 'enormous' })).toThrow(/effort/);
+  });
+
+  it('#3635: every return value is a real CODEX_EFFORT_MAP key — including above `high`', () => {
+    for (const level of Object.keys(CODEX_EFFORT_MAP)) {
+      const resolved = resolveCodexEffort({ effort: level });
+      expect(resolved).toBe(level);
+      expect(Object.keys(CODEX_EFFORT_MAP)).toContain(resolved);
+      // …and whatever comes back is accepted verbatim by the argv builder — the real contract.
+      expect(flagValue(buildCodexDirectTaskArgv({ cwd: '/d', effort: resolved }), '-c'))
+        .toBe(`model_reasoning_effort=${level}`);
+    }
+    for (const tier of Object.keys(CODEX_TIER_EFFORT)) {
+      expect(Object.keys(CODEX_EFFORT_MAP)).toContain(resolveCodexEffort({ tier }));
+    }
   });
 
   it('every resolved tier value round-trips through buildCodexDirectTaskArgv as a real -c flag', () => {
