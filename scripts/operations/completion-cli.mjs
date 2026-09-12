@@ -27,12 +27,16 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCompletion } from './completion-store.mjs';
+import {
+  COMPLETION_KINDS, applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCompletion,
+} from './completion-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
-/** The SAME two grammars `dispatch-lane.mjs#sessionSlugFor` (fix) and `review-dispatch.mjs` (review) mint. */
+/** The SAME `<kind>-<pr>` grammars `dispatch-lane.mjs#sessionSlugFor` (`fix`, and `ci-heal` since #3642) and
+ *  `review-dispatch.mjs` (review) mint. DERIVED from {@link COMPLETION_KINDS} rather than restating its
+ *  members, so a kind added to the record schema does not also need this literal edited (#3642). */
 export function sessionSlugForCompletion({ kind, pr }) {
-  if (kind !== 'review' && kind !== 'fix') throw new TypeError(`operations: completion --kind must be review or fix, got ${JSON.stringify(kind)}`);
+  if (!COMPLETION_KINDS.includes(kind)) throw new TypeError(`operations: completion --kind must be ${COMPLETION_KINDS.join(' or ')}, got ${JSON.stringify(kind)}`);
   if (pr === undefined || pr === null || String(pr).trim() === '') throw new TypeError('operations: completion --pr is required when --session is not given');
   return `${kind}-${String(pr).trim()}`;
 }
@@ -64,7 +68,7 @@ export function runReport(flags) {
   const pr = flags.pr ?? null;
   const item = flags.item ?? null;
   const session = flags.session || (kind && pr ? sessionSlugForCompletion({ kind, pr }) : undefined);
-  if (!session) throw new Error('usage: completion-cli.mjs report --session=<slug>|--kind=review|fix --pr=<n> --status=started|done [...]');
+  if (!session) throw new Error('usage: completion-cli.mjs report --session=<slug>|--kind=review|fix|ci-heal --pr=<n> --status=started|done [...]');
   if (flags.status !== 'started' && flags.status !== 'done') throw new Error('report requires --status=started|done');
 
   if (flags.status === 'started') {
@@ -76,7 +80,7 @@ export function runReport(flags) {
     // fresh here is what stops a crashed new generation from reading back as "already concluded" with a stale
     // outcome (review finding, #3436).
     if (existing?.status === 'started') return { changed: false, record: existing };
-    if (!kind) throw new Error('report --status=started requires --kind=review|fix (no existing record to infer it from)');
+    if (!kind) throw new Error('report --status=started requires --kind=review|fix|ci-heal (no existing record to infer it from)');
     const record = newCompletionRecord({ session, kind, pr, item });
     writeCompletion(record);
     return { changed: true, record };
@@ -102,7 +106,7 @@ export function runReport(flags) {
 
 export function runShow(flags) {
   const session = flags.session || (flags.kind && flags.pr ? sessionSlugForCompletion({ kind: flags.kind, pr: flags.pr }) : undefined);
-  if (!session) throw new Error('usage: completion-cli.mjs show --session=<slug>|--kind=review|fix --pr=<n>');
+  if (!session) throw new Error('usage: completion-cli.mjs show --session=<slug>|--kind=review|fix|ci-heal --pr=<n>');
   const record = tryReadCompletion(session);
   return record ? { found: true, ...record } : { found: false, session };
 }
@@ -117,7 +121,7 @@ if (IS_CLI) {
     } else if (sub === 'show') {
       writeAllSync(1, `${JSON.stringify(runShow(flags))}\n`);
     } else {
-      writeLineSync(2, 'usage: completion-cli.mjs report|show [--session=<slug>] [--kind=review|fix] [--pr=<n>] ...');
+      writeLineSync(2, 'usage: completion-cli.mjs report|show [--session=<slug>] [--kind=review|fix|ci-heal] [--pr=<n>] ...');
       process.exitCode = 2;
     }
   } catch (e) {

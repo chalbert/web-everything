@@ -54,6 +54,7 @@
 import { LAUNCH_KINDS } from './dispatch-lane.mjs';
 import { deliverItemDetachedProvider } from './dispatch-providers/build.mjs';
 import { fixDetachedProvider } from './dispatch-providers/fix.mjs';
+import { ciHealDetachedProvider } from './dispatch-providers/ci-heal.mjs';
 import { prepareScopeDetachedProvider } from './dispatch-providers/prepare.mjs';
 import { prepareDecisionDetachedProvider } from './dispatch-providers/prepare-decision.mjs';
 
@@ -62,14 +63,14 @@ import { prepareDecisionDetachedProvider } from './dispatch-providers/prepare-de
  * the ONE place a kind's mechanical wiring is declared; every consumer looks up through the functions below
  * rather than reaching in with a literal key.
  *
- * TODAY IT HOLDS THREE ENTRIES, and that is the honest state of the system rather than a stub: #3645 wired
- * `build`, #3641 wired `prepare`, #3640 wired `fix` and #3644 wired `prepare-decision`, because those are the
- * four kinds with a wrapper (`we:scripts/operations/deliver-item-wrapper.mjs`,
- * `we:scripts/operations/prepare-scope-wrapper.mjs`, `we:scripts/operations/fix-dispatch-wrapper.mjs`,
- * `we:scripts/operations/prepare-decision-wrapper.mjs`) owning their lifecycle. The remaining TWO —
- * `investigate`, `ci-heal` — still spawn their own agent from their own brief, whose first steps (`lane-pool
- * acquire`, `verify-lane`, `gh pr view`, `run.mjs open-pr`) the agent itself runs. Each sibling lane adds its
- * row as it lands.
+ * TODAY IT HOLDS FIVE ENTRIES, and that is the honest state of the system rather than a stub: #3645 wired
+ * `build`, #3641 wired `prepare`, #3640 wired `fix`, #3644 wired `prepare-decision` and #3642 wired
+ * `ci-heal`, because those are the five kinds with a wrapper
+ * (`we:scripts/operations/deliver-item-wrapper.mjs`, `we:scripts/operations/prepare-scope-wrapper.mjs`,
+ * `we:scripts/operations/fix-dispatch-wrapper.mjs`, `we:scripts/operations/prepare-decision-wrapper.mjs`,
+ * `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`) owning their lifecycle. The remaining ONE —
+ * `investigate` — still spawns its own agent from its own brief, whose first steps (`lane-pool acquire`,
+ * `verify-lane`, `run.mjs open-pr`) the agent itself runs.
  *
  * @type {Readonly<Record<string, Readonly<{kind: string, provider: Function, modeEnv: string|null, defaultMode: 'mechanical'|'agent'}>>>}
  */
@@ -104,6 +105,15 @@ export const DISPATCH_PROVIDER_REGISTRY = Object.freeze({
     kind: 'prepare-decision',
     provider: prepareDecisionDetachedProvider,
     modeEnv: 'WE_PREPARE_DECISION_DISPATCH_MODE',
+    defaultMode: 'mechanical',
+  }),
+  // #3642 — the ci-heal wrapper, the OTHER PR-keyed repair kind. Same real opt-out, same reason: the prose
+  // brief (`we:skills-src/conveyor/fix-agent-ci-brief.md`) is kept and carries a FALLBACK-PATH header naming
+  // `WE_CI_HEAL_DISPATCH_MODE=agent` as the path that selects it.
+  'ci-heal': Object.freeze({
+    kind: 'ci-heal',
+    provider: ciHealDetachedProvider,
+    modeEnv: 'WE_CI_HEAL_DISPATCH_MODE',
     defaultMode: 'mechanical',
   }),
 });

@@ -29,13 +29,16 @@ afterEach(() => {
 });
 
 describe('sessionSlugForCompletion', () => {
-  it('mints the same review-<pr> / fix-<pr> grammar the dispatchers already use', () => {
+  it('mints the same review-<pr> / fix-<pr> / ci-heal-<pr> grammar the dispatchers already use', () => {
     expect(sessionSlugForCompletion({ kind: 'review', pr: 701 })).toBe('review-701');
     expect(sessionSlugForCompletion({ kind: 'fix', pr: '9' })).toBe('fix-9');
+    // #3642 — and it agrees with `dispatch-lane.mjs#sessionSlugFor(num, 'ci-heal', pr)`, which is asserted
+    // against the real function in `./dispatch-lane-ci-heal-wiring.test.mjs`.
+    expect(sessionSlugForCompletion({ kind: 'ci-heal', pr: 743 })).toBe('ci-heal-743');
   });
 
   it('refuses an unknown kind or a missing pr', () => {
-    expect(() => sessionSlugForCompletion({ kind: 'build', pr: 1 })).toThrow(/--kind must be review or fix/);
+    expect(() => sessionSlugForCompletion({ kind: 'build', pr: 1 })).toThrow(/--kind must be review or fix or ci-heal/);
     expect(() => sessionSlugForCompletion({ kind: 'review', pr: null })).toThrow(/--pr is required/);
   });
 });

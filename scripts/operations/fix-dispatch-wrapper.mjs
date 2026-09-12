@@ -32,6 +32,16 @@
  *
  * `ci-heal` is the OTHER PR-keyed repair kind and its own card says the two "likely share most of a wrapper".
  * The pieces below are deliberately kind-agnostic and are meant to be imported, not copied:
+ *
+ * SETTLED BY #3642, which landed `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` as a SEPARATE module
+ * that IMPORTS this list rather than a shared core with two arms — see that file's own header for the four
+ * steps that genuinely differ and why a strategy-callback core would have been the worse shape. Two
+ * amendments to the handover below, both verified there against this code rather than assumed:
+ *   * {@link ensureFixHooksSettingsFile} did NOT generalize — the SETTINGS object does, the WRITER does not,
+ *     because it is bound to one sidecar path and this file's own §2 note forbids two concurrently
+ *     dispatchable kinds sharing one. `ci-heal` writes its own file over {@link FIX_HOOKS_SETTINGS}.
+ *   * {@link pushLaneRef} needed one optional flag (`forceWithLease`) rather than being reusable as-is — a
+ *     `ci-heal` rebases before repairing, so its re-push is not a fast-forward. Default unchanged.
  * {@link FIX_LANE_PURPOSE}-shaped acquire via `minimal-context-provider.mjs#acquireLane`,
  * {@link FIX_HOOKS_SETTINGS}/{@link ensureFixHooksSettingsFile}, {@link buildFixAgentEnv} (whose
  * `WE_DISPATCH_KIND: 'repair'` stamp is ALREADY the shared value — see its docblock),
@@ -392,9 +402,20 @@ export function runFixGateWithOneRetry(
 // ================================================================================================
 
 /** REAL — `git push origin HEAD:refs/heads/<laneRef>`, updating the EXISTING PR in place (never a new PR,
- *  never `pr-land`) — the same shape `we:skills-src/conveyor/fix-agent-brief.md` step 6 already uses. */
-export function pushLaneRef({ lanePath, laneRef }, { run: runFn = run } = {}) {
-  runFn('git', ['push', 'origin', `HEAD:refs/heads/${laneRef}`], { cwd: lanePath });
+ *  never `pr-land`) — the same shape `we:skills-src/conveyor/fix-agent-brief.md` step 6 already uses.
+ *
+ *  `forceWithLease` (#3642) — DEFAULT `false`, so this caller and every existing test are byte-identical. The
+ *  OTHER PR-keyed repair kind needs it: `ci-heal-dispatch-wrapper.mjs` rebases the lane onto current `main`
+ *  before repairing, which REWRITES the lane's history, so a plain push is rejected as non-fast-forward.
+ *  `--force-with-lease` and never a bare `--force` — the lease refuses if someone else advanced the ref since
+ *  the fetch, which is the safety net against clobbering a concurrent human `/finish`
+ *  (`we:skills-src/conveyor/fix-agent-ci-brief.md` step 6's own rule). A `fix` never rebases, so it never
+ *  passes this and never needs the lease. */
+export function pushLaneRef({ lanePath, laneRef, forceWithLease = false }, { run: runFn = run } = {}) {
+  const args = ['push'];
+  if (forceWithLease) args.push('--force-with-lease');
+  args.push('origin', `HEAD:refs/heads/${laneRef}`);
+  runFn('git', args, { cwd: lanePath });
 }
 
 /** REAL — `we:scripts/conveyor/rearm-review.mjs <pr> --repo=<repo>` (`review:changes → review:pending`; never

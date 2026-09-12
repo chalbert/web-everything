@@ -27,8 +27,19 @@ export const COMPLETION_RECORD_VERSION = 1;
 /** The two states a record moves through — see the file header. */
 export const COMPLETION_STATUSES = Object.freeze(['started', 'done']);
 
-/** The two dispatched-agent kinds this record shape serves today (`we:backlog/3436-*.md`'s own two briefs). */
-export const COMPLETION_KINDS = Object.freeze(['review', 'fix']);
+/**
+ * The dispatched-agent kinds this record shape serves — `review`/`fix` from `we:backlog/3436-*.md`'s own two
+ * briefs, plus `ci-heal` (#3642).
+ *
+ * `ci-heal` FITS THIS SHAPE RATHER THAN NEEDING A FOURTH RECORD FAMILY, checked rather than assumed: this
+ * record answers "was a dispatch of kind K at PR N started, and how did it end", which is exactly what a CI
+ * heal's durable trace needs, and its slug grammar is already `<kind>-<pr>` — so
+ * `completion-cli.mjs#sessionSlugForCompletion` derives `ci-heal-<pr>`, byte-identical to what
+ * `we:scripts/operations/dispatch-lane.mjs#sessionSlugFor(num, 'ci-heal', pr)` mints. Distinct from `fix`
+ * deliberately: both repair kinds can target the SAME PR number, so folding them onto one kind would make the
+ * two dispatches' records collide on one file.
+ */
+export const COMPLETION_KINDS = Object.freeze(['review', 'fix', 'ci-heal']);
 
 /** Session slugs are used as filenames, so the character set is closed — no separators, no traversal. */
 const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

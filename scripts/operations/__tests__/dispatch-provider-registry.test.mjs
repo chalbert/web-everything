@@ -7,8 +7,8 @@
  *      never fire, so it reads as working wiring in review while doing nothing. The registry checks this at
  *      module LOAD; this file pins that the check is real.
  *   2. **THE UNREGISTERED KINDS ARE A DELIBERATE TRIPWIRE.** Four sibling lanes were wiring `prepare` (#3641,
- *      LANDED — off the list below), `prepare-decision` (#3644, LANDED — likewise), `fix` (#3640) and
- *      `ci-heal` (#3642). Each one that lands flips ONE line here, on purpose — the list below is the ledger
+ *      LANDED — off the list below), `prepare-decision` (#3644, LANDED — likewise), `fix` (#3640, LANDED) and
+ *      `ci-heal` (#3642, LANDED — the last of the four). Each one that lands flips ONE line here, on purpose — the list below is the ledger
  *      of what is still on the agent path, and it should have to be edited rather than silently drift. This
  *      file is the ONE place that enumeration lives: every other routing test asserts the INVARIANT (routed
  *      mechanically iff registered) rather than a snapshot, so a landing kind edits one line, here, and
@@ -53,9 +53,10 @@ const buildPayload = (over = {}) => ({
 
 /** THE LEDGER OF WHAT IS STILL ON THE AGENT PATH. One line flips per sibling lane — see the header.
  *  `prepare` left this list in #3641 (`we:scripts/operations/prepare-scope-wrapper.mjs`), `fix` in #3640
- *  (`we:scripts/operations/fix-dispatch-wrapper.mjs`) and `prepare-decision` in #3644
- *  (`we:scripts/operations/prepare-decision-wrapper.mjs`). */
-const UNREGISTERED_KINDS = ['investigate', 'ci-heal'];
+ *  (`we:scripts/operations/fix-dispatch-wrapper.mjs`), `prepare-decision` in #3644
+ *  (`we:scripts/operations/prepare-decision-wrapper.mjs`) and `ci-heal` in #3642
+ *  (`we:scripts/operations/ci-heal-dispatch-wrapper.mjs`). `investigate` is the last one left. */
+const UNREGISTERED_KINDS = ['investigate'];
 
 /** Every registered kind's mode with NOTHING set in the environment — derived from the table rather than
  *  written out, so a landing sibling lane edits the ledger above and nothing else (#3641). */
