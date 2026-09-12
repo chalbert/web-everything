@@ -369,8 +369,10 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
      > **What a tool-free juror cannot do — stated, not buried.** `judgePanel` seats are always `--tools ''`
      > (it forwards no `allowedTools` — RULING in `we:scripts/lib/judge-panel.mjs`, #3158: panel seats stay
      > tool-free rather than pay the N-seats-need-N-lanes cost of a tool-bearing panel). A tool-free juror
-     > cannot literally break a line or clone the repo, so `MUTATION_PROBE_RULE` and the mandate's isolation
-     > clause now SELF-SCOPE on that fact (same pattern as the mutation probe's own lens-scoping): a tool-free
+     > cannot literally break a line or clone the repo, so all three clauses that demanded it —
+     > `MUTATION_PROBE_RULE`, `GUARANTEE_NEEDS_A_TEST_RULE` (the same demand, narrowed to prose guarantees),
+     > and the mandate's isolation
+     > clause — now SELF-SCOPE on that fact (same pattern as the mutation probe's own lens-scoping): a tool-free
      > seat is told to name the test it BELIEVES would redden and say plainly it ran nothing, never to
      > describe a break or a clone it did not perform. `panel-fanout` separately tells each juror it has no
      > tools and must not claim to have opened anything, so a seat reports honestly rather than fabricating —

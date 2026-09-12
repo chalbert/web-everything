@@ -2528,6 +2528,31 @@ describe('GUARANTEE_NEEDS_A_TEST_RULE rides alongside the prose rule', () => {
     expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
     expect(PROSE_IMPRECISION_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
   });
+
+  // ── #3158 — THIS RULE SELF-SCOPES ON TRANSPORT TOO, NOT JUST THE MUTATION PROBE ──────────────────────────
+  // It carries the IDENTICAL "BREAK the guarded line" demand, so conditioning only `MUTATION_PROBE_RULE` would
+  // have left a tool-free `judgePanel` seat still instructed to do the impossible. Same shape as the probe's
+  // fix: both branches in the WORDING, no caller flag, present for every mandate unconditionally.
+  describe('#3158 — the guarantee rule tells a tool-free juror what to do instead of breaking a line', () => {
+    it('names both branches — tool-bearing break-the-line, and tool-free name-the-test', () => {
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/When you have tools and can act on the diff, BREAK the guarded line/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/When you have NO tools \(a tool-free juror\), you cannot break anything/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/name the test you believe SHOULD defend it/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/never claim a mutation result you did not produce/);
+    });
+
+    it('keeps the COVERAGE framing for the tool-free branch — an unverified gap is still worth raising', () => {
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/worth raising even unverified/);
+    });
+
+    it('reaches every panel lens AND the validator with no caller flag', () => {
+      for (const lens of PANEL_LENSES) {
+        expect(buildPanelMandate({ lens }), lens).toContain('When you have NO tools (a tool-free juror), you cannot break anything');
+      }
+      expect(buildValidatorMandate({ lens: 'correctness' }))
+        .toContain('When you have NO tools (a tool-free juror), you cannot break anything');
+    });
+  });
 });
 
 describe('PROSE_IMPRECISION_RULE reaches every mandate built on buildMandate', () => {

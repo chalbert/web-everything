@@ -207,12 +207,23 @@ export const DEFAULT_MANDATE = 'correctness';
  * FRAMED AS COVERAGE, NOT AS PROSE, and that is load-bearing: a missing test is a real gap in the diff, so it
  * routes through the ordinary disposition machinery. Reading it as a prose finding would put it straight back
  * under the rule above and it would never be raised.
+ *
+ * #3158 — SELF-SCOPED ON TRANSPORT TOO, THE SAME WAY {@link MUTATION_PROBE_RULE} IS. This rule carries the
+ * IDENTICAL "BREAK the guarded line and confirm a NAMED test reddens" demand as the mutation probe, just
+ * narrowed to prose guarantees — so a tool-free `judgePanel` seat was being told to do the impossible here as
+ * well, and conditioning only the probe would have left half the bug in place. The fix is the same one the
+ * #3094 ruling above mandates and the one `judge-panel.mjs`'s RULING records: the text carries BOTH branches
+ * unconditionally and the juror — the only party that actually knows whether it has tools — picks. No caller
+ * flag, so no call site can forget it and no default can be stale in either direction.
  */
 export const GUARANTEE_NEEDS_A_TEST_RULE = [
   'A COMMENT THAT PROMISES SOMETHING IS A TEST WITH THE WRONG SYNTAX. For each guarantee the diff states in',
-  'prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find the test that defends it, then',
-  'BREAK the guarded line and confirm a NAMED test reddens. A guarantee no test defends is a COVERAGE finding,',
-  'not a prose one, and it is worth raising: prose is the only thing in a diff that nothing checks. Watch',
+  'prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find the test that defends it. When',
+  'you have tools and can act on the diff, BREAK the guarded line and confirm a NAMED test reddens. When you',
+  'have NO tools (a tool-free juror), you cannot break anything — name the test you believe SHOULD defend it,',
+  'say plainly that you could not verify by mutation, and never claim a mutation result you did not produce. A',
+  'guarantee no test defends is a COVERAGE finding, not a prose one, and it is worth raising even unverified:',
+  'prose is the only thing in a diff that nothing checks. Watch',
   'DEFAULTS in particular — a default value quietly satisfying a check written for the explicit value is the',
   'single most common shape here.',
 ].join(' ');
