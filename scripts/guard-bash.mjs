@@ -94,6 +94,16 @@
  *     The parser now FAILS CLOSED instead. This denies nothing real: bash rejects the identical input
  *     (`unexpected EOF while looking for matching quote`), verified against `bash -c`. No override.
  *
+ *   • the DELIVERY AGENT (#3627) — `dispatchKind === 'delivery'` (`WE_DISPATCH_KIND=delivery`, stamped by
+ *     `deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER.spawn` onto the agent's own process env; the
+ *     SAME channel #3105's dispatched-verification arm above already reads) may never run, ITSELF, any of the
+ *     mechanical lifecycle commands its own wrapper drives end to end: `lane-pool.mjs`, `backlog.mjs claim`/
+ *     `release`, `gh pr`, `run.mjs open-pr`/`open-pr.mjs`, `pr-land.mjs`, `learnings-drop.mjs`,
+ *     `converge-cli.mjs`, `verify-lane.mjs` (in any mode, including `request`/`check`), and
+ *     `review-core-cli.mjs`. The brief (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) already told the
+ *     agent this in prose; nothing enforced it. Every other session (interactive, or any other
+ *     `WE_DISPATCH_KIND`) is unaffected. No override.
+ *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
  * appends a COLLATERAL notice naming the state-producing steps (heredocs, file writes, git mutations) that
@@ -1824,7 +1834,7 @@ export function gitAddEnumerationReason(command) {
  *  lease in the same pool shares its `ownerSession`) and whose minted per-holder slug is this string (computed
  *  by the CLI via the lease read + a sibling-lease scan) — gates the #2997 fail-closed destructive-op rule,
  *  which supersedes the #2367 ownerSession compare in exactly the topology where that compare cannot answer. */
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null } = {}) {
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -2057,6 +2067,51 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       if (hasPutMethod)
         return 'a `gh api …/pulls/<n>/merge -X PUT` is the REST equivalent of a raw `gh pr merge` — the same bypass of `scripts/lib/pr-merge-gate.mjs`\'s `assertMayMerge` (#2290\'s sole-writer invariant) and the review-escalation check behind it. Apply the `ready-to-merge` label and let the drain land it (`node scripts/pr-land.mjs`, or the `/drain` skill). Emergency-only escape (logged loudly): prefix `WE_MERGE_BREAK_GLASS=1`.';
     }
+  }
+
+  // #3627 — the delivery agent's OWN Bash session (spawned by `scripts/operations/deliver-item-wrapper.mjs`'s
+  // `CLAUDE_RESTRICTED_PROVIDER`, `--restricted --tools=Bash,Edit,Write,Read,Glob,Grep`) must never run any of
+  // the mechanical lifecycle commands the WRAPPER itself owns end to end — acquire/claim, gate, converge, PR,
+  // and learnings-drop. `we:skills-src/conveyor/delivery-agent-brief-v2.md` already tells the agent this in
+  // PROSE ("build, report — nothing else"); nothing enforced it structurally until now.
+  //
+  // SCOPED VIA `dispatchKind === 'delivery'`, THE SAME CHANNEL #3105 ALREADY READS — not a second session-type
+  // signal invented for this file. `dispatchKind` comes from `process.env.WE_DISPATCH_KIND`
+  // (`dispatchedAgentVerificationReason`'s own docblock, above), and `CLAUDE_RESTRICTED_PROVIDER.spawn`
+  // (`deliver-item-wrapper.mjs`) now stamps `WE_DISPATCH_KIND=delivery` onto the delivery agent's own process
+  // env for exactly this reason — every hook that fires inside that agent's own turn inherits it, the same way
+  // a mechanically-dispatched build/fix/ci-heal agent's env already does for the #3105 arm above. An
+  // interactive operator session (no `WE_DISPATCH_KIND` at all) and every other dispatch kind are unaffected —
+  // this whole block is a no-op unless `dispatchKind` is literally `'delivery'`.
+  //
+  // NO OVERRIDE. Every command below is something the WRAPPER runs itself, OUTSIDE the agent's own turn and
+  // outside this hook's reach entirely (see this file's own `runGateWithOneRetry`/`runConverge`/`openPr`/
+  // `dropLearning` — none of those are Claude Code Bash TOOL calls; they are the wrapper's own plain Node
+  // child-process spawns, invisible to `PreToolUse` altogether). The agent has no legitimate reason to reach
+  // for any of them from inside its own restricted turn, ever — not even the read-only-looking spellings
+  // (`lane-pool.mjs status`, `verify-lane.mjs check`), because the agent has no business knowing any of this
+  // machinery exists at all (FIRM REQUIREMENT 5 in `deliver-item-wrapper.mjs`'s own header).
+  if (dispatchKind === 'delivery') {
+    if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
+      return 'a delivery agent may never run `lane-pool.mjs` itself — acquiring/releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseClaimAndLane` in deliver-item-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
+      return 'a delivery agent may never run `backlog.mjs claim` itself — the wrapper claims the item before the agent is ever spawned (`claimItem`); a second claim from inside the agent is redundant at best and a race at worst. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
+      return 'a delivery agent may never run `backlog.mjs release` itself — release is decided by the wrapper reading the agent\'s own structured report (`releaseClaimAndLane`), never by the agent releasing its own claim mid-build. There is no override.';
+    if (atCommand(/^gh\s+pr\b/))
+      return 'a delivery agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR (FIRM REQUIREMENT 2 in deliver-item-wrapper.mjs; `openPr` is the only caller, and only after the gate and converge have both run). There is no override.';
+    if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
+      return 'a delivery agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openPr`), driven by a park decision the agent never computes. There is no override.';
+    if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
+      return 'a delivery agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+    if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
+      return 'a delivery agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report, and the wrapper is what drops it (`dropLearning`). There is no override.';
+    if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
+      return 'a delivery agent may never run `converge-cli.mjs` itself — it never initiates review of its own diff (FIRM REQUIREMENT 1 in deliver-item-wrapper.mjs; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited). There is no override.';
+    if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
+      return 'a delivery agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+    if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
+      return 'a delivery agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
   }
 
   return null;
@@ -2321,8 +2376,8 @@ export function mergeBreakGlassUsed(command, ctx = {}) {
 }
 
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
- *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule, and
- *  `foreignLiveLease` for the #2367 rule). */
+ *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule,
+ *  `foreignLiveLease` for the #2367 rule, and `dispatchKind` for the #3105/#3627 dispatched-session rules). */
 export function decide(command, ctx = {}) {
   if (!command) return null;
   // #2788 review r3 finding 2 — a heredoc BODY is data, not commands. The segment split below treats every
