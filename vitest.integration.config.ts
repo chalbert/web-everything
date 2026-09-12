@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { weAlias } from './vitest.shared';
+import { maxTestWorkers, weAlias } from './vitest.shared';
 
 /**
  * The REAL-git / real-subprocess tier `vitest.config.ts` excludes (see that file's `test.exclude` comment
@@ -90,7 +90,16 @@ export default defineConfig({
       // item-resolved-axis pattern as its sibling above, so the same contention risk applies by construction.
       ['scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs', 'forks'],
     ],
+    // #x1jcikc: default `threads` pool cap (see vitest.shared.ts#maxTestWorkers) — the handful of files
+    // above are pinned to the SEPARATE `forks` pool's `singleFork: true` for a correctness reason (flaky
+    // under contention), which this leaves untouched; everything else here still shares the uncapped
+    // `threads` pool today, so it needs the same ceiling `vitest.config.ts` gets.
+    pool: 'threads',
     poolOptions: {
+      threads: {
+        maxThreads: maxTestWorkers,
+        minThreads: 1,
+      },
       forks: {
         singleFork: true,
       },
