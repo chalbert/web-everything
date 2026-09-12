@@ -1386,3 +1386,125 @@ describe('planTick — manual dispatch-pause (#3609): holds ALL new prepare/fix/
     expect(out.nextState.ciHealAttempts).toEqual({ 98: 1 });
   });
 });
+
+describe('planTick — KIND-SCOPED dispatch-pause (epic #3383): hold NEW-item kinds, let already-open-PR kinds run', () => {
+  const changesPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', labels: ['review:changes'] });
+  const redPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] });
+  // One candidate per spawn kind this core plans, all simultaneously ready, with a lane each.
+  const everyKindReady = {
+    state: {
+      queue: [], unshaped: [{ num: 20 }], decisions: [{ num: 30, prepared: false }], lanes: [],
+      prs: [changesPr(99, 40), redPr(98, 41)],
+    },
+    plan: { launch: [], held: [{ num: 50, reason: 'needs-investigation' }] },
+    freeLanes: [4, 5, 6, 7, 8],
+    bookkeeping: { tick: 0, launchedNums: [40, 41] },
+  };
+
+  it('BACKWARD COMPAT: `dispatchPaused: true` with NO kinds holds every kind — old-format marker / boolean-only caller', () => {
+    for (const kinds of [undefined, null, []]) {
+      const out = planTick({ ...everyKindReady, dispatchPaused: true, dispatchPausedKinds: kinds });
+      expect(out.decisions.spawnPrepareScope).toEqual([]);
+      expect(out.decisions.spawnPrepareDecision).toEqual([]);
+      expect(out.decisions.spawnInvestigations).toEqual([]);
+      expect(out.decisions.spawnFixes).toEqual([]);
+      expect(out.decisions.spawnCiHeals).toEqual([]);
+      // …and the note keeps its pre-scope wording verbatim.
+      expect(out.decisions.notes.find((n) => n.kind === 'dispatch-paused').text)
+        .toBe('⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick');
+    }
+  });
+
+  it('THE OPERATOR CASE — new-item kinds held, fix + ci-heal still spawn for already-open PRs', () => {
+    const out = planTick({
+      ...everyKindReady,
+      dispatchPaused: true,
+      dispatchPausedKinds: ['build', 'prepare', 'prepare-decision', 'investigate'],
+      dispatchPausedReason: 'Conserve Claude usage-limit tokens',
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.spawnPrepareDecision).toEqual([]);
+    expect(out.decisions.spawnInvestigations).toEqual([]);
+    // …while the two "act on an already-open PR" kinds proceed, taking the lanes the held kinds did not.
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 4 }]);
+    expect(out.decisions.spawnCiHeals).toEqual([{ pr: 98, num: 41, lane: 5, reason: 'red-ci' }]);
+  });
+
+  it('a held kind consumes NO lane — an unheld sibling gets the lane the held one would have taken', () => {
+    const out = planTick({
+      ...everyKindReady,
+      freeLanes: [4], // exactly one lane for the whole tick
+      dispatchPaused: true,
+      dispatchPausedKinds: ['prepare', 'prepare-decision', 'investigate'],
+    });
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 4 }]);
+  });
+
+  it('the INVERSE scope — fix/ci-heal held while the prepare family keeps spawning', () => {
+    const out = planTick({ ...everyKindReady, dispatchPaused: true, dispatchPausedKinds: ['fix', 'ci-heal'] });
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 4 }]);
+    expect(out.decisions.spawnPrepareDecision).toEqual([{ num: 30, lane: 5 }]);
+    expect(out.decisions.spawnInvestigations).toEqual([{ num: 50, lane: 6 }]);
+    expect(out.decisions.spawnFixes).toEqual([]);
+    expect(out.decisions.spawnCiHeals).toEqual([]);
+  });
+
+  it('each prepare-family kind is held INDEPENDENTLY of its two siblings', () => {
+    const out = planTick({ ...everyKindReady, dispatchPaused: true, dispatchPausedKinds: ['prepare-decision'] });
+    expect(out.decisions.spawnPrepareDecision).toEqual([]);
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 4 }]);
+    expect(out.decisions.spawnInvestigations).toEqual([{ num: 50, lane: 5 }]);
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 6 }]);
+  });
+
+  it('kinds WITHOUT `dispatchPaused` arm nothing, and no note fires', () => {
+    const out = planTick({ ...everyKindReady, dispatchPaused: false, dispatchPausedKinds: ['fix', 'ci-heal'] });
+    // lanes 4/5/6 go to prepare/prepare-decision/investigate, so an unarmed scope leaves fix on lane 7.
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 7 }]);
+    expect(out.decisions.notes.some((n) => n.kind === 'dispatch-paused')).toBe(false);
+  });
+
+  it('the NOTE names the kinds a SCOPED pause actually holds — never a flat "dispatch paused" while fix runs', () => {
+    const out = planTick({
+      ...everyKindReady,
+      dispatchPaused: true,
+      dispatchPausedKinds: ['build', 'prepare', 'prepare-decision', 'investigate'],
+      dispatchPausedReason: 'conserve tokens',
+    });
+    const note = out.decisions.notes.find((n) => n.kind === 'dispatch-paused');
+    expect(note.text).toContain('build, prepare, prepare-decision, investigate');
+    expect(note.text).toContain('prepare/prepare-decision/investigate');
+    expect(note.text).toContain('conserve tokens');
+    expect(note.text).not.toContain('/fix/');
+  });
+
+  it('a BUILD-ONLY pause says builds are held upstream rather than claiming this tick withheld spawns', () => {
+    const out = planTick({ ...everyKindReady, dispatchPaused: true, dispatchPausedKinds: ['build'] });
+    const note = out.decisions.notes.find((n) => n.kind === 'dispatch-paused');
+    expect(note.text).toContain('held upstream');
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 4 }]);
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 7 }]);
+  });
+
+  it('a scope naming ALL SIX kinds is indistinguishable from a blanket pause', () => {
+    const kinds = ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'];
+    const scoped = planTick({ ...everyKindReady, dispatchPaused: true, dispatchPausedKinds: kinds });
+    const blanket = planTick({ ...everyKindReady, dispatchPaused: true });
+    expect(scoped).toEqual(blanket);
+  });
+
+  it('a scoped pause still never touches in-flight work — a live fix guard retires normally while fix is held', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [], lanes: [], prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: [] }] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, fixGuards: [{ pr: 99, num: 40, lane: 3, spawnedTick: 0, claimed: true }] },
+      dispatchPaused: true,
+      dispatchPausedKinds: ['fix'],
+    });
+    expect(out.decisions.retireGuards.fix.some((r) => r.pr === 99)).toBe(true);
+    expect(out.nextState.fixGuards).toEqual([]);
+  });
+});

@@ -137,6 +137,9 @@
 
 import { normNum } from './queue-store.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
+// The kind-scoped pause's PURE half (epic #3383) — the same predicate `dispatch-plan.mjs` uses for its own
+// `build` gate, so the two cores can never disagree about what a given marker holds. No fs comes in with it.
+import { resolvePausedKinds, isScopedPause } from '../readiness/dispatch-pause.mjs';
 
 /** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
  *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
@@ -160,6 +163,14 @@ export const DEFAULT_CI_HEAL_TTL_TICKS = 5;
 export const DEFAULT_CI_HEAL_RETRY_CAP = 3;
 /** Default idle-stop window: queue-empty + no operator feedback for this long → stop (SKILL §6). */
 export const DEFAULT_IDLE_WINDOW_MS = 15 * 60 * 1000;
+/**
+ * The dispatch kinds THIS core spawns, in tick order — the five of `dispatch-pause.mjs#PAUSABLE_KINDS` that
+ * are planned here. `build` is the sixth and is deliberately absent: builds are gated one step upstream, where
+ * `we:scripts/readiness/dispatch-plan.mjs` empties `plan.launch` to `dispatch-paused` holds, so this core never
+ * decides a build's fate. Used to word the kind-scoped pause note with the kinds THIS tick actually withheld.
+ */
+export const TICK_SPAWN_KINDS = Object.freeze(['prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+
 /** The review label that routes a bounced PR to a fix agent (vs. a human-owned review park). */
 export const REVIEW_CHANGES_LABEL = 'review:changes';
 
@@ -865,15 +876,27 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *   now?: number|null, lastOperatorTurn?: number|null,
  *   dispatchPaused?: boolean,          // #3609 — the manual/emergency dispatch-pause lever's current state
  *   dispatchPausedReason?: string|null,// (dispatch-pause.mjs#isDispatchPaused / readPauseState), read by the IO
- *                                      // shell. When true, ALL NEW prepare/fix/ci-heal spawns are held this
- *                                      // tick (build launches are already held upstream — dispatch-plan.mjs
- *                                      // empties `plan.launch` to `dispatch-paused` holds when paused, so
- *                                      // `plan.launch` naturally arrives empty here too); already-running
- *                                      // lanes/guards/watchers are entirely untouched.
+ *                                      // shell. When true, NEW spawns are held this tick (build launches
+ *                                      // are held upstream instead — dispatch-plan.mjs empties `plan.launch`
+ *                                      // to `dispatch-paused` holds, so it arrives empty here too);
+ *                                      // already-running lanes/guards/watchers are entirely untouched.
+ *   dispatchPausedKinds?: string[]|null,// (epic #3383) the pause's optional KIND SCOPE — `dispatch-pause.mjs`'s
+ *                                      // `pausedKinds`. `null`/absent = BLANKET: all six kinds held, which is
+ *                                      // what an old-format marker and every boolean-only caller produce, so
+ *                                      // their behavior is unchanged. A NON-EMPTY scope holds ONLY the kinds it
+ *                                      // names, checked one by one against `TICK_SPAWN_KINDS` — e.g.
+ *                                      // `['build','prepare','prepare-decision','investigate']` stops all NEW
+ *                                      // item dispatch while `fix`/`ci-heal` keep working already-open PRs.
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedReason = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedKinds = null, dispatchPausedReason = null } = {}) {
+  // THE PAUSE, RESOLVED PER KIND (epic #3383). `pausedKinds` is the concrete list this tick holds: `[]` when
+  // nothing is paused, all six when the marker declares no scope (an old-format `{paused:true}` file, or any
+  // caller that still passes only the boolean — both keep holding everything, unchanged), or exactly the
+  // declared subset. Every spawn gate below asks `kindPaused('<kind>')` instead of the old blanket boolean.
+  const pausedKinds = resolvePausedKinds({ paused: dispatchPaused === true, pausedKinds: dispatchPausedKinds });
+  const kindPaused = (kind) => pausedKinds.includes(kind);
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
@@ -1031,9 +1054,20 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    `state.unshaped` / `state.decisions` / `state.investigations` / `state.prs`, never off `plan.launch`, so
   //    this tick's OWN `dispatchPaused` input — not a re-read of `plan.held` — is what gates them.
   //    Already-live guards are untouched either way.
-  const prep = dispatchPaused
-    ? { scopeSpawns: [], decisionSpawns: [], investigationSpawns: [], newGuards: [], consumedLanes: [], notes: [] }
-    : planPrepareSpawns({ unshaped, decisions, investigations, prs, livePrepareGuards: prepare.live, availableLanes, tick });
+  //    KIND-SCOPED (epic #3383): the three prepare-family kinds are held INDEPENDENTLY, by emptying the
+  //    candidate list each one is computed from rather than by stubbing out the whole call. That keeps the
+  //    lane arithmetic honest — a held kind consumes no lane, so an UNHELD sibling kind still gets the lanes
+  //    it would have had — and it degrades to the exact former stub when all three are held (empty inputs
+  //    produce empty spawns, empty guards, empty consumed lanes and no notes).
+  const prep = planPrepareSpawns({
+    unshaped: kindPaused('prepare') ? [] : unshaped,
+    decisions: kindPaused('prepare-decision') ? [] : decisions,
+    investigations: kindPaused('investigate') ? [] : investigations,
+    prs,
+    livePrepareGuards: prepare.live,
+    availableLanes,
+    tick,
+  });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
   const livePrepareGuards = [...prepare.live, ...prep.newGuards];
@@ -1050,7 +1084,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
   //    #3609 — held by the same manual dispatch-pause as step 4; `fixAttempts` passes through UNCHANGED (no new
   //    attempt is spawned to count) rather than being recomputed by `planFixSpawns`.
-  const fixPlan = dispatchPaused
+  const fixPlan = kindPaused('fix')
     ? { spawns: [], newGuards: [], fixAttempts, consumedLanes: [], notes: [] }
     : planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
@@ -1061,7 +1095,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //     fix loop: same entry + counter + cap shape, CI-regression trigger, and the heal repairs ONLY CI — never the
   //     review label. Uses the lanes the builds/prepares/fixes did not take, gated by in-flight test + retry cap.
   //    #3609 — held by the same manual dispatch-pause as steps 4/6; `ciHealAttempts` passes through UNCHANGED.
-  const ciHealPlan = dispatchPaused
+  const ciHealPlan = kindPaused('ci-heal')
     ? { spawns: [], newGuards: [], ciHealAttempts, consumedLanes: [], notes: [] }
     : planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
   const liveCiHealGuards = [...ciHeal.live, ...ciHealPlan.newGuards];
@@ -1081,8 +1115,22 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // planner would otherwise emit): the individual `plan.held` items already carry their own per-num
   // `dispatch-paused` note below, so this note covers only what those DON'T — the tick's own prepare/fix/
   // ci-heal spawns, which never had a `plan.held` row to begin with (see steps 4/6/6b above).
-  if (dispatchPaused) {
-    notes.push({ kind: 'dispatch-paused', text: `⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick${dispatchPausedReason ? ` (${dispatchPausedReason})` : ''}` });
+  // KIND-SCOPED (epic #3383): a BLANKET pause keeps the exact wording it has always had; a SCOPED one names
+  // what it actually holds, so the note can never say "no new fix spawns" while fix is demonstrably running.
+  if (pausedKinds.length > 0) {
+    const why = dispatchPausedReason ? ` (${dispatchPausedReason})` : '';
+    const heldHere = TICK_SPAWN_KINDS.filter(kindPaused);
+    let text;
+    if (!isScopedPause({ paused: true, pausedKinds: dispatchPausedKinds })) {
+      text = `⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick${why}`;
+    } else if (heldHere.length > 0) {
+      text = `⏸ dispatch paused for ${pausedKinds.join(', ')} — no new ${heldHere.join('/')} spawns this tick${why}`;
+    } else {
+      // Only `build` is held, and builds are gated UPSTREAM (dispatch-plan.mjs empties `plan.launch`) — say so
+      // rather than claim this tick withheld spawns it never had a reason to withhold.
+      text = `⏸ dispatch paused for ${pausedKinds.join(', ')} — build launches held upstream; every prepare/fix/ci-heal spawn kind still runs${why}`;
+    }
+    notes.push({ kind: 'dispatch-paused', text });
   }
   // #xupukxa — a build trimmed by the SAME concurrency ceiling (step 2) is surfaced too, not just the
   // available-lane withholding above: an operator watching the status line otherwise sees a ready build
@@ -1352,17 +1400,21 @@ async function main(argv) {
   // dispatch-plan.mjs's own IO shell already reads the SAME marker independently for `plan.launch`, so a
   // failure here only affects THIS tick's own prepare/fix/ci-heal spawns, never silently re-arms builds.
   let dispatchPaused = false;
+  let dispatchPausedKinds = null;
   let dispatchPausedReason = null;
   if (!flags['no-pause-check']) {
     try {
       const { readPauseState } = await import('../readiness/dispatch-pause.mjs');
       const pauseState = readPauseState();
       dispatchPaused = pauseState.paused === true;
+      // epic #3383 — carry the marker's KIND SCOPE through verbatim (`null` = blanket); the pure core resolves
+      // it. Flattening it to the boolean here would silently re-widen a scoped pause back to holding all six.
+      dispatchPausedKinds = pauseState.pausedKinds ?? null;
       dispatchPausedReason = pauseState.reason || null;
     } catch { /* leave unpaused — fail open, same contract as readPauseState's own try/catch */ }
   }
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedReason });
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedKinds, dispatchPausedReason });
   writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }
