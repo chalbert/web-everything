@@ -75,6 +75,13 @@ commitment-policy/**/*.d.ts
 # .conveyor/queue.json names. Absent ⇒ today's repo-wide default. Set/cleared via queue-scope.mjs set|clear;
 # machine-local and instance-local by construction, never committed.
 .conveyor/queue-scope.json
+# Driver-watchdog state (epic #3383) — the EXPLICITLY-recorded fallback commit a silently-stale driver is rolled
+# back to (`last-known-good.json`, written by `driver-watchdog.mjs record-good` before the driver is promoted
+# onto new code), the re-nag dedup record for its escalation (`watchdog-alert.json`), and its human log. All
+# three are per-checkout state about a LOCAL process — machine-disposable (memory rule 105), never committed.
+.conveyor/last-known-good.json
+.conveyor/watchdog-alert.json
+.conveyor/watchdog.log
 # …and its advisory lock (serializes concurrent record/retry writes) — ephemeral (created+unlinked per
 # critical section), but ignore it so a crashed holder's leftover lock never shows as an untracked file.
 .conveyor/*.lock
