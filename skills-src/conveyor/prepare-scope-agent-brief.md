@@ -1,5 +1,31 @@
 # Conveyor prepare-scope agent brief (template) — author ONE item's `scope:`, stop at ready-to-merge (#2613)
 
+> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#3641`, epic `#3383`).** A `prepare` dispatch no
+> longer spawns an agent with this brief. It starts
+> [we:scripts/operations/prepare-scope-run.mjs](../../scripts/operations/prepare-scope-run.mjs) — a detached,
+> per-dispatch process running
+> [we:scripts/operations/prepare-scope-wrapper.mjs](../../scripts/operations/prepare-scope-wrapper.mjs) — which
+> does the mechanical steps below ITSELF and spawns a MINIMAL agent
+> ([we:skills-src/conveyor/prepare-scope-agent-brief-v2.md](prepare-scope-agent-brief-v2.md)) for the one thing
+> that is actually judgment: predict the item's touch-set and write its `scope:`. You are reading THIS brief
+> because somebody set `WE_PREPARE_DISPATCH_MODE=agent`. Everything below still applies to you, unchanged.
+>
+> **What the wrapper now owns on the default path:** the lane acquire (step 1); the gate, run synchronously in
+> the wrapper's own process with exactly one resume-and-retry handed back to the agent (step 4); the
+> "edit exactly one file" guardrail, now checked against the real working tree before anything is committed; the
+> commit and the PR, opened through the same `run.mjs open-pr --mode=label-on-green` (step 6); the escalation
+> cases, decided by reading the agent's reported outcome (Escalations); and the learnings drop, forwarded from
+> that same report (step 7).
+> **What the agent still does directly:** read the spec and the code it implies, predict the touch-set, write
+> `scope:` into that one file, report.
+>
+> **Step 5 — the agent's own adversarial review subagent — is DROPPED on the default path, not moved.** An agent
+> spawning its own reviewer inside its own dispatched turn is the anti-pattern `#3627` removed from the build
+> agent and `#3629` ratified removing from the fix agent. What replaces it here is two mechanical checks the
+> wrapper runs: the single-file guardrail above, and the gate itself (which is what actually rejects a malformed
+> or empty `scope:`). What is deliberately NOT replaced, and is named rather than papered over: nothing
+> re-judges whether a WELL-FORMED prediction is a GOOD one. See the wrapper's own header for that gap.
+>
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2613) instantiates it — filling the
 > `{{PLACEHOLDERS}}` below — and passes the result as the prompt for **one background prepare-scope agent** it
 > spawns per `unshaped-no-scope` item (a cleared item the dispatcher is holding because it has no predicted
