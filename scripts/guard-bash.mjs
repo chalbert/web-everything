@@ -2084,10 +2084,18 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // interactive operator session (no `WE_DISPATCH_KIND` at all) and every other dispatch kind are unaffected —
   // this whole block is a no-op unless `dispatchKind` is literally `'delivery'`.
   //
+  // THIS TABLE IS LIVE AS OF #3645 (2026-09-12), AND WAS NOT WHEN IT WAS WRITTEN. The note that used to sit
+  // here said `deliver-item-wrapper.mjs` was "still unwired, so nothing stamps `'delivery'` in production and
+  // this whole table is, today, dead code". That is no longer true: a `build` dispatch now routes through
+  // `dispatch-lane-io.mjs#deliverItemDetachedProvider` → `deliver-item-run.mjs` → `deliverItem`, whose
+  // `CLAUDE_RESTRICTED_PROVIDER.spawn` stamps `WE_DISPATCH_KIND=delivery` on the minimal build agent it spawns.
+  // Every deny below now fires for real, on that agent, on the default path.
+  //
   // WHY THIS STAYS `'delivery'`-ONLY, AND MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT" (#xu2pp2m,
   // 2026-09-12 — recorded here because the generalization has now been proposed once and is superficially very
-  // plausible: `deliver-item-wrapper.mjs` is still unwired, so nothing stamps `'delivery'` in production and
-  // this whole table is, today, dead code).
+  // plausible). NOTE that the one thing that DID change with #3645 is the honesty note above, not this
+  // scoping: `WE_BUILD_DISPATCH_MODE=agent` still spawns a full-brief `WE_DISPATCH_KIND=build` agent that runs
+  // its own lifecycle, so `'build'` must keep being exempt here just as the other five kinds are.
   //
   // THE TABLE IS NOT "WHAT A DISPATCHED AGENT MAY NOT DO". It is "what the DELIVERY WRAPPER does on the
   // agent's behalf", and that ownership is the entire justification for every line in it. The other six

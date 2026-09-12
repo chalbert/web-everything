@@ -69,7 +69,12 @@ async function dispatchAndPark({ startedAt = '2026-08-13T09:00:00.000Z' } = {}) 
 
   // The one thing stubbed on THIS side: `claude --bg` is not run. Everything else — the in-flight write, the
   // handle, the deadline — is the real executor and the real sink.
+  // #3645 — PINNED TO THE AGENT PATH, deliberately. This file's subject is the `claude --bg` handle
+  // surviving a process boundary and the `claude agents` observer reading it back; `build` now defaults to the
+  // mechanical wrapper, whose own cross-process story (a `pid:` handle answered by the kernel, restart and
+  // all) is `./dispatch-lane-build-wiring.test.mjs`. Naming the mode here keeps each file testing one path.
   const sinks = createDispatchSinks({
+    buildMode: 'agent',
     root: PRIMARY, spawnAgent: () => bgStdout(SHORT_HANDLE), mintSessionId: () => HANDLE, now: () => new Date('2026-08-13T09:00:00.000Z'),
   });
   const outcome = await applyPendingEffects(run, { sinks, store });

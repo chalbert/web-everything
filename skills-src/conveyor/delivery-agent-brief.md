@@ -1,5 +1,22 @@
 # Conveyor delivery-agent brief (template) — build ONE item, stop at ready-to-merge (#2608)
 
+> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#3645`, epic `#3383`).** A `build` dispatch no
+> longer spawns an agent with this brief. It starts
+> [we:scripts/operations/deliver-item-run.mjs](../../scripts/operations/deliver-item-run.mjs) — a detached,
+> per-dispatch process running
+> [we:scripts/operations/deliver-item-wrapper.mjs](../../scripts/operations/deliver-item-wrapper.mjs) — which
+> does the mechanical steps below ITSELF and spawns a MINIMAL agent
+> ([we:skills-src/conveyor/delivery-agent-brief-v2.md](delivery-agent-brief-v2.md)) for the one thing that is
+> actually judgment: build the item, report a three-value outcome. You are reading THIS brief because somebody
+> set `WE_BUILD_DISPATCH_MODE=agent`. Everything below still applies to you, unchanged.
+>
+> **What the wrapper now owns on the default path:** the lane acquire and the item claim (before the build agent
+> starts at all); the gate, run synchronously in the wrapper's own process with exactly one resume-and-retry
+> handed back to the agent; converge, driven by the wrapper and never initiated by the agent; the park-mode
+> decision, taken by the existing deterministic rubric (`we:scripts/lib/review-escalation.mjs`); the PR, opened
+> through the same `run.mjs open-pr`; and the learnings drop, forwarded from the agent's own report.
+> **What the agent still does directly:** read the item, build it, keep its `## Progress` section synced, report.
+>
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2613) instantiates it — filling the
 > `{{PLACEHOLDERS}}` below with the launch entry the dispatch-plan script (#2609) produced — and passes the
 > result as the prompt for **one background delivery agent** spawned per launch entry. One agent = one item =

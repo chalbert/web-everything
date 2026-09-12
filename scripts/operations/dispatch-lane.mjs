@@ -572,7 +572,11 @@ export function dispatchStillHolds(entry, at, {
  * The answers `stampLiveness` may give about where an in-flight record's liveness came from. Anything else
  * (including an absent field) reads as `unknown`, which is the honest word for a reader that did not say.
  */
-export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'unreadable', 'not-needed']);
+// `wrapper-pid` (#3645) is the STRONG answer for a mechanical build dispatch: every in-flight record for the
+// item is a detached `deliver-item-run.mjs` process, and the kernel — not a `claude agents` listing — said
+// whether it is alive. It belongs beside `claude-agents` rather than under `unknown` precisely because it is a
+// read that SUCCEEDED; `dispatchStillHolds` keys on `live`, not on which reader produced it.
+export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'wrapper-pid', 'unreadable', 'not-needed']);
 
 /** A launch/suppression row from the tick core, or null. Shape-checked, never trusted blind. */
 function shapeRow(row, what) {

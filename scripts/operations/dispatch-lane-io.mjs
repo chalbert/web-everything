@@ -44,8 +44,8 @@
 // answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
-import { execFile, execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFile, execFileSync, spawn as nodeSpawn } from 'node:child_process';
+import { mkdirSync, openSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -176,6 +176,8 @@ export function readTick({
   loadItems = () => defaultLoadItems(root),
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
   listAgents = () => defaultListAgents({ exec }),
+  // #3645 — see {@link isDispatchHandleLive}: a mechanical build's handle is a pid, not a `claude` session id.
+  isPidAlive = defaultIsPidAlive,
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
@@ -302,7 +304,7 @@ export function readTick({
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
     // carrying the live/gone/unknown answer {@link stampLiveness} got for its handle.
-    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents })),
+    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents, isPidAlive })),
     // WHEN THIS READ WAS TAKEN. The declaration ages the double-dispatch guard out (`dispatchStillHolds`) and
     // is pure, so the clock has to arrive as DATA rather than be read there. Omitted or unparseable → nothing
     // ages out and every in-flight record holds, which is the fail-closed direction.
@@ -472,10 +474,23 @@ export function isHandleListed(handle, sessions) {
  * @param {{listAgents?: () => object[]}} [o]
  * @returns {{runs: object[], unreadable: number, livenessSource: 'claude-agents'|'unreadable'|'not-needed'}}
  */
-export function stampLiveness(inFlight, { listAgents } = {}) {
+export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidAlive } = {}) {
   const rows = Array.isArray(inFlight?.runs) ? inFlight.runs : [];
   const unreadable = Number(inFlight?.unreadable) > 0 ? Number(inFlight.unreadable) : 0;
   if (!rows.length) return { runs: [], unreadable, livenessSource: 'not-needed' };
+
+  // #3645 — A MECHANICAL BUILD'S HANDLE IS A PID, AND THE KERNEL ANSWERS IT. When EVERY row in flight is one of
+  // those, no `claude agents` listing is needed at all — and asking for one would mean an unreadable/absent
+  // `claude` degraded a pid probe that cannot fail into `livenessSource: 'unreadable'`, i.e. the strong answer
+  // reported as the weak one. Same reason the listing is skipped for zero rows above: do not shell `claude` to
+  // ask about handles it has never heard of.
+  if (rows.every((r) => !r.handle || detachedHandlePid(r.handle) !== null)) {
+    return {
+      runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, [], { isPidAlive }) : null })),
+      unreadable,
+      livenessSource: 'wrapper-pid',
+    };
+  }
 
   let sessions = null;
   try {
@@ -504,7 +519,9 @@ export function stampLiveness(inFlight, { listAgents } = {}) {
     // PREFIX match (#3331), not `listed.has(...)` — `listed` above is still the full-id Set, kept only for the
     // shape guard; `r.handle` is the short id `parseBackgroundedHandle` stored at dispatch time, and equality
     // against a full `sessionId` would never match it. See {@link isHandleListed}.
-    runs: rows.map((r) => ({ ...r, live: r.handle ? isHandleListed(r.handle, sessions) : null })),
+    // #3645 — through {@link isDispatchHandleLive}, so a MIXED set (an agent-path dispatch and a mechanical one
+    // in flight at once) answers each row with the right question. A `pid:` row never consults `sessions`.
+    runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, sessions, { isPidAlive }) : null })),
     unreadable,
     livenessSource: 'claude-agents',
   };
@@ -805,6 +822,221 @@ export function isPreSpawnRefusal(error) {
   return PRE_SPAWN_REFUSALS.includes(code);
 }
 
+// ================================================================================================
+// #3645 — THE MECHANICAL BUILD DISPATCH. Everything from here to `createDispatchSinks` is the `build` launch
+// kind's own provider: instead of handing a `claude --bg` agent the whole 500-line
+// `we:skills-src/conveyor/delivery-agent-brief.md` and trusting it to run its own lifecycle, a build dispatch
+// now starts `we:scripts/operations/deliver-item-run.mjs`, which runs
+// `we:scripts/operations/deliver-item-wrapper.mjs#deliverItem` — acquire → claim → spawn a MINIMAL build agent
+// → gate (one retry) → converge → park decision → open PR → drop learning — mechanically.
+//
+// FOLLOWS THE REVIEW KIND, LANDED THE SAME DAY (`#xu2pp2m`, `02d9af3`): `we:scripts/operations/
+// review-dispatch.mjs` made `we:scripts/operations/review-dispatch-wrapper.mjs` its DEFAULT and kept the agent
+// path reachable behind an explicit opt-out. Same shape here, with one difference the review kind did not have
+// to solve — see {@link deliverItemDetachedProvider} for why this one is DETACHED and that one is not.
+// ================================================================================================
+
+/** The per-dispatch process `deliverItemDetachedProvider` starts. Resolved by SCRIPT LOCATION, never cwd —
+ *  same reason {@link REPO_ROOT} is. */
+export const DELIVER_ITEM_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations', 'deliver-item-run.mjs');
+
+/** Where a detached delivery's stdout/stderr lands: `we:.operations/delivery-dispatch-logs/<slug>.log`, the
+ *  same gitignored sidecar family `delivery-report-store.mjs` and `minimal-context-provider.mjs` already use. */
+export function deliveryDispatchLogPath(sessionSlug, root = REPO_ROOT) {
+  const safe = /^[A-Za-z0-9._-]+$/.test(String(sessionSlug || '')) ? String(sessionSlug) : 'unnamed-dispatch';
+  return join(root, '.operations', 'delivery-dispatch-logs', `${safe}.log`);
+}
+
+/**
+ * WHICH PATH A `build` DISPATCH TAKES. `mechanical` (the default) runs the wrapper; `agent` restores the
+ * pre-`#3645` `claude --bg` + full-brief spawn.
+ *
+ * READ FROM THE ENVIRONMENT, for the same reason {@link AGENT_ARGS_ENV} is: a knob only a test can reach is not
+ * a knob, and the `dispatch-lane` operation's declared input has no field for this (its input is the tick's,
+ * not the operator's). An unrecognised value THROWS rather than falling back to either path — a typo'd
+ * `WE_BUILD_DISPATCH_MODE=mechnical` silently taking the agent path is exactly the class of failure this whole
+ * wiring exists to remove.
+ */
+export const BUILD_DISPATCH_MODE_ENV = 'WE_BUILD_DISPATCH_MODE';
+
+/** @returns {'mechanical'|'agent'} */
+export function buildDispatchModeFromEnv(env = process.env) {
+  const raw = String(env?.[BUILD_DISPATCH_MODE_ENV] ?? '').trim().toLowerCase();
+  if (!raw) return 'mechanical';
+  if (raw !== 'mechanical' && raw !== 'agent') {
+    throw new TypeError(
+      `operations: ${BUILD_DISPATCH_MODE_ENV} must be \`mechanical\` (the default — the deliver-item wrapper) `
+      + `or \`agent\` (the pre-#3645 full-brief \`claude --bg\` spawn), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * THE HANDLE SHAPE A DETACHED DELIVERY CARRIES. `pid:<n>` — deliberately unlike every `claude` handle
+ * ({@link parseBackgroundedHandle} only ever yields lower-case hex), so {@link isDispatchHandleLive} can tell
+ * the two apart with no extra field on the run record and no migration of the records already on disk.
+ */
+export const DETACHED_HANDLE_PREFIX = 'pid:';
+
+/** The pid inside a `pid:<n>` handle, or `null` for anything else. PURE. */
+export function detachedHandlePid(handle) {
+  const raw = String(handle ?? '').trim();
+  if (!raw.startsWith(DETACHED_HANDLE_PREFIX)) return null;
+  const pid = Number(raw.slice(DETACHED_HANDLE_PREFIX.length));
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+/**
+ * IS THIS PID STILL RUNNING? `process.kill(pid, 0)` sends no signal — it only asks the kernel whether the
+ * process exists and whether we may signal it. `EPERM` means it EXISTS and belongs to someone else, which is
+ * still alive; `ESRCH` (and anything else) means gone.
+ *
+ * THIS IS THE READ THAT MAKES RESTART-SURVIVAL OBSERVABLE. It asks the kernel, not a listing and not the
+ * process that started the delivery — so a runner that was restarted mid-delivery still gets a truthful `live:
+ * true` for the detached process it no longer parents, and its double-dispatch guard holds the item instead of
+ * starting a second build in an occupied lane.
+ */
+export function defaultIsPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return String(e?.code || '') === 'EPERM';
+  }
+}
+
+/**
+ * THE ONE LIVENESS QUESTION, for BOTH handle shapes — a `claude --bg` short id (asked of the agent listing, as
+ * before) and a `#3645` detached-wrapper `pid:<n>` (asked of the kernel). Every reader that used to call
+ * {@link isHandleListed} directly calls this instead, so the two readers cannot drift.
+ *
+ * @param {unknown} handle
+ * @param {unknown[]} sessions - a `claude agents --json` listing; IGNORED for a `pid:` handle.
+ * @param {{isPidAlive?: (pid: number) => boolean}} [io]
+ * @returns {boolean}
+ */
+export function isDispatchHandleLive(handle, sessions, { isPidAlive = defaultIsPidAlive } = {}) {
+  const pid = detachedHandlePid(handle);
+  if (pid !== null) return Boolean(isPidAlive(pid));
+  return isHandleListed(handle, sessions);
+}
+
+/**
+ * The DETACHED spawn primitive — named and exported for the same reason {@link defaultSpawnAgent} is: the
+ * options ARE the contract (`detached`, the log fds, the `unref`), and an option no test can reach is an option
+ * the next refactor deletes for free.
+ *
+ * `detached: true` makes the child a new session leader (Node calls `setsid`), so it is NOT in the runner's
+ * process group and a group-wide signal — which is exactly what `we:scripts/operations/restart-runner-io.mjs`'s
+ * shutdown sends — never reaches it. `.unref()` lets the dispatching process exit without waiting. `stdio` goes
+ * to a real file because a detached child with a piped stdio nobody reads blocks on a full pipe, and because
+ * the log is the only place a delivery's own narration survives.
+ */
+export function defaultSpawnDetached(argv, { cwd, logPath } = {}, {
+  spawn = nodeSpawn,
+  ensureDir = (d) => mkdirSync(d, { recursive: true }),
+  openLog = (p) => openSync(p, 'a'),
+} = {}) {
+  ensureDir(dirname(logPath));
+  const fd = openLog(logPath);
+  const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd] });
+  if (typeof child.unref === 'function') child.unref();
+  return child;
+}
+
+/**
+ * THE `build` PROVIDER (`#3645`) — one implementation of the SAME `#3579` port {@link defaultClaudeProvider}
+ * implements, answering the same request shape with the same thing: a durable handle for later liveness polling.
+ *
+ * ── WHY DETACHED, WHERE THE REVIEW WRAPPER IS NOT ───────────────────────────────────────────────────────────
+ *
+ * `review-dispatch.mjs` could call its wrapper INLINE and simply block, because its caller
+ * (`we:skills-src/conveyor/runner.mjs`'s review-reconcile pass) was moved onto the heartbeating async spawner in
+ * the same change. A BUILD cannot take that trade. `deliverItem`'s single `provider.spawn` is budgeted at 60
+ * minutes (`deliver-item-wrapper.mjs#DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and the gate + converge that follow add
+ * more; the dispatch path it sits on is `makeCliDispatchPass`'s SYNCHRONOUS `execFileSync` of
+ * `run.mjs dispatch-lane --num=<N>`, once per surfaced item, inside the runner's own tick. Blocking there would
+ * starve every other item in the tick, stop the singleton lease being heartbeated, and — the acceptance
+ * criterion this item was filed with — make a `restart-runner` kill a half-finished build: a claimed item, a
+ * held lane, no PR, no record of how far it got.
+ *
+ * So the wrapper runs in its OWN process ({@link DELIVER_ITEM_RUN_SCRIPT}), detached and unref'd, and this
+ * provider returns in milliseconds exactly as the `claude --bg` path did. THE DISPATCH SINK'S CONTRACT IS
+ * UNCHANGED: same `inFlight({handle, expectedBy})`, same run-store record, same observer. The only difference is
+ * the handle's SHAPE (`pid:<n>`, see {@link DETACHED_HANDLE_PREFIX}) and therefore which question answers its
+ * liveness — {@link isDispatchHandleLive} owns that, and both readers go through it.
+ *
+ * WHAT A KILLED SINK STILL COSTS, stated rather than papered over: exactly what it cost before. `dispatch: true`
+ * means the executor writes `in-flight` BEFORE this runs (#3073), so a sink killed between `spawn` returning and
+ * this function returning leaves an entry with a null handle in `inFlightEntries().unknown` — visible, and
+ * closable with `resolveInFlight`. That window is not widened here; it is, if anything, shorter, because there
+ * is no CLI confirmation line to parse before the handle is known.
+ *
+ * @param {{sessionSlug?: string, num?: string|number, lane?: string|number, scope?: string, cwd?: string}} request
+ * @param {{spawnDetached?: Function, logPathFor?: Function, attemptTagFor?: Function}} [io]
+ * @returns {string} the `pid:<n>` handle.
+ */
+export function deliverItemDetachedProvider(request, {
+  spawnDetached = defaultSpawnDetached,
+  logPathFor = deliveryDispatchLogPath,
+  attemptTagFor = sessionSlugAttemptTag,
+  runScript = DELIVER_ITEM_RUN_SCRIPT,
+} = {}) {
+  const sessionSlug = String(request?.sessionSlug ?? '').trim();
+  const num = normNum(request?.num);
+  const lane = String(request?.lane ?? '').trim();
+  // REFUSED BEFORE ANY PROCESS EXISTS, and `notApplied` so the entry lands `failed` rather than INDETERMINATE —
+  // the same treatment `buildAgentArgv` gives an empty prompt, and for the same reason: nothing was started, so
+  // nothing is ambiguous. A delivery with no item, lane or session has nothing to acquire or claim.
+  if (!num) throw notApplied('dispatch-lane: refusing a mechanical build dispatch with no item id');
+  if (!lane) throw notApplied(`dispatch-lane: refusing a mechanical build dispatch for #${num} with no lane`);
+  if (!sessionSlug) throw notApplied(`dispatch-lane: refusing a mechanical build dispatch for #${num} with no session slug`);
+
+  // `''` for a first attempt — recovered from the slug rather than added to the effect payload, the SAME way
+  // `createDispatchObservers` already recovers it (`sessionSlugAttemptTag`), so no new field crosses the seam.
+  const attemptTag = attemptTagFor(sessionSlug) || '';
+  const argv = [
+    String(runScript),
+    `--num=${num}`,
+    `--lane=${lane}`,
+    `--session=${sessionSlug}`,
+    `--scope=${String(request?.scope ?? '')}`,
+    `--attempt=${attemptTag}`,
+  ];
+  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
+  const pid = Number(child?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    // SAME indeterminate shape as an unparseable `claude --bg` confirmation: something may be running and its
+    // identity is unknown. Throwing lands the entry `in-flight` with a null handle, which is visible and
+    // closable; returning a handle known to be wrong would key every later liveness read on nothing.
+    throw new Error(
+      `dispatch-lane: started the delivery wrapper for #${num} but node reported no pid — whether it is running `
+      + 'cannot be told from here',
+    );
+  }
+  return `${DETACHED_HANDLE_PREFIX}${pid}`;
+}
+
+/**
+ * THE ROUTER (`#3645`) — the default `provider` {@link createDispatchSinks} now installs. `build` goes to the
+ * wrapper unless the operator opted out; every other launch kind is untouched and still spawns its own agent
+ * from its own brief, because no wrapper owns their lifecycle yet (see `we:scripts/guard-bash.mjs`'s own note on
+ * exactly that, and `we:backlog/3643-*.md` for the five sibling wiring stories).
+ *
+ * @param {object} request - the `#3579` port request.
+ * @param {{buildMode?: 'mechanical'|'agent', mechanical?: Function, agent?: Function}} [io]
+ */
+export function routeDispatchProvider(request, {
+  buildMode = 'mechanical',
+  mechanical = deliverItemDetachedProvider,
+  agent,
+} = {}) {
+  const kind = String(request?.launchKind || 'build');
+  if (kind === 'build' && buildMode !== 'agent') return mechanical(request);
+  return agent(request);
+}
+
 /**
  * THE SINK — the one thing in this repo that starts a delivery agent.
  *
@@ -883,7 +1115,17 @@ export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
-  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
+  // #3645 — `buildMode` is read from the environment ONCE, here, at sink-construction time rather than per
+  // dispatch, so one tick cannot straddle two modes. A test injects it directly and never touches `process.env`.
+  buildMode = buildDispatchModeFromEnv(),
+  // #3645 — THE DEFAULT PROVIDER IS NOW THE ROUTER, not `defaultClaudeProvider`. A `build` launch runs the
+  // deliver-item wrapper in its own detached process ({@link deliverItemDetachedProvider}); every other kind —
+  // and `build` under `WE_BUILD_DISPATCH_MODE=agent` — still takes the unchanged `claude --bg` path below. A
+  // caller supplying its own `provider` bypasses the routing entirely, exactly as before.
+  provider = (request) => routeDispatchProvider(request, {
+    buildMode,
+    agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
+  }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
@@ -904,6 +1146,13 @@ export function createDispatchSinks({
           // request rather than a Claude detail: every provider needs to tell the agent it starts what it was
           // started FOR. `defaultClaudeProvider` carries it across as the `WE_DISPATCH_KIND` env var.
           launchKind: payload?.launchKind,
+          // #3645 — THE LANE AND ITS SCOPE, already on the effect payload (`dispatch-lane.mjs`'s `dispatch`
+          // step) and until now read only by the brief's own fill. The mechanical build provider needs them as
+          // DATA, because it is the wrapper — not an agent reading a brief — that runs `lane-pool acquire`.
+          // Part of the port's request rather than a wrapper detail: "which lane, under what scope" is
+          // CLI-independent, exactly like `launchKind`.
+          lane: payload?.lane,
+          scope: payload?.scope,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
         });
@@ -1237,6 +1486,9 @@ export function createDispatchObservers({
   exec = execFileSync,
   listAgents = () => defaultListAgents({ exec }),
   listPrs = () => defaultListPrs({ exec }),
+  // #3645 — the liveness probe for a DETACHED delivery-wrapper handle (`pid:<n>`). Injectable for the same
+  // reason `listAgents`/`listPrs` are: the whole axis must be testable with no real process to signal.
+  isPidAlive = defaultIsPidAlive,
   now = () => new Date(),
 } = {}) {
   // `undefined` is the not-yet-read sentinel, NOT `null`: a reader that returns `null` (or anything else the
@@ -1290,6 +1542,28 @@ export function createDispatchObservers({
 
       // ── AXIS 2: LIVENESS. Unchanged — it is what answers while no PR exists yet, which is every dispatch
       //    for most of its life, and the dominant case until real dispatch lands.
+      //
+      // #3645 — A MECHANICAL BUILD IS ANSWERED BY THE KERNEL, BEFORE ANY `claude agents` CALL. The delivery
+      // wrapper runs in its own detached process and was never a `--bg` session, so it is not in that listing
+      // and never will be; asking anyway would read "gone" for a delivery that is an hour into its build. The
+      // grace-window and `unresolved` branches below are shared verbatim — only the liveness QUESTION differs,
+      // not what is done with its answer.
+      const detachedPid = detachedHandlePid(handle);
+      if (detachedPid !== null) {
+        if (isPidAlive(detachedPid)) return { status: 'running', result: null };
+        const startedDetached = entry?.startedAt ? Date.parse(entry.startedAt) : NaN;
+        if (!Number.isNaN(startedDetached) && now().getTime() - startedDetached < LISTING_GRACE_MS) {
+          return { status: 'running', result: null };
+        }
+        return {
+          status: 'unresolved',
+          error: `the delivery wrapper process ${handle} has exited, which reports liveness and not outcome, and no `
+            + 'MERGED PR for this item can be attributed to this dispatch — whether the build finished cleanly cannot '
+            + `be told from here. Read its log (\`${deliveryDispatchLogPath(entry?.payload?.sessionSlug ?? '')}\`) and `
+            + 'its delivery report, then close the entry out.',
+        };
+      }
+
       if (listed === undefined) listed = listAgents();
       const sessions = listed;
       if (!Array.isArray(sessions)) {

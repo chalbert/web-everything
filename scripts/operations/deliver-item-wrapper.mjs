@@ -1,13 +1,28 @@
 #!/usr/bin/env node
 /**
  * @file scripts/operations/deliver-item-wrapper.mjs
- * @description PROTOTYPE / DESIGN SKETCH for #3627 — the wrapper a MINIMAL delivery agent
- * (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) would run under, if #3627 is ever ratified.
+ * @description The wrapper a MINIMAL delivery agent (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) runs
+ * under — designed as a #3627 sketch, WIRED INTO THE LIVE `build` DISPATCH PATH by #3645 (2026-09-12).
  *
  * ================================================================================================
- * HONESTY LABEL, READ THIS FIRST. This file is NOT wired into `we:scripts/operations/dispatch-lane.mjs`,
- * is NOT imported by anything, and NOT covered by tests — it is a concrete SKETCH of shape and call order,
- * not a shipped implementation. Every function below is marked with one of:
+ * WIRING STATUS, READ THIS FIRST — CORRECTED 2026-09-12 (#3645, epic #3383). The paragraph that used to sit
+ * here said this file "is NOT wired into `we:scripts/operations/dispatch-lane.mjs`, is NOT imported by
+ * anything, and NOT covered by tests". Two of those three are now false, and the third was already:
+ *   • {@link deliverItem} IS the default `build` dispatch path. `we:scripts/operations/dispatch-lane-io.mjs`'s
+ *     sink routes a `build` launch to `deliverItemDetachedProvider`, which starts
+ *     `we:scripts/operations/deliver-item-run.mjs` — a DETACHED per-dispatch process — and that file is this
+ *     one's only production caller. `WE_BUILD_DISPATCH_MODE=agent` restores the old `claude --bg` + full-brief
+ *     spawn; nothing else does.
+ *   • WHY DETACHED, and not called inline the way the review wrapper is: the arc below BLOCKS for up to an hour
+ *     and the dispatch path is a synchronous `execFileSync` inside the resident runner's own tick. See
+ *     `deliver-item-run.mjs`'s own header for the full restart-survival reasoning — it is an acceptance
+ *     criterion of #3645, not a style preference.
+ *   • `we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs` has covered this file since #3627;
+ *     `we:scripts/operations/__tests__/dispatch-lane-build-wiring.test.mjs` covers the wiring itself.
+ *
+ * The REAL/SKETCH/PLACEHOLDER labels below are kept verbatim and still mean what they say — several functions
+ * are genuinely unverified against a live run, and per `we:docs/agent/prototype-based-dev.md` this path is not
+ * trusted on passing tests alone. Every function below is marked with one of:
  *   REAL      — the shell-out uses a CLI surface this session read directly (usage strings, or a working
  *               example) from the live scripts it calls, and the call shape is correct as written.
  *   SKETCH    — the call shape is my best-informed guess at the real API (I read adjacent code, but not
@@ -164,21 +179,15 @@ export {
 //    a hook" doctrine: `permissions.allow` only decides whether a human would be ASKED, never whether a command
 //    is SAFE.
 //
-//    HONESTY CHECK, READ THIS — `guard-bash.mjs` does NOT yet actually deny the mechanical CLIs (lane-pool,
-//    backlog claim/release, `gh pr`, `pr-land`, `converge-cli`, `verify-lane`, `learnings-drop`,
-//    `review-core-cli`) for a `WE_DISPATCH_KIND=delivery` session on this branch as of this commit — this
-//    session grepped `scripts/guard-bash.mjs` directly and found no `WE_DISPATCH_KIND`/`delivery` reference at
-//    all, despite this file's OWN section-2 comment (`CLAUDE_RESTRICTED_PROVIDER.spawn`, below) describing that
-//    arm as already landed "in an earlier round." It is not on this branch, and this branch is fully current
-//    with `origin/main` (checked directly: `git merge-base HEAD origin/main` equals `origin/main`'s own tip),
-//    so it has not landed anywhere else either. Broadening `permissions.allow` to these six tools is still the
-//    right call GIVEN the operator's own explicit design direction (a hand-enumerated "safe command" allowlist
-//    is worse, not safer — see above), but until that `guard-bash.mjs` arm is actually built, this settings
-//    file's `permissions.allow` is, for real, the ONLY enforcement layer standing between a delivery agent and
-//    the mechanical lifecycle commands (lane-pool/claim/PR/converge/etc.) this wrapper is supposed to own
-//    exclusively. Flagged here loudly, and again in this change's own PR/report, rather than silently assumed
-//    fixed by a hook that does not exist yet — building that `guard-bash.mjs` arm is real follow-up work, out
-//    of scope for this pass (which is bugs 7/8 + observability, not a guard-bash.mjs rewrite).
+//    HONESTY CHECK, NOW RESOLVED (#xu2pp2m built the arm; #3645 made it fire). This paragraph used to say
+//    `guard-bash.mjs` did NOT deny the mechanical CLIs (lane-pool, backlog claim/release, `gh pr`, `pr-land`,
+//    `converge-cli`, `verify-lane`, `learnings-drop`, `review-core-cli`) for a `WE_DISPATCH_KIND=delivery`
+//    session, so this settings file's `permissions.allow` was the only thing standing between a delivery agent
+//    and the lifecycle commands this wrapper owns. Both halves are now closed: the `dispatchKind === 'delivery'`
+//    deny table exists in `we:scripts/guard-bash.mjs` (search `WHY THIS STAYS`), and #3645 wired this wrapper
+//    into the live `build` dispatch, so something finally stamps `'delivery'` in production and the table is no
+//    longer dead code. `permissions.allow` is still deliberately the six tools `--tools` already exposed — the
+//    hook, not the allowlist, is the safety boundary, exactly as the paragraph above argues.
 // ================================================================================================
 export const DELIVERY_HOOKS_SETTINGS = Object.freeze({
   hooks: {

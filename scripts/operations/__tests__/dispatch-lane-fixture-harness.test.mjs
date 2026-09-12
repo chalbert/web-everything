@@ -237,7 +237,8 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
 
       const happyRoot = join(kase.caseRoot, 'primary-checkout'); // NOT lane-shaped — assertNotALaneCheckout must pass
       mkdirSync(happyRoot, { recursive: true });
-      const sinks = createDispatchSinks({ root: happyRoot, exec: kase.fakeExec });
+      // #3645 — this case asserts the `claude` ARGV against the fixture-derived brief, i.e. the agent path.
+      const sinks = createDispatchSinks({ buildMode: 'agent', root: happyRoot, exec: kase.fakeExec });
 
       // THE FAKE MUST ACTUALLY WIN PATH before the one real spawn in this file — see `dispatch-spawn-live.test.mjs`'s
       // own reasoning: without this, a bug anywhere in `combinedEnv`'s merge silently reaches whatever `claude`
@@ -282,7 +283,9 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       // inside one nests two checkouts).
       const laneRoot = join(kase.caseRoot, 'lane-42');
       mkdirSync(laneRoot, { recursive: true });
-      const sinks = createDispatchSinks({ root: laneRoot, exec: kase.fakeExec });
+      // #3645 — the lane-checkout refusal fires for BOTH paths (it is `assertNotALaneCheckout`, before any
+      // provider runs); the agent path is named here only so the `lastArgv()` assertion below stays meaningful.
+      const sinks = createDispatchSinks({ buildMode: 'agent', root: laneRoot, exec: kase.fakeExec });
 
       await expect(sinks[DISPATCH_EFFECT](payload)).rejects.toThrow(/lane checkout/);
       // NOTHING WAS SPAWNED — the guard fires before `buildAgentArgv`/`spawnAgent` ever runs.

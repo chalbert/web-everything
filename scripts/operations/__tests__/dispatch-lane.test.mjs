@@ -661,6 +661,8 @@ describe('the declared effect is a dispatch', () => {
     const { run, registry } = runTo();
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
+      // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+      buildMode: 'agent',
       root: PRIMARY,
       spawnAgent: () => bgStdout('a1a1a1a1'),
       mintSessionId: () => '11111111-2222-3333-4444-555555555555',
@@ -687,6 +689,8 @@ describe('the declared effect is a dispatch', () => {
     const store = createMemoryRunStore();
     let spawns = 0;
     const sinks = createDispatchSinks({
+      // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+      buildMode: 'agent',
       root: PRIMARY, spawnAgent: () => { spawns += 1; return bgStdout('a2a2a2a2'); }, mintSessionId: () => 'sess-a1',
     });
     const first = await applyPendingEffects(run, { sinks, store });
@@ -700,6 +704,8 @@ describe('the declared effect is a dispatch', () => {
     const { run } = runTo(tickRead(), { num: '3037', expectedWithinMinutes: 15 });
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
+      // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+      buildMode: 'agent',
       root: PRIMARY, spawnAgent: () => bgStdout('b2b2b2b2'), mintSessionId: () => 'sess-b2', now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
@@ -774,7 +780,8 @@ describe('what the sink actually runs', () => {
     // …and it is `notApplied`, so the entry is `failed` (retriable) rather than an unknown outcome.
     const { run } = runTo();
     const store = createMemoryRunStore();
-    const sinks = createDispatchSinks({ root: '/x/.lanes/web-everything/lane-8', spawnAgent: () => '' });
+    // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: '/x/.lanes/web-everything/lane-8', spawnAgent: () => '' });
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].status).toBe('failed');
   });
@@ -787,6 +794,8 @@ describe('what the sink actually runs', () => {
     const { run } = runTo();
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
+      // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+      buildMode: 'agent',
       root: PRIMARY,
       spawnAgent: () => { throw Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }); },
     });
@@ -798,7 +807,8 @@ describe('what the sink actually runs', () => {
   it('any OTHER failure is INDETERMINATE — in-flight with no handle, refused on replay', async () => {
     const { run } = runTo();
     const store = createMemoryRunStore();
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => { throw new Error('exit 1'); } });
+    // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: PRIMARY, spawnAgent: () => { throw new Error('exit 1'); } });
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0]).toMatchObject({ status: 'in-flight', handle: null });
     // Reported as `unknown`, never `running` — and the replay guard refuses it rather than double-dispatching.
@@ -807,14 +817,16 @@ describe('what the sink actually runs', () => {
   });
 
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => bgStdout('d4d4d4d4'), mintSessionId: () => 'sess-d4' });
+    // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: PRIMARY, spawnAgent: () => bgStdout('d4d4d4d4'), mintSessionId: () => 'sess-d4' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
   });
 
   it('#3331: a spawn that returns 0 but prints no parseable confirmation is INDETERMINATE, same as a thrown spawn', async () => {
     const { run } = runTo();
     const store = createMemoryRunStore();
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => 'not the shape we expect\n' });
+    // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: PRIMARY, spawnAgent: () => 'not the shape we expect\n' });
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0]).toMatchObject({ status: 'in-flight', handle: null });
     expect(inFlightEntries(outcome.run).unknown).toHaveLength(1);
@@ -877,6 +889,8 @@ describe('the provider port — #3579', () => {
   it('a plain spawnAgent (the old CLI-argv-shaped stub) still drives the DEFAULT provider unmodified', async () => {
     const spawned = [];
     const sinks = createDispatchSinks({
+      // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+      buildMode: 'agent',
       root: PRIMARY,
       spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return bgStdout('1e9ac11a'); },
       mintSessionId: () => 'sess-legacy',
@@ -893,7 +907,8 @@ describe('the provider port — #3579', () => {
   // end to end through the real sink + the DEFAULT provider, not just by unit-testing buildAgentArgv in isolation.
   it('an empty-prompt refusal from buildAgentArgv, reached via the DEFAULT provider, still rejects CLEAN — not indeterminate', async () => {
     const spawnAgent = () => { throw new Error('must not spawn — refused before any process could exist'); };
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent, mintSessionId: () => 'sess-empty' });
+    // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: PRIMARY, spawnAgent, mintSessionId: () => 'sess-empty' });
     // `notApplied: true` (retriable), NOT a bare/UNKNOWN error — the empty-prompt guard already proved nothing
     // started, and moving `buildAgentArgv` inside the provider call must not blur that into "indeterminate".
     await expect(sinks[DISPATCH_EFFECT]({ prompt: '  ', sessionSlug: 's', num: '1' }))
@@ -1680,6 +1695,8 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     if (!run.effects.length) return { run, spawned };
     const outcome = await applyPendingEffects(run, {
       sinks: createDispatchSinks({
+        // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+        buildMode: 'agent',
         root: PRIMARY,
         spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
         mintSessionId: () => 'sess-3165',
@@ -1920,6 +1937,8 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     if (!run.effects.length) return { run, spawned };
     const outcome = await applyPendingEffects(run, {
       sinks: createDispatchSinks({
+        // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
+        buildMode: 'agent',
         root: PRIMARY,
         spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
         mintSessionId: () => 'sess-3332',

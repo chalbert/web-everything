@@ -66,7 +66,10 @@ async function parkOneDispatch() {
   const store = createFileRunStore(dir);
   let run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: RUN_ID, input: { num: '3412' }, registry }), { registry });
   expect(runStatus(run, { registry })).toBe('awaiting-effect');
+  // #3645 — the agent path, named explicitly: aborting means `claude stop <id>`, which only exists for a
+  // `claude --bg` handle. A mechanical build's abort is a different mechanism and not this file's subject.
   const sinks = createDispatchSinks({
+    buildMode: 'agent',
     root: PRIMARY,
     spawnAgent: () => `backgrounded · ${SHORT_HANDLE} · conveyor-3412\n`,
     mintSessionId: () => HANDLE,
