@@ -151,15 +151,21 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
       const fake = withFakeClaude();
       try {
         const env = { ...process.env, ...fake.env };
-        const originalSessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-
         // Seed the "original builder" session by actually starting one through the real spawn path — this is
         // the SAME defaultSpawnAgent production code the dispatcher itself calls, not a hand-built fixture row.
         // `cwd: root` is load-bearing beyond the spawn itself: it is also what the SECURITY hardening below
         // resolves a real `git -C <cwd> rev-parse HEAD` against.
-        defaultSpawnAgent(['--bg', '--session-id', originalSessionId, '-n', 'fix-8801', 'original build work'], { env, cwd: root });
+        //
+        // #3331 — THE SEED'S ID IS READ BACK, NOT CHOSEN. This used to pass `--session-id <a uuid we picked>`
+        // and then assert that exact uuid was listed. `claude --bg` discards `--session-id` (the shim now
+        // models that), so a chosen id names no session — and production never chose one either: the id
+        // `findResumeCandidate` matches on comes off the PR body's `authored-by-actor` stamp, which the AGENT
+        // writes from its own real session id. Reading it out of the listing is what that actually looks like.
+        defaultSpawnAgent(['--bg', '-n', 'fix-8801', 'original build work'], { env, cwd: root });
         const listedBefore = defaultListAgents({ env, all: true });
-        expect(listedBefore.some((a) => a.sessionId === originalSessionId)).toBe(true);
+        const seeded = listedBefore.find((a) => a.name === 'fix-8801');
+        expect(seeded).toBeTruthy();
+        const originalSessionId = seeded.sessionId;
 
         const authorMarker = buildAuthorActorMarker(originalSessionId);
         // #xazl9u3 — deliberately NO `lane` field: `tryResumeFix` runs BEFORE any lane is ever popped from the
@@ -237,12 +243,16 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
 
         expect(result.resumed).toBe(false);
         expect(result.sessionId).toBe('ffffffff-0000-0000-0000-000000000000');
+        // #3331 — no `--session-id` in the argv, and the ADDRESSABLE id is what the CLI printed back.
         expect(fake.lastArgv()).toEqual([
-          '--bg', '--session-id', 'ffffffff-0000-0000-0000-000000000000', '-n', 'fix-8802',
+          '--bg', '-n', 'fix-8802',
           expect.stringContaining('fix brief for 8802'),
         ]);
+        expect(result.agentId).toBeTruthy();
         const listed = defaultListAgents({ env, all: true });
-        expect(listed.some((a) => a.sessionId === 'ffffffff-0000-0000-0000-000000000000')).toBe(true);
+        // The minted uuid names NOTHING — that is the defect this pins — while `agentId` names the real row.
+        expect(listed.some((a) => a.sessionId === 'ffffffff-0000-0000-0000-000000000000')).toBe(false);
+        expect(listed.some((a) => a.id === result.agentId && a.name === 'fix-8802')).toBe(true);
       } finally {
         fake.cleanup();
       }

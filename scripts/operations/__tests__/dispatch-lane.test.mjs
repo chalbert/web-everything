@@ -695,17 +695,23 @@ describe('the declared effect is a dispatch', () => {
 describe('what the sink actually runs', () => {
   const payload = { num: '3037', sessionSlug: 'conveyor-3037', prompt: '# build #3037' };
 
-  it('pins the handle with --session-id instead of racing to discover it', () => {
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).toEqual([
-      '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037', '# build #3037',
-    ]);
+  it('#3331 — does NOT pass --session-id, because `claude --bg` discards it', () => {
+    // This assertion is INVERTED from what it said before #3331 ("pins the handle with --session-id instead of
+    // racing to discover it"). The real CLI answers `warning: --bg manages the session id; ignoring
+    // --session-id` and assigns its own — measured 3/3 at 2.1.246 by #3331's probe, 2/2 at 2.1.269 with the
+    // real dispatch argv. Passing it bought nothing and encoded a false premise the rest of the file read as
+    // fact; the handle now comes from the id the CLI prints (`parseBackgroundedId`).
+    const argv = buildAgentArgv({ sessionId: 'sess-c3', payload });
+    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '# build #3037']);
+    expect(argv).not.toContain('--session-id');
+    expect(argv).not.toContain('sess-c3');
   });
 
   it('#xqyyoje — appends --append-system-prompt-file only when the caller passes one, ahead of extraArgs', () => {
     expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).not.toContain('--append-system-prompt-file');
     const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'] });
     expect(argv).toEqual([
-      '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037',
+      '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', '/path/to/identity.md',
       '--model', 'sonnet', '# build #3037',
     ]);
@@ -1701,7 +1707,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // is the sink's own standing-identity flag, always present on a real dispatch — see
     // `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`.
     expect(spawned[0].argv).toEqual([
-      '--bg', '--session-id', 'sess-3165', '-n', 'conveyor-3037',
+      '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
@@ -1759,7 +1765,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     tick.decisions.spawnPrepareScope.push({ num: '9999', lane: 7 });
     const { spawned } = await dispatchThrough({ num: '3150', tick, items: [UNSCOPED, { num: '9999', slug: 'other' }] });
     expect(spawned).toHaveLength(1);
-    expect(spawned[0].argv[4]).toBe('prepare-3150');
+    expect(spawned[0].argv[2]).toBe('prepare-3150');
   });
 
   it('a num in NO list still says so, and now names all three', async () => {

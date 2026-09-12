@@ -36,6 +36,8 @@ import {
 } from '../dispatch-lane.mjs';
 import {
   createDispatchObservers,
+  createDispatchSinks,
+  defaultClaudeProvider,
   listedSessionIds,
   normalizeHandle,
   persistLastSeenLive,
@@ -76,12 +78,15 @@ describe('hardening 1: the pinned payload is a real `claude agents --json` listi
     expect(shapes.size).toBe(3);
   });
 
-  it('`sessionId` is on EVERY row and `id` is not — which is why nothing reads `id`', () => {
+  it('`sessionId` is on EVERY row and `id` only on some — so `id` alone could never be the key', () => {
     const rows = payload();
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => typeof r.sessionId === 'string' && r.sessionId)).toBe(true);
-    // `id` is absent from half the listing, and where present it is a PREFIX — never a handle to compare.
+    // `id` is absent from half the listing (the `interactive` half). Since #3331 `listedSessionIds` collects
+    // it IN ADDITION to `sessionId`, never instead — because a `--bg` handle is the short `id` the CLI printed
+    // for that spawn, while the long form is what every other reader stores. An absent `id` costs nothing.
     expect(rows.some((r) => r.id === undefined)).toBe(true);
+    expect(rows.some((r) => typeof r.id === 'string' && r.id)).toBe(true);
   });
 
   it('every id is a lower-case v4 UUID — the measurement hardening 3 is deliberately NOT justified by', () => {
@@ -109,8 +114,13 @@ describe('hardening 1: the pinned payload is a real `claude agents --json` listi
  * and no live dispatch can ever exercise them.** That is not a reason to drop them: they are fail-closed cover
  * for a shape nobody has seen, and the cost of being wrong about it is two agents in one lane clone. A later
  * reader should not go hunting for the real listing that reddens this; there is none.
+ *
+ * `id` IS STRIPPED TOO, SINCE #3331. `listedSessionIds` now collects `id` alongside `sessionId` (a `--bg`
+ * handle is the CLI-assigned SHORT id, not a minted uuid — see that function's own docblock), so a row keeping
+ * its `id` is no longer unmatchable and would not reach the branch under test. Stripping both is what "not one
+ * row yielded anything comparable" means under the widened contract; the branch itself is unchanged.
  */
-const unmatchable = () => payload().map(({ sessionId, ...rest }) => rest);
+const unmatchable = () => payload().map(({ sessionId, id, ...rest }) => rest);
 
 describe('hardening 2: a non-empty listing yielding zero usable ids is UNREADABLE, not "everyone is gone"', () => {
   it('stampLiveness — reddens on revert: the old code stamped `live: false` on every row', () => {
@@ -176,9 +186,20 @@ describe('hardening 3: session ids compare normalized — drift-defence, not an 
     expect(normalizeHandle(null)).toBe('');
     expect(normalizeHandle(undefined)).toBe('');
     expect(normalizeHandle('  ABC ')).toBe('abc');
-    // An empty-string id must never become a Set member, or a handle-less row would "match" it.
-    expect(listedSessionIds([{ sessionId: '' }, { sessionId: '  ' }, null]).size).toBe(0);
-    expect(listedSessionIds(payload()).size).toBe(payload().length);
+    // An empty-string id must never become a Set member, or a handle-less row would "match" it. Both fields
+    // are read now (#3331), so both blank forms have to be dropped.
+    expect(listedSessionIds([{ sessionId: '' }, { sessionId: '  ' }, { id: '' }, { id: ' ' }, null]).size).toBe(0);
+    // Every row's `sessionId` is in the set, and — since #3331 — every row's short `id` as well, which is what
+    // a `--bg` handle actually looks like. Rows carrying no `id` (the interactive half of the listing)
+    // contribute exactly one entry each, as before.
+    const listed = listedSessionIds(payload());
+    for (const row of payload()) {
+      expect(listed.has(row.sessionId.toLowerCase())).toBe(true);
+      if (row.id) expect(listed.has(String(row.id).toLowerCase())).toBe(true);
+    }
+    const expectedSize = new Set(payload().flatMap((r) => [r.sessionId, r.id]).filter(Boolean).map((v) => String(v).toLowerCase())).size;
+    expect(listed.size).toBe(expectedSize);
+    expect(expectedSize).toBeGreaterThan(payload().length); // the widening is real, not a no-op
   });
 });
 
@@ -338,5 +359,80 @@ describe('7a: all three readers run against the pinned real payload, with no age
     expect(out.runs.every((r) => r.live === true)).toBe(true);
     // And the guard holds every one of them at any age — no clock may overrule a live session.
     expect(out.runs.every((r) => dispatchStillHolds({ ...r, startedAt: '2020-01-01T00:00:00.000Z' }, NOW))).toBe(true);
+  });
+});
+
+// ── HARDENING 6 (#3331) — the handle is the id the CLI PRINTED, not the one the dispatcher minted ─────────────
+
+/**
+ * WHAT WENT WRONG, and why it hid for so long. `buildAgentArgv` used to emit `--session-id <minted uuid>` and
+ * `defaultClaudeProvider` used to answer with that same uuid as the durable handle. `claude --bg` DISCARDS
+ * `--session-id` — it says so on stderr (`warning: --bg manages the session id; ignoring --session-id`) and
+ * assigns its own, measured 3/3 at CLI 2.1.246 by #3331's probe and 2/2 at 2.1.269 against the REAL dispatch
+ * argv (review brief, system-prompt file and deny list included).
+ *
+ * The dispatch still WORKED — a live `review-2129` session ran an independent review to a full accept verdict
+ * while this bug was in force — which is exactly why it hid. What broke was ADDRESSABILITY: every operator who
+ * ran the dispatcher's own printed `claude agents --json | grep <uuid>` got nothing and concluded no session
+ * had started, and `stampLiveness` answered `live: false` for every in-flight dispatch forever, silently
+ * degrading the double-dispatch guard to its clock backstop.
+ *
+ * WHY A FAKE-CLI TEST COULD NOT HAVE CAUGHT IT (`dispatch-spawn-live.test.mjs`): the fake obligingly echoes
+ * back whatever id it is handed, so it was green against an assumption the real CLI never honoured. These
+ * tests instead pin the two halves of the REAL contract — what the argv must not contain, and where the handle
+ * must come from — neither of which a cooperative stand-in can fake away.
+ */
+describe('hardening 6: a `--bg` handle is read back off stdout (#3331)', () => {
+  /** Verbatim the first line CLI 2.1.269 prints on stdout for a `--bg` spawn. */
+  const BANNER = (id, name) => `backgrounded · ${id} · ${name}\n  claude agents             list sessions\n`;
+
+  it('defaultClaudeProvider answers with the PRINTED id, never the minted one', () => {
+    const handle = defaultClaudeProvider(
+      { sessionId: 'minted-1111-2222-3333-444444444444', cwd: '/repo', prompt: '# go', sessionSlug: 'conveyor-3037' },
+      { spawnAgent: () => BANNER('fe8b4df8', 'conveyor-3037') },
+    );
+    expect(handle).toBe('fe8b4df8');
+    expect(handle).not.toBe('minted-1111-2222-3333-444444444444');
+  });
+
+  it('…and falls back to the minted id only when stdout carries no banner — never a null handle', () => {
+    // The fallback is the PRE-#3331 behaviour on purpose: an unparseable spawn must still record something
+    // `in-flight`, because a null handle lands in the executor's `unknown` bucket that only a person can close.
+    expect(defaultClaudeProvider(
+      { sessionId: 'minted-z9', cwd: '/repo', prompt: '# go', sessionSlug: 'conveyor-3037' },
+      { spawnAgent: () => '' },
+    )).toBe('minted-z9');
+  });
+
+  it('the SINK records the printed id as the run entry\'s handle', async () => {
+    const sinks = createDispatchSinks({
+      root: '/primary/webeverything',
+      mintSessionId: () => 'minted-z9',
+      spawnAgent: () => BANNER('91035f2f', 'conveyor-3037'),
+      now: () => new Date(NOW),
+    });
+    const entry = await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go' });
+    expect(entry.handle).toBe('91035f2f');
+  });
+
+  it('a printed short id MATCHES its own row in the real listing — the whole point of the change', () => {
+    // The listing's `id` field is the short id `--bg` prints; `sessionId` is its long form. Before #3331
+    // `listedSessionIds` collected only the long one, so a real handle could never be found.
+    const row = payload().find((r) => r.id);
+    expect(row).toBeTruthy();
+    const out = stampLiveness(
+      { runs: [{ runId: 'a', key: '3037', handle: row.id }], unreadable: 0 },
+      { listAgents: payload },
+    );
+    expect(out.runs[0].live).toBe(true);
+    expect(out.livenessSource).toBe('claude-agents');
+  });
+
+  it('and a MINTED uuid still matches nothing — the old handle is not rescued by the widening', () => {
+    const out = stampLiveness(
+      { runs: [{ runId: 'a', key: '3037', handle: GONE_HANDLE }], unreadable: 0 },
+      { listAgents: payload },
+    );
+    expect(out.runs[0].live).toBe(false);
   });
 });

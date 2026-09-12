@@ -29,7 +29,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { withFakeClaude } from './helpers/fake-claude.mjs';
-import { buildAgentArgv, defaultSpawnAgent, defaultListAgents } from '../dispatch-lane-io.mjs';
+import { buildAgentArgv, defaultSpawnAgent, defaultListAgents, parseBackgroundedId } from '../dispatch-lane-io.mjs';
 
 /**
  * Spawn through the REAL default path, with the fake first on PATH.
@@ -65,7 +65,10 @@ describe('dispatching an agent, against a real process', () => {
 
     const seen = fake.lastArgv();
     expect(seen).toContain('--bg');
-    expect(seen[seen.indexOf('--session-id') + 1]).toBe('11111111-2222-3333-4444-555555555555');
+    // #3331 — `--session-id` IS NOT SENT. `claude --bg` discards it (the shim now models that, and says so on
+    // stderr exactly as 2.1.269 does), so passing it only encoded a false premise about who owns the id.
+    expect(seen).not.toContain('--session-id');
+    expect(seen).not.toContain('11111111-2222-3333-4444-555555555555');
     expect(seen[seen.indexOf('-n') + 1]).toBe('conveyor-4242');
     // The prompt survives as the trailing operand rather than being eaten as a flag — the thing the sink's
     // own comment says was never checked against a real parser.
@@ -91,7 +94,7 @@ describe('dispatching an agent, against a real process', () => {
     fake = withFakeClaude();
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const env = { ...process.env, ...fake.env };
-    spawnVia(fake, buildAgentArgv({
+    const stdout = spawnVia(fake, buildAgentArgv({
       sessionId,
       payload: { num: '77', sessionSlug: 'conveyor-77', prompt: '# brief' },
     }));
@@ -105,10 +108,17 @@ describe('dispatching an agent, against a real process', () => {
     // this change, and this case is what holds it.
     const listing = defaultListAgents({ env });
 
-    // Both ends of the chain were previously modelled. This is the one assertion that ties them: the id the
-    // dispatcher pinned is the id the liveness listing reports back.
-    expect(listing.map((s) => s.sessionId)).toContain(sessionId);
-    expect(listing.find((s) => s.sessionId === sessionId).name).toBe('conveyor-77');
+    // Both ends of the chain were previously modelled. This is the one assertion that ties them — and since
+    // #3331 it ties the RIGHT two ends. It used to read "the id the dispatcher pinned is the id the liveness
+    // listing reports back", which was true only because the shim honoured `--session-id`; the real CLI never
+    // did. The chain that actually exists: the id `--bg` PRINTS is the id the listing carries, and it is what
+    // `parseBackgroundedId` (production's own parser, not a re-implementation) recovers.
+    const printed = parseBackgroundedId(stdout);
+    expect(printed).toBeTruthy();
+    expect(listing.map((s) => s.id)).toContain(printed);
+    expect(listing.find((s) => s.id === printed).name).toBe('conveyor-77');
+    // …and the MINTED id reaches nothing, which is the defect this pins against regression.
+    expect(listing.map((s) => s.sessionId)).not.toContain(sessionId);
   });
 
   it('a leading-dash brief is refused by the dispatcher — and the parser proves the refusal is load-bearing', () => {
