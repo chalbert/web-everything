@@ -14,6 +14,14 @@ import {
   CODEX_CLI,
   DEFAULT_TIMEOUT_MS,
   CODEX_EFFORT_MAP,
+  CODEX_MODEL,
+  CODEX_TIER_EFFORT,
+  resolveCodexEffort,
+  resolveCodexHome,
+  findRolloutFile,
+  parseRolloutQuota,
+  readRolloutQuota,
+  collectAndClearRolloutQuota,
   buildCodexDirectTaskArgv,
   buildCodexPrompt,
   buildScratchCloneArgv,
@@ -78,6 +86,56 @@ describe('buildCodexDirectTaskArgv — pure argv for agentic/workspace-write mod
       expect(flagValue(argv, '-c')).toBe(`model_reasoning_effort=${mapped}`);
     }
     expect(() => buildCodexDirectTaskArgv({ cwd: '/d', effort: 'ultra' })).toThrow();
+  });
+
+  // #x8wbivt — the ratified model/effort pin. The whole point is that a real constructed argv NEVER omits
+  // `-m`/`-c` even when a caller passes neither — never inherit the CLI's own implicit default.
+  it('#x8wbivt: pins -m to CODEX_MODEL (gpt-6-astra) when no model is given', () => {
+    expect(CODEX_MODEL).toBe('gpt-6-astra');
+    const argv = buildCodexDirectTaskArgv({ cwd: '/d' });
+    expect(flagValue(argv, '-m')).toBe('gpt-6-astra');
+  });
+
+  it('#x8wbivt: an explicit model still overrides the pin', () => {
+    const argv = buildCodexDirectTaskArgv({ cwd: '/d', model: 'gpt-5.6-sol' });
+    expect(flagValue(argv, '-m')).toBe('gpt-5.6-sol');
+  });
+
+  it("#x8wbivt: pins effort to the sonnet rung's medium when neither effort nor tier is given", () => {
+    const argv = buildCodexDirectTaskArgv({ cwd: '/d' });
+    expect(flagValue(argv, '-c')).toBe('model_reasoning_effort=medium');
+  });
+});
+
+describe('#x8wbivt — CODEX_TIER_EFFORT / resolveCodexEffort: the ratified three-rung effort ladder', () => {
+  it('the ladder maps haiku/sonnet/opus to low/medium/high — the pin is on EFFORT, not model', () => {
+    expect(CODEX_TIER_EFFORT).toEqual({ haiku: 'low', sonnet: 'medium', opus: 'high' });
+  });
+
+  it('resolves each tier to its real model_reasoning_effort value', () => {
+    expect(resolveCodexEffort({ tier: 'haiku' })).toBe('low');
+    expect(resolveCodexEffort({ tier: 'sonnet' })).toBe('medium');
+    expect(resolveCodexEffort({ tier: 'opus' })).toBe('high');
+  });
+
+  it('an explicit effort always wins over tier', () => {
+    expect(resolveCodexEffort({ tier: 'haiku', effort: 'high' })).toBe('high');
+  });
+
+  it('defaults to the sonnet rung when neither tier nor effort is given', () => {
+    expect(resolveCodexEffort({})).toBe('medium');
+    expect(resolveCodexEffort()).toBe('medium');
+  });
+
+  it('rejects an unknown tier', () => {
+    expect(() => resolveCodexEffort({ tier: 'fable' })).toThrow(/tier/);
+  });
+
+  it('every resolved tier value round-trips through buildCodexDirectTaskArgv as a real -c flag', () => {
+    for (const tier of Object.keys(CODEX_TIER_EFFORT)) {
+      const argv = buildCodexDirectTaskArgv({ cwd: '/d', effort: resolveCodexEffort({ tier }) });
+      expect(flagValue(argv, '-c')).toBe(`model_reasoning_effort=${CODEX_TIER_EFFORT[tier]}`);
+    }
   });
 });
 
@@ -180,6 +238,149 @@ describe('summarizeEvents — the real agentic-mode event shape observed in a li
     expect(s.terminal).toBeNull();
     expect(s.commands).toEqual([]);
     expect(s.filesChanged).toEqual([]);
+  });
+});
+
+describe('#x8wbivt Fork 4 — the ratified quota signal: locate, parse, read, and read-then-delete', () => {
+  describe('resolveCodexHome', () => {
+    it('honours $CODEX_HOME when set', () => {
+      expect(resolveCodexHome({ CODEX_HOME: '/custom/codex-home' })).toBe('/custom/codex-home');
+    });
+    it('falls back to ~/.codex when unset/blank', () => {
+      expect(resolveCodexHome({})).toMatch(/\.codex$/);
+      expect(resolveCodexHome({ CODEX_HOME: '   ' })).toMatch(/\.codex$/);
+    });
+  });
+
+  describe('findRolloutFile — walks sessions/ recursively over an injected readdirFn, matches by trailing thread id', () => {
+    // Mirrors the REAL layout observed live: <codexHome>/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<threadId>.jsonl
+    function fakeTree(byDir) {
+      return (dir) => (byDir[dir] ?? []);
+    }
+
+    it('finds the file nested three directories deep', () => {
+      const readdirFn = fakeTree({
+        '/home/.codex/sessions': [{ name: '2026', isDirectory: () => true }],
+        '/home/.codex/sessions/2026': [{ name: '09', isDirectory: () => true }],
+        '/home/.codex/sessions/2026/09': [{ name: '11', isDirectory: () => true }],
+        '/home/.codex/sessions/2026/09/11': [
+          { name: 'rollout-2026-09-11T16-45-34-01a09237-efe4-7520-a96c-95ff14613b28.jsonl', isDirectory: () => false },
+          { name: 'rollout-2026-09-11T17-00-00-unrelated-thread-id.jsonl', isDirectory: () => false },
+        ],
+      });
+      const found = findRolloutFile({
+        codexHome: '/home/.codex', threadId: '01a09237-efe4-7520-a96c-95ff14613b28', readdirFn,
+      });
+      expect(found).toBe('/home/.codex/sessions/2026/09/11/rollout-2026-09-11T16-45-34-01a09237-efe4-7520-a96c-95ff14613b28.jsonl');
+    });
+
+    it('returns null when no file matches', () => {
+      const readdirFn = fakeTree({ '/home/.codex/sessions': [{ name: 'x.jsonl', isDirectory: () => false }] });
+      expect(findRolloutFile({ codexHome: '/home/.codex', threadId: 'nope', readdirFn })).toBeNull();
+    });
+
+    it('tolerates a missing sessions/ directory (a fresh CODEX_HOME) — returns null, never throws', () => {
+      const readdirFn = () => { throw new Error('ENOENT'); };
+      expect(findRolloutFile({ codexHome: '/fresh', threadId: 't1', readdirFn })).toBeNull();
+    });
+
+    it('requires codexHome and threadId', () => {
+      expect(findRolloutFile({ threadId: 't1' })).toBeNull();
+      expect(findRolloutFile({ codexHome: '/h' })).toBeNull();
+    });
+  });
+
+  describe('parseRolloutQuota — over a REAL observed rollout line shape (live codex-cli 0.153.4, #x8wbivt)', () => {
+    // This is the ACTUAL (trimmed) event a real non-ephemeral `codex exec` run wrote to its rollout file —
+    // captured live while building this feature. Pinned here so a future Codex CLI change to this shape fails
+    // a test instead of silently breaking quota parsing, same discipline `summarizeEvents`'s own REAL_EVENTS
+    // fixture uses.
+    const REAL_ROLLOUT_LINES = [
+      '{"timestamp":"2026-09-11T20:45:34.674Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a09237-efe4-7520-a96c-95ff14613b28"}}',
+      '{"timestamp":"2026-09-11T20:45:45.451Z","ordinal":16,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":11123}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":27.0,"window_minutes":300,"resets_at":1789175180},"secondary":{"used_percent":12.0,"window_minutes":10080,"resets_at":1789761980},"plan_type":"prolite","rate_limit_reached_type":null}}}',
+    ].join('\n');
+
+    it('extracts used_percent/window_minutes/resets_at/plan_type from the primary window', () => {
+      const q = parseRolloutQuota(REAL_ROLLOUT_LINES);
+      expect(q).toEqual({
+        usedPercent: 27.0, windowMinutes: 300, resetsAt: 1789175180, planType: 'prolite',
+        raw: expect.objectContaining({ limit_id: 'codex' }),
+      });
+    });
+
+    it('takes the LAST token_count event when a multi-turn rollout logs more than one', () => {
+      const lines = [
+        '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":5,"window_minutes":300,"resets_at":1},"plan_type":"prolite"}}}',
+        '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":9,"window_minutes":300,"resets_at":2},"plan_type":"prolite"}}}',
+      ].join('\n');
+      expect(parseRolloutQuota(lines).usedPercent).toBe(9);
+    });
+
+    it('returns null for a rollout with no token_count event, and never throws on malformed lines', () => {
+      expect(parseRolloutQuota('{"type":"session_meta"}\nnot json\n')).toBeNull();
+      expect(parseRolloutQuota('')).toBeNull();
+      expect(() => parseRolloutQuota('garbage\n{{{')).not.toThrow();
+    });
+  });
+
+  describe('readRolloutQuota — READ-ONLY: never deletes anything (preserves codex exec resume)', () => {
+    it('reads the quota and has no deletion capability at all (no removeFileFn param)', () => {
+      const readFileFn = vi.fn(() => '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":50,"window_minutes":300,"resets_at":9},"plan_type":"prolite"}}}');
+      const readdirFn = () => [{ name: 'rollout-x-t1.jsonl', isDirectory: () => false }];
+      const result = readRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn, readFileFn });
+      expect(result.quota.usedPercent).toBe(50);
+      expect(result.rolloutFile).toBe('/h/sessions/rollout-x-t1.jsonl');
+      expect(result.deleted).toBeUndefined(); // unlike collectAndClearRolloutQuota, this shape never claims a deletion
+    });
+
+    it('returns a null quota (not a throw) when no rollout file is found', () => {
+      const readdirFn = () => [];
+      expect(readRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn })).toEqual({ quota: null, rolloutFile: null });
+    });
+
+    it('returns rolloutFile with a null quota when the file exists but fails to read', () => {
+      const readdirFn = () => [{ name: 'rollout-x-t1.jsonl', isDirectory: () => false }];
+      const readFileFn = () => { throw new Error('EACCES'); };
+      const result = readRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn, readFileFn });
+      expect(result.quota).toBeNull();
+      expect(result.rolloutFile).toBe('/h/sessions/rollout-x-t1.jsonl');
+    });
+  });
+
+  describe('collectAndClearRolloutQuota — #x8wbivt Fork 4 RATIFIED shape: read the record, THEN delete the file', () => {
+    it('reads the quota and deletes the rollout file afterward', () => {
+      const removeFileFn = vi.fn();
+      const readFileFn = () => '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":33,"window_minutes":300,"resets_at":9},"plan_type":"prolite"}}}';
+      const readdirFn = () => [{ name: 'rollout-x-t1.jsonl', isDirectory: () => false }];
+      const result = collectAndClearRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn, readFileFn, removeFileFn });
+      expect(result.quota.usedPercent).toBe(33);
+      expect(result.deleted).toBe(true);
+      expect(removeFileFn).toHaveBeenCalledWith('/h/sessions/rollout-x-t1.jsonl');
+    });
+
+    it('EVEN ON A FAILURE PATH — a read that throws still deletes the file (nothing lingers)', () => {
+      const removeFileFn = vi.fn();
+      const readFileFn = () => { throw new Error('corrupt rollout'); };
+      const readdirFn = () => [{ name: 'rollout-x-t1.jsonl', isDirectory: () => false }];
+      const result = collectAndClearRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn, readFileFn, removeFileFn });
+      expect(result.quota).toBeNull();
+      expect(result.deleted).toBe(true);
+      expect(removeFileFn).toHaveBeenCalledWith('/h/sessions/rollout-x-t1.jsonl');
+    });
+
+    it('a removeFileFn that itself throws does not propagate — best-effort cleanup', () => {
+      const readFileFn = () => '{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":1,"window_minutes":300,"resets_at":9},"plan_type":"prolite"}}}';
+      const readdirFn = () => [{ name: 'rollout-x-t1.jsonl', isDirectory: () => false }];
+      const removeFileFn = () => { throw new Error('EBUSY'); };
+      expect(() => collectAndClearRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn, readFileFn, removeFileFn })).not.toThrow();
+    });
+
+    it('never deletes anything when no rollout file is found', () => {
+      const removeFileFn = vi.fn();
+      const result = collectAndClearRolloutQuota({ codexHome: '/h', threadId: 't1', readdirFn: () => [], removeFileFn });
+      expect(result.deleted).toBe(false);
+      expect(removeFileFn).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -409,6 +610,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     try {
       const report = await codexDirectTask({
         task: 'edit a file', dir, gate: 'none', stream: false, execFn, spawnFn,
+        readQuotaFn: () => ({ quota: null, rolloutFile: null }),
       });
       expect(report.scratch.created).toBe(false);
       expect(report.dir).toBe(dir);
@@ -451,4 +653,84 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     const i = argv.indexOf(flag);
     return i === -1 ? undefined : argv[i + 1];
   }
+
+  describe('#x8wbivt Fork 4 — codexDirectTask wires the quota signal into its report', () => {
+    it('surfaces quotaUsedPercent/quotaWindowMinutes/quotaResetsAt/quotaPlanType via the injected readQuotaFn (default: read-only)', async () => {
+      const stdout = '{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.completed","usage":{}}\n';
+      const { fn: spawnFn } = fakeSpawn(stdout);
+      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
+      const readQuotaFn = vi.fn(({ threadId }) => {
+        expect(threadId).toBe('t1');
+        return { quota: { usedPercent: 42, windowMinutes: 300, resetsAt: 12345, planType: 'prolite' }, rolloutFile: '/h/sessions/x.jsonl' };
+      });
+      try {
+        const report = await codexDirectTask({ task: 't', dir, gate: 'none', stream: false, execFn, spawnFn, readQuotaFn });
+        expect(readQuotaFn).toHaveBeenCalledOnce();
+        expect(report.quotaUsedPercent).toBe(42);
+        expect(report.quotaWindowMinutes).toBe(300);
+        expect(report.quotaResetsAt).toBe(12345);
+        expect(report.quotaPlanType).toBe('prolite');
+        expect(report.quotaRolloutFile).toBe('/h/sessions/x.jsonl');
+        expect(report.quotaRolloutCleared).toBe(false); // default path never deletes
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses collectQuotaFn (read-then-delete) instead when clearRolloutAfterRun is true', async () => {
+      const stdout = '{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.completed","usage":{}}\n';
+      const { fn: spawnFn } = fakeSpawn(stdout);
+      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
+      const readQuotaFn = vi.fn();
+      const collectQuotaFn = vi.fn(() => ({ quota: { usedPercent: 7, windowMinutes: 300, resetsAt: 1, planType: 'prolite' }, rolloutFile: '/h/sessions/x.jsonl', deleted: true }));
+      try {
+        const report = await codexDirectTask({
+          task: 't', dir, gate: 'none', stream: false, execFn, spawnFn, clearRolloutAfterRun: true, readQuotaFn, collectQuotaFn,
+        });
+        expect(collectQuotaFn).toHaveBeenCalledOnce();
+        expect(readQuotaFn).not.toHaveBeenCalled();
+        expect(report.quotaUsedPercent).toBe(7);
+        expect(report.quotaRolloutCleared).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('never looks up quota for an --ephemeral run (no rollout was ever written)', async () => {
+      const stdout = '{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.completed","usage":{}}\n';
+      const { fn: spawnFn } = fakeSpawn(stdout);
+      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
+      const readQuotaFn = vi.fn();
+      const collectQuotaFn = vi.fn();
+      try {
+        const report = await codexDirectTask({
+          task: 't', dir, gate: 'none', stream: false, execFn, spawnFn, ephemeral: true, readQuotaFn, collectQuotaFn,
+        });
+        expect(readQuotaFn).not.toHaveBeenCalled();
+        expect(collectQuotaFn).not.toHaveBeenCalled();
+        expect(report.quotaUsedPercent).toBeNull();
+        expect(report.quotaRolloutFile).toBeNull();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('never looks up quota when the run produced no thread id at all (nothing to key the lookup on)', async () => {
+      const stdout = '{"type":"turn.completed","usage":{}}\n'; // no thread.started
+      const { fn: spawnFn } = fakeSpawn(stdout);
+      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
+      const readQuotaFn = vi.fn();
+      try {
+        const report = await codexDirectTask({ task: 't', dir, gate: 'none', stream: false, execFn, spawnFn, readQuotaFn });
+        expect(readQuotaFn).not.toHaveBeenCalled();
+        expect(report.quotaUsedPercent).toBeNull();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });

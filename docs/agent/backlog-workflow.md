@@ -661,6 +661,40 @@ distinguish from a right one without independently re-deriving it — which defe
 or `kind` the same way the model table warns about (a `story·3` can still hide a real design call) — route
 on what the brief actually asks the spawn to *do*, never on a field alone.
 
+### Codex model routing — pin the model, differentiate on effort {#codex-model-routing}
+
+Ratified by [#x8wbivt](/backlog/x8wbivt-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher.md)
+(operator, 2026-09-11), on 89 logged `codex exec` runs across 8 selectable models (backlog `#x8wbivt`'s own
+evidence). Two rules, deliberately different in shape from the Claude-side table above:
+
+1. **Every real Codex CLI invocation names its model explicitly**, the same "never inherit, never
+   default-cheap" discipline `agent-memory-src/always-set-subagent-model-explicitly.md` requires for a
+   Claude `Agent()` spawn — Codex's own implicit default silently resolves to the top rung today and nothing
+   records that choice. `scripts/codex-direct-task.mjs#CODEX_MODEL` pins `gpt-6-astra`, threaded via `-m` into
+   every constructed argv (`buildCodexDirectTaskArgv` defaults to it — there is no way to omit `-m`).
+2. **The three-rung Haiku/Sonnet/Opus vocabulary survives, but it selects EFFORT, not model.** The evidence
+   refuses a model-based ladder (three of four probes scored identically across six of seven current-generation
+   models; the one real split was by model *generation*, not tier), but *effort* measurably moved correctness
+   on the one probe that separated anything at all — raising a weak model's `model_reasoning_effort` from
+   `medium` to `high` rescued it from 4/8 to 4/4. So all three rungs pin the SAME `CODEX_MODEL` and differ only
+   on Codex's own `model_reasoning_effort` (real values, confirmed via a live `-c model_reasoning_effort=<level>`
+   run — not Claude's low/medium/high names applied by assumption):
+   `scripts/codex-direct-task.mjs#CODEX_TIER_EFFORT` = `{ haiku: 'low', sonnet: 'medium', opus: 'high' }`,
+   resolved via `resolveCodexEffort({ tier, effort })` (an explicit `effort` always outranks a named `tier`).
+3. **The quota-consumption signal is surfaced, not thrown away.** No USD figure exists anywhere in Codex's
+   output, but a real `rate_limits` block (`used_percent`/`window_minutes`/`resets_at`/`plan_type`) is
+   persisted in a non-`--ephemeral` run's rollout file as a `token_count` event. The ratified shape for a
+   caller with no resume use case (mirrors the fire-and-forget judge role): write the rollout normally, read
+   the one record, then delete the rollout file (`collectAndClearRolloutQuota`) — same net cleanliness
+   `--ephemeral` gives, but the signal gets read first. A caller that genuinely needs `codex exec resume
+   <thread-id>` (`scripts/codex-direct-task.mjs`'s own documented reason for not passing `--ephemeral` by
+   default) reads the same signal WITHOUT deleting (`readRolloutQuota`) — deleting the rollout there would
+   silently remove the resume feature the non-ephemeral default exists for.
+
+**RE-DERIVE, don't assume, when either axis changes**: a harder probe finding a real capability split (model
+axis), a task shape effort does not rescue (effort axis), or a Codex CLI upgrade re-ranking its catalogue —
+this table's whole premise is measured evidence with a short shelf life, not a permanent mapping.
+
 ## Running a batch — chain several small items, stop on a solid condition
 
 > Use via the `batch-backlog-items` skill (`/batch`, `/batch-next`). A batch works several **agent-ready** items back-to-back **without stopping for approval between them** — to run a bit longer and progress faster — while keeping a real validation stop at every seam and a hard backstop that guarantees it ends. It **reuses the single-item arc unchanged** (*Selecting*, *Working an item*, *Closing out*); it only adds the loop and the stop rule below.

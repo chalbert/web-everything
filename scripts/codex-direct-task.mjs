@@ -78,8 +78,10 @@
  */
 
 import { spawn as nodeSpawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdtempSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync,
+} from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 // ── constants ─────────────────────────────────────────────────────────────────────────────────────
@@ -97,6 +99,67 @@ export const CODEX_EFFORT_MAP = Object.freeze({
   max: 'high',
 });
 
+/**
+ * #x8wbivt — RATIFIED 2026-09-11 (operator, Nicolas Gilbert). The Codex model pin: every real `codex exec`
+ * invocation in this file names its model explicitly via `-m`, never relying on the CLI's own implicit
+ * default — measured live as resolving to this same model today (`codex doctor`'s un-pinned `model
+ * <default>`), but an implicit default is a choice nobody records and the server-fetched catalogue can
+ * re-rank without a release. `gpt-6-astra` was chosen on measured evidence (backlog `#x8wbivt`, 89 logged
+ * `codex exec` runs across 8 selectable models): top score on every probe (8/8 on the quick-lookup probe,
+ * correct on both judgment probes), lowest reasoning-token burn among the perfect scorers, and it shares its
+ * weekly quota bucket with the operator's own interactive Codex use (so routing here does not silently drain
+ * a SEPARATE, faster-draining bucket the way the "cheap" `gpt-5.3-codex-spark` model measurably does — see
+ * the card's quota-bucket table). RE-DERIVE if a future probe run finds a real capability split, or if this
+ * model is retired from the entitled catalogue.
+ */
+export const CODEX_MODEL = 'gpt-6-astra';
+
+/**
+ * #x8wbivt — RATIFIED 2026-09-11. The Claude-side three-rung ladder (`agent-memory-src/
+ * always-set-subagent-model-explicitly.md` — Haiku/Sonnet/Opus, routing on the *shape* of the work) is KEPT as
+ * a routing vocabulary on the Codex side too, but it no longer selects a MODEL: the card's own measurement
+ * (three of four probes scored identically across six of seven current-generation models; the one real
+ * separation found was by model *generation*, not marketing tier) refuses a model-based ladder twice over. The
+ * one axis effort measurably moved: raising a weak model's `model_reasoning_effort` from its default
+ * (`medium`) to `high` rescued it from 4/8 to 4/4 on the same probe, and dropping the strongest model to `low`
+ * cost nothing on that probe. So all three rungs below pin the SAME `CODEX_MODEL`, and only the reasoning
+ * EFFORT differentiates them — the dimension the evidence actually supports. Mapped onto Codex's own
+ * `model_reasoning_effort` values (confirmed real via a live `codex exec -c model_reasoning_effort=<level>`
+ * run, not guessed from Claude's low/medium/high naming): `haiku` (a pointer verifiable in seconds) gets the
+ * cheapest real effort Codex offers; `sonnet` (execution against a decided spec) gets Codex's own measured
+ * *default* (`medium` — unchanged from today's un-pinned behaviour, just made explicit rather than inherited);
+ * `opus` (judgment work) gets the effort level that measurably rescued the weakest model on this evidence.
+ * RE-DERIVE if a harder probe finds a task shape effort does not rescue.
+ */
+export const CODEX_TIER_EFFORT = Object.freeze({
+  haiku: 'low',
+  sonnet: 'medium',
+  opus: 'high',
+});
+
+/**
+ * Resolve the real `model_reasoning_effort` value a caller's `tier` (`CODEX_TIER_EFFORT`'s keys) or an
+ * explicit `effort` should use — an explicit `effort` always wins (a caller who names a level exactly is more
+ * specific than one naming a role), `tier` resolves through the ratified map above, and naming NEITHER pins
+ * the `sonnet` rung's `medium` rather than leaving the CLI to infer its own default — the same "never
+ * implicit" principle `CODEX_MODEL` applies to model, applied here to effort. PURE.
+ * @param {object} [opts]
+ * @param {'haiku'|'sonnet'|'opus'} [opts.tier]
+ * @param {string} [opts.effort] - one of `CODEX_EFFORT_MAP`'s keys.
+ * @returns {string} one of `CODEX_TIER_EFFORT`'s VALUES (a real Codex `model_reasoning_effort` level).
+ */
+export function resolveCodexEffort({ tier, effort } = {}) {
+  if (effort !== undefined) return effort;
+  if (tier !== undefined) {
+    const mapped = CODEX_TIER_EFFORT[tier];
+    if (!mapped) {
+      throw new TypeError(`codex-direct-task: \`tier\` must be one of ${Object.keys(CODEX_TIER_EFFORT).join('|')}, got ${JSON.stringify(tier)}`);
+    }
+    return mapped;
+  }
+  return CODEX_TIER_EFFORT.sonnet;
+}
+
 // ── pure: argv / prompt construction ─────────────────────────────────────────────────────────────
 
 /**
@@ -109,8 +172,12 @@ export const CODEX_EFFORT_MAP = Object.freeze({
  * @param {string} opts.cwd - the directory Codex should treat as its working root (an existing checkout, or a
  *   freshly-made scratch clone). REQUIRED.
  * @param {string} [opts.outputLastMessageFile] - if given, Codex writes its final message there too.
- * @param {string} [opts.model]
- * @param {string} [opts.effort] - one of `CODEX_EFFORT_MAP`'s keys.
+ * @param {string} [opts.model] - #x8wbivt: defaults to the ratified `CODEX_MODEL` pin — a caller must pass an
+ *   explicit different string to override it; there is no way to omit `-m` entirely any more; omitting the
+ *   CLI's own implicit-default resolution was the whole point of the ratification.
+ * @param {string} [opts.effort] - one of `CODEX_EFFORT_MAP`'s keys. #x8wbivt: defaults to the `sonnet` rung's
+ *   `medium` (via `CODEX_TIER_EFFORT`) for the same "never implicit" reason as `model` — resolve a `tier`
+ *   through `resolveCodexEffort` before calling this if the caller thinks in rungs rather than raw levels.
  * @param {boolean} [opts.ephemeral] - forwards Codex's own `--ephemeral` (no session persistence). Default
  *   false — see file header for why this script's default differs from the judge role's.
  * @param {string[]} [opts.addDirs] - forwarded as repeated `--add-dir`, for a task that legitimately needs to
@@ -120,8 +187,8 @@ export const CODEX_EFFORT_MAP = Object.freeze({
 export function buildCodexDirectTaskArgv({
   cwd,
   outputLastMessageFile,
-  model,
-  effort,
+  model = CODEX_MODEL,
+  effort = CODEX_TIER_EFFORT.sonnet,
   ephemeral = false,
   addDirs = [],
 } = {}) {
@@ -254,6 +321,152 @@ export function summarizeEvents(events) {
   }
   const usage = [...events].reverse().find((e) => e?.type === 'turn.completed')?.usage ?? {};
   return { threadId, turns, commands, filesChanged, agentMessages, terminal, usage };
+}
+
+// ── the ratified quota signal (#x8wbivt Fork 4) ──────────────────────────────────────────────────
+
+/**
+ * #x8wbivt — RATIFIED 2026-09-11. `codex exec --json` never carries a USD figure (confirmed, `#3371`), but a
+ * real quota-CONSUMPTION signal exists in the PERSISTED session — a rollout file Codex writes to
+ * `$CODEX_HOME/sessions/<year>/<month>/<day>/rollout-<timestamp>-<thread-id>.jsonl` (verified live: `codex
+ * exec` with no `--ephemeral` reliably wrote one, findable by thread id, on `codex-cli 0.153.4`) — as an
+ * `event_msg` of type `token_count` whose `rate_limits` block carries `primary.used_percent`,
+ * `primary.window_minutes`, `primary.resets_at`, and `plan_type`. `resolveCodexHome` honours `$CODEX_HOME`
+ * (Codex's own env var, confirmed via `codex exec --help`), falling back to `~/.codex`.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function resolveCodexHome(env = process.env) {
+  return (typeof env.CODEX_HOME === 'string' && env.CODEX_HOME.trim()) ? env.CODEX_HOME.trim() : join(homedir(), '.codex');
+}
+
+/** Every file path under `dir`, recursing through subdirectories. Injectable `readdirFn` so this needs no
+ * real filesystem in a test. Tolerates a missing/unreadable `dir` (returns `[]`) — a fresh `CODEX_HOME` with
+ * no `sessions/` directory yet is a real, non-error state, not a bug. */
+function walkFiles(dir, readdirFn) {
+  let entries;
+  try { entries = readdirFn(dir); } catch { return []; }
+  let out = [];
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    out = entry.isDirectory() ? out.concat(walkFiles(full, readdirFn)) : out.concat([full]);
+  }
+  return out;
+}
+
+/**
+ * Locate the rollout file a given `codex exec` run wrote, by its `thread_id` (observed off the stream's
+ * `thread.started` event — see `summarizeEvents`). The date-bucketed directory layout is not reconstructed
+ * from the run's start time (that would need a clock this function has no reason to take); instead every
+ * session file under `<codexHome>/sessions` is walked and matched by its trailing `-<threadId>.jsonl`, which
+ * the observed real filename shape (`rollout-<timestamp>-<thread-id>.jsonl`) makes a safe, unambiguous match —
+ * a UUID thread id never collides with another run's.
+ * @param {object} opts
+ * @param {string} opts.codexHome
+ * @param {string} opts.threadId
+ * @param {(dir: string) => import('node:fs').Dirent[]} [opts.readdirFn]
+ * @returns {string|null}
+ */
+export function findRolloutFile({ codexHome, threadId, readdirFn = (d) => readdirSync(d, { withFileTypes: true }) } = {}) {
+  if (typeof codexHome !== 'string' || !codexHome.trim()) return null;
+  if (typeof threadId !== 'string' || !threadId.trim()) return null;
+  const files = walkFiles(join(codexHome, 'sessions'), readdirFn);
+  return files.find((f) => f.endsWith(`-${threadId}.jsonl`)) ?? null;
+}
+
+/**
+ * The ratified quota fields (`primary.used_percent`/`window_minutes`/`resets_at`, `plan_type`) out of a
+ * rollout file's raw JSONL text — the LAST `token_count` event wins (a multi-turn run logs one per turn; the
+ * most recent is the current reading, mirroring `summarizeEvents`'/`parseCodexJudgeOutcome`'s own "the
+ * terminal/latest event is the one that matters" discipline). Never throws on a malformed/empty file — returns
+ * `null`, the same "an honest absence, not a crash" shape `summarizeEvents` uses for an empty stream. PURE.
+ * @param {string} jsonlText
+ * @returns {{usedPercent: number|null, windowMinutes: number|null, resetsAt: number|null, planType:
+ *   string|null, raw: object}|null}
+ */
+export function parseRolloutQuota(jsonlText) {
+  const lines = String(jsonlText).split('\n');
+  let last = null;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj;
+    try { obj = JSON.parse(trimmed); } catch { continue; }
+    if (obj?.type === 'event_msg' && obj.payload?.type === 'token_count' && obj.payload?.rate_limits) {
+      last = obj.payload.rate_limits;
+    }
+  }
+  if (!last) return null;
+  return {
+    usedPercent: last.primary?.used_percent ?? null,
+    windowMinutes: last.primary?.window_minutes ?? null,
+    resetsAt: last.primary?.resets_at ?? null,
+    planType: last.plan_type ?? null,
+    raw: last,
+  };
+}
+
+/**
+ * Read-only quota lookup: find the run's rollout file and parse its quota signal, WITHOUT removing anything.
+ * This is `codexDirectTask`'s own default — unlike the ephemeral, fire-and-forget judge role
+ * (`codex-judge-spawn.mjs`, #xqa9ttq), this script's rollout is deliberately left on disk by default
+ * specifically so a human can `codex exec resume <thread-id>` a run that stopped short (see file header);
+ * deleting it after every run would silently remove that feature.
+ * @param {object} opts
+ * @param {string} opts.codexHome
+ * @param {string} opts.threadId
+ * @param {Function} [opts.readdirFn]
+ * @param {(path: string) => string} [opts.readFileFn]
+ * @returns {{quota: object|null, rolloutFile: string|null}}
+ */
+export function readRolloutQuota({ codexHome, threadId, readdirFn, readFileFn = (p) => readFileSync(p, 'utf8') } = {}) {
+  const rolloutFile = findRolloutFile({ codexHome, threadId, readdirFn });
+  if (!rolloutFile) return { quota: null, rolloutFile: null };
+  try {
+    return { quota: parseRolloutQuota(readFileFn(rolloutFile)), rolloutFile };
+  } catch {
+    return { quota: null, rolloutFile };
+  }
+}
+
+/**
+ * #x8wbivt Fork 4's RATIFIED resolution, verbatim: "write the rollout normally, read the one quota record,
+ * then explicitly delete the rollout file" — the same net cleanliness `--ephemeral` gives, but the signal
+ * gets read first. ALWAYS deletes the rollout file it found, even when the read/parse itself throws (a
+ * partially-written or malformed rollout must not be left behind either — belt-and-braces, matching this
+ * file's `captureDiff`/`runGate` "report the failure, never let it block cleanup" discipline).
+ *
+ * NOT called by `codexDirectTask` below by default — see `readRolloutQuota`'s header for why (this script's
+ * resume feature). Exists for a caller with no resume use case: the ratified default shape for a fire-and-
+ * forget Codex role (mirrors what `codex-judge-spawn.mjs` should do once it drops its hardcoded `--ephemeral`
+ * — see #x8wbivt's card). `codexDirectTask` itself exposes this via `clearRolloutAfterRun: true` for an
+ * operator who explicitly has no resume need for a given run.
+ * @param {object} opts
+ * @param {string} opts.codexHome
+ * @param {string} opts.threadId
+ * @param {Function} [opts.readdirFn]
+ * @param {(path: string) => string} [opts.readFileFn]
+ * @param {(path: string) => void} [opts.removeFileFn]
+ * @returns {{quota: object|null, rolloutFile: string|null, deleted: boolean}}
+ */
+export function collectAndClearRolloutQuota({
+  codexHome,
+  threadId,
+  readdirFn,
+  readFileFn = (p) => readFileSync(p, 'utf8'),
+  removeFileFn = (p) => rmSync(p, { force: true }),
+} = {}) {
+  const rolloutFile = findRolloutFile({ codexHome, threadId, readdirFn });
+  if (!rolloutFile) return { quota: null, rolloutFile: null, deleted: false };
+  let quota = null;
+  try {
+    quota = parseRolloutQuota(readFileFn(rolloutFile));
+  } catch {
+    quota = null; // malformed/unreadable — still delete below, nothing lingers either way.
+  } finally {
+    try { removeFileFn(rolloutFile); } catch { /* best-effort cleanup — nothing further to do if this fails too */ }
+  }
+  return { quota, rolloutFile, deleted: true };
 }
 
 // ── impure: scratch clone, diff capture, gate ────────────────────────────────────────────────────
@@ -464,18 +677,28 @@ export async function runCodexDirectExec({
  * @param {string} opts.task
  * @param {string} [opts.dir] - an existing checkout/lane to work in. Omit to get a fresh scratch clone.
  * @param {string} [opts.repoRoot] - where to clone FROM when `dir` is omitted. Required in that case.
- * @param {string} [opts.model]
- * @param {string} [opts.effort]
+ * @param {string} [opts.model] - #x8wbivt: defaults to `CODEX_MODEL` (via `buildCodexDirectTaskArgv`'s own
+ *   default) when omitted — never left to the CLI's own implicit resolution.
+ * @param {string} [opts.effort] - explicit effort wins over `tier` — see `resolveCodexEffort`.
+ * @param {'haiku'|'sonnet'|'opus'} [opts.tier] - #x8wbivt: the ratified rung vocabulary. Resolved to a real
+ *   `model_reasoning_effort` value via `resolveCodexEffort`; ignored when `effort` is also given.
  * @param {boolean} [opts.ephemeral]
  * @param {number} [opts.timeoutMs]
  * @param {'none'|'standards'|'full'} [opts.gate]
  * @param {string} [opts.logFile]
  * @param {boolean} [opts.stream]
  * @param {boolean} [opts.installDeps]
+ * @param {boolean} [opts.clearRolloutAfterRun] - #x8wbivt Fork 4: when true, use the ratified read-then-delete
+ *   shape (`collectAndClearRolloutQuota`) instead of the default read-only lookup — only worth setting for a
+ *   caller with no `codex exec resume` use case for this particular run (see `readRolloutQuota`'s header).
+ *   Default false: this script's whole point is resumability.
+ * @param {NodeJS.ProcessEnv} [opts.env] - for `resolveCodexHome`. Default `process.env`.
  * @param {Function} [opts.execFn]
  * @param {Function} [opts.spawnFn]
  * @param {(prefix: string) => string} [opts.mkTempDir]
  * @param {(path: string) => boolean} [opts.existsFn]
+ * @param {Function} [opts.readQuotaFn] - injectable, default `readRolloutQuota`.
+ * @param {Function} [opts.collectQuotaFn] - injectable, default `collectAndClearRolloutQuota`.
  * @returns {Promise<object>} the full report — see the CLI's `--json` output for its exact shape.
  */
 export async function codexDirectTask({
@@ -484,16 +707,21 @@ export async function codexDirectTask({
   repoRoot,
   model,
   effort,
+  tier,
   ephemeral = false,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   gate = 'none',
   logFile,
   stream = true,
   installDeps = true,
+  clearRolloutAfterRun = false,
+  env = process.env,
   execFn = defaultExecFn,
   spawnFn = nodeSpawn,
   mkTempDir = (prefix) => mkdtempSync(prefix),
   existsFn = existsSync,
+  readQuotaFn = readRolloutQuota,
+  collectQuotaFn = collectAndClearRolloutQuota,
 } = {}) {
   if (typeof task !== 'string' || !task.trim()) {
     throw new TypeError('codex-direct-task: `task` must be a non-empty string');
@@ -517,8 +745,13 @@ export async function codexDirectTask({
   const resolvedLogFile = logFile || join(targetDir, '.git', 'codex-direct-task.jsonl');
   mkdirSync(resolvedLogFile.slice(0, resolvedLogFile.lastIndexOf('/')) || '.', { recursive: true });
 
+  // #x8wbivt: resolve the effort rung ONCE, here — the same explicit value then flows into both the real
+  // argv (`runCodexDirectExec` → `buildCodexDirectTaskArgv`) and, implicitly, the model pin (which
+  // `buildCodexDirectTaskArgv` defaults on its own when `model` is omitted).
+  const resolvedEffort = resolveCodexEffort({ tier, effort });
+
   const run = await runCodexDirectExec({
-    dir: targetDir, task, model, effort, ephemeral, timeoutMs, logFile: resolvedLogFile, stream, spawnFn,
+    dir: targetDir, task, model, effort: resolvedEffort, ephemeral, timeoutMs, logFile: resolvedLogFile, stream, spawnFn,
   });
   const events = parseJsonlEvents(run.stdout);
   const summary = summarizeEvents(events);
@@ -527,6 +760,22 @@ export async function codexDirectTask({
 
   const diff = captureDiff({ dir: targetDir, startSha, execFn });
   const gateResult = runGate({ dir: targetDir, mode: gate, execFn });
+
+  // #x8wbivt Fork 4: surface the quota signal for any run that actually persisted a rollout (an `--ephemeral`
+  // run writes none — nothing to read). Default is read-ONLY (`readQuotaFn`/`readRolloutQuota`) to preserve
+  // this script's resume feature; `clearRolloutAfterRun` opts into the ratified read-then-delete shape.
+  let quota = null;
+  let quotaRolloutFile = null;
+  let quotaRolloutCleared = false;
+  if (!ephemeral && summary.threadId) {
+    const codexHome = resolveCodexHome(env);
+    const lookup = clearRolloutAfterRun
+      ? collectQuotaFn({ codexHome, threadId: summary.threadId })
+      : readQuotaFn({ codexHome, threadId: summary.threadId });
+    quota = lookup.quota;
+    quotaRolloutFile = lookup.rolloutFile;
+    quotaRolloutCleared = Boolean(lookup.deleted);
+  }
 
   return {
     dir: targetDir,
@@ -540,6 +789,15 @@ export async function codexDirectTask({
     lastMessage,
     diff,
     gate: gateResult,
+    // #x8wbivt Fork 4 — the ratified budget signal, mirroring `judge-spawn.mjs`/`judge-panel.mjs`'s
+    // `costUsd`/timing reporting shape on the Claude side (no USD figure exists here; this is the real
+    // consumption analogue Codex actually offers).
+    quotaUsedPercent: quota?.usedPercent ?? null,
+    quotaWindowMinutes: quota?.windowMinutes ?? null,
+    quotaResetsAt: quota?.resetsAt ?? null,
+    quotaPlanType: quota?.planType ?? null,
+    quotaRolloutFile,
+    quotaRolloutCleared,
   };
 }
 
@@ -564,8 +822,12 @@ async function main() {
   if (flags.help) {
     console.log(
       'usage: node scripts/codex-direct-task.mjs --task=<text>|--task-file=<path> [--dir=<checkout>] '
-      + '[--repo-root=<path>] [--model=<m>] [--effort=low|medium|high|xhigh|max] [--timeout-ms=<n>] '
-      + '[--gate=none|standards|full] [--ephemeral] [--no-stream] [--log=<path>] [--no-install] [--json]',
+      + '[--repo-root=<path>] [--model=<m>] [--effort=low|medium|high|xhigh|max] [--tier=haiku|sonnet|opus] '
+      + '[--timeout-ms=<n>] [--gate=none|standards|full] [--ephemeral] [--clear-rollout-after-run] '
+      + '[--no-stream] [--log=<path>] [--no-install] [--json]\n'
+      + '  --model defaults to the ratified CODEX_MODEL pin (#x8wbivt); --effort/--tier default to the '
+      + "sonnet rung's `medium` — neither is ever left to codex's own implicit default. --tier is ignored "
+      + 'when --effort is also given.',
     );
     return;
   }
@@ -587,12 +849,14 @@ async function main() {
       repoRoot,
       model: flags.model,
       effort: flags.effort,
+      tier: flags.tier,
       ephemeral: Boolean(flags.ephemeral),
       timeoutMs,
       gate: flags.gate || 'none',
       logFile: flags.log ? resolve(flags.log) : undefined,
       stream: !flags['no-stream'],
       installDeps: !flags['no-install'],
+      clearRolloutAfterRun: Boolean(flags['clear-rollout-after-run']),
     });
   } catch (e) {
     console.error(`codex-direct-task: ${e.message}`);
@@ -609,6 +873,9 @@ async function main() {
     console.log(`  tool calls: ${report.events.commands.length}  files touched: ${report.events.filesChanged.length}`);
     for (const f of report.events.filesChanged) console.log(`    - ${f.kind} ${f.path}`);
     console.log(`  log: ${report.logFile}`);
+    if (report.quotaUsedPercent !== null) {
+      console.log(`  quota: ${report.quotaUsedPercent}% used of a ${report.quotaWindowMinutes}min window (plan: ${report.quotaPlanType})${report.quotaRolloutCleared ? ' — rollout file cleared after read' : ''}`);
+    }
     if (report.diff.commits.length) {
       console.log(`  ⚠ codex made ${report.diff.commits.length} commit(s) despite being told not to — review before using this diff:`);
       for (const c of report.diff.commits) console.log(`    ${c}`);
