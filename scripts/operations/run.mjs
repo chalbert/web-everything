@@ -74,6 +74,8 @@ import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { gapSweepStatusOperation, GAP_SWEEP_STATUS_OP } from './gap-sweep-status.mjs';
 import { createGapSweepSinks } from './gap-sweep-status-io.mjs';
+import { restartRunnerOperation, RESTART_RUNNER_OP, classifyLease } from './restart-runner.mjs';
+import { createRestartReader, createRestartRunnerSinks } from './restart-runner-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -141,6 +143,19 @@ export const OPERATIONS = Object.freeze({
   [GAP_SWEEP_STATUS_OP]: () => ({
     declaration: gapSweepStatusOperation(),
     sinks: createGapSweepSinks(),
+  }),
+  // #3383 — the SAFE conveyor restart: refuse under a just-spawned build agent, SIGTERM the process that
+  // actually owns the loop, confirm it went down by EVIDENCE, sweep a leaked lease, start fresh. The one
+  // operation whose effects SIGNAL and SPAWN processes, which is why its declaration is asserted to hold
+  // neither (`restart-runner.mjs`'s import graph) and every verb lives in the io shell.
+  //
+  // `classifyLease` is handed to the SINKS from the declaration rather than re-imported inside the io shell:
+  // the "a lease is stale only when the heartbeat is past its TTL AND the pid is dead" rule decides both
+  // whether to sweep and whether a launch may proceed, and a second implementation of it on the io side is
+  // precisely the drift this wiring exists to prevent.
+  [RESTART_RUNNER_OP]: () => ({
+    declaration: restartRunnerOperation({ readRestartFacts: createRestartReader() }),
+    sinks: createRestartRunnerSinks({ classifyLease }),
   }),
   // #xrrpfo7 — `claim`'s sibling: the CLOSE of the lifecycle whose OPEN #3034 declared. Same shape (read →
   // plan → write), same guarded writer, and the guards are REPLAYED from `we:scripts/backlog.mjs`'s

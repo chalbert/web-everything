@@ -48,6 +48,7 @@ import { CLAIM_OP } from '../claim.mjs';
 import { RESOLVE_OP } from '../resolve.mjs';
 import { SCAFFOLD_OP } from '../scaffold.mjs';
 import { FILE_ITEM_OP } from '../file-item.mjs';
+import { RESTART_RUNNER_OP } from '../restart-runner.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
@@ -358,6 +359,12 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // reaches nothing that can act — both effects' sinks live in `file-item-io.mjs`, which reuses
     // `scaffold-io.mjs`'s own guarded write sink and adds only a `queue-store.mjs` sink beside it.
     [FILE_ITEM_OP]: 'file-item.mjs',
+    // #3383 — the SAFE conveyor restart. Three of its six steps are effects, so it is emphatically NOT
+    // read-only; listed here for map coverage. The declaring module reaching nothing that can act matters
+    // MORE here than anywhere else on this list: this operation's verbs are SIGNAL A PROCESS and SPAWN ONE,
+    // and every one of them lives in `restart-runner-io.mjs` behind the three sinks `../run.mjs` wires
+    // through. Its own suite pins that graph property directly.
+    [RESTART_RUNNER_OP]: 'restart-runner.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
