@@ -77,6 +77,7 @@ import {
   buildRestrictedProviderArgv, createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { SCOPE_AUTHORING_AGENT_KIND } from './dispatch-lane.mjs';
 import {
   tryReadDeliveryReport, deleteDeliveryReport, resolveDeliveryReportsDir,
 } from './delivery-report-store.mjs';
@@ -156,25 +157,39 @@ export const ensurePrepareHooksSettingsFile = createHooksSettingsWriter(
  * `git clone`, so the agent's own copy of `delivery-report-store.mjs` would otherwise resolve a DIFFERENT,
  * lane-local reports directory and the wrapper would read a false-negative "no report" back.
  *
- * `WE_DISPATCH_KIND: 'prepare'` — the same channel `we:scripts/guard-bash.mjs` reads. NAMED GAP, and a gap
- * this item deliberately does NOT close, for a reason that file states itself. Its deny table matches the
- * literal string `'delivery'`, so nothing extra is enforced on a prepare agent beyond `--restricted`'s own
- * `--tools` allowlist. A `dispatchKind === 'prepare'` arm CANNOT simply be added: the table's own header names
- * the blocker for the identical `'fix'` case ("A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'` ARM IS ADDED …
- * one env value, two contracts"), and `'prepare'` has exactly that collision. Two different spawners stamp it
- * for two INCOMPATIBLE agent contracts — `dispatch-lane-io.mjs#defaultClaudeProvider` (the
- * `WE_PREPARE_DISPATCH_MODE=agent` fallback, running the v1 brief, which runs its OWN lane acquire, gate,
- * commit and `open-pr`) and this wrapper (running the v2 brief under a wrapper that owns all of it). A deny arm
- * correct for the second would deny the first its own step 1. Resolving that — a distinct kind, or a second
- * signal — is real follow-up work and is the prerequisite, not an oversight.
+ * `WE_DISPATCH_KIND: 'scope-authoring'` — the same channel `we:scripts/guard-bash.mjs` reads. THE NAMED GAP
+ * THIS DOCBLOCK USED TO CARRY IS CLOSED (#3642).
  *
- * WHAT DOES ALREADY FIRE, so this is not read as "no enforcement at all": `guard-bash.mjs`'s `#3105`
- * verification-set deny covers EVERY `WE_DISPATCH_KIND`, prepare included, so the one thing the v2 brief most
- * needs the agent not to do — run the gate itself — is already denied today.
+ * WHAT THE GAP WAS. This stamped `'prepare'` — a LAUNCH kind — and said a `dispatchKind === 'prepare'` arm
+ * CANNOT simply be added because two spawners stamp that value for two INCOMPATIBLE contracts:
+ * `dispatch-lane-io.mjs#defaultClaudeProvider` (the `WE_PREPARE_DISPATCH_MODE=agent` fallback, running the v1
+ * brief, whose steps 1/4/6/7 are `lane-pool acquire`, `verify-lane request`/`check`, `run.mjs open-pr` and
+ * `learnings-drop` — run by the AGENT itself) and this wrapper (running the v2 brief under a wrapper that
+ * owns every one of those). That analysis was exactly right; it was the same collision `#3640` had to resolve
+ * for `fix`, and it was correctly left latent rather than papered over.
+ *
+ * HOW IT IS RESOLVED — in the VALUE SPACE, not with a second env var, which is `#3640`'s answer generalised:
+ * `WE_DISPATCH_KIND` carries two axes, and `we:scripts/operations/dispatch-lane.mjs#WRAPPER_AGENT_KINDS` names
+ * the half that means "restricted worker, the wrapper owns the lifecycle". A wrapper-spawned agent is stamped
+ * from that half, never from `LAUNCH_KINDS`. So the v1-brief agent keeps `prepare` and every one of its own
+ * first steps, this wrapper's agent carries {@link SCOPE_AUTHORING_AGENT_KIND}, and `guard-bash.mjs`'s new
+ * arm for that value denies it exactly the commands THIS file runs for it — each deny's text naming the
+ * function here that runs the command instead, so the claim can be checked.
+ *
+ * `scope-authoring` RATHER THAN JOINING `delivery` OR `repair`, because those tables' messages would be FALSE
+ * here: `delivery`'s says the wrapper claims the item before the agent is spawned (a prepare-scope arc never
+ * claims anything — see {@link prepareScope}'s own docblock) and `repair`'s says the agent is repairing an
+ * EXISTING PR. `#3644`'s `prepare-decision-wrapper.mjs` reached the same conclusion for its own arc and minted
+ * `decision-authoring`; this follows that precedent rather than inventing a second convention.
+ *
+ * IMPORTED FROM `dispatch-lane.mjs` rather than restated as a literal here (which is what `#3644` did for its
+ * own value), so `assertDispatchKindAxesDisjoint` machine-checks this stamp against `LAUNCH_KINDS` at module
+ * load — the check whose absence is what let a launch kind be stamped here in the first place. No new import
+ * graph cost: this file already imports `dispatch-lane-io.mjs`, which imports `dispatch-lane.mjs`.
  */
 export function buildPrepareAgentEnv({ sessionSlug, item, lanePath, itemSpecPath, reportsDir }) {
   return {
-    WE_DISPATCH_KIND: 'prepare',
+    WE_DISPATCH_KIND: SCOPE_AUTHORING_AGENT_KIND,
     DELIVERY_SESSION: sessionSlug,
     DELIVERY_ITEM: String(item),
     ITEM_SPEC_PATH: itemSpecPath,

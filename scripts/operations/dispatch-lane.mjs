@@ -205,22 +205,37 @@ export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision
  * NOT A LAUNCH KIND, AND NEVER DISPATCHABLE. Nothing routes on these; `dispatch-lane` refuses a `launchKind`
  * outside `LAUNCH_KINDS` exactly as before.
  *
- * ── ONE KNOWN CASE STILL ON THE WRONG SIDE, NAMED RATHER THAN SILENTLY LEFT ─────────────────────────────────
+ * ── THE ONE KNOWN CASE THAT WAS STILL ON THE WRONG SIDE — CLOSED (#3642) ────────────────────────────────────
  *
- * `we:scripts/operations/prepare-scope-wrapper.mjs` (#3641, landed on this branch alongside this item) stamps
- * `WE_DISPATCH_KIND: 'prepare'` — a LAUNCH kind — on the restricted agent IT spawns, and its own docblock
- * already calls that a "NAMED GAP". It is this exact defect, one path over. It is LATENT, not live:
- * `we:scripts/guard-bash.mjs` has no `prepare` arm today, so nothing misfires. But the moment someone writes
- * one it will deny the AGENT-path prepare agent its own brief's first step — precisely the failure #3640 was
- * filed to resolve for `fix`. The fix is a one-line stamp change there plus a row in
- * `guard-bash.mjs#WRAPPER_OWNED_AGENTS`, and it is deliberately NOT attempted here: that stamp is #3641's own
- * file and its own call, and a guard row whose ownership claims nobody verified against
- * `prepare-scope-wrapper.mjs` command-by-command would be the stale note this whole item is about. WHOEVER
- * WRITES A `prepare` DENY ARM MUST MOVE THE STAMP FIRST.
+ * This section used to read as a NAMED GAP: `we:scripts/operations/prepare-scope-wrapper.mjs` (#3641) stamped
+ * `WE_DISPATCH_KIND: 'prepare'` — a LAUNCH kind — on the restricted agent IT spawns, which is this exact
+ * defect one path over. It was LATENT, not live (no `prepare` deny arm existed, so nothing misfired), and
+ * #3640 deliberately left it alone because a guard row whose ownership claims nobody had verified
+ * command-by-command would have been the stale note that whole item was about. #3642 did that verification
+ * — against `prepare-scope-wrapper.mjs` itself and against BOTH prepare briefs — and closed it. The stamp is
+ * now {@link SCOPE_AUTHORING_AGENT_KIND}, and `we:scripts/guard-bash.mjs` carries the matching arm.
+ *
+ * WHY `scope-authoring` RATHER THAN JOINING `delivery` OR `repair`, and why a fourth value is not sprawl.
+ * These values are not a taxonomy of wrappers; each one is the KEY of a deny table whose every message makes
+ * a concrete ownership claim, and a message that is false for one member is the defect this axis exists to
+ * prevent. `delivery`'s own table says "the wrapper claims the item before you are spawned" and "opening the
+ * PR is the wrapper's job, driven by a park decision" — the first is FALSE of a prepare-scope arc (it never
+ * claims anything; a prepare only authors `scope:`). `repair`'s says "you repair an EXISTING PR" — also
+ * false. #3644 had already reached the same conclusion for its own arc and minted `decision-authoring`; this
+ * follows that precedent rather than inventing a second convention, and both are now ON this list rather
+ * than beside it, so {@link assertDispatchKindAxesDisjoint} actually covers them.
  */
 export const DELIVERY_AGENT_KIND = 'delivery';
 export const REPAIR_AGENT_KIND = 'repair';
-export const WRAPPER_AGENT_KINDS = Object.freeze([DELIVERY_AGENT_KIND, REPAIR_AGENT_KIND]);
+/** #3644's own wrapper-agent kind — `we:scripts/operations/prepare-decision-wrapper.mjs`'s restricted agent.
+ *  Named here (rather than only as a literal in that file) so the disjointness check below covers it. */
+export const DECISION_AUTHORING_AGENT_KIND = 'decision-authoring';
+/** #3642's correction of #3641 — `we:scripts/operations/prepare-scope-wrapper.mjs`'s restricted agent, which
+ *  used to carry the LAUNCH kind `prepare`. See the docblock above for why it is its own value. */
+export const SCOPE_AUTHORING_AGENT_KIND = 'scope-authoring';
+export const WRAPPER_AGENT_KINDS = Object.freeze([
+  DELIVERY_AGENT_KIND, REPAIR_AGENT_KIND, DECISION_AUTHORING_AGENT_KIND, SCOPE_AUTHORING_AGENT_KIND,
+]);
 
 /**
  * THE INVARIANT THE RESOLUTION RESTS ON — the two axes {@link WRAPPER_AGENT_KINDS} and {@link LAUNCH_KINDS}

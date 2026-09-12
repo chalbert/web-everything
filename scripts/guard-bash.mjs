@@ -113,6 +113,17 @@
  *     Note the KIND VALUE: it is NOT the launch kind `prepare-decision`, deliberately — see that block's own
  *     comment at the table below for why the distinction is what makes this arm writable at all.
  *
+ *   • the SCOPE-AUTHORING AGENT (#3642) — `dispatchKind === 'scope-authoring'`
+ *     (`WE_DISPATCH_KIND=scope-authoring`, stamped by `prepare-scope-wrapper.mjs`'s
+ *     `CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn`) — same shape again, with this kind's own two differences:
+ *     it is denied `git commit` (uniquely among the four — its wrapper commits the one backlog file itself,
+ *     and only after reading `git status --porcelain`, which an agent that committed first would leave
+ *     empty), and its `converge-cli`/`review-core-cli` denies say there is NO converge loop on this arc
+ *     rather than "the wrapper drives it". Same kind-value rule as the two above: NOT the launch kind
+ *     `prepare`, which `dispatch-lane-io.mjs#defaultClaudeProvider` stamps on the fallback agent that runs
+ *     `lane-pool acquire`/`verify-lane`/`open-pr` ITSELF. That collision is why this arm did not exist before
+ *     #3642 and why the wrapper's stamp had to move first.
+ *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
  * appends a COLLATERAL notice naming the state-producing steps (heredocs, file writes, git mutations) that
@@ -2275,6 +2286,63 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return 'a decision-authoring agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
     if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
       return 'a decision-authoring agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
+  }
+
+  // #3642 — the SCOPE-AUTHORING agent's own Bash session (spawned by
+  // `we:scripts/operations/prepare-scope-wrapper.mjs`'s `CLAUDE_RESTRICTED_PREPARE_PROVIDER`, the same
+  // `--restricted --tools=Bash,Edit,Write,Read,Glob,Grep` shape). Same discipline as the two blocks above:
+  // every command below is one the PREPARE-SCOPE WRAPPER runs itself, outside the agent's own turn.
+  //
+  // WHY THE KIND VALUE IS `'scope-authoring'` AND NOT THE LAUNCH KIND `'prepare'`, which is what that wrapper
+  // used to stamp — this arm is exactly what the `'fix'` note above said must not be written until the
+  // collision was settled, and #3642 settled it. `WE_DISPATCH_KIND=prepare` is ALSO stamped by
+  // `dispatch-lane-io.mjs#defaultClaudeProvider` on the FALLBACK path (`WE_PREPARE_DISPATCH_MODE=agent`),
+  // which runs the full prose brief `we:skills-src/conveyor/prepare-scope-agent-brief.md` — an agent that
+  // runs its OWN lifecycle: `lane-pool acquire` (its step 1), `verify-lane request`/`check` (step 4),
+  // `run.mjs open-pr` (step 6), `learnings-drop` (step 7). A `'prepare'` arm would deny that agent its own
+  // step 1. So the wrapper now stamps a WRAPPER-AGENT kind and this arm keys on THAT; the fallback brief
+  // stays fully runnable, and both paths are correct at once.
+  //
+  // THE TEXT IS THIS KIND'S OWN, NOT `delivery`'s OR `decision-authoring`'s, because their claims are FALSE
+  // here — verified against `prepare-scope-wrapper.mjs` command-by-command rather than pattern-matched:
+  //   * a prepare-scope arc NEVER claims a backlog item and never holds a decision. `prepareScope`'s own
+  //     docblock: "Never merges, never resolves, never claims the item — a prepare only authors `scope:`."
+  //     So `delivery`'s "the wrapper claims the item before you are spawned" and `decision-authoring`'s
+  //     `prepare-hold`/`prepare-stamp` wording would both be untrue.
+  //   * THE AGENT DOES NOT COMMIT. Unique among the four wrapper-owned kinds: `commitScopeEdit` is the
+  //     wrapper's, run only AFTER `assertOnlyItemSpecTouched` has read `git status --porcelain` — which an
+  //     agent that committed first would leave empty, so a self-commit does not merely duplicate work, it
+  //     makes the one-file guardrail read "the agent left the file unmodified" and abort the whole arc. The
+  //     v2 brief says "Do **not** commit" in prose; this is what enforces it.
+  //   * THERE IS NO CONVERGE PASS ON THIS ARC AT ALL — deliberately (see that file's header: a converge is
+  //     sized for a code diff, and this diff is one frontmatter key). So the deny's reason is "there is no
+  //     loop for you to be spawning part of", not "the wrapper drives the loop".
+  // NO OVERRIDE, for the same reason the other two tables have none.
+  if (dispatchKind === 'scope-authoring') {
+    if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `lane-pool.mjs` itself — acquiring and releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseLane` in prepare-scope-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
+      return 'a scope-authoring agent may never run `backlog.mjs claim` — a prepare-scope dispatch never claims its item at all: it predicts where a build WOULD land and writes one `scope:` key. A claim marks the item as being BUILT, which is the very thing this arc has not done. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
+      return 'a scope-authoring agent may never run `backlog.mjs release` — this arc never takes a claim, so there is none to release; releasing one it does not hold would strip it from whoever does. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+resolve\b/.test(s))
+      return 'a scope-authoring agent may never run `backlog.mjs resolve` — predicting an item\'s `scope:` is not delivering it; the item is still open and still has to be built. There is no override.';
+    if (atCommand(/^git\s+commit\b/))
+      return 'a scope-authoring agent may never run `git commit` itself — the wrapper commits your one backlog file (`commitScopeEdit`), and only AFTER `assertOnlyItemSpecTouched` has read `git status --porcelain` to prove you touched nothing else. Committing first empties that read, so the guardrail concludes you left the file unmodified and the whole prepare aborts. Leave the edit uncommitted in your working tree and report `done`. There is no override.';
+    if (atCommand(/^gh\s+pr\b/))
+      return 'a scope-authoring agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR; the wrapper\'s `openScopePr` is the only caller, and only after the gate and the one-file check have both passed. There is no override.';
+    if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
+      return 'a scope-authoring agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openScopePr`), on a `lane/<num>-scope-<slug>` ref and with a `--mode=label-on-green` decision the agent never computes. There is no override.';
+    if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+    if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report and the wrapper is what drops it (`dropLearning`). There is no override.';
+    if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `converge-cli.mjs` itself — a prepare-scope arc runs NO converge pass at all (a converge is sized for a code diff; this diff is one frontmatter key), so there is no loop here for you to be spawning part of. What replaces the old brief\'s self-review is two mechanical checks the wrapper runs: `assertOnlyItemSpecTouched` and the gate. There is no override.';
+    if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runPrepareGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+    if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step belongs to a converge loop, and this arc has none. There is no override.';
   }
 
   return null;

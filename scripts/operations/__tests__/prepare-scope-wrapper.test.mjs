@@ -285,7 +285,11 @@ describe('#3641 — the agent\'s world', () => {
       sessionSlug: SESSION, item: ITEM, lanePath: '/lanes/2', itemSpecPath: SPEC, reportsDir: '/r',
     });
     expect(env).toEqual({
-      WE_DISPATCH_KIND: 'prepare',
+      // `scope-authoring`, NOT the launch kind `prepare` (#3642 — see `buildPrepareAgentEnv`'s own docblock
+      // and `./dispatch-kind-axes.test.mjs`'s `#3642` block, which is the regression for the move). A LAUNCH
+      // kind here would be stamping this restricted agent with the value `defaultClaudeProvider` puts on the
+      // FALLBACK agent that runs its own `lane-pool acquire`/`verify-lane`/`open-pr`.
+      WE_DISPATCH_KIND: 'scope-authoring',
       DELIVERY_SESSION: SESSION,
       DELIVERY_ITEM: ITEM,
       ITEM_SPEC_PATH: SPEC,

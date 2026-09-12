@@ -37,10 +37,12 @@ import { decide, reason, WRAPPER_OWNED_AGENTS } from '../../guard-bash.mjs';
 import {
   LAUNCH_KINDS,
   REPAIR_AGENT_KIND,
+  SCOPE_AUTHORING_AGENT_KIND,
   WRAPPER_AGENT_KINDS,
   assertDispatchKindAxesDisjoint,
 } from '../dispatch-lane.mjs';
 import { buildFixAgentEnv } from '../fix-dispatch-wrapper.mjs';
+import { buildPrepareAgentEnv } from '../prepare-scope-wrapper.mjs';
 import { createDispatchSinks } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { DISPATCH_PROVIDER_REGISTRY } from '../dispatch-provider-registry.mjs';
@@ -115,7 +117,13 @@ describe('#3640 — the WE_DISPATCH_KIND=fix collision', () => {
     // #3627 chose `delivery` over `build` for the wrapper-spawned build agent and never wrote down why. That
     // choice is the entire resolution, generalised: assert it is still the shape, so a future "simplification"
     // that re-stamps the delivery agent with its launch kind trips here rather than in production.
-    expect(WRAPPER_AGENT_KINDS).toEqual(['delivery', 'repair']);
+    //
+    // FOUR, NOT TWO, SINCE #3642: `decision-authoring` (#3644's wrapper-spawned agent) and `scope-authoring`
+    // (#3642's correction of #3641's launch-kind stamp) are wrapper-agent kinds by the same definition and
+    // are now ON this list rather than beside it — which is what puts them under
+    // `assertDispatchKindAxesDisjoint` at all. The literal is kept, rather than derived, precisely so adding
+    // one is a deliberate edit here.
+    expect(WRAPPER_AGENT_KINDS).toEqual(['delivery', 'repair', 'decision-authoring', 'scope-authoring']);
     expect(LAUNCH_KINDS.some((k) => WRAPPER_AGENT_KINDS.includes(k))).toBe(false);
   });
 
@@ -132,7 +140,26 @@ describe('#3640 — guard-bash keys on the wrapper half, and only on it', () => 
     // `guard-bash.mjs` is an import-free `PreToolUse` hook and restates these keys as literals (its own note
     // explains why, and cites `BUILD_DISPATCH_MODE_ENV`'s identical trade). This is the assertion that buys
     // the no-drift guarantee back.
-    expect(Object.keys(WRAPPER_OWNED_AGENTS).sort()).toEqual([...WRAPPER_AGENT_KINDS].sort());
+    //
+    // RESTATED BEHAVIOURALLY BY #3642, and deliberately stronger than the key-equality it replaces. That
+    // assertion read `Object.keys(WRAPPER_OWNED_AGENTS) === WRAPPER_AGENT_KINDS`, which silently encoded
+    // "the shared parametrised table is the ONLY way a wrapper-agent kind gets guarded" — and #3644 had
+    // already broken that by giving `decision-authoring` its own hand-written arm instead (correctly: its
+    // denies genuinely differ). The invariant that actually matters is not which table a kind is in, it is
+    // that EVERY wrapper-agent kind is guarded at all, so that is what is asserted now. `WRAPPER_OWNED_AGENTS`
+    // still must not name anything that is not a wrapper-agent kind.
+    expect(Object.keys(WRAPPER_OWNED_AGENTS).every((k) => WRAPPER_AGENT_KINDS.includes(k))).toBe(true);
+    for (const kind of WRAPPER_AGENT_KINDS) {
+      // The four commands EVERY wrapper owns for its agent, whichever table the kind's arm lives in.
+      for (const command of [
+        'node scripts/lane-pool.mjs acquire --lane=3',
+        'node scripts/verify-lane.mjs check',
+        'node scripts/operations/open-pr.mjs',
+        'node scripts/conveyor/learnings-drop.mjs --kind=friction',
+      ]) {
+        expect(reason(command, { dispatchKind: kind }), `${kind}: ${command}`).not.toBeNull();
+      }
+    }
   });
 
   it('fires every deny for the `repair` stamp — the table is LIVE for fix, not merely present', () => {
@@ -202,5 +229,98 @@ describe('#3640 — guard-bash keys on the wrapper half, and only on it', () => 
     expect(decide('npm run check:standards', { dispatchKind: 'fix' })).toMatch(/mechanically-dispatched/);
     expect(decide('npm run check:standards', { dispatchKind: REPAIR_AGENT_KIND })).toMatch(/mechanically-dispatched/);
     expect(decide('npm run check:standards', {})).toBeNull();
+  });
+});
+
+/**
+ * #3642 — THE SAME COLLISION, ONE PATH OVER: `WE_DISPATCH_KIND=prepare`.
+ *
+ * `prepare-scope-wrapper.mjs` (#3641) stamped the LAUNCH kind `prepare` on the RESTRICTED agent it spawns,
+ * which is the identical defect #3640 resolved for `fix`. It was latent only because no `prepare` deny arm
+ * existed; #3640's own note recorded it and said the stamp must move BEFORE anyone writes one. This block is
+ * the regression for moving it, and it is written to FAIL against the pre-fix code:
+ *
+ *   * the first `it` reads the stamp the wrapper ACTUALLY produces (never a literal typed here) and asserts
+ *     one command — `lane-pool.mjs acquire`, which the v1 prose brief REQUIRES of the agent at its step 1 and
+ *     the v2 brief forbids — gets OPPOSITE verdicts under the two spawners' stamps. Against the pre-fix code
+ *     both stamps are the string `prepare`, so the first assertion alone fails; against the naive "just add a
+ *     `prepare` arm" resolution the AGENT-path half fails instead.
+ *   * the second asserts the stamp is on the wrapper-agent axis at all, which is what makes
+ *     `assertDispatchKindAxesDisjoint` cover it.
+ */
+describe('#3642 — the WE_DISPATCH_KIND=prepare collision', () => {
+  /** The commands the AGENT-path (v1) prepare brief requires of the agent ITSELF, and the v2 brief forbids.
+   *  Read off `we:skills-src/conveyor/prepare-scope-agent-brief.md` steps 1/4/6/7, not invented. */
+  const CONTESTED_PREPARE_COMMANDS = Object.freeze([
+    'node scripts/lane-pool.mjs acquire --lane=3 --purpose=conveyor-prepare-scope --session=prepare-2568',
+    'node scripts/verify-lane.mjs request',
+    'node scripts/operations/run.mjs open-pr --ref=lane/2568-scope-x --sha=HEAD',
+    'node scripts/conveyor/learnings-drop.mjs --kind=friction',
+  ]);
+
+  /** The stamp the WRAPPER path actually produces — read off the production function, never typed. */
+  const wrapperPrepareStamp = () => buildPrepareAgentEnv({
+    sessionSlug: 'prepare-2568', item: '2568', lanePath: '/pool/lane-3', itemSpecPath: 'backlog/2568-x.md', reportsDir: '/r',
+  }).WE_DISPATCH_KIND;
+
+  it('THE REGRESSION: the two prepare spawners produce DIFFERENT stamps, so one command gets opposite verdicts', async () => {
+    const agentStamp = await agentPathStampFor('prepare');
+    const wrapperStamp = wrapperPrepareStamp();
+
+    // Half 1 — they are distinguishable at all. Before #3642 both were `'prepare'` and this line alone fails.
+    expect(agentStamp).not.toBe(wrapperStamp);
+
+    for (const command of CONTESTED_PREPARE_COMMANDS) {
+      // Half 2 — the AGENT-path (v1 brief) prepare agent is ALLOWED its own brief's steps.
+      expect(decide(command, { dispatchKind: agentStamp }), `agent path: ${command}`).toBeNull();
+      // Half 3 — the WRAPPER-path agent is DENIED the very same commands, because its wrapper runs them.
+      expect(decide(command, { dispatchKind: wrapperStamp }), `wrapper path: ${command}`).not.toBeNull();
+    }
+  });
+
+  it('the wrapper stamp is a WRAPPER-AGENT kind and never a launch kind', () => {
+    const wrapperStamp = wrapperPrepareStamp();
+    expect(wrapperStamp).toBe(SCOPE_AUTHORING_AGENT_KIND);
+    expect(WRAPPER_AGENT_KINDS).toContain(wrapperStamp);
+    expect(LAUNCH_KINDS).not.toContain(wrapperStamp);
+  });
+
+  it('every deny it fires NAMES the prepare-scope wrapper, and says what is TRUE of a prepare-scope arc', () => {
+    // The stale-note class this whole axis exists to prevent: `delivery`'s table says the wrapper claims the
+    // item before the agent is spawned, and `decision-authoring`'s talks about a decision's `preparedDate`.
+    // Neither is true here, so neither kind's wording may leak in.
+    const laneReason = reason('node scripts/lane-pool.mjs acquire --lane=3', { dispatchKind: SCOPE_AUTHORING_AGENT_KIND });
+    expect(laneReason).toContain('prepare-scope-wrapper.mjs');
+    expect(laneReason).not.toContain('deliver-item-wrapper.mjs');
+    expect(laneReason).not.toContain('prepare-decision-wrapper.mjs');
+    expect(reason('node scripts/backlog.mjs claim 2568 --session=x', { dispatchKind: SCOPE_AUTHORING_AGENT_KIND }))
+      .toMatch(/never claims its item at all/);
+    expect(reason('node scripts/verify-lane.mjs check', { dispatchKind: SCOPE_AUTHORING_AGENT_KIND }))
+      .toContain('runPrepareGateWithOneRetry');
+    // The converge denies say there is NO loop — not "the wrapper drives the loop", which would be false.
+    expect(reason('node scripts/converge-cli.mjs step --state=/lane-3/.converge-state.json', { dispatchKind: SCOPE_AUTHORING_AGENT_KIND }))
+      .toMatch(/runs NO converge pass at all/);
+  });
+
+  it('it is the ONLY wrapper-agent kind denied `git commit` — because its wrapper does the commit', () => {
+    // Unique to this arc, and load-bearing rather than tidy: `assertOnlyItemSpecTouched` reads `git status
+    // --porcelain` BEFORE `commitScopeEdit`, so an agent that committed first makes that read empty and the
+    // wrapper aborts with "left the file unmodified". The other three kinds' agents DO commit their own work.
+    expect(reason('git commit -m x -- backlog/2568-x.md', { dispatchKind: SCOPE_AUTHORING_AGENT_KIND }))
+      .toMatch(/commitScopeEdit/);
+    for (const kind of ['delivery', 'repair', 'decision-authoring']) {
+      expect(reason('git commit -m x -- a.mjs', { dispatchKind: kind }), kind).toBeNull();
+    }
+    // …and an interactive session with no stamp is untouched.
+    expect(decide('git commit -m x -- a.mjs', {})).toBeNull();
+  });
+
+  it('adds NOTHING to any LAUNCH kind, `prepare` included — the fallback brief stays fully runnable', () => {
+    for (const kind of LAUNCH_KINDS) {
+      for (const command of CONTESTED_PREPARE_COMMANDS) {
+        expect(decide(command, { dispatchKind: kind }), `${kind}: ${command}`).toBeNull();
+      }
+    }
+    for (const command of CONTESTED_PREPARE_COMMANDS) expect(decide(command, {}), command).toBeNull();
   });
 });
