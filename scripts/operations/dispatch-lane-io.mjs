@@ -402,9 +402,16 @@ export function normalizeHandle(x) {
  *
  * The listing carries THREE element shapes in one response — measured, see the fixture: rows with
  * `cwd+id+kind+name+sessionId+startedAt+state`, rows that add `pid+status+waitingFor`, and rows carrying
- * neither `state` nor `status` nor `id` at all. `sessionId` is the ONE field present on every one of them, and
- * it is the only field anything here reads; `id` in particular is absent from half the listing and is NOT
- * reliably the `sessionId` prefix, so nothing should key off it.
+ * neither `state` nor `status` nor `id` at all. `sessionId` is the ONE field present on every one of them.
+ *
+ * BOTH `sessionId` AND `id` ARE COLLECTED (#3331). Until this change only `sessionId` was, on the reasoning
+ * that `id` "is absent from half the listing and is NOT reliably the `sessionId` prefix, so nothing should key
+ * off it". The first half is true and harmless — an absent `id` simply contributes nothing — and the second
+ * half is beside the point now, because nothing DERIVES an `id`: the short id a handle is compared against is
+ * the one `claude --bg` PRINTED for that very session ({@link parseBackgroundedId}), not a prefix guessed off
+ * a uuid. Collecting it is what makes a real, CLI-assigned handle findable at all; see {@link buildAgentArgv}
+ * for why the handle can no longer be a minted uuid. Widening the set cannot produce a false `live: true` for
+ * a minted uuid either — a 36-char uuid never equals an 8-char short id.
  *
  * An EMPTY result from a NON-EMPTY listing is the signal the callers act on: the response parsed, and not one
  * element yielded an id — which is a shape this code does not understand, not a machine with no agents on it.
@@ -413,7 +420,13 @@ export function normalizeHandle(x) {
  * @returns {Set<string>}
  */
 export function listedSessionIds(sessions) {
-  const ids = (Array.isArray(sessions) ? sessions : []).map((s) => normalizeHandle(s?.sessionId)).filter(Boolean);
+  const ids = [];
+  for (const s of (Array.isArray(sessions) ? sessions : [])) {
+    for (const field of ['sessionId', 'id']) {
+      const v = normalizeHandle(s?.[field]);
+      if (v) ids.push(v);
+    }
+  }
   return new Set(ids);
 }
 
@@ -777,12 +790,20 @@ export function isPreSpawnRefusal(error) {
 /**
  * THE SINK — the one thing in this repo that starts a delivery agent.
  *
- * THE HANDLE IS MINTED, NOT DISCOVERED, and that is the load-bearing detail. The #3030 spike established that
- * `sessionId` is the durable handle and `pid` must never be one (the OS reuses it), and read the id back out of
- * `claude agents --json`. Reading it back needs a before/after diff of the live session list and races every
- * other session that starts in the same instant. `claude --session-id <uuid>` removes the race outright: the
- * dispatcher CHOOSES the id, so the handle is known before the agent exists and cannot be attributed to the
- * wrong session. (The spike did not have this; it is the one place its account was narrower than the CLI.)
+ * THE HANDLE IS THE ONE THE CLI PRINTS BACK — NOT A MINTED ONE. CORRECTED 2026-09-11 (#3331); this paragraph
+ * used to read *"THE HANDLE IS MINTED, NOT DISCOVERED, and that is the load-bearing detail … `claude
+ * --session-id <uuid>` removes the race outright: the dispatcher CHOOSES the id"*, and that was the discarded
+ * assumption stated as the design's load-bearing detail. `claude --bg` IGNORES `--session-id` (measured 3/3 at
+ * CLI 2.1.246 by #3331's probe, re-measured 2/2 at 2.1.269 with the real dispatch argv; the CLI says so itself
+ * on stderr), so every "minted" handle addressed a session that never existed.
+ *
+ * What IS true from the #3030 spike still stands: a session id is the durable handle and `pid` must never be
+ * one (the OS reuses it). What replaces the mint is neither a mint nor the spike's before/after listing diff —
+ * both of which the spike rightly called racy — but the id `claude --bg` PRINTS on its own stdout for the
+ * session it just started (`backgrounded · <id> · <name>`, {@link parseBackgroundedId}). That is
+ * race-free by construction: it is this spawn's own output, attributable to no other session, available
+ * synchronously, and it is the listing's `id` field on a background row. See {@link buildAgentArgv} and
+ * {@link defaultClaudeProvider}.
  *
  * WHAT IS STILL NOT COVERED, stated rather than papered over: a sink killed between `claude --bg` returning and
  * this function returning loses the handle, and the executor then refuses the entry on replay (it is
@@ -796,13 +817,15 @@ export function isPreSpawnRefusal(error) {
  * {@link AGENT_ARGS_ENV} at the `run.mjs` binding so an operator can actually set it, rather than being a
  * parameter only a test can reach.
  *
- * PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI. `./__tests__/dispatch-spawn-live.test.mjs` starts a
- * `claude` executable — a fake first on `PATH` that parses options the way a commander-style CLI does — and
- * asserts this argv is ACCEPTED, that `--bg` returns instead of blocking, and that the session id pinned here
- * is the id `defaultListAgents` later reports back. What is still NOT proven: no dispatch has been fired end
- * to end, and the REAL CLI's response to this argv remains unasserted. A background session's permission mode
- * and the isolation default are the two things a first live run has to settle; #xaibmeu, which routes the
- * conveyor through this operation, is where that happens.
+ * PROVEN AGAINST A PROCESS *AND*, SINCE #3331, AGAINST THE REAL CLI ON THE ONE POINT THAT MATTERED.
+ * `./__tests__/dispatch-spawn-live.test.mjs` starts a `claude` executable — a fake first on `PATH` that parses
+ * options the way a commander-style CLI does — and asserts this argv is ACCEPTED and that `--bg` returns
+ * instead of blocking. A FAKE CANNOT SETTLE WHO OWNS THE ID, which is precisely how the discarded
+ * `--session-id` survived: the fake obligingly echoed back whatever it was handed, so the round-trip test was
+ * green against an assumption the real CLI had never honoured. That question is now answered live (CLI 2.1.269,
+ * 2026-09-11) and the answer is in {@link buildAgentArgv}'s header. What is STILL not proven by a test: a
+ * background session's permission mode and the isolation default; #xaibmeu, which routes the conveyor through
+ * this operation, is where those settle.
  *
  * ── THE PROVIDER PORT (#3579) ───────────────────────────────────────────────────────────────────────────────
  *
@@ -818,10 +841,10 @@ export function isPreSpawnRefusal(error) {
  *
  * `defaultClaudeProvider` is ONE implementation of this port, not the port itself: it composes
  * {@link buildAgentArgv} (Claude's argv construction) with the injected `spawnAgent` (the CLI-shaped seam that
- * already existed) and answers with `sessionId` as the handle — Claude's own liveness reads (`stampLiveness`
- * et al.) already poll by that same minted id, so {@link parseBackgroundedId}'s stdout parsing plays no part in
- * producing THIS handle; it stays exactly where it was, serving the resume-detection path
- * (`resumeSucceeded`) that reads a live spawn's own printed id.
+ * already existed) and answers with the id `claude --bg` PRINTED — read by {@link parseBackgroundedId} off the
+ * spawn's own stdout. It used to answer with the minted `sessionId`; #3331 measured that the CLI discards that
+ * value outright, so the port was handing every caller a handle no listing could ever match. The stdout parse
+ * is no longer only the resume-detection path's (`resumeSucceeded`); it is where a usable handle comes from.
  *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
@@ -889,8 +912,13 @@ export function createDispatchSinks({
 /**
  * THE DEFAULT provider port implementation (#3579) — Claude's own. Translates the port's CLI-independent
  * request into {@link buildAgentArgv}'s payload shape, hands the resulting argv to `spawnAgent`, and answers
- * with the pre-minted `sessionId` as the durable handle (matching the pre-#3579 behaviour exactly: the sink
- * never trusted stdout for the handle, only the id it minted itself).
+ * with THE ID THE CLI ITSELF PRINTED (#3331) rather than the pre-minted `sessionId` the CLI discards.
+ *
+ * THE FALLBACK IS `request.sessionId`, DELIBERATELY, and it is exactly the pre-#3331 behaviour: when stdout
+ * cannot be parsed (a CLI whose banner changes shape, a `spawnAgent` that returns nothing) there is no better
+ * handle to be had, and the sink must still record SOMETHING `in-flight` — recording `null` instead would push
+ * every such dispatch into the executor's `unknown` bucket, which only a person can close out. So an
+ * unparseable spawn degrades to the old, unmatchable handle; it never gets worse than before.
  *
  * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
  * @param {{spawnAgent?: Function}} [io]
@@ -903,8 +931,8 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     extraArgs: request.extraArgs,
     systemPromptFile: request.systemPromptFile,
   });
-  spawnAgent(argv, { cwd: request.cwd });
-  return request.sessionId;
+  const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
+  return parseBackgroundedId(stdout) || request.sessionId;
 }
 
 /**
@@ -931,8 +959,34 @@ export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(im
  * The `claude` argv for one dispatch. PURE and exported, because the argv IS the contract with the CLI and a
  * test that asserts it is the only thing standing between a flag rename and a silent non-dispatch.
  *
- * `--bg` starts the session and returns immediately; `--session-id` pins the handle; `-n` names the session so
- * `claude agents` is legible to an operator watching the pool.
+ * `--bg` starts the session and returns immediately; `-n` names the session so `claude agents` is legible to
+ * an operator watching the pool.
+ *
+ * `--session-id` IS NOT EMITTED, AND THAT IS THE #3331 FIX — not an omission. Until this change this argv
+ * carried `'--session-id', String(sessionId)` and the whole file treated that minted uuid as the spawned
+ * session's real identity. It never was. `claude --bg` DISCARDS it and assigns its own id, printing
+ * `warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing
+ * session)` on stderr — measured 3/3 by #3331's own probe at CLI 2.1.246 (see that card's table) and
+ * re-measured 2/2 at CLI **2.1.269** on 2026-09-11 with THIS exact argv, review brief and deny list included.
+ * The cost was never a crash: the session starts fine and does its work (live-verified — `review-2129` ran to
+ * a full accept verdict under an id nothing in this repo knew). The cost is that the dispatcher could not
+ * ADDRESS what it started — `claude agents --json | grep <minted uuid>` is empty, no transcript exists under
+ * that name, so every operator who looked concluded the dispatch had silently failed, and
+ * {@link stampLiveness} read `live: false` for every in-flight dispatch, permanently, degrading the
+ * double-dispatch guard to its clock backstop.
+ *
+ * WHERE THE HANDLE COMES FROM NOW: the id `claude --bg` PRINTS on stdout (`backgrounded · <id> · <name>`),
+ * read by {@link parseBackgroundedId} and returned as the handle by {@link defaultClaudeProvider}. That short
+ * id is the listing's own `id` field on a background row (measured: `fe8b4df8` ↔
+ * `fe8b4df8-f682-46e4-a3a8-e7a2b772e88c`), which {@link listedSessionIds} now collects — so liveness matches
+ * again. Reading the FULL `sessionId` back out of a post-spawn listing was considered and rejected for the
+ * reason {@link resumeSucceeded}'s own docblock measured: a fresh session can take 26+ seconds to appear in
+ * `claude agents --json`, which no synchronous spawn path here can afford to wait for.
+ *
+ * `sessionId` STAYS IN THE SIGNATURE. It is still minted by every caller and still ends up on the run entry as
+ * the FALLBACK handle when stdout could not be parsed (see `createDispatchSinks`) — the same not-worse-than-
+ * before behaviour — and `#xu2krte`'s resume path addresses a session by an id it learned elsewhere. What it
+ * is no longer is a request to the CLI that the CLI ignores.
  *
  * `--append-system-prompt-file` (#xqyyoje), when `systemPromptFile` is given, adds the dispatched agent's
  * standing identity ahead of `extraArgs` and the prompt — a real CLI flag (`claude --help`), unused before this,
@@ -967,9 +1021,10 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
     throw notApplied('dispatch-lane: refusing a brief that begins with `-` — an argument parser can read it as a flag');
   }
   if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
+  // NO `--session-id` — see this function's own header. `sessionId` is deliberately unreferenced here.
+  void sessionId;
   return [
     '--bg',
-    '--session-id', String(sessionId),
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
     ...extraArgs.map(String),

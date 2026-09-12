@@ -244,7 +244,10 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
 
       const seen = kase.fakeClaude.lastArgv();
       expect(seen).toContain('--bg');
-      expect(seen[seen.indexOf('--session-id') + 1]).toBe(result.handle);
+      // #3331 — the handle is no longer something the argv pins. `claude --bg` discards `--session-id`, so the
+      // argv must not carry it, and `result.handle` is the id the CLI itself printed (the shim models both).
+      expect(seen).not.toContain('--session-id');
+      expect(result.handle).toBeTruthy();
       expect(seen[seen.indexOf('-n') + 1]).toBe(`conveyor-${NUM}`);
       expect(seen[seen.length - 1]).toBe(read.prompt);
     } finally {
