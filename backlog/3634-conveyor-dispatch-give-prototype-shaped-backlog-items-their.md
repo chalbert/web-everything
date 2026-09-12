@@ -1,4 +1,5 @@
 ---
+bornAs: xe6nenk
 kind: story
 size: 5
 parent: "3369"
