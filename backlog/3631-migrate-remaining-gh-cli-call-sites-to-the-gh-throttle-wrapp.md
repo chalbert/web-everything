@@ -3,9 +3,10 @@ bornAs: xulcd4z
 kind: story
 size: 5
 parent: "3621"
-status: open
+status: resolved
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/ci-queue-watch.mjs", "we:skills-src/conveyor/runner.mjs", "we:scripts/review-set-label.mjs"]
 dateOpened: "2026-09-11"
+dateResolved: "2026-09-12"
 tags: []
 ---
 
