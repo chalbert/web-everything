@@ -17,7 +17,6 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { DISPATCH_PROVIDER_REGISTRY } from '../dispatch-provider-registry.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';

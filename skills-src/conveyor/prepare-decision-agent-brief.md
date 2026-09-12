@@ -1,5 +1,32 @@
 # Conveyor prepare-decision agent brief (template) — prepare ONE decision's forks, stop at ready-to-merge (#2647)
 
+> ## ⚠️ FALLBACK PATH — this is NO LONGER the default (#3644, 2026-09-12)
+>
+> A `prepare-decision` dispatch is **mechanical by default**. It runs
+> [`we:scripts/operations/prepare-decision-wrapper.mjs`](../../scripts/operations/prepare-decision-wrapper.mjs)'s
+> arc — acquire the lane, `prepare-hold`, spawn a MINIMAL authoring agent on
+> [`prepare-decision-agent-brief-v2.md`](prepare-decision-agent-brief-v2.md), `prepare-stamp`, gate with one
+> retry, converge, open the PR, `prepare-release` — and asks the agent only for the one thing that is judgment:
+> research the decision and author its forks. The wiring is one row in
+> `we:scripts/operations/dispatch-provider-registry.mjs` pointing at
+> `we:scripts/operations/dispatch-providers/prepare-decision.mjs`.
+>
+> **This brief is still REACHABLE, and is still the full, correct account of the arc.** It is what a
+> `prepare-decision` dispatch spawns when — and only when — an operator sets:
+>
+> ```bash
+> WE_PREPARE_DECISION_DISPATCH_MODE=agent
+> ```
+>
+> which restores the pre-#3644 `claude --bg` spawn of this whole prose brief, with the agent running its own
+> lifecycle exactly as described below. Any other value **throws at sink construction** rather than quietly
+> picking a path — a typo'd `mechnical` is a loud failure, never a silent fallback to either side.
+>
+> Two consequences for anyone editing this file: (1) everything below still describes a real, runnable path,
+> so do not delete or hollow it out; (2) if the METHOD changes (what a prepared fork must carry), it has to
+> change in the `/prepare` skill and be mirrored in the v2 brief too — the two paths must not drift on what
+> "prepared" means.
+
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2612) instantiates it — filling the
 > `{{PLACEHOLDERS}}` below — and passes the result as the prompt for **one background prepare-decision agent** it
 > spawns per **UNPREPARED** `needs-decision` item (a cleared `kind:decision` the dispatcher is holding because a

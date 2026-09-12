@@ -106,6 +106,13 @@
  *     it. Every other session (interactive, or any LAUNCH-kind `WE_DISPATCH_KIND` — `build`, `fix`, `ci-heal`,
  *     …, which name an agent running its OWN lifecycle from a full brief) is unaffected. No override.
  *
+ *   • the DECISION-AUTHORING AGENT (#3644) — `dispatchKind === 'decision-authoring'`
+ *     (`WE_DISPATCH_KIND=decision-authoring`, stamped by `prepare-decision-wrapper.mjs`'s
+ *     `CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn`) — the SAME table for the SAME reason, plus this kind's own
+ *     three verbs (`backlog.mjs prepare-hold`/`prepare-stamp`/`prepare-release`) and `backlog.mjs resolve`.
+ *     Note the KIND VALUE: it is NOT the launch kind `prepare-decision`, deliberately — see that block's own
+ *     comment at the table below for why the distinction is what makes this arm writable at all.
+ *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
  * appends a COLLATERAL notice naming the state-producing steps (heredocs, file writes, git mutations) that
@@ -2205,6 +2212,69 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return `a ${owner.agent} agent may never run \`verify-lane.mjs\` itself, in ANY mode (not even \`request\`/\`check\`) — the gate is run by the wrapper (\`${owner.gateFn}\`), synchronously, outside the agent's own turn; the agent reports \`done\` and is resumed with the result if the gate came back red. There is no override.`;
     if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
       return `a ${owner.agent} agent may never run \`review-core-cli.mjs\` itself — the invite-on-discovery step is driven by the wrapper's own converge loop (\`runConvergeInvite\`), never by the agent. There is no override.`;
+  }
+
+  // #3644 — the DECISION-AUTHORING agent's own Bash session (spawned by
+  // `we:scripts/operations/prepare-decision-wrapper.mjs`'s `CLAUDE_RESTRICTED_PREPARE_PROVIDER`, the same
+  // `--restricted --tools=Bash,Edit,Write,Read,Glob,Grep` shape). Same table, same justification as the
+  // `'delivery'` block above — every command below is one the PREPARE WRAPPER runs itself, outside the agent's
+  // own turn and outside this hook's reach entirely.
+  //
+  // WHY THE KIND VALUE IS `'decision-authoring'` AND NOT THE LAUNCH KIND `'prepare-decision'` — this is the
+  // whole reason an arm can be written here at all, and it is exactly the collision the `'fix'` note above
+  // says must be settled BEFORE any arm is added.
+  //
+  //   `WE_DISPATCH_KIND=prepare-decision` is stamped by `dispatch-lane-io.mjs#defaultClaudeProvider` on the
+  //   FALLBACK path (`WE_PREPARE_DECISION_DISPATCH_MODE=agent`), which runs the full prose brief
+  //   `we:skills-src/conveyor/prepare-decision-agent-brief.md` — an agent that runs its OWN lifecycle:
+  //   `lane-pool acquire` (its step 1), `prepare-hold` (step 2), `verify-lane request`/`check` (step 4),
+  //   `run.mjs open-pr` (step 6), `learnings-drop` + `prepare-release` (step 7). Denying that agent those
+  //   commands would deny it its own first step, which is precisely what the `#xu2pp2m` non-generalization
+  //   block in `we:scripts/__tests__/guard-bash.test.mjs` asserts must never happen.
+  //
+  //   So this wrapper stamps a DISTINCT value, exactly as #3645's build wrapper stamps `'delivery'` rather
+  //   than `'build'` for the same reason. One env value, one contract. The two paths can now both be correct
+  //   at once, and the fallback brief stays fully runnable.
+  //
+  // FOUR ARMS BEYOND THE DELIVERY TABLE, all `backlog.mjs` verbs specific to a decision's lifecycle:
+  //   • `prepare-hold`/`prepare-release` — the wrapper takes and drops the hold (`prepareHold`/
+  //     `prepareRelease`), before the agent is spawned and after it reports.
+  //   • `prepare-stamp` — THE most important one. `preparedDate` is what makes readiness rank a decision
+  //     `✓ ready to ratify`; the wrapper stamps it only after reading a `done` report, so an agent stamping
+  //     its own half-finished authoring is a false "ready" the next ratify turn would trust.
+  //   • `resolve` — a prepared decision is STILL OPEN. Resolving is the ratify turn's job (MEMORY #39), and
+  //     a decision-authoring agent resolving the very decision it was asked to prepare is the single most
+  //     damaging thing on this page.
+  // NO OVERRIDE, for the same reason the delivery table has none.
+  if (dispatchKind === 'decision-authoring') {
+    if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `lane-pool.mjs` itself — acquiring/releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseHoldAndLane` in prepare-decision-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+prepare-stamp\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs prepare-stamp` itself — `preparedDate` is what makes readiness rank a decision `✓ ready to ratify`, and the wrapper stamps it (`stampPreparedDate`) only after reading your `done` report. Stamping your own in-progress authoring is a false "ready" the next ratify turn will trust. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+prepare-hold\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs prepare-hold` itself — the wrapper holds the decision before the agent is ever spawned (`prepareHold`); a second hold from inside the agent is redundant at best and a lease race at worst. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+prepare-release\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs prepare-release` itself — the hold is dropped by the wrapper reading your own structured report (`releaseHoldAndLane`, or step 11 once the PR is open), never by the agent releasing mid-authoring. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+resolve\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs resolve` — a PREPARED decision is still OPEN; the call has not been made. Resolving belongs to the later, human ratify turn (MEMORY #39 — never take an unprepared decision), never to the agent that prepared it. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs claim` — a prepare HOLDS its decision, it never CLAIMS it (a claim marks the item as being BUILT). The wrapper takes the hold itself (`prepareHold`). There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs release` — this arc never takes a claim, so there is none to release; the wrapper drops the HOLD (`prepareRelease`) off your own reported outcome. There is no override.';
+    if (atCommand(/^gh\s+pr\b/))
+      return 'a decision-authoring agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR; the wrapper\'s `openPreparePr` is the only caller, and only after the stamp, the gate and converge have all run. There is no override.';
+    if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
+      return 'a decision-authoring agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openPreparePr`), on a `lane/<num>-prepare-<slug>` ref and a park decision the agent never computes. There is no override.';
+    if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+    if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report and the wrapper is what drops it (`dropLearning`). There is no override.';
+    if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `converge-cli.mjs` itself — it never initiates review of its own forks; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited. There is no override.';
+    if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+    if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
   }
 
   return null;

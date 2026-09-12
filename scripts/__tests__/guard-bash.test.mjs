@@ -2343,4 +2343,126 @@ describe('#xu2pp2m — the lifecycle denylist stays delivery-scoped because the 
       expect(decide(cmd, { dispatchKind: 'delivery' }), cmd).not.toBeNull();
     }
   });
+
+  it('…and for `decision-authoring`, the SECOND wrapper-owned kind (#3644) — same move, same reason', () => {
+    // `prepare-decision-wrapper.mjs` stamps `decision-authoring`, NOT the launch kind `prepare-decision`, for
+    // exactly the reason the loop above exists: the launch kind is still stamped on the FALLBACK path
+    // (`WE_PREPARE_DECISION_DISPATCH_MODE=agent`), whose agent runs the full prose brief and needs every one
+    // of these. Two kind values, two contracts, both correct at once.
+    for (const [cmd] of REQUIRED_BY_LIVE_BRIEFS) {
+      expect(decide(cmd, { dispatchKind: 'decision-authoring' }), cmd).not.toBeNull();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #3644 — the DECISION-AUTHORING agent's own Bash session (`--restricted`, spawned by
+// `we:scripts/operations/prepare-decision-wrapper.mjs`'s `CLAUDE_RESTRICTED_PREPARE_PROVIDER`) may never run
+// any of the mechanical lifecycle commands its own wrapper drives end to end — the same table the `'delivery'`
+// block above carries, plus this kind's own four backlog verbs.
+//
+// WHY THIS IS A SEPARATE KIND VALUE AND NOT `'prepare-decision'` is the load-bearing design point, and both
+// halves are asserted here: denied under `decision-authoring`, ALLOWED under `prepare-decision` (which the
+// `#xu2pp2m` block above also holds, from the other direction).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('guard-bash — a decision-authoring agent may never run the mechanical lifecycle commands itself (#3644)', () => {
+  const K = { dispatchKind: 'decision-authoring' };
+
+  it('denies `lane-pool.mjs` (any subcommand)', () => {
+    expect(reason('node scripts/lane-pool.mjs acquire --lane=6 --purpose=conveyor-prepare-decision', K)).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs status --json', K)).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs release --lane=6', K)).toMatch(/lane-pool\.mjs/);
+  });
+
+  it('denies `prepare-stamp` — the flag that makes readiness call a decision `✓ ready to ratify`', () => {
+    // THE most important arm on this page: the wrapper stamps only after reading a `done` report, so an agent
+    // stamping its own in-progress authoring is a false "ready" the next ratify turn would trust.
+    expect(reason('node scripts/backlog.mjs prepare-stamp 2568', K)).toMatch(/prepare-stamp/);
+    expect(reason('node scripts/backlog.mjs prepare-stamp 2568', K)).toMatch(/ready to ratify/);
+  });
+
+  it('denies `prepare-hold` and `prepare-release` — the wrapper takes and drops the hold', () => {
+    expect(reason('node scripts/backlog.mjs prepare-hold 2568 --session=x', K)).toMatch(/prepare-hold/);
+    expect(reason('node scripts/backlog.mjs prepare-release 2568 --session=x', K)).toMatch(/prepare-release/);
+  });
+
+  it('denies `backlog.mjs resolve` — a PREPARED decision is still OPEN, and resolving is the ratify turn\'s job', () => {
+    const why = reason('node scripts/backlog.mjs resolve 2568', K);
+    expect(why).toMatch(/resolve/);
+    expect(why).toMatch(/still OPEN/);
+  });
+
+  it('denies `backlog.mjs claim` and `release` — this arc HOLDS its decision, it never CLAIMS it', () => {
+    expect(reason('node scripts/backlog.mjs claim 2568 --session=x', K)).toMatch(/backlog\.mjs claim/);
+    expect(reason('node scripts/backlog.mjs release 2568 --session=x', K)).toMatch(/backlog\.mjs release/);
+  });
+
+  it('denies `gh pr`, `run.mjs open-pr`/`open-pr.mjs` and `pr-land.mjs`', () => {
+    expect(reason('gh pr view 2140', K)).toMatch(/gh pr/);
+    expect(reason('gh pr create --title=x --body=y', K)).toMatch(/gh pr/);
+    expect(reason('node scripts/operations/run.mjs open-pr --ref=lane/2568-prepare-x --sha=HEAD --base=main', K)).toMatch(/open-pr/);
+    expect(reason('node scripts/operations/open-pr.mjs', K)).toMatch(/open-pr/);
+    // The flag is spelled out for #3321's caller sweep, exactly as the delivery block above explains: this
+    // string is INPUT TO A DENY PREDICATE and is never executed, so no verification is skipped by it.
+    expect(reason('node scripts/pr-land.mjs --no-require-verified --pr=2140', K)).toMatch(/pr-land\.mjs/);
+  });
+
+  it('denies `learnings-drop.mjs`, `converge-cli.mjs`, `review-core-cli.mjs` and `verify-lane.mjs` in EVERY mode', () => {
+    expect(reason('node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x --area=y --suggestion=z', K)).toMatch(/learnings-drop\.mjs/);
+    expect(reason('node scripts/converge-cli.mjs init --lane=/lane-6 --state=/lane-6/.converge-state.json', K)).toMatch(/converge-cli\.mjs/);
+    expect(reason('node scripts/review-core-cli.mjs invite --file=x.json --json', K)).toMatch(/review-core-cli\.mjs/);
+    // Including `request`/`check` — unlike the #3105 build/fix/ci-heal carve-out, this agent never runs the
+    // gate at all, in any form; the wrapper runs it outside the agent's own turn.
+    expect(reason('node scripts/verify-lane.mjs --json', K)).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs request', K)).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs check --json', K)).toMatch(/verify-lane\.mjs/);
+  });
+
+  it('touches NOTHING for any other session — interactive, or any other dispatch kind', () => {
+    const commands = [
+      'node scripts/lane-pool.mjs acquire --lane=6',
+      'node scripts/backlog.mjs prepare-hold 2568',
+      'node scripts/backlog.mjs prepare-stamp 2568',
+      'node scripts/backlog.mjs prepare-release 2568',
+      'node scripts/backlog.mjs resolve 2568',
+      'gh pr view 2140',
+      'node scripts/operations/run.mjs open-pr --ref=lane/2568-prepare-x',
+      'node scripts/converge-cli.mjs init --lane=/lane-6',
+      'node scripts/verify-lane.mjs request',
+    ];
+    for (const cmd of commands) {
+      expect(reason(cmd, {}), cmd).toBeNull();
+      expect(reason(cmd), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: null }), cmd).toBeNull();
+      // The FALLBACK-path agent, which runs the prose brief and does its own lifecycle.
+      expect(reason(cmd, { dispatchKind: 'prepare-decision' }), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: 'build' }), cmd).toBeNull();
+    }
+  });
+
+  it('does NOT over-block the ordinary authoring work this agent exists to do', () => {
+    const ordinary = [
+      'git status',
+      'git diff',
+      'git add backlog/2568-a-decision.md src/_data/researchTopics.json',
+      'git commit -F /lane-6/.msg.txt -- backlog/2568-a-decision.md',
+      'node scripts/operations/delivery-report-cli.mjs report --session=$PREPARE_SESSION --item=$PREPARE_ITEM --status=started',
+      'printenv LANE',
+      'cat src/_data/researchTopics.json',
+    ];
+    for (const cmd of ordinary) {
+      expect(reason(cmd, K), cmd).toBeNull();
+    }
+  });
+
+  it('reaches decide() — the real enforcement point, not just the pure per-segment predicate', () => {
+    expect(String(decide('node scripts/backlog.mjs prepare-stamp 2568', K))).toMatch(/prepare-stamp/);
+    // chained: the deny fires even alongside an otherwise-benign command
+    expect(String(decide('git status && node scripts/backlog.mjs resolve 2568', K))).toMatch(/resolve/);
+    // an ordinary, undenied chain still passes clean under the same dispatchKind
+    expect(decide('git status && git add -- backlog/2568-a.md && git commit -F /lane-6/.msg.txt -- backlog/2568-a.md', K)).toBeNull();
+    // the identical command with no dispatchKind at all (interactive) — untouched
+    expect(decide('node scripts/backlog.mjs prepare-stamp 2568')).toBeNull();
+  });
 });

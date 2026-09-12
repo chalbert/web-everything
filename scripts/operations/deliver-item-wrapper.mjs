@@ -1348,8 +1348,14 @@ export function openPr({ item, attemptTag, lane, park, report, slug }, { run: ru
 
 // #3627 follow-up — raw script call, not routed through `run.mjs`: no `learnings-drop` operation is
 // registered yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass.
-/** REAL (flags lifted verbatim from the live brief's step 9). */
-function dropLearning({ sessionSlug, learning }) {
+/** REAL (flags lifted verbatim from the live brief's step 9).
+ *
+ *  EXPORTED by #3644, not rewritten: the prepare-decision wrapper
+ *  (`we:scripts/operations/prepare-decision-wrapper.mjs`) forwards its agent's optional `learning` through the
+ *  identical drop-box call with the identical four flags, and the function is already kind-independent —
+ *  `sessionSlug` plus the report's own `learning` sub-object, nothing build-shaped. A second copy in that file
+ *  would be literal duplication of a six-line shell-out whose flags are the contract. */
+export function dropLearning({ sessionSlug, learning }) {
   run('node', [
     'scripts/conveyor/learnings-drop.mjs', `--kind=${learning.kind}`, `--summary=${learning.summary}`,
     `--area=${learning.area}`, `--suggestion=${learning.suggestion}`, `--session=${sessionSlug}`,

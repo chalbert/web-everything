@@ -6,12 +6,13 @@
  *   1. **THE TABLE ONLY NAMES KINDS THE OPERATION WILL DISPATCH.** A row for a kind outside `LAUNCH_KINDS` can
  *      never fire, so it reads as working wiring in review while doing nothing. The registry checks this at
  *      module LOAD; this file pins that the check is real.
- *   2. **THE UNREGISTERED KINDS ARE A DELIBERATE TRIPWIRE.** Four sibling lanes are wiring `prepare` (#3641,
- *      LANDED — it is off the list below), `prepare-decision` (#3644), `fix` (#3640) and `ci-heal` (#3642).
- *      Each one that lands flips ONE line here, on purpose — the list below is the ledger of what is still on
- *      the agent path, and it should have to be edited rather than silently drift. This file is the ONE place
- *      that enumeration lives: every other routing test asserts the INVARIANT (routed mechanically iff
- *      registered) rather than a snapshot, so a landing kind edits one line, here, and nothing else.
+ *   2. **THE UNREGISTERED KINDS ARE A DELIBERATE TRIPWIRE.** Four sibling lanes were wiring `prepare` (#3641,
+ *      LANDED — off the list below), `prepare-decision` (#3644, LANDED — likewise), `fix` (#3640) and
+ *      `ci-heal` (#3642). Each one that lands flips ONE line here, on purpose — the list below is the ledger
+ *      of what is still on the agent path, and it should have to be edited rather than silently drift. This
+ *      file is the ONE place that enumeration lives: every other routing test asserts the INVARIANT (routed
+ *      mechanically iff registered) rather than a snapshot, so a landing kind edits one line, here, and
+ *      nothing else.
  *   3. **A TYPO'D MODE STILL THROWS.** #3645's whole reason for the knob: `WE_BUILD_DISPATCH_MODE=mechnical`
  *      silently taking the agent path is the failure class the wiring exists to remove. Generalising the read
  *      from one kind to a table must not soften it.
@@ -34,6 +35,7 @@ import {
 } from '../dispatch-provider-registry.mjs';
 import { deliverItemDetachedProvider } from '../dispatch-providers/build.mjs';
 import { fixDetachedProvider } from '../dispatch-providers/fix.mjs';
+import { prepareDecisionDetachedProvider } from '../dispatch-providers/prepare-decision.mjs';
 import { BUILD_DISPATCH_MODE_ENV, createDispatchSinks, routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT, LAUNCH_KINDS } from '../dispatch-lane.mjs';
 
@@ -51,8 +53,9 @@ const buildPayload = (over = {}) => ({
 
 /** THE LEDGER OF WHAT IS STILL ON THE AGENT PATH. One line flips per sibling lane — see the header.
  *  `prepare` left this list in #3641 (`we:scripts/operations/prepare-scope-wrapper.mjs`), `fix` in #3640
- *  (`we:scripts/operations/fix-dispatch-wrapper.mjs`). */
-const UNREGISTERED_KINDS = ['prepare-decision', 'investigate', 'ci-heal'];
+ *  (`we:scripts/operations/fix-dispatch-wrapper.mjs`) and `prepare-decision` in #3644
+ *  (`we:scripts/operations/prepare-decision-wrapper.mjs`). */
+const UNREGISTERED_KINDS = ['investigate', 'ci-heal'];
 
 /** Every registered kind's mode with NOTHING set in the environment — derived from the table rather than
  *  written out, so a landing sibling lane edits the ledger above and nothing else (#3641). */
@@ -98,6 +101,15 @@ describe('the dispatch provider registry — the table', () => {
       kind: 'build',
       provider: deliverItemDetachedProvider,
       modeEnv: 'WE_BUILD_DISPATCH_MODE',
+      defaultMode: 'mechanical',
+    });
+  });
+
+  it('holds `prepare-decision`, wired to the prepare wrapper behind `WE_PREPARE_DECISION_DISPATCH_MODE` (#3644)', () => {
+    expect(dispatchProviderEntry('prepare-decision')).toEqual({
+      kind: 'prepare-decision',
+      provider: prepareDecisionDetachedProvider,
+      modeEnv: 'WE_PREPARE_DECISION_DISPATCH_MODE',
       defaultMode: 'mechanical',
     });
   });
@@ -156,8 +168,11 @@ describe('dispatchModesFromEnv — read ONCE, over every registered kind', () =>
   it('answers for every registered kind from the env it is handed', () => {
     expect(dispatchModesFromEnv({})).toEqual(defaultModes());
     expect(dispatchModesFromEnv({ WE_BUILD_DISPATCH_MODE: 'agent' })).toEqual({ ...defaultModes(), build: 'agent' });
-    // One kind's opt-out moves ONLY that kind — the reason the modes are a map and not a scalar (#3640).
+    // One kind's opt-out moves ONLY that kind — the reason the modes are a map and not a scalar (#3640/#3644),
+    // and a thing a single-entry table could not have shown.
     expect(dispatchModesFromEnv({ WE_FIX_DISPATCH_MODE: 'agent' })).toEqual({ ...defaultModes(), fix: 'agent' });
+    expect(dispatchModesFromEnv({ WE_PREPARE_DECISION_DISPATCH_MODE: 'agent' }))
+      .toEqual({ ...defaultModes(), 'prepare-decision': 'agent' });
     expect(Object.keys(dispatchModesFromEnv({}))).toEqual(Object.keys(DISPATCH_PROVIDER_REGISTRY));
   });
 
@@ -283,5 +298,6 @@ describe('THE DEFAULT PATH — the registry is LIVE, not merely present', () => 
     // Derived, but not vacuous: every entry in the real table must actually default to the mechanical path,
     // which is the claim this test's name makes.
     expect(Object.values(dispatchModesFromEnv({})).every((m) => m === 'mechanical')).toBe(true);
+    expect(Object.keys(dispatchModesFromEnv({})).length).toBeGreaterThan(0);
   });
 });
