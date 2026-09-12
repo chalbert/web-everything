@@ -43,9 +43,17 @@
 // telling the truth about the CONTENTION — 6 queued items name this file, and they do serialize on it. The
 // answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
+//
+// STILL HONOURED AFTER THE #3645 PROVIDER EXTRACTION, which moved code OUT of this file and so deserves an
+// explicit word here rather than leaving the next reader to assume the marker was overridden. The three halves
+// the ruling is about — the tick READER, the SINK, the OBSERVER — are all still here, together, sharing the
+// sink's handle contract. What moved to `./detached-dispatch.mjs`, `./dispatch-providers/build.mjs` and
+// `./dispatch-provider-registry.mjs` is the PER-KIND mechanical provider machinery that #3645 ADDED to this
+// file afterwards; it was never one of the three, and four sibling lanes each about to edit the same `if`
+// inside it is why it moved. See `THE MECHANICAL DISPATCH SEAM` banner further down for the full argument.
 
-import { execFile, execFileSync, spawn as nodeSpawn } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -60,6 +68,16 @@ import { classifyPr } from '../conveyor/pr-watch.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
+// #3645, generalised — the detached primitives and the per-kind provider table. ONE-WAY: this file imports
+// them, neither of them imports this file. See the `THE MECHANICAL DISPATCH SEAM` banner below for why the
+// per-kind bodies live there and why that is not a split of this file's `@cohesive:` triple.
+import { defaultIsPidAlive, deliveryDispatchLogPath, detachedHandlePid } from './detached-dispatch.mjs';
+import {
+  DISPATCH_PROVIDER_REGISTRY,
+  dispatchModeFor,
+  dispatchModesFromEnv,
+  dispatchProviderEntry,
+} from './dispatch-provider-registry.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -823,87 +841,78 @@ export function isPreSpawnRefusal(error) {
 }
 
 // ================================================================================================
-// #3645 — THE MECHANICAL BUILD DISPATCH. Everything from here to `createDispatchSinks` is the `build` launch
-// kind's own provider: instead of handing a `claude --bg` agent the whole 500-line
-// `we:skills-src/conveyor/delivery-agent-brief.md` and trusting it to run its own lifecycle, a build dispatch
-// now starts `we:scripts/operations/deliver-item-run.mjs`, which runs
+// #3645 — THE MECHANICAL DISPATCH SEAM. A `build` dispatch no longer hands a `claude --bg` agent the whole
+// 500-line `we:skills-src/conveyor/delivery-agent-brief.md` and trusts it to run its own lifecycle: it starts
+// `we:scripts/operations/deliver-item-run.mjs`, which runs
 // `we:scripts/operations/deliver-item-wrapper.mjs#deliverItem` — acquire → claim → spawn a MINIMAL build agent
 // → gate (one retry) → converge → park decision → open PR → drop learning — mechanically.
 //
-// FOLLOWS THE REVIEW KIND, LANDED THE SAME DAY (`#xu2pp2m`, `02d9af3`): `we:scripts/operations/
-// review-dispatch.mjs` made `we:scripts/operations/review-dispatch-wrapper.mjs` its DEFAULT and kept the agent
-// path reachable behind an explicit opt-out. Same shape here, with one difference the review kind did not have
-// to solve — see {@link deliverItemDetachedProvider} for why this one is DETACHED and that one is not.
+// WHAT USED TO SIT HERE, AND WHERE IT WENT. #3645 wrote the whole of that — the detached primitives, the
+// `build` provider itself, the env knob, the router's `if (kind === 'build')` — inline, in this file. Four
+// sibling kinds are now being wired by four separate lanes (`prepare` #3641, `prepare-decision` #3644, `fix`
+// #3640, `ci-heal` #3642, under `we:backlog/3643-*.md`), and every one of them would have added another arm to
+// that branch and another env read to `createDispatchSinks` — five lanes colliding on the same twenty lines.
+// So the PER-KIND bodies moved out and a registry took their place:
+//
+//   * `we:scripts/operations/detached-dispatch.mjs` — the primitives EVERY detached provider needs (the
+//     `pid:<n>` handle shape, the kernel liveness probe, the detached spawn, the log path). Imported FROM here;
+//     it never imports this file back.
+//   * `we:scripts/operations/dispatch-providers/build.mjs` — the `build` provider, the template a sibling kind
+//     copies.
+//   * `we:scripts/operations/dispatch-provider-registry.mjs` — the table. Adding a kind is adding a ROW; see
+//     {@link routeDispatchProvider}, which now has no per-kind knowledge whatsoever.
+//
+// THIS IS NOT A SPLIT OF THE `@cohesive:` TRIPLE AT THE TOP OF THIS FILE, and the marker's ruling is not being
+// ignored. That ruling is about the READER / SINK / OBSERVER — one operation's io boundary, one effect
+// contract, one handle contract, three halves that must stay together. All three are still here, unchanged and
+// still sharing the sink's handle docblock. What left is the per-kind PROVIDER machinery #3645 ADDED to this
+// file afterwards, which was never one of the three; `isDispatchHandleLive` below is the deliberate proof of
+// the distinction — it stays, because it composes a moved primitive (`detachedHandlePid`) with an io-shell read
+// (`isHandleListed`, the `claude agents` listing), and that composition is io-boundary business.
 // ================================================================================================
 
-/** The per-dispatch process `deliverItemDetachedProvider` starts. Resolved by SCRIPT LOCATION, never cwd —
- *  same reason {@link REPO_ROOT} is. */
-export const DELIVER_ITEM_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations', 'deliver-item-run.mjs');
-
-/** Where a detached delivery's stdout/stderr lands: `we:.operations/delivery-dispatch-logs/<slug>.log`, the
- *  same gitignored sidecar family `delivery-report-store.mjs` and `minimal-context-provider.mjs` already use. */
-export function deliveryDispatchLogPath(sessionSlug, root = REPO_ROOT) {
-  const safe = /^[A-Za-z0-9._-]+$/.test(String(sessionSlug || '')) ? String(sessionSlug) : 'unnamed-dispatch';
-  return join(root, '.operations', 'delivery-dispatch-logs', `${safe}.log`);
-}
+// ── BACK-COMPAT RE-EXPORTS ──────────────────────────────────────────────────────────────────────────────────
+// Every symbol this file exported before the extraction is still exported from it, so no existing importer —
+// the dispatch test suite included — has to move. NEW CODE SHOULD IMPORT FROM THE REAL HOMES NAMED ABOVE:
+// detached primitives from `./detached-dispatch.mjs`, the `build` provider from `./dispatch-providers/build.mjs`,
+// and anything mode- or kind-related from `./dispatch-provider-registry.mjs`.
+export {
+  DETACHED_HANDLE_PREFIX,
+  defaultIsPidAlive,
+  defaultSpawnDetached,
+  deliveryDispatchLogPath,
+  detachedHandlePid,
+} from './detached-dispatch.mjs';
+export { DELIVER_ITEM_RUN_SCRIPT, deliverItemDetachedProvider } from './dispatch-providers/build.mjs';
 
 /**
- * WHICH PATH A `build` DISPATCH TAKES. `mechanical` (the default) runs the wrapper; `agent` restores the
- * pre-`#3645` `claude --bg` + full-brief spawn.
+ * BACK-COMPAT — the `build` kind's opt-out env var. It is DECLARED in the registry now (`modeEnv` on the
+ * `build` entry) and that is the copy everything acts on; this one exists only so pre-registry importers keep
+ * resolving.
  *
- * READ FROM THE ENVIRONMENT, for the same reason {@link AGENT_ARGS_ENV} is: a knob only a test can reach is not
- * a knob, and the `dispatch-lane` operation's declared input has no field for this (its input is the tick's,
- * not the operator's). An unrecognised value THROWS rather than falling back to either path — a typo'd
- * `WE_BUILD_DISPATCH_MODE=mechnical` silently taking the agent path is exactly the class of failure this whole
- * wiring exists to remove.
+ * WHY IT IS RE-STATED AS A LITERAL RATHER THAN READ OFF THE ENTRY, which would be the obvious way to stop the
+ * two drifting: `we:scripts/conveyor/lease-reaper.mjs` imports this file and this file (through the registry
+ * and the `build` provider) imports it back — a module cycle that predates the registry. In a cycle, a
+ * MODULE-LOAD-TIME call across the seam (`dispatchProviderEntry('build').modeEnv`) reads a binding that may not
+ * be initialised yet, and it fails only for whichever import order happens to enter the cycle first — the worst
+ * kind of breakage to own. A literal is evaluated by nobody. The no-drift guarantee is bought back by a test
+ * instead (`./__tests__/dispatch-provider-registry.test.mjs` asserts the two are equal), which is where a
+ * static fact belongs. {@link buildDispatchModeFromEnv} below is a CALL-time read and so has no such problem.
  */
 export const BUILD_DISPATCH_MODE_ENV = 'WE_BUILD_DISPATCH_MODE';
 
-/** @returns {'mechanical'|'agent'} */
+/**
+ * BACK-COMPAT — `build`'s mode, as a thin alias over the registry. Identical behaviour to #3645's own function
+ * (default `mechanical`, accepts `agent`, throws on anything else naming the var); the reasoning it used to
+ * carry now lives on {@link ./dispatch-provider-registry.mjs#dispatchModeFor}, generalised to every kind.
+ * New code wanting EVERY kind's mode should call `dispatchModesFromEnv` instead.
+ * @returns {'mechanical'|'agent'}
+ */
 export function buildDispatchModeFromEnv(env = process.env) {
-  const raw = String(env?.[BUILD_DISPATCH_MODE_ENV] ?? '').trim().toLowerCase();
-  if (!raw) return 'mechanical';
-  if (raw !== 'mechanical' && raw !== 'agent') {
-    throw new TypeError(
-      `operations: ${BUILD_DISPATCH_MODE_ENV} must be \`mechanical\` (the default — the deliver-item wrapper) `
-      + `or \`agent\` (the pre-#3645 full-brief \`claude --bg\` spawn), got ${JSON.stringify(raw)}`,
-    );
-  }
-  return raw;
-}
-
-/**
- * THE HANDLE SHAPE A DETACHED DELIVERY CARRIES. `pid:<n>` — deliberately unlike every `claude` handle
- * ({@link parseBackgroundedHandle} only ever yields lower-case hex), so {@link isDispatchHandleLive} can tell
- * the two apart with no extra field on the run record and no migration of the records already on disk.
- */
-export const DETACHED_HANDLE_PREFIX = 'pid:';
-
-/** The pid inside a `pid:<n>` handle, or `null` for anything else. PURE. */
-export function detachedHandlePid(handle) {
-  const raw = String(handle ?? '').trim();
-  if (!raw.startsWith(DETACHED_HANDLE_PREFIX)) return null;
-  const pid = Number(raw.slice(DETACHED_HANDLE_PREFIX.length));
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
-}
-
-/**
- * IS THIS PID STILL RUNNING? `process.kill(pid, 0)` sends no signal — it only asks the kernel whether the
- * process exists and whether we may signal it. `EPERM` means it EXISTS and belongs to someone else, which is
- * still alive; `ESRCH` (and anything else) means gone.
- *
- * THIS IS THE READ THAT MAKES RESTART-SURVIVAL OBSERVABLE. It asks the kernel, not a listing and not the
- * process that started the delivery — so a runner that was restarted mid-delivery still gets a truthful `live:
- * true` for the detached process it no longer parents, and its double-dispatch guard holds the item instead of
- * starting a second build in an occupied lane.
- */
-export function defaultIsPidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return String(e?.code || '') === 'EPERM';
-  }
+  // Read through the back-compat CONSTANT rather than `entry.modeEnv`, so this alias keeps answering about the
+  // variable its existing callers named — which is the whole job of a back-compat alias — even if the `build`
+  // entry is ever re-keyed to a different one. The two are equal today, and a test holds them equal.
+  return dispatchModeFor({ ...dispatchProviderEntry('build'), modeEnv: BUILD_DISPATCH_MODE_ENV }, env);
 }
 
 /**
@@ -923,117 +932,50 @@ export function isDispatchHandleLive(handle, sessions, { isPidAlive = defaultIsP
 }
 
 /**
- * The DETACHED spawn primitive — named and exported for the same reason {@link defaultSpawnAgent} is: the
- * options ARE the contract (`detached`, the log fds, the `unref`), and an option no test can reach is an option
- * the next refactor deletes for free.
+ * THE ROUTER (`#3645`) — the default `provider` {@link createDispatchSinks} installs. It has NO per-kind
+ * knowledge any more: it asks {@link ./dispatch-provider-registry.mjs#dispatchProviderEntry} whether this
+ * launch kind has a mechanical provider and dispatches to it unless the operator opted THAT KIND out. A kind
+ * with no entry falls through to the agent path — the unchanged `claude --bg` spawn from that kind's own
+ * brief, whose first steps (`lane-pool acquire`, `verify-lane`, `gh pr view`, `run.mjs open-pr`) the agent
+ * itself runs (see `we:scripts/guard-bash.mjs`'s own note on exactly that, and `we:backlog/3643-*.md` for the
+ * sibling wiring stories).
  *
- * `detached: true` makes the child a new session leader (Node calls `setsid`), so it is NOT in the runner's
- * process group and a group-wide signal — which is exactly what `we:scripts/operations/restart-runner-io.mjs`'s
- * shutdown sends — never reaches it. `.unref()` lets the dispatching process exit without waiting. `stdio` goes
- * to a real file because a detached child with a piped stdio nobody reads blocks on a full pipe, and because
- * the log is the only place a delivery's own narration survives.
- */
-export function defaultSpawnDetached(argv, { cwd, logPath } = {}, {
-  spawn = nodeSpawn,
-  ensureDir = (d) => mkdirSync(d, { recursive: true }),
-  openLog = (p) => openSync(p, 'a'),
-} = {}) {
-  ensureDir(dirname(logPath));
-  const fd = openLog(logPath);
-  const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd] });
-  if (typeof child.unref === 'function') child.unref();
-  return child;
-}
-
-/**
- * THE `build` PROVIDER (`#3645`) — one implementation of the SAME `#3579` port {@link defaultClaudeProvider}
- * implements, answering the same request shape with the same thing: a durable handle for later liveness polling.
+ * WHY THE BRANCH WENT AWAY. #3645 wrote this as `if (kind === 'build' && buildMode !== 'agent')`. Four sibling
+ * lanes are wiring four more kinds; four more arms on that one `if`, each from a different lane, is four
+ * conflicts on twenty lines. With the registry, "add a kind" is "add a row" and this function is never edited
+ * again. Behaviour is IDENTICAL today: the table holds exactly `build`, so `build` goes mechanical and the
+ * other five go to the agent, which is what the line above did.
  *
- * ── WHY DETACHED, WHERE THE REVIEW WRAPPER IS NOT ───────────────────────────────────────────────────────────
- *
- * `review-dispatch.mjs` could call its wrapper INLINE and simply block, because its caller
- * (`we:skills-src/conveyor/runner.mjs`'s review-reconcile pass) was moved onto the heartbeating async spawner in
- * the same change. A BUILD cannot take that trade. `deliverItem`'s single `provider.spawn` is budgeted at 60
- * minutes (`deliver-item-wrapper.mjs#DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and the gate + converge that follow add
- * more; the dispatch path it sits on is `makeCliDispatchPass`'s SYNCHRONOUS `execFileSync` of
- * `run.mjs dispatch-lane --num=<N>`, once per surfaced item, inside the runner's own tick. Blocking there would
- * starve every other item in the tick, stop the singleton lease being heartbeated, and — the acceptance
- * criterion this item was filed with — make a `restart-runner` kill a half-finished build: a claimed item, a
- * held lane, no PR, no record of how far it got.
- *
- * So the wrapper runs in its OWN process ({@link DELIVER_ITEM_RUN_SCRIPT}), detached and unref'd, and this
- * provider returns in milliseconds exactly as the `claude --bg` path did. THE DISPATCH SINK'S CONTRACT IS
- * UNCHANGED: same `inFlight({handle, expectedBy})`, same run-store record, same observer. The only difference is
- * the handle's SHAPE (`pid:<n>`, see {@link DETACHED_HANDLE_PREFIX}) and therefore which question answers its
- * liveness — {@link isDispatchHandleLive} owns that, and both readers go through it.
- *
- * WHAT A KILLED SINK STILL COSTS, stated rather than papered over: exactly what it cost before. `dispatch: true`
- * means the executor writes `in-flight` BEFORE this runs (#3073), so a sink killed between `spawn` returning and
- * this function returning leaves an entry with a null handle in `inFlightEntries().unknown` — visible, and
- * closable with `resolveInFlight`. That window is not widened here; it is, if anything, shorter, because there
- * is no CLI confirmation line to parse before the handle is known.
- *
- * @param {{sessionSlug?: string, num?: string|number, lane?: string|number, scope?: string, cwd?: string}} request
- * @param {{spawnDetached?: Function, logPathFor?: Function, attemptTagFor?: Function}} [io]
- * @returns {string} the `pid:<n>` handle.
- */
-export function deliverItemDetachedProvider(request, {
-  spawnDetached = defaultSpawnDetached,
-  logPathFor = deliveryDispatchLogPath,
-  attemptTagFor = sessionSlugAttemptTag,
-  runScript = DELIVER_ITEM_RUN_SCRIPT,
-} = {}) {
-  const sessionSlug = String(request?.sessionSlug ?? '').trim();
-  const num = normNum(request?.num);
-  const lane = String(request?.lane ?? '').trim();
-  // REFUSED BEFORE ANY PROCESS EXISTS, and `notApplied` so the entry lands `failed` rather than INDETERMINATE —
-  // the same treatment `buildAgentArgv` gives an empty prompt, and for the same reason: nothing was started, so
-  // nothing is ambiguous. A delivery with no item, lane or session has nothing to acquire or claim.
-  if (!num) throw notApplied('dispatch-lane: refusing a mechanical build dispatch with no item id');
-  if (!lane) throw notApplied(`dispatch-lane: refusing a mechanical build dispatch for #${num} with no lane`);
-  if (!sessionSlug) throw notApplied(`dispatch-lane: refusing a mechanical build dispatch for #${num} with no session slug`);
-
-  // `''` for a first attempt — recovered from the slug rather than added to the effect payload, the SAME way
-  // `createDispatchObservers` already recovers it (`sessionSlugAttemptTag`), so no new field crosses the seam.
-  const attemptTag = attemptTagFor(sessionSlug) || '';
-  const argv = [
-    String(runScript),
-    `--num=${num}`,
-    `--lane=${lane}`,
-    `--session=${sessionSlug}`,
-    `--scope=${String(request?.scope ?? '')}`,
-    `--attempt=${attemptTag}`,
-  ];
-  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
-  const pid = Number(child?.pid);
-  if (!Number.isInteger(pid) || pid <= 0) {
-    // SAME indeterminate shape as an unparseable `claude --bg` confirmation: something may be running and its
-    // identity is unknown. Throwing lands the entry `in-flight` with a null handle, which is visible and
-    // closable; returning a handle known to be wrong would key every later liveness read on nothing.
-    throw new Error(
-      `dispatch-lane: started the delivery wrapper for #${num} but node reported no pid — whether it is running `
-      + 'cannot be told from here',
-    );
-  }
-  return `${DETACHED_HANDLE_PREFIX}${pid}`;
-}
-
-/**
- * THE ROUTER (`#3645`) — the default `provider` {@link createDispatchSinks} now installs. `build` goes to the
- * wrapper unless the operator opted out; every other launch kind is untouched and still spawns its own agent
- * from its own brief, because no wrapper owns their lifecycle yet (see `we:scripts/guard-bash.mjs`'s own note on
- * exactly that, and `we:backlog/3643-*.md` for the five sibling wiring stories).
+ * `modes` IS DATA, NOT AN ENVIRONMENT READ. It arrives already resolved from
+ * {@link ./dispatch-provider-registry.mjs#dispatchModesFromEnv}, read ONCE at sink-construction time — see
+ * {@link createDispatchSinks}. A kind missing from `modes` takes its registered provider; only the literal
+ * string `agent` diverts a registered kind.
  *
  * @param {object} request - the `#3579` port request.
- * @param {{buildMode?: 'mechanical'|'agent', mechanical?: Function, agent?: Function}} [io]
+ * @param {object} [io]
+ * @param {Record<string, 'mechanical'|'agent'>} [io.modes] - kind → mode, resolved once at construction.
+ * @param {Record<string, object>} [io.registry] - the provider table; injectable so a test can hand in its own.
+ * @param {Function} [io.agent] - the fallback provider: the unchanged `claude --bg` path.
+ * @param {'mechanical'|'agent'} [io.buildMode] - BACK-COMPAT (#3645's parameter): `modes.build` as a scalar.
+ * @param {Function} [io.mechanical] - BACK-COMPAT (#3645's parameter): overrides the `build` entry's provider.
  */
 export function routeDispatchProvider(request, {
-  buildMode = 'mechanical',
-  mechanical = deliverItemDetachedProvider,
+  modes = {},
+  registry = DISPATCH_PROVIDER_REGISTRY,
   agent,
+  // BACK-COMPAT with #3645's own call shape, kept rather than deleted because the tests that pin #3645's
+  // behaviour inject through it: `mechanical` is how they reach `deliverItemDetachedProvider`'s `spawnDetached`
+  // seam, which is what keeps a routing test from starting a real detached process. New callers pass `modes`
+  // (and `registry`, if they must) and never these two.
+  buildMode,
+  mechanical,
 } = {}) {
   const kind = String(request?.launchKind || 'build');
-  if (kind === 'build' && buildMode !== 'agent') return mechanical(request);
+  const entry = dispatchProviderEntry(kind, registry);
+  const mode = modes?.[kind] ?? (kind === 'build' ? buildMode : undefined);
+  if (entry && mode !== 'agent') {
+    return (kind === 'build' && typeof mechanical === 'function' ? mechanical : entry.provider)(request);
+  }
   return agent(request);
 }
 
@@ -1104,8 +1046,14 @@ export function routeDispatchProvider(request, {
  *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT `spawnAgent` goes through. See
  *   {@link readTick} for why this is a second seam and not the same one.
+ * @param {Record<string, 'mechanical'|'agent'>} [o.modes] - every registered kind's dispatch mode, read from
+ *   the environment ONCE at construction ({@link ./dispatch-provider-registry.mjs#dispatchModesFromEnv}).
+ * @param {'mechanical'|'agent'} [o.buildMode] - BACK-COMPAT (#3645): `modes.build`, as a scalar.
+ * @param {Record<string, object>} [o.registry] - the per-kind provider table; injectable so the DEFAULT path
+ *   can be exercised without a real process being started.
  * @param {(request: object) => (string|Promise<string>)} [o.provider] - the PORT (see above). Defaults to
- *   {@link defaultClaudeProvider} closed over `spawnAgent`.
+ *   {@link routeDispatchProvider} over `registry`/`modes`, falling back to {@link defaultClaudeProvider}
+ *   closed over `spawnAgent` for any kind with no mechanical provider.
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
@@ -1115,15 +1063,26 @@ export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
-  // #3645 — `buildMode` is read from the environment ONCE, here, at sink-construction time rather than per
-  // dispatch, so one tick cannot straddle two modes. A test injects it directly and never touches `process.env`.
-  buildMode = buildDispatchModeFromEnv(),
-  // #3645 — THE DEFAULT PROVIDER IS NOW THE ROUTER, not `defaultClaudeProvider`. A `build` launch runs the
-  // deliver-item wrapper in its own detached process ({@link deliverItemDetachedProvider}); every other kind —
-  // and `build` under `WE_BUILD_DISPATCH_MODE=agent` — still takes the unchanged `claude --bg` path below. A
-  // caller supplying its own `provider` bypasses the routing entirely, exactly as before.
+  // #3645 — EVERY REGISTERED KIND'S MODE is read from the environment ONCE, here, at sink-construction time
+  // rather than per dispatch, so one tick cannot straddle two modes. A test injects the map directly (or an
+  // `env` object through `dispatchModesFromEnv`) and never touches `process.env`. Generalised from the single
+  // `buildMode` scalar #3645 read: the reason is unchanged, it now just covers every kind in the table.
+  modes = dispatchModesFromEnv(),
+  // BACK-COMPAT — #3645's own `buildMode` scalar, which twelve existing dispatch tests pass to name the agent
+  // path they are testing. When given it overrides `modes.build` and nothing else. New callers pass `modes`.
+  buildMode,
+  // #3645 — the provider table itself, injectable for the same reason `spawnAgent` is: the DEFAULT path
+  // (registry → `deliverItemDetachedProvider` → a real detached `node`) is otherwise the one path no test can
+  // exercise without starting a process, and an untestable default is a default that rots.
+  registry = DISPATCH_PROVIDER_REGISTRY,
+  // #3645 — THE DEFAULT PROVIDER IS THE ROUTER, not `defaultClaudeProvider`. A launch kind with a row in the
+  // registry runs that row's provider (today: `build` → the deliver-item wrapper, in its own detached
+  // process); every other kind — and any registered kind opted out through its own `modeEnv` — still takes the
+  // unchanged `claude --bg` path below. A caller supplying its own `provider` bypasses the routing entirely,
+  // exactly as before.
   provider = (request) => routeDispatchProvider(request, {
-    buildMode,
+    modes: buildMode ? { ...modes, build: buildMode } : modes,
+    registry,
     agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
   }),
   mintSessionId = () => randomUUID(),
