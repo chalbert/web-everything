@@ -67,6 +67,7 @@ import {
 } from './runner-lock.mjs';
 import { runGhSync } from '../../scripts/lib/gh-throttle.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+import { QUEUE_SCOPE_ENV, isQueueScopeEnabled, readScopedQueueIds } from '../../scripts/conveyor/queue-scope.mjs';
 import { writeLineSync } from '../../scripts/lib/write-all-sync.mjs';
 import { normNum } from '../../scripts/conveyor/queue-store.mjs';
 
@@ -317,6 +318,41 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  window `#2453` already fixed for the plateau-app drain daemon's whole-process lease. The other passes are
  *  quick bookkeeping sweeps; wrapping them the same way would add an async spawn + timer for no real benefit.
  */
+
+/**
+ *  QUEUE SCOPING — WHICH OF THESE PASSES IS REPO-WIDE, AND WHAT NOW NARROWS THEM (epic #3383, default OFF).
+ *
+ *  THE LIVE BUG. A scratch checkout was given its own `.conveyor/queue.json` (5 items) and a kind-scoped
+ *  `.conveyor/dispatch-pause.json` holding every spawn kind but `build`, so ONE bounded `--once` tick could
+ *  touch those 5 items and nothing else. The kind scoping worked. The MECHANICAL PASSES did not respect it at
+ *  all — they never read the queue — and the same tick reviewed two unrelated `review:pending` PRs found by a
+ *  repo-wide `gh pr list`, which the (separate, resident) drain then landed.
+ *
+ *  THE PAUSE LEVER WAS NOT THE FIX, AND ITS OWN REASONING IS LEFT INTACT. `dispatch-pause.mjs`'s header says
+ *  `review-dispatch` is deliberately outside `PAUSABLE_KINDS`. That is right: pausing is an ADMISSION gate on
+ *  NEW work, while these passes CLEAR work already open — gating them by default would strand every in-flight
+ *  PR the moment an operator paused new dispatch. The wrong verb was being reached for. The right one is
+ *  SCOPING: the passes keep running, on a narrowed candidate set.
+ *
+ *  WHERE EACH PASS GETS ITS CANDIDATES, and which ones therefore needed the filter:
+ *    • `reconcile-pass.mjs` → `gh pr list --state open` REPO-WIDE. **Scoped.** The single highest-leverage
+ *      point: this one plan drives `review-dispatch.mjs`, both tag scripts, AND `reconcile-fix-dispatch.mjs`
+ *      (which calls `runReconcilePass` directly), so filtering the read scopes all four effects at once.
+ *    • `parked-pr-conflict-watch.mjs` / `duplicate-pr-watch.mjs` / `parked-pr-progress-watch.mjs` → their own
+ *      REPO-WIDE `gh pr list --state open`. **Scoped**, each at the one point the listing enters the sweep.
+ *    • `verify-dispatch.mjs` → NOT `gh` at all: the HOST-WIDE lane pool. **Scoped** on lane branch name — a
+ *      different leak axis (filesystem, not GitHub) but the same "an isolated instance is not isolated" bug.
+ *    • `review-round-tag.mjs` / `review-status-tag.mjs` → already derived entirely from the reconcile plan, so
+ *      they inherit its scoping and needed no change of their own.
+ *    • `infra-blocked.mjs` / `lease-reaper.mjs` / `session-reaper.mjs` / `branch-drift.mjs` /
+ *      `ci-queue-watch.mjs` / `lane-pool-health-watch.mjs` / the hiccup sink → NOT scoped, deliberately. None
+ *      of them mutates a pull request: they read local sidecar state, this tick's own decisions, one named
+ *      branch, `gh run list` timings, or host lane/lease/session hygiene. Scoping host-hygiene passes would
+ *      trade the bug being fixed for a worse one (a scoped instance that stops reaping its own dead leases).
+ *
+ *  DEFAULT OFF is load-bearing: with no `.conveyor/queue-scope.json` and no `--scope-to-queue`, every filter
+ *  above is the identity function and a production checkout behaves exactly as it did. See
+ *  {@link ../../scripts/conveyor/queue-scope.mjs}. */
 
 /** Cap on {@link summarizeMechanicalPassError}'s output — generous for a real diagnostic, still bounded so one
  *  runaway stack trace can't flood `runner.log`. */
@@ -730,6 +766,28 @@ function finiteOr(val, fallback) {
 }
 
 /**
+ * `--scope-to-queue` → the env every child process this runner shells must inherit (epic #3383). PURE: returns
+ * the patch, never applies it, so the whole decision is unit-testable with no process env in play.
+ *
+ * WHY AN ENV PATCH AND NOT AN IN-MEMORY FLAG. This runner barely does anything itself — it SHELLS
+ * `tick-core.mjs`, `reconcile-pass.mjs`, `review-dispatch.mjs`, the watch sweeps and `verify-dispatch.mjs`, and
+ * each of those resolves its own sidecars through its own `resolve*Path()` call. A flag that only changed this
+ * process's in-memory state would scope the parent and leave every child reading the unscoped default — which
+ * is the WORST outcome available, because it LOOKS scoped and is not. (This is the shape `#3639`'s own Fork
+ * 2(C) argues is forced by the architecture rather than chosen.)
+ *
+ * The flag is a pure OVERRIDE of the `.conveyor/queue-scope.json` marker, not a replacement for it: a scratch
+ * checkout can carry the marker and need no flag, and an operator can scope one bounded run without writing
+ * any file. An ABSENT flag patches NOTHING — it must not force scoping OFF, or it would override a marker the
+ * operator deliberately set.
+ * @param {object} flags parsed CLI flags
+ * @returns {object} an env patch (`{}` when the flag is absent)
+ */
+export function queueScopeEnvPatch(flags) {
+  return flags && flags['scope-to-queue'] ? { [QUEUE_SCOPE_ENV]: '1' } : {};
+}
+
+/**
  * Acquire the singleton lease, drive the loop, and ALWAYS release the lease — the lifecycle wrapper, kept
  * SEPARATE from `main()` so it is unit-testable without `process.exit` (which does NOT unwind a `finally`, so
  * the release MUST NOT sit behind an exit). A held lease returns `{ started: false }` so the caller stands
@@ -859,6 +917,15 @@ async function main(argv) {
   const json = !!flags.json;
   const intervalMs = finiteOr(flags['interval-ms'], DEFAULT_TICK_INTERVAL_MS);
   const maxTicks = flags.once ? 1 : finiteOr(flags['max-ticks'], Infinity);
+
+  // epic #3383 — applied BEFORE any effect is built, so every child this runner shells (and this process's own
+  // `isQueueScopeEnabled()` reads) sees it. Announced on stderr because a scoped runner that says nothing is
+  // indistinguishable from a broken one: the passes below will look like they are finding no work.
+  Object.assign(process.env, queueScopeEnvPatch(flags));
+  if (isQueueScopeEnabled()) {
+    const ids = readScopedQueueIds();
+    process.stderr.write(`⊂ conveyor runner is QUEUE-SCOPED — repo-wide mechanical passes act only on: ${ids.length ? ids.join(', ') : '(nothing — this checkout\'s queue is empty)'}\n`);
+  }
 
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = () => ({

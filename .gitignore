@@ -70,6 +70,11 @@ commitment-policy/**/*.d.ts
 # otherwise-launchable item/spawn `dispatch-paused`, without touching already-running lanes. Operator-set/cleared
 # via dispatch-pause.mjs set|clear; machine-local advisory state, never committed.
 .conveyor/dispatch-pause.json
+# Queue-scoped mechanical passes marker (epic #3383) — present+true ⇒ this checkout's repo-wide passes
+# (reconcile/review-dispatch, the three open-PR watch sweeps, verify-dispatch) act ONLY on PRs/lanes its own
+# .conveyor/queue.json names. Absent ⇒ today's repo-wide default. Set/cleared via queue-scope.mjs set|clear;
+# machine-local and instance-local by construction, never committed.
+.conveyor/queue-scope.json
 # …and its advisory lock (serializes concurrent record/retry writes) — ephemeral (created+unlinked per
 # critical section), but ignore it so a crashed holder's leftover lock never shows as an untracked file.
 .conveyor/*.lock

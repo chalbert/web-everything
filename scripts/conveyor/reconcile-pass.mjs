@@ -47,6 +47,7 @@ import { resolve } from 'node:path';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { countRearmComments } from './rearm-review.mjs';
 import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS } from './reconcile-core.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -226,14 +227,26 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#runReconcilePass — read, decide, return. Every reader is injectable, so
  * the whole shell is exercisable with no network and no credential.
- * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, now?:number, repo?:string|null}} [o]
+ *
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF ⇒ `scopePrsToQueue` is the IDENTITY
+ * function and this pass reconciles every open PR in the repo, exactly as it always has. THIS IS THE MOST
+ * CONSEQUENTIAL of the four scope points, because this one plan drives THREE separate mechanical effects: the
+ * `review-dispatch.mjs` spawn (a real jury review, which lands a review label the drain then acts on) and its
+ * two informative tag scripts, both driven from `decisions.dispatch`/`refusals` by
+ * `we:skills-src/conveyor/runner.mjs#makeCliMechanicalPasses`, AND the fix-agent spawn in
+ * `we:scripts/conveyor/reconcile-fix-dispatch.mjs`, which calls THIS function directly. Filtering the PR list
+ * here therefore scopes all three at once, at the single point the repo-wide listing enters the chain — the
+ * 2026-09-12 incident (a queue-scoped scratch tick reviewed and landed two unrelated `review:pending` PRs)
+ * came in through exactly this reader.
+ * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, now?:number, repo?:string|null,
+ *   queueScope?:object}} [o]
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>, prs:number, agents:number}}
  */
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
-  now = Date.now(), repo = null,
+  now = Date.now(), repo = null, queueScope = {},
 } = {}) {
-  const prs = readPrs({ repo });
+  const prs = scopePrsToQueue(readPrs({ repo }), { label: 'reconcile-pass', ...queueScope });
   const agents = enrich(readAgents({}));
   const plan = planReconcile({ prs, agents, durableCounts: durableCountsFrom(prs), now });
   return { ...plan, prs: prs.length, agents: agents.length };

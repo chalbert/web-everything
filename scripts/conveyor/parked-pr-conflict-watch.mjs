@@ -65,6 +65,7 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
@@ -299,15 +300,20 @@ export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) 
  * fix-dispatch pipeline picks up) or {@link defaultPostConflictStandDown} ({@link isStatuteTierConflict} —
  * straight to a human, no dispatch attempt). Best-effort like every other write here: a failure is reported on
  * the entry, never thrown, and never stops the sweep from checking the rest of the PRs.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, listPrFiles?:Function}} [o]
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF: with no marker and no env override
+ * `scopePrsToQueue` is the IDENTITY function and this sweep stays repo-wide, exactly as it has always been. A
+ * checkout the operator scoped to its own `.conveyor/queue.json` narrows the candidate list here, at the ONE
+ * point the whole-repo listing enters the pass, so every downstream decision (label, comment, finding,
+ * stand-down) is scoped by construction rather than by remembering to re-filter at each write site.
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, listPrFiles?:Function, queueScope?:object}} [o]
  * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
 export function watchParkedPrConflicts({
   repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false,
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
-  listPrFiles = defaultListPrFiles,
+  listPrFiles = defaultListPrFiles, queueScope = {},
 } = {}) {
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-conflict-watch', ...queueScope });
   const results = [];
   // xoh8fkw — resolved LAZILY, only once, only when a real write is about to happen (the common empty-sweep tick
   // never pays for the extra `gh repo view` call). `defaultListParkedPrs` above works fine with a null `repo`

@@ -58,6 +58,7 @@ import { randomUUID } from 'node:crypto';
 import { REVIEW_LABELS, REVIEW_HOLD_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -304,17 +305,22 @@ export function defaultPostFinding({
  * neglect ({@link isNeglectedPr}), and posts a finding for each neglected PR. Never throws on a per-PR read/
  * write failure — one bad `gh`/`reconcile-finding.mjs` call must not stop the sweep from checking the rest
  * (mirrors both sibling watches' own best-effort contract).
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF ⇒ `scopePrsToQueue` is the IDENTITY
+ * function and this sweep stays repo-wide. Applied BEFORE `isParkedCandidate` so a scoped checkout never pays
+ * the per-candidate `gh api` label-timeline fetch for a PR it has no business judging in the first place.
  * @param {{repo?:string|null, now?:number, thresholdHours?:number, env?:NodeJS.ProcessEnv, listPrs?:Function,
- *   listAgents?:Function, listLabelEvents?:Function, postFinding?:Function, dryRun?:boolean}} [o]
+ *   listAgents?:Function, listLabelEvents?:Function, postFinding?:Function, dryRun?:boolean,
+ *   queueScope?:object}} [o]
  * @returns {Array<{pr:number, holdLabel:string, parkedHours:number|null, neglected:boolean, posted:boolean, error?:string}>}
  */
 export function watchNeglectedPrs({
   repo = null, now = Date.now(), thresholdHours, env = process.env,
   listPrs = defaultListParkedPrs, listAgents = defaultListAllAgents,
   listLabelEvents = defaultListLabelEvents, postFinding = defaultPostFinding, dryRun = false,
+  queueScope = {},
 } = {}) {
   const threshold = thresholdHours ?? neglectThresholdHours(env);
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-progress-watch', ...queueScope });
   const candidates = prs.filter(isParkedCandidate);
   const results = [];
   if (!candidates.length) return results;
