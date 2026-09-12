@@ -174,6 +174,11 @@ non-recyclable (`we:scripts/lane-pool.mjs:1026-1027`). It is the memory-lane pri
 
 # Fork 5 — Holding a group of work in place, and resuming it later
 
+> **Under-scoped against new evidence (2026-09-12, continued) — see the session update at the foot of this
+> card.** (A) is still the right shape for the QUEUE half, but the operator's lived case shows the queue is
+> only one of three halves a real shelving needs. Text below kept unedited so the gap is visible rather than
+> quietly rewritten.
+
 This is the operator's third need and it is **genuinely distinct** from the other two: it is holding a SUBSET of
 ONE instance's queue, not separating two instances. Today the only way is
 `we:scripts/conveyor/queue.mjs remove <num>` — which loses the grouping, loses the `addedAt` ordering, and makes
@@ -210,6 +215,10 @@ only one of them is *running* at a time. That is the right split: Fork 1(B) sepa
 
 # Fork 6 — Relationship to `deliveryTarget` / POC branches (`#3637`)
 
+> **Re-checked against new evidence (2026-09-12, continued) and CONFIRMED unchanged** — see the session update
+> at the foot of this card. Nothing in the operator's new scenario touches the orthogonality argument or the
+> checkout-is-already-a-partition finding.
+
 - **(A) Orthogonal concepts, and a separate checkout is the DEFAULT way to get a second instance** ← **RECOMMENDED**.
 - **(B) Tightly coupled** — a changeset implicitly targets a POC branch; binding one implies the other.
 - **(C) Fully independent with no operational relationship acknowledged.**
@@ -237,6 +246,11 @@ That collapses the operator's literal ask to B1 + B2 alone. The named-changeset 
 ---
 
 # Fork 7 — Sequencing: build now, or defer?
+
+> **Partially revised against new evidence (2026-09-12, continued) — see the session update at the foot of this
+> card.** The minimal slice (B1+B2+B3) and the deferral of Fork 1(B)'s namespacing both survive intact. What
+> changes is the third clause — "build Fork 5(A)'s hold labels as a separate small item WHEN the need actually
+> bites." The need bit, the same day, and it is bigger than a label. Text below kept unedited.
 
 - **(A) Build the whole design now** — named instances, registry-free namespacing, the hold labels, the advisory
   overlap warning.
@@ -292,3 +306,195 @@ construction. So this card cannot be dispatched even after the pause lifts; it n
 **Conclusion:** this spike needed the same direct agent delegation this session has used all day, and the follow-up
 BUILD (once ruled) is the first part of it the conveyor could actually carry — as an ordinary `build` item against
 the scope listed above, once dispatch is unpaused.
+
+---
+
+## Session update (2026-09-12, continued) — the operator's real motivating scenario for a broader changeset
+## concept: shelving a coherent WORKING SET, planning one ahead, and handing one to another machine
+
+Everything above was written from ONE stated use case: dogfood a new version of the conveyor's code against a
+small controlled set while the regular conveyor keeps running. Fork 6/7 concluded that case was already mostly
+satisfied by existing infrastructure and recommended a three-defect fix instead of the feature. The operator then
+gave the *actual* lived motivation in conversation, and it is a materially different shape. It is recorded here as
+**evidence to reason from**, not as a ruling — the operator still makes the call.
+
+### The operator's words, verbatim
+
+> "During delivery at some point we had a whole lot of stories in flight but not super efficiently (still many
+> pr). I decided to do a spike on improving efficiency that led to the changes still pending wiring. We had to
+> build a pause into the conveyor but it still has a bunch of queued and open pr. No way to say cleanly: save this
+> for later, we are now building something else for a while. For planning point of view, could be also
+> interesting to prepare a bunch of changeset (maybe not the best name) that would be a bit the equivalent to a
+> sprint worth of work. It's to be delegated between machines, I am sure there are more cases."
+
+### That scenario is THIS session, concretely
+
+Every clause maps onto something on this card or its parent, which is why it is worth writing down rather than
+paraphrasing:
+
+- *"a whole lot of stories in flight but not super efficiently (still many pr)"* — the mechanical-dispatch wiring
+  work under `#3383`.
+- *"a spike on improving efficiency that led to the changes still pending wiring"* — today's whole POC-branch /
+  review-dispatch / pause thread. Six of seven launch kinds are still unwired (the 2026-09-12 delegation audit on
+  `#3383`), and PR #2113 is still open.
+- *"we had to build a pause into the conveyor"* — `#3609`'s `dispatch-pause`, plus today's kind-scoped
+  `pausedKinds` extension.
+- *"but it still has a bunch of queued and open pr"* — **this is the finding.** The pause is an admission gate:
+  `we:scripts/readiness/dispatch-pause.mjs`'s own header says it holds every otherwise-launchable item and
+  "NEVER touch[es] an already-running lane ... it is a pure upstream gate." It stops NEW dispatch and does
+  nothing whatsoever to the queue entries that remain listed or to the PRs already open.
+- *"No way to say cleanly: save this for later, we are now building something else for a while."*
+
+**The need is not concurrency.** The original framing was "run two instances at once." This is the opposite axis:
+**park one coherent working set as a unit, give something else full attention, then resume exactly this set
+later.** Two instances is a *capacity* question; this is an *attention* question. The card currently has only one
+word ("changeset") for both.
+
+### The three new cases
+
+1. **Mid-flight pivot / shelving.** A batch of already-in-flight items *and their open PRs* is set aside as one
+   unit — not touched, not nagging for attention, clearly labelled "parked" — while something else gets the
+   focus; then resumed where it left off.
+2. **Forward planning ("sprint").** Proactively DEFINE a batch of stories ahead of time as a named unit, rather
+   than reactively grouping whatever happens to be in flight, so a set of work can be scoped, staffed and tracked
+   as a coherent whole from the start.
+3. **Cross-machine delegation.** A defined batch is handed to a different machine/session to work independently
+   — which requires a portable, well-defined boundary (which items, which PRs, what state) that travels with the
+   batch rather than a flag in a local file.
+
+The operator explicitly adds *"I am sure there are more cases."* Treat these three as evidence of breadth, not as
+a closed enumeration — and note both failure modes are live here: under-building a concept with real breadth, and
+the speculative generality Fork 1 was right to warn against.
+
+### Reassessment — Fork 6: **CONFIRMED, unchanged**
+
+Nothing in the new evidence touches Fork 6's two claims, and both survive on their own merits:
+
+- *Orthogonal as concepts.* A batch scopes WHICH items are in play; `deliveryTarget` scopes WHERE their work
+  lands. Shelving a batch, planning one, or handing one to another machine says nothing about its landing target,
+  and all four combinations stay meaningful.
+- *Adjacent in practice.* "Instance B runs a POC checkout, which already has its own `we:.conveyor/queue.json`
+  and `we:.conveyor/dispatch-pause.json`, so the literal dogfooding ask collapses to B1+B2" is a fact about the
+  code, and the new cases do not contradict it. They are simply about a different thing.
+
+If anything the new evidence *strengthens* Fork 6(A): every one of the three new cases is about a batch of WORK,
+none is about a second RUNNER. That pulls the concept further from `deliveryTarget`, not closer.
+
+### Reassessment — Fork 7: **PARTIALLY REVISED**
+
+Two of Fork 7(B)'s three clauses stand. The third flips.
+
+**Stands — the minimal slice (B1 + B2 + B3) is still first.** It is small, it is largely a bug fix (the runner is
+the one caller that forgot to read an env var its own sibling already honours), and none of the new cases depend
+on it or argue against it. Build it first regardless of what is ruled below.
+
+**Stands — deferring Fork 1(B)'s per-name sidecar namespacing.** Its only payoff is two runners inside ONE
+checkout. All three new cases are single-runner. Deferral confirmed, on stronger grounds than before.
+
+**Flips — "build Fork 5(A)'s hold labels as a separate small item WHEN the need actually bites."** The need bit
+the same day the card was written, and the evidence shows `heldAs` is roughly a third of what it needs.
+
+#### Is `heldAs` enough for case 1? **No — it covers one of three halves.**
+
+Shelving an in-flight batch has to answer three questions, and the queue entry answers only the first:
+
+| Half | What shelving must do | Does `heldAs` reach it? |
+|---|---|---|
+| **Queue entries** (not yet dispatched) | stop admission, keep `addedAt` rank for the resume | **Yes** — this is exactly Fork 5(A), and it is the right shape |
+| **Open PRs** (already dispatched) | stop them landing; mark them parked-by-priority | **No** — the queue has no PR knowledge at all |
+| **In-flight lanes** | decide whether the lane is released or held | **No** — and this is currently unmodelled anywhere |
+
+- **The PR half is the sharp one.** The drain lands a PR off LABELS, not off the queue: `pr-land` applies
+  `ready-to-merge` at open and stops, and the drain merges anything carrying it with no hold label present
+  (`we:scripts/merge-ai-prs.mjs`, `READY_TO_MERGE_LABEL`/`REVIEW_HOLD_LABELS` at
+  `we:scripts/lib/review-escalation.mjs:1655,1663`). So a "shelved" batch's open PRs keep landing — precisely the
+  opposite of set-aside. The only lever available today is a review hold label, and all three of them
+  (`review:pending` · `review:changes` · `review:human`) **lie about the reason**: they assert a reviewer objected
+  or a human must look, when the truth is the operator changed priority. This repo has been careful about exactly
+  that distinction (`#3039`/`#3053` are entirely about what a hold label is allowed to mean), so overloading one
+  here would be a regression, not a shortcut. **A shelved batch needs its own honest hold — a fourth,
+  non-review park reason.**
+- **The lane half is a real cost nobody has priced.** A shelved in-flight item is holding a lane clone out of a
+  capped pool — the cap that exists because of the 42-lane / load-34.95 incident. Shelving must say whether the
+  lane is released (losing uncommitted work) or held (starving the pool). Neither Fork 5(A) nor a PR label
+  answers it, and the honest read is that this is the hardest of the three, not the easiest.
+
+**So case 1 is its own item, not a field.** `heldAs` becomes one third of it. The other two thirds are a
+non-review PR park and a stated lane-disposition policy, and all three have to be addressable **as one set** or
+"shelve this batch" is still three manual passes.
+
+#### Does case 2 need the static registry the card argued against? **Yes — and Fork 1's argument does not reach it.**
+
+This is the part of the original reasoning that most deserves re-reading rather than reversing. Fork 1's case
+against a registry was precise: *"(A) creates a second source of truth about the same question. 'May this item
+dispatch?' is answered today by queue membership, and only by queue membership."* That is a correct argument
+about a registry used **as a dispatch filter**, and it stays correct.
+
+Case 2 asks a **different question**. A sprint-shaped batch is defined *before* its items are queued — there are
+no queue entries to tag, so there is nothing for a registry to disagree with. "What work belongs to this planned
+unit?" and "may this item dispatch?" are not the same question, and the two-sources-of-truth failure mode needs
+them to be. The natural flow is **registry → queue**: the batch is *loaded into* the queue when it starts. That is
+a one-way projection, and it never vetoes — so it cannot reproduce the `clearedNotReady` class of silent bug
+(`we:scripts/readiness/dispatch-plan.mjs:471`) that Fork 1 was rightly defending against.
+
+**Honest check first: does the repo already have this?** `parent:` (epic grouping) is git-tracked, portable, and
+already means "a named unit, items added later." But it is the wrong AXIS, for two reasons that are structural
+rather than stylistic: `parent` is *permanent and structural* (what the work IS) while a sprint is *temporal and
+operational* (when we are doing it); and an item has exactly one `parent`, so re-parenting it into a sprint would
+destroy its real epic lineage. `#466`/`#2691` also settled `kind` as the ONE structural axis, so a sprint tier
+cannot ride there. **A planned batch is genuinely a second, orthogonal grouping axis** — which is the actual
+argument for giving it a home of its own.
+
+#### Does case 3 need a real exportable artifact? **Yes, and this is the cleanest fact on the card.**
+
+`we:.conveyor/queue.json` is **gitignored** (`we:.gitignore:49`) and its own module header says it is
+"SESSION-LOCAL ... Never committed" (`we:scripts/conveyor/queue-store.mjs`). So is the pause marker
+(`we:.gitignore:72`). Every sidecar in Fork 1(B)'s design is deliberately local and deliberately untracked.
+
+That falsifies Fork 1(B)'s defining premise **for this use case**: *"an item is in the changeset iff it is in
+that instance's queue."* That premise makes the queue the definition of record — and the queue is exactly the
+artifact that cannot travel. `heldAs` inherits the same non-portability, because it is a field inside that file.
+
+This does not make Fork 1(B) wrong for the case it was written for (two runners on one host, where local is
+correct). It means **the portable batch and the instance namespace are two different objects**, and the card
+currently calls both "changeset."
+
+#### The naming point the operator flagged
+
+*"maybe not the best name"* — worth taking literally. On this card "changeset" means an **instance namespace**
+(a queue + a pause marker + a lease key). In the new cases it means a **named unit of work** that can be parked,
+planned and handed over. One word for two things is the seed of exactly the confusion Fork 1 set out to avoid.
+Suggested split, offered as a fork and not a ruling: **instance** = a runner plus its local sidecars; **batch**
+(or *set*, or *sprint*) = a named, git-tracked unit of work. Naming is the operator's call.
+
+### Revised recommendation for Fork 7, stated plainly
+
+**Not (A) build everything, and no longer (B) as written. A three-step sequence:**
+
+1. **B1 + B2 + B3 first, unchanged.** Small, largely a bug fix, unblocks the original dogfooding ask, and
+   independent of everything below. No reason to wait on a ruling for the rest.
+2. **Case 1 (shelving) as its own item, now — it is the need that actually bit.** Scope: the queue half
+   (Fork 5(A)'s `heldAs`, which is right as far as it goes), a **non-review PR park label** with honest
+   semantics, an explicit **lane-disposition** policy for a shelved in-flight item, and one verb that addresses
+   all three as a set. This is a decision card, not a straight build — the lane-disposition question is a real
+   call with no obvious answer.
+3. **Cases 2 + 3 (planning + delegation) as one item, second.** They share exactly one requirement — a
+   **git-tracked batch object** — so they are one design, not two. That card is where the registry question
+   re-opens with this new evidence, and its own first fork is *registry file vs. a `batch:` frontmatter field on
+   each card*. My lean is the **registry file**, for two reasons: `#3637` just ruled this way for the same reason
+   ("a registry is what makes a branch DECLARED rather than ad hoc"), and cases 1/3 want the batch to carry state
+   of its own — shelved-or-active, which machine holds it — that a per-card field has nowhere to put. Second, not
+   first, because nothing is currently blocked on it the way today's session was blocked on shelving.
+
+**What the new evidence does NOT support, said plainly so it is not smuggled in:** it does not argue for Fork
+1(B)'s per-name sidecar namespacing, and it does not argue for building a general changeset system up front. Every
+new case is single-runner and about WORK, not about a second runner. The right read of *"I am sure there are more
+cases"* is to give the batch object room to grow — not to pre-build the room.
+
+**The honest counter-argument, stated so it is not buried.** Step 3 is the one that could be wrong. Its whole case
+rests on cases 2 and 3 being real durable needs rather than a good idea voiced once. Case 1 has hard evidence (it
+happened today, and there was no clean way to do it); cases 2 and 3 have an operator's stated intent and no
+incident behind them yet. If the operator's read is that the sprint/delegation shape is speculative, the correct
+answer is to build step 2 only and let step 3 wait for its own bite — which would be Fork 7(B)'s original posture
+applied one level down, and would be a defensible ruling. What is *not* defensible after this evidence is leaving
+step 2 deferred.
