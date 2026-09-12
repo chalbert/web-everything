@@ -24,7 +24,7 @@ import {
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
-  bookkeepingForDispatch,
+  bookkeepingForDispatch, installShutdownHandlers, finalEventLine, SHUTDOWN_SIGNALS,
 } from '../runner.mjs';
 
 // Hoisted mock — `makeCliMechanicalPasses` dynamically `import('node:child_process')`s `execFileSync`
@@ -416,6 +416,149 @@ describe('driveConveyor — acquire → drive → ALWAYS release (no leaked sing
 
   it('requires a buildEffects factory', async () => {
     await expect(driveConveyor({ lockRoot: root, owner: 'A' })).rejects.toThrow(/buildEffects/);
+  });
+});
+
+// ── (3b) installShutdownHandlers / finalEventLine — the SHUTDOWN CONTRACT, unit half ───────────────────────
+//
+//  The LIVE half (a real child, a real SIGTERM, the real supervisor stdout parser) is
+//  `./runner-shutdown-live.test.mjs`; this half pins the DECISIONS that file cannot see from outside a
+//  process — which signals are hooked, that the handler is re-entrant-safe, that a throwing release still
+//  lets the process die, and the exact bytes of the final event line.
+
+describe('installShutdownHandlers — release the singleton lease on SIGTERM/SIGINT, then die by that signal', () => {
+  /** A fake signal table, so no test ever registers a real handler on the vitest worker itself. */
+  const fakeSignals = () => {
+    const reg = new Map();
+    return {
+      reg,
+      on: (sig, fn) => { reg.set(sig, [...(reg.get(sig) || []), fn]); },
+      off: (sig, fn) => { reg.set(sig, (reg.get(sig) || []).filter((f) => f !== fn)); },
+      fire: (sig) => { for (const fn of [...(reg.get(sig) || [])]) fn(); },
+    };
+  };
+
+  it('hooks BOTH SIGTERM and SIGINT (the supervisor sends the first; Ctrl-C sends the second)', () => {
+    const s = fakeSignals();
+    installShutdownHandlers({ lockRoot: '/lock', owner: 'A', release: () => true, on: s.on, off: s.off, raise: () => {}, log: () => {} });
+    expect([...s.reg.keys()].sort()).toEqual(['SIGINT', 'SIGTERM']);
+    expect(SHUTDOWN_SIGNALS).toEqual(['SIGTERM', 'SIGINT']);
+  });
+
+  it('releases the lease for the EXACT (lockRoot, owner) it was installed with, then re-raises the SAME signal', () => {
+    const s = fakeSignals();
+    const released = [];
+    const raised = [];
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'OWNER-X', release: (r, o) => { released.push([r, o]); return true; },
+      on: s.on, off: s.off, raise: (sig) => raised.push(sig), log: () => {},
+    });
+    s.fire('SIGTERM');
+    expect(released).toEqual([['/lock', 'OWNER-X']]);
+    // Re-raise, NOT process.exit(0): `classifyExit` short-circuits on `signal` before it reads the code, so an
+    // exit-0 here would silently reclassify every killed runner as a CLEAN exit.
+    expect(raised).toEqual(['SIGTERM']);
+  });
+
+  it('REMOVES its handler BEFORE re-raising, so the re-raise hits Node\'s default disposition (no signal loop)', () => {
+    const s = fakeSignals();
+    let stillRegisteredAtRaise = null;
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'A', release: () => true, on: s.on, off: s.off, log: () => {},
+      raise: () => { stillRegisteredAtRaise = (s.reg.get('SIGTERM') || []).length; },
+    });
+    s.fire('SIGTERM');
+    expect(stillRegisteredAtRaise).toBe(0);              // deregistered BEFORE the raise, not after
+    expect((s.reg.get('SIGINT') || []).length).toBe(0);  // the sibling signal is unhooked too
+  });
+
+  it('is re-entrant-safe — a second signal mid-shutdown never double-releases or re-raises', () => {
+    const s = fakeSignals();
+    let releases = 0; const raised = [];
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'A', release: () => { releases += 1; return true; },
+      on: s.on, off: s.off, raise: (sig) => raised.push(sig), log: () => {},
+    });
+    const fn = s.reg.get('SIGTERM')[0];
+    fn(); fn();                        // the second arrives while the first is still unwinding
+    expect(releases).toBe(1);
+    expect(raised).toEqual(['SIGTERM']);
+  });
+
+  it('STILL DIES when the release throws — a broken lock file must never wedge a shutdown', () => {
+    const s = fakeSignals();
+    const raised = [];
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'A', release: () => { throw new Error('EACCES'); },
+      on: s.on, off: s.off, raise: (sig) => raised.push(sig), log: () => {},
+    });
+    expect(() => s.fire('SIGTERM')).not.toThrow();
+    expect(raised).toEqual(['SIGTERM']);  // the TTL backstops the lease; the exit is not negotiable
+  });
+
+  it('says which happened — "released" vs "not held" (a signal arriving before the lease was acquired)', () => {
+    const s = fakeSignals();
+    const lines = [];
+    installShutdownHandlers({ lockRoot: '/l', owner: 'A', release: () => false, on: s.on, off: s.off, raise: () => {}, log: (x) => lines.push(x) });
+    s.fire('SIGINT');
+    expect(lines.join('')).toMatch(/SIGINT — singleton lease not held/);
+  });
+
+  it('releases a REAL lease in a REAL temp lock root through the DEFAULT release (not just an injected stub)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'runner-sig-'));
+    try {
+      acquireRunnerLease(root, 'HOLDER', { leaseMinutes: 15 });
+      expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe('HOLDER');
+      const s = fakeSignals();
+      installShutdownHandlers({ lockRoot: root, owner: 'HOLDER', on: s.on, off: s.off, raise: () => {}, log: () => {} });
+      s.fire('SIGTERM');                                          // production `releaseRunnerLeaseIfOwned`
+      expect(readLockEntry(root, RUNNER_LEASE_PATH)).toBeNull();
+    } finally { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } }
+  });
+
+  it('NEVER stomps a lease another owner reclaimed after a stale window (the fencing invariant)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'runner-sig-fence-'));
+    try {
+      acquireRunnerLease(root, 'RECLAIMER', { leaseMinutes: 15 });
+      const s = fakeSignals();
+      installShutdownHandlers({ lockRoot: root, owner: 'STALE-ME', on: s.on, off: s.off, raise: () => {}, log: () => {} });
+      s.fire('SIGTERM');
+      expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe('RECLAIMER'); // untouched
+    } finally { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } }
+  });
+
+  it('dispose() unhooks everything — no handler survives to fire after a caller tears it down', () => {
+    const s = fakeSignals();
+    let releases = 0;
+    const { dispose } = installShutdownHandlers({
+      lockRoot: '/l', owner: 'A', release: () => { releases += 1; return true; },
+      on: s.on, off: s.off, raise: () => {}, log: () => {},
+    });
+    dispose();
+    s.fire('SIGTERM'); s.fire('SIGINT');
+    expect(releases).toBe(0);
+  });
+});
+
+describe('finalEventLine — the exact bytes supervisor.mjs parses (the field is stoppedReason, NOT reason)', () => {
+  it('a started run emits {event:"stopped", stoppedReason, ticks}', () => {
+    expect(JSON.parse(finalEventLine({ started: true, stoppedReason: 'idle-stop', ticks: 7 })))
+      .toEqual({ event: 'stopped', stoppedReason: 'idle-stop', ticks: 7 });
+  });
+
+  it('a stand-down emits {event:"stood-down", heldBy} — the supervisor maps THAT to "stand-down" itself', () => {
+    expect(JSON.parse(finalEventLine({ started: false, heldBy: 'Mac:9:conveyor-runner' })))
+      .toEqual({ event: 'stood-down', heldBy: 'Mac:9:conveyor-runner' });
+  });
+
+  it('is ONE line of parseable JSON with no embedded newline (the supervisor reads it line-by-line)', () => {
+    const line = finalEventLine({ started: true, stoppedReason: 'max-ticks', ticks: 1 });
+    expect(line).not.toContain('\n');
+    expect(() => JSON.parse(line)).not.toThrow();
+  });
+
+  it('degrades rather than throws on a missing outcome (it runs on the way out; it must not crash there)', () => {
+    expect(JSON.parse(finalEventLine(undefined))).toEqual({ event: 'stood-down', heldBy: null });
   });
 });
 

@@ -760,6 +760,93 @@ export async function driveConveyor({
   }
 }
 
+/**
+ * The final `--json` line the supervisor parses off this runner's stdout to tell a POLITE STAND-DOWN apart
+ * from a genuine IDLE-STOP (#3406). Kept as a PURE function, separate from the writing, for one reason: the
+ * exact byte shape is a CROSS-MODULE CONTRACT with `supervisor.mjs`'s `makeRealSpawnChild` line parser
+ * (`{event:'stopped', stoppedReason}` / `{event:'stood-down'}` — note the field is `stoppedReason`, NOT
+ * `reason`), and a contract only one side can construct is a contract neither side can test. With this
+ * exported, the suite feeds THIS function's real output into THAT parser's real input and proves the two
+ * halves agree, rather than restating the shape in a test fixture that can drift from both.
+ * @param {{ started: boolean, heldBy?: string|null, stoppedReason?: string, ticks?: number }} outcome
+ * @returns {string} one JSON line (no trailing newline)
+ */
+export function finalEventLine(outcome) {
+  return outcome && outcome.started
+    ? JSON.stringify({ event: 'stopped', stoppedReason: outcome.stoppedReason, ticks: outcome.ticks })
+    : JSON.stringify({ event: 'stood-down', heldBy: (outcome && outcome.heldBy) ?? null });
+}
+
+/** The signals a runner shuts down on. SIGTERM is what `supervisor.mjs`'s `shutdown` sends its child (and what
+ *  a manual `kill` sends by default); SIGINT is a foreground Ctrl-C. */
+export const SHUTDOWN_SIGNALS = ['SIGTERM', 'SIGINT'];
+
+/**
+ * Install the SIGTERM/SIGINT shutdown handler that RELEASES THE SINGLETON LEASE before the process dies.
+ *
+ * WHY THIS EXISTS (the leak it fixes). `driveConveyor`'s `finally` releases the lease on every exit path the
+ * JS runtime controls — a clean stop, a thrown tick. A SIGNAL is not one of those: an unhandled SIGTERM
+ * terminates the process outright, the `finally` never unwinds, and the lease is LEAKED for its full 15-minute
+ * TTL. `acquireRunnerLease` passes pidLiveness `'unknown'`, so there is no dead-pid fast path to rescue it
+ * either — the lock dir simply looks live. The observable damage is a restart storm, not just a stale file:
+ * the next runner finds a live-looking lease, stands down, and exits in well under `supervisor.mjs`'s
+ * `crashThresholdMs`, which `classifyExit` reads as `'too-short'` ⇒ a CRASH — so the supervisor backs off,
+ * doubles, and eventually fires a `crash-loop-at-ceiling` desktop alert for a conveyor that is not crashing at
+ * all. `supervisor.mjs`'s own `shutdown` comment assumed this handler already existed ("runner.mjs gets a
+ * chance to run its own driveConveyor `finally`"); it did not, so its 5-second SIGTERM grace bought nothing.
+ * A real leaked lease of exactly this shape was found on the dev machine (pid dead, heartbeat 6.5 h old).
+ *
+ * RE-RAISE, NEVER `process.exit(0)`. After releasing, the handler removes itself and re-sends the SAME signal
+ * so the process dies BY THAT SIGNAL, exactly as it does today. That is deliberate: `classifyExit` short-
+ * circuits on `signal` before it ever looks at the exit code, so exiting 0 here would silently reclassify
+ * every killed runner as a CLEAN exit and hand it #3406's prompt-restart path. Releasing the lease is the
+ * whole fix; the exit semantics must not move with it.
+ *
+ * LIMIT, stated plainly: Node dispatches signal handlers on the event loop, so a signal arriving while the
+ * runner is inside a BLOCKING `execFileSync` mechanical pass is not handled until that child returns. The
+ * supervisor's 5-second SIGTERM→SIGKILL grace can therefore still expire on a long synchronous pass, and that
+ * case still leaks. Narrowing it means moving those passes off `execFileSync` (the `runQuietHeartbeating`
+ * treatment #3404 already gave `verify-dispatch.mjs`) — out of scope here, and a strictly smaller window than
+ * the "every single SIGTERM leaks" this fixes.
+ *
+ * Every effect is injectable so the unit suite can drive the handler without signalling the test runner
+ * itself; the live proof spawns a REAL child and sends it a REAL SIGTERM.
+ * @returns {{ dispose: () => void }} removes the handlers (for tests / a caller that shuts down some other way)
+ */
+export function installShutdownHandlers({
+  lockRoot = RUNNER_LOCK_ROOT,
+  owner = runnerOwner(),
+  release = releaseRunnerLeaseIfOwned,
+  signals = SHUTDOWN_SIGNALS,
+  on = (sig, fn) => process.on(sig, fn),
+  off = (sig, fn) => process.removeListener(sig, fn),
+  raise = (sig) => process.kill(process.pid, sig),
+  log = (s) => process.stderr.write(s),
+} = {}) {
+  let shuttingDown = false;
+  const handlers = new Map();
+  const dispose = () => { for (const [sig, fn] of handlers) off(sig, fn); handlers.clear(); };
+  for (const sig of signals) {
+    const fn = () => {
+      // A second signal while the first is still unwinding must not double-release (the release is
+      // owner-fenced and idempotent, but a re-raise loop would be a real hang) — same guard shape as
+      // `supervisor.mjs`'s own `stopRequested`.
+      if (shuttingDown) return;
+      shuttingDown = true;
+      // Owner-fenced and idempotent: a no-op when the lease was never acquired (a signal during startup) or
+      // was already reclaimed by someone else. NEVER let a release failure stop us from dying.
+      let released = false;
+      try { released = release(lockRoot, owner); } catch { /* best-effort; the TTL is the backstop */ }
+      log(`conveyor runner: ${sig} — singleton lease ${released ? 'released' : 'not held'}; exiting.\n`);
+      dispose();               // so the re-raise below hits Node's DEFAULT disposition, not this handler again
+      raise(sig);
+    };
+    handlers.set(sig, fn);
+    on(sig, fn);
+  }
+  return { dispose };
+}
+
 async function main(argv) {
   const flags = parseFlags(argv);
 
@@ -788,7 +875,14 @@ async function main(argv) {
   // #2702 SINGLETON LOCK — `driveConveyor` acquires the sole-driver right, runs the loop, and ALWAYS releases
   // the lease (in its `finally`, before we exit). A LIVE runner already driving ⇒ `started:false`, a polite
   // stand-down (exit 0, not an error).
-  const outcome = await driveConveyor({ owner: runnerOwner(), buildEffects });
+  //
+  // …but a `finally` covers only the exit paths the runtime unwinds. A SIGTERM (the supervisor's own shutdown,
+  // or a manual kill) is not one — it kills the process outright and LEAKS the lease for the full 15-minute
+  // TTL, falsely standing every launch down inside that window. Installed BEFORE the acquire, so a signal
+  // arriving mid-startup is covered too (the release is owner-fenced, so a not-yet-acquired lease is a no-op).
+  const owner = runnerOwner();
+  installShutdownHandlers({ owner });
+  const outcome = await driveConveyor({ owner, buildEffects });
   if (!outcome.started) {
     process.stderr.write(`✗ another conveyor runner holds the singleton lease (heldBy=${outcome.heldBy}); standing down.\n`);
     // #3406 — a stand-down and a genuine idle-stop both exit code 0, and were previously indistinguishable
@@ -796,10 +890,10 @@ async function main(argv) {
     // explicitly as one final structured line so the supervisor never has to guess from the exit code alone —
     // a stand-down must still restart PROMPTLY (another runner already covers the singleton right), unlike an
     // idle-stop, which the supervisor should back off from re-spawning immediately (see supervisor.mjs).
-    if (json) writeLineSync(1, JSON.stringify({ event: 'stood-down', heldBy: outcome.heldBy }));
+    if (json) writeLineSync(1, finalEventLine(outcome));
   } else {
     process.stderr.write(`conveyor runner stopped: ${outcome.stoppedReason} after ${outcome.ticks} tick(s).\n`);
-    if (json) writeLineSync(1, JSON.stringify({ event: 'stopped', stoppedReason: outcome.stoppedReason, ticks: outcome.ticks }));
+    if (json) writeLineSync(1, finalEventLine(outcome));
   }
   process.exit(0);
 }

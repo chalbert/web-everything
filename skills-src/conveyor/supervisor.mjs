@@ -528,6 +528,13 @@ async function main(argv) {
   // singleton lease — same as the pattern drain-daemon's releaseAndExit uses on ITS child), SIGKILL only if it
   // hangs on past a grace window. Never leaves the child running once the supervisor itself is gone — the
   // orphan a bare `process.exit()` here would otherwise create.
+  //
+  // That first clause used to say the SIGTERM let the child run its `driveConveyor` finally. It did NOT: until
+  // runner.mjs grew `installShutdownHandlers` it had no `process.on` at all, so this SIGTERM killed it
+  // outright, the `finally` never unwound, and the singleton lease leaked for its full 15-minute TTL — inside
+  // which every fresh runner stood down in under a second and `classifyExit` scored that `'too-short'` ⇒
+  // crash, driving this loop's backoff to its `crash-loop-at-ceiling` alert for a conveyor that never crashed.
+  // The 5-second grace below only ever bought anything once the other half of the handshake existed; it does.
   const shutdown = (signal) => {
     if (stopRequested) return; // a second signal shouldn't double-log or re-kill an already-dying child
     stopRequested = true;
