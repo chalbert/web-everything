@@ -6,10 +6,12 @@
  *   1. **THE TABLE ONLY NAMES KINDS THE OPERATION WILL DISPATCH.** A row for a kind outside `LAUNCH_KINDS` can
  *      never fire, so it reads as working wiring in review while doing nothing. The registry checks this at
  *      module LOAD; this file pins that the check is real.
- *   2. **THE UNREGISTERED KINDS ARE A DELIBERATE TRIPWIRE.** Four sibling lanes are wiring `prepare` (#3641),
- *      `prepare-decision` (#3644), `fix` (#3640) and `ci-heal` (#3642). Each one that lands flips ONE line
- *      here, on purpose — the list below is the ledger of what is still on the agent path, and it should have
- *      to be edited rather than silently drift.
+ *   2. **THE UNREGISTERED KINDS ARE A DELIBERATE TRIPWIRE.** Four sibling lanes are wiring `prepare` (#3641,
+ *      LANDED — it is off the list below), `prepare-decision` (#3644), `fix` (#3640) and `ci-heal` (#3642).
+ *      Each one that lands flips ONE line here, on purpose — the list below is the ledger of what is still on
+ *      the agent path, and it should have to be edited rather than silently drift. This file is the ONE place
+ *      that enumeration lives: every other routing test asserts the INVARIANT (routed mechanically iff
+ *      registered) rather than a snapshot, so a landing kind edits one line, here, and nothing else.
  *   3. **A TYPO'D MODE STILL THROWS.** #3645's whole reason for the knob: `WE_BUILD_DISPATCH_MODE=mechnical`
  *      silently taking the agent path is the failure class the wiring exists to remove. Generalising the read
  *      from one kind to a table must not soften it.
@@ -46,8 +48,15 @@ const buildPayload = (over = {}) => ({
   ...over,
 });
 
-/** THE LEDGER OF WHAT IS STILL ON THE AGENT PATH. One line flips per sibling lane — see the header. */
-const UNREGISTERED_KINDS = ['prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'];
+/** THE LEDGER OF WHAT IS STILL ON THE AGENT PATH. One line flips per sibling lane — see the header.
+ *  `prepare` left this list in #3641 (`we:scripts/operations/prepare-scope-wrapper.mjs`). */
+const UNREGISTERED_KINDS = ['prepare-decision', 'investigate', 'fix', 'ci-heal'];
+
+/** Every registered kind's mode with NOTHING set in the environment — derived from the table rather than
+ *  written out, so a landing sibling lane edits the ledger above and nothing else (#3641). */
+const defaultModes = () => Object.fromEntries(
+  Object.entries(DISPATCH_PROVIDER_REGISTRY).map(([kind, entry]) => [kind, entry.defaultMode]),
+);
 
 describe('the dispatch provider registry — the table', () => {
   it('names ONLY launch kinds, and each entry agrees with its own key', () => {
@@ -134,8 +143,8 @@ describe('dispatchModeFor — a typo must never pick a path', () => {
 
 describe('dispatchModesFromEnv — read ONCE, over every registered kind', () => {
   it('answers for every registered kind from the env it is handed', () => {
-    expect(dispatchModesFromEnv({})).toEqual({ build: 'mechanical' });
-    expect(dispatchModesFromEnv({ WE_BUILD_DISPATCH_MODE: 'agent' })).toEqual({ build: 'agent' });
+    expect(dispatchModesFromEnv({})).toEqual(defaultModes());
+    expect(dispatchModesFromEnv({ WE_BUILD_DISPATCH_MODE: 'agent' })).toEqual({ ...defaultModes(), build: 'agent' });
     expect(Object.keys(dispatchModesFromEnv({}))).toEqual(Object.keys(DISPATCH_PROVIDER_REGISTRY));
   });
 
@@ -145,8 +154,13 @@ describe('dispatchModesFromEnv — read ONCE, over every registered kind', () =>
     const env = new Proxy({ WE_BUILD_DISPATCH_MODE: 'agent' }, {
       get(target, prop) { reads.push(prop); return target[prop]; },
     });
-    expect(dispatchModesFromEnv(env)).toEqual({ build: 'agent' });
+    expect(dispatchModesFromEnv(env)).toEqual({ ...defaultModes(), build: 'agent' });
     expect(reads.filter((p) => p === 'WE_BUILD_DISPATCH_MODE')).toHaveLength(1);
+    // And every OTHER registered kind's var is read exactly once too — the "read ONCE, over every registered
+    // kind" half of this function's name, which a single-entry table could not have shown.
+    for (const entry of Object.values(DISPATCH_PROVIDER_REGISTRY)) {
+      if (entry.modeEnv) expect(reads.filter((p) => p === entry.modeEnv)).toHaveLength(1);
+    }
   });
 
   it('walks the registry it is handed, not the real one', () => {
@@ -252,6 +266,9 @@ describe('THE DEFAULT PATH — the registry is LIVE, not merely present', () => 
   });
 
   it('an EMPTY env means `mechanical` for every registered kind — nothing has to be set for this to be live', () => {
-    expect(dispatchModesFromEnv({})).toEqual({ build: 'mechanical' });
+    expect(dispatchModesFromEnv({})).toEqual(defaultModes());
+    // Derived, but not vacuous: every entry in the real table must actually default to the mechanical path,
+    // which is the claim this test's name makes.
+    expect(Object.values(dispatchModesFromEnv({})).every((m) => m === 'mechanical')).toBe(true);
   });
 });

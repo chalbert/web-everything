@@ -30,6 +30,7 @@ import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs
 import { applyPendingEffects, inFlightEntries, isInFlightResult } from '../effect-executor.mjs';
 import { observeRun } from '../effect-observer.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
+import { DISPATCH_PROVIDER_REGISTRY } from '../dispatch-provider-registry.mjs';
 import { createRegistry } from '../registry.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
 import {
@@ -1695,8 +1696,13 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     if (!run.effects.length) return { run, spawned };
     const outcome = await applyPendingEffects(run, {
       sinks: createDispatchSinks({
-        // #3645 — the AGENT path, named: a `build` payload now defaults to the mechanical wrapper.
-        buildMode: 'agent',
+        // THE AGENT PATH, NAMED — for EVERY registered kind, not just `build` (#3641). This block asserts the
+        // `claude` argv and the filled BRIEF each kind's agent is handed, which is the fallback path
+        // (`WE_<KIND>_DISPATCH_MODE=agent`) for any kind whose mechanical wrapper has since been wired: #3645
+        // wired `build`, #3641 wired `prepare`. Derived from the registry rather than listed, so the three
+        // sibling lanes still to land do not each have to come back and add their own kind here — without it,
+        // this block would spawn a real detached `node` per dispatch the moment their row appears.
+        modes: Object.fromEntries(Object.keys(DISPATCH_PROVIDER_REGISTRY).map((k) => [k, 'agent'])),
         root: PRIMARY,
         spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
         mintSessionId: () => 'sess-3165',

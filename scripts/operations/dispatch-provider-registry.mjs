@@ -53,15 +53,17 @@
 
 import { LAUNCH_KINDS } from './dispatch-lane.mjs';
 import { deliverItemDetachedProvider } from './dispatch-providers/build.mjs';
+import { prepareScopeDetachedProvider } from './dispatch-providers/prepare.mjs';
 
 /**
  * THE TABLE — launch kind → its mechanical dispatch provider and how an operator opts out of it. Frozen, and
  * the ONE place a kind's mechanical wiring is declared; every consumer looks up through the functions below
  * rather than reaching in with a literal key.
  *
- * TODAY IT HOLDS EXACTLY ONE ENTRY, and that is the honest state of the system rather than a stub: #3645
- * wired `build` and nothing else, because `build` is the only kind with a wrapper
- * (`we:scripts/operations/deliver-item-wrapper.mjs`) owning its lifecycle. The other five still spawn their
+ * TODAY IT HOLDS TWO ENTRIES, and that is the honest state of the system rather than a stub: #3645 wired
+ * `build` and #3641 wired `prepare`, because those are the two kinds with a wrapper
+ * (`we:scripts/operations/deliver-item-wrapper.mjs`, `we:scripts/operations/prepare-scope-wrapper.mjs`) owning
+ * their lifecycle. The remaining FOUR — `prepare-decision`, `investigate`, `fix`, `ci-heal` — still spawn their
  * own agent from their own brief, whose first steps (`lane-pool acquire`, `verify-lane`, `gh pr view`,
  * `run.mjs open-pr`) the agent itself runs. Each sibling lane adds its row as it lands.
  *
@@ -72,6 +74,15 @@ export const DISPATCH_PROVIDER_REGISTRY = Object.freeze({
     kind: 'build',
     provider: deliverItemDetachedProvider,
     modeEnv: 'WE_BUILD_DISPATCH_MODE',
+    defaultMode: 'mechanical',
+  }),
+  // #3641 — the prepare-scope wrapper. `modeEnv` is a REAL opt-out here, not a formality: the pre-#3641 brief
+  // (`we:skills-src/conveyor/prepare-scope-agent-brief.md`) is kept, and carries a header saying it is the
+  // path `WE_PREPARE_DISPATCH_MODE=agent` selects.
+  prepare: Object.freeze({
+    kind: 'prepare',
+    provider: prepareScopeDetachedProvider,
+    modeEnv: 'WE_PREPARE_DISPATCH_MODE',
     defaultMode: 'mechanical',
   }),
 });

@@ -8,9 +8,13 @@
  *      the WRAPPER and never spawns an agent"): under the DEFAULT sink, a `build` dispatch must not reach
  *      `defaultClaudeProvider`/`spawnAgent` at all. A test that only asserted the wrapper WAS called would
  *      still pass if both ran.
- *   2. **THE OTHER SIX KINDS ARE UNTOUCHED.** `prepare`, `prepare-decision`, `investigate`, `fix`, `ci-heal`
- *      have no wrapper owning their lifecycle (`we:scripts/guard-bash.mjs` says exactly why), so a routing
- *      change that swept them in would deny every one of them its own first step.
+ *   2. **ROUTING FOLLOWS THE REGISTRY, AND AN UNREGISTERED KIND KEEPS THE AGENT PATH.** A kind with no wrapper
+ *      owning its lifecycle must keep spawning its own agent from its own brief, or a routing change sweeping
+ *      it in would deny it its own first step. Stated as an INVARIANT (routed mechanically iff registered)
+ *      rather than as a list of kind names — #3641 rewrote it that way when `prepare` became the second
+ *      registered kind, so the three lanes still to land (`prepare-decision` #3644, `fix` #3640, `ci-heal`
+ *      #3642) do not each have to re-edit this assertion. The one place the names are still enumerated is
+ *      `./dispatch-provider-registry.test.mjs`'s own ledger, which is deliberately a tripwire.
  *   3. **RESTART-SURVIVAL** — the acceptance criterion #3645 was filed with. The wrapper's arc blocks for up to
  *      an hour; the dispatch path is a synchronous `execFileSync` inside the resident runner's own tick. So the
  *      spawn must be DETACHED (`detached: true`, `unref`'d, stdio to a durable file), the sink must return a
@@ -39,6 +43,7 @@ import {
   routeDispatchProvider,
   stampLiveness,
 } from '../dispatch-lane-io.mjs';
+import { DISPATCH_PROVIDER_REGISTRY, dispatchProviderEntry } from '../dispatch-provider-registry.mjs';
 import { DISPATCH_EFFECT, LAUNCH_KINDS, LIVENESS_SOURCES } from '../dispatch-lane.mjs';
 import { parseDeliverItemRunArgv, runDeliverItemCli } from '../deliver-item-run.mjs';
 
@@ -117,19 +122,34 @@ describe('#3645 — the build dispatch is MECHANICAL by default', () => {
     expect(result.handle).toBe('1ae0905c');
   });
 
-  it('routes ONLY `build` — the other five launch kinds still spawn their own agent from their own brief', () => {
+  it('routes a kind mechanically IF AND ONLY IF the registry holds an entry for it', () => {
+    // THE INVARIANT, not a snapshot (#3641). Asserting "only `build`" made this the one assertion every
+    // sibling wiring lane had to come back and edit — five lanes serializing on three lines that say nothing
+    // a lookup does not already say. What actually has to hold is that the router consults the TABLE and
+    // nothing else: a registered kind reaches its own provider, an unregistered one keeps the unchanged
+    // `claude --bg` agent path, and neither fact is spelled out here as a list of names. The names live in
+    // exactly one place, `./dispatch-provider-registry.test.mjs`'s ledger, which is meant to be edited.
     const seen = [];
     for (const kind of LAUNCH_KINDS) {
       routeDispatchProvider({ launchKind: kind, num: '1', lane: 1, sessionSlug: 's' }, {
-        buildMode: 'mechanical',
-        mechanical: () => { seen.push(['mechanical', kind]); return 'pid:1'; },
+        // Every registered kind's provider replaced by a recorder, so no real process is ever started —
+        // including `prepare`'s, which #3641 registered.
+        registry: Object.fromEntries(Object.entries(DISPATCH_PROVIDER_REGISTRY).map(([k, entry]) => [k, {
+          ...entry, provider: () => { seen.push(['mechanical', k]); return 'pid:1'; },
+        }])),
+        modes: Object.fromEntries(Object.keys(DISPATCH_PROVIDER_REGISTRY).map((k) => [k, 'mechanical'])),
         agent: () => { seen.push(['agent', kind]); return 'abc'; },
       });
     }
-    expect(seen.filter(([via]) => via === 'mechanical')).toEqual([['mechanical', 'build']]);
-    // Every other kind — and there are five — went the agent way, unchanged.
+    const registered = LAUNCH_KINDS.filter((k) => dispatchProviderEntry(k) !== null);
+    expect(seen.filter(([via]) => via === 'mechanical').map(([, k]) => k)).toEqual(registered);
+    // And every kind the table does NOT name went the agent way, unchanged — the half that would break a
+    // brief's own first step if routing ever swept it in.
     expect(seen.filter(([via]) => via === 'agent').map(([, k]) => k))
-      .toEqual(LAUNCH_KINDS.filter((k) => k !== 'build'));
+      .toEqual(LAUNCH_KINDS.filter((k) => dispatchProviderEntry(k) === null));
+    // A guard against the assertion going vacuous if the table were ever emptied or filled wholesale.
+    expect(registered.length).toBeGreaterThan(0);
+    expect(registered.length).toBeLessThan(LAUNCH_KINDS.length);
   });
 
   it('refuses a mechanical build with no item / lane / session BEFORE any process exists', () => {

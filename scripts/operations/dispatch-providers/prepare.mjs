@@ -35,11 +35,11 @@
  */
 import { join } from 'node:path';
 
-import { notApplied } from '../effect-executor.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
+import { notApplied } from '../effect-executor.mjs';
 import {
   REPO_ROOT, DETACHED_HANDLE_PREFIX, defaultSpawnDetached, deliveryDispatchLogPath,
-} from '../dispatch-lane-io.mjs';
+} from '../detached-dispatch.mjs';
 
 /** The per-dispatch process {@link prepareScopeDetachedProvider} starts. Resolved by SCRIPT LOCATION, never
  *  cwd — same reason `REPO_ROOT` is. */
