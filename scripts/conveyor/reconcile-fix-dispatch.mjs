@@ -416,9 +416,13 @@ export function dispatchFix(planned, {
   }, BRIEF_REQUIRED_BY_KIND.fix);
   const sessionId = String(mintSessionId());
   const argv = buildAgentArgv({ sessionId, payload: { prompt, sessionSlug }, extraArgs });
-  spawnAgent(argv, { cwd: root });
+  // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
+  // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
+  // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
+  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
   return {
-    sessionId, sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
+    sessionId, agentId: parseBackgroundedId(stdout),
+    sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
     resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
   };
 }
@@ -525,7 +529,10 @@ if (IS_CLI) {
     const lines = [`reconcile-fix-dispatch — ${result.dispatched.length} dispatched, ${result.refusals.length} refusal(s)`];
     for (const d of result.dispatched) {
       const laneInfo = d.resumed ? 'no lane (resumed)' : `lane-${d.lane}`;
-      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — session ${d.sessionId} (${d.sessionSlug}), ${laneInfo}`);
+      // #3331 — report the ADDRESSABLE id (`claude logs/stop` take it) when we have one; a resume reports the
+      // session it continued, and an unparseable spawn falls back to the slug, which `claude agents` carries.
+      const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
+      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
     }
     for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');

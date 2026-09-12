@@ -114,8 +114,8 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     expect(calls).toHaveLength(1);
     expect(calls[0].opts).toEqual({ cwd: '/repo' });
     expect(calls[0].argv).toEqual([
+      // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
-      '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
@@ -167,8 +167,8 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       checkStaleness: FRESH,
     });
     expect(calls[0].argv).toEqual([
+      // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
-      '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
@@ -310,5 +310,45 @@ describe('dispatchReview — refuses to spawn from a stale checkout (#3439)', ()
       checkStaleness: FRESH,
     });
     expect(calls).toHaveLength(1);
+  });
+});
+
+// ── #3331 — the id this operation REPORTS has to be the one that addresses the session ────────────────────────
+
+describe('#3331 — dispatchReview reports the id `claude --bg` assigned, not the uuid it minted', () => {
+  /** Verbatim the first line CLI 2.1.269 prints on stdout for a `--bg` spawn. */
+  const BANNER = (id) => `backgrounded \u00b7 ${id} \u00b7 review-1234\n  claude agents             list sessions\n`;
+
+  it('returns `agentId` parsed off the spawn\'s stdout', () => {
+    // The bug this pins: `claude --bg` discards `--session-id` and assigns its own id, so the minted uuid
+    // this operation used to print named NO session. `claude agents --json | grep <uuid>` was always empty and
+    // no transcript existed under it, which is why a dispatch that had in fact run a full review to an accept
+    // verdict (live: review-2129) read to every operator as a silent failure.
+    const result = dispatchReview({
+      pr: 1234,
+      repo: 'chalbert/web-everything',
+      root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: () => BANNER('91035f2f'),
+      checkStaleness: FRESH,
+    });
+    expect(result.agentId).toBe('91035f2f');
+    // The minted id is still returned, so an existing caller reading `sessionId` sees the documented shape —
+    // it is simply no longer the thing that addresses the session.
+    expect(result.sessionId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('reports `agentId: null` rather than a fabricated one when the banner cannot be read', () => {
+    const result = dispatchReview({
+      pr: 1234,
+      repo: 'chalbert/web-everything',
+      root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: () => '',
+      checkStaleness: FRESH,
+    });
+    expect(result.agentId).toBeNull();
   });
 });
