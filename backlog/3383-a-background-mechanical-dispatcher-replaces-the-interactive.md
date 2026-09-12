@@ -1464,6 +1464,11 @@ against.
 ## Working doctrine (2026-09-04, continued): rule 10 — the runner's normal operating mode is tracking `main`
 ## directly; a long-lived divergent branch is a temporary build tool, not the default steady state
 
+> **AMENDED 2026-09-12 — read this section together with "Working doctrine (2026-09-12): rule 10 amended"
+> below.** The operator ruled that N standing POC branches are a wanted, durable delivery mode. The
+> wind-down half of this section no longer holds; its drift/naming/short-lived-fix-lane reasoning does.
+> Kept unedited as the original record.
+
 Set the same night as rule 9 above, after a second, independent finding: `origin/lane/mechanical-dispatcher`
 itself — this epic's own prototype branch — had silently drifted 97 commits behind `origin/main`. The
 branch's own auto-sync loop (the mechanism meant to keep it current, per the `keep-prototype-branch-synced-
@@ -1542,3 +1547,101 @@ and `we:skills-src/conveyor/runner.mjs`, both with unit + real-CLI-subprocess te
 `claude agents` listing reaped cleanly post-fix; the new tests prove the retry recovers within budget, still
 fails (bounded, not silently) once the budget is exhausted, never retries an already-`No job matching` answer,
 and that the error-summary no longer truncates a real multi-line failure to a bare "Command failed" line.
+
+## Session update (2026-09-12) — mechanical-harness delegation audit across all seven dispatch launch kinds:
+## exactly ONE (`review`) is actually wired; the other six still run their own lifecycle from a brief
+
+A delegation audit of every dispatch launch kind on `origin/lane/mechanical-dispatcher`, verified against tip
+`02d9af300`. The question asked was narrow and checkable: for each launch kind, does the dispatched agent still
+run its own lifecycle commands (`lane-pool acquire`, `open-pr`, `learnings-drop`, …) out of a full prose brief,
+or has that lifecycle moved into a mechanical harness the dispatcher calls directly? This is the concrete state
+of the epic's own founding bullet — "**Subagents only edit code.** Every command they'd otherwise run themselves
+is delegated to the mechanical layer" (see "The target shape" at the top of this card).
+
+**The answer: one of seven.** `review` is fully harnessed — no agent commands in its brief, a direct wrapper call
+to `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as the default path at
+`we:scripts/operations/review-dispatch.mjs:496` and `:542`. The other six all still hand the agent a full brief
+and let it drive its own lifecycle.
+
+| Launch kind | Agent runs lifecycle commands itself? | Wrapper | `we:scripts/guard-bash.mjs` coverage | Verdict |
+|---|---|---|---|---|
+| build | Yes | `we:scripts/operations/deliver-item-wrapper.mjs` exists, **unwired** | verification-only; lifecycle denylist dead | Not integrated |
+| prepare (scope) | Yes | none | verification-only; brief bug fixed | Not integrated |
+| prepare-decision | Yes | none | verification-only; brief bug fixed | Not integrated |
+| investigation | Yes | none | verification-only; never had the bug | Not integrated |
+| fix | Yes | `we:scripts/operations/fix-dispatch-wrapper.mjs` exists, **unwired**, brief still "PROTOTYPE" | verification-only; brief bug fixed; denylist arm blocked by a two-spawner conflict | Not integrated |
+| ci-heal | Yes | none | verification-only; brief bug fixed | Not integrated |
+| review | **No** | `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as default path | N/A by construction | **Fully integrated** |
+
+**Two wrappers exist but nothing calls them.** `we:scripts/operations/deliver-item-wrapper.mjs` (for `build`) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (for `fix`) are both written and both dead code on the dispatch
+path. The `fix` one is not merely un-wired-yet: it is blocked by a real, named conflict — `WE_DISPATCH_KIND=fix`
+is stamped by **two different spawners with incompatible contracts**, so wiring one wrapper behind that single
+env value would mis-harness the other spawner's agents. That conflict has to be resolved before the wrapper can
+be turned on at all; it is not a "just flip the flag" item.
+
+**`guard-bash`'s lifecycle denylist is correctly OFF for all six, and must stay off until each one is wired.**
+The denylist is what would mechanically enforce "the agent doesn't run its own lifecycle commands." Arming it
+today, for any of the six, would deny **step 1 of that kind's own brief** — `lane-pool acquire` — and break the
+dispatch outright. So the current state is self-consistent, not an oversight: the denylist can only be armed for
+a kind *after* that kind's lifecycle has moved into a harness. `guard-bash`'s coverage for the six is
+verification-only today, which is the correct setting for an unwired kind.
+
+**Why this matters for the epic, not just as a status line.** `review` being harnessed is the existence proof
+that the target shape works — the pattern is proven, once, end to end. But the epic's founding claim is about
+*every* command an agent would otherwise run, and six of seven kinds are still the old shape. The `review`
+wrapper is therefore the template to copy, and the remaining work is concrete and enumerable rather than
+open-ended: wire `deliver-item-wrapper` for `build`; resolve the two-spawner `WE_DISPATCH_KIND=fix` conflict and
+then wire `fix-dispatch-wrapper`; author wrappers for `prepare`, `prepare-decision`, `investigation`, `ci-heal`;
+arm `guard-bash`'s lifecycle denylist per kind, each time only after that kind's wrapper is live.
+
+**Related, already filed:** `#3629` (review and fix dispatch should get the same minimal context treatment) and
+`#3627` (dispatched delivery agents should get a minimal hand-crafted brief) both sit next to this finding but
+neither tracks the wiring itself. The self-hosting question this audit immediately raised — whether the
+prototype branch can build these six remaining kinds into ITSELF, via a lane forked from the prototype rather
+than from `main`, without a PR per increment — is filed separately as its own decision card; see the
+"POC-branch delivery mode" decision under this epic.
+
+## Working doctrine (2026-09-12): rule 10 amended — a long-lived divergent branch is a DECLARED delivery
+## mode ("POC branch"), N may stand at once, and landing inside one skips review until graduation
+
+The "POC-branch delivery mode" decision above was ruled by the operator the same day it was filed, and the
+ruling amends rule 10 rather than working around it. The operator's words, verbatim:
+
+> "I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must not be
+> slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+> graduate."
+
+**Before (rule 10 as set 2026-09-04).** "The runner's steady state is tracking `main` directly; a long-lived
+divergent branch is not the default operating mode." A divergent branch was framed as a temporary build tool
+to be wound down; `#3443` was that wind-down; only one such branch was contemplated, and having it at all was
+treated as a state to exit.
+
+**After (rule 10 as amended 2026-09-12).** "A long-lived divergent branch is a DECLARED delivery mode — a
+'POC branch' — not temporary scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one."
+N POC branches may stand concurrently, each a first-class delivery target an item can name
+(`deliveryTarget:`), each graduating to `main` on its own timeline. Landing INSIDE a POC branch skips the
+review gate entirely — the item's own tests/build validation is the only gate; the full review process (a real
+PR to `main`, the escalation gate, the jury/judge panel, `review:human`) applies once, at graduation.
+
+**What was preserved, and why it is not sentiment.** The 97-commit drift incident is real evidence, but of a
+narrower claim than the original rule drew from it: the branch was undeclared, unregistered, and its sync loop
+was failing silently with nothing watching. So the amended rule keeps (a) the runner's own steady state being
+`main` — a POC branch is a *target*, never the runner's default tracking ref; (b) the short-lived
+scratch-lane-off-current-`main` pattern for fixing the delivery machinery itself
+(`#1894`/`#1895`/`#1902`/`#1903`) — "I need a POC branch" is never the answer to "I need to fix the runner";
+(c) the requirement that every POC branch NAME what it is for and who graduates it, now as a registry entry;
+(d) active per-branch drift reconciliation via `we:scripts/conveyor/branch-drift.mjs`, with a drifted branch
+still holding its own items; and (e) build no more machinery than the POC in front of you needs.
+
+**What was deleted.** The claim that divergence is inherently temporary and must be wound down, and the
+assumption of a single branch. `#3443` remains real work — but as that one branch's own graduation, not as a
+wind-down of the mode, and the runner tracking it today is not a violation of anything.
+
+**Where it lives.** `we:skills-src/mechanical-delivery-doctrine/SKILL.md`, rule 10, plus that skill's own
+`description:` line which paraphrases it — edited there first, per the skill's own stated amendment path
+("If a rule itself changes, edit it here first, then note the change on the card"), and noted here second.
+
+**Left for a follow-on, not this ruling:** the build itself — the `poc-branches` registry, the
+`deliveryTarget:` field, the per-branch land lock, and the fast-forward-with-rebase-retry lander. The decision
+card names that item and deliberately builds none of it.

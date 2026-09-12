@@ -1,6 +1,6 @@
 ---
 name: mechanical-delivery-doctrine
-description: The twelve standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state — a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified — and default to routing filing/building/investigating through the conveyor itself (`file-item` + `tier --to=pinned` for urgency) rather than a hand-dispatched subagent, wherever the conveyor's own dispatch already covers that work kind. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
+description: The twelve standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, a long-lived divergent branch is a DECLARED delivery mode (a "POC branch"), N of them may stand at once, and landing inside one skips review entirely — tests only, with the real review deferred to graduation — a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified — and default to routing filing/building/investigating through the conveyor itself (`file-item` + `tier --to=pinned` for urgency) rather than a hand-dispatched subagent, wherever the conveyor's own dispatch already covers that work kind. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
 ---
 
 # Mechanical-delivery doctrine — epic #3383's standing operating rules
@@ -114,23 +114,36 @@ history. If a rule itself changes, edit it here first, then note the change on t
    once the subsession's fix is proven (measured before/after, not asserted) and landed does the
    orchestrating session resume delivery. (Full evidence: `#3383`'s "Working doctrine (2026-09-04):
    rule 9" section.)
-10. **The runner's steady state is tracking `main` directly; a long-lived divergent branch is not the
-    default operating mode.** When a mechanical bug in the delivery machinery itself needs fixing:
-    (1) stop the runner (or otherwise take it off `main`), (2) cut a SHORT-LIVED branch/lane fresh off
-    current `main` for the fix, iterate and test it live there, (3) once the fix is confirmed working
-    and merged back to `main`, switch the runner back to tracking `main` directly. The fix branch is
-    disposable — it does not linger as a standing parallel tree. Set after tonight's own prototype
-    branch, `origin/lane/mechanical-dispatcher`, drifted 97 commits behind `main` behind a
-    silently-failing auto-sync loop, costing a ~40-minute manual reconciliation (15 real conflicts)
-    before delivery could resume at all — while the same quick-fix-via-fresh-scratch-lane pattern
-    (`#1894`/`#1895`/`#1902`/`#1903`, all tonight) landed repeatedly without ever needing a standing
-    branch. **Not yet fully in effect as of 2026-09-04**: `#3443` (the branch's own graduation to
-    `main`) is still open, with real content still unique to the branch, so the runner currently still
-    needs to run off `origin/lane/mechanical-dispatcher` (freshly reconciled tonight, not stale)
-    rather than `main` directly — this rule states the TARGET steady state once graduation completes,
-    not a claim about today's actual runner configuration; check `#3443`'s live status to know whether
-    this rule is fully active yet. (Full rationale: `#3383`'s "Working doctrine (2026-09-04,
-    continued): rule 10" section.) **If a manual reconciliation like this one turns up a PR that conflicts
+10. **A long-lived divergent branch is a DECLARED delivery mode — a "POC branch" — not temporary
+    scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one.** *(Amended
+    2026-09-12 by the operator's ruling on the POC-branch delivery-mode decision, `#3383`'s
+    `x7ppgg6`: "I do want N POC as new feature… we must not be slow by the same slow PR process…
+    real review will happen when the POC graduate.")* **N POC branches may stand concurrently**, each a
+    first-class delivery target items can declare (`deliveryTarget:`), each graduating to `main` on its
+    own timeline. **Landing INSIDE a POC branch skips the review gate entirely** — the item's own
+    tests/build validation is the only gate, no judge panel, no escalation label, no per-landing review
+    pass of any shape. The FULL review process this repo already has (a real PR to `main`, the
+    escalation gate, the jury/judge panel, `review:human`) applies **once, at graduation**, undiluted.
+    **What the original rule got right, and still holds:** (a) the runner's own steady state is still
+    tracking `main` — a POC branch is a delivery TARGET for items that declare it, never the runner's
+    default tracking ref; (b) a mechanical fix to the delivery machinery itself still takes a
+    SHORT-LIVED scratch lane cut fresh off *current* `main`, iterated and tested live, landed as one
+    small PR, then discarded (`#1894`/`#1895`/`#1902`/`#1903` are the pattern) — "I need a POC branch"
+    is never the answer to "I need to fix the runner"; (c) every POC branch must NAME what it is for
+    and who graduates it (a registry entry: branch, graduation target, scope, graduation item) — an
+    *unnamed* divergent branch is still exactly the failure mode that cost a ~40-minute manual
+    reconciliation and 15 hand-resolved conflicts when `origin/lane/mechanical-dispatcher` drifted 97
+    commits behind `main` behind a silently-failing auto-sync loop; (d) drift is still actively
+    reconciled per branch, never tolerated — `we:scripts/conveyor/branch-drift.mjs` sweeps each
+    registered branch and a drifted branch still holds its own items; and (e) build no more machinery
+    than the POC in front of you actually needs. **What the amendment DELETES:** the claim that a
+    divergent branch is inherently "a temporary build tool, not the default steady state" that must be
+    wound down, and the assumption that there is only ever one. `#3443` (graduating
+    `origin/lane/mechanical-dispatcher`) is still real work — but it is now that one branch's own
+    graduation, not a wind-down of the mode itself, and the runner tracking that branch today is not a
+    violation of anything. (Full rationale: `#3383`'s "Working doctrine (2026-09-04, continued): rule
+    10" section for the original, and its "Working doctrine (2026-09-12): rule 10 amended" section for
+    the before/after and the ruling that caused it.) **If a manual reconciliation like this one turns up a PR that conflicts
     with a decision made elsewhere on `main`** (a sequencing conflict, not a text conflict), post it as a
     finding on that PR rather than only in your own task summary:
     `node we:scripts/conveyor/reconcile-finding.mjs <pr> --body-file=<path> [--repo=<owner/name>]` (the same
