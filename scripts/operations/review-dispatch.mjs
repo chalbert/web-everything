@@ -114,6 +114,11 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
+// #xqa9ttq — the single source of truth for the `claude`/`codex` juror-provider enum, shared with
+// `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
+// cannot silently drift out of step with what `review-loop-cli.mjs` (which the dispatched session runs)
+// actually accepts.
+import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 
 /** The review-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
  *  (`#xy8di3v`, extending `#3418`/`#xqyyoje`'s fix to the review-dispatch path). Passed via
@@ -144,10 +149,13 @@ export function reviewBriefPath(root = REPO_ROOT) {
   return join(root, 'skills-src', 'review', 'review-agent-brief.md');
 }
 
-/** The three `{{PLACEHOLDER}}` tokens the review brief declares. Mirrors `we:scripts/operations/
+/** The `{{PLACEHOLDER}}` tokens the review brief declares. Mirrors `we:scripts/operations/
  *  dispatch-lane.mjs#BRIEF_PLACEHOLDERS`'s NAMING convention (a small, closed, named list) without importing
- *  that file's machinery — see the file header for why this operation owns its own, smaller copy. */
-export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG']);
+ *  that file's machinery — see the file header for why this operation owns its own, smaller copy.
+ *  `JUDGE_PROVIDER` (#xqa9ttq) is ALWAYS filled, even when nobody asked for anything but the default: see
+ *  `dispatchReview`'s own `judgeProvider = 'claude'` default — never blank, so `fillReviewBrief`'s
+ *  every-declared-placeholder-must-have-a-value refusal never fires for the ordinary, opt-out case. */
+export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
 
 /** Any run of separators a placeholder name might be typo'd with, canonicalized — same shape as `dispatch-
  *  lane.mjs#canonicalPlaceholder`, scoped to this brief's own three names. */
@@ -343,6 +351,12 @@ export function planReviewDispatch({ pr, repo } = {}) {
  * @param {string[]} [o.extraArgs] - forwarded to `buildAgentArgv`, exactly like `dispatch-lane-io.mjs`'s own.
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [o.checkStaleness] - injectable staleness
  *   check (#3439) — see `assertMainNotStale`.
+ * @param {string} [o.judgeProvider] - #xqa9ttq — which `JudgeProvider` the dispatched session's OWN
+ *   `review-loop-cli.mjs` invocation (brief step 2) is told to pass `--provider=<this>`. One of
+ *   `JUDGE_PROVIDER_NAMES`; defaults to `'claude'`, today's behaviour, unchanged — this is OPT-IN. Note what
+ *   this does NOT do: it never makes the DISPATCHED SESSION ITSELF (a tool-bearing `claude --bg` agent) run on
+ *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` spawns underneath it, which is the one part
+ *   of this whole dispatch `#3581`'s ratified sequencing actually clears Codex for.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
@@ -352,15 +366,22 @@ export function dispatchReview({
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   checkStaleness,
+  judgeProvider = 'claude',
 } = {}) {
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
   // `checkStaleness` undefined here falls straight through to that function's own default — no need to
   // duplicate it.
   assertMainNotStale(root, checkStaleness);
+  // #xqa9ttq — validated HERE, before the brief is ever filled: an unrecognised name would otherwise reach
+  // `review-loop-cli.mjs`'s own `--provider` parse INSIDE the dispatched session, where the refusal happens
+  // minutes into a real dispatch instead of at the command line that requested it.
+  if (!JUDGE_PROVIDER_NAMES.includes(judgeProvider)) {
+    throw new Error(`review-dispatch: \`judgeProvider\` must be one of ${JUDGE_PROVIDER_NAMES.join('|')}, got ${JSON.stringify(judgeProvider)}`);
+  }
   const planned = planReviewDispatch({ pr, repo });
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
-    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug,
+    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
   });
   const sessionId = String(mintSessionId());
   // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
@@ -377,7 +398,10 @@ export function dispatchReview({
     extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
   });
   spawnAgent(argv, { cwd: root });
-  return { sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens };
+  return {
+    sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens,
+    judgeProvider,
+  };
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
@@ -392,11 +416,16 @@ if (IS_CLI) {
     // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
     // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
     // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
-    const result = dispatchReview({ pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv() });
+    // #xqa9ttq — `--judge-provider` is OPTIONAL; `dispatchReview`'s own `judgeProvider = 'claude'` default
+    // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
+    // case, not a gap.
+    const result = dispatchReview({
+      pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
+    });
     writeAllSync(
       1,
       `dispatch-review: started session ${result.sessionId} (slug ${result.sessionSlug}) reviewing `
-      + `${result.repo}#${result.pr}\n`
+      + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
       + `watch it: claude agents --json | grep ${result.sessionId}\n`
       + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
     );

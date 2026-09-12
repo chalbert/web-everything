@@ -16,6 +16,7 @@
 | `{{PR}}` | the PR number to review — e.g. `1234` |
 | `{{REPO}}` | the `owner/repo` the PR lives in — e.g. `chalbert/web-everything` |
 | `{{SESSION_SLUG}}` | a per-dispatch lane-lease slug, e.g. `review-1234` |
+| `{{JUDGE_PROVIDER}}` | which `JudgeProvider` the tool-free jurors below run as — `claude` (default) or `codex` (`#xqa9ttq`) |
 
 ---
 
@@ -91,8 +92,14 @@ Then report that plainly (`blocked-on-infra`, no lane available) and exit.
 ### 2. Run the review loop, once
 
 ```bash
-node scripts/operations/review-loop-cli.mjs --pr={{PR}} --repo={{REPO}} --cwd="$LANE"
+node scripts/operations/review-loop-cli.mjs --pr={{PR}} --repo={{REPO}} --cwd="$LANE" --provider={{JUDGE_PROVIDER}}
 ```
+
+**`--provider={{JUDGE_PROVIDER}}` picks the `JudgeProvider` for the TOOL-FREE jurors this step spawns — it is
+filled `claude` unless this dispatch specifically asked for `codex` (`#xqa9ttq`).** It never changes what YOU
+are (this session stays a tool-bearing Claude agent regardless): the two independent jurors `review-loop-cli.mjs`
+spawns underneath are the only thing this flag touches, and only while they stay tool-free (`#3581`'s ratified
+sequencing — a tool-bearing Codex juror does not exist yet).
 
 This runs the declared `review-pr` operation's ONE round — read the diff, judge it (correctness AND security,
 two independent jurors, both spawned by the operation, neither is you), reduce their findings to a verdict, and
