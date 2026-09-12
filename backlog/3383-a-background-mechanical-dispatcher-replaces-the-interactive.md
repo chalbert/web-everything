@@ -1645,3 +1645,181 @@ wind-down of the mode, and the runner tracking it today is not a violation of an
 **Left for a follow-on, not this ruling:** the build itself — the `poc-branches` registry, the
 `deliveryTarget:` field, the per-branch land lock, and the fast-forward-with-rebase-retry lander. The decision
 card names that item and deliberately builds none of it.
+
+## Session update (2026-09-12, continued) — punch-list of what is genuinely still open after today's
+## mechanical-harness wiring, so a fresh session does not have to re-derive it
+
+Written to survive this conversation, per the operator's own instruction. Every item below was RE-VERIFIED
+against live state, not copied from an earlier draft — verified against `origin/lane/mechanical-dispatcher` tip
+`373f14af1` ("validate-and-promote, the trigger that finally arms the watchdog"), `origin/main` tip
+`b0763ceac`, and the live backlog/PR/issue trackers, all as of 2026-09-12. Where something turned out to
+already be resolved, that is stated explicitly rather than silently dropped.
+
+**What moved since the "one of seven" delegation audit earlier on this card (tip `02d9af300`).** That audit is
+now stale on two of its six "Not integrated" rows — read the table below, not that one, for current state:
+`build` (#3645) and `prepare` (#3641) both went from unwired to wired-by-default in the five commits after it
+(`c081e1650` … `373f14af1`). The registry mechanism itself (`we:scripts/operations/dispatch-provider-registry.mjs`,
+`62f4ce383`) is also new since that audit — it replaces what would otherwise have been a fifth hard-coded
+branch in `we:scripts/operations/dispatch-lane-io.mjs`.
+
+### 1. Dispatch-kind wiring — current state of all seven launch kinds
+
+Re-verified directly against `we:scripts/operations/dispatch-provider-registry.mjs` on the lane tip (it throws
+at import time if it ever drifts from `LAUNCH_KINDS`, so the table below is closer to a compile-time fact than
+a snapshot):
+
+| Kind | State | Evidence |
+|---|---|---|
+| `build` | **Wired, mechanical by default** | `DISPATCH_PROVIDER_REGISTRY.build` → `deliverItemDetachedProvider`; opt-out `WE_BUILD_DISPATCH_MODE=agent` |
+| `prepare` (scope) | **Wired, mechanical by default** | `DISPATCH_PROVIDER_REGISTRY.prepare` → `prepareScopeDetachedProvider`; opt-out `WE_PREPARE_DISPATCH_MODE=agent` |
+| `review` | **Wired** (since before today's later commits) | `we:scripts/operations/review-dispatch.mjs:496`/`:542` → `we:scripts/operations/review-dispatch-wrapper.mjs`, no agent turn in the critical path |
+| `fix` | **Still unwired — blocked, not just undone** | see item 2 below |
+| `prepare-decision` | **Still unwired** | no `we:scripts/operations/dispatch-providers/prepare-decision.mjs` exists; `#3644` (open) is the story |
+| `ci-heal` | **Still unwired** | no `we:scripts/operations/dispatch-providers/ci-heal.mjs` exists; `#3642` (open) is the story |
+| `investigation` | **Still unwired**, and no wrapper exists yet at all (unlike fix/ci-heal/prepare-decision, nobody has even prototyped one) | full-brief agent path only |
+
+**Action for a future session:** `#3640` (fix, blocked — see item 2), `#3642` (ci-heal), `#3644`
+(prepare-decision) are the three remaining stories under the umbrella `#3643`, all `status: open`, all already
+carrying `deliveryTarget: lane/mechanical-dispatcher` (set on `main` via PR #2144, landed today) — so each can
+be picked up as an ordinary POC-branch-targeted build, no further decision needed to start. `investigation`
+has no story yet; file one before building it (needs a wrapper design pass first, the way `#3627`/`#3629`
+did for build/fix/review).
+
+### 2. `fix` dispatch is blocked on a real conflict, not merely unscheduled
+
+`WE_DISPATCH_KIND=fix` is stamped by **two different spawners with two incompatible contracts**:
+`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider` (the live path, running
+`we:skills-src/conveyor/fix-agent-brief.md` v1, which runs its OWN lane acquire / gate / commit / open-pr) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (written, unwired, running
+`we:skills-src/conveyor/fix-agent-brief-v2.md` under a wrapper that owns all of that lifecycle instead). One
+env value cannot describe both contracts at once — a `dispatchKind === 'fix'` deny arm in
+`we:scripts/guard-bash.mjs` written for the wrapper's contract would deny the v1 agent's own legitimate step 1.
+This is documented in `we:scripts/guard-bash.mjs` itself (search "A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'`
+ARM IS ADDED") and in `we:scripts/operations/fix-dispatch-wrapper.mjs`'s own header.
+
+**Newly found today, same shape:** `prepare` now has the identical collision.
+`we:scripts/operations/prepare-scope-wrapper.mjs` stamps `WE_DISPATCH_KIND=prepare` for its own (wrapped)
+contract, but the pre-existing `WE_PREPARE_DISPATCH_MODE=agent` fallback path also stamps
+`WE_DISPATCH_KIND=prepare` via `we:scripts/operations/dispatch-lane-io.mjs`'s generic
+`String(request.launchKind || 'build')` stamp — same one-value/two-contracts problem, currently undocumented
+anywhere except `we:scripts/operations/prepare-scope-wrapper.mjs`'s own header. **Not yet filed as its own
+item** — worth doing before anyone tries to arm a `we:scripts/guard-bash.mjs` `'prepare'` deny arm and hits the
+same wall `'fix'` already hit.
+
+**Resolution shape, not yet decided:** either a distinct `WE_DISPATCH_KIND` value per contract (e.g.
+`fix-wrapped` vs `fix-agent`, and the equivalent for `prepare`), or a second signal alongside the kind that
+says which contract is in force. Whichever is chosen for `fix` should almost certainly be reused for `prepare`
+rather than re-litigated.
+
+### 3. `we:scripts/guard-bash.mjs`'s lifecycle denylist — confirmed still correctly scoped, and why it must stay that way
+
+Re-read directly (`we:scripts/guard-bash.mjs`, the `dispatchKind === 'delivery'` block). **Only `'delivery'` is
+armed** — the stamp `we:scripts/operations/deliver-item-wrapper.mjs` puts on the minimal build agent it
+spawns. `'prepare'` is NOT armed (see item 2 — same two-contract collision as `fix`, confirmed in
+`we:scripts/operations/prepare-scope-wrapper.mjs`'s own header: "`WE_DISPATCH_KIND: 'prepare'` … NAMED GAP, and
+a gap this item deliberately does NOT close"). `fix`, `prepare-decision`, `ci-heal`, `investigation` are all
+still verification-only (the `#3105` gate only), exactly as before. **This is self-consistent, not drift:**
+arming any of these before its own two-contract collision (if any) is resolved and its wrapper is the sole
+spawner would deny that kind's own agents their legitimate first step. Confirm this table again before arming
+anything new.
+
+### 4. Nothing re-judges whether a predicted scope is a GOOD prediction — still just flagged
+
+`we:scripts/operations/prepare-scope-wrapper.mjs` (line ~47) states this in its own header in so many words:
+"nothing here re-judges whether a WELL-FORMED prediction is a GOOD one." The wrapper checks structural
+well-formedness (did the agent touch only its own backlog file, did it write a `scope:` field at all) but
+nothing scores whether the predicted touch-set is actually close to what the item will really touch. **No
+backlog item exists for this yet** (searched; nothing found). Worth filing as its own story before `prepare`
+dispatch is trusted at volume — a silently bad prediction degrades exactly the scope-lease conflict machinery
+(`#2560`/`#2592`) that predicted scope exists to feed.
+
+### 5. `we:scripts/conveyor/driver-watchdog.mjs` has nothing scheduling it — still just a script
+
+Confirmed: no `we:package.json` script, no cron entry, no launchd plist, no GitHub Actions workflow references
+`we:scripts/conveyor/driver-watchdog.mjs` anywhere in the repo. It is invoked only by hand (`node
+we:scripts/conveyor/driver-watchdog.mjs check|heal`) or, as of `373f14af1`, indirectly by
+`we:scripts/conveyor/validate-and-promote.mjs promote` (which calls `record-good`, arming the watchdog's
+fallback, but never calls the watchdog itself). **A real decision is still owed:** cron/loop trigger on the
+driver's own host, a tick inside the runner's own mechanical passes (the watchdog's header explicitly forbids
+sharing the driver's decision logic, but running the CHECK on a timer from outside the driver process is a
+different question), or accepted as manual-only for now. Until one of those is chosen and wired, the watchdog
+protects nothing unattended.
+
+### 6. `validate-and-promote` / `record-good` / `restart-runner` — unit-tested, never live-fired end to end
+
+Confirmed by reading the test suites directly: `we:scripts/conveyor/__tests__/validate-and-promote.test.mjs` is
+pure decision-table + injected-double tests only (four described sections, no real clone, no real `npm`, no
+real `git reset`, no real `claude`). `we:scripts/operations/__tests__/restart-runner-io-real.test.mjs` is the
+one REAL-mechanism test in this group — real directory trees, a real `ps` shell-out, a real detached child
+process — but its own header states it deliberately never spawns the real supervisor or the real runner, "per
+a standing operator constraint." The `we:scripts/conveyor/validate-and-promote.mjs` CLI does have a
+live-fireable read-only `validate` verb (five checks in a throwaway clone, touches no driver) — that is the
+"one live self-test" this session ran — but nobody has yet run the `promote` verb for real: a live sha, a real
+driver checkout, a real `record-good` write, a real reset, and a real `restart-runner` landing the driver on
+new code. **That end-to-end live run is the next concrete step before trusting this pipeline**, not a code
+change — the code appears complete and is exercised in isolation, just never chained together for real.
+
+### 7. `#xnq6brj` / backlog `#3646` — filed, not fixed. Confirmed still open.
+
+`we:skills-src/conveyor/runner.mjs`'s SIGTERM/SIGINT handler cannot fire while the runner is inside a blocking
+`execFileSync` call (one of its own mechanical passes) — Node only dispatches signals on the event loop.
+`we:backlog/3646-*.md` (`status: open`) documents this and names the precedent fix (`#3404`'s move to
+`runQuietHeartbeating` for `we:scripts/conveyor/verify-dispatch.mjs`). PR #2142, which merged today, **only
+filed this card** ("backlog: file runner SIGTERM-mid-blocking-pass limitation under #3383") — it added no
+code. The actual fix (moving whichever of `we:skills-src/conveyor/runner.mjs`'s own mechanical passes still
+use a plain blocking spawn onto the heartbeating pattern) remains unbuilt.
+
+### 8. `#3647` — review-dispatch-wrapper misclassifies a successful review as `blocked-on-infra`. Confirmed still open, unfixed.
+
+`we:backlog/3647-*.md`, `status: open`. Root cause already diagnosed and written down on the card:
+`we:scripts/operations/review-loop-cli.mjs` exits non-zero when a *secondary, non-essential* logging step
+fails (a missed prevention-guard append to `~/.claude/conveyor/learnings/review-loop.jsonl`), even though the
+review itself ran to completion and succeeded (real accept verdict posted, label flipped, PR merged). The
+wrapper's `execFileSync` catch branch cannot currently tell "the review never ran" from "the review ran and
+succeeded but something secondary afterward failed," so it hardcodes `blocked-on-infra` either way. No code
+fix has landed for this — only the diagnosis and the card.
+
+### 9. PR #2113 — needs a real disposition decision, not indefinite open status
+
+Confirmed still `OPEN` against `main` (`gh pr view 2113`): "WE #xu2pp2m: extract shared minimal-context
+primitives + build the mechanical review-dispatch wrapper." Its content was already merged into
+`lane/mechanical-dispatcher` via a local branch merge back on `5129bd1fd` ("Merge branch 'pr-2113' into
+lane/mechanical-dispatcher") — i.e., the review-dispatch-wrapper code this PR carries is *already living and
+running* on the prototype branch (`02d9af300` wired it as the default `review` path there), while
+`we:scripts/operations/review-dispatch-wrapper.mjs` does **not exist on `main` at all** (confirmed: `git
+ls-tree -r origin/main` has no such file). Since the 2026-09-12 POC-branch ruling, the intended path for
+prototype-branch content reaching `main` is `#3443`'s incremental small-PR graduation (that epic is `status:
+active`, already landing pieces), not a single big PR opened before that ruling existed. **Recommendation, not
+yet decided by the operator:** close #2113 as superseded by the POC-branch content plus #3443's graduation
+path, rather than leaving a stale direct-to-main PR open indefinitely alongside the now-different intended
+landing mechanism. This needs the operator's actual call, not a unilateral close.
+
+### 10. `#3639` — the changeset/"batch" decision. Confirmed still open, unratified.
+
+`we:backlog/3639-*.md`, `kind: decision`, `status: open`, no `preparedDate` set. Extensively researched on the
+card itself (7 forks, a full survey, a "continued" reassessment after the operator supplied the real
+motivating scenario) but per this repo's own rule ("never rule w/o preparedDate"), it is not yet a
+ready-to-ratify decision in the tracked sense even though the prose reads as thorough. Needs either a
+`/prepare` pass to set `preparedDate` formally, or the operator ratifying directly against the "Revised
+recommendation for Fork 7" already on the card.
+
+### 11. The bootstrap gap — named so it is not mistaken for forgotten work
+
+`main`'s own conveyor still cannot spawn delivery agents at all (`#3369`/`#3580`'s decoupling work and the
+dispatcher-on-`main` question are unrelated to and upstream of everything above). Every mechanical-harness
+wiring item in this whole session update lives on `origin/lane/mechanical-dispatcher` only. Graduating any of
+it to `main` is explicitly `#3443`'s job — already `status: active`, already landing incremental PRs (most
+recently PR #2144 today) — and is a separate, ongoing epic, not something this list calls for action on. Named
+here only so a future session does not mistake "none of this runs on `main` yet" for a gap in today's work.
+
+### Already-resolved items worth naming explicitly (so nobody re-opens them)
+
+- **PR #2142** — merged (filed `#3646`, no code fix — see item 7 above; the PR itself is done, the underlying
+  work it filed is not).
+- **The `build`/`prepare` rows of the earlier "one of seven" audit** — superseded by item 1 above; both kinds
+  wired and mechanical-by-default as of `d1c2d8ed6`/`ffbc921ab`+`49c46c3d2`.
+- **The `we:scripts/operations/dispatch-provider-registry.mjs` extraction itself (`62f4ce383`)** — done; a
+  pure refactor, all pre-existing tests pass unchanged, 21 new tests added for the registry.
+- **The driver watchdog's fallback-marker gap** — `we:scripts/conveyor/validate-and-promote.mjs` (`373f14af1`)
+  closes the "nothing ever calls `record-good`" gap the watchdog shipped with; see item 6 for what is still
+  NOT done (a live end-to-end `promote` run).
