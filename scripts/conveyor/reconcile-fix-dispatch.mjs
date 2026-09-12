@@ -61,7 +61,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
-  defaultSpawnAgent, findItem, normalizeHandle, parseBackgroundedId, resumeSucceeded, REPO_ROOT,
+  defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
+  resumeSucceeded, REPO_ROOT,
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
@@ -389,6 +390,23 @@ export function tryResumeFix(planned, {
  * file's own copies. Requires `planned.lane` — the caller ({@link runReconcileFixDispatch}) only calls this
  * AFTER popping one from the free-lane pool, which by construction only happens once {@link tryResumeFix} (when
  * relevant) has already reported `resumed: false` — see that function's own `#xazl9u3` docblock for why.
+ *
+ * IT PASSES THE DISPATCHED-AGENT SYSTEM PROMPT (#3606/#xqyyoje/#xy8di3v), AND UNTIL 2026-09-11 IT DID NOT —
+ * the one dispatch path in the repo that was missing it. `createDispatchSinks` has always passed
+ * `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (so the tick-core-driven fix dispatch was covered) and
+ * `review-dispatch.mjs` passes its own review-side twin (#xy8di3v). THIS function passed none, so a fix agent
+ * dispatched by the reconcile pass met `fix-agent-brief.md` with nothing telling it the brief was real.
+ *
+ * The brief opens with *"**This is a TEMPLATE, not a runnable skill.**"* and keeps `{{PLACEHOLDERS}}` /
+ * `{{LIKE_THIS}}` in its own explanatory prose (both legitimately unsubstituted — `fillBrief` reports them as
+ * non-fatal unknown tokens by design), so a genuinely, correctly filled brief still READS as an unfilled
+ * template. LIVE-CONFIRMED 3/3 on 2026-09-11: `fix-2127`, `fix-2130` and `fix-2003` each received a fully
+ * substituted 16.5 KB brief naming their real PR — and each self-aborted with *"I don't see an actual task or
+ * question in your message — just the fix-agent brief template (#2630) itself"*, doing no work at all. That is
+ * exactly the #3606 failure `review-1998/2024/2027` hit on the review side, recurring on the one path the
+ * remedy had never been wired into. The delivery-side file is the right one here (not the review twin): a fix
+ * agent IS a `dispatch-lane`-shaped delivery agent — it acquires a lane, works an item, pushes to a PR.
+ *
  * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
  * @param {object} [o]
  * @param {object|null} [o.resumeAttempt] - carried forward from a prior {@link tryResumeFix} call for this same
@@ -415,7 +433,14 @@ export function dispatchFix(planned, {
     SCOPE: planned.scope.join(','),
   }, BRIEF_REQUIRED_BY_KIND.fix);
   const sessionId = String(mintSessionId());
-  const argv = buildAgentArgv({ sessionId, payload: { prompt, sessionSlug }, extraArgs });
+  const argv = buildAgentArgv({
+    sessionId,
+    payload: { prompt, sessionSlug },
+    // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
+    // unfilled template and self-aborts (3/3 live).
+    systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+    extraArgs,
+  });
   // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
   // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
   // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
