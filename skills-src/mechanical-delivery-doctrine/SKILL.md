@@ -115,37 +115,26 @@ history. If a rule itself changes, edit it here first, then note the change on t
    orchestrating session resume delivery. (Full evidence: `#3383`'s "Working doctrine (2026-09-04):
    rule 9" section.)
 10. **A long-lived divergent branch is a DECLARED delivery mode — a "POC branch" — not temporary
-    scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one.** *(Amended
-    2026-09-12 by the operator's ruling on the POC-branch delivery-mode decision, `#3383`'s
-    `x7ppgg6`: "I do want N POC as new feature… we must not be slow by the same slow PR process…
-    real review will happen when the POC graduate.")* **N POC branches may stand concurrently**, each a
-    first-class delivery target items can declare (`deliveryTarget:`), each graduating to `main` on its
-    own timeline. **Landing INSIDE a POC branch skips the review gate entirely** — the item's own
-    tests/build validation is the only gate, no judge panel, no escalation label, no per-landing review
-    pass of any shape. The FULL review process this repo already has (a real PR to `main`, the
-    escalation gate, the jury/judge panel, `review:human`) applies **once, at graduation**, undiluted.
-    **What the original rule got right, and still holds:** (a) the runner's own steady state is still
-    tracking `main` — a POC branch is a delivery TARGET for items that declare it, never the runner's
-    default tracking ref; (b) a mechanical fix to the delivery machinery itself still takes a
-    SHORT-LIVED scratch lane cut fresh off *current* `main`, iterated and tested live, landed as one
-    small PR, then discarded (`#1894`/`#1895`/`#1902`/`#1903` are the pattern) — "I need a POC branch"
-    is never the answer to "I need to fix the runner"; (c) every POC branch must NAME what it is for
-    and who graduates it (a registry entry: branch, graduation target, scope, graduation item) — an
-    *unnamed* divergent branch is still exactly the failure mode that cost a ~40-minute manual
-    reconciliation and 15 hand-resolved conflicts when `origin/lane/mechanical-dispatcher` drifted 97
-    commits behind `main` behind a silently-failing auto-sync loop; (d) drift is still actively
-    reconciled per branch, never tolerated — `we:scripts/conveyor/branch-drift.mjs` sweeps each
-    registered branch and a drifted branch still holds its own items; and (e) build no more machinery
-    than the POC in front of you actually needs. **What the amendment DELETES:** the claim that a
-    divergent branch is inherently "a temporary build tool, not the default steady state" that must be
-    wound down, and the assumption that there is only ever one. `#3443` (graduating
-    `origin/lane/mechanical-dispatcher`) is still real work — but it is now that one branch's own
-    graduation, not a wind-down of the mode itself, and the runner tracking that branch today is not a
-    violation of anything. (Full rationale: `#3383`'s "Working doctrine (2026-09-04, continued): rule
-    10" section for the original, and its "Working doctrine (2026-09-12): rule 10 amended" section for
-    the before/after and the ruling that caused it.) **If a manual reconciliation like this one turns up a PR that conflicts
-    with a decision made elsewhere on `main`** (a sequencing conflict, not a text conflict), post it as a
-    finding on that PR rather than only in your own task summary:
+    scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one.** This is now a
+    **durable, cross-cutting rule**, not scoped to this epic — the canonical, full-detail source is
+    statute
+    [`#poc-branch-declared-delivery-mode`](../../docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode)
+    (the operator's ruling verbatim, all four clauses, and exactly what the amendment deletes from the
+    original framing); read it before extending or citing this rule anywhere outside this epic. The
+    load-bearing points for driving `#3383` day to day: **N POC branches may stand concurrently**, each
+    declared via `deliveryTarget:` and a registry entry (branch, graduation target, scope, graduation
+    item); **landing inside a POC branch skips review entirely** — tests/build validation only, no
+    judge panel, no escalation label, no per-landing review pass of any shape; **the full review
+    process runs once, undiluted, at graduation** to `main`; the runner's own steady state still tracks
+    `main` — a POC branch is a delivery TARGET, never the default; build no more machinery than the POC
+    needs; and drift is still actively reconciled per branch, never tolerated
+    (`we:scripts/conveyor/branch-drift.mjs`). A mechanical fix to the delivery machinery itself still
+    takes a SHORT-LIVED scratch lane cut fresh off *current* `main` (`#1894`/`#1895`/`#1902`/`#1903` are
+    the pattern) — "I need a POC branch" is never the answer to "I need to fix the runner". (Amended
+    2026-09-12 by the operator's ruling on `#3637`; full before/after and design on `#3383`'s "Working
+    doctrine (2026-09-12): rule 10 amended" section.) **If a manual reconciliation like this one turns
+    up a PR that conflicts with a decision made elsewhere on `main`** (a sequencing conflict, not a text
+    conflict), post it as a finding on that PR rather than only in your own task summary:
     `node we:scripts/conveyor/reconcile-finding.mjs <pr> --body-file=<path> [--repo=<owner/name>]` (the same
     tool `we:skills-src/finish/SKILL.md`'s rebase step uses for this).
 11. **A one-off action that relieves a symptom is not a fix.** Landing counts only once the real root
