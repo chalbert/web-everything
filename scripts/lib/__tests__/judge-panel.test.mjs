@@ -159,6 +159,24 @@ describe('judgePanel — one spawn per seat, all awaited, results returned toget
     expect(panel.totalCostUsd).toBeCloseTo(0.08, 10);
   });
 
+  // #3158 — the RULING that panel seats stay tool-free is a comment unless something pins it: every seat's
+  // argv must carry `--tools ''` and never `--allowedTools`, and `judgePanel` must accept no per-seat `cwd`
+  // that would vary a seat's admission (only the single panel-wide `cwd` — unset here — ever reaches a call).
+  it('#3158 — every seat spawns tool-free: `--tools \'\'` in argv, never `--allowedTools`, no per-seat cwd', async () => {
+    const spy = panelSpawn();
+    await judgePanel({ ...BASE, jurors: FOUR_SEATS, spawnFn: spy.fn });
+    expect(spy.count).toBe(4);
+    for (const call of spy.calls) {
+      const toolsIdx = call.argv.indexOf('--tools');
+      expect(toolsIdx).toBeGreaterThan(-1);
+      expect(call.argv[toolsIdx + 1]).toBe('');
+      expect(call.argv).not.toContain('--allowedTools');
+      // every seat gets the SAME cwd (the one panel-wide value, here whatever judgeSpawn defaults to) —
+      // never a seat-specific one, which is what a per-seat lane cwd (the tool-bearing alternative) would be.
+      expect(call.opts?.cwd).toBe(spy.calls[0].opts?.cwd);
+    }
+  });
+
   it('starts every child BEFORE any of them settles — the fan-out is concurrent, not a serial loop', async () => {
     const spy = panelSpawn(() => ({ delayMs: 5 }));
     await judgePanel({ ...BASE, jurors: FOUR_SEATS, spawnFn: spy.fn });

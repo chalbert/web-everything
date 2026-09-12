@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,8 +23,13 @@ import {
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
   resolveSubjectCheckout,
 } from '../review-pr-io.mjs';
-import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
+import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL, REVIEW_PR_OP } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
+// #xu2pp2m — the `--cwd`-reaches-the-reader wiring, asserted through the REAL operation table rather than a
+// re-created copy of it (the same reason `createCliJudgeFactory` is exported and driven directly, #3151).
+import { cwdFlagValue } from '../cli-adapter.mjs';
+import { resolveOperation } from '../run.mjs';
+import { advanceWhileRunning, startRun } from '../engine.mjs';
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'review-pr-io-')); });
@@ -811,5 +817,76 @@ describe('the subject checkout is DERIVED from the constellation siblings (#xgmz
     const reader = createReviewPrReader({ cwd: '/pool/lane-1', originRepo, siblings });
     expect(() => reader({ pr: 1, repo: 'chalbert/nothing-here' }))
       .toThrow(/refusing to review chalbert\/nothing-here#1[\s\S]*probed 3 checkout\(s\)[\s\S]*\/pool\/frontierui/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — `--cwd` REACHES THE DIFF READER, NOT ONLY THE JURORS.
+//
+// THE LIVE DEFECT (PR #2122, 2026-09-12, and the PR MERGED on it). `run.mjs`'s operation table built
+// `createReviewPrReader()` with NO arguments, so the reader's `cwd` was `REPO_ROOT` on every call. `--cwd=`
+// reached `createCliJudgeFactory` and stopped there. Every MECHANICAL review — which always passes a lane,
+// that being the whole point of the wrapper — therefore read its diff from a checkout nobody had chosen; in a
+// single-branch lane clone with no remote-tracking ref for the PR's head branch that produced
+// `degraded: 'ref-unresolved'` and a zero-byte diff, which nothing then refused.
+//
+// WHY THE TEST DRIVES `resolveOperation` AND NOT A HAND-BUILT READER. The whole defect WAS the table entry:
+// `createReviewPrReader({ cwd })` already worked perfectly (the block above proves it), and nothing called it
+// that way. A test that re-creates the wiring instead of exercising it is exactly the shape that let this
+// ship — the same reason `createCliJudgeFactory` is exported and driven directly rather than re-derived
+// (#3151, "deleting the flags from this file entirely left 14 of 15 tests green").
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — `--cwd` decides which checkout the DIFF is read from', () => {
+  /**
+   * A REAL git checkout with a DISTINCTIVE origin, because the cwd is not otherwise observable from outside
+   * the reader. The #3137 guard's refusal quotes `git remote get-url origin` AS RESOLVED AT THE READ'S CWD —
+   * so a unique origin slug there is a direct, unforgeable read of which checkout the diff would have come
+   * from. (The earlier attempt used a nonexistent path and asserted on the probed-checkout list; that list is
+   * only printed when more than one candidate was probed, so it said nothing here.)
+   */
+  let namedCwd;
+  const NAMED_ORIGIN = 'xu2pp2m-owner/xu2pp2m-subject';
+  beforeEach(() => {
+    namedCwd = mkdtempSync(join(tmpdir(), 'xu2pp2m-cwd-'));
+    const git = (...args) => execFileSync('git', args, { cwd: namedCwd, stdio: 'ignore' });
+    git('init', '-q');
+    git('remote', 'add', 'origin', `git@github.com:${NAMED_ORIGIN}.git`);
+  });
+  afterEach(() => { rmSync(namedCwd, { recursive: true, force: true }); });
+
+  const driveRead = (opts) => {
+    const { registry } = resolveOperation(REVIEW_PR_OP, opts);
+    try {
+      advanceWhileRunning(
+        startRun({ op: REVIEW_PR_OP, id: `run-cwd-${Math.random()}`, input: { pr: 1, repo: 'o/n' }, registry }),
+        { registry },
+      );
+    } catch (e) { return String(e.message); }
+    return '';
+  };
+
+  it('`cwdFlagValue` reads both `--cwd=<v>` and `--cwd <v>`, and answers null for neither', () => {
+    expect(cwdFlagValue(['--pr=1', '--cwd=/lanes/lane-3', '--json'])).toBe('/lanes/lane-3');
+    // The space-separated form matters: `parseOperationArgv` accepts it for control flags, so a helper that
+    // only understood `--cwd=` would silently fall back to REPO_ROOT for exactly the shape that DID name a lane.
+    expect(cwdFlagValue(['--pr=1', '--cwd', '/lanes/lane-4'])).toBe('/lanes/lane-4');
+    expect(cwdFlagValue(['--pr=1', '--json'])).toBeNull();
+    expect(cwdFlagValue(['--cwd', '--json'])).toBeNull(); // a flag is not a value
+    expect(cwdFlagValue(['--cwd='])).toBeNull();
+    expect(cwdFlagValue([])).toBeNull();
+  });
+
+  it('the REAL operation table roots the reader at the `cwd` it was given', () => {
+    // The guard resolves `git remote get-url origin` AT THE READ'S CWD and quotes the answer. Only a read
+    // actually rooted at `namedCwd` can produce this slug.
+    expect(driveRead({ cwd: namedCwd })).toContain(NAMED_ORIGIN);
+  });
+
+  it('REGRESSION — with no `cwd`, the read is NOT rooted there, which is exactly how #2122 happened', () => {
+    // THE BEFORE/AFTER, as one pair: "not rooted at the named checkout" is the state the old table entry was
+    // ALWAYS in — for every invocation, `--cwd` or not. Revert the fix and the test above produces this.
+    expect(driveRead({})).not.toContain(NAMED_ORIGIN);
+    expect(driveRead({ cwd: null })).not.toContain(NAMED_ORIGIN);
   });
 });

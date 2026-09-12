@@ -3296,6 +3296,15 @@ dispatch decisions; the thing that turns a surfaced decision into a running agen
    `claude --bg` really does discard `--session-id`, the dispatcher cannot address the session it started,
    and stop-then-resume is unreachable as designed until `#3331`'s own remedy (reading the real id back
    off `claude agents --json`) exists. Trigger (i) is hypothetical; **trigger (ii) is live today.**
+   **RESOLVED 2026-09-11 (`#3331`), and the ruling is unchanged by it.** The probe came back negative — `claude
+   --bg` discards `--session-id`, 5/5 across CLI 2.1.246 and 2.1.269 — so trigger (ii) did fire, and `#3331`'s
+   remedy has now landed. The dispatcher addresses the session it started by the id the CLI **prints back**
+   (`backgrounded · <id> · <name>`, parsed by `we:scripts/operations/dispatch-lane-io.mjs#parseBackgroundedId`),
+   which is narrower and cheaper than the "read it back off `claude agents --json`" this clause anticipated: it
+   is the spawn's own synchronous output, so it needs neither the before/after listing diff the `#3030` spike
+   rejected as racy nor a wait on a listing measured to lag 26+ seconds. Clause 3's acceptance of
+   stop-then-resume therefore stands on a presupposition that is now TRUE rather than unverified. Nothing here
+   implements steering; this records that the mechanism is reachable, not that it is built.
 
 **Lineage:** #3118 (ratified 2026-08-26, operator), resolving its single fork as **(c)** over (a) a WE-native
 port of the CLI-spawn runner and (b) a cross-process HTTP call into `plateau-app`'s dev server. (b) was

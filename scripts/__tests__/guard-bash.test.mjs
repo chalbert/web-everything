@@ -549,6 +549,53 @@ describe('guard-bash — direct-push-to-main block (#2203)', () => {
   });
 });
 
+describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3390)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+
+  it('still denies a REAL sed/perl in-place edit or tee write into backlog|reports (unchanged from before)', () => {
+    denied('sed -i s/x/y/ backlog/2200-a.md');
+    denied("sed -i '' s/x/y/ backlog/2200-a.md"); // BSD empty in-place suffix
+    denied('sed --in-place s/x/y/ reports/2200-a.md');
+    denied("perl -pi -e 's/x/y/' backlog/2200-a.md");
+    denied("perl -i -pe 's/x/y/' backlog/2200-a.md");
+    denied('tee -a backlog/2200-a.md');
+    denied('tee reports/2200-a.md'); // bare tee still WRITES the named file
+    denied('echo hi >> backlog/2200-a.md'); // the untouched `>>` half of the OR
+    denied('echo hi >> ./reports/2200-a.md');
+  });
+
+  it('does NOT deny a READ-ONLY sed/tee/perl invocation that merely MENTIONS a backlog|reports path (#3390 false positive)', () => {
+    allowed("sed -n '1,200p' backlog/123-foo.md");
+    allowed("sed -n '1,200p' reports/123-foo.md");
+    allowed("perl -ne 'print' backlog/123-foo.md");
+    allowed("perl -ne 'print if /x/' reports/123-foo.md");
+    allowed('tee /tmp/scratch.md < backlog/123-foo.md'); // reads from backlog, writes only to scratch
+    allowed("sed 's/x/y/' backlog/123-foo.md"); // no -i at all — prints to stdout, writes nothing
+  });
+
+  it('still denies when the write target is backlog|reports even though the READ input is a different path', () => {
+    denied('sed -i s/x/y/ /tmp/scratch.md backlog/2200-a.md');
+    denied("tee -a backlog/2200-a.md < /tmp/in.txt");
+  });
+
+  // Security review on #2108 — sed's `w` write mechanism needs NO `-i`/`--in-place`: a trailing `w <file>`
+  // flag on an `s///` command, or a standalone `/addr/w <file>` address-command, both genuinely write
+  // `<file>` from the script text alone. Verified directly against real sed: pre-fix, `fileWriteTargets`
+  // only ever read ARGV flags (never the script TEXT), so both commands below returned `[]` and were
+  // allowed — a real regression the flag-only rewrite introduced while fixing the mere-mention false
+  // positive above.
+  it('denies a sed `w`-command/`w`-flag write into backlog|reports with NO -i anywhere (#2108 security finding)', () => {
+    denied("sed 's/x/y/w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/w backlog/2200-a.md' file.txt");
+  });
+
+  it('does NOT deny a sed `w`-command/`w`-flag write whose target is NOT backlog|reports', () => {
+    allowed("sed 's/x/y/w /tmp/scratch.md' file.txt");
+    allowed("sed -n '/pat/w /tmp/scratch.md' file.txt");
+  });
+});
+
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
   const blockedMerge = (c) => expect(decide(c), c).toMatch(/assertMayMerge/);
   const allowed = (c) => expect(decide(c), c).toBeNull();
@@ -2130,5 +2177,170 @@ describe('truncated operation --json — pipeline scoping, not string scanning',
   it('still reaches decide() — the enforcement point, not just the predicate', () => {
     expect(String(decide('node scripts/operations/run.mjs review-pr --pr=1 --json | tail -40'))).toMatch(/corrupts the VALUE/);
     expect(decide('node scripts/operations/run.mjs verify --json > /tmp/run.json; git log | tail -5')).toBeFalsy();
+  });
+});
+
+// #3627 — the delivery agent's OWN Bash session (`--restricted`, spawned by
+// `we:scripts/operations/deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER`) may never run any of the
+// mechanical lifecycle commands its own wrapper drives end to end. Scoped via `dispatchKind === 'delivery'` —
+// the SAME `WE_DISPATCH_KIND` channel the #3105 dispatched-verification arm above already reads, now also
+// stamped by `CLAUDE_RESTRICTED_PROVIDER.spawn`. Every arm here is `reason(segment, { dispatchKind })`-level
+// (the per-segment table), never `decide`-only, EXCEPT the last describe block, which proves the real
+// enforcement point (`decide`) denies too, not just the pure predicate.
+describe('guard-bash — a delivery agent may never run the mechanical lifecycle commands itself (#3627)', () => {
+  it('denies `lane-pool.mjs` (any subcommand) for a delivery-agent session', () => {
+    expect(reason('node scripts/lane-pool.mjs acquire --lane=3', { dispatchKind: 'delivery' })).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs status --json', { dispatchKind: 'delivery' })).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs release --lane=3', { dispatchKind: 'delivery' })).toMatch(/lane-pool\.mjs/);
+  });
+
+  it('denies `backlog.mjs claim` and `backlog.mjs release` for a delivery-agent session', () => {
+    expect(reason('node scripts/backlog.mjs claim 1234 --session=x', { dispatchKind: 'delivery' })).toMatch(/backlog\.mjs claim/);
+    expect(reason('node scripts/backlog.mjs release 1234 --session=x', { dispatchKind: 'delivery' })).toMatch(/backlog\.mjs release/);
+  });
+
+  it('denies `gh pr` (any subcommand) for a delivery-agent session', () => {
+    expect(reason('gh pr view 1234', { dispatchKind: 'delivery' })).toMatch(/gh pr/);
+    expect(reason('gh pr create --title=x --body=y', { dispatchKind: 'delivery' })).toMatch(/gh pr/);
+    expect(reason('gh pr merge 1234', { dispatchKind: 'delivery' })).toMatch(/gh pr/); // the delivery-scoped arm, not just the #2290 merge-only arm
+  });
+
+  it('denies `run.mjs open-pr` and `open-pr.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/operations/run.mjs open-pr --ref=lane/1234-x --sha=HEAD --base=main', { dispatchKind: 'delivery' })).toMatch(/open-pr/);
+    expect(reason('node scripts/operations/open-pr.mjs', { dispatchKind: 'delivery' })).toMatch(/open-pr/);
+  });
+
+  it('denies `pr-land.mjs` for a delivery-agent session', () => {
+    // The `--require-verified` flag is NOT what this case asserts — the deny keys on the script path alone and
+    // is flag-independent. It is spelled out because #3321's caller sweep (`we:scripts/__tests__/lane-verify.test.mjs`)
+    // harvests EVERY flagged pr-land.mjs command string any tracked file ships and requires each one to
+    // declare its verification posture. That sweep has exactly one exclusion (pr-land's own --help banner) and
+    // says in-file that the exclusion must be re-argued, never silently widened — so a deny FIXTURE carries the
+    // posture too rather than becoming exclusion number two. `--no-require-verified` is the sweep's own
+    // sanctioned flag arm (its mutation probe injects exactly that spelling), and it is the honest one for a
+    // fixture: this string is INPUT TO A DENY PREDICATE, never executed, so no verification is skipped by it.
+    expect(reason('node scripts/pr-land.mjs --no-require-verified --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
+  });
+
+  it('denies `learnings-drop.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x --area=y --suggestion=z', { dispatchKind: 'delivery' })).toMatch(/learnings-drop\.mjs/);
+  });
+
+  it('denies `converge-cli.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/converge-cli.mjs init --lane=/lane-3 --state=/lane-3/.converge-state.json', { dispatchKind: 'delivery' })).toMatch(/converge-cli\.mjs/);
+    expect(reason('node scripts/converge-cli.mjs step --state=/lane-3/.converge-state.json', { dispatchKind: 'delivery' })).toMatch(/converge-cli\.mjs/);
+  });
+
+  it('denies `verify-lane.mjs` for a delivery-agent session in EVERY mode — including `request`/`check`/`reset`, '
+    + 'unlike the #3105 build/fix/ci-heal carve-out (a delivery agent never runs the gate at all, not even the poll form)', () => {
+    expect(reason('node scripts/verify-lane.mjs --json', { dispatchKind: 'delivery' })).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs request', { dispatchKind: 'delivery' })).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs check', { dispatchKind: 'delivery' })).toMatch(/verify-lane\.mjs/);
+  });
+
+  it('denies `review-core-cli.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/review-core-cli.mjs invite --file=x.json --json', { dispatchKind: 'delivery' })).toMatch(/review-core-cli\.mjs/);
+  });
+
+  it('never fires for an interactive session or any OTHER dispatch kind — scoped strictly to `delivery`', () => {
+    const commands = [
+      'node scripts/lane-pool.mjs acquire --lane=3',
+      'node scripts/backlog.mjs claim 1234 --session=x',
+      'gh pr view 1234',
+      'node scripts/operations/run.mjs open-pr --ref=lane/1234-x',
+      'node scripts/pr-land.mjs --no-require-verified --pr=1234', // flag spelled out for #3321's sweep — see above
+      'node scripts/conveyor/learnings-drop.mjs --kind=friction',
+      'node scripts/converge-cli.mjs init --lane=/lane-3',
+      'node scripts/verify-lane.mjs request',
+      'node scripts/review-core-cli.mjs invite --file=x.json',
+    ];
+    for (const cmd of commands) {
+      expect(reason(cmd, {}), cmd).toBeNull();
+      expect(reason(cmd), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: null }), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: 'build' }), cmd).toBeNull(); // a DIFFERENT dispatch kind — not this table
+    }
+  });
+
+  it('does NOT over-block ordinary build/test/git commands for a delivery-agent session', () => {
+    const ordinary = [
+      'npm test',
+      'npm run test:unit',
+      'npm run check:standards',
+      'node --test scripts/operations/__tests__/deliver-item-wrapper.test.mjs',
+      'git status',
+      'git diff',
+      'git add scripts/operations/deliver-item-wrapper.mjs',
+      'git commit -m "build item #1234"',
+      'node scripts/some-other-tool.mjs --flag=lane-pool-ish-but-not-really',
+    ];
+    for (const cmd of ordinary) {
+      expect(reason(cmd, { dispatchKind: 'delivery' }), cmd).toBeNull();
+    }
+  });
+
+  it('reaches decide() — the real enforcement point, not just the pure per-segment predicate', () => {
+    expect(String(decide('node scripts/lane-pool.mjs acquire --lane=3', { dispatchKind: 'delivery' }))).toMatch(/lane-pool\.mjs/);
+    expect(String(decide('gh pr merge 1234', { dispatchKind: 'delivery' }))).toMatch(/gh pr/);
+    // chained: the deny fires even when the denied command sits alongside an otherwise-benign one
+    expect(String(decide('git status && node scripts/verify-lane.mjs check', { dispatchKind: 'delivery' }))).toMatch(/verify-lane\.mjs/);
+    // an ordinary, undenied chain still passes clean under the same dispatchKind. (`npm test`/check:standards
+    // are deliberately NOT used here — those are already denied for ANY dispatchKind by the pre-existing
+    // #3105 arm above, which is correct and unrelated to this new table.)
+    expect(decide('git status && git add -- scripts/x.mjs && git commit -m "build item #1234"', { dispatchKind: 'delivery' })).toBeNull();
+    // the identical commands, no dispatchKind at all (interactive) — untouched
+    expect(decide('node scripts/lane-pool.mjs acquire --lane=3')).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE DELIVERY LIFECYCLE TABLE MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT".
+//
+// WHY THIS BLOCK EXISTS. That generalization has now been proposed once, on a reading that is superficially
+// very plausible: `deliver-item-wrapper.mjs` is still unwired, so nothing stamps `'delivery'` in production
+// and the table above is, today, dead code. The conclusion drawn from that — "so widen the gate to the kinds
+// that ARE stamped (build/prepare/prepare-decision/investigate/fix/ci-heal) and it will finally fire" — is
+// wrong, and wrong in a way that would break every dispatched agent's FIRST STEP.
+//
+// The table is not "what a dispatched agent may not do". It is "what the delivery WRAPPER does on the agent's
+// behalf" — and the other six launch kinds have no wrapper owning their lifecycle; their briefs tell the agent
+// to do these things itself. Each command below is therefore asserted ALLOWED under the live kinds, with the
+// brief and step that requires it named, so a future widening goes RED here with the reason attached rather
+// than shipping and denying step 1 of every dispatch.
+//
+// (The complementary half — `npm run check:standards` IS already denied for all these kinds, by the #3105 arm
+// — is asserted at the top of this file and is why `we:skills-src/conveyor/*-brief.md` all use
+// `verify-lane request` + poll instead.)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — the lifecycle denylist stays delivery-scoped because the live briefs need those commands', () => {
+  /** `we:scripts/operations/dispatch-lane.mjs#LAUNCH_KINDS` — the kinds `dispatch-lane-io.mjs` actually stamps. */
+  const LIVE_LAUNCH_KINDS = ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'];
+
+  /** command → the brief step that requires it, so a red test says WHY rather than only WHAT. */
+  const REQUIRED_BY_LIVE_BRIEFS = [
+    ['node scripts/lane-pool.mjs acquire --lane=3 --purpose=conveyor-delivery', 'step 1 of ALL SIX briefs — acquire the lane clone'],
+    ['node scripts/verify-lane.mjs request', 'the SANCTIONED gate path (#3105) every brief now uses'],
+    ['node scripts/verify-lane.mjs check --json', 'the poll half of that same sanctioned gate path'],
+    ['node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x', 'the learnings step in five of the six briefs'],
+    ['gh pr view 1234 --json title,body,comments', 'fix-agent-brief.md step 2 — read the finding being repaired'],
+    ['gh pr checks 1234', 'fix-agent-ci-brief.md step 2 — find which required check is red'],
+    ['node scripts/operations/run.mjs open-pr --ref=lane/1234-x --sha=HEAD --base=main', 'how build/prepare/investigate open their PR at all'],
+  ];
+
+  for (const kind of LIVE_LAUNCH_KINDS) {
+    it(`allows every command a \`${kind}\` brief requires of the agent itself`, () => {
+      for (const [cmd, why] of REQUIRED_BY_LIVE_BRIEFS) {
+        expect(decide(cmd, { dispatchKind: kind }), `${cmd} — ${why}`).toBeNull();
+      }
+    });
+  }
+
+  it('and the SAME commands are still denied for `delivery`, where a wrapper genuinely owns them', () => {
+    // The scoping is the ruling, so both directions are asserted together: widening the gate and narrowing it
+    // are each a real change, and neither should be possible without one of these two going red.
+    for (const [cmd] of REQUIRED_BY_LIVE_BRIEFS) {
+      expect(decide(cmd, { dispatchKind: 'delivery' }), cmd).not.toBeNull();
+    }
   });
 });

@@ -28,12 +28,35 @@
  *
  * PURE-CORE / IO-SHELL SPLIT (the hard design constraint, mirrored from tick-core.mjs):
  *   • The PURE core ({@link carryForward}, {@link shouldStop}, {@link tickSurface}, {@link runLoop}) has NO
- *     fs / child_process / clock of its own — every effect (stepping a tick, the mechanical passes, emitting,
- *     heartbeating the lease, sleeping) is INJECTED. `runLoop` is the runner's whole control flow, unit-tested
- *     (skills-src/conveyor/__tests__/runner.test.mjs) with fake effects — no git/network, no real lease.
+ *     fs / child_process / clock of its own — every effect (stepping a tick, dispatching, the mechanical
+ *     passes, emitting, heartbeating the lease, sleeping) is INJECTED. `runLoop` is the runner's whole control
+ *     flow, unit-tested (skills-src/conveyor/__tests__/runner.test.mjs) with fake effects — no git/network, no
+ *     real lease, no `claude` process.
  *   • The IO SHELL (the `main()` CLI + the `cli*` effect builders, gated on the main-module check) shells
- *     `tick-core.mjs` (bookkeeping in on STDIN, `{ decisions, nextState }` out), runs the two deterministic
- *     passes, prints the surface, and heartbeats the real singleton lease.
+ *     `tick-core.mjs` (bookkeeping in on STDIN, `{ decisions, nextState }` out), calls `dispatch-lane` for each
+ *     surfaced decision (#3383), runs the two deterministic passes, prints the surface, and heartbeats the
+ *     real singleton lease.
+ *
+ * #3383 — WHAT CHANGED FROM "THREADS `nextState` FORWARD UNCHANGED". The runner still never re-derives a
+ * guard — that invariant is intact. But it is no longer accurate to say it carries THIS tick's own
+ * `nextState` forward byte-identical: `dispatchPass` (below) calls `dispatch-lane` once per surfaced
+ * decision, and EACH call runs its OWN nested `tick-core` read, which updates `nextState` again as it goes.
+ * Carrying a stale copy forward instead of the dispatch pass's own updated one would make the runner's
+ * bookkeeping silently drift from what actually got dispatched: the same item would re-surface and get
+ * RE-INVOKED every tick for its whole build lifetime, forever — not a second live agent (dispatch-lane's OWN
+ * double-dispatch guard still catches that), but a wasted subprocess spawn every ~120s for as long as
+ * anything is building. So `runLoop` now carries forward the DISPATCH PASS's `nextState` when one ran, not
+ * the raw tick read's — still the tick core's own answer, just the latest one, and still nothing the runner
+ * computed itself.
+ *
+ * #3416 — CORRECTION TO THE PARAGRAPH ABOVE'S ORIGINAL CLAIM. It used to say a newly-decided item's guard
+ * "gets ADDED to `nextState`" only INSIDE dispatch-lane's own nested call, "a fact the runner's own top-level
+ * tick read (made BEFORE any dispatching happens) cannot know." That is false: `tick-core.mjs`'s `planTick`
+ * writes a guard the MOMENT it decides to surface a spawn candidate — in the SAME call that produces
+ * `decisions.spawnBuilds`/`spawnPrepareScope`/etc, unconditionally, including the runner's own top-level
+ * read. Forwarding that already-guarded `nextState` to `dispatch-lane` verbatim made every dispatch through
+ * this pass suppress itself as "already in flight" — see `makeCliDispatchPass`'s own docblock below for the
+ * fix (strip an item's own guard immediately before its call, restoring the pre-dispatch view for it alone).
  */
 
 import { dirname, join } from 'node:path';
@@ -44,6 +67,8 @@ import {
 } from './runner-lock.mjs';
 import { runGhSync } from '../../scripts/lib/gh-throttle.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+import { writeLineSync } from '../../scripts/lib/write-all-sync.mjs';
+import { normNum } from '../../scripts/conveyor/queue-store.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -85,6 +110,10 @@ export function tickSurface(out) {
   const d = (out && out.decisions) || {};
   return {
     statusLine: d.statusLine || '',
+    // #3398 — the structured tallies behind `statusLine` (tick-core's `computeTickCounts`), so a consumer
+    // (the supervisor's alerting, once it captures this surface) can read `counts.queued` without re-parsing
+    // the rendered line's text.
+    counts: d.counts && typeof d.counts === 'object' ? d.counts : null,
     notes: Array.isArray(d.notes) ? d.notes : [],
     dispatch: {
       builds: Array.isArray(d.spawnBuilds) ? d.spawnBuilds : [],
@@ -100,13 +129,24 @@ export function tickSurface(out) {
 /**
  * The runner's WHOLE control flow, as a reducer over injected effects — so it is unit-testable with fakes and
  * carries no IO of its own. Each tick: step the core (`tickOnce`), emit the surface, run the deterministic
- * mechanical passes, check stop, heartbeat the singleton lease, sleep, then carry `nextState` forward. A lost
- * lease (another process reclaimed a stale runner) STOPS the loop — the singleton right to drive is gone.
+ * mechanical passes, THEN dispatch the surfaced decisions (`dispatchPass`) — this order, mechanical passes
+ * before dispatch, not the reverse, since xpshzms (2026-09-07): `dispatchPass` is a sequential, blocking,
+ * untimed spawn loop that can run long on a big backlog, and running it FIRST used to starve the (cheap,
+ * bounded) mechanical passes of a timely turn — check stop, heartbeat the singleton lease, sleep, then carry
+ * the DISPATCH PASS's `nextState` forward (see the file header, #3383, for why that is not the same as this
+ * tick's own raw read). A lost lease (another process reclaimed a stale runner) STOPS the loop — the
+ * singleton right to drive is gone.
  *
  * @param {object} effects
  * @param {(payload:object)=>Promise<object>|object} effects.tickOnce  step the tick core → `{ decisions, nextState }`
  * @param {(surface:object,ctx:object)=>any} [effects.emit]            surface the tick (status + notes + dispatch)
- * @param {(ctx:object)=>any} [effects.mechanicalPasses]              run the no-LLM passes (§4b infra, §4c/§4d reapers)
+ * @param {(ctx:{tick:number,out:object})=>Promise<{nextState:object}>} [effects.dispatchPass]
+ *   call `dispatch-lane` once per surfaced decision (#3383) and return the nextState after all of them —
+ *   defaults to an identity pass-through (`out.nextState`, unchanged) so a caller with nothing to dispatch
+ *   through pays no cost and needs no override.
+ * @param {(ctx:{tick:number,out:object,heartbeat:Function})=>any} [effects.mechanicalPasses]  run the no-LLM
+ *   passes (§4b infra, §4c/§4d reapers, #3105 verify-dispatch) — `heartbeat` (#3404) is the SAME lease-extend
+ *   effect this loop calls after the tick, so a pass that itself outlasts the lease TTL can extend it mid-pass
  * @param {()=>boolean|Promise<boolean>} [effects.heartbeat]           extend the singleton lease; false ⇒ lost
  * @param {(ms:number)=>any} [effects.sleep]                           wait between ticks
  * @param {number} [effects.intervalMs]                                tick interval
@@ -117,6 +157,7 @@ export function tickSurface(out) {
 export async function runLoop({
   tickOnce,
   emit = () => {},
+  dispatchPass = async ({ out } = {}) => ({ nextState: (out && out.nextState) || {} }),
   mechanicalPasses = () => {},
   heartbeat = () => true,
   sleep = () => {},
@@ -135,9 +176,34 @@ export async function runLoop({
     const out = await tickOnce(payload);
     lastOut = out;
     await emit(tickSurface(out), { tick });
+
     // Best-effort deterministic passes — a throw here must never wedge the loop (mirrors the SKILL's §4b/§4c/§4d
-    // "best-effort; its exit never gates the tick").
-    try { await mechanicalPasses({ tick, out }); } catch { /* best-effort — a pass failure never stalls a tick */ }
+    // "best-effort; its exit never gates the tick"). #3404 — `heartbeat` is threaded IN here so a pass that
+    // itself runs longer than the lease TTL (the #3105 verify-dispatch pass: "can legitimately run for as long
+    // as the gate itself takes, 150-350s, sometimes longer") can extend the lease MID-PASS, not only after it
+    // returns — a single heartbeat call placed after this line, the way it used to be, would still let the
+    // lease go stale while the pass that needs it most is still running.
+    //
+    // RUNS BEFORE `dispatchPass` BELOW — deliberately, moved here from AFTER it (xpshzms, live-caught
+    // 2026-09-07). `dispatchPass` is a STRICTLY SEQUENTIAL loop of blocking, untimed `execFileSync` spawns —
+    // one per surfaced build/fix/ci-heal item (see `makeCliDispatchPass`'s own docblock) — that can run for
+    // many minutes on a large backlog, confirmed live via a process sample of the resident runner (100% of a
+    // 5s sample sat inside `node::SyncProcessRunner::Spawn`). With mechanical passes running AFTER dispatch,
+    // as this file used to, a big backlog starved them (and the heartbeat below, called only once both
+    // finish) of a timely turn every tick — the confirmed root cause of PR #1939 sitting with a real merge
+    // conflict `we:scripts/conveyor/parked-pr-conflict-watch.mjs` never caught (compare PR #1932, which the
+    // SAME pass DID catch, hours before that night's backlog built up). Running these cheap, bounded passes
+    // FIRST guarantees they get a turn every ~120s tick regardless of how long the dispatch backlog behind
+    // them takes to drain.
+    try { await mechanicalPasses({ tick, out, heartbeat }); } catch { /* best-effort — a pass failure never stalls a tick */ }
+
+    // DISPATCH what this tick decided (#3383) — now AFTER the mechanical passes above, not before (xpshzms).
+    // Still unrelated to them (infra recovery, lease reaping — neither reads nor produces `nextState`).
+    // Best-effort: a dispatch failure must not wedge the loop. On a throw, `dispatched` keeps its default
+    // (this tick's own raw `nextState`) — the same degraded-but-safe behaviour the runner had before this
+    // pass existed, never worse.
+    let dispatched = { nextState: (out && out.nextState) || {} };
+    try { dispatched = await dispatchPass({ tick, out }); } catch { /* best-effort */ }
 
     const stop = shouldStop(out, { tick, maxTicks });
     if (stop.stop) { stoppedReason = stop.reason; break; }
@@ -148,11 +214,11 @@ export async function runLoop({
     if (!alive) { stoppedReason = 'lease-lost'; break; }
 
     await sleep(intervalMs);
-    // No `signals` folded in: this runner spawns no LLM agents (it only SURFACES the core's decisions — #2701
-    // clause 3), so it observes no agent RETURN and has no `returnedBuildNums` to inject. Build guards still
-    // retire via the CLAIMED path off each tick's fresh state read. Folding observed returns is #2703's job
-    // (wiring headless agent-spawning), not this slice's.
-    payload = carryForward(out);
+    // No `signals` folded in: `dispatchPass` starts agents but does not WATCH them run to completion, so there
+    // is still no `returnedBuildNums` to inject here — that remains a later slice. `nextState` DOES come from
+    // the dispatch pass now, not the raw tick read — see the file header (#3383) for why carrying the stale
+    // one forward would silently re-surface an already-dispatched item every tick.
+    payload = carryForward({ ...out, nextState: dispatched.nextState }, {});
     tick += 1;
   }
   return { ticks: tick + 1, stoppedReason, lastOut };
@@ -178,6 +244,12 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
   };
 }
 
+/** #3404 — how often the verify-dispatch pass's own long run heartbeats the singleton lease WHILE it is still
+ *  running, not only after it returns. Well under the 15-min lease TTL (`RUNNER_LEASE_MINUTES`,
+ *  {@link ./runner-lock.mjs}) and well under the pass's own typical 150-350s runtime, so a normal run
+ *  heartbeats at least once or twice mid-pass, not zero times. */
+const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
+
 /** Build the real `mechanicalPasses` effect: the deterministic, no-LLM passes the SKILL runs each tick —
  *  the infra-blocked recovery pass (§4b), the lease-reaper (§4c), the session-reaper (§4d, WE #3435 — stops
  *  a `claude agents` background session once ITS OWN process reports `done`/`failed`, a wholly separate
@@ -202,7 +274,9 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  conveyor/ci-queue-watch.mjs sweep`: samples `gh run list`'s started-minus-created wait time and appends it
  *  to a durable sidecar history, the SAME "piggyback on a pass this headless runner already ticks" shape
  *  branch-drift above uses, so a genuine Actions run-queue regression becomes a visible trend instead of
- *  invisible; purely informative — no dispatch gate reads its verdict). All ten are best-effort: a failure is
+ *  invisible; purely informative — no dispatch gate reads its verdict), and the verify-dispatch pass
+ *  (#3105: picks up a `request`-stamped gate marker and runs it AS the runner's own process, unbound by an
+ *  agent's 120s foreground window). All eleven are best-effort: a failure is
  *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer
  *  to `main`.
  *
@@ -214,13 +288,35 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
  *  flight for a PR simply does not appear in next tick's plan.
  *
- *  THE HICCUP SINK is the ONLY one of the eight that reads `out` (this tick's already-computed
+ *  THE HICCUP SINK is the ONLY one of the eleven that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
  *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
  *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
  *  shape — this runner spawns no LLM agents (#2701 clause 3) and so never observes an agent's return; that
  *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
- *  hiccup-sink.mjs `fileHiccup`. */
+ *  hiccup-sink.mjs `fileHiccup`.
+ *
+ *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
+ *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
+ *  `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so it can just be re-run every
+ *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
+ *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
+ *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
+ *  flight for a PR simply does not appear in next tick's plan. Firing its per-PR `review-dispatch.mjs` calls
+ *  SEQUENTIALLY mirrors `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state —
+ *  parallel runs have no benefit and this keeps one bad dispatch's blast radius the same as every other pass
+ *  here. #xu2pp2m — each call is now a BLOCKING mechanical review rather than a fork-and-return `claude --bg`
+ *  spawn, so this pass (like verify-dispatch) heartbeats the lease while it runs.
+ *
+ *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
+ *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
+ *  simply takes longer; nothing about the runner's own loop is bound by a per-turn window the way an
+ *  interactive agent's Bash call is. #3404 — it is run through {@link runQuietHeartbeating}, not the plain
+ *  synchronous `runQuiet` the other passes use: it is the one pass whose runtime can outlast the singleton
+ *  lease's TTL if nothing heartbeats DURING it — a mid-pass heartbeat closes the exact stale-lease-mid-run
+ *  window `#2453` already fixed for the plateau-app drain daemon's whole-process lease. The other passes are
+ *  quick bookkeeping sweeps; wrapping them the same way would add an async spawn + timer for no real benefit.
+ */
 
 /** Cap on {@link summarizeMechanicalPassError}'s output — generous for a real diagnostic, still bounded so one
  *  runaway stack trace can't flood `runner.log`. */
@@ -248,7 +344,7 @@ export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR
 }
 
 export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
-  return async ({ out } = {}) => {
+  return async ({ out, heartbeat = () => true } = {}) => {
     const { execFileSync } = await import('node:child_process');
     const runQuiet = (relPath, extraArgs = []) => {
       try {
@@ -297,9 +393,15 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // is ever reached — so a review already in flight for a PR simply does not appear in next tick's plan.
     //
     // SEQUENTIAL, mirroring `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state:
-    // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
-    // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
-    // rest of the tick, or the tick itself).
+    // firing N reviews at once has no benefit and this keeps one bad dispatch's blast radius the same as every
+    // other pass here (best-effort — a single PR's dispatch failure never stops the rest of the tick, or the
+    // tick itself).
+    //
+    // #xu2pp2m — EACH ONE NOW BLOCKS UNTIL THE REVIEW HAS A VERDICT. `review-dispatch.mjs` no longer forks a
+    // `claude --bg` agent to type three commands out of a brief; it runs those three commands itself
+    // (`review-dispatch-wrapper.mjs`). So a tick with reviews owed is minutes longer than one without — which
+    // is fine here, exactly as it is for verify-dispatch (#3105/#3404), PROVIDED the singleton lease is
+    // heartbeated mid-pass. It is: see the `runQuietHeartbeating` call in the loop below.
     let plan = null;
     try {
       const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json'];
@@ -342,15 +444,29 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
             // `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
             // attempt itself threw and no session was ever spawned — so `review-round:<N>` kept advancing every
             // tick regardless of whether a review actually happened, misleading anyone reading the label.
-            let dispatched = false;
-            try {
-              execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
-                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
-              dispatched = true;
-            } catch (e) {
-              process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-            }
-            if (!dispatched) continue; // no session was spawned — never advance the round label for this PR
+            // #xu2pp2m — HEARTBEATED, not a bare `execFileSync`, because `review-dispatch.mjs` is now
+            // MECHANICAL and therefore BLOCKING. It used to return the instant `claude --bg` forked; it now
+            // returns when the review has an actual verdict, which is minutes. That is the SAME shape #3404
+            // already solved for `verify-dispatch.mjs`: a pass whose runtime can approach the 15-minute
+            // singleton lease TTL must heartbeat the lease WHILE it runs, and `execFileSync` structurally
+            // cannot (it blocks the event loop until the child exits, so no timer can fire). Without this the
+            // runner would lose its own lease mid-review and stop.
+            //
+            // `dispatched` now means MORE than it did, and that is deliberate — see `review-dispatch.mjs`'s
+            // header. Exit 0 from the mechanical path proves a review RAN and reached a verdict; a
+            // `blocked-on-infra` classification (no free lane, a crashed loop) exits non-zero. So the
+            // `review-round:<N>` label below finally advances on rounds that happened rather than on sessions
+            // that were forked, which is what #x5v8yy9's own comment always claimed for it.
+            const dispatched = await runQuietHeartbeating(
+              join(scriptsDir, 'operations', 'review-dispatch.mjs'),
+              {
+                repo: null, // the slug is passed explicitly below; `runQuietHeartbeating`'s own `--repo` append would duplicate it
+                args: [`--pr=${d.prNumber}`, `--repo=${repoSlug}`],
+                heartbeat,
+                label: `review-dispatch --pr=${d.prNumber}`,
+              },
+            );
+            if (!dispatched) continue; // no review actually ran — never advance the round label for this PR
             // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
             // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
             // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
@@ -374,6 +490,19 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
             }
           }
         }
+        // #xu2pp2m — A DUPLICATED, ALWAYS-THROWING COPY OF THE TWO LOOPS ABOVE WAS DELETED HERE. It was a
+        // merge artifact (the branch's own cross-PR reconcile commit, `c014ef4`, landed the round-tag and
+        // status-tag loops twice): the second `review-round-tag.mjs` call sat OUTSIDE
+        // `for (const d of reviewsOwed)` and still referenced `d`, whose `let`-scope ends with that loop — so
+        // reaching it ALWAYS threw `ReferenceError: d is not defined`, every tick this branch ran.
+        //
+        // WHAT IT ACTUALLY COST, stated no wider than it was: the two loops above it had already done the real
+        // work, and the copy below the throw was redundant with the status sweep that had just run — so no
+        // label went unwritten. What was lost was the LOG: every such tick ended in
+        // `⚠ mechanical pass review-reconcile dispatch failed (non-fatal): d is not defined`, which reads as
+        // "the review pass failed" when the review pass had in fact succeeded. An operator debugging a real
+        // dispatch failure was looking at a permanent false positive. Found while wiring the mechanical
+        // dispatch through here, not looked for.
       }
     } catch (e) {
       process.stderr.write(`⚠ mechanical pass review-reconcile dispatch failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
@@ -394,6 +523,12 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // `review:changes` is skipped (that re-check is the separate follow-on we:3596, out of scope here). See
     // that file's own header for the full design, ratified in we:3549.
     runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep']);
+    // #3105/#3404 — unlike the passes above, this one can legitimately run for as long as the gate itself
+    // takes (150–350s, sometimes longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep.
+    // That is fine here — this tick simply takes longer — but the lease must be heartbeated WHILE it runs, not
+    // only once the whole tick returns.
+    await runQuietHeartbeating(join(scriptsDir, 'conveyor', 'verify-dispatch.mjs'),
+      { repo, heartbeat, label: 'conveyor/verify-dispatch.mjs' });
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
@@ -407,6 +542,157 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     } catch (e) {
       process.stderr.write(`⚠ mechanical pass hiccup-sink failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
     }
+  };
+}
+
+/**
+ * Run one script async (never blocking the event loop the way `execFileSync` does), heartbeating the lease
+ * every {@link MECHANICAL_PASS_HEARTBEAT_MS} while it is still running, and resolving once it exits — best-
+ * effort like `runQuiet` (a non-zero exit or spawn error is swallowed, logged to stderr, never thrown). The
+ * heartbeat MUST run on an interval independent of the child's own completion — `execFileSync` cannot do this
+ * at all (it blocks the caller until the child exits, so nothing else can run meanwhile), which is why these
+ * passes need `child_process.spawn` instead of the other passes' synchronous call.
+ *
+ * #xu2pp2m — RESOLVES `true` ON A CLEAN EXIT, `false` OTHERWISE, and takes explicit `args`. Both are for the
+ * second caller: `review-dispatch.mjs` became a BLOCKING mechanical review (so it needs the heartbeat) whose
+ * exit code gates the `review-round:<N>` label (so a swallowed failure must still be REPORTED to the caller,
+ * not only to stderr). `verify-dispatch.mjs`'s call ignores the return, exactly as before.
+ *
+ * @param {string} scriptPath
+ * @param {{ repo?:string|null, args?:string[], heartbeat:Function, label:string }} o
+ * @returns {Promise<boolean>} did the child exit 0?
+ */
+async function runQuietHeartbeating(scriptPath, { repo = null, args: extraArgs = [], heartbeat = () => true, label } = {}) {
+  const { spawn } = await import('node:child_process');
+  const args = [scriptPath, ...extraArgs];
+  if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
+  let timer = null;
+  let ok = false;
+  try {
+    await new Promise((resolvePromise) => {
+      const child = spawn('node', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      timer = setInterval(() => { try { heartbeat(); } catch { /* best-effort */ } }, MECHANICAL_PASS_HEARTBEAT_MS);
+      let stderr = '';
+      child.stderr.on('data', (d) => { stderr += String(d); });
+      child.on('error', (e) => {
+        process.stderr.write(`⚠ mechanical pass ${label} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+        resolvePromise();
+      });
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          process.stderr.write(`⚠ mechanical pass ${label} failed (non-fatal): exit ${code} ${stderr.split('\n')[0]}\n`);
+        }
+        ok = code === 0;
+        resolvePromise();
+      });
+    });
+  } finally {
+    if (timer) clearInterval(timer);
+  }
+  return ok;
+}
+
+/**
+ * Build the real `dispatchPass` effect (#3383): call `dispatch-lane` once per item this tick's core surfaced
+ * — builds, then prepareScope, then prepareDecision, then fixes, then ciHeals ({@link tickSurface}'s own
+ * order) — and hand back the bookkeeping after all of them.
+ *
+ * SEQUENTIAL, NEVER PARALLEL. `dispatch-lane` runs its own nested `tick-core` read per call, which updates
+ * `nextState` again as it goes. Item 2 must see item 1's guard or the two could both read "not yet guarded"
+ * and both clear a lane the double-dispatch guard exists to serialize — running them in parallel would reopen
+ * exactly the race the guard is for.
+ *
+ * #3416 — EACH ITEM'S OWN GUARD IS STRIPPED FROM ITS BOOKKEEPING, RIGHT BEFORE ITS CALL, AND NOWHERE ELSE
+ * ({@link bookkeepingForDispatch} below owns the why). See the file header (#3416) for how this was found
+ * and confirmed unconditional, and for the still-open question of how the 2026-08-29 session's `#2936`
+ * dispatch succeeded through this same call path despite it.
+ *
+ * THE BOOKKEEPING FILE IS BARE, not `{ bookkeeping: … }`. `forwardableBookkeeping`
+ * ({@link ../../scripts/operations/dispatch-lane-io.mjs}) accepts either shape, but the wrapped one recognizes
+ * only a `bookkeeping` key and reports every sibling as a DROPPED key — so wrapping `nextState` under a
+ * `signals` or similar key here would make every call log a spurious drop for a key nothing ever meant to send.
+ *
+ * A PER-ITEM FAILURE NEVER STOPS THE TICK (mirrors `makeCliMechanicalPasses`'s "best-effort, never wedge"):
+ * a spawn throw, a non-zero exit, or unparsable stdout is caught, logged to stderr, and the loop keeps the
+ * PRIOR `nextState` for that item and moves on — one bad `dispatch-lane` call must not block the rest of this
+ * tick's dispatches.
+ *
+ * `repo` IS ACCEPTED BUT NOT FORWARDED. Unlike `tick-core.mjs` / the mechanical passes, `dispatch-lane`'s own
+ * declared input has no `repo` field — its repo root is resolved by script location
+ * (`dispatch-lane-io.mjs`'s `REPO_ROOT`), never by a flag or cwd. Passing `--repo=` would be refused as an
+ * unknown flag and fail every dispatch this tick, so the parameter exists only for call-site symmetry with
+ * `makeCliTickOnce` / `makeCliMechanicalPasses`.
+ */
+/**
+ * #3416 — bookkeeping for ONE item's own dispatch-lane call: `nextState` with THIS item's guard entries
+ * stripped from every guard list (build/prepare/fix/ciHeal), everything else untouched. Pure.
+ *
+ * WHY THIS EXISTS. `tick-core.mjs`'s `planTick` writes a guard entry the MOMENT it decides to surface an item
+ * as a spawn candidate — the same call that produces `decisions.spawnBuilds`/`spawnPrepareScope`/etc, not a
+ * later one. `nextState`, as `makeCliDispatchPass`'s loop holds it before calling this, already has a guard
+ * for the item about to be dispatched — the runner's own top-level read committed one for every item now
+ * being processed, and each prior iteration's own nested `tick-core` call re-committed one for every item
+ * STILL pending too. Left unstripped, dispatch-lane's nested read for this item sees an "already live" guard
+ * for itself and refuses to dispatch — correctly, by its own duplicate-prevention logic, but the guard it is
+ * honoring was written by PLANNING, never by an actual spawn, so nothing is ever dispatched. Stripping only
+ * this item's own guard restores the pre-dispatch view for it alone; every other item's guard — genuinely in
+ * flight, whether from a real prior dispatch or an earlier iteration of the same loop — is left exactly as
+ * `nextState` already has it, so the double-dispatch and lane-collision guards those protect are unaffected.
+ *
+ * @param {object} nextState the tick core's current bookkeeping (buildGuards/prepareGuards/fixGuards/ciHealGuards)
+ * @param {{num:*}} item the item about to be dispatched — only ITS OWN guard entries are stripped
+ * @returns {object} nextState with this item's own guard entries removed from each list; everything else identical
+ */
+export function bookkeepingForDispatch(nextState, item) {
+  const key = normNum(item && item.num);
+  const stripOwnGuard = (list) => (Array.isArray(list) ? list.filter((g) => normNum(g && g.num) !== key) : list);
+  return {
+    ...nextState,
+    buildGuards: stripOwnGuard(nextState && nextState.buildGuards),
+    prepareGuards: stripOwnGuard(nextState && nextState.prepareGuards),
+    fixGuards: stripOwnGuard(nextState && nextState.fixGuards),
+    ciHealGuards: stripOwnGuard(nextState && nextState.ciHealGuards),
+  };
+}
+
+function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
+  void repo; // see the doc comment above: dispatch-lane declares no --repo input
+  return async ({ out } = {}) => {
+    let nextState = (out && out.nextState) || {};
+    const d = tickSurface(out).dispatch;
+    const items = [...d.builds, ...d.prepareScope, ...d.prepareDecision, ...d.fixes, ...d.ciHeals];
+    if (!items.length) return { nextState };
+
+    const { execFileSync } = await import('node:child_process');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const runMjs = join(scriptsDir, 'operations', 'run.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'we-conveyor-dispatch-'));
+    try {
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        try {
+          // #3416 — see bookkeepingForDispatch's own docblock above for why this strip exists.
+          const bookkeeping = bookkeepingForDispatch(nextState, item);
+          const file = join(dir, `bk-${i}.json`);
+          writeFileSync(file, JSON.stringify(bookkeeping));
+          const args = [runMjs, 'dispatch-lane', `--num=${item.num}`, `--bookkeepingFile=${file}`, '--json'];
+          const stdout = execFileSync('node', args, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            maxBuffer: 32 * 1024 * 1024,
+          });
+          const parsed = JSON.parse(stdout);
+          const updated = parsed && parsed.findings && parsed.findings.read && parsed.findings.read.tickNextState;
+          if (updated && typeof updated === 'object') nextState = updated;
+        } catch (e) {
+          process.stderr.write(`⚠ dispatch-lane --num=${item.num} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    return { nextState };
   };
 }
 
@@ -491,6 +777,7 @@ async function main(argv) {
   const buildEffects = () => ({
     tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
     emit: makeCliEmit({ json }),
+    dispatchPass: makeCliDispatchPass({ scriptsDir: SCRIPTS_DIR, repo }),
     mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     intervalMs,
@@ -504,8 +791,15 @@ async function main(argv) {
   const outcome = await driveConveyor({ owner: runnerOwner(), buildEffects });
   if (!outcome.started) {
     process.stderr.write(`✗ another conveyor runner holds the singleton lease (heldBy=${outcome.heldBy}); standing down.\n`);
+    // #3406 — a stand-down and a genuine idle-stop both exit code 0, and were previously indistinguishable
+    // from the supervisor's side. Under `--json` (how the supervisor always launches this), surface the fact
+    // explicitly as one final structured line so the supervisor never has to guess from the exit code alone —
+    // a stand-down must still restart PROMPTLY (another runner already covers the singleton right), unlike an
+    // idle-stop, which the supervisor should back off from re-spawning immediately (see supervisor.mjs).
+    if (json) writeLineSync(1, JSON.stringify({ event: 'stood-down', heldBy: outcome.heldBy }));
   } else {
     process.stderr.write(`conveyor runner stopped: ${outcome.stoppedReason} after ${outcome.ticks} tick(s).\n`);
+    if (json) writeLineSync(1, JSON.stringify({ event: 'stopped', stoppedReason: outcome.stoppedReason, ticks: outcome.ticks }));
   }
   process.exit(0);
 }

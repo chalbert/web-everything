@@ -48,7 +48,9 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { driveRun, hasJsonFlag, outcomePayload, parseOperationArgv, renderOutcome } from './cli-adapter.mjs';
+import {
+  cwdFlagValue, driveRun, hasJsonFlag, outcomePayload, parseOperationArgv, renderOutcome,
+} from './cli-adapter.mjs';
 import { startRun, runStatus } from './engine.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { resolveOperation, createCliJudgeFactory } from './run.mjs';
@@ -64,6 +66,42 @@ import { writeAllSync } from '../lib/write-all-sync.mjs';
 export const REVIEW_LOOP_OP = 'review-pr';
 
 /**
+ * #xu2pp2m — WHO A RUN THROUGH THIS ENTRY POINT IS ATTRIBUTED TO, when the caller named nobody.
+ *
+ * `review-pr`'s `actor` field defaults to `'operator'` (`we:scripts/operations/review-pr.mjs`), which is
+ * exactly right for `run.mjs review-pr` — a HUMAN at a terminal answering `confirm` themselves. It is exactly
+ * WRONG here: this file is the unattended driver, it already tells `driveRun` `attemptedBy: 'agent'`, and
+ * nothing about the run involves an operator at all. Live-caught 2026-09-12 (PR #2122): a fully mechanical
+ * clear recorded its durable verdict as `Recorded by operator.` and its operator notice as
+ * `PR … — human review accepted by operator.` — a machine-made clear, indistinguishable downstream from one a
+ * person actually looked at.
+ *
+ * THE DEFAULT MOVES, THE FLAG DOES NOT. A caller who passes `--actor=<name>` still gets exactly that name
+ * (`applyUnattendedActorDefault` only fills in an absent one), so the human-driven `--resume … --answer=accept`
+ * ceremony — which goes through this file too, with `--actor=` supplied — is unchanged.
+ */
+export const UNATTENDED_REVIEW_ACTOR = 'agent (unattended review-loop)';
+
+/**
+ * PURE — the input a run started through this driver should carry. Fills `actor` with
+ * {@link UNATTENDED_REVIEW_ACTOR} only when the invocation named none.
+ *
+ * WHY IT READS RAW `argv` AND NOT `parsed.input.actor`. The declaration's own `default: 'operator'` has
+ * ALREADY been applied by the time `parseOperationArgv` returns, so `parsed.input.actor === 'operator'` is
+ * indistinguishable between "nobody said" and "somebody typed `--actor=operator`". Raw argv is the only place
+ * that distinction still exists — the same reason `cwdFlagValue`/`hasJsonFlag` read argv directly.
+ *
+ * @param {object} input - `parseOperationArgv`'s `input`.
+ * @param {string[]} argv
+ * @returns {object}
+ */
+export function applyUnattendedActorDefault(input, argv = []) {
+  const named = argv.some((t) => typeof t === 'string' && (t === '--actor' || t.startsWith('--actor=')));
+  if (named) return input;
+  return { ...input, actor: UNATTENDED_REVIEW_ACTOR };
+}
+
+/**
  * DRIVE ONE ROUND, UNATTENDED. The whole file, as a function — mirrors `we:scripts/operations/cli-adapter.mjs
  * #runOperationCli`'s shape closely, on purpose, so the two are easy to read side by side and hard to let
  * drift silently: same parse, same start-or-resume, same render. The differences are exactly the two things
@@ -75,7 +113,7 @@ export const REVIEW_LOOP_OP = 'review-pr';
  * @param {string[]} o.argv
  * @param {{read: Function, write: Function}} o.store
  * @param {Record<string, Function>} o.sinks
- * @param {(o: {cwd: (string|null), model: (string|null)}) => Function} o.makeJudge
+ * @param {(o: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} o.makeJudge
  * @param {() => string} o.mintRunId
  * @param {(pending: object|null, run: object) => ({value: string}|null)} [o.autoConfirm] - injected so a test
  *   can supply a stub; the real caller always passes {@link reviewLoopAutoConfirm}.
@@ -103,7 +141,9 @@ export async function runReviewLoopOnce({
     };
   }
 
-  const activeJudge = makeJudge({ cwd: parsed.control.cwd || null, model: parsed.control.model || null });
+  const activeJudge = makeJudge({
+    cwd: parsed.control.cwd || null, model: parsed.control.model || null, provider: parsed.control.provider || null,
+  });
 
   let run;
   if (parsed.control.resume) {
@@ -113,7 +153,14 @@ export async function runReviewLoopOnce({
       return { code: 2, lines: [`error: run ${run.id} is a \`${run.op}\` run, not \`${declaration.name}\``], run: null, stopped: 'refused' };
     }
   } else {
-    run = startRun({ op: declaration.name, id: parsed.control.runId || mintRunId(), input: parsed.input, registry });
+    run = startRun({
+      op: declaration.name,
+      id: parsed.control.runId || mintRunId(),
+      // #xu2pp2m — see `applyUnattendedActorDefault`: this driver is the UNATTENDED one, so an unnamed actor
+      // is an agent, never `review-pr`'s own human-terminal `'operator'` default.
+      input: applyUnattendedActorDefault(parsed.input, argv),
+      registry,
+    });
     store.write(run);
   }
 
@@ -274,7 +321,12 @@ if (IS_CLI) {
   // `argv` is known before the declaration `resolveOperation` binds sinks to — see `hasJsonFlag`'s doc
   // (`we:scripts/operations/cli-adapter.mjs`). A `--json` invocation must not have this file's own notice
   // effect (fired mid-run, well before the final JSON line below) land on the same stdout stream.
-  const { declaration, registry, sinks } = resolveOperation(REVIEW_LOOP_OP, { json: hasJsonFlag(argv) });
+  // #xu2pp2m — `cwd` for the SAME pre-parse reason as `json` (see `cwdFlagValue`). THIS entry point is the
+  // one a dispatched/mechanical review runs through, and it is ALWAYS given a lane, so before this the diff it
+  // judged came from `REPO_ROOT` on every single unattended review ever run (PR #2122 merged on it).
+  const { declaration, registry, sinks } = resolveOperation(
+    REVIEW_LOOP_OP, { json: hasJsonFlag(argv), cwd: cwdFlagValue(argv) },
+  );
   runReviewLoopOnce({
     declaration,
     registry,

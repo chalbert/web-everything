@@ -279,12 +279,29 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
   });
 
   it('the sink goes through `defaultSpawnAgent`, timeout and all', async () => {
-    const { exec, calls } = spyExec('');
+    // #3331: stdout has to carry a real `backgrounded · <id> · <name>` line — the sink now reads the handle
+    // from it (the CLI ignores `--session-id`), and an empty stdout would make this dispatch indeterminate.
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · conveyor-3037\n');
     const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
-    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go', expectedWithinMinutes: 90 });
+    const result = await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go', expectedWithinMinutes: 90 });
     expect(calls[0].file).toBe('claude');
     expect(calls[0].argv.slice(0, 3)).toEqual(['--bg', '--session-id', 'sess-z9']);
     expect(calls[0].opts).toMatchObject({ timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL' });
+    expect(result.handle).toBe('a9a9a9a9');
+  });
+
+  it('#3105 — stamps WE_DISPATCH_KIND=<launchKind> onto the spawned agent\'s env, so guard-bash can deny it running the gate directly', async () => {
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · fix-3037\n');
+    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'fix-3037', prompt: '# go', launchKind: 'fix' });
+    expect(calls[0].opts.env).toMatchObject({ WE_DISPATCH_KIND: 'fix' });
+  });
+
+  it('#3105 — defaults WE_DISPATCH_KIND to "build" when the payload names no launchKind', async () => {
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · conveyor-3037\n');
+    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go' });
+    expect(calls[0].opts.env).toMatchObject({ WE_DISPATCH_KIND: 'build' });
   });
 
   it('the observer goes through `defaultListAgents` — same argv, still no `--all`', async () => {

@@ -21,6 +21,9 @@ import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { importGraph } from './import-graph.mjs';
+// #xu2pp2m — the REAL guard, so a brief's instructions and the harness's refusals are read in one place and
+// cannot drift apart silently. A brief is a prompt; nothing else in the suite would ever notice.
+import { decide } from '../../guard-bash.mjs';
 import { releaseSessionForNum } from '../../conveyor/tick-core.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
 import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
@@ -65,7 +68,9 @@ import {
   defaultLaneRefForPr,
   forwardableBookkeeping,
   inFlightDispatchesFor,
+  isHandleListed,
   isPreSpawnRefusal,
+  parseBackgroundedHandle,
   readTick,
   stampLiveness,
   // #3457/#3460 — the already-done ground-truth check.
@@ -88,6 +93,14 @@ const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
  * in one, and the sink refuses to dispatch from a lane.
  */
 const PRIMARY = '/primary/webeverything';
+
+/**
+ * A fake `--bg` confirmation, shaped exactly the way the real CLI's is (#3331): `parseBackgroundedHandle`
+ * reads `shortId` off this, not off the minted `sessionId` a test injects via `mintSessionId` — the mint is
+ * pinned into the argv only, proven ignored by the real CLI. Tests that need a specific `handle` on the
+ * resulting entry pass their own `shortId` here rather than relying on what was minted.
+ */
+const bgStdout = (shortId, name = 'n') => `backgrounded · ${shortId} · ${name}\n`;
 
 /** A brief template with every placeholder the operation fills, and nothing else. */
 const BRIEF = [
@@ -649,14 +662,16 @@ describe('the declared effect is a dispatch', () => {
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
       root: PRIMARY,
-      spawnAgent: () => '',
+      spawnAgent: () => bgStdout('a1a1a1a1'),
       mintSessionId: () => '11111111-2222-3333-4444-555555555555',
       now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
     const entry = outcome.run.effects[0];
     expect(entry.status).toBe('in-flight');
-    expect(entry.handle).toBe('11111111-2222-3333-4444-555555555555');
+    // #3331: the recorded handle is what the CLI's OWN confirmation carried, never the minted sessionId — the
+    // mint is proven ignored by a real `--bg` spawn.
+    expect(entry.handle).toBe('a1a1a1a1');
     expect(entry.expectedBy).toBe('2026-08-13T11:30:00.000Z'); // 90 minutes, the declared default
     expect(entry.startedAt).toBeTruthy();
     expect(outcome.inFlight).toEqual([entry.key]);
@@ -671,19 +686,21 @@ describe('the declared effect is a dispatch', () => {
     const { run } = runTo();
     const store = createMemoryRunStore();
     let spawns = 0;
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => { spawns += 1; return ''; }, mintSessionId: () => 'sess-a1' });
+    const sinks = createDispatchSinks({
+      root: PRIMARY, spawnAgent: () => { spawns += 1; return bgStdout('a2a2a2a2'); }, mintSessionId: () => 'sess-a1',
+    });
     const first = await applyPendingEffects(run, { sinks, store });
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(spawns).toBe(1);
     expect(second.inFlight).toEqual([first.run.effects[0].key]);
-    expect(second.run.effects[0].handle).toBe('sess-a1');
+    expect(second.run.effects[0].handle).toBe('a2a2a2a2');
   });
 
   it('honours a caller\'s own expectedWithinMinutes', async () => {
     const { run } = runTo(tickRead(), { num: '3037', expectedWithinMinutes: 15 });
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
-      root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-b2', now: () => new Date('2026-08-13T10:00:00.000Z'),
+      root: PRIMARY, spawnAgent: () => bgStdout('b2b2b2b2'), mintSessionId: () => 'sess-b2', now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].expectedBy).toBe('2026-08-13T10:15:00.000Z');
@@ -790,8 +807,17 @@ describe('what the sink actually runs', () => {
   });
 
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-d4' });
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => bgStdout('d4d4d4d4'), mintSessionId: () => 'sess-d4' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
+  });
+
+  it('#3331: a spawn that returns 0 but prints no parseable confirmation is INDETERMINATE, same as a thrown spawn', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => 'not the shape we expect\n' });
+    const outcome = await applyPendingEffects(run, { sinks, store });
+    expect(outcome.run.effects[0]).toMatchObject({ status: 'in-flight', handle: null });
+    expect(inFlightEntries(outcome.run).unknown).toHaveLength(1);
   });
 });
 
@@ -823,29 +849,42 @@ describe('the provider port — #3579', () => {
     const spawned = [];
     const handle = defaultClaudeProvider(
       { sessionId: 'sess-c9', cwd: PRIMARY, prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9', extraArgs: ['--model', 'sonnet'] },
-      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; } },
+      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return bgStdout('c9c9c9c9'); } },
     );
-    expect(handle).toBe('sess-c9');
-    expect(spawned).toEqual([{
-      argv: buildAgentArgv({
-        sessionId: 'sess-c9',
-        payload: { prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9' },
-        extraArgs: ['--model', 'sonnet'],
-      }),
-      opts: { cwd: PRIMARY },
-    }]);
+    // #3331 — the handle this port implementation answers with is the one the SPAWN printed, never the
+    // `sessionId` it was handed: `claude --bg` ignores `--session-id` and mints its own.
+    expect(handle).toBe('c9c9c9c9');
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].argv).toEqual(buildAgentArgv({
+      sessionId: 'sess-c9',
+      payload: { prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9' },
+      extraArgs: ['--model', 'sonnet'],
+    }));
+    // #3105 — the launch kind rides across as an env var on the spawn (defaulted when the request omits it).
+    expect(spawned[0].opts).toMatchObject({ cwd: PRIMARY });
+    expect(spawned[0].opts.env.WE_DISPATCH_KIND).toBe('build');
+  });
+
+  // #3331, through the DEFAULT provider — a spawn that exits 0 but prints no parseable confirmation is
+  // INDETERMINATE, never silently keyed on the minted id the CLI is proven to ignore.
+  it('defaultClaudeProvider REFUSES a spawn whose stdout carries no parseable handle, rather than falling back to the minted id', () => {
+    expect(() => defaultClaudeProvider(
+      { sessionId: 'sess-c0', cwd: PRIMARY, prompt: '# build #0', sessionSlug: 'conveyor-0', num: '0' },
+      { spawnAgent: () => 'not the shape we expect\n' },
+    )).toThrow(/no parseable session handle/);
   });
 
   it('a plain spawnAgent (the old CLI-argv-shaped stub) still drives the DEFAULT provider unmodified', async () => {
     const spawned = [];
     const sinks = createDispatchSinks({
       root: PRIMARY,
-      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return bgStdout('1e9ac11a'); },
       mintSessionId: () => 'sess-legacy',
     });
     const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #legacy', sessionSlug: 'conveyor-legacy', num: 'legacy' });
     expect(spawned).toHaveLength(1);
-    expect(result).toMatchObject({ handle: 'sess-legacy' });
+    // #3331 — the CLI's own printed handle, not the minted `sess-legacy` it was asked for.
+    expect(result).toMatchObject({ handle: '1e9ac11a' });
   });
 
   // #3579 review — a validation refusal from `buildAgentArgv` now runs INSIDE the provider call (moved there so
@@ -887,7 +926,7 @@ describe('the provider port — #3579', () => {
         sessionId: 'sess-parity', cwd: PRIMARY, prompt: richPayload.prompt, sessionSlug: richPayload.sessionSlug,
         num: richPayload.num, extraArgs: ['--model', 'sonnet'],
       },
-      { spawnAgent: (argv) => { spawned.push(argv); return ''; } },
+      { spawnAgent: (argv) => { spawned.push(argv); return bgStdout('42424242'); } },
     );
     expect(spawned[0]).toEqual(directArgv);
   });
@@ -1483,6 +1522,17 @@ describe('the tick reader', () => {
     expect(out.livenessSource).toBe('not-needed');
   });
 
+  // ── #3331: the handle is now a SHORT id, and the comparison against a listing has to be a prefix ───────────
+
+  it('#3331: G1 matches a SHORT handle (what a real dispatch now records) against a FULL listed sessionId', () => {
+    const rows = [{ runId: 'a', handle: 'a1a1a1a1' }, { runId: 'b', handle: 'b2b2b2b2' }];
+    const out = stampLiveness(
+      { runs: rows, unreadable: 0 },
+      { listAgents: () => [{ sessionId: 'a1a1a1a1-2222-3333-4444-555555555555' }] },
+    );
+    expect(out.runs.map((r) => r.live)).toEqual([true, false]);
+  });
+
   it('G1: the READ wires the liveness answer onto the rows the declaration ages against', () => {
     // The seam that matters: `dispatchStillHolds` is pure, so a `live` field that never got stamped would
     // silently put every hold back on the clock — the exact defect round 2 found, one level up.
@@ -1683,6 +1733,21 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(run.findings.read.dispatchedGuard).toEqual({ num: '3150', kind: 'prepare-decision', lane: 6, spawnedTick: 3, sawPr: false });
   });
 
+  // ── criterion 2b (#3567) ────────────────────────────────────────────────────────────────────────────────
+  it('a `spawnInvestigations` entry SPAWNS ONCE, with the investigation brief', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnInvestigations', { num: '3150', lane: 9 }), items: [UNSCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'investigate', lane: 9, sessionSlug: 'investigate-3150' });
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('investigate', {
+      ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 9, SESSION_SLUG: 'investigate-3150', SCOPE: `we:${SPEC_PATH}`,
+    }));
+    expect(prompt).toContain('--purpose=conveyor-investigate');
+    expect(run.findings.read.dispatchedGuard).toBeNull();
+  });
+
   // ── criterion 3 ──────────────────────────────────────────────────────────────────────────────────────────
   it('a BUILD is byte-identical to before — the same brief, the same slug, the same argv', async () => {
     // The additive claim, TESTED rather than asserted in a comment. If any of these three moved, every caller
@@ -1722,10 +1787,10 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // …and the pure half refuses a reader that hands it one, rather than shaping a read around it.
     expect(() => shapeDispatchRead(tickRead({ launchKind: 'prepare-scope' }), { num: '3037' }))
       .toThrow(/unknown `launchKind`/);
-    // The five that ARE wired all resolve, and to five DISTINCT files (#3332 grew this from three to five) —
-    // one map entry pointing at the wrong brief is the same failure with a quieter face.
+    // The six that ARE wired all resolve, and to six DISTINCT files (#3332 grew this from three to five,
+    // #3567 to six) — one map entry pointing at the wrong brief is the same failure with a quieter face.
     const paths = LAUNCH_KINDS.map((k) => briefPath(REPO_ROOT, k));
-    expect(new Set(paths).size).toBe(5);
+    expect(new Set(paths).size).toBe(6);
     for (const path of paths) expect(readFileSync(path, 'utf8').trim()).not.toBe('');
   });
 
@@ -2521,5 +2586,109 @@ describe('readTick — `openBlockers` reaches the read end to end, from `loadIte
     const v = shapeDispatchRead(out, { num: '3398' });
     expect(v.dispatching).toBe(false);
     expect(v.holdReason).toContain('3443');
+  });
+});
+
+describe('#3331 — parseBackgroundedHandle: the CLI ignores --session-id, so this is the ONLY handle source', () => {
+  it('reads the short id off a real `--bg` confirmation line', () => {
+    expect(parseBackgroundedHandle('backgrounded · 1ae0905c · probe-listing-lag-1787948603\n  claude agents             list sessions\n'))
+      .toBe('1ae0905c');
+  });
+
+  it('is case-insensitive on input, normalizes to lower case', () => {
+    expect(parseBackgroundedHandle('backgrounded · 1AE0905C · n\n')).toBe('1ae0905c');
+  });
+
+  it('returns null for stdout that does not carry the shape — never a best-effort guess', () => {
+    expect(parseBackgroundedHandle('')).toBeNull();
+    expect(parseBackgroundedHandle('ok\n')).toBeNull();
+    expect(parseBackgroundedHandle('some unrelated CLI output\n')).toBeNull();
+    expect(parseBackgroundedHandle(undefined)).toBeNull();
+  });
+});
+
+describe('#3331 — isHandleListed: prefix match, because a short handle is never equal to a full sessionId', () => {
+  it('matches a short handle against the full id it is a prefix of', () => {
+    expect(isHandleListed('1ae0905c', [{ sessionId: '1ae0905c-314c-4f73-a7c4-3973a9005e82' }])).toBe(true);
+  });
+
+  it('still matches a full handle against itself — forward-compatible if a future CLI honours --session-id', () => {
+    expect(isHandleListed('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', [{ sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }])).toBe(true);
+  });
+
+  it('does not match a handle that is merely a SUBSTRING rather than a PREFIX', () => {
+    expect(isHandleListed('0905c314', [{ sessionId: '1ae0905c-314c-4f73-a7c4-3973a9005e82' }])).toBe(false);
+  });
+
+  it('is case-insensitive and false on empty/missing input', () => {
+    expect(isHandleListed('1AE0905C', [{ sessionId: '1ae0905c-314c-4f73-a7c4-3973a9005e82' }])).toBe(true);
+    expect(isHandleListed('', [{ sessionId: 'anything' }])).toBe(false);
+    expect(isHandleListed(null, [{ sessionId: 'anything' }])).toBe(false);
+    expect(isHandleListed('x', null)).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — NO BRIEF MAY TELL A DISPATCHED AGENT TO RUN A COMMAND THE GUARD DENIES IT.
+//
+// THE DEFECT, LIVE TODAY AND MEASURED (not predicted). `we:scripts/guard-bash.mjs`'s #3105 arm denies the
+// verification set to a dispatched agent for ANY `WE_DISPATCH_KIND` — build, prepare, prepare-decision,
+// investigate, fix, ci-heal — and `dispatch-lane-io.mjs#defaultClaudeProvider` stamps exactly those. Yet FOUR
+// of the six briefs still carried a bare `npm run check:standards` fenced block as their "run the gate GREEN"
+// step: `prepare-scope`, `prepare-decision`, `fix` (v1, the one actually routed) and `fix-agent-ci`. So the
+// brief instructed a command the harness refuses before the model is consulted, on a step every one of those
+// dispatches has to pass. `delivery-agent-brief.md` and `investigation-agent-brief.md` already used the
+// sanctioned `verify-lane request` → poll `check` pattern; these four now match it.
+//
+// WHY THIS TEST IS A CONTENT ASSERTION AND NOT A LINT. The property is "this brief and the guard agree", and
+// both halves are read here — the REAL brief text off disk, and `decide()` itself — so neither can drift
+// without a red test. A brief is a prompt, so nothing else in the suite would ever notice.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — every dispatched brief steers to the gate path the guard actually allows', () => {
+  /** Read the REAL file, exactly as `dispatch-lane-io.mjs` would for that kind. */
+  const briefText = (kind) => readFileSync(briefPath(REPO_ROOT, kind), 'utf8');
+
+  /** A fenced shell line, i.e. something the brief is TELLING the agent to run — not prose about a command. */
+  const commandLines = (text) => text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('npm ') || l.startsWith('node ') || l.startsWith('gh '));
+
+  it('covers every live launch kind — the roster is read, never retyped', () => {
+    // If a seventh kind is added with a brief of its own, this list grows on its own and the assertions below
+    // start covering it. A hand-typed list would silently exempt the new one.
+    expect(LAUNCH_KINDS).toEqual(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+  });
+
+  for (const kind of ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']) {
+    it(`the \`${kind}\` brief instructs NO command the guard denies that very dispatch`, () => {
+      const denied = commandLines(briefText(kind))
+        .map((cmd) => [cmd, decide(cmd, { dispatchKind: kind })])
+        .filter(([, reason]) => reason);
+      expect(denied.map(([cmd, reason]) => `${cmd}\n  → ${String(reason).slice(0, 160)}`)).toEqual([]);
+    });
+
+    it(`the \`${kind}\` brief steers to the SANCTIONED gate path instead`, () => {
+      const text = briefText(kind);
+      // Both halves — `request` alone is a marker nobody reads back, `check` alone never asks for a run.
+      expect(text, 'must tell the agent to REQUEST the gate').toMatch(/node scripts\/verify-lane\.mjs request\b/);
+      expect(text, 'must tell the agent to POLL for the result').toMatch(/node scripts\/verify-lane\.mjs check\b/);
+    });
+  }
+
+  it('REGRESSION — a bare `npm run check:standards` in a brief WOULD have been caught', () => {
+    // The exact line the four briefs carried, proven denied for the kinds that ran them. This is the "did the
+    // bug exist" half: without it, the assertions above could pass over a guard that denies nothing.
+    for (const kind of LAUNCH_KINDS) {
+      expect(decide('npm run check:standards', { dispatchKind: kind }), kind)
+        .toMatch(/mechanically-dispatched .* agent may not run the verification set/);
+    }
+    // …and the SANCTIONED replacement is genuinely allowed, for every one of them — otherwise the fix would
+    // have swapped one denied command for another.
+    for (const kind of LAUNCH_KINDS) {
+      expect(decide('node scripts/verify-lane.mjs request', { dispatchKind: kind }), kind).toBeNull();
+      expect(decide('node scripts/verify-lane.mjs check --json', { dispatchKind: kind }), kind).toBeNull();
+    }
   });
 });

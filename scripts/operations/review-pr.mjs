@@ -279,6 +279,58 @@ export const JUDGE_SEATS = Object.freeze([
 export const JUDGE_STEPS = Object.freeze(JUDGE_SEATS.map((seat) => seat.step));
 
 /**
+ * #xqa9ttq — THE THIRD SEAT'S LENS, for the OPT-IN Codex panelist (see `reviewPrOperation`'s `codexAdvisory`
+ * param). READ OFF `ADVISORY_LENSES[0]`, never retyped, for the same reason `SECURITY_LENS` is read off
+ * `MANDATORY_LENSES[1]`: if the advisory set is ever reordered this seat follows it rather than pinning a
+ * string the statute no longer names first.
+ *
+ * `simplicity` (today's `ADVISORY_LENSES[0]`) is the right FIRST pick among the three advisory lenses for a
+ * TOOL-FREE, diff-only juror specifically:
+ *   - `standards-conformance` needs this repo's own convention docs (`we:docs/agent/conventions.md`,
+ *     `platform-decisions.md`) to judge against — material a tool-free juror shown only the diff text cannot
+ *     fetch.
+ *   - `claim-accuracy` benefits from tool access to verify a PR's claim against the actual repo (grep a cited
+ *     file, run a cited command) — exactly what this seat structurally cannot have (#3581).
+ *   - `simplicity` — "does this diff introduce avoidable complexity/redundancy" — is answerable from the
+ *     mandate's diff text and description ALONE, which is the whole of what a tool-free juror is ever shown.
+ *     It is also the one closest in spirit to a genuinely SECOND opinion: a structurally different model
+ *     reading the same diff for the same kind of thing a human `/simplify` pass looks for.
+ */
+export const ADVISORY_JUDGE_LENS = ADVISORY_LENSES[0];
+
+/**
+ * #xqa9ttq — THE THIRD SEAT, AS DATA, kept OUT of {@link JUDGE_SEATS} (unlike `judgeSecurity`, this one is
+ * opt-in — see `reviewPrOperation`'s `codexAdvisory` param and its own docblock for why). `reviewPrOperation`
+ * appends this to a LOCAL copy of `JUDGE_SEATS` only when `codexAdvisory` is true, so every existing consumer
+ * of the exported `JUDGE_SEATS`/`JUDGE_STEPS` (tests included) keeps seeing exactly today's mandatory pair.
+ */
+export const ADVISORY_JUDGE_SEAT = Object.freeze({ step: 'judgeAdvisory', lens: ADVISORY_JUDGE_LENS });
+
+/**
+ * #xqa9ttq — THE ENV VAR NAME both `run.mjs` and `record-verdict-io.mjs` read to decide `codexAdvisory`
+ * (`reviewPrOperation`'s opt-in param). ONE constant, not a string re-typed at each call site, because the two
+ * are INDEPENDENT registrations of the SAME operation name (`run.mjs` starts a run; `record-verdict-io.mjs`
+ * resumes/records one, #3540, possibly on a different host/process) — a run STARTED with the third seat must
+ * be RESUMED against a declaration seating the same roster, or the resume would be reasoning about a run shape
+ * that no longer exists (the same class of hazard `JUDGE_SEATS`'s registration-time roster check exists to
+ * catch, one level up: THAT check catches drift within one registration; this is what keeps two INDEPENDENT
+ * registrations honestly agreeing). NOT a CLI `--flag`: the step list is fixed at REGISTRATION, before any
+ * run's argv is parsed, so a per-invocation flag cannot reach this — the same reason `--provider` has an env
+ * fallback (`JUDGE_PROVIDER`).
+ */
+export const CODEX_ADVISORY_ENV_VAR = 'REVIEW_PR_CODEX_ADVISORY';
+
+/**
+ * #xqa9ttq — READS {@link CODEX_ADVISORY_ENV_VAR}. `env` is a parameter, not `process.env` read directly
+ * inline at each call site, so this stays unit-testable without mutating real process state.
+ * @param {object} [env]
+ * @returns {boolean}
+ */
+export function codexAdvisoryFromEnv(env = process.env) {
+  return env?.[CODEX_ADVISORY_ENV_VAR] === '1';
+}
+
+/**
  * WHICH LENSES A RUN WOULD ACTUALLY SEAT, given the caller's `--lens`. Resolves {@link CALLER_CHOSEN_LENS}
  * against `lens` and takes every other seat's literal. PURE.
  *
@@ -697,6 +749,34 @@ export function shapeReadFinding(raw, { pr, repo, careLevel } = {}) {
   const netChangedFiles = Array.isArray(net.paths) ? net.paths.map(String) : [];
   const degradedReason = net.scored === true ? '' : String(net.reason || 'unscored');
 
+  // #xu2pp2m — A DEGRADED BASIS THAT ALSO PRODUCED NO DIFF AT ALL IS `unrun`, NOT A REVIEW. THROWS.
+  //
+  // MEASURED, NOT HYPOTHESISED (2026-09-12, PR #2122 — and it MERGED on this). A mechanical review ran in a
+  // single-branch lane clone with no remote-tracking ref for the PR's head branch. `resolveNetDiffBasis` came
+  // back `ref-unresolved`, `computeNetDiffText` returned ZERO bytes, and nothing in this pipeline refused:
+  // `renderJudgeInput` handed all three seats `_(the net diff could not be resolved — see the degraded note)_`
+  // and the panel reduced their answers to a clean `accept` over 560 lines of script + test nobody read. Two
+  // of the three jurors only produced anything real because they independently went and FOUND the diff
+  // themselves with their own tools — and, starting from two different self-recovered bases, disagreed.
+  //
+  // WHY THIS DOES NOT REOPEN THE `exec-contract` / degrade SPLIT ABOVE. The other two misses
+  // (`ref-unresolved`, `diff-failed`) still DEGRADE whenever there is genuinely material to judge — that
+  // remains right, and this refusal is strictly narrower than "refuse every degrade": it fires only when the
+  // degrade produced NOTHING, where the alternative is not "a review on an imperfect basis" but "a verdict on
+  // an empty page". An EMPTY diff on a SCORED basis is untouched (a PR that is genuinely a no-op vs main is a
+  // real, honest read) — the conjunction is what makes this precise.
+  if (degradedReason !== '' && !String(diff.text || '').trim()) {
+    throw new Error(
+      `review-pr.read: the net-diff basis for ${repo}#${pr} is DEGRADED (\`${degradedReason}\`) AND the diff `
+      + 'came back EMPTY — there is nothing for a juror to review, so any verdict over it would be `unrun` '
+      + 'dressed as a finding (#xu2pp2m; PR #2122 merged on exactly this false accept). Refusing BEFORE the '
+      + '`judge` step, so no juror is paid to read an empty page. THE FIX IS ALMOST ALWAYS THE CHECKOUT: this '
+      + 'read takes its diff from LOCAL git rooted at the `--cwd` checkout, and a single-branch clone has no '
+      + `remote-tracking ref for this PR's head branch. Run review-pr from a checkout that can resolve it `
+      + `(\`git fetch origin <head-ref>\` in the lane, or pass a \`--cwd=\` that already has it).`,
+    );
+  }
+
   // #3335 — THE DECLARED SHAPE MEETS THE TOUCH-SET, at the first moment both exist. Refuses an UNDER-declaration
   // (see `assertDeclaredShapeHolds` for why only that direction), and returns the derived shape either way so
   // the write-up can state what the touch-set EARNED beside what actually SAT.
@@ -866,6 +946,45 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
     // (`we:scripts/lib/judge-panel.mjs`) never forwards `allowedTools`, so wiring the panel would have made
     // the security seat — and the correctness one with it — `--tools ''`. That is #3158, and it is open.
     allowedTools: REVIEW_JUROR_TOOLS,
+  };
+}
+
+/**
+ * #xqa9ttq — THE THIRD SEAT'S RECIPE. Same mandate/input shaping as {@link buildReviewJudgeRequest} — same
+ * diff, same description, same #2336 context isolation — but structurally different in the two fields that
+ * make this seat what it is:
+ *
+ *   - NO `allowedTools`. This seat is deliberately advisory-only and diff-only, not merely "the same juror
+ *     with a different lens" — see the file header's account of why `--provider=codex` cannot simply be
+ *     applied to the existing two seats (BOTH set `allowedTools` unconditionally, and `createDefaultJudge`
+ *     structurally refuses `codex` + `allowedTools` together, #3581).
+ *   - `providerName: 'codex'`, carried ON THE REQUEST rather than relying on the run's `--provider` flag, so
+ *     this seat runs Codex regardless of what provider the OTHER two seats use in the SAME run — see
+ *     `createDefaultJudge`'s per-request `providerName` override in `cli-adapter.mjs`.
+ *
+ * NO `model` EITHER, and that omission is deliberate rather than an oversight: `JUDGE_MODEL` ('sonnet') is a
+ * Claude model name that would reach Codex's `-m` flag VERBATIM (`codex-judge-spawn.mjs#buildCodexJudgeArgv`)
+ * — passing it would ask `codex exec` to run a model it does not have. No live probe (#3371) established a
+ * correct Codex model name, so this seat omits `model` and takes whatever `codex exec` defaults to, rather
+ * than shipping an unverified guess.
+ *
+ * @param {object} o
+ * @param {object} o.read - the `read` step's finding.
+ * @param {string} [o.aim] - the caller's #3094 hypothesis, or `''`.
+ * @returns {object} the judge request.
+ */
+export function buildReviewAdvisoryJudgeRequest({ read, aim = '' }) {
+  return {
+    mandate: buildPanelMandate({
+      lens: ADVISORY_JUDGE_LENS, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
+    }),
+    input: renderJudgeInput(read),
+    shape: REVIEW_JUDGE_SHAPE,
+    lens: ADVISORY_JUDGE_LENS,
+    effort: JUDGE_EFFORT,
+    budget: JUDGE_BUDGET_USD,
+    // #xqa9ttq — PINS THIS SEAT TO CODEX, independent of the run's `--provider` flag. See `createDefaultJudge`.
+    providerName: 'codex',
   };
 }
 
@@ -1159,10 +1278,17 @@ export function renderAdvisoryNote({ read, verdict } = {}) {
  * BUILD THE DECLARATION. `readPr` is the injected reader (see the header); {@link ./review-pr-io.mjs} supplies
  * the real one and tests supply a stub. Built per call so nothing leaks between registries.
  *
- * @param {{readPr: (o: {pr: number, repo: string}) => object}} deps
+ * @param {{readPr: (o: {pr: number, repo: string}) => object, codexAdvisory?: boolean}} deps
+ * @param {boolean} [deps.codexAdvisory] - #xqa9ttq — OPT-IN THIRD SEAT. `false` by default: the declaration is
+ *   BYTE-IDENTICAL to before this card when omitted, which is deliberate (see the rationale below the roster
+ *   check at the bottom of this function, and the file header's "THE THIRD SEAT" section). `true` appends
+ *   {@link ADVISORY_JUDGE_SEAT} — a tool-free Codex juror on `ADVISORY_JUDGE_LENS` — as a THIRD `judge` step.
+ *   The real binding (`we:scripts/operations/run.mjs`) reads this off `REVIEW_PR_CODEX_ADVISORY=1` in the
+ *   environment (mirroring `JUDGE_PROVIDER`'s existing env-fallback shape, since a CLI `--flag` cannot reach
+ *   here — the step list is fixed at REGISTRATION, before any run's argv is parsed).
  * @returns {object} the frozen declaration from `op()`.
  */
-export function reviewPrOperation({ readPr } = {}) {
+export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
   if (typeof readPr !== 'function') {
     throw new TypeError(
       'review-pr: needs a `readPr({pr, repo})` reader — the io is INJECTED so the declaration stays testable '
@@ -1181,6 +1307,20 @@ export function reviewPrOperation({ readPr } = {}) {
       + 'lens; #3319 declared this step on it, so re-decide that seat (#3314) rather than judging on nothing.',
     );
   }
+  // #xqa9ttq — SAME POSTURE, FOR THE THIRD SEAT, ONLY WHEN OPTED IN. `ADVISORY_JUDGE_LENS` is read off
+  // `ADVISORY_LENSES[0]` rather than typed; if that set is ever narrowed to empty this fails here, before any
+  // run record exists, rather than mid-review.
+  if (codexAdvisory && (!ADVISORY_JUDGE_LENS || !PANEL_LENSES.includes(ADVISORY_JUDGE_LENS))) {
+    throw new Error(
+      `review-pr: the third juror's lens comes from \`ADVISORY_LENSES[0]\` and resolved to ${JSON.stringify(ADVISORY_JUDGE_LENS)}, `
+      + `which is not one of ${PANEL_LENSES.join(', ')}. Re-decide that seat rather than judging on nothing.`,
+    );
+  }
+  // #xqa9ttq — THE ACTUAL ROSTER FOR THIS BUILD. A LOCAL copy, never a mutation of the exported `JUDGE_SEATS`:
+  // every seat-shape check below (the floor refusal in `read`, the roster-consistency check at the bottom of
+  // this function) reads THIS, so an opted-in build validates against the roster it actually declares, and an
+  // opted-OUT build (the default) reads exactly the same `JUDGE_SEATS` reference it always has.
+  const seats = codexAdvisory ? Object.freeze([...JUDGE_SEATS, ADVISORY_JUDGE_SEAT]) : JUDGE_SEATS;
 
   const declaration = op(REVIEW_PR_OP, {
     input: {
@@ -1328,7 +1468,7 @@ export function reviewPrOperation({ readPr } = {}) {
         // #xwp8ioh's liveness one beside it: refuse early, and refuse rather than warn, when the caller is
         // a machine. See `decideLensFloor` for why the condition reads across ALL judge seats, and for the
         // honest note that today's step list makes it dormant.
-        assertMandatoryLensSeated({ lens: view.input.lens });
+        assertMandatoryLensSeated({ lens: view.input.lens, seats });
         // #3335 — THE SECOND INPUT-ONLY REFUSAL, right behind it and for the same reason it is here rather
         // than at `judge`: whether the ONE caller-chosen seat is being spent on a lens that can block, given
         // a touch-set the CALLER says escalates, is decidable before a single `gh` call. It is a strictly
@@ -1387,6 +1527,30 @@ export function reviewPrOperation({ readPr } = {}) {
       }),
     }),
 
+    // ── (opt-in) judgeAdvisory ─────────────────────────────────────────────────────────────────────────────
+    // #xqa9ttq — THE THIRD SEAT, DECLARED ONLY WHEN `codexAdvisory` IS TRUE (see `reviewPrOperation`'s param
+    // docs). A TOOL-FREE Codex panelist on `ADVISORY_JUDGE_LENS` ('simplicity' today) — see
+    // `buildReviewAdvisoryJudgeRequest` for the two fields that make it structurally different from the two
+    // seats above (no `allowedTools`, `providerName: 'codex'`).
+    //
+    // SAME ISOLATION PROPERTY AS `judgeSecurity`: it reads neither `findings.judge` nor `findings.judgeSecurity`,
+    // so it starts from the diff alone — a structurally different MODEL on a structurally different starting
+    // point, not a third vote anchored on what either Claude juror already said.
+    //
+    // ADVISORY, NOT MANDATORY, AND THAT IS ENFORCED STRUCTURALLY, NOT BY CONVENTION: `ADVISORY_JUDGE_LENS` is
+    // not a member of `MANDATORY_LENSES`, so `reduce`'s `mandatoryLenses: MANDATORY_LENSES.filter(l =>
+    // lenses.includes(l))` below can NEVER include it — this seat's per-lens verdict cannot, by construction,
+    // flip the panel verdict to `changes` on its own (see the test coverage for this exact property).
+    ...(codexAdvisory ? {
+      judgeAdvisory: judgeStep({
+        reads: ['input.aim', 'findings.read'],
+        request: (view) => buildReviewAdvisoryJudgeRequest({
+          read: view.findings.read,
+          aim: typeof view.input.aim === 'string' ? view.input.aim : '',
+        }),
+      }),
+    } : {}),
+
     // ── 4. reduce ───────────────────────────────────────────────────────────────────────────────────────────
     // THE PANEL REDUCER DECIDES; this step only feeds it. `derivePanelVerdict` (`we:scripts/lib/jury-core.mjs`)
     // is #2310's ratified reduction and is IMPORTED, never restated — adding a second answer to "what does this
@@ -1412,14 +1576,26 @@ export function reviewPrOperation({ readPr } = {}) {
     // not to the per-lens calls, where it would flatten every seat to `needs-human` and destroy the per-lens
     // table the write-up renders.
     reduce: compute({
-      reads: ['findings.read', 'findings.judge', 'findings.judgeSecurity', 'input.lens'],
+      reads: [
+        'findings.read', 'findings.judge', 'findings.judgeSecurity', 'input.lens',
+        // #xqa9ttq — ONLY declared as a read when the seat itself is declared (`codexAdvisory`): a step may
+        // only name a leaf that EXISTS at that point in the run (`op()`'s own registration-time check, above),
+        // and `findings.judgeAdvisory` does not exist at all in the opted-out (default) declaration.
+        ...(codexAdvisory ? ['findings.judgeAdvisory'] : []),
+      ],
       fn: (view) => {
         const read = view.findings.read;
         // The seats, in declared order. `step` is carried so the refusal below can NAME which juror was
-        // silent: with two of them, "the juror returned no summary" is not enough to act on.
+        // silent: with two (or, opted in, three) of them, "the juror returned no summary" is not enough to
+        // act on.
         const seats = [
           { step: JUDGE_STEPS[0], lens: view.input.lens, answer: view.findings.judge },
           { step: JUDGE_STEPS[1], lens: SECURITY_LENS, answer: view.findings.judgeSecurity },
+          // #xqa9ttq — THE THIRD SEAT, ONLY WHEN SEATED. `ADVISORY_JUDGE_LENS` is a LITERAL here, exactly
+          // like `SECURITY_LENS` above, for the same reason: it is not caller-negotiable.
+          ...(codexAdvisory
+            ? [{ step: ADVISORY_JUDGE_SEAT.step, lens: ADVISORY_JUDGE_LENS, answer: view.findings.judgeAdvisory }]
+            : []),
         ];
 
         // #x6t2z6h — THE CITATION SCOPE THIS RUN CAN ENFORCE AGAINST. `read.netChangedFiles` is the SAME ground
@@ -1506,6 +1682,13 @@ export function reviewPrOperation({ readPr } = {}) {
         const verdict = derivePanelVerdict({
           lensVerdicts,
           humanRequired,
+          // #xu2pp2m — THE BASIS THIS PANEL ACTUALLY JUDGED ON. `read.degraded` is already the fact every
+          // rendering surface prints as "⚠️ DEGRADED BASIS"; until now it changed nothing about the VERDICT,
+          // so a panel that reviewed material it could not resolve still reduced to a clean, mechanically
+          // clearable `accept`. `shapeReadFinding` now refuses outright when the degrade produced NO diff at
+          // all; this covers the remaining shape — a degrade that yielded SOMETHING, but not the net basis the
+          // mandate told the jurors was ground truth. See `derivePanelVerdict`'s own docblock.
+          degradedBasis: read.degraded === true,
           mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
           // REQUIRED by the reducer, never defaulted (#2823 round-3 finding 1): the findings-derived prevention
           // scan is what catches an uncaptured guard that per-lens verdict flattening would hide.
@@ -1741,7 +1924,9 @@ export function reviewPrOperation({ readPr } = {}) {
   // is the exact failure mode #3344 exists to rule out. REFUSED AT REGISTRATION, before any run record, for
   // the same reason the `SECURITY_LENS` check above is.
   const declaredJudgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
-  const roster = JUDGE_SEATS.map((seat) => seat.step);
+  // #xqa9ttq — `seats`, NOT the module-level `JUDGE_SEATS`: this build's actual roster, which is 2 seats when
+  // `codexAdvisory` is false (identical to `JUDGE_SEATS`) and 3 when true.
+  const roster = seats.map((seat) => seat.step);
   if (declaredJudgeSteps.length !== roster.length || declaredJudgeSteps.some((n, i) => n !== roster[i])) {
     throw new Error(
       `review-pr: \`JUDGE_SEATS\` lists [${roster.join(', ')}] but the declaration's \`judge\` steps are `

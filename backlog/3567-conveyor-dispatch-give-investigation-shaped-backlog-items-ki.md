@@ -3,9 +3,10 @@ bornAs: x6qdz9n
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: active
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:skills-src/conveyor/investigation-agent-brief.md", "we:scripts/check-standards-rules.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-08"
 tags: []
 ---
 
@@ -43,3 +44,25 @@ This item's kind-based dispatch routing generalizes we:backlog/2445's own "item 
 past the build-only path. we:backlog/3620 tracks generalizing it into the Loop's own item-selection
 substrate under the existing Plateau Loop epic (we:backlog/2445). Build and land this item for WE's own
 conveyor regardless; this note is a forward pointer, not a dependency.
+
+## Progress
+
+- `kind: investigation` added to `BACKLOG_KINDS` (`we:scripts/check-standards-rules.mjs`), documented in
+  `we:docs/agent/backlog-workflow.md`'s kind vocabulary + a new `investigation-kind` section.
+- `we:scripts/readiness/dispatch-plan.mjs` holds a cleared `kind: investigation` item `needs-investigation`,
+  analogous to `needs-decision`, before the scope gate.
+- `we:scripts/conveyor/tick-core.mjs`'s `planTick` derives investigation candidates from `plan.held` and
+  spawns them directly via an extended `planPrepareSpawns`/`retirePrepareGuards` (`kind: 'investigate'`),
+  exposed as the 6th launch list `decisions.spawnInvestigations` — never `spawnBuilds`.
+- `we:scripts/operations/dispatch-lane.mjs` + `we:scripts/operations/dispatch-lane-io.mjs` gained the `investigate` launch kind
+  (`LAUNCH_KINDS`, `BRIEF_REQUIRED_BY_KIND`, `sessionSlugFor`, `BRIEF_BY_KIND`, `LAUNCH_LISTS`).
+- New brief `we:skills-src/conveyor/investigation-agent-brief.md`, parallel to `we:skills-src/conveyor/delivery-agent-brief.md`,
+  baking in check-first-before-proposing, `file-item`-only filing, root-cause-only findings, and a required
+  short-plain `## Findings` report shape with two documented terminal shapes (report-only / file-item-terminal).
+- Test coverage: `dispatch-plan`/`tick-core`/`dispatch-lane` routing (incl. "never lands in spawnBuilds"),
+  the kind-axis constants, and a parameterized-terminal test mirroring #3150's own pattern against the
+  `file-item` primitive an investigation depends on (the brief's own runtime terminal-shape CHOICE is agent
+  judgment no unit test can reach).
+- `we:scripts/readiness/queue-report.mjs`'s `classifyHeld` extended (`needs-investigation` → `not-ready`) so
+  the new held reason doesn't trip its unrecognized-token refusal — a small out-of-declared-scope touch
+  required for correctness (the existing test iterates every `HELD_REASONS` token through `classifyHeld`).

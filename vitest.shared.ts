@@ -15,3 +15,23 @@ export const weAlias = {
   '@frontierui/plugs': fuiPlugsRoot,
   '@frontierui/webtheme': fuiWebthemeRoot,
 };
+
+// #x1jcikc: a single `vitest` invocation left NO pool/thread cap at all, so it defaults (via tinypool) to one
+// worker PER AVAILABLE CPU CORE. `heavy-admission.mjs` (#3461) already caps concurrent HEAVY COMMANDS
+// (`test:unit`, `check:standards`, the Playwright capture) at `DEFAULT_ADMISSION_CAP` (2) host-wide — but that
+// cap bounds how many `vitest` PROCESSES may run at once, never how many WORKER THREADS each one spawns. Two
+// admitted `vitest` runs on a real 12-core host therefore each grab up to 12 threads — 24 fighting over 12
+// cores — before the admission cap does any good at all, which is exactly the near-total-CPU symptom this
+// fixes. Sized for the admission cap's OWN documented worst case, not just its happy path: the cap's blocking
+// wait (`acquireSlotBlocking`) FAILS OPEN on a 20-minute timeout by design (a queuing timeout must never
+// strand a lane's whole delivery arc) — so a THIRD `vitest` can and does run concurrently with the two
+// slotted ones under real burst load, not just hypothetically. 4 threads/forks per invocation keeps even that
+// 3-way burst at 3×4=12 — fully subscribed but never oversubscribed — while the designed 2-at-a-time case
+// (2×4=8) still leaves 4 cores of headroom for the OS, git, and everything else running alongside a lane's
+// gate. Applied to `pool: 'threads'` (`vitest.config.ts`, `vitest.maas-conformance.config.ts`) AND to the
+// `forks` pool's `maxForks` (`vitest.integration.config.ts`'s few explicitly-`forks`-scoped files, via
+// `poolMatchGlobs`) so neither pool can locally re-open the same oversubscription this constant exists to
+// close. Deliberately NOT applied to `singleFork: true` files (`vitest.integration.config.ts`) — those are
+// already pinned to exactly one worker for a CORRECTNESS reason (flaky under contention), not a speed one;
+// this constant governs the OTHER files' worker ceiling, never overrides an existing serialization need.
+export const maxTestWorkers = 4;

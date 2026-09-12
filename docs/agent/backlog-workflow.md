@@ -52,7 +52,7 @@ Frontmatter is metadata only — **no `title`, no `summary`, no `id`/`num`**; th
 
 ```markdown
 ---
-kind: story | epic | task | decision   # the one merged nature+hierarchy axis (required) — #466/#487
+kind: story | epic | task | decision | feature | investigation   # the one merged nature+hierarchy axis (required) — #466/#487/#2691/#3567
 status: open | active | preparing | parked | resolved   # `preparing` = a decision being /prepare-researched (in-flight like active, distinct on the board — #375)
 size: 3                            # Fibonacci points — ONLY on stories + unstoried epics (optional on a decision)
 parent: "049"                      # optional — NNN of the epic this rolls under (quote it: leading zeros)
@@ -157,7 +157,7 @@ Every item carries a `kind` (the one merged nature+hierarchy axis — #466/#487)
 
 **Rule (ratified [#2691](/backlog/2691-define-a-feature-tier-above-epic-deterministic-feature-epic-/), 2026-08-08).** The tier above `epic` is an **explicitly-marked node**, never a graph walk:
 
-- **`kind: feature` is a real backlog item** — the tier rides the one structural `kind` axis [#466](/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/) established (`story | task | epic | decision | feature`). There is **no** parallel `feature:` grouping field; epics point up through the **existing `parent` chain**, the same edge story→epic already uses. Adding a value to the single axis *upholds* #466 rather than colliding with it.
+- **`kind: feature` is a real backlog item** — the tier rides the one structural `kind` axis [#466](/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/) established (`story | task | epic | decision | feature | investigation`). There is **no** parallel `feature:` grouping field; epics point up through the **existing `parent` chain**, the same edge story→epic already uses. Adding a value to the single axis *upholds* #466 rather than colliding with it.
 - **The derivation — total and deterministic.** An epic's feature is its **nearest `kind: feature` ancestor** walking `parent` upward; if there is none, the epic is **Unassigned**. "Nearest" is what makes it deterministic over a deep, uneven tree (measured: 81 of 88 epic parents are themselves epics, max chain depth 5) — a *marked* node decides, not the top root.
 - **A feature is a root.** A `kind: feature` carries **no `parent` at all** — that is the hole-free form of "the feature tier is structurally the top" (a `{story,epic,task}` blacklist leaks via `feature → decision → epic` and drifts as kinds are added). Promoting an existing epic to a feature therefore **drops its `parent` edge**; that is a re-parent, not a bare kind-flip.
 - **Features are flat.** A `kind: feature` may not have a `kind: feature` ancestor. Nesting (a `feature → feature` "initiative"/program tier) is a **non-breaking future extension** — flat ⊂ nested — to build when a consumer for it appears, not now. Program-level containment that the root rule drops is what that extension is for.
@@ -165,6 +165,33 @@ Every item carries a `kind` (the one merged nature+hierarchy axis — #466/#487)
 - **Fix/feature *nature* stays on `tags`.** This tier is *hierarchy grouping*; #466 already demoted nature to `tags`. Same word, different axis.
 
 **The plumbing tax is part of the rule, not an afterthought.** `feature` is a **grouping tier like `epic`, not buildable work** — so every `kind`-keyed loader/gate site must give it epic-parity, or a feature mis-renders as agent-ready work or vanishes from its lane. Enforced by `check:standards`: the kind vocabulary, the §10 kind-drift guard over `src/backlog.njk`, tier derivation, the grouping/bucket sites, feature↔child status coherence, the parent-deadlock guard, and the flat + root invariants above.
+
+## The investigation kind — a dispatched investigator, not a build {#investigation-kind}
+
+**Rule (#3567).** `kind: investigation` is a third non-build lifecycle on the same axis as `decision`:
+*investigate → synthesize → report*, optionally filing children, never a build/PR of its own findings. It is
+the automatic-dispatch counterpart to the manually-invoked, on-demand N-panelist committee
+(`we:scripts/operations/explore.mjs`, #3150) — that operation is unchanged and stays the tool a live session
+calls by hand; this kind is what lets a *filed card* get picked up and investigated on its own, the way
+`kind: decision` already gets picked up and prepared on its own.
+
+- **No `scope:`, like a decision.** An investigation is never build work, so it carries no lane-scope
+  prediction. `we:scripts/readiness/dispatch-plan.mjs` holds every cleared `kind: investigation` item
+  `needs-investigation`, BEFORE the scope gate — mirroring the `kind: decision` → `needs-decision` hold.
+- **One dispatch, not two phases.** Unlike a decision (prepare, then present), an investigation has no
+  separate research-then-ratify split — a single dispatched agent investigates and reports in one run.
+  `we:scripts/conveyor/tick-core.mjs`'s `planTick` spawns it directly (`spawnInvestigations`) once held
+  `needs-investigation`, the same tick it clears, rather than waiting on a `prepared` flag.
+- **Its own brief, its own doctrine.** `we:scripts/operations/dispatch-lane.mjs` dispatches it through the
+  `investigate` launch kind, filling `we:skills-src/conveyor/investigation-agent-brief.md` — the brief bakes
+  in check-first-before-proposing, routing any discovered gap through `file-item` (never a hand-rolled
+  scaffold), root-cause-only findings (no band-aid/symptom recommendations), and a required short-plain
+  final-report shape.
+- **Two terminal shapes.** A *report-only* run writes nothing to the backlog — its findings live only in the
+  final report. A *file-item-terminal* run files one or more child items via the declared `file-item`
+  operation (never a hand-scaffold), then resolves the investigation item itself — the filed item(s) and the
+  now-resolved investigation spec commit and land together, as ONE ordinary small PR (never a separate PR per
+  filed item). Either way the investigation item resolves directly — it is never carried by a build PR.
 
 ## Programs — the strict bar for a perpetual `ongoing` epic {#program-definition}
 

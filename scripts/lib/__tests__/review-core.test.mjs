@@ -238,6 +238,14 @@ describe('buildMandate', () => {
     expect(text).toMatch(/throwaway `git clone`/);
   });
 
+  // #3158 — a `judgePanel` seat is always tool-free (`--tools ''`), so the clone escape must not read as an
+  // unconditional instruction to a juror that structurally cannot run `git clone` at all.
+  it('#3158 — the clone escape self-scopes on tool availability, both branches present unconditionally', () => {
+    const text = buildMandate();
+    expect(text).toMatch(/you have tools and genuinely must run the code/);
+    expect(text).toMatch(/If you have no tools at all, you cannot run or clone anything/);
+  });
+
   it('joins a multi-mandate array (the #2285 v3 reviewer-panel shape)', () => {
     const text = buildMandate({ mandate: ['correctness', 'security', 'simplicity'] });
     expect(text).toContain('correctness, security, simplicity');
@@ -785,6 +793,27 @@ describe('buildPanelMandate (#2310)', () => {
       const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
       expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
       expect(text).toContain(MUTATION_PROBE_RULE);
+    });
+  });
+
+  // ── #3158 — THE PROBE SELF-SCOPES ON TRANSPORT TOO, SAME PHRASING PATTERN AS #3094 ─────────────────────
+  // A `judgePanel` seat is always tool-free (`we:scripts/lib/judge-panel.mjs` forwards no `allowedTools`),
+  // so the old unconditional "BREAK the line" instruction told every seat to do something it cannot. No
+  // caller flag was added (matching the #3094 ruling above): the rule's own WORDING now carries both a
+  // tool-bearing branch and a tool-free branch, unconditionally, for every lens.
+  describe('#3158 — the probe tells a tool-free juror what to do instead of fabricating a mutation', () => {
+    it('names both branches — tool-bearing break-the-line, and tool-free name-the-test', () => {
+      expect(MUTATION_PROBE_RULE).toMatch(/when you have tools and can act on the diff, BREAK the line/);
+      expect(MUTATION_PROBE_RULE).toMatch(/When you have NO tools \(a tool-free juror\), you cannot run this probe/);
+      expect(MUTATION_PROBE_RULE).toMatch(/name the test you believe WOULD need to redden/);
+      expect(MUTATION_PROBE_RULE).toMatch(/never claim to have broken or run anything you did not/);
+    });
+
+    it('is present for every lens with no caller flag — the #3094 invariant holds for the new branch too', () => {
+      for (const lens of PANEL_LENSES) {
+        const text = buildPanelMandate({ lens });
+        expect(text, lens).toContain('When you have NO tools (a tool-free juror), you cannot run this probe');
+      }
     });
   });
 
@@ -2498,6 +2527,31 @@ describe('GUARANTEE_NEEDS_A_TEST_RULE rides alongside the prose rule', () => {
     expect(text).toContain(PROSE_IMPRECISION_RULE);
     expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
     expect(PROSE_IMPRECISION_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
+  });
+
+  // ── #3158 — THIS RULE SELF-SCOPES ON TRANSPORT TOO, NOT JUST THE MUTATION PROBE ──────────────────────────
+  // It carries the IDENTICAL "BREAK the guarded line" demand, so conditioning only `MUTATION_PROBE_RULE` would
+  // have left a tool-free `judgePanel` seat still instructed to do the impossible. Same shape as the probe's
+  // fix: both branches in the WORDING, no caller flag, present for every mandate unconditionally.
+  describe('#3158 — the guarantee rule tells a tool-free juror what to do instead of breaking a line', () => {
+    it('names both branches — tool-bearing break-the-line, and tool-free name-the-test', () => {
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/When you have tools and can act on the diff, BREAK the guarded line/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/When you have NO tools \(a tool-free juror\), you cannot break anything/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/name the test you believe SHOULD defend it/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/never claim a mutation result you did not produce/);
+    });
+
+    it('keeps the COVERAGE framing for the tool-free branch — an unverified gap is still worth raising', () => {
+      expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/worth raising even unverified/);
+    });
+
+    it('reaches every panel lens AND the validator with no caller flag', () => {
+      for (const lens of PANEL_LENSES) {
+        expect(buildPanelMandate({ lens }), lens).toContain('When you have NO tools (a tool-free juror), you cannot break anything');
+      }
+      expect(buildValidatorMandate({ lens: 'correctness' }))
+        .toContain('When you have NO tools (a tool-free juror), you cannot break anything');
+    });
   });
 });
 

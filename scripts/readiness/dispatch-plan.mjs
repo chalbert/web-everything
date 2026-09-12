@@ -80,6 +80,10 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
+// The kind-scoped pause's PURE half (epic #3383). `dispatch-pause.mjs`'s fs helpers stay out of this pure core
+// — only the pure predicate/normalizer come in, so "is THIS kind held" is decided in ONE place rather than
+// re-derived here and again in `tick-core.mjs`.
+import { PAUSABLE_KINDS, normalizePausedKinds, resolvePausedKinds } from './dispatch-pause.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -110,6 +114,14 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
  *  state (`state.decisions[].prepared`): UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks
  *  (artefact + the ruling surface) for ratification. The operator gloss is {@link NEEDS_DECISION_HINT}.
  *
+ *  `needs-investigation` (#3567): a cleared `kind:investigation`. An investigation is NOT build work either —
+ *  it is a single dispatched investigator (investigate -> synthesize -> report, optionally filing children),
+ *  never a two-phase prepare/present lifecycle the way a decision is. It has no `scope:`, so — same reason as
+ *  the decision case just above — it is held BEFORE the scope gate rather than mislabeled `unshaped-no-scope`.
+ *  UNLIKE a decision, there is no `prepared` flag to wait on: `we:scripts/conveyor/tick-core.mjs`'s `planTick`
+ *  spawns every `needs-investigation` hold directly (`spawnInvestigations`) the same tick it clears. The
+ *  operator gloss is {@link NEEDS_INVESTIGATION_HINT}.
+ *
  *  `already-done` (#3457/#3460): a queued item the IO shell's AGE-GATED ground-truth enrichment found a real
  *  merged PR already closing out (Fork 2(b) of #3457's ratified ruling). Checked FIRST, ahead of every other
  *  branch — see {@link dispatchPlan}'s own step 0 for why a real PR-history signal outranks a stale `blocked` /
@@ -139,7 +151,7 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
  *  touches an already-running lane — this pure core has no lease/lane-release knowledge at all. The operator
  *  gloss is {@link DISPATCH_PAUSED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -159,6 +171,12 @@ export const NEEDS_SLICE_HINT = 'epic — /slice into buildable child stories';
  *  prepared/unprepared split that routes prepare-vs-present is carried in `state.decisions[].prepared`. */
 export const NEEDS_DECISION_HINT = 'decision — prepare its forks, then present for ratify';
 
+/** The operator-facing gloss for a `needs-investigation` hold (#3567) — surfaced beside the token so a held
+ *  investigation always tells the operator WHAT the conveyor does with it: it is spawned directly
+ *  (`spawnInvestigations`), one dispatched agent, no separate prepare/present phase the way a decision has.
+ *  An investigation is never a build. */
+export const NEEDS_INVESTIGATION_HINT = 'investigation — dispatched to investigate, synthesize, and report';
+
 /** The operator-facing gloss for an `already-done` hold (#3457/#3460) — surfaced beside the token so a held
  *  item always tells the operator WHAT to do: check the named merged PR, and if it really does close the item
  *  out, `resolve` it (rather than re-dispatching); if the check false-positived (see
@@ -176,6 +194,20 @@ export const BRANCH_DRIFT_BLOCKED_HINT = 'a dispatched-work branch is unreconcil
  *  always tells the operator WHAT to do: clear the manual pause (`node scripts/readiness/dispatch-pause.mjs
  *  clear`) once the emergency has passed; already-running lanes were never touched. */
 export const DISPATCH_PAUSED_HINT = 'manual dispatch-pause is set — clear it (dispatch-pause.mjs clear) to resume new launches';
+
+/**
+ * The gloss for a `dispatch-paused` hold, NARROWED to the kinds a SCOPED pause actually holds (epic #3383).
+ * A blanket pause keeps {@link DISPATCH_PAUSED_HINT} verbatim — the wording an operator already knows, and the
+ * only wording an old-format marker can produce. A scoped pause names the held kinds instead, so the hint never
+ * claims "dispatch is paused" flatly while `fix`/`ci-heal` are demonstrably still spawning.
+ * @param {string[]|null} [pausedKinds] the marker's declared scope (`null`/absent = blanket)
+ * @returns {string}
+ */
+export function dispatchPausedHint(pausedKinds = null) {
+  const kinds = normalizePausedKinds(pausedKinds);
+  if (kinds == null || kinds.length === PAUSABLE_KINDS.length) return DISPATCH_PAUSED_HINT;
+  return `manual dispatch-pause is set for ${kinds.join(', ')} — clear it (dispatch-pause.mjs clear) to resume new launches`;
+}
 
 /** The operator-facing gloss for a `capacity-cap` hold (#xupukxa) — surfaced beside the token so a held item
  *  always tells the operator WHY it differs from `no free lane`: a lane physically exists, but launching it
@@ -256,6 +288,7 @@ function hasOpenBlockers(item) {
  *   driftBlockedScope?: string[]|null,
  *   maxConcurrentLanes?: number,
  *   dispatchPaused?: boolean,
+ *   dispatchPausedKinds?: string[]|null,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
  *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
@@ -290,12 +323,24 @@ function hasOpenBlockers(item) {
  *                   would otherwise be assigned a lane holds `dispatch-paused` instead — checked at the very
  *                   last step, so it never relabels an item already held for a MORE specific reason. Defaults
  *                   to `false` (unpaused — today's pre-#3609 behavior) when omitted.
+ *   • `dispatchPausedKinds` — (epic #3383) the pause's optional KIND SCOPE
+ *                   (`we:scripts/readiness/dispatch-pause.mjs`'s `pausedKinds` field, read by the IO shell).
+ *                   `null`/absent = BLANKET, so a caller passing only `dispatchPaused: true` — every caller
+ *                   written before the scope existed, and every old-format marker — still holds builds exactly
+ *                   as before. A NON-EMPTY scope holds builds only when it names `build`: a pause scoped to
+ *                   `fix`/`ci-heal` alone leaves this core's launches untouched, since `build` is the ONLY
+ *                   kind it plans (the other five are `tick-core.mjs#planTick`'s spawns).
  * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null } = {}) {
+  // The pause is per-KIND now, and this core only ever decides ONE kind: `build`. Resolving the marker's
+  // declared scope through the shared predicate (rather than reading the raw boolean) is what makes an
+  // old-format `{paused:true}` — and every caller that still passes only the boolean — keep holding builds,
+  // while `--kinds=fix` alone leaves builds launching.
+  const buildPaused = resolvePausedKinds({ paused: dispatchPaused === true, pausedKinds: dispatchPausedKinds }).includes('build');
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
@@ -368,6 +413,18 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
       held.push({ num, reason: 'needs-decision' });
       continue;
     }
+    // 3.5. A cleared `kind:investigation` (#3567) — HOLD `needs-investigation`, ALWAYS. Analogous to the
+    //    decision branch just above: an investigation is never build work, so it is held BEFORE the scope
+    //    gate for the same reason a decision is — it carries no `scope:` at all, and without this branch it
+    //    would fall through to the scope gate and be mislabeled `unshaped-no-scope`. UNLIKE a decision, an
+    //    investigation has no separate prepare/present phase: `we:scripts/conveyor/tick-core.mjs`'s `planTick`
+    //    reads every `needs-investigation` hold straight off THIS `held` list and spawns it directly
+    //    (`spawnInvestigations`) the same tick it clears — a single dispatched investigator, not a two-phase
+    //    prepare-then-ratify lifecycle. A BLOCKED investigation is still `blocked` (checked first).
+    if (item.kind === 'investigation') {
+      held.push({ num, reason: 'needs-investigation' });
+      continue;
+    }
     // 4. No predicted scope — HOLD `unshaped-no-scope`, ALWAYS. An unscoped item is NEVER launched to build, not
     //    even alone into an idle pool (auto-prepare, ruled 2026-07-22): building blind is the hazard, and an
     //    unscoped build is "assume-overlaps-everything". The skill sees this hold (and `state.unshaped`) and
@@ -411,7 +468,10 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    point a lane would actually be handed out, so it never relabels an item already held for a more
     //    specific reason above (blocked / needs-slice / needs-decision / unshaped-no-scope / branch-drift-blocked
     //    / an overlap) — pausing changes nothing about why those items weren't launching anyway.
-    if (dispatchPaused) {
+    //    A KIND-SCOPED pause (epic #3383) that does not name `build` never reaches here at all: this core's
+    //    only launch kind is `build`, so a `fix`/`ci-heal`-only pause leaves this gate open and the item
+    //    launches normally (the scoped kinds are held in `tick-core.mjs`, which owns those spawns).
+    if (buildPaused) {
       held.push({ num, reason: 'dispatch-paused' });
       continue;
     }
@@ -641,11 +701,16 @@ async function main(argv) {
   //     (module missing, unreadable/corrupt file) — an absent/unreadable pause signal must never itself hold
   //     dispatch; only an explicit `paused:true` marker does. Skippable via `--no-pause-check` (mirrors
   //     `--no-ground-truth` / `--no-drift-check`).
+  //     Reads the FULL state rather than the bare `isDispatchPaused` boolean, so a kind-scoped marker's
+  //     `pausedKinds` reaches the pure core (and the operator hint) instead of being flattened to "paused".
   let dispatchPaused = false;
+  let dispatchPausedKinds = null;
   if (!flags['no-pause-check']) {
     try {
-      const { isDispatchPaused } = await import('./dispatch-pause.mjs');
-      dispatchPaused = isDispatchPaused();
+      const { readPauseState } = await import('./dispatch-pause.mjs');
+      const pauseState = readPauseState();
+      dispatchPaused = pauseState.paused === true;
+      dispatchPausedKinds = pauseState.pausedKinds ?? null;
     } catch (e) {
       log(`  ⚠ dispatch-pause check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
     }
@@ -653,7 +718,7 @@ async function main(argv) {
 
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -688,7 +753,7 @@ async function main(argv) {
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
               : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
               : h.reason === 'capacity-cap' ? ` (${CAPACITY_CAP_HINT})`
-                : h.reason === 'dispatch-paused' ? ` (${DISPATCH_PAUSED_HINT})`
+                : h.reason === 'dispatch-paused' ? ` (${dispatchPausedHint(dispatchPausedKinds)})`
                   : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }

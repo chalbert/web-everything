@@ -60,6 +60,12 @@ import {
   // #3540 — the shared record-decision core and the record-verdict vocabulary mapping.
   planRecordDecision,
   confirmAnswerFor,
+  // #xqa9ttq — the opt-in third (Codex, advisory) seat.
+  ADVISORY_JUDGE_LENS,
+  ADVISORY_JUDGE_SEAT,
+  buildReviewAdvisoryJudgeRequest,
+  codexAdvisoryFromEnv,
+  CODEX_ADVISORY_ENV_VAR,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -83,6 +89,13 @@ function stubReader({
   // proceeds — so adding the guard changes nothing for a suite that is about something else. The
   // independence tests are the only ones that override them.
   body = 'the PR description', clearerId = undefined, createdAt = '',
+  // #xu2pp2m — WHAT A DEGRADED READ ACTUALLY CAME BACK WITH. This used to be hard-wired to `''` for every
+  // `netScored: false` case, which quietly conflated the TWO shapes a degrade can take: "the basis could not
+  // be pinned, but here IS a diff" (limp on and say so — the case the `ref-unresolved` tests below are
+  // actually about) and "the basis could not be pinned AND there is nothing at all" (`unrun`, refused since
+  // #xu2pp2m, because PR #2122 merged on a clean accept over exactly that). Defaulted to real diff text so
+  // the existing degrade tests keep testing the case they were written for; the empty-diff tests pass `''`.
+  degradedDiffText = '--- a/x\n+++ b/x\n+a line the degraded read still saw\n',
 } = {}) {
   return ({ pr, repo }) => ({
     state,
@@ -105,13 +118,20 @@ function stubReader({
     net: netScored
       ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
       : { paths: [], base: null, rev: null, scored: false, reason: netReason },
-    diff: netScored ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true } : { text: '', scored: false, reason: netReason },
+    diff: netScored
+      ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true }
+      : { text: degradedDiffText, scored: false, reason: netReason },
   });
 }
 
-/** A registry holding one freshly-built declaration over a stub reader. */
-function registryFor(readerOptions) {
-  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions) });
+/**
+ * A registry holding one freshly-built declaration over a stub reader.
+ * @param {object} readerOptions - forwarded to `stubReader`.
+ * @param {{codexAdvisory?: boolean}} [opOptions] - #xqa9ttq — forwarded to `reviewPrOperation`. Defaulted to
+ *   `false` so every EXISTING caller of this helper keeps building today's two-seat declaration unchanged.
+ */
+function registryFor(readerOptions, { codexAdvisory = false } = {}) {
+  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions), codexAdvisory });
   const registry = createRegistry();
   registry.register(declaration);
   return { declaration, registry };
@@ -2526,5 +2546,233 @@ describe('#3335 the write-up states what was EARNED beside what SAT', () => {
     expect(body).toContain('did NOT run and are not reported as unjudged');
     const absent = PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l));
     expect(body).toContain(`The other ${absent.length} panel lens(es) (${absent.join(', ')})`);
+  });
+});
+
+// ── #xqa9ttq — THE OPT-IN THIRD SEAT: A TOOL-FREE CODEX JUROR ON AN ADVISORY LENS ────────────────────────────
+describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
+  describe('codexAdvisoryFromEnv', () => {
+    it('is false when the env var is unset, or set to anything other than the literal string "1"', () => {
+      expect(codexAdvisoryFromEnv({})).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: 'true' })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '' })).toBe(false);
+    });
+
+    it('is true only for the exact literal "1"', () => {
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' })).toBe(true);
+    });
+  });
+
+  describe('buildReviewAdvisoryJudgeRequest', () => {
+    it('carries no allowedTools, no model, and pins providerName to codex', () => {
+      const request = buildReviewAdvisoryJudgeRequest({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' },
+      });
+      expect(request.allowedTools).toBeUndefined();
+      expect(request.model).toBeUndefined();
+      expect(request.providerName).toBe('codex');
+      expect(request.lens).toBe(ADVISORY_JUDGE_LENS);
+      expect(ADVISORY_JUDGE_LENS).toBe(ADVISORY_LENSES[0]);
+    });
+
+    it('the mandate carries the same diff/description the two existing seats get (#2336 context isolation)', () => {
+      const read = { netChangedFiles: NET_PATHS, title: 'the PR title' };
+      const advisory = buildReviewAdvisoryJudgeRequest({ read });
+      const correctness = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+      expect(advisory.input).toBe(correctness.input);
+    });
+  });
+
+  it('is NOT declared by default — the default declaration is byte-identical to before this card', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(judgeSteps).not.toContain('judgeAdvisory');
+    // The module-level roster is untouched — every OTHER test in this file keeps reading exactly this.
+    expect(JUDGE_SEATS).toHaveLength(2);
+  });
+
+  it('when opted in, declares a THIRD judge step, in order, after judgeSecurity and before reduce', () => {
+    const { declaration } = registryFor({}, { codexAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    const advisoryStep = declaration.steps.find((s) => s.name === 'judgeAdvisory');
+    expect(advisoryStep.step.kind).toBe('judge');
+    // It is isolated exactly like `judgeSecurity`: it reads neither sibling juror's findings.
+    expect(advisoryStep.step.reads).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('the seated request is tool-free and pinned to codex, on ADVISORY_JUDGE_LENS', () => {
+    const { registry } = registryFor({}, { codexAdvisory: true });
+    const { requests } = atConfirm({
+      registry, input: BASE_INPUT, id: 'run-codex-request',
+      answers: { [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeAdvisory: CLEAN_ANSWER },
+    });
+    const request = requests.judgeAdvisory;
+    expect(request.lens).toBe(ADVISORY_JUDGE_LENS);
+    expect(request.providerName).toBe('codex');
+    expect(request.allowedTools).toBeUndefined();
+    expect(request.model).toBeUndefined();
+    // The two EXISTING seats are UNTOUCHED — still tool-bearing, still no `providerName` (they use whatever
+    // provider the RUN's own `--provider`/factory default is).
+    expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[0]].providerName).toBeUndefined();
+    expect(requests[JUDGE_STEPS[1]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[1]].providerName).toBeUndefined();
+  });
+
+  it('the registration-time roster check still holds for the 3-seat build (no drift, no throw)', () => {
+    // `reviewPrOperation({ codexAdvisory: true })` not throwing at registration IS the assertion: the roster
+    // check at the bottom of that function throws if the declared `judge` steps ever stop matching the local
+    // `seats` array this card added. A regression here would fail EVERY test in this describe block, but this
+    // one names the property directly.
+    expect(() => registryFor({}, { codexAdvisory: true })).not.toThrow();
+  });
+
+  describe('THE CORE PROPERTY: an advisory-lens Codex finding cannot flip the verdict to `changes` on its own', () => {
+    it('mandatory lenses accept, the advisory seat reports a blocker — the panel verdict is still `accept`', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-cannot-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          // The Codex seat reports a BLOCKER-shaped finding — exactly the shape that flips a MANDATORY lens's
+          // own per-lens verdict to `changes` (see `reduceWith` above). Seated on an advisory lens, it must not
+          // be able to do the same to the PANEL verdict.
+          judgeAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      // The per-lens verdict is honestly `changes` — the finding is not hidden or downgraded.
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('changes');
+      // …but the PANEL verdict, reduced only over `mandatoryLenses`, is still `accept`.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
+      // The finding still SURFACES — advisory means "informs", not "invisible". `buildPanelFindings` tags a
+      // finding's LENS into `category` (`${lens}/${category}`, or bare `lens` with none) — see `jury-core.mjs`.
+      expect(run.verdict.findings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+    });
+
+    it('a MANDATORY lens reporting the identical blocker DOES flip the verdict — proving the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-mandatory-does-block',
+        answers: {
+          [JUDGE_STEPS[0]]: BLOCKING_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('changes');
+    });
+
+    it('`decideLensFloor` over a 3-seat roster: the advisory seat is counted as advisory, never mandatory', () => {
+      const seats = Object.freeze([...JUDGE_SEATS, ADVISORY_JUDGE_SEAT]);
+      const floor = decideLensFloor({ lens: DEFAULT_LENS, seats });
+      expect(floor.seated).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
+      expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+      expect(floor.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
+      expect(floor.seatsFloor).toBe(true);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE PR #2122 FALSE ACCEPT, REPRODUCED AND CLOSED.
+//
+// WHAT ACTUALLY HAPPENED (2026-09-12, live, and the PR MERGED on it). A mechanical review ran in a
+// single-branch lane clone with no remote-tracking ref for the PR's head branch. The read came back
+// `degraded: true, degradedReason: 'ref-unresolved'` with a ZERO-BYTE diff; all three seats were handed
+// `_(the net diff could not be resolved …)_` as their entire material; nothing refused; and the panel reduced
+// to a clean `accept` over 560 lines of script + test that no juror had read. The tool-free Codex seat even
+// said so out loud — "the missing net diff prevents a substantive review of the changes" — and that honest
+// ABSTENTION, carrying no findings, counted as an accept vote.
+//
+// TWO INDEPENDENT GUARDS, because either alone leaves a hole:
+//   • `read` REFUSES a degrade that produced nothing — the exact measured shape, caught before a juror is paid.
+//   • `reduce` cannot return a CLEARABLE verdict on any degraded basis — the residual shape, where the degrade
+//     yielded something but not the net basis the mandate called ground truth.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — a review can no longer clear a PR on material it could not read', () => {
+  it('REFUSES at `read` when a degraded basis produced an EMPTY diff — before any juror is spawned', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved', degradedDiffText: '' });
+    expect(() => advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-empty-degraded', input: BASE_INPUT, registry }), { registry },
+    )).toThrow(/DEGRADED[\s\S]*EMPTY/);
+  });
+
+  it('the refusal names the CHECKOUT as the fix, because that is what it almost always is', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved', degradedDiffText: '' });
+    expect(() => advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-empty-degraded-msg', input: BASE_INPUT, registry }), { registry },
+    )).toThrow(/--cwd/);
+  });
+
+  it('an EMPTY diff on a SCORED basis is NOT refused — a genuine no-op PR is an honest read', () => {
+    // The conjunction is what makes the refusal precise. Narrowing it to "degraded" alone, or to "empty"
+    // alone, would either miss the measured case or reject a legitimate one.
+    const { registry } = registryFor({});
+    const reader = stubReader({});
+    const raw = reader({ pr: 1234, repo: 'chalbert/web-everything' });
+    const shaped = shapeReadFinding(
+      { ...raw, diff: { text: '', scored: true } },
+      { pr: 1234, repo: 'chalbert/web-everything' },
+    );
+    expect(shaped.degraded).toBe(false);
+    expect(registry).toBeTruthy();
+  });
+
+  it('a UNANIMOUS clean panel on a DEGRADED basis reduces to `needs-human`, never `accept`', () => {
+    // THE REGRESSION, stated as the before/after it is: with `degradedBasis` removed from the `reduce` call
+    // this run returns `accept` — the exact verdict PR #2122 merged on — and a `review:pending` PR carrying it
+    // is auto-cleared MECHANICALLY by `reviewLoopAutoConfirm`. `needs-human` is the one non-blocking verdict
+    // that parks instead.
+    const { run } = driveFixture({
+      correctness: CLEAN_ANSWER,
+      security: CLEAN_ANSWER,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.lensVerdicts[DEFAULT_LENS]).toBe('accept');
+    expect(run.verdict.lensVerdicts[SECURITY_LENS]).toBe('accept');
+    expect(run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('an ABSTAINING tool-free seat is not counted as an accept vote — the #3158 risk, as measured', () => {
+    // The Codex seat's real words from the live run. It has a summary (so the #x0p5k2q silent-juror refusal
+    // does not fire) and no findings (so `deriveVerdict` reads it as clean). Nothing in a PURE reducer can
+    // recognise that prose as an abstention — which is exactly why the guard keys on the INPUT being
+    // unreadable instead, and why this run parks rather than clearing.
+    const ABSTENTION = {
+      summary: 'the missing net diff prevents a substantive review of the changes',
+      findings: [],
+    };
+    const { run } = driveFixture({
+      correctness: CLEAN_ANSWER,
+      security: ABSTENTION,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(run.verdict.summary).toContain('prevents a substantive review');
+  });
+
+  it('a degraded basis still lets a REAL blocker bounce — the downgrade takes only the clearable outcomes', () => {
+    // Deliberately NOT "degrade ⇒ always needs-human": a bounce is more actionable than a park and costs
+    // nothing, so a mandatory seat that DID find something keeps its say. This is the pre-existing
+    // `ref-unresolved` behaviour, asserted here so the new arm cannot quietly swallow it.
+    const { run } = driveFixture({
+      correctness: BLOCKING_ANSWER,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.verdict).toBe(VERDICTS.CHANGES);
+  });
+
+  it('an UNDEGRADED clean panel is untouched — the guard costs an ordinary review nothing', () => {
+    const { run } = driveFixture({ correctness: CLEAN_ANSWER, security: CLEAN_ANSWER });
+    expect(run.findings.read.degraded).toBe(false);
+    expect(run.verdict.verdict).toBe(VERDICTS.ACCEPT);
   });
 });

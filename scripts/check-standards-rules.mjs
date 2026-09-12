@@ -126,12 +126,22 @@ export const MATURITY_TRIGGER_RE = /^(externalConsumers>=\d+|realRuns>=\d+|adopt
 // `feature` (#2691, ratified 2026-08-08) is the grouping tier ABOVE epic — a root, flat, non-buildable
 // grouping node (epic-parity: never Tier-A, never sized as buildable work). See
 // docs/agent/backlog-workflow.md#feature-tier for the full ruling; #2998 is the plumbing tax it names.
-export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision', 'feature']);
+// `investigation` (#3567) is a THIRD non-build lifecycle beside `decision` — investigate -> synthesize ->
+// report, optionally filing children, never a build/PR of its own work. Like `decision` it carries no
+// `scope:` and is held (`needs-investigation`) before the scope gate — see
+// `we:scripts/readiness/dispatch-plan.mjs`'s `item.kind === 'investigation'` branch — but it is NOT a
+// `decision` (no fork to ratify) and NOT a grouping kind (it has no children of its own by definition).
+export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision', 'feature', 'investigation']);
 // The repo's single "build kind" rule: every kind except `decision` ships work (story/task build leaves,
 // epic is the umbrella). This is the canonical form of proposer.mjs's `isBuildable` and the backlog-health
 // audit's G2/G3 exec gate — keeping it here, beside the kind set, means a future kind rename surfaces it.
 // Defined as `!== 'decision'` (not a positive list) on purpose: a NEW build kind is auto-covered, and the
 // only silent-death vector is `decision` itself being renamed — pinned by the kinds test (#1473).
+// `investigation` (#3567) IS exec-kind here too, even though it never reaches `spawnBuilds`: this axis means
+// "ships SOME resolution work" (a decision ships nothing but a ratified fork), not "builds code" — an
+// investigation ships its own report/filed-items resolution, which is exactly `isExecKind`'s A1
+// done-when-proof gate's intent (an open investigation still owes a provable "done when"). The actual
+// build-vs-not routing lives in `we:scripts/readiness/dispatch-plan.mjs`'s per-kind branches, not here.
 export const isExecKind = (kind) => kind !== 'decision';
 // GROUPING kinds (#2998) — the container kinds that are never directly buildable: they hold no `scope:`,
 // never carry burndown `size` as buildable work, and are never dispatched to build — their work lives in

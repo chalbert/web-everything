@@ -207,12 +207,23 @@ export const DEFAULT_MANDATE = 'correctness';
  * FRAMED AS COVERAGE, NOT AS PROSE, and that is load-bearing: a missing test is a real gap in the diff, so it
  * routes through the ordinary disposition machinery. Reading it as a prose finding would put it straight back
  * under the rule above and it would never be raised.
+ *
+ * #3158 — SELF-SCOPED ON TRANSPORT TOO, THE SAME WAY {@link MUTATION_PROBE_RULE} IS. This rule carries the
+ * IDENTICAL "BREAK the guarded line and confirm a NAMED test reddens" demand as the mutation probe, just
+ * narrowed to prose guarantees — so a tool-free `judgePanel` seat was being told to do the impossible here as
+ * well, and conditioning only the probe would have left half the bug in place. The fix is the same one the
+ * #3094 ruling above mandates and the one `judge-panel.mjs`'s RULING records: the text carries BOTH branches
+ * unconditionally and the juror — the only party that actually knows whether it has tools — picks. No caller
+ * flag, so no call site can forget it and no default can be stale in either direction.
  */
 export const GUARANTEE_NEEDS_A_TEST_RULE = [
   'A COMMENT THAT PROMISES SOMETHING IS A TEST WITH THE WRONG SYNTAX. For each guarantee the diff states in',
-  'prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find the test that defends it, then',
-  'BREAK the guarded line and confirm a NAMED test reddens. A guarantee no test defends is a COVERAGE finding,',
-  'not a prose one, and it is worth raising: prose is the only thing in a diff that nothing checks. Watch',
+  'prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find the test that defends it. When',
+  'you have tools and can act on the diff, BREAK the guarded line and confirm a NAMED test reddens. When you',
+  'have NO tools (a tool-free juror), you cannot break anything — name the test you believe SHOULD defend it,',
+  'say plainly that you could not verify by mutation, and never claim a mutation result you did not produce. A',
+  'guarantee no test defends is a COVERAGE finding, not a prose one, and it is worth raising even unverified:',
+  'prose is the only thing in a diff that nothing checks. Watch',
   'DEFAULTS in particular — a default value quietly satisfying a check written for the explicit value is the',
   'single most common shape here.',
 ].join(' ');
@@ -232,16 +243,31 @@ export const GUARANTEE_NEEDS_A_TEST_RULE = [
  * DISTINCT FROM {@link GUARANTEE_NEEDS_A_TEST_RULE}, which mutates to check ONE narrow class: a guarantee the
  * diff states in PROSE. This asks the same question of any behaviour finding, whatever prompted it.
  *
+ * #3158 (x27e4xs) — ALSO SCOPED BY ITS OWN WORDING, NOW ON TRANSPORT. A `judgePanel` seat is always
+ * `--tools ''` (`we:scripts/lib/judge-panel.mjs` forwards no `allowedTools` — see that module's RULING),
+ * so the old unconditional "BREAK the line" instruction told a tool-free juror to do something it
+ * structurally cannot. The ruling there is panel seats STAY tool-free (the N-seats-need-N-lanes cost of a
+ * tool-bearing panel is not paid); the fix here is the SAME pattern as the UNCONDITIONAL ruling above — the
+ * text branches on whether the juror has tools rather than a caller passing a flag, because
+ * `skills-src/jury/panel-fanout.mjs` already tells a tool-free juror that fact about itself. A tool-bearing
+ * juror (a future transport, or a caller reading its own `allowedTools`) still gets the literal instruction;
+ * a tool-free one is told to name the test it BELIEVES would redden and say plainly it could not run anything
+ * — never to fabricate a result it did not produce. `we:skills-src/drain/SKILL.md`'s panel-review section
+ * documents which finding classes a tool-free panel can and cannot reach.
+ *
  * Exported so a caller building another transport can assert its presence rather than paraphrasing it, and so a
  * test can pin that it is the only thing #3094 added to the mandate when no `aim` is passed.
  */
 export const MUTATION_PROBE_RULE = [
   'MUTATION PROBE — FOR BEHAVIOUR FINDINGS. If you report a defect that affects correctness or changes',
-  'behaviour, BREAK the line you say is wrong or unguarded and state, in the finding, whether a NAMED test',
-  'reddens — name the test if one does, and say plainly that NO named test reddens if none does. "No test',
-  'catches this" is itself a finding worth reporting; an assertion of a defect with no mutation result behind it',
-  'is weaker than one with it. This does NOT apply to a finding that changes no behaviour — pure style, naming,',
-  'wording, simplicity — where there is nothing to break: say nothing about mutation for those.',
+  'behaviour: when you have tools and can act on the diff, BREAK the line you say is wrong or unguarded and',
+  'state, in the finding, whether a NAMED test reddens — name the test if one does, and say plainly that NO',
+  'named test reddens if none does. When you have NO tools (a tool-free juror), you cannot run this probe —',
+  'say so explicitly, name the test you believe WOULD need to redden if the defect is real, and never claim',
+  'to have broken or run anything you did not. "No test catches this" — or "I have no tools to check" — is',
+  'itself a finding worth reporting; an assertion of a defect with no mutation result behind it is weaker than',
+  'one with it. This does NOT apply to a finding that changes no behaviour — pure style, naming, wording,',
+  'simplicity — where there is nothing to break: say nothing about mutation for those.',
 ].join(' ');
 
 export const PROSE_IMPRECISION_RULE = [
@@ -292,7 +318,9 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
     bodyLines: [
       'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
       'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
-      'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
+      'you have tools and genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a',
+      'temp dir, never here. If you have no tools at all, you cannot run or clone anything — say so plainly',
+      'rather than describing verification you did not perform.',
       PROSE_IMPRECISION_RULE,
       GUARANTEE_NEEDS_A_TEST_RULE,
     ],

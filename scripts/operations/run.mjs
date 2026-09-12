@@ -29,8 +29,10 @@ import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
-import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
-import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
+import {
+  createDefaultJudge, runOperationCli, buildCliSpec, cwdFlagValue, hasJsonFlag,
+} from './cli-adapter.mjs';
+import { reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
 import { stagePrViewOperation, STAGE_PR_VIEW_OP } from './stage-pr-view.mjs';
 import { createPayloadReader, createStagePrViewSinks, defaultViewDir } from './stage-pr-view-io.mjs';
@@ -89,8 +91,22 @@ export const OPERATIONS = Object.freeze({
   // no-op for them. See `createReviewPrSinks`'s own `json` doc (`we:scripts/operations/review-pr-io.mjs`) for
   // WHY this exists: a `--json` caller's stdout must stay pure JSON even when the `record` step's notice
   // effect fires mid-run.
-  [REVIEW_PR_OP]: ({ json = false } = {}) => ({
-    declaration: reviewPrOperation({ readPr: createReviewPrReader() }),
+  //
+  // #xqa9ttq — `codexAdvisory` reads `REVIEW_PR_CODEX_ADVISORY=1` off the environment (`codexAdvisoryFromEnv`,
+  // `we:scripts/operations/review-pr.mjs`), OFF by default — see that flag's own docs for why it is an env
+  // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
+  // `record-verdict-io.mjs`'s registration below reads the SAME env var. It composes with `json` above
+  // rather than replacing it: the two knobs are independent (one shapes stdout, the other seats a juror).
+  // #xu2pp2m — `cwd` IS THREADED INTO THE READER, not only into the judge factory. See
+  // `we:scripts/operations/cli-adapter.mjs#cwdFlagValue` for the live PR #2122 false-accept this closes: the
+  // reader used to be built with NO arguments, so `--cwd=<lane>` steered the jurors' working tree while the
+  // DIFF still came from `REPO_ROOT`. `createReviewPrReader`'s own `cwd` default is `REPO_ROOT`, so an
+  // invocation with no `--cwd` is byte-identical to before.
+  [REVIEW_PR_OP]: ({ json = false, cwd = null } = {}) => ({
+    declaration: reviewPrOperation({
+      readPr: createReviewPrReader(cwd ? { cwd } : {}),
+      codexAdvisory: codexAdvisoryFromEnv(),
+    }),
     sinks: createReviewPrSinks({ json }),
   }),
   // backlog/xzdi27a-* — the sibling of `review-pr` for a BACKLOG CARD instead of a PR diff (no `gh`, no diff,
@@ -246,7 +262,8 @@ export const OPERATIONS = Object.freeze({
 });
 
 /**
- * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model` become a juror's spawn options (#3151).
+ * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model`/`--provider` become a juror's spawn
+ * options (#3151, extended for `--provider` by #xqa9ttq).
  *
  * EXPORTED SO THE TEST DRIVES THIS FUNCTION AND NOT A COPY OF IT. The first cut inlined the arrow below and the
  * suite re-created the same expression, so the precedence was ASSERTED, never EXERCISED: deleting the flags
@@ -254,17 +271,22 @@ export const OPERATIONS = Object.freeze({
  * `env || cwd` would silently make `--cwd` lose to a stale environment variable and reopen #3151 with the gate
  * still green. One copy, imported by both.
  *
+ * `--provider` FOLLOWS THE SAME FLAG-WINS-ENV-FALLBACK SHAPE as `--cwd`, via `JUDGE_PROVIDER` — an operator who
+ * wants every juror in a session to default to Codex without typing `--provider=codex` on each command sets
+ * the env var once, exactly the workflow `JUDGE_LANE_CWD` already supports for the lane.
+ *
  * @param {object} [o]
- * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD` from.
+ * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD`/`JUDGE_PROVIDER` from.
  * @param {(o: object) => Function} [o.factory] - the judge builder, injected so a test can supply the spawn.
- * @returns {(flags: {cwd: (string|null), model: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
+ * @returns {(flags: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
  */
 export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge } = {}) {
   // THE FLAG WINS, and the env var is the fallback — the explicit act beats the ambient one. `|| null` on both,
   // never a fallback to this process's directory: see the `makeJudge` note at the call site.
-  return ({ cwd, model } = {}) => factory({
+  return ({ cwd, model, provider } = {}) => factory({
     cwd: cwd || env.JUDGE_LANE_CWD || null,
     model: model || null,
+    providerName: provider || env.JUDGE_PROVIDER || 'claude',
   });
 }
 
@@ -272,10 +294,12 @@ export function createCliJudgeFactory({ env = process.env, factory = createDefau
  * Build an isolated registry plus the bindings for ONE named operation. Throws on an unknown name.
  *
  * @param {string} name
- * @param {{json?: boolean}} [opts] - passed straight through to the table entry's builder. Every builder
- *   except `REVIEW_PR_OP`'s ignores it today (see the table above); it exists here so a CALLER can tell a
- *   builder what its OWN argv already says before the declaration it binds to is resolved — `json` is the one
- *   case that needs this (stdout purity under `--json`, `we:scripts/operations/review-pr-io.mjs`).
+ * @param {{json?: boolean, cwd?: string|null}} [opts] - passed straight through to the table entry's builder.
+ *   Every builder except `REVIEW_PR_OP`'s ignores it today (see the table above); it exists here so a CALLER
+ *   can tell a builder what its OWN argv already says before the declaration it binds to is resolved — `json`
+ *   (stdout purity under `--json`, `we:scripts/operations/review-pr-io.mjs`) and `cwd` (#xu2pp2m — which
+ *   checkout the DIFF is read from, `we:scripts/operations/cli-adapter.mjs#cwdFlagValue`) are the two cases
+ *   that need this.
  */
 export function resolveOperation(name, opts = {}) {
   // `Object.hasOwn`, never a bare bracket read: `OPERATIONS['toString']` on a normal-prototype object returns an
@@ -316,7 +340,10 @@ if (IS_CLI) {
   try {
     // `rest` is this invocation's OWN argv, known before the declaration is — see `hasJsonFlag`'s doc for why
     // a full `parseOperationArgv` pass cannot run yet at this point.
-    resolved = resolveOperation(name, { json: hasJsonFlag(rest) });
+    // #xu2pp2m — `cwd` rides alongside `json` for the SAME pre-parse reason (see `cwdFlagValue`): the
+    // `review-pr` reader is built HERE, before `parseOperationArgv` has run, so a `--cwd=<lane>` that only
+    // reached the judge factory left the DIFF coming from `REPO_ROOT`.
+    resolved = resolveOperation(name, { json: hasJsonFlag(rest), cwd: cwdFlagValue(rest) });
   } catch (e) {
     writeAllSync(1, `error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
     process.exit(2);

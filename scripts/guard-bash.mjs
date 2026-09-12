@@ -94,6 +94,16 @@
  *     The parser now FAILS CLOSED instead. This denies nothing real: bash rejects the identical input
  *     (`unexpected EOF while looking for matching quote`), verified against `bash -c`. No override.
  *
+ *   • the DELIVERY AGENT (#3627) — `dispatchKind === 'delivery'` (`WE_DISPATCH_KIND=delivery`, stamped by
+ *     `deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER.spawn` onto the agent's own process env; the
+ *     SAME channel #3105's dispatched-verification arm above already reads) may never run, ITSELF, any of the
+ *     mechanical lifecycle commands its own wrapper drives end to end: `lane-pool.mjs`, `backlog.mjs claim`/
+ *     `release`, `gh pr`, `run.mjs open-pr`/`open-pr.mjs`, `pr-land.mjs`, `learnings-drop.mjs`,
+ *     `converge-cli.mjs`, `verify-lane.mjs` (in any mode, including `request`/`check`), and
+ *     `review-core-cli.mjs`. The brief (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) already told the
+ *     agent this in prose; nothing enforced it. Every other session (interactive, or any other
+ *     `WE_DISPATCH_KIND`) is unaffected. No override.
+ *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
  * appends a COLLATERAL notice naming the state-producing steps (heredocs, file writes, git mutations) that
@@ -1317,6 +1327,62 @@ function fileOperands(args, optsWithArg = new Set()) {
   return files;
 }
 
+/** sed's `w` write mechanism embedded in the SCRIPT TEXT itself — no `-i`/`--in-place` needed. Two shapes:
+ *  a trailing `w <file>` flag on an `s///` command (`s/x/y/w file`, `s/x/y/gw file`), and a standalone
+ *  address-command (`/pat/w file`, `3,5w file`) with no `s` at all. Either way sed opens `<file>` and writes
+ *  to it on a match — a real write the flag-only scan above (in-place / tee operands) never looks at, because
+ *  it only inspects ARGV flags, never the script TEXT. Not full sed grammar (no `{...}` blocks, no `;`-aware
+ *  splitting) — good enough to catch both shapes above without chasing sed's whole command language. */
+const SED_SUB_W = /s(.)(?:\\.|(?!\1).)*?\1(?:\\.|(?!\1).)*?\1[a-zA-Z0-9]*w[ \t]+(\S.*)$/;
+const SED_ADDR_W = /^[ \t]*(?:\$|\d+(?:,(?:\d+|\$))?|\/(?:\\.|[^\/\\])*\/(?:,\/(?:\\.|[^\/\\])*\/)?)[ \t]*w[ \t]+(\S.*)$/;
+
+/** The file(s) one sed SCRIPT TEXT writes via an embedded `w` — see `SED_SUB_W`/`SED_ADDR_W` above. Pure.
+ *  Scanned per PHYSICAL LINE (`-e` script fragments join on `\n`, same as sed itself reads them) since `w`
+ *  consumes the rest of its line as the filename, so a later command on the SAME line can never be its own
+ *  match target. */
+function sedWriteTargets(scriptText) {
+  const out = [];
+  for (const line of String(scriptText).split('\n')) {
+    // group 1 of SED_SUB_W is the `s///` DELIMITER (`\1` backreferences need it captured); the filename is
+    // group 2 — `sub[1]` would silently push the delimiter character itself as the "target" instead.
+    const sub = line.match(SED_SUB_W);
+    if (sub) out.push(sub[2].trim());
+    const addr = line.match(SED_ADDR_W);
+    if (addr) out.push(addr[1].trim());
+  }
+  return out;
+}
+
+/** The sed/perl SCRIPT TEXT(s) a tokenized `args` list passes INLINE — every `-e`/`--expression` operand, or
+ *  (when neither `-e`/`--expression` nor `-f`/`--file` appears at all) the first bare operand, which sed/perl
+ *  read as the script itself (`sed 's/x/y/' file`, `sed -n '/pat/p' file`). A `-f`/`--file` script lives in
+ *  an external file this guard cannot see, so its presence is noted (to skip the implicit-first-operand
+ *  fallback) but its content is never guessed at. Pure. */
+function sedScriptTexts(args) {
+  const texts = [];
+  let sawInlineOrFile = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.quoted) continue;
+    if (a.text === '-e' || a.text === '--expression') {
+      sawInlineOrFile = true;
+      if (args[i + 1]) { texts.push(args[i + 1].text); i += 1; }
+      continue;
+    }
+    if (/^--expression=/.test(a.text)) { sawInlineOrFile = true; texts.push(a.text.slice('--expression='.length)); continue; }
+    if (a.text === '-f' || a.text === '--file' || /^--file=/.test(a.text)) {
+      sawInlineOrFile = true;
+      if (a.text === '-f' || a.text === '--file') i += 1; // skip the external script-file operand
+      continue;
+    }
+  }
+  if (!sawInlineOrFile) {
+    const first = args.find((a) => a.quoted || !a.text.startsWith('-'));
+    if (first) texts.push(first.text);
+  }
+  return texts;
+}
+
 /** EVERY file path `segment` writes via a shell redirect / `tee` / an in-place editor (`sed -i`, `perl -pi`),
  *  scratch paths INCLUDED. Pure.
  *
@@ -1370,6 +1436,18 @@ export function fileWriteTargets(segment) {
       const files = fileOperands(args, new Set(scriptOpts));
       out.push(...(has(...scriptOpts) ? files : files.slice(1)));
     }
+  }
+  // A security review on #2108 found the block above blind to sed's OTHER write mechanism: a `w` write
+  // embedded in the SCRIPT TEXT (a trailing `s///w file` flag, or a standalone `/addr/w file` command) needs
+  // NO `-i`/`--in-place` — `sed 's/x/y/w backlog/x.md' file` and `sed -n '/pat/w backlog/x.md' file` both
+  // genuinely write `backlog/x.md` with no in-place flag anywhere, so the `inPlace`-gated scan above (which
+  // only ever reads ARGV FLAGS) misses both entirely. This runs unconditionally — not gated on `inPlace` —
+  // and scans the actual script TEXT via `sedScriptTexts`/`sedWriteTargets` above. Perl has no equivalent
+  // NARROW write directive in its script text — a perl one-liner can only write a file via arbitrary
+  // `open`/`print` code, which is unparseable general-purpose Perl, not a structured directive like sed's
+  // `w` — so this stays sed/gsed-only by design, not an oversight.
+  if (prog === 'sed' || prog === 'gsed') {
+    for (const script of sedScriptTexts(args)) out.push(...sedWriteTargets(script));
   }
   if (prog === 'tee') out.push(...fileOperands(args, new Set(['--output-error', '-p'])));
   return out;
@@ -1756,7 +1834,7 @@ export function gitAddEnumerationReason(command) {
  *  lease in the same pool shares its `ownerSession`) and whose minted per-holder slug is this string (computed
  *  by the CLI via the lease read + a sibling-lease scan) — gates the #2997 fail-closed destructive-op rule,
  *  which supersedes the #2367 ownerSession compare in exactly the topology where that compare cannot answer. */
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null } = {}) {
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -1886,7 +1964,16 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return `Never renumber a backlog item (${srcN} → ${dstN}) — NNN is immutable. A new item takes the next free number; yield this one.`;
   }
 
-  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && CORPUS_MD.test(s)))
+  // #3390 — the sed/tee/perl half used to test CORPUS_MD against the WHOLE command string `s`, so a
+  // purely read-only invocation that merely NAMES a backlog/reports path (`sed -n '1,200p' backlog/x.md`,
+  // `perl -ne 'print' backlog/x.md`) was denied even with no `-i`/`--in-place`/write flag anywhere — a
+  // false positive on a benign read, reproduced live twice in one night on two different files. Reuse
+  // `fileWriteTargets`, the SAME real-write-target extractor `primaryTreeWriteReason` above already calls
+  // via `isFileWriteRedirect(s)` for this exact segment — it correctly parses `-i`/`--in-place`/a short
+  // cluster containing `i` for sed/perl and real `tee` targets, so only an ACTUAL write target is tested
+  // against CORPUS_MD, never the raw command text. `atCommand` still scopes this to sed/tee/perl
+  // invocations (a `>>` from any other command is caught by the first half of this OR, untouched).
+  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && fileWriteTargets(s).some((f) => CORPUS_MD.test(f))))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
   // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
@@ -1980,6 +2067,75 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       if (hasPutMethod)
         return 'a `gh api …/pulls/<n>/merge -X PUT` is the REST equivalent of a raw `gh pr merge` — the same bypass of `scripts/lib/pr-merge-gate.mjs`\'s `assertMayMerge` (#2290\'s sole-writer invariant) and the review-escalation check behind it. Apply the `ready-to-merge` label and let the drain land it (`node scripts/pr-land.mjs`, or the `/drain` skill). Emergency-only escape (logged loudly): prefix `WE_MERGE_BREAK_GLASS=1`.';
     }
+  }
+
+  // #3627 — the delivery agent's OWN Bash session (spawned by `scripts/operations/deliver-item-wrapper.mjs`'s
+  // `CLAUDE_RESTRICTED_PROVIDER`, `--restricted --tools=Bash,Edit,Write,Read,Glob,Grep`) must never run any of
+  // the mechanical lifecycle commands the WRAPPER itself owns end to end — acquire/claim, gate, converge, PR,
+  // and learnings-drop. `we:skills-src/conveyor/delivery-agent-brief-v2.md` already tells the agent this in
+  // PROSE ("build, report — nothing else"); nothing enforced it structurally until now.
+  //
+  // SCOPED VIA `dispatchKind === 'delivery'`, THE SAME CHANNEL #3105 ALREADY READS — not a second session-type
+  // signal invented for this file. `dispatchKind` comes from `process.env.WE_DISPATCH_KIND`
+  // (`dispatchedAgentVerificationReason`'s own docblock, above), and `CLAUDE_RESTRICTED_PROVIDER.spawn`
+  // (`deliver-item-wrapper.mjs`) now stamps `WE_DISPATCH_KIND=delivery` onto the delivery agent's own process
+  // env for exactly this reason — every hook that fires inside that agent's own turn inherits it, the same way
+  // a mechanically-dispatched build/fix/ci-heal agent's env already does for the #3105 arm above. An
+  // interactive operator session (no `WE_DISPATCH_KIND` at all) and every other dispatch kind are unaffected —
+  // this whole block is a no-op unless `dispatchKind` is literally `'delivery'`.
+  //
+  // WHY THIS STAYS `'delivery'`-ONLY, AND MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT" (#xu2pp2m,
+  // 2026-09-12 — recorded here because the generalization has now been proposed once and is superficially very
+  // plausible: `deliver-item-wrapper.mjs` is still unwired, so nothing stamps `'delivery'` in production and
+  // this whole table is, today, dead code).
+  //
+  // THE TABLE IS NOT "WHAT A DISPATCHED AGENT MAY NOT DO". It is "what the DELIVERY WRAPPER does on the
+  // agent's behalf", and that ownership is the entire justification for every line in it. The other six
+  // `LAUNCH_KINDS` (`we:scripts/operations/dispatch-lane.mjs`) have NO wrapper owning their lifecycle — their
+  // briefs tell the agent to do these things ITSELF, and a `WE_DISPATCH_KIND=build|prepare|prepare-decision|
+  // investigate|fix|ci-heal` agent is running one of those briefs. Verified command by command against the
+  // live briefs rather than assumed: `lane-pool.mjs acquire` is step 1 of ALL SIX; `verify-lane.mjs
+  // request`/`check` is the SANCTIONED gate path #3105's arm above deliberately exempts and every brief now
+  // uses; `learnings-drop.mjs` is a named step in five of them; `gh pr view`/`gh pr checks` is how
+  // `fix-agent-brief.md`/`fix-agent-ci-brief.md` read the finding they exist to repair; `run.mjs open-pr` is
+  // how build/prepare/investigate open their PR at all. Flipping the gate to cover those kinds would deny
+  // every dispatched agent its own first step.
+  //
+  // A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'` ARM IS ADDED: `WE_DISPATCH_KIND=fix` is stamped by TWO
+  // different spawners for two INCOMPATIBLE agent contracts — `dispatch-lane-io.mjs#defaultClaudeProvider`
+  // (the live one, running `fix-agent-brief.md` v1, which runs its own lifecycle) and
+  // `fix-dispatch-wrapper.mjs` (unwired, running `fix-agent-brief-v2.md` under a wrapper that owns the
+  // lifecycle). One env value, two contracts. A `dispatchKind === 'fix'` deny arm cannot be correct for both,
+  // so that collision has to be resolved (a distinct kind, or a second signal) BEFORE one is written.
+  //
+  // NO OVERRIDE. Every command below is something the WRAPPER runs itself, OUTSIDE the agent's own turn and
+  // outside this hook's reach entirely (see this file's own `runGateWithOneRetry`/`runConverge`/`openPr`/
+  // `dropLearning` — none of those are Claude Code Bash TOOL calls; they are the wrapper's own plain Node
+  // child-process spawns, invisible to `PreToolUse` altogether). The agent has no legitimate reason to reach
+  // for any of them from inside its own restricted turn, ever — not even the read-only-looking spellings
+  // (`lane-pool.mjs status`, `verify-lane.mjs check`), because the agent has no business knowing any of this
+  // machinery exists at all (FIRM REQUIREMENT 5 in `deliver-item-wrapper.mjs`'s own header).
+  if (dispatchKind === 'delivery') {
+    if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
+      return 'a delivery agent may never run `lane-pool.mjs` itself — acquiring/releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseClaimAndLane` in deliver-item-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
+      return 'a delivery agent may never run `backlog.mjs claim` itself — the wrapper claims the item before the agent is ever spawned (`claimItem`); a second claim from inside the agent is redundant at best and a race at worst. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
+      return 'a delivery agent may never run `backlog.mjs release` itself — release is decided by the wrapper reading the agent\'s own structured report (`releaseClaimAndLane`), never by the agent releasing its own claim mid-build. There is no override.';
+    if (atCommand(/^gh\s+pr\b/))
+      return 'a delivery agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR (FIRM REQUIREMENT 2 in deliver-item-wrapper.mjs; `openPr` is the only caller, and only after the gate and converge have both run). There is no override.';
+    if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
+      return 'a delivery agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openPr`), driven by a park decision the agent never computes. There is no override.';
+    if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
+      return 'a delivery agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+    if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
+      return 'a delivery agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report, and the wrapper is what drops it (`dropLearning`). There is no override.';
+    if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
+      return 'a delivery agent may never run `converge-cli.mjs` itself — it never initiates review of its own diff (FIRM REQUIREMENT 1 in deliver-item-wrapper.mjs; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited). There is no override.';
+    if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
+      return 'a delivery agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+    if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
+      return 'a delivery agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
   }
 
   return null;
@@ -2244,8 +2400,8 @@ export function mergeBreakGlassUsed(command, ctx = {}) {
 }
 
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
- *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule, and
- *  `foreignLiveLease` for the #2367 rule). */
+ *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule,
+ *  `foreignLiveLease` for the #2367 rule, and `dispatchKind` for the #3105/#3627 dispatched-session rules). */
 export function decide(command, ctx = {}) {
   if (!command) return null;
   // #2788 review r3 finding 2 — a heredoc BODY is data, not commands. The segment split below treats every

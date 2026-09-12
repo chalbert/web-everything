@@ -128,6 +128,41 @@
  * `judge-spawn.mjs`: it imports that and nothing else from the review/jury seams.
  */
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * RULING (#3158 / x27e4xs) — PANEL SEATS STAY TOOL-FREE BY DESIGN, FOR NOW.
+ *
+ * The alternative this module could take instead is threading a per-seat `allowedTools` plus a per-seat lane
+ * `cwd` through to `judgeSpawn` (which already supports both — see `assertLaneCwd`) — but that means N seats
+ * need N lane clones, acquired, scoped, and released around a single review round. Nothing in this repo
+ * provisions or bills for that today, and paying it just to recover ONE finding class (a mutation actually
+ * run) is not this card's call to make unilaterally. So the ruling is: panel seats stay `--tools ''` — this
+ * module forwards no `allowedTools` and takes no per-seat `cwd` — and the mutation probe belongs to whichever
+ * transport can actually run it, not to every seat by default. Revisit if a caller ever prices the N-lane
+ * cost and decides it is worth paying for a specific seat.
+ *
+ * What this DOES change: THREE clauses in `we:scripts/lib/review-core.mjs` used to instruct EVERY juror —
+ * tool-free or not — to break a line and clone a repo it structurally cannot: `MUTATION_PROBE_RULE`,
+ * `buildMandate`'s clone-escape body line, and `GUARANTEE_NEEDS_A_TEST_RULE`, which carries the IDENTICAL
+ * "BREAK the guarded line and confirm a NAMED test reddens" demand narrowed to prose guarantees (conditioning
+ * only the first two would have left half the bug in place — the sibling rule was missed the same way on more
+ * than one review round of this card). All three now branch ON THEIR OWN WORDING (the #3094 pattern: scope by
+ * phrasing, not by a caller flag) on whether the juror has tools, which `skills-src/jury/panel-fanout.mjs`
+ * already tells a tool-free juror about itself.
+ *
+ * WHY WORDING AND NOT A `toolsAvailable` PARAMETER. The rejected alternative threads an explicit flag from
+ * every caller down through `buildMandate`/`buildPanelMandate`/`buildValidatorMandate`. It cannot be made
+ * correct at the default: `true` leaves every tool-free caller that forgets it still holding the original bug,
+ * and `false` tells a genuinely tool-bearing juror it has no tools — suppressing the highest-yield finding
+ * technique this repo has. Worse, the flag has to survive a `review-core-cli.mjs --toolsAvailable` argv string
+ * embedded in a Workflow subagent's PROMPT, so a prompt edit silently loses it and no test can see the loss.
+ * #3094's own ruling in `review-core.mjs` already settled this exact shape — *"an opt-in flag is a way to omit
+ * the single highest-yield line by forgetting it"*. Tool availability is a property of the SPAWN that only the
+ * juror observes directly, so the wording asks the one party that always knows.
+ * `we:skills-src/drain/SKILL.md`'s panel-review section documents which finding classes a tool-free seat can
+ * and cannot reach, so an `accept` from this panel is never read as a tool-backed one.
+ */
+
 import {
   judgeSpawn,
   buildJudgeArgv,
