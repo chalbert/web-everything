@@ -675,6 +675,7 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
       if (cmd === 'git' && args[0] === 'status') {
         return typeof gitStatus === 'function' ? gitStatus(gitStatusCallIdx++) : gitStatus;
       }
+      if (cmd === 'git' && args[0] === 'add') return ''; // #3383 — commitConvergeRound now stages before committing
       if (cmd === 'git' && args[0] === 'commit') return '';
       if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'step') {
         if (stepIdx >= steps.length) throw new Error(`fakeRun: no scripted step left for call #${stepIdx + 1}`);
@@ -899,6 +900,19 @@ describe('convergeRoundTouchedFiles (#3627 bug 14 helper — the real touched-fi
     expect(run).toHaveBeenCalledWith('git', ['status', '--porcelain'], { cwd: '/some/lane' });
   });
 
+  it('#3383 live #3564 trial finding — also drops commitBuildTurn\'s OWN `.delivery-commit-msg-<phase>.txt` '
+    + 'bookkeeping (previously unexcluded, so a SECOND commitBuildTurn call picked up the FIRST call\'s leftover '
+    + 'message file as an untracked "touched" path and crashed the gate-fix commit on it)', () => {
+    const porcelain = [
+      ' M src/foo.mjs',
+      '?? .delivery-commit-msg-build.txt',
+      '?? .delivery-commit-msg-gate-fix.txt',
+      '',
+    ].join('\n');
+    const run = vi.fn(() => porcelain);
+    expect(convergeRoundTouchedFiles('/lane', { run })).toEqual(['src/foo.mjs']);
+  });
+
   it('returns an empty list when the only changes present are this wrapper\'s own bookkeeping', () => {
     const run = vi.fn(() => '?? .converge-obs-1-0.json\n?? .converge-state.json\n');
     expect(convergeRoundTouchedFiles('/lane', { run })).toEqual([]);
@@ -923,7 +937,8 @@ describe('coAuthorTrailerFor (#3565 — the trailer a WRAPPER-OWNED commit carri
 });
 
 describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; the agent never runs git)', () => {
-  it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the build phase + provider trailer', () => {
+  it('stages then commits explicit paths via `git add --` + `git commit -F <msgfile> -- <paths>`, never '
+    + '`git add -A`, message names the build phase + provider trailer', () => {
     const run = vi.fn(() => '');
     const writeFile = vi.fn();
     const result = commitBuildTurn(
@@ -936,10 +951,23 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
     expect(msgFile).toBe('/lane/.delivery-commit-msg-build.txt');
     expect(message).toMatch(/delivery build/);
     expect(message).toMatch(/Co-Authored-By: Codex <noreply@openai\.com>/);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith('git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
-    expect(run.mock.calls[0][1]).not.toContain('-A');
-    expect(run.mock.calls[0][1]).not.toContain('--all');
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run.mock.calls[1][1]).not.toContain('-A');
+    expect(run.mock.calls[1][1]).not.toContain('--all');
+  });
+
+  it('#3383 live #3564 trial finding — `git add` before `git commit` means a genuinely NEW (never-tracked) '
+    + 'touched file is committed too, not silently refused (`git commit -- <pathspec>` alone rejects an '
+    + 'untracked path with "did not match any file(s) known to git" — confirmed directly against real git)', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    commitBuildTurn(
+      { lane: '/lane', item: '1234' },
+      { run, writeFile, touchedFiles: () => ['brand-new-file.mjs'] },
+    );
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-file.mjs'], { cwd: '/lane' });
   });
 
   it('names the gate-fix phase distinctly (own message file, own text) for a resumed turn\'s commit', () => {
@@ -1162,7 +1190,8 @@ describe('commitBuildTurn auto-fixes locus-prefix mentions before committing (#3
 });
 
 describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round commit)', () => {
-  it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the round', () => {
+  it('stages then commits explicit paths via `git add --` + `git commit -F <msgfile> -- <paths>`, never '
+    + '`git add -A`, message names the round', () => {
     const run = vi.fn(() => '');
     const writeFile = vi.fn();
     const result = commitConvergeRound(
@@ -1174,10 +1203,23 @@ describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round comm
     const [msgFile, message] = writeFile.mock.calls[0];
     expect(msgFile).toBe('/lane/.converge-commit-msg-r2.txt');
     expect(message).toMatch(/round 2/);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith('git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
-    expect(run.mock.calls[0][1]).not.toContain('-A');
-    expect(run.mock.calls[0][1]).not.toContain('--all');
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run.mock.calls[1][1]).not.toContain('-A');
+    expect(run.mock.calls[1][1]).not.toContain('--all');
+  });
+
+  it('#3383 live #3564 trial finding — stages a genuinely NEW (never-tracked) touched file too, not just '
+    + 'modified-tracked ones (`git commit -- <pathspec>` alone rejects an untracked path outright — confirmed '
+    + 'directly against real git)', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    commitConvergeRound(
+      { lane: '/lane', item: '1234', round: 1 },
+      { run, writeFile, touchedFiles: () => ['brand-new-fixture.mjs'] },
+    );
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-fixture.mjs'], { cwd: '/lane' });
   });
 
   it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {

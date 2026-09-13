@@ -1381,13 +1381,27 @@ function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, juror
  * --porcelain` in the lane, filtered to drop this wrapper's OWN `.converge-*` bookkeeping (the
  * `.converge-state.json` / `.converge-material-r*.txt` / `.converge-panel-r*.json` / `.converge-redteam-r*.json`
  * / `.converge-invite-r*.json` / `.converge-obs-*-*.json` / `.converge-commit-msg-r*.txt` files this SAME file
- * writes into the lane every round, above) and the known lane-release scratch litter
+ * writes into the lane every round, above), this wrapper's OWN `.delivery-commit-msg-<phase>.txt` bookkeeping
+ * (see #3383 fix note below), and the known lane-release scratch litter
  * (`we:scripts/lib/lane-litter.mjs#LANE_RELEASE_LITTER_ALLOWLIST` — `.pr-body.md`/`.commit-msg.txt`/etc, in
- * case any already exist in the lane at converge time). Neither is a real edit the editor made — committing
- * either would bury the round's actual diff in wrapper noise, and the `.converge-*` files churn every round
- * (a fresh `.converge-obs-<round>-<i>.json` per step), which would otherwise produce a spurious "changed" file
- * on every single round even when the editor touched nothing. `run` is injectable for tests, same pattern as
- * {@link computeLaneDiffStats}.
+ * case any already exist in the lane at converge time). None of these is a real edit the editor/agent made —
+ * committing any of them would bury the round's actual diff in wrapper noise, and the `.converge-*` files
+ * churn every round (a fresh `.converge-obs-<round>-<i>.json` per step), which would otherwise produce a
+ * spurious "changed" file on every single round even when the editor touched nothing. `run` is injectable for
+ * tests, same pattern as {@link computeLaneDiffStats}.
+ *
+ * #3383 mechanical-dispatcher fix (live #3564 trial, 2026-09-13): `.delivery-commit-msg-build.txt` — the
+ * message file {@link commitBuildTurn}'s OWN first (`phase: 'build'`) call writes to the lane, deliberately
+ * left uncommitted (it is written AFTER `paths` is computed, so it never lands in that first commit) — used
+ * to have NO exclusion here, so the SECOND `commitBuildTurn` call (`phase: 'gate-fix'`, after a resumed
+ * agent fixes a red gate) picked it up as an untracked "touched" path and tried to commit it too. That failed
+ * outright: `git commit -- <pathspec>` refuses a pathspec that is neither tracked nor already staged — CONFIRMED
+ * directly (`git commit -m x -- new-untracked.txt` on a fresh untracked file: `error: pathspec 'new-untracked.txt'
+ * did not match any file(s) known to git`) — so the gate-fix commit crashed with exactly that error, live,
+ * mid-trial: `error: pathspec '.delivery-commit-msg-build.txt' did not match any file(s) known to git`, which
+ * propagated uncaught and discarded the resumed agent's real gate-fix. Excluding it here (mirroring the
+ * `.converge-*` exclusion) fixes BOTH problems at once: it can never crash a later commit's pathspec again,
+ * and it stops leaking wrapper bookkeeping into the delivery's real diff.
  */
 export function convergeRoundTouchedFiles(lane, { run: runFn = run } = {}) {
   const porcelain = runFn('git', ['status', '--porcelain'], { cwd: lane });
@@ -1397,6 +1411,7 @@ export function convergeRoundTouchedFiles(lane, { run: runFn = run } = {}) {
     const path = line.slice(3).trim();
     if (!path) continue;
     if (path.startsWith('.converge-')) continue; // this wrapper's own per-round bookkeeping, not a real edit
+    if (path.startsWith('.delivery-commit-msg-')) continue; // commitBuildTurn's OWN msg files — see #3383 note above
     if (isAllowlistedLitterPath(path)) continue; // known delivery-pipeline scratch litter, same reason
     paths.push(path);
   }
@@ -1415,6 +1430,15 @@ export function convergeRoundTouchedFiles(lane, { run: runFn = run } = {}) {
  * them). No-ops (returns `{committed: false}`) when there is nothing real to commit — an `advanced: false`
  * round, or a round whose only touched paths are this file's own `.converge-*` bookkeeping — so a round with
  * no accepted edit never creates an empty/spurious commit.
+ *
+ * #3383 mechanical-dispatcher fix (live #3564 trial) — `git add -- paths` now runs BEFORE `git commit`.
+ * `git commit -F <msg> -- <paths>` alone silently REFUSES any path that is not already tracked or staged
+ * (confirmed directly: `git commit -m x -- new-untracked.txt` on a fresh file errors `pathspec
+ * 'new-untracked.txt' did not match any file(s) known to git`), so a round whose accepted edit created a
+ * genuinely NEW file (not just a modification) would have crashed here uncaught — the same class of bug
+ * that broke {@link commitBuildTurn}'s gate-fix commit live (see that function's own note). Staging first
+ * makes both new and modified paths committable the same way, with the same "only these exact paths, never
+ * `git add -A`" discipline this function's docblock already commits to.
  */
 export function commitConvergeRound(
   { lane, item, round },
@@ -1427,6 +1451,7 @@ export function commitConvergeRound(
     + 'Commits the accepted editor findings from this round of the #3627 delivery-pipeline converge loop '
     + '(runConvergeEdit reported advanced:true) before the loop continues and before the PR opens.\n';
   writeFile(msgFile, message);
+  runFn('git', ['add', '--', ...paths], { cwd: lane });
   runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
   return { committed: true, paths };
 }
@@ -1549,6 +1574,17 @@ export function sanitizeOwnLocusMentions(lane, paths, { readFile = readFileSync,
   }
 }
 
+// #3383 mechanical-dispatcher fix (live #3564 trial, 2026-09-13) — `git add -- paths` now runs BEFORE
+// `git commit`. `git commit -F <msg> -- <paths>` alone silently REFUSES any path that is not already
+// tracked or staged (confirmed directly: `git commit -m x -- new-untracked.txt` on a fresh untracked file
+// errors `pathspec 'new-untracked.txt' did not match any file(s) known to git`) — a real, reachable
+// failure: the second (`phase: 'gate-fix'`) call in a real delivery crashed EXACTLY this way, live, because
+// its OWN prior `phase: 'build'` message file (`.delivery-commit-msg-build.txt`, left uncommitted by
+// design — see `convergeRoundTouchedFiles`'s own #3383 note) had no exclusion and leaked into `paths` as an
+// untracked, never-added file. That specific leak is fixed separately (excluded at the source), but the
+// underlying `git commit -- <pathspec>` limitation is general: ANY genuinely new file in a delivery's real
+// diff (a new test fixture, a new module) would hit the identical crash. Staging first closes the whole
+// class, not just the one leaked path.
 export function commitBuildTurn(
   { lane, item, provider = CLAUDE_RESTRICTED_PROVIDER, phase = 'build' },
   {
@@ -1568,6 +1604,7 @@ export function commitBuildTurn(
       + "behalf; the agent itself never runs git (see this function's own header for why that moved here).\n";
   const message = `${subject}\n\n${body}\n${coAuthorTrailerFor(provider?.name)}\n`;
   writeFile(msgFile, message);
+  runFn('git', ['add', '--', ...paths], { cwd: lane });
   runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
   return { committed: true, paths };
 }
