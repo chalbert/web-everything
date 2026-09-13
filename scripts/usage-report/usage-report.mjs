@@ -777,7 +777,10 @@ export async function runUsageReportCli(argv, {
   if (argv.includes('--ledger')) {
     const nowDate = now();
     const claudeOtelEvents = createFileOtelStore().readAll();
-    const codexTelemetryEvents = createFileTelemetryStore().readAll();
+    // `readAll()` here returns `{events, corrupt}` (telemetry-store.mjs's own shape — distinct from
+    // claude-otel-collector.mjs's `readAll()`, which returns a plain array) — `.events` is what
+    // `sumProviderTokenTelemetry` iterates.
+    const codexTelemetryEvents = createFileTelemetryStore().readAll().events;
     const ledger = buildUsageLedger({ now: nowDate, claudeOtelEvents, codexTelemetryEvents });
     out(json ? `${JSON.stringify(ledger, null, 2)}\n` : `${renderLedgerSummary(ledger)}\n`);
     return 0;
