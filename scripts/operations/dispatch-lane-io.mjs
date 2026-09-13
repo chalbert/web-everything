@@ -1058,6 +1058,9 @@ export function routeDispatchProvider(request, {
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
+ * @param {(root: string) => void} [o.freshenCheckout] - mechanical-dispatcher #3383 Part 2 follow-up. Runs
+ *   BEFORE `provider(request)`, best-effort. Defaults to a no-op; `run.mjs`'s own registration passes
+ *   `../delivery-agent-marker.mjs#defaultFreshenPrimaryCheckout`.
  * @returns {Record<string, Function>} effect type → `async (payload, ctx) => result`.
  */
 export function createDispatchSinks({
@@ -1089,10 +1092,19 @@ export function createDispatchSinks({
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
+  // mechanical-dispatcher #3383 Part 2 follow-up — BEST-EFFORT freshen of `root` BEFORE `provider(request)`
+  // runs, so a mechanical provider's own `deliveryAgent:` marker read (`../delivery-agent-marker.mjs`) sees
+  // whatever has already landed on `root`'s tracked branch, not a stale on-disk snapshot. Defaults to a NO-OP:
+  // every existing caller and test that does not name this parameter must stay byte-identical — see
+  // `delivery-agent-marker.mjs#defaultFreshenPrimaryCheckout`'s own docblock for why a git-shelling default
+  // here would be unsafe, and why `run.mjs`'s own `dispatch-lane` registration is the one place that passes
+  // the real function in.
+  freshenCheckout = () => {},
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
+      freshenCheckout(root);
       const sessionId = String(mintSessionId());
       let handle;
       try {

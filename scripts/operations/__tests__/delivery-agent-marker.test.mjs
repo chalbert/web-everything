@@ -4,7 +4,10 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { DELIVERY_AGENT_MARKER_KEY, parseDeliveryAgentMarker, readItemDeliveryAgentMarker } from '../delivery-agent-marker.mjs';
+import {
+  DELIVERY_AGENT_MARKER_KEY, parseDeliveryAgentMarker, readItemDeliveryAgentMarker,
+  defaultFreshenPrimaryCheckout,
+} from '../delivery-agent-marker.mjs';
 
 describe('parseDeliveryAgentMarker (PURE)', () => {
   it('reads a scalar `deliveryAgent:` frontmatter value, trimmed', () => {
@@ -76,5 +79,71 @@ describe('readItemDeliveryAgentMarker (IO SHELL)', () => {
       { '3629-some-item.md': '---\nstatus: open\n---\n' },
     ));
     expect(result).toBeNull();
+  });
+});
+
+describe('defaultFreshenPrimaryCheckout (mechanical-dispatcher #3383 Part 2 follow-up — the marker-ordering fix)', () => {
+  /** A fake `run` shaped like `main-staleness.mjs#gitRun`'s own return, keyed by the exact argv joined. */
+  const fakeRun = (responses) => {
+    const calls = [];
+    const run = (args) => {
+      calls.push(args);
+      const key = args.join(' ');
+      if (key in responses) return responses[key];
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    return { run, calls };
+  };
+
+  it('reads the CURRENT branch and freshens THAT branch against its own origin ref', () => {
+    const { run, calls } = fakeRun({
+      'rev-parse --abbrev-ref HEAD': { status: 0, stdout: 'lane/mechanical-dispatcher\n', stderr: '' },
+      'fetch origin lane/mechanical-dispatcher --quiet': { status: 0, stdout: '', stderr: '' },
+      'rev-parse lane/mechanical-dispatcher': { status: 0, stdout: 'abc\n', stderr: '' },
+      'rev-parse origin/lane/mechanical-dispatcher': { status: 0, stdout: 'abc\n', stderr: '' },
+    });
+    expect(() => defaultFreshenPrimaryCheckout('/repo', { run })).not.toThrow();
+    expect(calls).toContainEqual(['fetch', 'origin', 'lane/mechanical-dispatcher', '--quiet']);
+  });
+
+  it('does nothing on a DETACHED HEAD — nothing safe to compare or fast-forward', () => {
+    const { run, calls } = fakeRun({
+      'rev-parse --abbrev-ref HEAD': { status: 0, stdout: 'HEAD\n', stderr: '' },
+    });
+    defaultFreshenPrimaryCheckout('/repo', { run });
+    expect(calls).toEqual([['rev-parse', '--abbrev-ref', 'HEAD']]);
+  });
+
+  it('does nothing when the branch itself cannot be read — never guesses a base', () => {
+    const { run, calls } = fakeRun({
+      'rev-parse --abbrev-ref HEAD': { status: 128, stdout: '', stderr: 'fatal: not a git repository' },
+    });
+    defaultFreshenPrimaryCheckout('/repo', { run });
+    expect(calls).toEqual([['rev-parse', '--abbrev-ref', 'HEAD']]);
+  });
+
+  it('NEVER THROWS — a dispatch decision must proceed even when freshening cannot', () => {
+    const run = () => { throw new Error('ENOENT: no such file or directory, spawnSync git'); };
+    expect(() => defaultFreshenPrimaryCheckout('/repo', { run })).not.toThrow();
+  });
+
+  // ── THE ACTUAL REGRESSION: the marker landed on `origin/<branch>` (a lane's PR merged it in), but THIS
+  // checkout's own working copy is still behind — the exact residual gap the live Codex trial's own "the
+  // marker can only currently take effect if it's already merged into main" finding names. Before this fix,
+  // `readItemDeliveryAgentMarker`'s plain `readFileSync` would see the OLD, marker-less file forever; this
+  // proves the freshen step pulls the landed state in, non-destructively, via `--ff-only --autostash`.
+  it('a behind-but-not-diverged checkout is fast-forwarded to the branch that already carries the marker', () => {
+    const { run, calls } = fakeRun({
+      'rev-parse --abbrev-ref HEAD': { status: 0, stdout: 'main\n', stderr: '' },
+      'fetch origin main --quiet': { status: 0, stdout: '', stderr: '' },
+      'rev-parse main': { status: 0, stdout: 'old-sha-before-the-marker-landed\n', stderr: '' },
+      'rev-parse origin/main': { status: 0, stdout: 'new-sha-carrying-the-marker\n', stderr: '' },
+      'rev-list --count main..origin/main': { status: 0, stdout: '1\n', stderr: '' },
+      'rev-list --count origin/main..main': { status: 0, stdout: '0\n', stderr: '' },
+      'status --porcelain': { status: 0, stdout: '', stderr: '' },
+      'pull --ff-only --autostash': { status: 0, stdout: '', stderr: '' },
+    });
+    defaultFreshenPrimaryCheckout('/repo', { run });
+    expect(calls).toContainEqual(['pull', '--ff-only', '--autostash']);
   });
 });

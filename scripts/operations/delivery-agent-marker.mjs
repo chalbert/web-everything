@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { readField } from '../backlog/frontmatter.mjs';
 import { resolveBacklogFile } from './resolve-io.mjs';
 import { REPO_ROOT } from './detached-dispatch.mjs';
+import { checkMainStaleness, gitRun } from '../lib/main-staleness.mjs';
 
 /** The frontmatter key itself — named once so a grep for the marker's spelling has exactly one hit. */
 export const DELIVERY_AGENT_MARKER_KEY = 'deliveryAgent';
@@ -75,5 +76,63 @@ export function readItemDeliveryAgentMarker(num, {
     return parseDeliveryAgentMarker(read(join(root, 'backlog', file)));
   } catch {
     return null;
+  }
+}
+
+/**
+ * THE MARKER-ORDERING FIX (mechanical-dispatcher #3383 Part 2 follow-up — a real bug found on the first live
+ * Codex trial). BEST-EFFORT: freshens `root`'s OWN currently-checked-out branch against `origin/<that branch>`
+ * — a `fetch` + `--ff-only --autostash` fast-forward via {@link checkMainStaleness}
+ * (`we:scripts/lib/main-staleness.mjs`, #2204) — the SAME fetch-first guard `we:scripts/operations/
+ * review-dispatch.mjs#assertMainNotStale` (#3439) already gives the review dispatcher for an analogous
+ * staleness risk. NEVER THROWS and never blocks: a network miss, a detached HEAD, or a diverged tree all
+ * degrade to "did nothing" — a dispatch decision must proceed even when freshening cannot, exactly like every
+ * other best-effort read `readItemDeliveryAgentMarker` above already takes.
+ *
+ * ── THE BUG THIS CLOSES, CONFIRMED BY READING THE REAL DISPATCH CODE, NOT ASSUMED ──────────────────────────────
+ *
+ * `readItemDeliveryAgentMarker`'s `root` is `REPO_ROOT` by default — ONE fixed, persistent checkout that
+ * `we:scripts/operations/dispatch-lane-io.mjs#assertNotALaneCheckout` already guarantees can never be a
+ * `lane-<N>` pool clone (that guard runs, and refuses, BEFORE any provider — hence any marker read — is ever
+ * reached). So the literal mechanism the live trial's own hypothesis named — "a lane's acquire step resets the
+ * lane's working tree... before the dispatch-provider code ever gets to read it" — cannot occur through
+ * `build.mjs`/`fix.mjs`/`ci-heal.mjs`: each reads the marker in the PARENT process, strictly before the
+ * detached child it spawns ever calls `acquireLane` (`we:scripts/operations/deliver-item-wrapper.mjs`), and the
+ * resolved value is threaded through as a plain `--provider=<name>` argv string, immune to whatever that later
+ * acquire does to a lane directory the read never touched.
+ *
+ * The REAL bug is narrower, and it is what the trial actually observed: the marker is invisible to the read
+ * unless it is ALREADY on `root`'s own working copy of its tracked branch AT READ TIME. A marker set inside an
+ * item's own lane clone — the only place this repo's own convention allows an edit to happen at all
+ * (`Edit-Work Runs In A Lane Clone`) — reaches `root` only once its lane's PR lands there, same as `scope:`,
+ * `status:`, or any other frontmatter field. But landing it is not sufficient either: nothing previously kept
+ * `root`'s OWN on-disk copy current, so a marker that HAD already merged could still be invisible to the very
+ * next dispatch decision if `root` itself had gone stale in the meantime — which is why the trial's "the
+ * marker can only currently take effect if it's already merged into main" finding is true but incomplete:
+ * merged-into-main was never sufficient on its own. Freshening `root` immediately before the read closes that
+ * remaining gap, making the marker "readable at the point of dispatch regardless of when it was set", as long
+ * as it is on `root`'s own remote branch — the one place it was always going to have to be.
+ *
+ * NOT WIRED AS `readItemDeliveryAgentMarker`'s OWN DEFAULT, DELIBERATELY. A default that silently shells `git
+ * fetch`/`git pull` would fire on every existing caller and test that never named this concern — including
+ * every dispatch-provider unit test that calls the bare function against `REPO_ROOT` — mutating a real
+ * checkout as a side effect of an unrelated assertion. Instead this is wired ONCE, explicitly, where the real
+ * dispatch decision actually happens: `we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`'s
+ * `freshenCheckout` option (default a no-op, so every existing caller stays byte-identical) and
+ * `we:scripts/operations/run.mjs`'s own `dispatch-lane` registration, which passes this function in for real.
+ *
+ * @param {string} root
+ * @param {{run?: (args: string[]) => {status: number, stdout: string, stderr: string}}} [io] - injectable,
+ *   mirroring `assertMainNotStale`'s own seam — a test never shells real `git`.
+ * @returns {void}
+ */
+export function defaultFreshenPrimaryCheckout(root, { run = (args) => gitRun(args, { cwd: root }) } = {}) {
+  try {
+    const head = run(['rev-parse', '--abbrev-ref', 'HEAD']);
+    const base = head.status === 0 ? head.stdout.trim() : '';
+    if (!base || base === 'HEAD') return; // a detached HEAD, or an unreadable checkout — nothing safe to sync.
+    checkMainStaleness({ base, run });
+  } catch {
+    // Best-effort — see the docblock above. A dispatch decision must proceed even when this cannot.
   }
 }

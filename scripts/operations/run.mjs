@@ -48,6 +48,10 @@ import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
+// mechanical-dispatcher #3383 Part 2 follow-up — see `defaultFreshenPrimaryCheckout`'s own docblock for why
+// this is the ONE place the real (git-shelling) freshen function is wired in, rather than a default anywhere
+// importable/testable code would hit unasked.
+import { defaultFreshenPrimaryCheckout } from './delivery-agent-marker.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
 // ALIASED, and the collision is worth naming: this file already exports `resolveOperation(name)` — the
@@ -232,7 +236,10 @@ export const OPERATIONS = Object.freeze({
     // model and the effort a dispatched agent runs under are the operator's call, and a knob only a test can
     // reach is not a knob. Unset → no extra flags, which is the deliberate non-default (a baked-in
     // `--dangerously-skip-permissions` would widen every agent this ever launches).
-    sinks: createDispatchSinks({ extraArgs: agentArgsFromEnv() }),
+    // `freshenCheckout` — mechanical-dispatcher #3383 Part 2 follow-up: the ONE real (git-shelling) wiring of
+    // `defaultFreshenPrimaryCheckout`, so a REAL `dispatch-lane` run sees a `deliveryAgent:` marker that has
+    // already landed on this checkout's own tracked branch, not a stale on-disk snapshot.
+    sinks: createDispatchSinks({ extraArgs: agentArgsFromEnv(), freshenCheckout: defaultFreshenPrimaryCheckout }),
   }),
   // #3034 — the is-the-engine-too-heavy probe: `compute` → `compute` → `effect`, no judge, no confirm.
   // Registering here is what makes `node run.mjs claim --ref=<NNN>` work; `we:scripts/backlog.mjs claim`
