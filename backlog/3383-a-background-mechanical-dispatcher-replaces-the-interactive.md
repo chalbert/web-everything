@@ -2199,3 +2199,107 @@ own sake; it exists to answer this capacity-planning question.
   capacity-split/enforcement work would build on — it has to exist before a capacity split or an enforcement
   mechanism can be designed responsibly, since neither can be sized without knowing what actually consumes
   capacity today.
+
+## Operator goal, recorded for the record (2026-09-13): a "git manager" — a central coordination layer every
+## git/GitHub operation across concurrent conveyor + subagent work routes through
+
+**A distinct, separate concern from the "point interactive build skills at the driver" goal recorded just
+above** — that one is about which system drives a build; this one is about how many independent processes are
+allowed to hit GitHub's API at once and how they share that budget. Recorded here as real, durable operator
+intent to build, in the same terms as this epic's other forward-looking goals — **not** a "could do" idea a
+future session should second-guess away.
+
+**Trigger, live during this very session.** A real GitHub API rate-limit exhaustion happened while this
+session was running: many concurrent conveyor/review/dispatch processes, each making its own independent
+`gh`/GitHub API calls with no shared coordination between them, caused `PR #2162`'s review-clear/drain pass to
+fail non-fatally and retry repeatedly. Nothing today stops N independently-running processes from each
+assuming they have the whole rate-limit budget to themselves.
+
+**The goal, in the operator's own words, in substance**: build a **git manager** — a central coordination
+layer that all git/GitHub operations across concurrent conveyor and subagent work should route through
+("hook all git operation in concurrent conveyor and subagent work ideally"), rather than each process
+independently making raw calls. Two requirements the operator stated directly:
+
+1. **Telemetry.** It must track git/GitHub API call volume and rate-limit consumption over time. This ties
+   directly into the telemetry system already built this session — `we:scripts/operations/telemetry.mjs` /
+   `we:scripts/operations/telemetry-store.mjs` — rather than inventing a second recording mechanism.
+2. **Self-adjusting to the REAL live rate limit, not a guessed static threshold.** It must read the actual
+   rate-limit-remaining/reset signal off real GitHub API responses and throttle dynamically off that live
+   signal. Confirmed earlier this session: GitHub returns rate-limit headers on every call, and the exact
+   header names differ from the Anthropic/OpenAI ones researched earlier in this session. For GitHub
+   specifically: the REST API returns `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset`,
+   `x-ratelimit-used`, and `x-ratelimit-resource` on every response; the GraphQL API returns the same header
+   family AND additionally exposes an in-band `rateLimit` query field (`cost`/`limit`/`remaining`/`resetAt`/
+   `nodeCount`) for point-based accounting a header alone can't give. The SECONDARY/abuse-detection limit (the
+   one that actually fired in the live incident behind this goal — see the near-term-stopgap note below) is
+   separate again: it surfaces as an HTTP 403/429 with an optional `Retry-After` header, not the primary
+   `x-ratelimit-*` family, and is NOT reflected in `gh api rate_limit`'s own primary-quota numbers. A design
+   that only watches the primary headers would miss the exact failure mode that triggered this goal.
+
+**Explicitly not built yet.** No git-manager code, design, or scaffolding exists as of this entry — this is
+operator intent to revisit and design, not a change already in flight.
+
+**Near-term stopgap raised, NOT yet decided/authorized.** A smaller interim step — a shared rate-limit-aware
+retry/backoff wrapper around the existing scattered `gh` calls, short of the full git-manager build — was
+raised as a possible stopgap during this same discussion. That is not yet decided or authorized as a plan;
+record it as raised, not agreed.
+
+**Important finding while writing this entry down: a version of that stopgap already exists, partially,
+in this repo — checked directly, not assumed.** `we:scripts/lib/gh-throttle.mjs` (`#3621`) is a real, already-
+landed module built after this exact class of incident (its own header cites a prior live secondary-rate-limit
+trip: "100 concurrent requests / 900 REST points-per-min / 2000 GraphQL points-per-min... confirmed separate
+from and NOT reflected in the primary 5,000/hr quota"). It gives `gh` calls a concurrency cap (default 6,
+deliberately conservative against GitHub's 100-concurrent secondary ceiling) built on top of
+`we:scripts/readiness/heavy-admission.mjs`'s existing counting semaphore (see the reuse question below), and
+retries a rate-limit-*shaped* failure (via `we:scripts/conveyor/infra-blocked.mjs`'s existing stderr
+classifier) with bounded exponential backoff. Two things matter about it for this goal specifically:
+- It is wired into only **3 of the ~84** `gh`-calling call sites that same incident's own grep found —
+  the conveyor runner's highest-volume paths only, by its own header's admission, not a full migration.
+- It throttles by a **fixed concurrency cap plus reactive retry on a failure already classified as
+  rate-limit-shaped** — it does NOT read the live `x-ratelimit-remaining`/`x-ratelimit-reset` (or GraphQL
+  `rateLimit`) signal proactively. So it does not yet satisfy requirement 2 above (self-adjust to the exact
+  live limit); it is a real, working, narrower stopgap already partially in place, not a full answer to the
+  live-signal requirement, and migrating the remaining ~79 call sites and/or making it header-driven is
+  itself unmigrated, undecided follow-up — separate from, and short of, the full git-manager build.
+
+**Codex readiness for this work, assessed today: not ready.** Codex cannot build any part of the git manager
+right now — its OS sandbox currently blocks it from committing anything at all (a separate bug found today,
+fix in progress, tracked outside this entry). Once that fix is confirmed, the plan discussed is to split the
+git manager's work by risk, not hand the whole thing over:
+- The core coordination/throttling logic — the part everything else depends on — stays with Claude. A bug
+  there could cascade across the whole mechanical system, the same caution already applied to driver/conveyor
+  subjects elsewhere in this epic.
+- Well-scoped, self-contained pieces (a rate-limit-header parser, a telemetry-recording helper, tests) are
+  reasonable first Codex candidates once the sandbox fix is proven — matching the atomic/no-design-judgment
+  selection criteria that worked in the `#3565` trial.
+- The point is reducing Claude token usage where it's safe to do so, not blanket-handing Codex critical
+  infrastructure. None of this is authorized yet — it's the shape of the plan, contingent on the sandbox fix.
+
+**Open question, not yet resolved: does this repo already have the right foundation to build on?** Two
+existing mechanisms may already be relevant, and whether they are the same mechanism or two distinct ones —
+and whether either is a natural foundation for the git manager's own coordination logic rather than building
+from scratch — is being checked separately, right now, as of this entry. Not yet answered:
+- `we:scripts/readiness/heavy-admission.mjs` (`#3461`/`#3456`) — the existing counting concurrency semaphore,
+  used today to gate the heavy verify-gate step, and ALREADY reused (not reimplemented) by
+  `we:scripts/lib/gh-throttle.mjs` above for its own independent `gh`-call pool.
+- The general "operation" engine (`we:scripts/operations/registry.mjs`'s `op()` pattern plus
+  `we:scripts/operations/engine.mjs`), used today for things like `restart-runner`.
+A future session should resolve this open question before starting the git manager's design, not assume
+either mechanism is or isn't the right base.
+
+**A further vision extension, recorded here so the plan stays in one place, not scattered across chat: the
+same wrapper-owned-content principle should cover every GitHub WRITE operation, not just commits.** The
+operator extended the same principle just applied to fixing the Codex sandbox-commit bug (commits are
+mechanically generated, never agent-composed free text) to the git manager's own scope: agents — Claude or
+Codex alike — should never compose raw `gh` write content freely, whether that's a PR body/description, a
+label, or a comment. Instead the wrapper renders that content from a template, fed by structured data the
+agent supplies (what changed, why, findings) — the same shape as the commit-message fix, generalized. This
+closes the same class of risk the commit fix closes: it guarantees standard-compliant formatting, and it
+structurally blocks an agent from doing something wrong or dangerous through a raw `gh` call (a malformed
+body, a wrong label, or worse) — a footgun-first structural fix, not a judgment call left to each agent.
+**Existing precedent already in this repo supports this direction**, checked directly:
+`we:scripts/operations/review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` already denies raw `gh` and
+label-editing tool access to every spawned review session — this is the same discipline, not a new one; it
+would generalize that discipline to build/fix/delivery dispatch's own PR-opening step too, which carries no
+such restriction today. This is a plan/vision addition, not something built in this entry — recorded here so
+a future design pass inherits it rather than re-discovering it.
