@@ -2286,3 +2286,20 @@ from scratch — is being checked separately, right now, as of this entry. Not y
   `we:scripts/operations/engine.mjs`), used today for things like `restart-runner`.
 A future session should resolve this open question before starting the git manager's design, not assume
 either mechanism is or isn't the right base.
+
+**A further vision extension, recorded here so the plan stays in one place, not scattered across chat: the
+same wrapper-owned-content principle should cover every GitHub WRITE operation, not just commits.** The
+operator extended the same principle just applied to fixing the Codex sandbox-commit bug (commits are
+mechanically generated, never agent-composed free text) to the git manager's own scope: agents — Claude or
+Codex alike — should never compose raw `gh` write content freely, whether that's a PR body/description, a
+label, or a comment. Instead the wrapper renders that content from a template, fed by structured data the
+agent supplies (what changed, why, findings) — the same shape as the commit-message fix, generalized. This
+closes the same class of risk the commit fix closes: it guarantees standard-compliant formatting, and it
+structurally blocks an agent from doing something wrong or dangerous through a raw `gh` call (a malformed
+body, a wrong label, or worse) — a footgun-first structural fix, not a judgment call left to each agent.
+**Existing precedent already in this repo supports this direction**, checked directly:
+`we:scripts/operations/review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` already denies raw `gh` and
+label-editing tool access to every spawned review session — this is the same discipline, not a new one; it
+would generalize that discipline to build/fix/delivery dispatch's own PR-opening step too, which carries no
+such restriction today. This is a plan/vision addition, not something built in this entry — recorded here so
+a future design pass inherits it rather than re-discovering it.
