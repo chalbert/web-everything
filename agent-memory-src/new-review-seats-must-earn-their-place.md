@@ -24,6 +24,12 @@ maximize the number of review angles. This scales down naturally — once a non-
 agent is doing real delivery work, Claude's existing judges already satisfy this rule
 for those PRs, so no additional seat is needed there just to keep adding angles.
 
+This concept is named the **non-self-model invariant** (short form: **cross-model
+gate**) — parallel to the existing non-author invariant (#2398/#2439), but keyed on
+model identity rather than session identity: the non-author invariant blocks a session
+from clearing its own PR, while the non-self-model invariant blocks a model from being
+the sole reviewer of its own work.
+
 **How to apply:**
 - Before adding any new seat/agent to a default, always-on pipeline (review panel,
   benchmark panel, etc.), require a validation batch first: real cases plus a known-clean
