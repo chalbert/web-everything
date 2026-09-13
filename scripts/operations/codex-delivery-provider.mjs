@@ -122,14 +122,16 @@
  * `buildCodexDeliveryArgv`, `parseCodexThreadId` and `assertDenyPathsUsable` are PURE — no fs, no spawn, no
  * clock — so the argv, which IS the contract with the CLI, is assertable by a test with no subprocess at all.
  */
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
+import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 import {
   CODEX_EFFORT_MAP, CODEX_MODEL, assertCodexModel, resolveCodexEffort,
 } from '../lib/codex-model-routing.mjs';
 import { buildNativeDenyCodexArgs } from '../lib/isolation-provider.mjs';
 import { REPO_ROOT } from './minimal-context-provider.mjs';
+import { usageReportSecretDir } from '../lib/usage-report-secret-paths.mjs';
+import { recordTokenUsage } from './telemetry-store.mjs';
 
 /** The binary. Named, not inlined, for the same reason `codex-judge-spawn.mjs#CODEX_CLI` is. */
 export const CODEX_CLI = 'codex';
@@ -191,7 +193,13 @@ export const CODEX_THREAD_DIR_NAME = 'codex-delivery-threads';
  */
 export function defaultDeliveryDenyPaths(repoRoot = REPO_ROOT) {
   const root = String(repoRoot).replace(/\/+$/, '');
-  return [`${root}/**`];
+  // epic #3383 — the usage-report tool's external admin-key directory is ALWAYS included here, unconditionally,
+  // alongside the caller's own repo root: a Codex delivery/repair agent must never be able to read
+  // ~/.we-usage-report/ even if a caller overrides denyPaths for its own reasons. Imported from the SAME shared
+  // constant usage-report.mjs itself resolves (scripts/lib/usage-report-secret-paths.mjs), so the two can never
+  // drift — see that module's own header for why this directory sits outside the repo entirely in the first
+  // place (a lane clone would otherwise carry it on disk regardless of any deny-list).
+  return [`${root}/**`, `${usageReportSecretDir()}/**`];
 }
 
 /**
@@ -340,20 +348,87 @@ export function readCodexThreadId(sessionSlug, repoRoot = REPO_ROOT) {
 }
 
 /**
- * The blocking spawn primitive — the Codex counterpart to `dispatch-lane-io.mjs#defaultSpawnAgent`, which
- * hardcodes `'claude'` and so cannot be reused. RETURNS STDOUT (unlike the Claude one, which discards it),
- * because the thread id this port's resume branch depends on exists nowhere else.
+ * The blocking spawn primitive — the Codex counterpart to `dispatch-lane-io.mjs#spawnAgentToCompletion`, which
+ * hardcodes `'claude'` and so cannot be reused. Resolves `{stdout, stderr, resourceUsage}` (unlike the Claude
+ * one's own `spawnAgentToCompletion`, whose caller discards `stdout`), because the thread id this port's resume
+ * branch depends on exists nowhere else.
+ *
+ * #3383 follow-up — ASYNC now, built on `scripts/lib/spawn-to-completion.mjs#spawnToCompletion` (was
+ * `execFileSync`; see that module's own header for the full execFileSync-equivalence contract this inherits
+ * unchanged — stdout/stderr capture, exit-code/signal/timeout/maxBuffer handling — and for why the `resourceUsage`
+ * field it also returns is honestly `null` on real Node, not a real per-child CPU reading: `ChildProcess` has no
+ * `resourceUsage()` method at all, contrary to an earlier assumption). Every EXISTING caller already awaits
+ * this (`CODEX_PROVIDER.spawn` and its `fix`/`ci-heal` siblings, all async), so this conversion is a drop-in:
+ * the same blocking-until-done semantics, just implemented via an awaited promise instead of a synchronous
+ * return.
  *
  * `stdio: ['ignore', 'pipe', 'pipe']` is LOAD-BEARING, not housekeeping — see the file header's stdin-trap
- * note. `killSignal: 'SIGKILL'` mirrors `defaultSpawnAgent`: a wedged agent is still reclaimed when the
- * caller's `timeout` fires.
+ * note. `killSignal: 'SIGKILL'` mirrors `dispatch-lane-io.mjs#spawnAgentToCompletion`: a wedged agent is still
+ * reclaimed when the caller's `timeout` fires.
  */
-export function defaultSpawnCodexAgent(argv, opts = {}, { exec = execFileSync } = {}) {
-  return exec(CODEX_CLI, argv, {
+export function defaultSpawnCodexAgent(argv, opts = {}, io = {}) {
+  return spawnToCompletion(CODEX_CLI, argv, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
     killSignal: 'SIGKILL',
     ...opts,
-  });
+  }, io);
+}
+
+
+// ── SELF-TRACKED TOKEN USAGE (epic #3383, usage-ledger follow-up) ──────────────────────────────────────────
+// Codex has no official OpenTelemetry usage export (unlike Claude Code — see `claude-otel-collector.mjs` and
+// `telemetry-store.mjs#recordTokenUsage`'s own header), so this reads the ONE thing Codex already gives every
+// `--json` run: its own `turn.completed`/`turn.failed` event's `usage` block — the SAME field
+// `scripts/lib/codex-judge-spawn.mjs#parseCodexJudgeOutcome` already scans for, re-derived here (not
+// imported) because that module's own parser THROWS on a delivery agent's free-form text answer (it expects a
+// `--json-schema`-constrained JSON reply, which no delivery/fix/ci-heal turn produces) — a usage-only reader
+// must never share a failure mode with an answer-shape reader it has nothing in common with.
+/**
+ * PURE. Best-effort, never-throw scan of a Codex `--json` run's JSONL stdout for its terminal event's own
+ * token counts. Scans from the END (mirrors `parseCodexJudgeOutcome`'s own `turn.completed`/`turn.failed`
+ * reasoning: a retry's earlier `error`/`turn.started` lines are never terminal). Returns `null` when no
+ * terminal event or no `usage` block is found — a caller that gets `null` records nothing, rather than a
+ * caller ever seeing a thrown error over a usage-only read.
+ * @param {string} stdout
+ * @returns {{tokensIn: number, tokensOut: number, tokensCacheRead: number, tokensCacheWrite: number}|null}
+ */
+export function parseCodexTurnTokenUsage(stdout) {
+  try {
+    const lines = String(stdout ?? '').split('\n');
+    let terminal = null;
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const trimmed = lines[i].trim();
+      if (!trimmed || trimmed[0] !== '{') continue;
+      let event;
+      try { event = JSON.parse(trimmed); } catch { continue; }
+      if (event?.type === 'turn.completed' || event?.type === 'turn.failed') { terminal = event; break; }
+    }
+    const usage = terminal?.usage;
+    if (!usage || typeof usage !== 'object') return null;
+    const n = (k) => (typeof usage?.[k] === 'number' ? usage[k] : 0);
+    return {
+      tokensIn: n('input_tokens'), tokensOut: n('output_tokens'),
+      tokensCacheRead: n('cached_input_tokens'), tokensCacheWrite: 0, // Codex reports no separate cache-write figure
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse + record one Codex delivery/fix/ci-heal turn's token usage against the ACTIVE telemetry recorder, via
+ * the shared `recordTokenUsage` (`telemetry-store.mjs`) — same ambient pattern `acquireLane` uses. Never
+ * throws; a parse miss (no terminal event, non-JSON stdout) simply records nothing. `model` defaults to
+ * {@link CODEX_DELIVERY_MODEL} — the model this port's own argv already requested — rather than trying to
+ * re-derive it from the JSONL stream, which does not reliably carry it on every event observed.
+ * @param {string} stdout
+ * @param {{model?: string}} [o]
+ */
+export function recordCodexTurnUsage(stdout, { model = CODEX_DELIVERY_MODEL } = {}) {
+  try {
+    const usage = parseCodexTurnTokenUsage(stdout);
+    if (usage) recordTokenUsage({ provider: 'codex', model, ...usage });
+  } catch { /* telemetry must never mask a real spawn result */ }
 }

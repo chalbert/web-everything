@@ -674,6 +674,9 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/forge\.ensureLabel\(LABEL, \{/);
     expect(src).toMatch(/forge\.ensureLabel\(verdict\.label, \{/);
     expect(src).toMatch(/forge\.ensureLabel\(parkLabel, \{/);
+    // mechanical-dispatcher — the review:awaiting-advisory companion label also goes through the port.
+    expect(src).toMatch(/forge\.addLabel\(prNum, REVIEW_LABELS\.awaitingAdvisory\)/);
+    expect(src).toMatch(/forge\.ensureLabel\(REVIEW_LABELS\.awaitingAdvisory, \{/);
   });
 });
 

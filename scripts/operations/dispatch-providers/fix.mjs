@@ -50,6 +50,9 @@ import {
   defaultSpawnDetached,
   deliveryDispatchLogPath,
 } from '../detached-dispatch.mjs';
+// mechanical-dispatcher (epic #3383) Part 2 — see `build.mjs`'s own note; identical use here, keyed on the
+// repair's OPTIONAL `num` (the item, when known — see the "ITEM is optional" note below).
+import { readItemDeliveryAgentMarker } from '../delivery-agent-marker.mjs';
 import { join } from 'node:path';
 
 /** The per-dispatch process {@link fixDetachedProvider} starts. Resolved by SCRIPT LOCATION, never cwd — same
@@ -68,13 +71,15 @@ export const FIX_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations', 'fix-run.
  * `resolveInFlight`.
  *
  * @param {{sessionSlug?: string, pr?: string|number, num?: string|number, cwd?: string}} request
- * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string}} [io]
+ * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string,
+ *   readDeliveryAgentMarker?: Function}} [io]
  * @returns {string} the `pid:<n>` handle.
  */
 export function fixDetachedProvider(request, {
   spawnDetached = defaultSpawnDetached,
   logPathFor = deliveryDispatchLogPath,
   runScript = FIX_RUN_SCRIPT,
+  readDeliveryAgentMarker = readItemDeliveryAgentMarker,
 } = {}) {
   const sessionSlug = String(request?.sessionSlug ?? '').trim();
   const pr = normNum(request?.pr);
@@ -89,6 +94,10 @@ export function fixDetachedProvider(request, {
   // `$FIX_ITEM` as "when known"), so it is passed only when there is one rather than as an empty flag the
   // wrapper would have to re-normalise.
   if (num) argv.push(`--num=${num}`);
+  // mechanical-dispatcher (epic #3383) Part 2 — honour the TARGET ITEM's own `deliveryAgent:` marker, when
+  // there is a known item to read one from (a repair with no `num` has no backlog card to carry a marker on).
+  const deliveryAgent = readDeliveryAgentMarker(num);
+  if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
 
   const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
   const pid = Number(child?.pid);

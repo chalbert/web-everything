@@ -109,8 +109,8 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
-import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import {
@@ -217,7 +217,13 @@ async function prepareDecisionInner(launch, provider = CLAUDE_RESTRICTED_PREPARE
     hold({ item, sessionSlug });
 
     // ---- 3. THE ONE AGENT TURN. Research + author the forks. Everything else on this page is mechanical. --
-    const report = await runAgent({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
+    // #3383 per-process-attribution follow-on — same new `agent.turn` span `prepare-scope-wrapper.mjs` gained
+    // (this wrapper's own telemetry envelope, further down, otherwise only opens the root `dispatch` span).
+    const report = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: {
+        item: item == null ? null : String(item), lane: String(lane), dispatchKind: 'prepare-decision', provider: provider.name,
+      },
+    }, () => runAgent({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId }));
 
     // ---- 4. `blocked` → could-not-prepare. NO stamp, NO PR, at any amount of partial authoring. -----------
     // `filesTouched` is deliberately NOT consulted (unlike the build wrapper's two-way `blocked` split): a
@@ -238,7 +244,7 @@ async function prepareDecisionInner(launch, provider = CLAUDE_RESTRICTED_PREPARE
     commitStamp({ item, lanePath });
 
     // ---- 6. Gate, with exactly one retry (REUSED — see the header for why it generalises exactly) ---------
-    const gate = runGate({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
+    const gate = await runGate({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
     if (gate.status === 'red') {
       releaseBoth({ item, lane, sessionSlug });
       return { item, result: 'gate-red' };
@@ -408,29 +414,38 @@ export function buildPrepareAgentEnv({ sessionSlug, item, lanePath, attemptTag, 
  */
 export const CLAUDE_RESTRICTED_PREPARE_PROVIDER = {
   name: 'claude-restricted',
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
     {
       ensureSettingsFile = ensureDeliveryHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       resolveLane = resolveLanePath,
       run: runFn = run,
       persistFailure = persistPrepareSpawnFailure,
       resolveReportsDir = resolveDeliveryReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
     const lanePath = resolveLane(lane, { run: runFn });
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher fix — lane-aware (see `deliver-item-wrapper.mjs`'s equivalent fix for the
+    // full root-cause account): un-parameterized, `resolveReportsDir()` named the primary checkout regardless
+    // of `lanePath`.
+    const reportsDir = resolveReportsDir(lanePath);
     const prepareEnv = buildPrepareAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
     try {
-      spawnAgent(argv, {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); `await` is the only "wait" in
+      // this arc. No polling, anywhere (#3627 firm requirement 4) — the same guarantee, just reached via an
+      // awaited promise instead of a synchronous return.
+      const { resourceUsage } = (await spawnAgent(argv, {
         cwd: lanePath,
         env: { ...process.env, ...prepareEnv },
         timeout: PREPARE_DECISION_AGENT_SPAWN_TIMEOUT_MS,
-      }); // BLOCKS — the only "wait" in this arc. No polling, anywhere (#3627 firm requirement 4).
+      })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -459,12 +474,19 @@ export async function runPrepareAgentToCompletion(
   {
     readBrief = () => readFileSync(PREPARE_DECISION_BRIEF_V2, 'utf8'),
     readReport = tryReadDeliveryReport,
+    resolveLane = resolveLanePath,
+    resolveReportsDir = resolveDeliveryReportsDir,
+    run: runFn = run,
     loadItems,
   } = {},
 ) {
   const prompt = fillPrepareBrief(readBrief(), { item, sessionSlug, lane, attemptTag }, { loadItems });
-  provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // AWAITS.
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const lanePath = resolveLane(lane, { run: runFn });
+  const reportsDir = resolveReportsDir(lanePath);
+  const report = readReport(sessionSlug, reportsDir);
   if (!report || report.status !== 'done') {
     throw new Error(`prepare-decision-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }

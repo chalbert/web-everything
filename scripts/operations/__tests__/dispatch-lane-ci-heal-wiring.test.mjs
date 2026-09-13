@@ -45,8 +45,9 @@ import {
   parseCiHealRunArgv,
   resolveRepoSlug,
   runCiHealCli,
+  selectCiHealAgentProvider,
 } from '../ci-heal-run.mjs';
-import { planCiHealDispatchWrapper } from '../ci-heal-dispatch-wrapper.mjs';
+import { planCiHealDispatchWrapper, CI_HEAL_AGENT_PROVIDERS } from '../ci-heal-dispatch-wrapper.mjs';
 
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits for a `ci-heal` launch, trimmed to what a
  *  provider reads. `pr`/`reason` have ridden the payload since #3332 and the port since #3640. */
@@ -239,6 +240,23 @@ describe('#3642 — PR-keyed, reason-carrying: build\'s assumptions do NOT carry
     expect(calls[0].argv.slice(1)).toEqual(['--pr=743', '--session=ci-heal-743']);
   });
 
+  // mechanical-dispatcher (epic #3383, Part 2) — the DRIVER honours the target item's own `deliveryAgent:`
+  // marker for `ci-heal`, exactly as it does for `build`/`fix`.
+  it('appends `--provider=<marker>` when the item carries a `deliveryAgent:` marker', () => {
+    const { fn: spawnDetached, calls } = recordingSpawnDetached();
+    const readDeliveryAgentMarker = vi.fn(() => 'codex');
+    ciHealDetachedProvider(ciHealPayload(), { spawnDetached, readDeliveryAgentMarker });
+    expect(readDeliveryAgentMarker).toHaveBeenCalledWith('2638');
+    expect(calls[0].argv.slice(1))
+      .toEqual(['--pr=743', '--session=ci-heal-743', '--num=2638', '--reason=red-ci', '--provider=codex']);
+  });
+
+  it('adds no `--provider=` at all when the item carries no marker', () => {
+    const { fn: spawnDetached, calls } = recordingSpawnDetached();
+    ciHealDetachedProvider(ciHealPayload(), { spawnDetached, readDeliveryAgentMarker: () => null });
+    expect(calls[0].argv.join(' ')).not.toMatch(/--provider=/);
+  });
+
   it('the sink forwards `reason` onto the port request — the field this kind alone needs', async () => {
     const seen = [];
     const sinks = createDispatchSinks({
@@ -332,9 +350,9 @@ describe('#3642 — restart survival (the parent epic\'s cross-cutting clause)',
 describe('#3642 — ci-heal-run.mjs, the per-dispatch process', () => {
   it('parses the argv the provider builds, and refuses a missing required flag BY NAME', () => {
     expect(parseCiHealRunArgv(['--pr=743', '--session=ci-heal-743', '--num=2638', '--reason=red-ci']))
-      .toEqual({ pr: '743', item: '2638', sessionSlug: 'ci-heal-743', repo: null, reason: 'red-ci' });
+      .toEqual({ pr: '743', item: '2638', sessionSlug: 'ci-heal-743', repo: null, reason: 'red-ci', provider: '' });
     expect(parseCiHealRunArgv(['--pr=743', '--session=ci-heal-743']))
-      .toEqual({ pr: '743', item: null, sessionSlug: 'ci-heal-743', repo: null, reason: null });
+      .toEqual({ pr: '743', item: null, sessionSlug: 'ci-heal-743', repo: null, reason: null, provider: '' });
     expect(() => parseCiHealRunArgv(['--session=ci-heal-743'])).toThrow(/--pr=/);
     expect(() => parseCiHealRunArgv(['--pr=743'])).toThrow(/--session=/);
   });
@@ -392,5 +410,37 @@ describe('#3642 — ci-heal-run.mjs, the per-dispatch process', () => {
       write: () => {}, writeErr: () => {},
     });
     expect(result.repo).toBe('chalbert/frontierui');
+  });
+});
+
+// mechanical-dispatcher (epic #3383, Part 1) — mirrors `dispatch-lane-fix-wiring.test.mjs`'s identical suite.
+describe('#3383 — ci-heal-run.mjs provider selection', () => {
+  it('selects the ci-heal agent provider: flag beats env, env beats the default, and Claude IS the default', () => {
+    expect(selectCiHealAgentProvider('', {}).name).toBe('claude-restricted');
+    expect(selectCiHealAgentProvider('', { DELIVERY_AGENT_PROVIDER: 'codex' }).name).toBe('codex');
+    expect(selectCiHealAgentProvider('codex', {}).name).toBe('codex');
+    expect(selectCiHealAgentProvider('claude-restricted', { DELIVERY_AGENT_PROVIDER: 'codex' }).name)
+      .toBe('claude-restricted');
+    expect(selectCiHealAgentProvider('codex', {}).provider).toBe(CI_HEAL_AGENT_PROVIDERS.codex);
+  });
+
+  it('refuses an unknown provider name BEFORE any lane/rebase work happens, exiting the CLI with code 1', async () => {
+    expect(() => selectCiHealAgentProvider('gemini', {})).toThrow(/unknown delivery agent provider/);
+    let dispatched = false;
+    const res = await runCiHealCli(['--pr=743', '--session=ci-heal-743', '--provider=gemini'], {
+      repoSlug: () => 'chalbert/web-everything', write: () => {}, writeErr: () => {}, env: {},
+      dispatch: async () => { dispatched = true; return { result: 'ok' }; },
+    });
+    expect(res).toMatchObject({ code: 1, result: null });
+    expect(dispatched).toBe(false);
+  });
+
+  it('hands the CHOSEN provider to `dispatchCiHeal` as its second argument', async () => {
+    let seenProvider = null;
+    await runCiHealCli(['--pr=743', '--session=ci-heal-743', '--provider=codex'], {
+      repoSlug: () => 'chalbert/web-everything', write: () => {}, writeErr: () => {}, env: {},
+      dispatch: async (_launch, provider) => { seenProvider = provider; return { result: 'ok' }; },
+    });
+    expect(seenProvider).toBe(CI_HEAL_AGENT_PROVIDERS.codex);
   });
 });

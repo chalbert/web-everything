@@ -5,13 +5,14 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
   siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
+  usageReportSecretReadReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
@@ -57,6 +58,37 @@ describe('guard-bash — backgrounded verification is denied (#2833 finding 3)',
     expect(decide('node scripts/verify-lane.mjs --gate="npm run test:unit" &')).toMatch(/never backgrounded/);
     expect(decide('npm run check:standards', { runInBackground: false })).toBeNull();
     expect(decide('npm run check:standards')).toBeNull();
+  });
+});
+
+describe('guard-bash — a dispatched agent may never reference the usage-report external admin-key location (#3383)', () => {
+  it('denies a Bash segment naming the external secret directory, for ANY dispatch kind', () => {
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', 'build')).toMatch(/usage-report tool's external admin-key location/);
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', 'delivery')).toMatch(/#3383/);
+    expect(usageReportSecretReadReason('ls -la ~/.we-usage-report', 'fix')).toMatch(/#3383/);
+  });
+  it('denies a Bash segment naming the resolved absolute secret directory too, not just the ~/ spelling', () => {
+    const abs = `${homedir()}/.we-usage-report/.env`;
+    expect(usageReportSecretReadReason(`cat ${abs}`, 'build')).toMatch(/#3383/);
+  });
+  it('denies a Bash segment querying the Keychain service by name', () => {
+    expect(usageReportSecretReadReason("security find-generic-password -s we-usage-report -a anthropic-admin-key -w", 'build'))
+      .toMatch(/#3383/);
+  });
+  it('never fires for an interactive (non-dispatched) session — the operator is the sanctioned caller of that tool', () => {
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', null)).toBeNull();
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', undefined)).toBeNull();
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', '')).toBeNull();
+    expect(usageReportSecretReadReason('node scripts/usage-report/usage-report.mjs', null)).toBeNull();
+  });
+  it('never fires for an unrelated command, dispatched or not', () => {
+    expect(usageReportSecretReadReason('npm run check:standards', 'build')).toBeNull();
+    expect(usageReportSecretReadReason('cat ~/.other-tool/.env', 'build')).toBeNull();
+  });
+  it('is wired into reason()/decide() so a real dispatched Bash call is actually denied end to end', () => {
+    expect(reason('cat ~/.we-usage-report/.env', { dispatchKind: 'build' })).toMatch(/#3383/);
+    expect(decide('cat ~/.we-usage-report/.env', { dispatchKind: 'delivery' })).toMatch(/#3383/);
+    expect(decide('cat ~/.we-usage-report/.env')).toBeNull(); // no dispatchKind ⇒ interactive session ⇒ allowed
   });
 });
 

@@ -101,13 +101,17 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // installs it so the shared helpers in `minimal-context-provider.mjs` emit into it without being passed one;
 // `spanAround` wraps a single existing call in a span without changing its behaviour. All three are
 // never-throwing by construction — see `telemetry-store.mjs`'s purity discipline.
-import { recorderFor, setActiveRecorder, spanAround } from './telemetry-store.mjs';
-import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { recorderFor, setActiveRecorder, spanAround, resolveTurnCpuAttributes, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
 import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/review-escalation.mjs';
 import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
+// #3383 mechanical-dispatcher fix (live #3565 trial) — the REAL locus-prefix detector, reused so
+// `sanitizeOwnLocusMentions` below prefixes every bare mention the `lint:locus` pre-commit hook would
+// itself flag, not just mentions of the delivery's own touched paths (see that function's own header).
+import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
 // #xu2pp2m — EXTRACTED to the shared module both this wrapper and `we:scripts/operations/
 // review-dispatch-wrapper.mjs` now import: the proven `CLAUDE_RESTRICTED_PROVIDER` argv shape, hooks-settings
 // generation, lane acquire/release, and the gate-running pattern. See that file's own header for why. Every
@@ -122,7 +126,7 @@ import {
 // `guard-lane.mjs`/`guard-bash.mjs` hooks); `CODEX_PROVIDER` further down is the thin composition of these.
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
-  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
 } from './codex-delivery-provider.mjs';
 // RE-EXPORTED so every existing caller/test that imports these names from THIS file (their pre-extraction
 // home) keeps working unchanged — the extraction moved WHERE they are defined, never what imports them.
@@ -298,19 +302,40 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   // wrapper process itself inherited.
   acquireLane({ lane, sessionSlug, scope, item, claudeSessionId });
   try {
-    spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug }));
+    // pre-existing bug found live during the #3565 real-dispatch re-verification, fixed alongside it: the
+    // claim must run with the LANE as cwd (see `claimItem`'s own docblock) or `run.mjs claim` resolves the
+    // item onto the shared primary checkout and is refused outright.
+    const claimLanePath = resolveLanePath(lane, { run });
+    spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug, lanePath: claimLanePath }));
 
     // ---- 2. Spawn the MINIMAL agent, wait for its structured report (SKETCH) -----------------------------
     // THE EXPENSIVE SPAN. This is the single longest phase in the system (capped at 60 minutes by
     // `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and until #3383 it was timed by nothing at all — the exact gap
     // `readiness/conveyor-instrument.mjs` reports as `authoring: {ms: null, reason: 'no-dispatch-signal'}`.
-    const turn = root.child('agent.turn', { attributes: { item: String(item), timeoutMs: DELIVERY_AGENT_SPAWN_TIMEOUT_MS } });
+    // `lane`/`dispatchKind`/`provider` (#3383 per-process-attribution follow-on) tag the span so a per-agent
+    // CPU rollup can be sliced by any of the three without a second lookup. `resolveTurnCpuAttributes` prefers
+    // the REAL child `resourceUsage` `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn` record via
+    // `recordChildResourceUsage` (now that both spawn asynchronously — see `dispatch-lane-io.mjs
+    // #spawnAgentToCompletion` / `codex-delivery-provider.mjs#defaultSpawnCodexAgent`'s own headers) over the
+    // wrapper-only `process.cpuUsage()` fallback — see that function's own docblock in `telemetry-store.mjs`
+    // for exactly what `cpu*Ms`/`cpuSource` do and do not measure before reading them as "what the agent cost".
+    const turn = root.child('agent.turn', {
+      attributes: {
+        item: String(item), timeoutMs: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
+        lane: String(lane), dispatchKind: 'build', provider: provider.name,
+      },
+    });
+    const turnCpuStart = process.cpuUsage();
     let report;
     try {
       report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
-      turn.ok({ outcome: report && report.outcome ? String(report.outcome) : 'unreported', filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0 });
+      turn.ok({
+        outcome: report && report.outcome ? String(report.outcome) : 'unreported',
+        filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0,
+        ...resolveTurnCpuAttributes(turnCpuStart),
+      });
     } catch (e) {
-      turn.fail(e, { outcome: 'agent-spawn-failed' });
+      turn.fail(e, { outcome: 'agent-spawn-failed', ...resolveTurnCpuAttributes(turnCpuStart) });
       throw e;
     }
 
@@ -336,7 +361,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // either case: a needs-human-judgment report still needs a green gate before anyone reviews it.
     // (The `verify.gate` span itself is emitted one level down, inside `runVerifyOperation`, so it is
     // captured identically for every wrapper rather than six times over — see that function.)
-    const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
+    const gate = await runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
     if (gate.status === 'red') {
       releaseClaimAndLane({ item, lane, sessionSlug });
       return finish('gate-red', { status: 'error', outcome: 'gate-red' });
@@ -353,8 +378,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // ---- 4. Converge — driven BY THE WRAPPER, not the agent (this session's call on step 6, see the design
     // amendment on #3627: KEEP the substance, MOVE the driving). SKETCH — the exact init/step loop shape is
     // taken from the live brief's own step 6 prose, not verified against `converge-cli.mjs`'s real output. --
-    const convergeVerdict = spanAround('converge.round', { attributes: { item: String(item) } },
-      () => runConverge({ lane: gate.lanePath, item }));
+    // `provider` threaded through (mechanical-dispatcher follow-up to #3580) — see `runConvergeEdit`'s own
+    // docblock ("VISIBILITY fix") for why this does not make Codex the converge editor; it only makes the
+    // requested build provider visible to, and recorded by, the round that runs regardless.
+    const convergeVerdict = spanAround('converge.round', { attributes: { item: String(item), buildProvider: provider.name } },
+      () => runConverge({ lane: gate.lanePath, item }, { provider }));
 
     // ---- 5. Map outcome + convergeVerdict + statute-touch to a park mode, via the EXISTING deterministic
     // rubric (`review-escalation.mjs`) — REAL import, SKETCH call (the real `scoreEscalation` signature takes
@@ -439,9 +467,19 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
  * but it IS a real behavioral difference from a raw `backlog.mjs claim --session=…` call and is called out
  * here rather than silently dropped.
  */
-export function claimItem({ item, sessionSlug }, { run: runFn = run } = {}) {
+export function claimItem({ item, sessionSlug, lanePath } = {}, { run: runFn = run } = {}) {
   void sessionSlug; // accepted, not forwarded — see the docblock above for why.
-  runFn('node', ['scripts/operations/run.mjs', 'claim', `--ref=${item}`, '--json']);
+  // BUG FOUND live during the #3565 real-dispatch re-verification (separate from, and pre-existing before,
+  // the #3565 sandbox/commit redesign): `run.mjs claim` resolves the backlog item's path relative to the
+  // CHILD PROCESS's own cwd. With no `cwd` at all here, that child inherited the WRAPPER's cwd (the primary
+  // checkout), so the claim resolved onto the primary tree and was refused outright — "backlog item-mutation
+  // BLOCKED ... resolves under the shared PRIMARY checkout ... There is no override." `lanePath`, when given,
+  // fixes this the same way every other lane-scoped call in this file already does (`openPr`, `commitBuildTurn`,
+  // `runVerifyOperation` all pass `{ cwd: lane }`) — optional only so every existing caller/test that predates
+  // this fix, which never had a lane path to give, keeps calling this with the exact same two-argument shape.
+  const args = ['scripts/operations/run.mjs', 'claim', `--ref=${item}`, '--json'];
+  if (lanePath) runFn('node', args, { cwd: lanePath });
+  else runFn('node', args);
 }
 
 // #3627 follow-up — both calls below are raw script calls, not routed through `run.mjs`: `release` has no
@@ -464,9 +502,13 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
 //    stay exactly where they are; only what sits BETWEEN them and the call site becomes a named port." Here,
 //    the port is `DeliveryAgentProvider` — one provider per CLI a delivery agent might run under.
 //
-//    `defaultSpawnAgent` (REAL, imported below) blocks via `execFileSync` until its child process exits — the
-//    fact this whole no-polling design rests on (FIRM REQUIREMENT 4) — and stays the shared low-level spawn
-//    primitive every provider's `spawn` ultimately calls; what varies PER PROVIDER is only the argv/settings
+//    `spawnAgentToCompletion` (REAL, imported below from `dispatch-lane-io.mjs`) does not RETURN — i.e. this
+//    provider's own `await` does not resolve — until its child process exits: the fact this whole no-polling
+//    design rests on (FIRM REQUIREMENT 4). #3383 mechanical-dispatcher follow-up converted it from a
+//    synchronous `execFileSync` call to an awaited async `spawn()` (see that function's own header for why —
+//    the sync call could not expose the child's real CPU usage), with the exact same blocking-until-done
+//    semantics from this provider's own caller's perspective. It stays the shared low-level spawn primitive
+//    every Claude-based provider's `spawn` ultimately calls; what varies PER PROVIDER is only the argv/settings
 //    a given CLI needs to achieve "minimal context, no hooks lost, no polling."
 // ================================================================================================
 
@@ -670,15 +712,16 @@ const CLAUDE_RESTRICTED_PROVIDER = {
   // `runGateWithOneRetry`, `runConvergeEdit`). Real call sites (`runAgentToCompletion`,
   // `resumeAgentWithGateFailure`) pass `{ sessionId, prompt, resumeSessionId?, lane, sessionSlug, item,
   // attemptTag }` — `lane`/`sessionSlug`/`item`/`attemptTag` added by bug 7's fix, below.
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
     {
       ensureSettingsFile = ensureDeliveryHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       resolveLane = resolveLanePath,
       run: runFn = run,
       persistFailure = persistDeliverySpawnFailure,
       resolveReportsDir = resolveDeliveryReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
@@ -698,7 +741,20 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // of `delivery-report-store.mjs` to recompute its own script-location-relative default, which resolves to
     // a DIFFERENT directory because `lanePath` is a separate `git clone`, not a worktree (see
     // `buildDeliveryAgentEnv`'s own docblock for the full mechanism and the false-negative this fixes).
-    const reportsDir = resolveReportsDir();
+    //
+    // #3383 mechanical-dispatcher FOLLOW-UP FIX — bug 9's own "resolve ONCE, hand down" shape was right, but
+    // WHAT it resolved to was wrong: called with no argument, `resolveDeliveryReportsDir()` falls back to its
+    // own SCRIPT-LOCATION default, which names wherever THIS WRAPPER's own physical copy of the file lives —
+    // always the primary checkout (`deliver-item-run.mjs` is spawned with `cwd: REPO_ROOT`), never `lanePath`,
+    // regardless of which lane the delivery is actually for. That silently told every spawned agent to write
+    // its completion report OUTSIDE its own lane. Claude's `--restricted` mode never caught this because
+    // `guard-lane.mjs`/`guard-bash.mjs` only gate the Edit/Write/Bash TOOLS, and `delivery-report-cli.mjs
+    // report` runs as a plain child process the agent shells out to — invisible to those hooks either way —
+    // so the wrong-directory write just silently succeeded. Codex's real OS-level lane sandbox has no such
+    // blind spot: a write outside `lanePath` came back `EPERM`, which is exactly how this was found (item
+    // #3476). Passing `lanePath` here makes the resolution LANE-AWARE — `deliveryReportsDir(lanePath)` inside
+    // `resolveDeliveryReportsDir`, not the script-location default — for both providers, going forward.
+    const reportsDir = resolveReportsDir(lanePath);
     // #3627 bug 7(b) — REAL env vars (see `buildDeliveryAgentEnv`'s own docblock), not the old text-appended
     // `[env: ...]` footer `fillMinimalBrief` still also appends below (kept — see that function's own comment
     // — the brief's prose reads naturally either way, and real env vars are what the CLI actually needs).
@@ -706,16 +762,28 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     try {
       // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
       // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without
-      // this override `defaultSpawnAgent` silently applies its own 60s default here too, SIGKILLing a real
+      // this override `spawnAgentToCompletion` silently applies its own 60s default here too, SIGKILLing a real
       // build+gate+converge turn before it can finish — see `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`'s own docblock.
-      spawnAgent(argv, {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`, blocking synchronously); see
+      // `dispatch-lane-io.mjs#spawnAgentToCompletion`'s own header for the full contract this preserves. The
+      // `await` IS the "wait" now, same as the sync call was — the caller still does not proceed until the
+      // agent's turn has actually finished. `resourceUsage` is threaded through to `deliverItem`'s `agent.turn`
+      // span via `recordChildResourceUsage`/`resolveTurnCpuAttributes` — honestly `null` on real Node today
+      // (no `ChildProcess#resourceUsage()` exists; see `spawn-to-completion.mjs`'s own header), kept only for
+      // forward compatibility.
+      const { resourceUsage } = (await spawnAgent(argv, {
         cwd: lanePath,
         env: { ...process.env, ...deliveryEnv },
         timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
-      }); // BLOCKS — the only "wait".
+      })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
       // Observability fix — capture what the child actually said before this bubbles up further (see
       // `persistDeliverySpawnFailure`'s own docblock for why this exists and exactly what it captures).
+      // `e.resourceUsage` (present whenever the child actually started — see `spawn-to-completion.mjs`'s own
+      // header) is recorded too, so an agent turn that fails still reports its real CPU cost, not a fabricated
+      // zero.
+      recordCpu(e && e.resourceUsage);
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -752,7 +820,7 @@ const CODEX_PROVIDER = {
   name: 'codex',
   // Same `(request, io?)` shape as `CLAUDE_RESTRICTED_PROVIDER.spawn` — `io` exists ONLY so a test can assert
   // what this spawns without a real `codex` process or a real filesystem.
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
     {
       spawnAgent = defaultSpawnCodexAgent,
@@ -763,6 +831,7 @@ const CODEX_PROVIDER = {
       readThreadId = readCodexThreadId,
       writeThreadId = writeCodexThreadId,
       denyPaths = null,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     // Identical resolution order to the Claude provider — the SAME single source of truth for the lane path
@@ -770,7 +839,11 @@ const CODEX_PROVIDER = {
     // provider-independent: they are about where the CHILD is and where its report lands, not about which CLI
     // the child is, so re-deriving either here would just be re-introducing them for the second provider.
     const lanePath = resolveLane(lane, { run: runFn });
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher follow-up fix — SAME lane-aware resolution as CLAUDE_RESTRICTED_PROVIDER
+    // above (see its own comment for the full root-cause account): `resolveReportsDir()` called with no
+    // argument silently named the primary checkout regardless of `lanePath`, which Codex's real sandbox
+    // correctly refused (`EPERM`) rather than tolerating like Claude's soft, hook-based one did.
+    const reportsDir = resolveReportsDir(lanePath);
     const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
     const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
     // Codex mints its OWN thread id and has no `--session-id`, so `resumeSessionId` (a CLAUDE-side UUID the
@@ -790,17 +863,26 @@ const CODEX_PROVIDER = {
     const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
     let stdout;
     try {
-      // BLOCKS — the only "wait", exactly as in the Claude provider, and budgeted on the same clock
-      // (`DELIVERY_AGENT_SPAWN_TIMEOUT_MS`): this call covers the agent's whole real build turn.
-      stdout = spawnAgent(argv, {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); the `await` is still the only
+      // "wait", exactly as the sync call was, and budgeted on the same clock (`DELIVERY_AGENT_SPAWN_TIMEOUT_MS`)
+      // — see `codex-delivery-provider.mjs#defaultSpawnCodexAgent`'s own header for the full contract this
+      // preserves. `resourceUsage` is threaded through to the `agent.turn` span — honestly `null` on real Node
+      // today (no `ChildProcess#resourceUsage()` exists; see `spawn-to-completion.mjs`'s own header), kept only
+      // for forward compatibility.
+      const spawned = (await spawnAgent(argv, {
         cwd: lanePath,
         env: { ...process.env, ...deliveryEnv },
         timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
-      });
+      })) || {};
+      stdout = spawned.stdout;
+      recordCpu(spawned.resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
+    // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
+    recordCodexTurnUsage(stdout);
     // Record the thread id on a FRESH spawn only — a resume re-announces the same id, so re-writing it is
     // noise. Best-effort by construction (`writeCodexThreadId` never throws): losing the crumb costs the
     // ability to resume, which the guard above then reports loudly, and must never fail a build that worked.
@@ -872,6 +954,9 @@ export async function runAgentToCompletion(
   {
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadDeliveryReport,
+    resolveLane = resolveLanePath,
+    resolveReportsDir = resolveDeliveryReportsDir,
+    run: runFn = run,
     loadItems,
   } = {},
 ) {
@@ -881,9 +966,16 @@ export async function runAgentToCompletion(
   // #3627 bug 7 — `lane`/`sessionSlug`/`item`/`attemptTag` threaded through so the provider can resolve the
   // real lane path (`cwd`) and mint the real env vars the brief needs (`buildDeliveryAgentEnv`) — see
   // `CLAUDE_RESTRICTED_PROVIDER.spawn`'s own docblock.
-  provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // BLOCKS — see DeliveryAgentProvider's own docblock.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // AWAITS — see DeliveryAgentProvider's own docblock.
 
-  const report = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider itself just
+  // resolved and handed to the spawned agent (see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`),
+  // never this process's own script-location default — which is always the primary checkout, not the lane.
+  // `resolveLane`/`resolveReportsDir` mirror the exact same seams each provider already uses, so a test can
+  // assert on this independently of which provider ran.
+  const lanePath = resolveLane(lane, { run: runFn });
+  const reportsDir = resolveReportsDir(lanePath);
+  const report = readReport(sessionSlug, reportsDir);
   if (!report || report.status !== 'done') {
     // The agent's process exited without ever sending a `done` report — a crash, per #3436's own precedent.
     // Nothing to poll for: the process is gone, so there is nothing further to wait on. This is itself a
@@ -961,11 +1053,17 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
  *  it said (the bug: `second.ok` used to be the ONLY thing this function looked at after the resume).
  *  `readReport` is injectable (mirrors `runAgentToCompletion`'s own `readReport = tryReadDeliveryReport`
  *  convention) so this second-report branch is testable without a real delivery-report sidecar on disk. */
-export function runGateWithOneRetry(
+export async function runGateWithOneRetry(
   { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
-  { run: runFn = run, readReport = tryReadDeliveryReport } = {},
+  {
+    run: runFn = run, readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
+    commitTurn = commitBuildTurn,
+  } = {},
 ) {
   const lanePath = resolveLanePath(lane, { run: runFn });
+  // #3565 — the WRAPPER commits the agent's OWN build turn here, before the gate ever runs — the agent never
+  // touches `.git` itself any more (see `commitBuildTurn`'s own header for the full redesign reasoning).
+  commitTurn({ lane: lanePath, item, provider, phase: 'build' }, { run: runFn });
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
 
@@ -978,10 +1076,16 @@ export function runGateWithOneRetry(
   // #3627 attempt-5 finding — `gateOutcome` threaded through so the resume prompt itself can stop telling an
   // agent "your gate failed, fix it" when the true outcome is `unrun` (nothing in its diff to fix) — see
   // `resumeAgentWithGateFailure` below.
-  resumeAgentWithGateFailure({
+  await resumeAgentWithGateFailure({
     sessionSlug, lane, item, attemptTag, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
   }); // SKETCH — see below
-  const retryReport = readReport(sessionSlug); // agent's fresh report after the resume — 'done' (fixed) or 'blocked' (couldn't)
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the resume just used
+  // (see `runAgentToCompletion`'s own comment for the full root-cause account), never the wrapper's own
+  // script-location default.
+  const retryReport = readReport(sessionSlug, resolveReportsDir(lanePath)); // agent's fresh report after the resume — 'done' (fixed) or 'blocked' (couldn't)
+  // #3565 — commit whatever the resumed turn changed, same wrapper-owned reasoning as the build commit above,
+  // BEFORE the second verify reads the lane. A `blocked` retry that touched nothing no-ops harmlessly here.
+  commitTurn({ lane: lanePath, item, provider, phase: 'gate-fix' }, { run: runFn });
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
 
@@ -1004,7 +1108,7 @@ export function runGateWithOneRetry(
  *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
-function resumeAgentWithGateFailure({
+async function resumeAgentWithGateFailure({
   sessionSlug, lane, item, attemptTag, failureOutput, gateOutcome = 'fail', provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId,
 }) {
   // #3627 attempt-5 finding — an `unrun` gate gets an HONEST prompt, not "your gate failed, fix it": that
@@ -1013,21 +1117,26 @@ function resumeAgentWithGateFailure({
   // turn correctly explaining there was nothing in its own diff to fix. Explicitly inviting a `blocked` report
   // here is what `runGateWithOneRetry` above now reads and honors, instead of that self-diagnosis happening
   // only by the agent's own initiative against a misleading prompt.
+  // #3565 redesign — NEITHER branch asks the agent to commit any more. The agent's OWN job ends at "the
+  // files in $LANE are correct"; `runGateWithOneRetry` commits this resumed turn's fix itself, the same
+  // wrapper-owned way it already commits the original build (see `commitBuildTurn`'s own header for why —
+  // this is the #3565 Codex sandbox finding applied as a structural fix, not a sandbox carve-out).
   const prompt = gateOutcome === 'unrun'
     ? `The verification gate could not RUN for your commit in $LANE (this looks like a wrapper/environment `
       + `problem, not necessarily a problem in your own diff):\n\n${failureOutput}\n\nIf you can see something `
-      + `genuinely wrong in your own change, fix it, commit again, and send a fresh \`done\` report exactly as `
-      + `before. If you cannot find anything wrong in your own diff, do not guess at a code change — send a `
-      + `report with \`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
-    : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
-      + `\`done\` report exactly as before.`;
+      + `genuinely wrong in your own change, fix it in $LANE and send a fresh \`done\` report exactly as `
+      + `before — do NOT run \`git commit\` yourself; the wrapper commits your fix for you. If you cannot find `
+      + `anything wrong in your own diff, do not guess at a code change — send a report with `
+      + `\`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
+    : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, then send a fresh \`done\` report exactly `
+      + `as before — do NOT run \`git commit\` yourself; the wrapper commits your fix for you.`;
   // BUG-5 FIX: both `sessionId` and `resumeSessionId` are `claudeSessionId` — the real UUID minted once in
   // `deliverItem` and reused by the fresh spawn — never `sessionSlug`. `--resume <id>` must name the SAME CLI
   // session the fresh spawn created, and that id must itself be a UUID (CLI-enforced).
   // #3627 bug 7 — this prompt says `$LANE` above, same as the fresh brief, so this resume needs the SAME real
   // cwd/env treatment (`lane`/`sessionSlug`/`item`/`attemptTag` threaded through to the provider) or a resumed
   // agent hits the identical "no real $LANE to cd into" failure the fresh spawn did.
-  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag }); // BLOCKS.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag }); // AWAITS.
 }
 
 // #xu2pp2m — `resolveLanePath` EXTRACTED to `./minimal-context-provider.mjs` (imported above), unchanged: the
@@ -1201,12 +1310,31 @@ export function parseConvergeEditResult(rawOut) {
  * (`applyRevision`, `converge-transports.mjs`) never references `$LANE`/`$DELIVERY_SESSION` — it hardcodes the
  * absolute lane path directly into the instruction text — so nothing in this call's actual prompt would read
  * them; adding unused env vars here would be padding, not a fix for a real gap this prompt has.
+ *
+ * `provider` (mechanical-dispatcher follow-up to #3580) — NOT a real second implementation, a VISIBILITY fix.
+ * Before this, `deliverItem`/`fix-dispatch-wrapper.mjs`/`ci-heal-dispatch-wrapper.mjs` all resolve a real
+ * {@link DeliveryAgentProvider} (`CLAUDE_RESTRICTED_PROVIDER` or `CODEX_PROVIDER`) for the BUILD spawn, hold it
+ * in a local `provider` variable, and then called `runConverge`/`runConvergeEdit` with NO provider argument at
+ * all — not "falls back to Claude", genuinely un-passed, so a Codex-delivered item's converge editor ran under
+ * Claude with no record anywhere that a hand-off had even happened. `CODEX_PROVIDER`'s own docblock already
+ * says this boundary is deliberate ("the port's real boundary today, not an oversight" — no Codex
+ * implementation of the editor role has been built OR live-verified: it would need its own argv builder,
+ * parallel to `codex-delivery-provider.mjs#buildCodexDeliveryArgv`, AND a parser that turns Codex's `--json`
+ * event stream into the same `{advanced, dismissed}` shape `parseConvergeEditResult` extracts from Claude's
+ * `--output-format json` envelope — neither exists, so building one here blind, with no live run to confirm
+ * the JSON actually comes back in a parseable shape, would be exactly the kind of unverified claim this
+ * codebase's own discipline refuses (see `codex-delivery-provider.mjs`'s file header, "measured, not
+ * reasoned", throughout). So the spawn below is UNCHANGED — still always `claude` — but `provider` is now a
+ * real parameter, and the requested build provider (which may be Codex) travels alongside the ACTUAL editor
+ * provider (always `'claude-restricted'` today) in the return value, so this is a stated fact in the round's
+ * own `.converge-obs-*.json` record and in `convergeVerdict`, not a silent gap. Building and live-verifying a
+ * real Codex converge editor is a genuine follow-up (file it rather than guess at it here).
  */
 export function runConvergeEdit(
   editInstruction,
   {
     item, round, lane, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID,
-    dispatchKind = 'delivery',
+    dispatchKind = 'delivery', provider = CLAUDE_RESTRICTED_PROVIDER,
   },
 ) {
   const settingsFile = ensureSettingsFile();
@@ -1226,7 +1354,9 @@ export function runConvergeEdit(
   // (`dispatch-lane.mjs#WRAPPER_AGENT_KINDS`) — the same half of the value space this default's own
   // `'delivery'` has always been in. The gap that note called an open follow-up is closed.
   const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: dispatchKind } });
-  return parseConvergeEditResult(out);
+  // Additive fields only — see this function's own docblock ("VISIBILITY fix") for why these two are always
+  // `requestedProvider !== editorProvider` on a Codex-selected delivery, on purpose, not a bug.
+  return { ...parseConvergeEditResult(out), requestedProvider: provider.name, editorProvider: CLAUDE_RESTRICTED_PROVIDER.name };
 }
 
 /** Shell `review-core-cli.mjs invite` for the jury-growth delta (#2640), per the SKILL's `invite` row. A
@@ -1302,6 +1432,147 @@ export function commitConvergeRound(
 }
 
 /**
+ * Map a {@link DeliveryAgentProvider}'s `.name` to the `Co-Authored-By` trailer for a commit made ON ITS
+ * BEHALF (#3565's redesign — see `commitBuildTurn`'s own header). PURE, and defaults to the Claude trailer
+ * for any name this does not recognize: a wrapper-authored commit must always carry SOME correctly-shaped
+ * trailer, and silently omitting one for an unrecognized/future provider name would be worse than a
+ * slightly-imprecise default.
+ */
+export function coAuthorTrailerFor(providerName) {
+  if (providerName === 'codex') return 'Co-Authored-By: Codex <noreply@openai.com>';
+  return 'Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>';
+}
+
+/**
+ * Commit the delivery agent's OWN turn ON ITS BEHALF — WRAPPER-OWNED, generalizing `commitConvergeRound`'s
+ * already-proven "the wrapper computes the real diff and commits it, never the agent" pattern (bug 14, above)
+ * to the FIRST commit in a delivery (the initial build, `phase: 'build'`) and to a gate-failure RESUME's own
+ * fix (`phase: 'gate-fix'`) — not just a converge round's revision.
+ *
+ * WHY THIS MOVED OUT OF THE AGENT'S OWN JOB ENTIRELY (#3565). A real Codex delivery trial confirmed Codex's OS
+ * sandbox denies `.git` writes inside its own lane. Traced to root cause, not guessed: every lane is
+ * `git clone --reference <primary>` (`scripts/lane-pool.mjs#cloneLane`), so a lane's own
+ * `.git/objects/info/alternates` file points AT the primary checkout's `.git/objects` verbatim — ordinary git
+ * plumbing (`status`, `log`, `commit`) reads through that pointer. The sandbox's own `filesystem` deny map
+ * (correctly) ALSO denies reading the primary checkout, so `git status`/`git commit` inside the lane failed
+ * `fatal: bad object HEAD` (live-reproduced against real `codex exec` with the exact production argv this
+ * repo's `codex-delivery-provider.mjs` builds). The fix on the table was carving `.git/objects` out of that
+ * deny map — but the STRUCTURALLY BETTER fix is this one: the dispatched agent, Claude OR Codex, never needs
+ * `.git` access at all, because it never runs git itself. Two independent reasons this beats a sandbox
+ * carve-out:
+ *   1. It GUARANTEES the commit-message/trailer convention mechanically (this function, {@link
+ *      coAuthorTrailerFor}) instead of hoping every agent, on every provider, formats a commit correctly.
+ *   2. It is a STRONGER isolation guarantee than any deny-list: a deny-list is only as good as what someone
+ *      remembered to block, where no path to `.git` at all structurally blocks a force-push, a
+ *      `reset --hard`, or a history rewrite from inside the agent's own turn — not by a rule the agent could
+ *      misconfigure or a deny-list entry someone forgot, but because there is no `.git` to reach.
+ * Applies UNIFORMLY to both providers — neither `CLAUDE_RESTRICTED_PROVIDER` nor `CODEX_PROVIDER` needs its
+ * own sandbox carve-out for this any more, because neither one's agent turn touches `.git`. Codex's sandbox
+ * denying `.git` writes is therefore not a bug any more — it is simply correct, and stays exactly as strict as
+ * it already is.
+ *
+ * Reuses {@link convergeRoundTouchedFiles}'s real `git status --porcelain` read — its own logic was never
+ * converge-specific (it is exactly "the real, live-diffed touched-file list in this lane, minus this
+ * wrapper's own bookkeeping litter"), so a second, parallel implementation would just be the same read typed
+ * twice. No-ops (`{committed: false, paths: []}`) when there is nothing to commit — an agent that reported
+ * `done`/fixed the gate but genuinely left nothing new in the working tree never produces an empty, spurious
+ * commit.
+ *
+ * @param {{lane: string, item: string|number, provider?: DeliveryAgentProvider, phase?: 'build'|'gate-fix'}} o
+ * @param {{run?: Function, writeFile?: Function, touchedFiles?: Function}} [deps]
+ */
+// #3565 real-trial finding (live, 2026-09-13): the delivery agent is DELIBERATELY never taught the
+// `we:`/`fui:`/`plateau:` locus-prefix citation convention (delivery-agent-brief-v2.md's own header — "no
+// cited convention, no doctrine reference"), so its own `## Progress`/`## Done when` prose routinely quotes
+// files by their BARE repo-relative path. Under the OLD design the agent's own `git commit` hit
+// `.githooks/pre-commit`'s `npm run lint:locus` backstop (#883/#1574) directly and could fix its own text
+// in the same turn; under this redesign the WRAPPER commits after the agent has already exited, so that
+// same rejection had nowhere to go — it just failed the whole delivery (reproduced live: `git commit`
+// exited non-zero, "2 bare code-path ref(s) ... lack a <repo>: prefix", the wrapper's own best-effort
+// release then discarded a genuinely-passing build for a trivially-fixable citation nit).
+//
+// #3383 mechanical-dispatcher fix (SECOND live #3565 trial, still 2026-09-13, AFTER the first narrow fix
+// above had already landed): the first fix only prefixed bare mentions of the delivery's OWN touched
+// paths, on the theory that those are the only bare mentions an agent's prose would ever introduce. A
+// fresh Codex trial disproved that theory directly — its own `## Progress` note cited an UNTOUCHED
+// existing file bare (`queue-store.mjs`, named for context, never itself part of the diff), which the
+// touched-paths-only fixer had no way to catch (it was never in that list), and `lint:locus` rejected the
+// wrapper's commit again for exactly the same reason, just a different token. `sanitizeOwnLocusMentions`
+// below now finds every bare mention `we:scripts/check-standards-rules.mjs#findUnmarkedLocusRefs` (the
+// REAL gate's own detector, reused rather than re-approximated) would itself flag in the file's full
+// content — touched or not, self-referencing or not — so nothing the gate would reject can slip past this
+// fix. `LOCUS_MD_CORPUS_RE` still scopes WHICH touched files get scanned (only the delivery's own touched
+// backlog/reports markdown — never every corpus file in the repo, which would be a different, unbounded
+// job); it is only the CONTENT scan inside each one that widened.
+const LOCUS_MD_CORPUS_RE = /(?:^|\/)(?:backlog|reports)\/[^/]+\.md$/;
+
+/**
+ * PURE. Prefix every BARE mention of one of `refs` inside `content` with `we:`, leaving an ALREADY-prefixed
+ * mention (`we:<path>`, `fui:<path>`, …) untouched. Generic over its `refs` list — {@link
+ * sanitizeOwnLocusMentions} is the only caller, and (as of the #3383 fix above) feeds it every unmarked
+ * token `findUnmarkedLocusRefs` finds in the document's own content, not a caller-guessed subset.
+ */
+export function prefixOwnPathMentions(content, refs) {
+  let next = String(content ?? '');
+  for (const p of Array.isArray(refs) ? refs : []) {
+    if (typeof p !== 'string' || !p) continue;
+    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<!(?:we|fui|plateau|webeverything|frontierui|plateau-app):)${escaped}`, 'g');
+    next = next.replace(re, `we:${p}`);
+  }
+  return next;
+}
+
+/**
+ * IMPURE shell around {@link prefixOwnPathMentions}: for every touched path that is itself a
+ * `backlog/*.md`/`reports/*.md` document, rewrite it in place (only if it actually changed) so the pending
+ * commit passes the repo's locus-prefix backstop. Errors reading/writing one file are swallowed (best-effort
+ * — this is a convenience fix-up, never the reason a real build+commit fails for an unrelated fs hiccup);
+ * `git commit` below is still the real, authoritative gate.
+ *
+ * #3383 mechanical-dispatcher fix — the ref list to prefix now comes from `findUnmarkedLocusRefs(before)`
+ * (the real `lint:locus` detector run against THIS file's own current content), not from `paths` (the
+ * delivery's touched-file list). See {@link LOCUS_MD_CORPUS_RE}'s own comment above for the live trial that
+ * found the gap this closes.
+ */
+export function sanitizeOwnLocusMentions(lane, paths, { readFile = readFileSync, writeFile = writeFileSync } = {}) {
+  for (const p of paths) {
+    if (!LOCUS_MD_CORPUS_RE.test(p)) continue;
+    try {
+      const abs = `${lane}/${p}`;
+      const before = readFile(abs, 'utf8');
+      const refs = findUnmarkedLocusRefs(before);
+      if (!refs.length) continue;
+      const after = prefixOwnPathMentions(before, refs);
+      if (after !== before) writeFile(abs, after);
+    } catch { /* best-effort — see docblock */ }
+  }
+}
+
+export function commitBuildTurn(
+  { lane, item, provider = CLAUDE_RESTRICTED_PROVIDER, phase = 'build' },
+  {
+    run: runFn = run, writeFile = writeFileSync, readFile = readFileSync,
+    touchedFiles = convergeRoundTouchedFiles,
+  } = {},
+) {
+  const paths = touchedFiles(lane, { run: runFn });
+  if (!paths.length) return { committed: false, paths: [] };
+  sanitizeOwnLocusMentions(lane, paths, { readFile, writeFile });
+  const msgFile = `${lane}/.delivery-commit-msg-${phase}.txt`;
+  const subject = phase === 'gate-fix' ? `WE #${item}: gate-failure fix` : `WE #${item}: delivery build`;
+  const body = phase === 'gate-fix'
+    ? "Commits the delivery agent's fix after a red gate resumed it for one retry (#3383/#3565) — the wrapper "
+      + "makes this commit on the agent's behalf; the agent itself never runs git.\n"
+    : "Commits the delivery agent's build turn (#3383/#3565) — the wrapper makes this commit on the agent's "
+      + "behalf; the agent itself never runs git (see this function's own header for why that moved here).\n";
+  const message = `${subject}\n\n${body}\n${coAuthorTrailerFor(provider?.name)}\n`;
+  writeFile(msgFile, message);
+  runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
+  return { committed: true, paths };
+}
+
+/**
  * THE LOOP. Drives `converge-cli.mjs` `init` → repeated `step` calls, executing whatever action each call
  * prints, until the action is genuinely `land` or `escalate` — replacing the sketch's single `step` call.
  * `run` is injectable (defaults to this file's own `run`) so the whole loop is testable against a scripted
@@ -1309,7 +1580,10 @@ export function commitConvergeRound(
  */
 export function runConverge(
   { lane, item, goal },
-  { run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile, dispatchKind = 'delivery' } = {},
+  {
+    run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile, dispatchKind = 'delivery',
+    provider = CLAUDE_RESTRICTED_PROVIDER,
+  } = {},
 ) {
   const state = `${lane}/.converge-state.json`;
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `converge` operation is registered
@@ -1348,7 +1622,7 @@ export function runConverge(
       obs.lensResults = lastLensResults;
       obs.redTeamResult = runConvergeRedTeam(step.redTeam, { lane, item, round: step.round, material, run: runFn });
     } else if (step.action === 'edit') {
-      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile, dispatchKind });
+      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile, dispatchKind, provider });
       // BUG-14 FIX — commit a genuinely accepted round's real edits NOW, before the `step` call below reads
       // the lane's state (`converge-cli.mjs`'s own `read` action re-reads the lane fresh each round, so a
       // later round must see THIS round's commit, not just uncommitted working-tree changes it happens to

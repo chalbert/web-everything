@@ -51,10 +51,15 @@ export function fixReportsDir(root = FIX_REPORTS_ROOT) {
  *  uses (#3627 bug 9): the wrapper resolves this ONCE, in its own process, and hands it down to the spawned
  *  agent's env so both processes agree on the same absolute directory despite the agent running out of a
  *  SEPARATE lane clone (its own, different `import.meta.url`-relative default would otherwise resolve to the
- *  wrong checkout entirely). */
-export function resolveFixReportsDir() {
+ *  wrong checkout entirely).
+ *
+ *  `root` (optional, #3383 mechanical-dispatcher fix — SAME fix as
+ *  `delivery-report-store.mjs#resolveDeliveryReportsDir`'s own `root` param, see its docblock for the full
+ *  root-cause account): pass the RESOLVED LANE PATH so this resolves INSIDE the lane the fix/ci-heal agent is
+ *  actually running in, never the wrapper's own script-location default (always the primary checkout). */
+export function resolveFixReportsDir(root) {
   const env = process.env.OPERATION_FIX_REPORTS_DIR;
-  return env && env.trim() ? resolve(env.trim()) : fixReportsDir();
+  return env && env.trim() ? resolve(env.trim()) : fixReportsDir(root);
 }
 
 /** The on-disk path of one session's fix report. Refuses a slug that is not filename-safe. */

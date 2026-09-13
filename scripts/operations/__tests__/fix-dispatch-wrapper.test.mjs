@@ -29,12 +29,13 @@ vi.mock('node:fs', async (importOriginal) => {
 
 import {
   FIX_LANE_PURPOSE, FIX_LOOP_ACQUIRE_WAIT_MS, FIX_FINDING_SCRATCH_FILENAME, CHANGES_REQUESTED_MARKERS,
-  FIX_REPORT_CLI_PATH,
+  FIX_REPORT_CLI_PATH, FIX_AGENT_SPAWN_TIMEOUT_MS, FIX_AGENT_PROVIDERS, resolveFixAgentProvider,
   planFixDispatchWrapper, findLatestChangesRequestedComment, resolveFixTarget, buildFixAgentEnv,
   pushLaneRef, rearmReview, standDown, runFixGateWithOneRetry, dispatchFix,
 } from '../fix-dispatch-wrapper.mjs';
 import { newFixReport, writeFixReport, tryReadFixReport } from '../fix-report-store.mjs';
 import { REPAIR_AGENT_KIND } from '../dispatch-lane.mjs';
+import { DELIVERY_AGENT_PROVIDER_NAMES } from '../deliver-item-wrapper.mjs';
 
 describe('planFixDispatchWrapper', () => {
   it('accepts a positive integer PR and an owner/repo slug, deriving the fix-<pr> session slug', () => {
@@ -115,6 +116,17 @@ describe('resolveFixTarget', () => {
   it('findingBody is null when no changes-requested comment exists', () => {
     const run = vi.fn(() => JSON.stringify({ headRefName: 'lane/2108-foo', comments: [{ body: 'unrelated' }] }));
     expect(resolveFixTarget({ pr: 2108, repo: 'a/b' }, { run }).findingBody).toBeNull();
+  });
+
+  it('#Part-3 autofix — findingOverride SKIPS the comment scan and is used verbatim, headRefName is still real', () => {
+    const run = vi.fn(() => JSON.stringify({
+      headRefName: 'lane/2108-foo',
+      // NO changes-requested comment at all — the advisory-note population this override exists for never
+      // carries one (review:human posts an advisory note, not a changes-requested bounce).
+      comments: [{ body: 'some unrelated PR chatter' }],
+    }));
+    const target = resolveFixTarget({ pr: 2108, repo: 'a/b', findingOverride: 'fix only src/foo.mjs:12' }, { run });
+    expect(target).toEqual({ headRefName: 'lane/2108-foo', findingBody: 'fix only src/foo.mjs:12' });
   });
 });
 
@@ -201,22 +213,22 @@ describe('pushLaneRef / rearmReview / standDown — the hand-back mechanics', ()
 describe('runFixGateWithOneRetry', () => {
   const okVerify = () => JSON.stringify({ verdict: { ok: true } });
 
-  it('returns green on a first-try pass, never resuming the agent', () => {
+  it('returns green on a first-try pass, never resuming the agent', async () => {
     const run = vi.fn(() => okVerify());
     const provider = { spawn: vi.fn() };
-    const result = runFixGateWithOneRetry({ lanePath: '/pool/lane-3', pr: 1, item: null, sessionSlug: 'fix-1', provider, claudeSessionId: 'id-1' }, { run });
+    const result = await runFixGateWithOneRetry({ lanePath: '/pool/lane-3', pr: 1, item: null, sessionSlug: 'fix-1', provider, claudeSessionId: 'id-1' }, { run });
     expect(result.status).toBe('green');
     expect(provider.spawn).not.toHaveBeenCalled();
   });
 
-  it('resumes the agent once on a red gate; a passing second verify returns green', () => {
+  it('resumes the agent once on a red gate; a passing second verify returns green', async () => {
     let calls = 0;
     const run = vi.fn(() => {
       calls += 1;
       return calls === 1 ? JSON.stringify({ verdict: { ok: false, failed: 1, blocking: ['x'] } }) : okVerify();
     });
     const provider = { spawn: vi.fn() };
-    const result = runFixGateWithOneRetry({ lanePath: '/pool/lane-3', pr: 1, item: null, sessionSlug: 'fix-1', provider, claudeSessionId: 'id-1' }, { run });
+    const result = await runFixGateWithOneRetry({ lanePath: '/pool/lane-3', pr: 1, item: null, sessionSlug: 'fix-1', provider, claudeSessionId: 'id-1' }, { run });
     expect(result.status).toBe('green');
     expect(provider.spawn).toHaveBeenCalledTimes(1);
     const [spawnArgs] = provider.spawn.mock.calls[0];
@@ -224,20 +236,20 @@ describe('runFixGateWithOneRetry', () => {
     expect(spawnArgs.sessionId).toBe('id-1');
   });
 
-  it('a still-red second verify with no honest blocked self-diagnosis reports red', () => {
+  it('a still-red second verify with no honest blocked self-diagnosis reports red', async () => {
     const run = vi.fn(() => JSON.stringify({ verdict: { ok: false, failed: 1, blocking: ['x'] } }));
     const provider = { spawn: vi.fn() };
-    const result = runFixGateWithOneRetry(
+    const result = await runFixGateWithOneRetry(
       { lanePath: '/pool/lane-3', pr: 1, item: null, sessionSlug: 'fix-1', provider, claudeSessionId: 'id-1' },
       { run, readReport: () => ({ status: 'done', outcome: 'fixed' }) },
     );
     expect(result.status).toBe('red');
   });
 
-  it('an honest `outcome !== fixed` resumed report classifies as gate-blocked, never red', () => {
+  it('an honest `outcome !== fixed` resumed report classifies as gate-blocked, never red', async () => {
     const run = vi.fn(() => JSON.stringify({ verdict: { ok: false, unrun: 1, failed: 0 } }));
     const provider = { spawn: vi.fn() };
-    const result = runFixGateWithOneRetry(
+    const result = await runFixGateWithOneRetry(
       { lanePath: '/pool/lane-3', pr: 1, item: null, sessionSlug: 'fix-1', provider, claudeSessionId: 'id-1' },
       { run, readReport: () => ({ status: 'done', outcome: 'blocked', reason: 'nothing wrong in my own diff' }) },
     );
@@ -374,6 +386,25 @@ describe('dispatchFix', () => {
     expect(run.mock.calls.some((c) => c[1]?.[1] === 'acquire')).toBe(false);
     const doneCall = run.mock.calls.find((c) => c[1]?.includes('--status=done'));
     expect(doneCall[1]).toEqual(expect.arrayContaining(['--outcome=not-applicable']));
+  });
+
+  it('#Part-3 autofix — findingOverride dispatches even when the PR carries NO changes-requested comment '
+    + '(the review:human advisory-note population this exists for never has one), scoped to the override text', async () => {
+    const run = fakeRun({ findingBody: null }); // no changes-requested comment on the PR at all
+    const provider = {
+      spawn: vi.fn(({ sessionSlug, pr, item, lanePath }) => {
+        expect(readFileSync(join(lanePath, FIX_FINDING_SCRATCH_FILENAME), 'utf8')).toContain('fix only src/foo.mjs:12 — off-by-one');
+        writeFixReport({ ...newFixReport({ session: sessionSlug, pr, item }), status: 'done', outcome: 'fixed', filesTouched: ['a.mjs'] });
+      }),
+    };
+    const result = await dispatchFix(
+      { pr: 2108, repo: 'chalbert/web-everything', findingOverride: 'fix only src/foo.mjs:12 — off-by-one' },
+      provider,
+      { run, newSessionId: () => 'sess-override' },
+    );
+    expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+    expect(provider.spawn).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(lane, FIX_FINDING_SCRATCH_FILENAME))).toBe(false); // cleaned up after the turn
   });
 
   it('when acquire fails because --base does not resolve (the lane ref is gone), reports not-applicable, '
@@ -610,5 +641,130 @@ describe('#3640 — the wrapper arc, with a converge round that actually EDITS',
       rmSync(reportsDir, { recursive: true, force: true });
       rmSync(lane, { recursive: true, force: true });
     }
+  });
+});
+
+// ================================================================================================
+// mechanical-dispatcher (epic #3383, Part 1) — the `fix` kind's OWN provider registry, reusing the CODEX spawn
+// mechanics `codex-delivery-provider.mjs` already proved live for `build`, never re-derived.
+// ================================================================================================
+describe('FIX_AGENT_PROVIDERS registry / resolveFixAgentProvider (#3383)', () => {
+  it('names the same two providers `build` does, matching vocabulary', () => {
+    expect(Object.keys(FIX_AGENT_PROVIDERS)).toEqual(DELIVERY_AGENT_PROVIDER_NAMES);
+    expect(FIX_AGENT_PROVIDERS['claude-restricted'].name).toBe('claude-restricted-fix');
+    expect(FIX_AGENT_PROVIDERS.codex.name).toBe('codex');
+    expect(typeof FIX_AGENT_PROVIDERS.codex.spawn).toBe('function');
+  });
+
+  it('resolves by name, defaults to claude-restricted, and refuses an unknown name by NAME', () => {
+    expect(resolveFixAgentProvider()).toBe(FIX_AGENT_PROVIDERS['claude-restricted']);
+    expect(resolveFixAgentProvider('codex')).toBe(FIX_AGENT_PROVIDERS.codex);
+    expect(resolveFixAgentProvider(' codex ')).toBe(FIX_AGENT_PROVIDERS.codex);
+    expect(() => resolveFixAgentProvider('gemini')).toThrow(/unknown delivery agent provider "gemini"/);
+    expect(() => resolveFixAgentProvider('gemini')).toThrow(/claude-restricted\|codex/);
+  });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test for the CLAUDE fix provider (mirrors the
+  // `codex` describe block's own equivalent test, above): `resolveReportsDir` must be called WITH the
+  // (already-resolved) lane path, never bare.
+  it('claude-restricted-fix.spawn resolves the reports dir WITH the (already-resolved) lane path — never bare', () => {
+    const io = {
+      ensureSettingsFile: vi.fn(() => '/fake/.operations/fix-agent-hooks-settings.json'),
+      spawnAgent: vi.fn(),
+      persistFailure: vi.fn(),
+      resolveReportsDir: vi.fn(() => '/tmp/fix-reports'),
+    };
+    FIX_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', prompt: 'p', lanePath: '/tmp/fix-lane-3', sessionSlug: 'fix-2108', pr: 2108, item: '3629' },
+      io,
+    );
+    expect(io.resolveReportsDir).toHaveBeenCalledWith('/tmp/fix-lane-3');
+  });
+});
+
+// #3383 — FIX_CODEX_PROVIDER.spawn. Same port contract `CODEX_PROVIDER.spawn` satisfies for `build`
+// (`deliver-item-wrapper.test.mjs`'s own suite), mirrored here for the `fix` kind: `lanePath` arrives already
+// resolved (no `resolveLane` call, unlike `build`'s provider, which takes a bare lane NUMBER).
+describe('FIX_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Codex spawn mechanics for `fix`)', () => {
+  const LANE_PATH = '/tmp/fix-lane-9';
+  const THREAD_EVENT = '{"type":"thread.started","thread_id":"01a0-fix-thread"}\n{"type":"turn.completed"}\n';
+
+  const io = (over = {}) => ({
+    spawnAgent: vi.fn(() => ({ stdout: THREAD_EVENT, resourceUsage: null })),
+    persistFailure: vi.fn(),
+    resolveReportsDir: vi.fn(() => '/tmp/fix-reports'),
+    readThreadId: vi.fn(() => null),
+    writeThreadId: vi.fn(),
+    denyPaths: ['/tmp/primary/**'],
+    ...over,
+  });
+
+  const REQ = { sessionId: 'claude-uuid', prompt: 'REPAIR IT', lanePath: LANE_PATH, sessionSlug: 'fix-2108', pr: '2108', item: '3629' };
+
+  it('spawns `codex exec` in the ALREADY-RESOLVED lane clone, no `resolveLane` call needed', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    const [argv, opts] = o.spawnAgent.mock.calls[0];
+    expect(argv.slice(0, 3)).toEqual(['exec', '-C', LANE_PATH]);
+    expect(opts.cwd).toBe(LANE_PATH);
+  });
+
+  it('stamps the SAME real fix env vars the Claude fix provider does', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
+      WE_DISPATCH_KIND: REPAIR_AGENT_KIND,
+      FIX_SESSION: 'fix-2108',
+      FIX_PR: '2108',
+      FIX_ITEM: '3629',
+      LANE: LANE_PATH,
+      OPERATION_FIX_REPORTS_DIR: '/tmp/fix-reports',
+    });
+  });
+
+  it('blocks on the fix/delivery-shared budget, never dispatch-lane-io\'s 60s fire-and-forget one', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(FIX_AGENT_SPAWN_TIMEOUT_MS);
+  });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test: `resolveReportsDir` must be called WITH the
+  // (already-resolved) lane path, never bare. Bare, it silently falls back to the SCRIPT-LOCATION default,
+  // which always names the primary checkout regardless of `lanePath` — invisible under Claude's soft,
+  // hook-based `--restricted` sandbox, but a hard `EPERM` under Codex's real OS-level lane jail (see
+  // `deliver-item-wrapper.test.mjs`'s own equivalent regression test for the full root-cause account).
+  it('resolves the reports dir WITH the (already-resolved) lane path — never bare', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
+  });
+
+  it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.writeThreadId).toHaveBeenCalledWith('fix-2108', '01a0-fix-thread');
+  });
+
+  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', async () => {
+    const o = io({ readThreadId: vi.fn(() => 'recorded-tid') });
+    await FIX_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
+    expect(o.readThreadId).toHaveBeenCalledWith('fix-2108');
+    const argv = o.spawnAgent.mock.calls[0][0];
+    expect(argv.slice(0, 3)).toEqual(['exec', 'resume', 'recorded-tid']);
+    expect(o.writeThreadId).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', async () => {
+    const o = io({ readThreadId: vi.fn(() => null) });
+    await expect(FIX_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
+      .rejects.toThrow(/cannot resume session fix-2108/);
+    expect(o.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('captures the child\'s output on a spawn failure and rethrows untouched, under fix\'s own sidecar name', async () => {
+    const boom = new Error('spawnSync codex ETIMEDOUT');
+    const o = io({ spawnAgent: vi.fn(() => { throw boom; }) });
+    await expect(FIX_AGENT_PROVIDERS.codex.spawn(REQ, o)).rejects.toThrow(boom);
+    expect(o.persistFailure).toHaveBeenCalledWith('fix-spawn-failures', 'fix-2108', boom, { resumeSessionId: null });
   });
 });

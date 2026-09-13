@@ -101,10 +101,12 @@ import {
   REPO_ROOT, run, acquireLane, releaseAllPools, buildRestrictedProviderArgv, createHooksSettingsWriter,
   persistSpawnFailure,
 } from './minimal-context-provider.mjs';
-import { runConverge } from './deliver-item-wrapper.mjs';
+import {
+  runConverge, DELIVERY_AGENT_PROVIDER_NAMES, DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
+} from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
-import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import {
   FIX_AGENT_SPAWN_TIMEOUT_MS, FIX_HOOKS_SETTINGS, buildFixAgentEnv, pushLaneRef, runFixGateWithOneRetry,
@@ -112,6 +114,14 @@ import {
 } from './fix-dispatch-wrapper.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+// mechanical-dispatcher (epic #3383, Part 1) — REUSED verbatim from `fix-dispatch-wrapper.mjs`'s own Codex
+// provider, which itself reuses these from `codex-delivery-provider.mjs`; see that file's own header for the
+// live-verification trail. `CI_HEAL_CODEX_PROVIDER` below only differs from `FIX_CODEX_PROVIDER` in the ENV it
+// builds (`buildCiHealAgentEnv`, which carries `reason` alongside everything `buildFixAgentEnv` already does).
+import {
+  buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
+} from './codex-delivery-provider.mjs';
 
 /** The lane-pool `--purpose` this wrapper's acquire carries — the SAME string
  *  `we:skills-src/conveyor/fix-agent-ci-brief.md` step 1 already used, so a lane's purpose field keeps meaning
@@ -379,28 +389,112 @@ export function buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDi
 
 const CI_HEAL_AGENT_PROVIDER = {
   name: 'claude-restricted-ci-heal',
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item, reason } = {},
     {
       ensureSettingsFile = ensureCiHealHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       persistFailure = persistSpawnFailure,
       resolveReportsDir = resolveFixReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
-    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(), reason });
+    // #3383 mechanical-dispatcher fix — lane-aware (see `deliver-item-wrapper.mjs`'s equivalent fix for the
+    // full root-cause account): un-parameterized, `resolveReportsDir()` named the primary checkout regardless
+    // of `lanePath`.
+    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(lanePath), reason });
     try {
       // `cwd: lanePath` is load-bearing: `--restricted` confines the file tools to the process's own working
       // directory, so a wrong cwd sandboxes the agent into the wrong repo entirely (#3627 bug 7(a), live).
-      spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...env }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); `await` is the only "wait".
+      const { resourceUsage } = (await spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...env }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure('ci-heal-spawn-failures', sessionSlug, e, { resumeSessionId });
       throw e;
     }
   },
 };
+
+/**
+ * CI_HEAL_CODEX_PROVIDER — mechanical-dispatcher (epic #3383) Part 1: the `ci-heal` kind's own Codex
+ * implementation of the `DeliveryAgentProvider` port. Structurally identical to
+ * `fix-dispatch-wrapper.mjs#FIX_CODEX_PROVIDER` — same reused `codex-delivery-provider.mjs` primitives, same
+ * resume-by-thread-id sidecar keyed on `sessionSlug` (here `ci-heal-<PR>`, so it can never collide with a
+ * `fix-<PR>` sidecar on the same PR) — differing only in the env it builds (`buildCiHealAgentEnv`, which adds
+ * `CI_HEAL_REASON` on top of everything `buildFixAgentEnv` already carries) and its own failure-sidecar name.
+ */
+const CI_HEAL_CODEX_PROVIDER = {
+  name: 'codex',
+  async spawn(
+    { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item, reason } = {},
+    {
+      spawnAgent = defaultSpawnCodexAgent,
+      persistFailure = persistSpawnFailure,
+      resolveReportsDir = resolveFixReportsDir,
+      readThreadId = readCodexThreadId,
+      writeThreadId = writeCodexThreadId,
+      denyPaths = null,
+      recordCpu = recordChildResourceUsage,
+    } = {},
+  ) {
+    // #3383 mechanical-dispatcher fix — same lane-aware resolution as `CI_HEAL_AGENT_PROVIDER` above.
+    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(lanePath), reason });
+    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
+    const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
+    if (resumeSessionId && !resumeThreadId) {
+      throw new Error(
+        `ci-heal-dispatch-wrapper: CI_HEAL_CODEX_PROVIDER cannot resume session ${sessionSlug} — no Codex thread `
+        + 'id was recorded for it (the fresh spawn never reached `thread.started`, or its sidecar was removed). '
+        + 'Refusing to silently start a NEW session, which would lose the heal context the resume exists to carry.',
+      );
+    }
+    const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
+    let stdout;
+    try {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now; `await` is the only "wait".
+      const spawned = (await spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...env }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS })) || {};
+      stdout = spawned.stdout;
+      recordCpu(spawned.resourceUsage);
+    } catch (e) {
+      recordCpu(e && e.resourceUsage);
+      persistFailure('ci-heal-spawn-failures', sessionSlug, e, { resumeSessionId });
+      throw e;
+    }
+    // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
+    recordCodexTurnUsage(stdout);
+    if (!resumeThreadId) {
+      const threadId = parseCodexThreadId(stdout);
+      if (threadId) writeThreadId(sessionSlug, threadId);
+    }
+    void sessionId; // unused — Codex mints its own id (see `FIX_CODEX_PROVIDER`'s own docblock).
+  },
+};
+
+/** The `ci-heal` provider registry — same keys as `deliver-item-wrapper.mjs#DELIVERY_AGENT_PROVIDERS` /
+ *  `fix-dispatch-wrapper.mjs#FIX_AGENT_PROVIDERS`. */
+export const CI_HEAL_AGENT_PROVIDERS = Object.freeze({
+  'claude-restricted': CI_HEAL_AGENT_PROVIDER,
+  codex: CI_HEAL_CODEX_PROVIDER,
+});
+
+/**
+ * Name → `ci-heal` provider, refusing an unknown name by NAME — mirrors
+ * `deliver-item-wrapper.mjs#resolveDeliveryAgentProvider`/`fix-dispatch-wrapper.mjs#resolveFixAgentProvider`.
+ * @param {string} [name] - one of {@link DELIVERY_AGENT_PROVIDER_NAMES}.
+ * @returns {object}
+ */
+export function resolveCiHealAgentProvider(name = DEFAULT_DELIVERY_AGENT_PROVIDER_NAME) {
+  const provider = CI_HEAL_AGENT_PROVIDERS[String(name).trim()];
+  if (provider) return provider;
+  throw new Error(
+    `ci-heal-dispatch-wrapper: unknown delivery agent provider ${JSON.stringify(name)} — one of `
+    + `${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}`,
+  );
+}
 
 /**
  * Reads the static brief + spawns the agent through the provider, BLOCKING until it exits, then reads the
@@ -425,11 +519,14 @@ export async function runCiHealAgentToCompletion(
     // transform, and a redundant `//` collapses harmlessly on a real POSIX read.
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/ci-heal-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadFixReport,
+    resolveReportsDir = resolveFixReportsDir,
   } = {},
 ) {
   const prompt = readBrief();
-  provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item, reason }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item, reason }); // AWAITS.
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const report = readReport(sessionSlug, resolveReportsDir(lanePath));
   if (!report || report.status !== 'done') {
     throw new Error(`ci-heal-dispatch-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }
@@ -629,8 +726,16 @@ export async function dispatchCiHeal(
   let agentReport;
   try {
     // #3383 — THE EXPENSIVE SPAN, same reasoning as the fix wrapper's: the agent turn is this dispatch's
-    // dominant cost and was previously untimed. `spanAroundAsync` never alters the return value or the throw.
-    agentReport = await spanAroundAsync('agent.turn', { attributes: { pr: planned.pr, item: planned.item ?? null, reason: planned.reason ?? null } }, () =>
+    // dominant cost and was previously untimed. `spanAroundAsyncWithCpu` (per-process-attribution follow-on)
+    // never alters the return value or the throw, and merges a `process.cpuUsage()` delta into the closing
+    // attributes — see that function's own docblock in `telemetry-store.mjs` for exactly what `cpu*Ms` does and
+    // does not measure.
+    agentReport = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: {
+        pr: planned.pr, item: planned.item ?? null, reason: planned.reason ?? null,
+        lane: lanePath, dispatchKind: 'ci-heal', provider: provider.name,
+      },
+    }, () =>
       runCiHealAgentToCompletion(
         { pr: planned.pr, item: planned.item, reason: planned.reason, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
         { run: runFn },
@@ -657,7 +762,7 @@ export async function dispatchCiHeal(
   // REUSED UNMODIFIED from `fix-dispatch-wrapper.mjs` — it takes the provider and the slug and reads a fix
   // report, none of which is fix-specific. A red gate is a HARD STOP on this axis exactly as it is on the
   // other: `fix-agent-ci-brief.md` step 4's own rule is "do NOT re-push, report `ci-heal gate-red`".
-  const gate = runFixGateWithOneRetry(
+  const gate = await runFixGateWithOneRetry(
     { lanePath, pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, provider, claudeSessionId },
     { run: runFn },
   );
@@ -681,8 +786,9 @@ export async function dispatchCiHeal(
         { lane: lanePath, item: planned.pr, goal: `repair the failing required check on PR #${planned.pr}${planned.item ? ` (item #${planned.item})` : ''}` },
         // `repair` for the same reason `buildFixAgentEnv` stamps it (#3640): the converge EDITOR is another
         // restricted agent this wrapper spawns outside the heal agent's own turn, so it is a wrapper-owned
-        // agent, never a `ci-heal` LAUNCH.
-        { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND },
+        // agent, never a `ci-heal` LAUNCH. `provider` threaded through (mechanical-dispatcher follow-up to
+        // #3580) — see `fix-dispatch-wrapper.mjs`'s identical note; this reuses the same shared function.
+        { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND, provider },
       );
     } catch (e) {
       reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });

@@ -905,6 +905,16 @@ function runCli() {
       try { forge.ensureLabel(verdict.label, { color: meta.color, description: meta.description }); } catch { /* already exists — fine */ }
       try { forge.addLabel(prNum, verdict.label); }
       catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply review label "${verdict.label}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+      // mechanical-dispatcher — a PR that opens review:human also opens carrying review:awaiting-advisory: the
+      // operator's standing rule is that no review:human PR is ever reviewed cold, and that "the advisory panel
+      // hasn't posted yet" state has to be a visible label, not something inferred from a missing bot comment.
+      // review-pr.mjs's `advise` step mechanically clears it the moment the panel actually posts (#xlw02hw).
+      if (verdict.label === REVIEW_LABELS.human && shouldApplyReviewLabel(REVIEW_LABELS.awaitingAdvisory, currentLabels)) {
+        const awaitMeta = REVIEW_LABEL_META[REVIEW_LABELS.awaitingAdvisory];
+        try { forge.ensureLabel(REVIEW_LABELS.awaitingAdvisory, { color: awaitMeta.color, description: awaitMeta.description }); } catch { /* already exists — fine */ }
+        try { forge.addLabel(prNum, REVIEW_LABELS.awaitingAdvisory); }
+        catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply "${REVIEW_LABELS.awaitingAdvisory}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+      }
       // Stamp the WHY into the PR body (mirrors the drain's #2324 guarantee) so an operator sees it without
       // re-deriving the rubric — and, for #2635, so the roster-expansion re-alignment reason is trailed where
       // the jury ledger (#2641) will read it. Best-effort. #3044 — RECONCILE, not guard-then-append: a re-run

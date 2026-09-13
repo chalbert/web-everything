@@ -23,7 +23,8 @@ import {
 } from '../runner-lock.mjs';
 import { METRIC_NAMES, METRIC_UNITS } from '../../../scripts/operations/telemetry.mjs';
 import {
-  carryForward, shouldStop, tickSurface, tickMetrics, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
+  carryForward, shouldStop, tickSurface, tickMetrics, hostMetrics, readHostSample,
+  runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
   bookkeepingForDispatch, installShutdownHandlers, finalEventLine, SHUTDOWN_SIGNALS,
   recordLaunchPosture,
@@ -735,7 +736,7 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
 //        its own wiring silently regressing. ─────────────────────────────────────────────────────────────
 
 describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes, in order, every tick', () => {
-  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through', async () => {
+  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through (except lane-pool-health-watch.mjs, whose OWN --repo means a checkout path, not this GH slug — #3383 live incident)', async () => {
     const calls = [];
     const execFileSync = vi.fn((cmd, args) => {
       calls.push([cmd, ...args]);
@@ -762,7 +763,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/branch-drift.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=owner/repo',
-      'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=owner/repo',
+      'node /scripts/conveyor/lane-pool-health-watch.mjs',
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
@@ -898,5 +899,58 @@ describe('tickMetrics — the saturation signals the runner computes every tick 
       const m = tickMetrics(junk);
       expect(m.every((x) => Number.isFinite(x.value))).toBe(true);
     }
+  });
+});
+
+// #3383 follow-on — the HOST-RESOURCE half of the capacity-planning question this epic exists to eventually
+// answer: as concurrent dispatch capacity grows, does the HOST (not the queue/lane logic) become the actual
+// constraint. `hostMetrics` is pure over an already-read OS snapshot, exactly like `tickMetrics` is pure over
+// the surface — no real `os.*` call in this describe block.
+describe('hostMetrics — the host-resource samples recorded alongside every tick\'s dispatch metrics', () => {
+  it('reports the three load averages, the core count, and raw memory bytes', () => {
+    const m = hostMetrics({ loadavg: [1.5, 2.25, 3.0], freeBytes: 4_000_000_000, totalBytes: 16_000_000_000, cpuCount: 8 });
+    expect(m.find((x) => x.name === 'host.cpu.load1').value).toBe(1.5);
+    expect(m.find((x) => x.name === 'host.cpu.load5').value).toBe(2.25);
+    expect(m.find((x) => x.name === 'host.cpu.load15').value).toBe(3.0);
+    expect(m.find((x) => x.name === 'host.cpu.count').value).toBe(8);
+    expect(m.find((x) => x.name === 'host.mem.free_bytes').value).toBe(4_000_000_000);
+    expect(m.find((x) => x.name === 'host.mem.total_bytes').value).toBe(16_000_000_000);
+  });
+
+  it('every sample carries a name from the closed METRIC_NAMES vocabulary and a valid unit', () => {
+    const m = hostMetrics({ loadavg: [1, 1, 1], freeBytes: 1, totalBytes: 2, cpuCount: 4 });
+    for (const x of m) {
+      expect(METRIC_NAMES).toContain(x.name);
+      expect(METRIC_UNITS).toContain(x.unit);
+      expect(Number.isFinite(x.value)).toBe(true);
+    }
+    // Memory is raw BYTES, not a pre-computed ratio — recoverable to a ratio later, but a ratio alone could
+    // never recover the total.
+    expect(m.find((x) => x.name === 'host.mem.free_bytes').unit).toBe('bytes');
+    expect(m.find((x) => x.name === 'host.mem.total_bytes').unit).toBe('bytes');
+  });
+
+  it('is TOTAL on a bare or junk sample — an observability read must never take a tick down', () => {
+    for (const junk of [undefined, null, {}, { loadavg: 'nope', freeBytes: 'nope', cpuCount: null }]) {
+      expect(() => hostMetrics(junk)).not.toThrow();
+      const m = hostMetrics(junk);
+      expect(m.every((x) => Number.isFinite(x.value))).toBe(true);
+    }
+  });
+});
+
+describe('readHostSample — the one IO edge that touches node:os, kept to exactly that', () => {
+  it('reads a real, sane snapshot off the actual host', () => {
+    const s = readHostSample();
+    expect(Array.isArray(s.loadavg)).toBe(true);
+    expect(s.loadavg).toHaveLength(3);
+    expect(s.loadavg.every((n) => Number.isFinite(n) && n >= 0)).toBe(true);
+    expect(Number.isFinite(s.freeBytes)).toBe(true);
+    expect(Number.isFinite(s.totalBytes)).toBe(true);
+    expect(s.totalBytes).toBeGreaterThan(0);
+    expect(Number.isInteger(s.cpuCount)).toBe(true);
+    expect(s.cpuCount).toBeGreaterThan(0);
+    // hostMetrics must accept this real shape with no coercion surprises.
+    expect(() => hostMetrics(s)).not.toThrow();
   });
 });

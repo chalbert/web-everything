@@ -54,6 +54,7 @@ import {
   openScopePr,
   prepareScope,
   runPrepareGateWithOneRetry,
+  CLAUDE_RESTRICTED_PREPARE_PROVIDER,
 } from '../prepare-scope-wrapper.mjs';
 
 const ITEM = '3641';
@@ -244,6 +245,24 @@ describe('#3641 — the outcomes the wrapper decides by READING the report', () 
     await expect(prepareScope({ item: ITEM, lane: 2, sessionSlug: SESSION }, recordingProvider().provider, deps(run)))
       .rejects.toThrow(/exited with no done report/);
     expect(calls.some((c) => c.args.join(' ').includes('lane-pool.mjs release --lane=2'))).toBe(true);
+  });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test: `resolveReportsDir` must be called WITH the
+  // lane path this wrapper already has in hand (`lanePath`, never re-resolved), never bare — bare, it
+  // silently names the primary checkout regardless of which lane the agent actually ran in (invisible under
+  // Claude's soft, hook-based `--restricted` sandbox, but a hard `EPERM` under Codex's real OS-level jail).
+  it('CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn resolves the reports dir WITH the lane path — never bare', () => {
+    const resolveReportsDir = vi.fn(() => '/ops/delivery-reports');
+    CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn(
+      { sessionId: 'u', prompt: 'go', lanePath: '/tmp/prepare-lane-2', sessionSlug: SESSION, item: ITEM, itemSpecPath: SPEC },
+      {
+        ensureSettingsFile: () => '/ops/settings.json',
+        spawnAgent: () => {},
+        persistFailure: () => {},
+        resolveReportsDir,
+      },
+    );
+    expect(resolveReportsDir).toHaveBeenCalledWith('/tmp/prepare-lane-2');
   });
 });
 

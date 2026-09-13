@@ -7,12 +7,13 @@
  * covers for the shared `buildAgentArgv`/`defaultSpawnAgent` machinery this file reuses verbatim).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, dispatchReviewCli, fillReviewBrief,
   planReviewDispatch, reviewDispatchDisallowedToolsArgs, reviewSessionSlug, CODEX_JUDGE_PROVIDER_REFUSAL,
   REVIEW_BRIEF_PLACEHOLDERS, REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
+  runAutoFixRoute,
 } from '../review-dispatch.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
@@ -545,5 +546,62 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
       write: () => {},
     });
     expect(res.code).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// runAutoFixRoute — Part 3's IS_CLI-level trigger. Fires ONLY on the exact population Part 2 already dispatches
+// the advisory panel for (a mechanical, parked, human-required review), reads the SAME structured findings the
+// advisory comment was rendered from, and never touches any other outcome.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('runAutoFixRoute', () => {
+  const FINDINGS = [{ file: 'src/foo.mjs', summary: 'x' }];
+  function cliResult({ mode = 'mechanical', outcome = 'parked', humanRequired = true, pr = 7, repo = 'o/r' } = {}) {
+    return {
+      code: 0,
+      mode,
+      result: { pr, repo, classified: { outcome }, raw: { verdict: { humanRequired, findings: FINDINGS } } },
+    };
+  }
+
+  it('runs the auto-fix router for a mechanical, parked, human-required review', async () => {
+    const autoFixFn = vi.fn(async () => ({ tier: 'strict', results: [] }));
+    const out = await runAutoFixRoute(cliResult(), { autoFixFn });
+    expect(out.ran).toBe(true);
+    expect(autoFixFn).toHaveBeenCalledWith({ pr: 7, repo: 'o/r', findings: FINDINGS });
+  });
+
+  it('does NOT run for the --agent path (mode !== mechanical)', async () => {
+    const autoFixFn = vi.fn();
+    const out = await runAutoFixRoute(cliResult({ mode: 'agent' }), { autoFixFn });
+    expect(out.ran).toBe(false);
+    expect(autoFixFn).not.toHaveBeenCalled();
+  });
+
+  it('does NOT run for a bounced/auto-cleared/blocked-on-infra outcome', async () => {
+    for (const outcome of ['bounced', 'auto-cleared', 'blocked-on-infra']) {
+      const autoFixFn = vi.fn();
+      // eslint-disable-next-line no-await-in-loop
+      const out = await runAutoFixRoute(cliResult({ outcome }), { autoFixFn });
+      expect(out.ran, outcome).toBe(false);
+      expect(autoFixFn, outcome).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does NOT run for a parked review that is NOT human-required (an ordinary agent-addressed park)', async () => {
+    const autoFixFn = vi.fn();
+    const out = await runAutoFixRoute(cliResult({ humanRequired: false }), { autoFixFn });
+    expect(out.ran).toBe(false);
+    expect(autoFixFn).not.toHaveBeenCalled();
+  });
+
+  it('a thrown auto-fix router error is caught and reported, never rethrown — the review verdict already landed', async () => {
+    const autoFixFn = vi.fn(async () => { throw new Error('gh not found'); });
+    const writeErr = vi.fn();
+    const out = await runAutoFixRoute(cliResult(), { autoFixFn, writeErr });
+    expect(out.ran).toBe(true);
+    expect(out.error).toMatch(/gh not found/);
+    expect(writeErr).toHaveBeenCalledTimes(1);
+    expect(writeErr.mock.calls[0][0]).toMatch(/auto-fix route failed/);
   });
 });

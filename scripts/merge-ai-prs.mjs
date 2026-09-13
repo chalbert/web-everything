@@ -3996,6 +3996,12 @@ async function runCli() {
           if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
+          // mechanical-dispatcher — re-parking to review:human means the advisory panel has not seen THIS
+          // diff either; carry review:awaiting-advisory alongside it so "not yet advised" stays a label even on
+          // a re-park, not just a fresh park (review-pr.mjs's `advise` step clears it once it posts, #xlw02hw).
+          if (shouldApplyReviewLabel(REVIEW_LABELS.awaitingAdvisory, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.awaitingAdvisory], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
           // #2832 / #984 F2 — this park CREATES a hold (review:human) on a PR that, being in the
           // `--label ready-to-merge` candidate set, carries the go-ahead. Strip it in the same operation, through
           // the same seam the decideReviewGate park uses — this site `continue`s, so it never reached the strip.
@@ -4046,6 +4052,11 @@ async function runCli() {
         if (!DRY_RUN) {
           if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
+          // mechanical-dispatcher — same as the manifest-tamper park above: a re-park has not been re-advised
+          // either, so carry review:awaiting-advisory alongside review:human here too (#xlw02hw clears it).
+          if (shouldApplyReviewLabel(REVIEW_LABELS.awaitingAdvisory, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.awaitingAdvisory], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // #2832 / #984 F2 — same as the manifest-tamper park above: this site CREATES a review:human hold on
           // a go-ahead-carrying candidate and `continue`s, so it must strip through the shared seam here.
@@ -4218,6 +4229,11 @@ async function runCli() {
             const ledgered = recordDrainVerdict({ repo: v.repo || localSlug, pr: v.num, applyLabel: gate.applyLabel, reason: v.reason, headSha: v.headSha ?? null });
             if (!ledgered.ok && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} verdict-ledger append (#3215, drain hold, non-fatal) — ${ledgered.errors.join('; ')}\n`);
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
+          // mechanical-dispatcher — the companion "not yet advised" label, only for a review:human park (never
+          // for a plain review:pending one). Same shared guard, same best-effort posture as the add above.
+          if (gate.applyLabel === REVIEW_LABELS.human && shouldApplyReviewLabel(REVIEW_LABELS.awaitingAdvisory, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.awaitingAdvisory], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // #xmnl36p — A CLEARANCE REVOCATION IS NEVER SILENT, and this is the ONE path that guarantees it.
           // It sits AHEAD of `shouldPostParkReasonComment` (which returns false for every human park, routing

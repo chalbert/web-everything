@@ -61,7 +61,8 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { dispatchFix, planFixDispatchWrapper } from './fix-dispatch-wrapper.mjs';
+import { dispatchFix, planFixDispatchWrapper, resolveFixAgentProvider } from './fix-dispatch-wrapper.mjs';
+import { DEFAULT_DELIVERY_AGENT_PROVIDER_NAME } from './deliver-item-wrapper.mjs';
 import { REPO_ROOT } from './detached-dispatch.mjs';
 
 /** Refused rather than defaulted: a repair with no PR has nothing to resolve, and no session slug has nothing
@@ -72,7 +73,7 @@ const REQUIRED_FLAGS = Object.freeze(['pr', 'session']);
 /**
  * PURE. `--k=v` argv → the shape {@link runFixCli} works with, refusing a missing required flag by NAME.
  * @param {string[]} argv
- * @returns {{pr: string, item: (string|null), sessionSlug: string, repo: (string|null)}}
+ * @returns {{pr: string, item: (string|null), sessionSlug: string, repo: (string|null), provider: string}}
  */
 export function parseFixRunArgv(argv = []) {
   const flags = {};
@@ -96,7 +97,30 @@ export function parseFixRunArgv(argv = []) {
     item: item || null,
     sessionSlug: String(flags.session).trim(),
     repo: repo || null,
+    // #3383 (mechanical-dispatcher) — parsed, NOT validated, here: same split
+    // `deliver-item-run.mjs#parseDeliverItemRunArgv` keeps for `build`'s own `--provider=`. This function stays
+    // a PURE argv→shape mapper; `selectFixAgentProvider` below owns the name check and the env fallback.
+    provider: String(flags.provider ?? '').trim(),
   };
+}
+
+/**
+ * #3383 (mechanical-dispatcher, Part 1) — WHICH CLI RUNS THE FIX AGENT. Deliberately the SAME
+ * flag-wins-env-fallback shape `deliver-item-run.mjs#selectDeliveryAgentProvider` already uses for `build`, so
+ * an operator who has met one selection mechanism has met both: an explicit `--provider=` beats the
+ * `DELIVERY_AGENT_PROVIDER` environment variable, the environment beats the default, and the default is
+ * unchanged (`claude-restricted`).
+ *
+ * Resolved BEFORE any lane is acquired or PR resolved (see {@link runFixCli}) — same reasoning as the build
+ * kind's own resolver: a typo here must exit before real work starts, not after.
+ *
+ * @param {string} flagValue - the parsed `--provider=` value, `''` when absent.
+ * @param {Record<string, (string|undefined)>} [env] - the environment to read `DELIVERY_AGENT_PROVIDER` from.
+ * @returns {{name: string, provider: object}}
+ */
+export function selectFixAgentProvider(flagValue, env = process.env) {
+  const name = String(flagValue || env.DELIVERY_AGENT_PROVIDER || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
+  return { name, provider: resolveFixAgentProvider(name) };
 }
 
 /**
@@ -161,7 +185,8 @@ export function assertSessionSlugAgrees(dispatchedSlug, wrapperSlug) {
  * mechanism worked.
  *
  * @param {string[]} argv
- * @param {{dispatch?: Function, repoSlug?: Function, write?: Function, writeErr?: Function}} [io]
+ * @param {{dispatch?: Function, repoSlug?: Function, write?: Function, writeErr?: Function,
+ *   selectProvider?: Function, env?: object}} [io]
  * @returns {Promise<{code: number, result: object|null}>}
  */
 export async function runFixCli(argv = [], {
@@ -169,8 +194,11 @@ export async function runFixCli(argv = [], {
   repoSlug = resolveRepoSlug,
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
+  selectProvider = selectFixAgentProvider,
+  env = process.env,
 } = {}) {
   let launch;
+  let selected;
   try {
     launch = parseFixRunArgv(argv);
     const repo = launch.repo ?? repoSlug();
@@ -179,6 +207,9 @@ export async function runFixCli(argv = [], {
       launch.sessionSlug,
       planFixDispatchWrapper({ pr: launch.pr, repo, item: launch.item }).sessionSlug,
     );
+    // #3383 — resolved BEFORE the repair starts, so a bad `--provider=` exits here rather than after a lane and
+    // a claim have already been taken (see `selectFixAgentProvider`'s own docblock).
+    selected = selectProvider(launch.provider, env);
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };
@@ -186,10 +217,10 @@ export async function runFixCli(argv = [], {
   write(
     `fix-run: starting repair of PR #${launch.pr}`
     + `${launch.item ? ` (item #${launch.item})` : ''} in ${launch.repo} `
-    + `(session ${launch.sessionSlug}) — pid ${process.pid}\n`,
+    + `(session ${launch.sessionSlug}, provider ${selected.name}) — pid ${process.pid}\n`,
   );
   try {
-    const result = await dispatch({ pr: launch.pr, repo: launch.repo, item: launch.item });
+    const result = await dispatch({ pr: launch.pr, repo: launch.repo, item: launch.item }, selected.provider);
     write(`fix-run: PR #${launch.pr} finished — ${result?.result ?? '(no result reported)'}\n`);
     return { code: 0, result };
   } catch (e) {

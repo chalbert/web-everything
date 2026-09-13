@@ -1,6 +1,6 @@
 /**
  * codex-judge-spawn.mjs — the SECOND `JudgeProvider` implementation (#xqa9ttq, under #3369/#3370), Codex CLI
- * as a tool-free panelist.
+ * as a READ-ONLY-SHELL panelist (NOT tool-free — see below).
  *
  * EVERY CLAIM BELOW WAS PROVEN LIVE, NOT DERIVED FROM DOCS — `#3371`'s ten probes against `codex-cli 0.153.4`
  * on a real ChatGPT subscription are the evidentiary record this module translates into code. This header
@@ -12,11 +12,16 @@
  * `we:scripts/operations/cli-adapter.mjs`. Nothing about the port's shape changed to make this true (`#3371`'s
  * verdict: "the port's shape survives the probe intact").
  *
- * TOOL-FREE ONLY. There is no `allowedTools`/lane-cwd parameter here, and there never should be one added
- * casually: probe 9 found NO context-strip flag for a tool-bearing Codex juror in a lane cwd (`-C` always
- * loads `we:AGENTS.md`), and per `#3581`'s ratified sequencing this provider is seated as a tool-free
- * panelist first. `assertNoCodexTools` below REFUSES a request carrying `allowedTools` rather than silently
- * ignoring it.
+ * NO TOOL ALLOW-LIST — BUT A REAL READ-ONLY SHELL, NOT ZERO TOOLS. There is no `allowedTools`/lane-cwd
+ * parameter here, and there never should be one added casually: probe 9 found NO context-strip flag for a
+ * tool-bearing Codex juror in a lane cwd (`-C` always loads `we:AGENTS.md`). But `-s read-only` (see
+ * `buildCodexJudgeArgv`) is a REAL shell, confirmed live: `git --version`/`git status` exit 0; only a WRITE
+ * (`mktemp -d`, writing a file) gets `Operation not permitted`. So this provider is NOT "tool-free" — it can
+ * read and run non-mutating commands, it simply cannot write, create temp dirs/files, or mutate anything, and
+ * that ceiling is fixed by the sandbox flag rather than by any configurable allow-list (there is no allow-list
+ * mechanism here to configure). Per `#3581`'s ratified sequencing this provider is seated first with that
+ * read-only posture. `assertNoCodexToolAllowlist` below REFUSES a request carrying `allowedTools` — there is
+ * nothing for such a list to configure — rather than silently ignoring it.
  *
  * THE FOUR THINGS THAT DO NOT TRANSLATE FROM `judge-spawn.mjs`, EACH RECORDED WHERE IT DIFFERS:
  *
@@ -242,19 +247,23 @@ export class CodexInvalidSchemaError extends Error {
 }
 
 /**
- * Refuses a `JudgeProviderRequest` carrying `allowedTools` — this provider is TOOL-FREE ONLY (see file
- * header). Separately exported so it is provable on its own, the same reason `assertNoForbiddenArgv` is
- * exported from `judge-spawn.mjs`.
+ * Refuses a `JudgeProviderRequest` carrying `allowedTools` — NOT because this provider is tool-free (it is
+ * NOT: `-s read-only` gives it a real, if read-only, shell — see the file header), but because there is no
+ * allow-list mechanism here for such a list to configure: the sandbox flag fixes the ceiling (read, never
+ * write) for every request alike. Separately exported so it is provable on its own, the same reason
+ * `assertNoForbiddenArgv` is exported from `judge-spawn.mjs`.
  * @param {string[]|null|undefined} allowedTools
  */
-export function assertNoCodexTools(allowedTools) {
+export function assertNoCodexToolAllowlist(allowedTools) {
   if (allowedTools === null || allowedTools === undefined) return;
   if (Array.isArray(allowedTools) && allowedTools.length === 0) return;
   throw new Error(
-    'codex-judge-spawn: refusing a TOOL-BEARING request — this provider is seated as a TOOL-FREE panelist '
-    + 'only (#3581\'s ratified sequencing). Probe 9 found no context-strip flag for a tool-bearing Codex '
-    + 'juror in a lane cwd (`-C` always loads `we:AGENTS.md`), so a tool-bearing Codex juror is out of scope '
-    + 'here, not merely unimplemented. Omit `allowedTools`, or use the Claude provider for a tool-bearing role.',
+    'codex-judge-spawn: refusing a request with an `allowedTools` list — this provider has no configurable '
+    + 'tool allow-list to apply it to. Its capability is FIXED by its sandbox (`-s read-only`: a real but '
+    + 'read-only shell — it can read files and run non-mutating commands like `git status`, but cannot write, '
+    + 'create temp dirs/files, or mutate anything), not by an allow-list, and per `#3581`\'s ratified sequencing '
+    + 'there is no tool-bearing mode to opt into here. Omit `allowedTools`, or use the Claude provider for a '
+    + 'tool-bearing, allow-listed role.',
   );
 }
 
@@ -266,8 +275,9 @@ export function assertNoCodexTools(allowedTools) {
  * @param {string} opts.schemaFile - path a caller has ALREADY written the (transformed) JSON Schema to.
  * @param {string} opts.outputLastMessageFile - path Codex should write its final answer to (probe 7's clean
  *   parse seam).
- * @param {string} opts.cwd - a scratch working directory. NOT a lane — this provider is tool-free, so `-C`
- *   only decides how much ambient repo doctrine gets loaded (probe 9), never what the juror can write.
+ * @param {string} opts.cwd - a scratch working directory. NOT a lane — this provider's shell is read-only
+ *   regardless of cwd (it cannot write anywhere), so `-C` only decides how much ambient repo doctrine gets
+ *   loaded (probe 9), never what the juror can write.
  * @param {string} [opts.model] - Codex's `-m`. #3635: defaults to the ratified `CODEX_MODEL` pin and is
  *   ALWAYS emitted — there is no code path here that omits `-m`. A caller must name a model to get a
  *   different one; it can no longer get an unrecorded one by saying nothing.
@@ -460,7 +470,7 @@ export function codexLoadedContextTokens(usage = {}) {
 }
 
 /**
- * THE ONE FUNCTION A CODEX-BACKED `judge` STEP CALLS. Spawns a tool-free Codex juror and returns its
+ * THE ONE FUNCTION A CODEX-BACKED `judge` STEP CALLS. Spawns a read-only-shell Codex juror and returns its
  * validated answer, in the same `JudgeProviderOutcome` shape `judgeSpawn` returns.
  *
  * DOES NOT APPLY `requireAllProperties` ITSELF — the caller (`we:scripts/operations/cli-adapter.mjs`'s
@@ -478,10 +488,10 @@ export function codexLoadedContextTokens(usage = {}) {
  *   (`#3371`'s verdict — "does not exist and cannot be built"). Kept as an accepted (unused) option rather
  *   than refused, so a caller forwarding a whole `JudgeProviderRequest` (as `createDefaultJudge` does) does
  *   not have to special-case Codex just to omit a field every other provider request already carries.
- * @param {string[]|null} [opts.allowedTools] - must be absent/empty; see `assertNoCodexTools`.
+ * @param {string[]|null} [opts.allowedTools] - must be absent/empty; see `assertNoCodexToolAllowlist`.
  * @param {string|null} [opts.cwd] - a scratch directory. Defaults to a fresh `mkdtemp` — NEVER a lane, and
- *   never the caller's own cwd, since a tool-free juror has nothing to protect a shared tree from but still
- *   has no reason to load one's doctrine either (probe 9).
+ *   never the caller's own cwd, since a read-only-shell juror cannot write to a shared tree regardless but
+ *   still has no reason to load one's doctrine either (probe 9).
  * @param {Record<string,string>} [opts.env]
  * @param {string} [opts.cli]
  * @param {number} [opts.timeoutMs] - PARENT-IMPOSED wall; Codex has no CLI timeout flag (`#3371` probe 6).
@@ -520,7 +530,7 @@ export async function codexJudgeSpawn({
   if (!shape || typeof shape !== 'object' || Array.isArray(shape)) {
     throw new TypeError('codex-judge-spawn: `shape` must be a JSON Schema object');
   }
-  assertNoCodexTools(allowedTools);
+  assertNoCodexToolAllowlist(allowedTools);
 
   const workDir = mkTempDir(join(tmpdir(), 'codex-judge-'));
   const spawnCwd = cwd || workDir;

@@ -109,13 +109,25 @@ import {
   REPO_ROOT, RESTRICTED_PROVIDER_TOOLS, run, acquireLane, releaseAllPools, buildRestrictedProviderArgv,
   createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
-import { runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS } from './deliver-item-wrapper.mjs';
+import {
+  runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS, DELIVERY_AGENT_PROVIDER_NAMES,
+  DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
+} from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
-import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+// mechanical-dispatcher (epic #3383, Part 1) — the REAL Codex spawn primitives, REUSED verbatim from the
+// `build` kind's own provider (`deliver-item-wrapper.mjs#CODEX_PROVIDER`) rather than re-derived: every one of
+// these is already live-verified against `codex exec` (see that file's own header for the evidence trail), and
+// none of it is delivery-specific — only the ENV a spawned agent gets and the reports dir it reads back from
+// are, which `FIX_CODEX_PROVIDER` below supplies via `buildFixAgentEnv`/`resolveFixReportsDir`, unchanged.
+import {
+  buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
+} from './codex-delivery-provider.mjs';
 
 /**
  * ABSOLUTE path to THIS CHECKOUT's own `fix-report-cli.mjs` (bug #xu2pp2m/1, confirmed live on real PR #2027,
@@ -213,15 +225,24 @@ export function findLatestChangesRequestedComment(comments) {
 
 /**
  * REAL — `gh pr view <pr> --json headRefName,comments --repo <repo>`. Returns the PR's own lane ref (for
- * `acquireLane`'s `base`) and the latest changes-requested finding's body text, or `null` when the PR carries
- * no such comment (a PR reached this wrapper without ever being bounced — nothing for a fixer to do).
- * @param {{pr: number, repo: string}} o
+ * `acquireLane`'s `base`) and the finding text a fixer should act on, or `null` findingBody when there is
+ * nothing to repair.
+ *
+ * `findingOverride` (#Part-3 autofix — `we:scripts/conveyor/autofix-review-findings.mjs`) SKIPS the
+ * changes-requested comment scan and uses the supplied text verbatim instead. This is what lets a caller with
+ * ONE ALREADY-CLASSIFIED advisory-panel finding (never a `review:changes` bounce — a `review:human` PR's
+ * advisory note is posted before any human ceremony and sets no label at all, so it never carries the
+ * `CHANGES_REQUESTED_MARKERS` shape {@link findLatestChangesRequestedComment} scans for) hand this wrapper a
+ * narrowly-scoped brief directly, while still fetching the real `headRefName` a lane needs to reconstitute the
+ * PR's own branch. `headRefName` is ALWAYS read for real — only the finding-text source branches.
+ * @param {{pr: number, repo: string, findingOverride?: (string|null)}} o
  * @param {{run?: Function}} [io]
  * @returns {{headRefName: string, findingBody: (string|null)}}
  */
-export function resolveFixTarget({ pr, repo }, { run: runFn = run } = {}) {
+export function resolveFixTarget({ pr, repo, findingOverride = null } = {}, { run: runFn = run } = {}) {
   const out = runFn('gh', ['pr', 'view', String(pr), '--json', 'headRefName,comments', '--repo', repo]);
   const parsed = JSON.parse(out);
+  if (findingOverride) return { headRefName: parsed.headRefName, findingBody: findingOverride };
   const comment = findLatestChangesRequestedComment(parsed.comments);
   return { headRefName: parsed.headRefName, findingBody: comment ? comment.body : null };
 }
@@ -304,27 +325,129 @@ export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }
 
 const FIX_AGENT_PROVIDER = {
   name: 'claude-restricted-fix',
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
     {
       ensureSettingsFile = ensureFixHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       persistFailure = persistSpawnFailure,
       resolveReportsDir = resolveFixReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher fix — lane-aware: `resolveReportsDir()` called with no argument named the
+    // primary checkout regardless of `lanePath` (see `deliver-item-wrapper.mjs`'s own comment on the same fix
+    // for the full root-cause account — same bug, same shape, this wrapper's own copy of it).
+    const reportsDir = resolveReportsDir(lanePath);
     const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
     try {
-      spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); see
+      // `dispatch-lane-io.mjs#spawnAgentToCompletion`'s own header for the preserved contract. `await` is the
+      // only "wait", same as the sync call was. `resourceUsage` is threaded to the wrapping `agent.turn` span
+      // (`spanAroundAsyncWithCpu`, in `dispatchFix`) via `recordChildResourceUsage` — honestly `null` on real
+      // Node today (no `ChildProcess#resourceUsage()` exists; see `spawn-to-completion.mjs`'s own header),
+      // kept only for forward compatibility.
+      const { resourceUsage } = (await spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure('fix-spawn-failures', sessionSlug, e, { resumeSessionId });
       throw e;
     }
   },
 };
+
+/**
+ * FIX_CODEX_PROVIDER — mechanical-dispatcher (epic #3383) Part 1: the `fix` kind's OWN Codex implementation of
+ * the `DeliveryAgentProvider` port, structurally identical to `deliver-item-wrapper.mjs#CODEX_PROVIDER` (same
+ * resolve-lane-path-already-done → build-argv → BLOCK → capture-failure order, same thread-id sidecar keyed by
+ * `sessionSlug`) but supplying FIX's own env (`buildFixAgentEnv`, not `buildDeliveryAgentEnv`) and FIX's own
+ * reports dir/failure-sidecar name, exactly as `FIX_AGENT_PROVIDER` above parallels `CLAUDE_RESTRICTED_PROVIDER`
+ * for the Claude half. Every CLI-specific detail — which flags, why no `-s`, what replaces the Claude-only
+ * hooks — is NOT restated here; it lives once, in `codex-delivery-provider.mjs`'s own header, and every
+ * function this spawns is imported from there unchanged.
+ *
+ * `lanePath` arrives ALREADY RESOLVED (unlike the `build` kind's `CODEX_PROVIDER`, which takes a bare lane
+ * NUMBER and resolves it itself) — `dispatchFix`/`runFixAgentToCompletion` already hand every provider a real
+ * path, so this one does not call `resolveLanePath` at all.
+ */
+const FIX_CODEX_PROVIDER = {
+  name: 'codex',
+  async spawn(
+    { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
+    {
+      spawnAgent = defaultSpawnCodexAgent,
+      persistFailure = persistSpawnFailure,
+      resolveReportsDir = resolveFixReportsDir,
+      readThreadId = readCodexThreadId,
+      writeThreadId = writeCodexThreadId,
+      denyPaths = null,
+      recordCpu = recordChildResourceUsage,
+    } = {},
+  ) {
+    // #3383 mechanical-dispatcher fix — same lane-aware resolution as `FIX_AGENT_PROVIDER` above.
+    const reportsDir = resolveReportsDir(lanePath);
+    const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
+    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
+    // Same resume contract as `CODEX_PROVIDER`: Codex mints its own thread id, so `resumeSessionId` (the
+    // CLAUDE-side UUID every provider is handed) is only the SIGNAL that this is a resume; the real id comes
+    // from this provider's own sidecar map, keyed by `sessionSlug` (here, `fix-<PR>`).
+    const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
+    if (resumeSessionId && !resumeThreadId) {
+      throw new Error(
+        `fix-dispatch-wrapper: FIX_CODEX_PROVIDER cannot resume session ${sessionSlug} — no Codex thread id was `
+        + 'recorded for it (the fresh spawn never reached `thread.started`, or its sidecar was removed). '
+        + 'Refusing to silently start a NEW session, which would lose the repair context the resume exists to carry.',
+      );
+    }
+    const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
+    let stdout;
+    try {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now; see
+      // `codex-delivery-provider.mjs#defaultSpawnCodexAgent`'s own header. `await` is the only "wait".
+      const spawned = (await spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS })) || {};
+      stdout = spawned.stdout;
+      recordCpu(spawned.resourceUsage);
+    } catch (e) {
+      recordCpu(e && e.resourceUsage);
+      persistFailure('fix-spawn-failures', sessionSlug, e, { resumeSessionId });
+      throw e;
+    }
+    // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
+    recordCodexTurnUsage(stdout);
+    if (!resumeThreadId) {
+      const threadId = parseCodexThreadId(stdout);
+      if (threadId) writeThreadId(sessionSlug, threadId);
+    }
+    void sessionId; // unused — Codex mints its own id (see above).
+  },
+};
+
+/** The `fix` provider registry — same keys as `deliver-item-wrapper.mjs#DELIVERY_AGENT_PROVIDERS`
+ *  (`DELIVERY_AGENT_PROVIDER_NAMES`), so an operator (or a `deliveryAgent:` item marker) who has learned the
+ *  `build` kind's vocabulary needs no second one for `fix`. */
+export const FIX_AGENT_PROVIDERS = Object.freeze({
+  'claude-restricted': FIX_AGENT_PROVIDER,
+  codex: FIX_CODEX_PROVIDER,
+});
+
+/**
+ * Name → `fix` provider, refusing an unknown name by NAME — mirrors
+ * `deliver-item-wrapper.mjs#resolveDeliveryAgentProvider` down to the error wording, because an operator who
+ * has met one selection seam should not have to learn a second shape for this one.
+ * @param {string} [name] - one of {@link DELIVERY_AGENT_PROVIDER_NAMES}.
+ * @returns {object}
+ */
+export function resolveFixAgentProvider(name = DEFAULT_DELIVERY_AGENT_PROVIDER_NAME) {
+  const provider = FIX_AGENT_PROVIDERS[String(name).trim()];
+  if (provider) return provider;
+  throw new Error(
+    `fix-dispatch-wrapper: unknown delivery agent provider ${JSON.stringify(name)} — one of `
+    + `${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}`,
+  );
+}
 
 /**
  * Reads the static brief template + spawns the agent through the provider, BLOCKING until it exits — no
@@ -343,11 +466,14 @@ export async function runFixAgentToCompletion(
     // own documented note on this), and a redundant `//` collapses harmlessly on a real POSIX read either way.
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/fix-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadFixReport,
+    resolveReportsDir = resolveFixReportsDir,
   } = {},
 ) {
   const prompt = readBrief();
-  provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item }); // AWAITS.
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const report = readReport(sessionSlug, resolveReportsDir(lanePath));
   if (!report || report.status !== 'done') {
     throw new Error(`fix-dispatch-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }
@@ -361,7 +487,7 @@ export async function runFixAgentToCompletion(
 //    analogue of that function's own `retryReport.outcome === 'blocked'` check).
 // ================================================================================================
 
-function resumeFixAgentWithGateFailure({
+async function resumeFixAgentWithGateFailure({
   sessionSlug, lanePath, pr, item, failureOutput, gateOutcome = 'fail', provider = FIX_AGENT_PROVIDER, claudeSessionId,
 }) {
   const prompt = gateOutcome === 'unrun'
@@ -372,21 +498,24 @@ function resumeFixAgentWithGateFailure({
       + `report with \`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
     : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
       + `\`done\` report exactly as before.`;
-  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lanePath, sessionSlug, pr, item }); // BLOCKS.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lanePath, sessionSlug, pr, item }); // AWAITS.
 }
 
 /** @returns {{status: ('green'|'red'|'gate-blocked'), lanePath: string, reason?: (string|null)}} */
-export function runFixGateWithOneRetry(
+export async function runFixGateWithOneRetry(
   { lanePath, pr, item, sessionSlug, provider = FIX_AGENT_PROVIDER, claudeSessionId },
-  { run: runFn = run, readReport = tryReadFixReport } = {},
+  {
+    run: runFn = run, readReport = tryReadFixReport, resolveReportsDir = resolveFixReportsDir,
+  } = {},
 ) {
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
 
-  resumeFixAgentWithGateFailure({
+  await resumeFixAgentWithGateFailure({
     sessionSlug, lanePath, pr, item, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
   });
-  const retryReport = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — same lane-aware read-back as `runFixAgentToCompletion` above.
+  const retryReport = readReport(sessionSlug, resolveReportsDir(lanePath));
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
 
@@ -484,7 +613,13 @@ function describeError(e) {
  * reconstituted at that ref, spawn the minimal fix agent exactly once (plus, rarely, one gate-failure resume),
  * drive ONE converge pass on the repair, then re-push + re-arm (or stand down), release, return.
  *
- * @param {{pr: number|string, repo: string, item?: (number|string|null)}} o
+ * `findingOverride` (#Part-3 autofix) supplies the finding text directly instead of scanning the PR's
+ * changes-requested comments — see {@link resolveFixTarget}'s own docblock. `rearmReview`'s label swap is a
+ * safe no-op on a PR that never carried `review:changes` in the first place (`decideRearm`'s own INVARIANT:
+ * only a `review:changes` PR is re-armed) — exactly the case a `review:human` advisory-driven auto-fix lands
+ * on, so this function needs no separate hand-back branch for that caller.
+ *
+ * @param {{pr: number|string, repo: string, item?: (number|string|null), findingOverride?: (string|null)}} o
  * @param {DeliveryAgentProvider} [provider]
  * `ensureSettingsFile` is injectable for the same reason every other impure call in this file is (see the
  * header's own IMPURE note): it is an `mkdirSync`+`writeFileSync` into `${REPO_ROOT}.operations`, and it is the
@@ -496,7 +631,7 @@ function describeError(e) {
  * @param {{newSessionId?: () => string, run?: Function, waitMs?: number, ensureSettingsFile?: Function}} [deps]
  */
 export async function dispatchFix(
-  { pr, repo, item } = {},
+  { pr, repo, item, findingOverride = null } = {},
   provider = FIX_AGENT_PROVIDER,
   {
     newSessionId = randomUUID, run: runFn = run, waitMs = FIX_LOOP_ACQUIRE_WAIT_MS,
@@ -537,7 +672,7 @@ export async function dispatchFix(
 
   let target;
   try {
-    target = resolveFixTarget(planned, { run: runFn });
+    target = resolveFixTarget({ pr: planned.pr, repo: planned.repo, findingOverride }, { run: runFn });
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });
     throw e;
@@ -581,9 +716,14 @@ export async function dispatchFix(
   try {
     // #3383 — THE EXPENSIVE SPAN. A fixer agent turn shares the delivery agent's 60-minute ceiling
     // (`FIX_AGENT_SPAWN_TIMEOUT_MS === DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and, until now, was timed by nothing.
-    // `spanAroundAsync` closes it `ok` on return and `error` on throw and rethrows the original untouched, so
-    // the `catch` below — which owns the real report/release contract — runs exactly as it did before.
-    agentReport = await spanAroundAsync('agent.turn', { attributes: { pr: planned.pr, item: planned.item ?? null } }, () =>
+    // `spanAroundAsyncWithCpu` (per-process-attribution follow-on) closes it `ok` on return and `error` on
+    // throw, rethrows the original untouched, and merges a `process.cpuUsage()` delta into the closing
+    // attributes — see that function's own docblock in `telemetry-store.mjs` for exactly what `cpu*Ms` does and
+    // does not measure. The `catch` below — which owns the real report/release contract — runs exactly as it
+    // did before.
+    agentReport = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: { pr: planned.pr, item: planned.item ?? null, lane: lanePath, dispatchKind: 'fix', provider: provider.name },
+    }, () =>
       runFixAgentToCompletion(
         { pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
         { run: runFn },
@@ -609,7 +749,7 @@ export async function dispatchFix(
     return { ...planned, lanePath, result: `stood-down (${agentReport.outcome})` };
   }
 
-  const gate = runFixGateWithOneRetry(
+  const gate = await runFixGateWithOneRetry(
     { lanePath, pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, provider, claudeSessionId },
     { run: runFn },
   );
@@ -632,8 +772,11 @@ export async function dispatchFix(
       // `repair` for the same reason `buildFixAgentEnv` stamps it (#3640): the converge EDITOR is another
       // restricted agent this wrapper spawns outside the fixer's own turn, so it is a wrapper-owned agent, not
       // a `fix` LAUNCH. Passing the launch kind here would put the editor under a guard contract written for
-      // an agent that runs its own lifecycle.
-      { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND },
+      // an agent that runs its own lifecycle. `provider` threaded through (mechanical-dispatcher follow-up to
+      // #3580) — was resolved above for `runFixGateWithOneRetry` and silently never reached the converge round;
+      // see `deliver-item-wrapper.mjs#runConvergeEdit`'s docblock for why this is visibility only, not a real
+      // Codex converge editor.
+      { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND, provider },
     );
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import {
   DISPATCH_KINDS, DURABLE_SPAN_NAMES, ERROR_OUTCOMES, MAX_ATTRIBUTE_KEYS, MAX_LINE_BYTES, MAX_VALUE_LENGTH,
-  METRIC_NAMES, OK_OUTCOMES, SPAN_NAMES, SPAN_STATUS, TELEMETRY_SCHEMA_VERSION,
+  METRIC_NAMES, METRIC_UNITS, OK_OUTCOMES, SPAN_NAMES, SPAN_STATUS, TELEMETRY_SCHEMA_VERSION,
   classifyOutcomeStatus, deriveTraceId, durationMs, goldenSignals, groupByTrace, newMetric, newSpanEnd,
   newSpanStart, normItemKey, normalizeAttributes, parseTelemetryLine, parseTelemetryLines, percentile,
   serializeTelemetryEvent, truncateValue, validateTelemetryEvent,
@@ -25,7 +25,7 @@ import {
   setActiveRecorder, spanAround, spanAroundAsync, telemetryDir, telemetryEnabled,
 } from '../telemetry-store.mjs';
 import {
-  daysInWindow, eventTime, fmtMs, renderReport, renderTrace, renderTraces, runTelemetryCli, withinWindow,
+  daysInWindow, eventTime, fmtBytes, fmtMs, renderReport, renderTrace, renderTraces, runTelemetryCli, withinWindow,
 } from '../telemetry-cli.mjs';
 
 /** A deterministic clock: each read advances by `stepMs`, so a span's duration is exactly predictable. */
@@ -870,6 +870,91 @@ describe('the read CLI', () => {
     expect(fmtMs(null)).toBe('—');
   });
 
+  // #3383 follow-on — `host.mem.*` renders human-sized rather than as a raw byte count that would dwarf every
+  // other line in the report; the JSON path still carries the raw integer untouched.
+  it('fmtBytes scales from bytes to terabytes', () => {
+    expect(fmtBytes(512)).toBe('512B');
+    expect(fmtBytes(4 * 1024 * 1024)).toBe('4.0MB');
+    expect(fmtBytes(1.2 * 1024 * 1024 * 1024)).toBe('1.2GB');
+    expect(fmtBytes(null)).toBe('—');
+  });
+
+  it('report breaks host samples into their OWN section, formatted human-sized, not raw byte counts', () => {
+    const { store, now } = loaded();
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.cpu.load1', kind: 'runner', value: 2.5, unit: 'count',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+    })}\n`, '2026-09-12');
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.cpu.count', kind: 'runner', value: 8, unit: 'count',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+    })}\n`, '2026-09-12');
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.mem.free_bytes', kind: 'runner', value: 2 * 1024 * 1024 * 1024,
+      unit: 'bytes', timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+    })}\n`, '2026-09-12');
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('HOST — is the machine itself the constraint?');
+    expect(text).toContain('host.cpu.load1');
+    expect(text).toContain('of 8 cores');
+    expect(text).toContain('host.mem.free_bytes');
+    expect(text).toContain('2.0GB');
+    // The generic SATURATION section must NOT also print the host gauges (no double-reporting).
+    const saturationBlock = text.slice(text.indexOf('SATURATION'), text.indexOf('HOST —'));
+    expect(saturationBlock).not.toContain('host.cpu.load1');
+  });
+
+  it('report says so plainly when no host samples landed in the window', () => {
+    let text = '';
+    runTelemetryCli(['report'], { store: createMemoryTelemetryStore(), out: (s) => { text += s; } });
+    expect(text).toContain('no host samples recorded in this window');
+  });
+
+  // #3383 follow-on — per-process attribution: the six `host.process.*` categories get their OWN table,
+  // separate from the whole-machine HOST section above (no double-reporting either way).
+  it('report breaks per-process samples into their OWN table, all six categories, with an honest total', () => {
+    const { store, now } = loaded();
+    const categories = {
+      conveyor: { cpu: 12.5, mem: 100 * 1024 * 1024 },
+      drain: { cpu: 3, mem: 40 * 1024 * 1024 },
+      dispatched_agents: { cpu: 220, mem: 900 * 1024 * 1024 },
+      vscode: { cpu: 15, mem: 800 * 1024 * 1024 },
+      chrome: { cpu: 40, mem: 1200 * 1024 * 1024 },
+      other: { cpu: 30, mem: 500 * 1024 * 1024 },
+    };
+    for (const [cat, { cpu, mem }] of Object.entries(categories)) {
+      store.append(`${JSON.stringify({
+        v: 1, event: 'metric', name: `host.process.${cat}.cpu_pct`, kind: 'runner', value: cpu, unit: 'percent',
+        timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+      })}\n`, '2026-09-12');
+      store.append(`${JSON.stringify({
+        v: 1, event: 'metric', name: `host.process.${cat}.mem_bytes`, kind: 'runner', value: mem, unit: 'bytes',
+        timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+      })}\n`, '2026-09-12');
+    }
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('HOST PROCESSES — who is actually consuming it');
+    for (const cat of Object.keys(categories)) expect(text).toContain(cat);
+    // The catch-all is never omitted — it must appear even though it is the least "interesting" category.
+    expect(text).toContain('other');
+    // A total row sums all six — auditable against the whole-machine `host.cpu.load1` figure elsewhere in the
+    // same report (this test only checks the total row itself renders; the cross-check is a human/analysis
+    // task this report exists to support, not something the CLI computes on its own).
+    expect(text).toContain('total (all 6)');
+    // The generic SATURATION and whole-machine HOST sections must not ALSO print these per-process names.
+    const beforeProcessTable = text.slice(0, text.indexOf('HOST PROCESSES'));
+    expect(beforeProcessTable).not.toContain('host.process.');
+  });
+
+  it('report says so plainly when no per-process samples landed in the window', () => {
+    const { store, now } = loaded();
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('no per-process samples recorded in this window');
+  });
+
   it('renderTrace says so plainly when a trace has no spans', () => {
     expect(renderTrace('i9999', [])).toContain('no spans recorded');
   });
@@ -899,6 +984,42 @@ describe('METRIC_NAMES / DISPATCH_KINDS cover what the system actually has', () 
     expect(METRIC_NAMES.some((n) => n.startsWith('heavy.admission.'))).toBe(true);
     expect(METRIC_NAMES).toContain('dispatch.denied');
     expect(METRIC_NAMES).toContain('dispatch.admitted');
+  });
+
+  // #3383 follow-on — the HOST-RESOURCE half of the capacity-planning question: is the machine itself, not the
+  // queue/lane logic, the actual delivery constraint.
+  it('covers host CPU load, core count, and memory — the capacity-planning terms', () => {
+    for (const n of [
+      'host.cpu.load1', 'host.cpu.load5', 'host.cpu.load15', 'host.cpu.count',
+      'host.mem.free_bytes', 'host.mem.total_bytes',
+    ]) {
+      expect(METRIC_NAMES).toContain(n);
+    }
+  });
+
+  it('the `bytes` unit exists so a byte-valued gauge never has to lie and call itself a `count`', () => {
+    expect(METRIC_UNITS).toContain('bytes');
+  });
+
+  // #3383 follow-on — per-process attribution: the six closed `host.process.*` categories, CPU + memory each.
+  it('covers all six host.process.* categories, CPU and memory each', () => {
+    for (const cat of ['conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other']) {
+      expect(METRIC_NAMES).toContain(`host.process.${cat}.cpu_pct`);
+      expect(METRIC_NAMES).toContain(`host.process.${cat}.mem_bytes`);
+    }
+  });
+
+  it('the `percent` unit exists, distinct from `ratio`, so a 0..100+ CPU-percent sum is never mistaken for a 0..1 fraction', () => {
+    expect(METRIC_UNITS).toContain('percent');
+    expect(METRIC_UNITS).toContain('ratio');
+  });
+
+  it('a `host.process.*.cpu_pct` metric validates with unit `percent`', () => {
+    const rec = newMetric({
+      name: 'host.process.chrome.cpu_pct', kind: 'runner', value: 42, unit: 'percent',
+      timestamp: '2026-09-12T10:00:00.000Z',
+    });
+    expect(validateTelemetryEvent(rec)).toEqual({ ok: true, errors: [] });
   });
 });
 

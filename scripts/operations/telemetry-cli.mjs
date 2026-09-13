@@ -68,6 +68,17 @@ export function fmtMs(ms) {
 
 const pct = (r) => `${(Number(r) * 100).toFixed(1)}%`;
 
+/** Human byte size — `512B` / `4.0MB` / `1.2GB`. Same rendering-only role as `fmtMs`: the JSON output carries
+ *  raw bytes (`host.mem.free_bytes`/`total_bytes`, #3383) so a consumer never has to parse this back out. */
+export function fmtBytes(n) {
+  if (!Number.isFinite(n)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = Number(n);
+  let i = 0;
+  while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${i === 0 ? v : v.toFixed(1)}${units[i]}`;
+}
+
 /** Render the golden signals as text. PURE (returns a string), so a test asserts the rendering without stdout. */
 export function renderReport(signals, { hours }) {
   const L = [];
@@ -115,8 +126,63 @@ export function renderReport(signals, { hours }) {
     L.push(`      ↳ ${reason}: ${n}`);
   }
   for (const [name, g] of Object.entries(signals.saturation.gauges)) {
-    if (name === 'dispatch.admitted' || name === 'dispatch.denied') continue;
+    if (name === 'dispatch.admitted' || name === 'dispatch.denied' || name.startsWith('host.')) continue;
     L.push(`    ${name.padEnd(26)} last ${g.last}  max ${g.max}  mean ${Number(g.mean).toFixed(1)}  (n=${g.samples})`);
+  }
+  L.push('');
+
+  // #3383 follow-on — HOST resource samples, broken out of the generic SATURATION gauges above into their own
+  // section: the whole reason they were added is the capacity-planning question ("is the HOST, not the queue
+  // or lane logic, the actual delivery constraint"), and that reads far more directly as its own labeled block
+  // than interleaved among lane-pool/admission gauges. `host.cpu.count` is folded into the load lines rather
+  // than printed as its own gauge — a constant core count next to a load average is the number a reader
+  // actually wants (load1 vs cores), not a fourth line to cross-reference by hand.
+  // `host.process.*` (#3383 per-process-attribution follow-on) gets its OWN section below — excluded here so
+  // the whole-machine gauges above stay exactly what they always were.
+  const hostGauges = Object.entries(signals.saturation.gauges)
+    .filter(([name]) => name.startsWith('host.') && !name.startsWith('host.process.'));
+  L.push('HOST — is the machine itself the constraint?');
+  if (!hostGauges.length) {
+    L.push('    (no host samples recorded in this window)');
+  } else {
+    const cpuCountGauge = signals.saturation.gauges['host.cpu.count'];
+    const cores = cpuCountGauge ? cpuCountGauge.last : null;
+    for (const [name, g] of hostGauges) {
+      if (name === 'host.cpu.count') continue;
+      const fmt = (v) => (g.unit === 'bytes' ? fmtBytes(v) : Number(v).toFixed(2));
+      const suffix = name.startsWith('host.cpu.load') && Number.isFinite(cores) ? ` (of ${cores} cores)` : '';
+      L.push(`    ${name.padEnd(26)} last ${fmt(g.last)}  max ${fmt(g.max)}  mean ${fmt(g.mean)}${suffix}  (n=${g.samples})`);
+    }
+  }
+  L.push('');
+
+  // #3383 follow-on — per-process attribution: who is actually consuming the host, broken into the six closed
+  // `host.process.*` categories (`host-process-sample.mjs`). A dedicated table rather than folded into the
+  // gauge list above: the capacity-planning question this whole feature exists to answer ("what's competing
+  // for headroom") reads as a comparison ACROSS categories, which a table serves far better than six
+  // interleaved single-line gauges would. `other`'s row is never omitted — see `summarizeProcessSample`'s own
+  // docblock for why that catch-all is the honesty check that makes the six numbers auditable against
+  // `host.cpu.load1`/`host.mem.free_bytes` above, rather than a curated subset that could quietly undercount.
+  L.push('HOST PROCESSES — who is actually consuming it (mean over the window)');
+  const PROCESS_CATEGORY_ORDER = ['conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other'];
+  const g = signals.saturation.gauges;
+  const anyProcessSamples = PROCESS_CATEGORY_ORDER.some((cat) => g[`host.process.${cat}.cpu_pct`]);
+  if (!anyProcessSamples) {
+    L.push('    (no per-process samples recorded in this window)');
+  } else {
+    L.push(`    ${'category'.padEnd(20)} ${'cpu%'.padStart(10)} ${'mem'.padStart(10)}`);
+    let cpuTotal = 0;
+    let memTotal = 0;
+    for (const cat of PROCESS_CATEGORY_ORDER) {
+      const cpuG = g[`host.process.${cat}.cpu_pct`];
+      const memG = g[`host.process.${cat}.mem_bytes`];
+      const cpuMean = cpuG ? cpuG.mean : 0;
+      const memMean = memG ? memG.mean : 0;
+      cpuTotal += Number(cpuMean) || 0;
+      memTotal += Number(memMean) || 0;
+      L.push(`    ${cat.padEnd(20)} ${Number(cpuMean).toFixed(1).padStart(9)}% ${fmtBytes(memMean).padStart(10)}`);
+    }
+    L.push(`    ${'— total (all 6) —'.padEnd(20)} ${Number(cpuTotal).toFixed(1).padStart(9)}% ${fmtBytes(memTotal).padStart(10)}`);
   }
   L.push('');
 

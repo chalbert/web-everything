@@ -61,6 +61,7 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadavg, freemem, totalmem, cpus } from 'node:os';
 import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -75,6 +76,12 @@ import { writeDriverMode, driverModeFor } from '../../scripts/conveyor/driver-mo
 // (admission decisions, lane-pool pressure, heavy-command queue wait) that belong to no single item, and that
 // spans alone cannot express. Never throws by construction; see `telemetry-store.mjs`'s purity discipline.
 import { createTelemetryRecorder } from '../../scripts/operations/telemetry-store.mjs';
+// #3383 follow-on — per-process attribution: categorize EVERY process on the host (not just this system's own)
+// into the six named `host.process.*` buckets, from one `ps` snapshot per tick. See that file's own header for
+// the pure/IO split and the category-matching rules; `readProcessSample` is the one IO edge, never throwing.
+import {
+  readProcessSample, summarizeProcessSample, processCategoryMetrics,
+} from '../../scripts/operations/host-process-sample.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -394,10 +401,29 @@ export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR
 export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out, heartbeat = () => true } = {}) => {
     const { execFileSync } = await import('node:child_process');
-    const runQuiet = (relPath, extraArgs = []) => {
+    // `repo` here is a GitHub `owner/repo` SLUG (this runner's own `--repo` flag, threaded through for the
+    // `gh`-calling passes below). `runQuiet` forwards it as `--repo=<repo>` to every pass by default, which is
+    // harmless for passes that either consume it as that same slug (`ci-queue-watch.mjs`,
+    // `parked-pr-conflict-watch.mjs`, `duplicate-pr-watch.mjs`, `parked-pr-progress-watch.mjs`,
+    // `reconcile-pass.mjs`, `reconcile-fix-dispatch.mjs`) or silently ignore an unrecognized flag
+    // (`branch-drift.mjs`, `session-reaper.mjs`, `lease-reaper.mjs`).
+    //
+    // `conveyor/lane-pool-health-watch.mjs` is the one pass where this is NOT harmless — live incident, found
+    // debugging a recurring "could not determine an origin URL" failure every tick. That pass's OWN `--repo`
+    // flag (threaded to `lane-pool.mjs status --json --repo=<...>`) means a CHECKOUT PATH
+    // (`lane-pool.mjs`'s `resolveRepo()` resolves it with `resolve(flags.repo || cwd())` and derives the origin
+    // URL from `git remote get-url origin` run THERE) — a completely different contract from the GH slug this
+    // runner threads everywhere else. Forwarding the slug here made `lane-pool.mjs` `resolve()` a nonexistent
+    // path (`<cwd>/<owner>/<repo>`, e.g. `.../wev-scratch-dispatcher-9/chalbert/web-everything`), whose `git`
+    // calls silently no-op to null (`tryGit` swallows the "no such directory" failure) and the resolver reports
+    // the whole thing as "no origin", not "bad path" — hence `resolveRepo` failing loud with `could not
+    // determine an origin URL`, every tick, forever (this pass never needs `--repo` at all: `defaultListLaneStatus`
+    // already reads `root`'s OWN pool via `cwd`, no selector required). So this one pass opts OUT of the
+    // default forward entirely — seen live in `wev-scratch-dispatcher-9/run.log`.
+    const runQuiet = (relPath, extraArgs = [], { forwardRepo = true } = {}) => {
       try {
         const args = [join(scriptsDir, relPath), ...extraArgs];
-        if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
+        if (forwardRepo && typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
         execFileSync('node', args, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
       } catch (e) {
         process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
@@ -427,7 +453,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix
     // or accumulated through any path other than a normal release. See that file's own header for the full
     // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
-    runQuiet('conveyor/lane-pool-health-watch.mjs');
+    runQuiet('conveyor/lane-pool-health-watch.mjs', [], { forwardRepo: false });
     // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
     // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
     // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
@@ -819,12 +845,88 @@ export function tickMetrics(surface) {
 }
 
 /**
- * #3383 — IO. Record this tick as one `runner.tick` span plus {@link tickMetrics}' samples. Wrapped whole in a
- * try/catch on top of the recorder's own never-throw contract — belt and braces, because this runs inside the
- * RESIDENT driver, where the discipline is the watchdog's: an observability bug must never be able to stop
- * the conveyor. The tick span is zero-width by construction (the surface is already computed by the time
- * `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the same
- * trace, not to time the tick.
+ * #3383 follow-on — PURE. Derive this tick's HOST-RESOURCE telemetry samples from an already-read OS snapshot,
+ * mirroring {@link tickMetrics} exactly: no `os.*` call of its own, so it is unit-testable against a plain
+ * object with no real host in play.
+ *
+ * WHY THESE SAMPLES EXIST, AND WHY THEY ARE RECORDED HERE RATHER THAN ANYWHERE ELSE. The saturation metrics
+ * above answer "is the QUEUE or LANE POOL the constraint"; nothing in the system today records whether the
+ * HOST itself — CPU, memory — is the actual ceiling as more concurrent dispatch capacity gets added. Recording
+ * these in the SAME `emitTickMetrics` call, at the SAME cadence and the SAME `tick` attribute as the dispatch
+ * metrics, is what makes them ANSWER that question later: a scoring pass can join "how loaded was the machine"
+ * against "how much dispatch throughput was happening" at the same points in time, rather than reading host
+ * load in isolation (which would say nothing about whether it was actually binding on delivery).
+ *
+ * WHAT THIS DOES NOT CAPTURE, STATED PLAINLY (see the file's own `readHostSample` for the swap tradeoff):
+ *   • SWAP USAGE — no cross-platform in-process Node API exists for it; see {@link readHostSample}.
+ *   • DISK I/O, NETWORK — no `node:os` accessor exists for either; adding them would mean shelling out
+ *     (`iostat`/`nettop`/`/proc/...`), which this file's own no-subprocess discipline (mirrored from
+ *     `telemetry-store.mjs`) argues against for a per-tick sample.
+ *   • PER-PROCESS / PER-CONTAINER breakdown from THESE `os.*` samples specifically — `os.loadavg()`/
+ *     `os.freemem()` are whole-HOST aggregates and cannot themselves attribute load to any one process. This
+ *     is now covered by a SIBLING sample, not by this function: {@link module:host-process-sample} categorizes
+ *     every process on the host (via `ps`, once per tick, right alongside this one — see `emitTickMetrics`)
+ *     into the `host.process.*` buckets, and the harder per-agent-turn case (a delivery agent's own CPU cost)
+ *     is covered by `telemetry-store.mjs#spanAroundAsyncWithCpu` on the `agent.turn` span itself. Neither
+ *     follow-on touches `hostMetrics`/`readHostSample` here, which is why this docblock still describes only
+ *     the whole-machine `os.*` gauges.
+ *
+ * @param {{loadavg?: number[], freeBytes?: number, totalBytes?: number, cpuCount?: number}} [sample]
+ * @returns {Array<{name: string, value: number, unit: string, attributes: object}>}
+ */
+export function hostMetrics(sample) {
+  const s = sample || {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const la = Array.isArray(s.loadavg) ? s.loadavg : [];
+  const [l1, l5, l15] = la;
+  return [
+    { name: 'host.cpu.load1', value: n(l1), unit: 'count', attributes: {} },
+    { name: 'host.cpu.load5', value: n(l5), unit: 'count', attributes: {} },
+    { name: 'host.cpu.load15', value: n(l15), unit: 'count', attributes: {} },
+    // Recorded EVERY tick alongside the load averages, not once — see METRIC_NAMES' own comment in
+    // telemetry.mjs for why (cheap, and a later analysis should never need a second lookup to compute
+    // load-vs-cores).
+    { name: 'host.cpu.count', value: n(s.cpuCount), unit: 'count', attributes: {} },
+    // RAW bytes, not a ratio — see telemetry.mjs's own comment: a ratio alone cannot recover the total.
+    { name: 'host.mem.free_bytes', value: n(s.freeBytes), unit: 'bytes', attributes: {} },
+    { name: 'host.mem.total_bytes', value: n(s.totalBytes), unit: 'bytes', attributes: {} },
+  ];
+}
+
+/**
+ * IO EDGE — the one place this feature touches `node:os` directly, kept to exactly this so {@link hostMetrics}
+ * above stays pure. Never throws: a read failure (no known real one, but this runs inside the RESIDENT driver,
+ * where the watchdog's discipline applies — an observability read must never be able to stop the conveyor)
+ * degrades to a zeroed sample rather than taking a tick down.
+ *
+ * SWAP USAGE IS DELIBERATELY NOT SAMPLED — the tradeoff, stated rather than silently skipped. Node's `os`
+ * module has no swap accessor on any platform; the only way to get it is shelling out (macOS: `sysctl
+ * vm.swapusage` / `vm_stat`; Linux: parsing `/proc/meminfo`'s `SwapTotal`/`SwapFree`, itself not portable to
+ * macOS). `telemetry-store.mjs`'s own purity discipline forbids a subprocess in the recorder's hot path for
+ * exactly this reason (cost + a new failure mode on every sample), and this sampling point runs on the SAME
+ * ~120s cadence as every other tick metric — spawning a process every tick for one more gauge was judged not
+ * worth it against `os.loadavg()`'s CPU pressure signal already covering the same "is the host saturated"
+ * question the swap number would answer indirectly. Revisit if a later capacity-planning pass finds load
+ * average alone insufficient to explain an observed slowdown.
+ * @returns {{loadavg: number[], freeBytes: number, totalBytes: number, cpuCount: number}}
+ */
+export function readHostSample() {
+  try {
+    return { loadavg: loadavg(), freeBytes: freemem(), totalBytes: totalmem(), cpuCount: cpus().length };
+  } catch {
+    return { loadavg: [0, 0, 0], freeBytes: 0, totalBytes: 0, cpuCount: 0 };
+  }
+}
+
+/**
+ * #3383 — IO. Record this tick as one `runner.tick` span plus {@link tickMetrics}' and {@link hostMetrics}'
+ * samples — the dispatch/queue saturation signals and the host-resource signals, side by side, at the SAME
+ * `tick` attribute (see {@link hostMetrics}'s own docblock for why that co-location is the whole point). Wrapped
+ * whole in a try/catch on top of the recorder's own never-throw contract — belt and braces, because this runs
+ * inside the RESIDENT driver, where the discipline is the watchdog's: an observability bug must never be able
+ * to stop the conveyor. The tick span is zero-width by construction (the surface is already computed by the
+ * time `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the
+ * same trace, not to time the tick.
  */
 function emitTickMetrics(recorder, surface, ctx) {
   try {
@@ -832,6 +934,16 @@ function emitTickMetrics(recorder, surface, ctx) {
       attributes: { tick: ctx && ctx.tick, statusLine: (surface && surface.statusLine) || null },
     });
     for (const m of tickMetrics(surface)) {
+      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
+    }
+    for (const m of hostMetrics(readHostSample())) {
+      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
+    }
+    // #3383 follow-on — per-process attribution: ONE `ps` shell-out per tick (matching the whole-machine
+    // sample's own cadence, never a hot path), bucketed into the six `host.process.*` categories. See
+    // `host-process-sample.mjs` for the full pure/IO split; `readProcessSample` never throws (an empty sample
+    // on any `ps` failure), so a missing/unexpected `ps` degrades to six zeroed categories, not a broken tick.
+    for (const m of processCategoryMetrics(summarizeProcessSample(readProcessSample()))) {
       recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
     }
     span.ok();

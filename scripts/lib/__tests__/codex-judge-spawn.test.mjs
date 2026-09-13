@@ -13,7 +13,7 @@ import {
   CODEX_EFFORT_MAP,
   CODEX_MODEL,
   CodexInvalidSchemaError,
-  assertNoCodexTools,
+  assertNoCodexToolAllowlist,
   buildCodexJudgeArgv,
   buildCodexPrompt,
   parseCodexJudgeOutcome,
@@ -184,15 +184,15 @@ describe('buildCodexPrompt — folding the mandate into prompt text (no --append
   });
 });
 
-describe('assertNoCodexTools — TOOL-FREE ONLY (probe 9, #3581 sequencing)', () => {
+describe('assertNoCodexToolAllowlist — no configurable allow-list, not "tool-free" (probe 9, #3581 sequencing)', () => {
   it('passes for null/undefined/empty', () => {
-    expect(() => assertNoCodexTools(null)).not.toThrow();
-    expect(() => assertNoCodexTools(undefined)).not.toThrow();
-    expect(() => assertNoCodexTools([])).not.toThrow();
+    expect(() => assertNoCodexToolAllowlist(null)).not.toThrow();
+    expect(() => assertNoCodexToolAllowlist(undefined)).not.toThrow();
+    expect(() => assertNoCodexToolAllowlist([])).not.toThrow();
   });
 
   it('refuses any non-empty tool list', () => {
-    expect(() => assertNoCodexTools(['Read'])).toThrow(/TOOL-FREE panelist only/);
+    expect(() => assertNoCodexToolAllowlist(['Read'])).toThrow(/no configurable tool allow-list/);
   });
 });
 
@@ -376,7 +376,7 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
     let called = false;
     const spy = (...a) => { called = true; return fn(...a); };
     await expect(codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, allowedTools: ['Read'], spawnFn: spy }))
-      .rejects.toThrow(/TOOL-FREE panelist only/);
+      .rejects.toThrow(/no configurable tool allow-list/);
     expect(called).toBe(false);
   });
 

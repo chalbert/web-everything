@@ -14,7 +14,7 @@
  * REJECTED after a real smoke test showed a `--settings=<hooks file>` layered on top of it never fires.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -63,7 +63,8 @@ import {
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
-  convergeRoundTouchedFiles, commitConvergeRound,
+  convergeRoundTouchedFiles, commitConvergeRound, commitBuildTurn, coAuthorTrailerFor,
+  prefixOwnPathMentions, sanitizeOwnLocusMentions,
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
@@ -184,9 +185,11 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
   const LANE_PATH = '/tmp/lane-9';
   const THREAD_EVENT = '{"type":"thread.started","thread_id":"01a0-live-thread"}\n{"type":"turn.completed"}\n';
 
-  /** The injectable `io` every test below starts from — no real fs, no real process, no real lane. */
+  /** The injectable `io` every test below starts from — no real fs, no real process, no real lane.
+   *  #3383 mechanical-dispatcher follow-up — `spawnAgent` now resolves `{stdout, resourceUsage}` (was a bare
+   *  stdout string), matching the real async `spawnToCompletion`-based primitive this provider now awaits. */
   const io = (over = {}) => ({
-    spawnAgent: vi.fn(() => THREAD_EVENT),
+    spawnAgent: vi.fn(() => ({ stdout: THREAD_EVENT, resourceUsage: null })),
     resolveLane: vi.fn(() => LANE_PATH),
     run: vi.fn(),
     persistFailure: vi.fn(),
@@ -199,9 +202,9 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
 
   const REQ = { sessionId: 'claude-uuid', prompt: 'BUILD IT', lane: 9, sessionSlug: 'sess-9', item: '3580', attemptTag: 'b' };
 
-  it('spawns `codex exec` in the RESOLVED lane clone, not wherever the wrapper process happens to sit', () => {
+  it('spawns `codex exec` in the RESOLVED lane clone, not wherever the wrapper process happens to sit', async () => {
     const o = io();
-    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.resolveLane).toHaveBeenCalledWith(9, { run: o.run });
     const [argv, opts] = o.spawnAgent.mock.calls[0];
     expect(argv.slice(0, 3)).toEqual(['exec', '-C', LANE_PATH]);
@@ -210,9 +213,9 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
 
   // #3627 bugs 7/9 are provider-INDEPENDENT (they are about where the child is and where its report lands),
   // so the second provider must not silently re-introduce either of them.
-  it('stamps the SAME real delivery env vars the Claude provider does, including the reports-dir override', () => {
+  it('stamps the SAME real delivery env vars the Claude provider does, including the reports-dir override', async () => {
     const o = io();
-    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
       WE_DISPATCH_KIND: 'delivery',
       DELIVERY_SESSION: 'sess-9',
@@ -223,22 +226,31 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
     });
   });
 
-  it('blocks on the DELIVERY budget, never dispatch-lane-io\'s 60s fire-and-forget one (#3627 bug 6)', () => {
+  // #3383 mechanical-dispatcher fix — the actual #3476 regression test for the Codex provider: this MUST
+  // resolve the reports dir WITH the resolved lane path, never bare (see the Claude describe block's own
+  // regression test, above, for the full root-cause account — this is the same bug, in the second provider).
+  it('resolves the reports dir WITH the resolved lane path — never bare', async () => {
     const o = io();
-    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
+  });
+
+  it('blocks on the DELIVERY budget, never dispatch-lane-io\'s 60s fire-and-forget one (#3627 bug 6)', async () => {
+    const o = io();
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(DELIVERY_AGENT_SPAWN_TIMEOUT_MS);
     expect(DELIVERY_AGENT_SPAWN_TIMEOUT_MS).not.toBe(SPAWN_TIMEOUT_MS);
   });
 
-  it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', () => {
+  it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', async () => {
     const o = io();
-    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.writeThreadId).toHaveBeenCalledWith('sess-9', '01a0-live-thread');
   });
 
-  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', () => {
+  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', async () => {
     const o = io({ readThreadId: vi.fn(() => 'recorded-tid') });
-    DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
     expect(o.readThreadId).toHaveBeenCalledWith('sess-9');
     const argv = o.spawnAgent.mock.calls[0][0];
     expect(argv.slice(0, 3)).toEqual(['exec', 'resume', 'recorded-tid']);
@@ -249,29 +261,29 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
 
   // A silent downgrade to a fresh session would lose exactly the build context the gate-failure resume exists
   // to carry — the agent would be handed "your gate failed" with no memory of what it built.
-  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', () => {
+  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', async () => {
     const o = io({ readThreadId: vi.fn(() => null) });
-    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
-      .toThrow(/cannot resume session sess-9/);
+    await expect(DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
+      .rejects.toThrow(/cannot resume session sess-9/);
     expect(o.spawnAgent).not.toHaveBeenCalled();
   });
 
-  it('captures the child\'s output on a spawn failure and rethrows untouched (same as the Claude provider)', () => {
+  it('captures the child\'s output on a spawn failure and rethrows untouched (same as the Claude provider)', async () => {
     const boom = new Error('spawnSync codex ETIMEDOUT');
     const o = io({ spawnAgent: vi.fn(() => { throw boom; }) });
-    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).toThrow(boom);
+    await expect(DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).rejects.toThrow(boom);
     expect(o.persistFailure).toHaveBeenCalledWith('sess-9', boom, { resumeSessionId: null });
   });
 
-  it('refuses a deny map that would cover the agent\'s own lane, before any spawn happens', () => {
+  it('refuses a deny map that would cover the agent\'s own lane, before any spawn happens', async () => {
     const o = io({ denyPaths: ['/tmp/**'] }); // LANE_PATH is /tmp/lane-9 — covered.
-    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).toThrow(/covers the agent's own lane/);
+    await expect(DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).rejects.toThrow(/covers the agent's own lane/);
     expect(o.spawnAgent).not.toHaveBeenCalled();
   });
 
-  it('tolerates a stream with no thread.started rather than failing a build that already succeeded', () => {
-    const o = io({ spawnAgent: vi.fn(() => '{"type":"turn.completed"}') });
-    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).not.toThrow();
+  it('tolerates a stream with no thread.started rather than failing a build that already succeeded', async () => {
+    const o = io({ spawnAgent: vi.fn(() => ({ stdout: '{"type":"turn.completed"}', resourceUsage: null })) });
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o); // a throw here fails the test naturally.
     expect(o.writeThreadId).not.toHaveBeenCalled();
   });
 });
@@ -302,9 +314,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
 
   it('passes an explicit `timeout` to the underlying spawn call, distinct from and far larger than '
     + 'SPAWN_TIMEOUT_MS (the 60s budget correct only for defaultClaudeProvider\'s fire-and-forget '
-    + '`claude --bg` caller)', () => {
+    + '`claude --bg` caller)', async () => {
     const io = fakeIo();
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       io,
     );
@@ -324,9 +336,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
   });
 
   it('still forwards the WE_DISPATCH_KIND=delivery env stamp alongside the timeout override (#3627 hardening, '
-    + 'unaffected by the timeout fix)', () => {
+    + 'unaffected by the timeout fix)', async () => {
     const io = fakeIo();
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: '66666666-6666-4666-8666-666666666666', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       io,
     );
@@ -334,7 +346,7 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
     expect(opts.env.WE_DISPATCH_KIND).toBe('delivery');
   });
 
-  it('the un-overridden `io` defaults name the REAL `ensureDeliveryHooksSettingsFile`/`defaultSpawnAgent`/'
+  it('the un-overridden `io` defaults name the REAL `ensureDeliveryHooksSettingsFile`/`spawnAgentToCompletion`/'
     + '`resolveLanePath`/`run` — a source-level check (rather than a real fs/process call, which this suite\'s '
     + 'environment cannot make reliably against this file\'s `import.meta.url`-derived REPO_ROOT) that every '
     + 'injected seam is opt-in for tests only, never a second code path production takes', () => {
@@ -342,7 +354,7 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn timeout (#3627 bug 6)', () => {
     expect(spawnSource).toContain('ensureSettingsFile = ensureDeliveryHooksSettingsFile');
     // The test transform rewrites imported references to a namespaced `__vite_ssr_import_N__.<name>` —
     // assert on the stable suffix, not the whole identifier.
-    expect(spawnSource).toMatch(/spawnAgent = [\w.]*\bdefaultSpawnAgent\b/);
+    expect(spawnSource).toMatch(/spawnAgent = [\w.]*\bspawnAgentToCompletion\b/);
     expect(spawnSource).toMatch(/resolveLane = [\w.]*\bresolveLanePath\b/);
     expect(spawnSource).toMatch(/run: runFn = [\w.]*\brun\b/);
   });
@@ -368,9 +380,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
   });
 
   it('resolves the real lane path via the injected `resolveLane` (mirrors `resolveLanePath`\'s own `run` '
-    + 'seam) and passes it as `cwd` to the underlying spawn call — never the wrapper\'s own REPO_ROOT', () => {
+    + 'seam) and passes it as `cwd` to the underlying spawn call — never the wrapper\'s own REPO_ROOT', async () => {
     const io = fakeIo();
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: '77777777-7777-4777-8777-777777777777', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       io,
     );
@@ -380,9 +392,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
   });
 
   it('the spawn\'s `env` carries all four real DELIVERY_SESSION/DELIVERY_ITEM/LANE/ATTEMPT_TAG values — real '
-    + 'process env vars, never only the old text-appended `[env: ...]` prompt footer', () => {
+    + 'process env vars, never only the old text-appended `[env: ...]` prompt footer', async () => {
     const io = fakeIo();
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: '88888888-8888-4888-8888-888888888888', prompt: 'build item #3371', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: 'b' },
       io,
     );
@@ -393,9 +405,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     expect(opts.env.ATTEMPT_TAG).toBe('b');
   });
 
-  it('ATTEMPT_TAG falls back to the empty string, matching the old footer\'s `attemptTag ?? \'\'` behavior', () => {
+  it('ATTEMPT_TAG falls back to the empty string, matching the old footer\'s `attemptTag ?? \'\'` behavior', async () => {
     const io = fakeIo();
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: '99999999-9999-4999-8999-999999999999', prompt: 'p', lane: 3, sessionSlug: 's', item: '1' },
       io,
     );
@@ -411,9 +423,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
   // its own physical copy of the script) wrote to a DIFFERENT script-location default — the exact false
   // negative ("exited with no done report") that rejected a real, successfully-completed #3371 attempt 4.
   it('resolves the reports dir via the injected `resolveReportsDir` and passes it as '
-    + 'OPERATION_DELIVERY_REPORTS_DIR to the underlying spawn call', () => {
+    + 'OPERATION_DELIVERY_REPORTS_DIR to the underlying spawn call', async () => {
     const io = fakeIo({ resolveReportsDir: vi.fn(() => '/real/repo/.operations/delivery-reports') });
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'p', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       io,
     );
@@ -422,11 +434,27 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     expect(opts.env.OPERATION_DELIVERY_REPORTS_DIR).toBe('/real/repo/.operations/delivery-reports');
   });
 
+  // #3383 mechanical-dispatcher fix — THE regression test for the actual #3476 finding: `resolveReportsDir`
+  // must be called WITH the resolved lane path, never with no argument at all. Calling it bare silently falls
+  // back to the SCRIPT-LOCATION default, which always names the primary checkout regardless of which lane
+  // this delivery is for — invisible under Claude's soft, hook-based `--restricted` sandbox (a Bash-shelled
+  // write is not gated by `guard-lane.mjs`/`guard-bash.mjs` at all), but a hard `EPERM` under Codex's real
+  // OS-level lane jail.
+  it('calls `resolveReportsDir` WITH the resolved lane path — never bare — so the reports dir this resolves '
+    + 'to is the AGENT\'s own lane, not wherever the wrapper process happens to be running from', async () => {
+    const io = fakeIo({ resolveReportsDir: vi.fn(() => '/real/pool/lane-3/.operations/delivery-reports') });
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'p', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
+      io,
+    );
+    expect(io.resolveReportsDir).toHaveBeenCalledWith('/real/pool/lane-3'); // io.resolveLane's own fixed return
+  });
+
   it('a resume (resumeAgentWithGateFailure\'s own call shape) gets the SAME OPERATION_DELIVERY_REPORTS_DIR '
     + 'treatment — both call sites go through this one spawn, so both need the agent\'s report to land where '
-    + 'the wrapper reads it', () => {
+    + 'the wrapper reads it', async () => {
     const io = fakeIo({ resolveReportsDir: vi.fn(() => '/real/repo/.operations/delivery-reports') });
-    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       {
         sessionId: '66666666-6666-4666-8666-666666666666', resumeSessionId: '66666666-6666-4666-8666-666666666666',
         prompt: 'fix the gate failure', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '',
@@ -439,7 +467,7 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
 
   it('captures the spawned child\'s stdout/stderr and persists them via the injected `persistFailure` seam '
     + 'when the underlying spawn throws — the observability fix, so a future failure does not require hunting '
-    + 'down the agent\'s own transcript by UUID', () => {
+    + 'down the agent\'s own transcript by UUID', async () => {
     const failure = Object.assign(new Error('spawnSync claude ETIMEDOUT'), {
       stdout: 'partial agent output before the timeout\n',
       stderr: 'some stderr line\n',
@@ -449,10 +477,10 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     const io = fakeIo({ spawnAgent: vi.fn(() => { throw failure; }) });
     const persistFailure = vi.fn();
 
-    expect(() => DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await expect(DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', prompt: 'p', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
       { ...io, persistFailure },
-    )).toThrow('spawnSync claude ETIMEDOUT');
+    )).rejects.toThrow('spawnSync claude ETIMEDOUT');
 
     expect(persistFailure).toHaveBeenCalledTimes(1);
     const [sessionSlugArg, errorArg, optsArg] = persistFailure.mock.calls[0];
@@ -463,25 +491,25 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     expect(optsArg.resumeSessionId).toBe(null);
   });
 
-  it('still throws the original error after capturing it — the capture is observability, never a swallow', () => {
+  it('still throws the original error after capturing it — the capture is observability, never a swallow', async () => {
     const io = fakeIo({ spawnAgent: vi.fn(() => { throw new Error('boom'); }) });
-    expect(() => DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await expect(DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       { sessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', prompt: 'p', lane: 3, sessionSlug: 's', item: '1', attemptTag: '' },
       { ...io, persistFailure: vi.fn() },
-    )).toThrow('boom');
+    )).rejects.toThrow('boom');
   });
 
   it('a resume\'s captured failure is tagged with the resumeSessionId (so it never clobbers the fresh spawn\'s '
-    + 'own capture, which uses the same sessionSlug)', () => {
+    + 'own capture, which uses the same sessionSlug)', async () => {
     const io = fakeIo({ spawnAgent: vi.fn(() => { throw new Error('resume boom'); }) });
     const persistFailure = vi.fn();
-    expect(() => DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+    await expect(DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
       {
         sessionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', resumeSessionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         prompt: 'fix the gate failure', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '',
       },
       { ...io, persistFailure },
-    )).toThrow('resume boom');
+    )).rejects.toThrow('resume boom');
     const [, , optsArg] = persistFailure.mock.calls[0];
     expect(optsArg.resumeSessionId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc');
   });
@@ -783,6 +811,28 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     expect(editorCall.opts.env.WE_DISPATCH_KIND).toBe('fix');
   });
 
+  // mechanical-dispatcher follow-up to #3580 — a Codex-selected build `provider` was previously never even
+  // threaded down to the converge round at all (not "ignored" — genuinely absent from the call). This proves
+  // the END-TO-END path from `runConverge`'s own `provider` option into the round's real `.converge-obs-*.json`
+  // record, the same artifact an operator already inspects after a run.
+  it('threads a `provider` option from runConverge down into the editor round\'s recorded `.converge-obs-*.json`', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }),
+      steps: [landStep],
+    });
+
+    runConverge(
+      { lane, item: '1234' },
+      { run, ensureSettingsFile: () => '/fake/hooks.json', provider: { name: 'codex' } },
+    );
+
+    const obs = JSON.parse(readFileSync(join(lane, '.converge-obs-1-0.json'), 'utf8'));
+    expect(obs.editResult.requestedProvider).toBe('codex');
+    expect(obs.editResult.editorProvider).toBe('claude-restricted'); // the editor itself never changes — no Codex implementation exists yet
+  });
+
   it('creates NO commit for a round the editor did NOT advance (`advanced: false`, dismissed-only) — no empty/'
     + 'spurious commit (#3627 bug 14)', () => {
     const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
@@ -860,6 +910,257 @@ describe('convergeRoundTouchedFiles (#3627 bug 14 helper — the real touched-fi
   });
 });
 
+describe('coAuthorTrailerFor (#3565 — the trailer a WRAPPER-OWNED commit carries per provider)', () => {
+  it('names Codex for the codex provider', () => {
+    expect(coAuthorTrailerFor('codex')).toBe('Co-Authored-By: Codex <noreply@openai.com>');
+  });
+
+  it('defaults to Claude for the claude-restricted provider and for any unrecognized/absent name', () => {
+    expect(coAuthorTrailerFor('claude-restricted')).toBe('Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>');
+    expect(coAuthorTrailerFor(undefined)).toBe('Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>');
+    expect(coAuthorTrailerFor('some-future-provider')).toBe('Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>');
+  });
+});
+
+describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; the agent never runs git)', () => {
+  it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the build phase + provider trailer', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitBuildTurn(
+      { lane: '/lane', item: '1234', provider: { name: 'codex' } },
+      { run, writeFile, touchedFiles: () => ['a.mjs', 'b.md'] },
+    );
+    expect(result).toEqual({ committed: true, paths: ['a.mjs', 'b.md'] });
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const [msgFile, message] = writeFile.mock.calls[0];
+    expect(msgFile).toBe('/lane/.delivery-commit-msg-build.txt');
+    expect(message).toMatch(/delivery build/);
+    expect(message).toMatch(/Co-Authored-By: Codex <noreply@openai\.com>/);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith('git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run.mock.calls[0][1]).not.toContain('-A');
+    expect(run.mock.calls[0][1]).not.toContain('--all');
+  });
+
+  it('names the gate-fix phase distinctly (own message file, own text) for a resumed turn\'s commit', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitBuildTurn(
+      { lane: '/lane', item: '1234', provider: { name: 'claude-restricted' }, phase: 'gate-fix' },
+      { run, writeFile, touchedFiles: () => ['fix.mjs'] },
+    );
+    expect(result).toEqual({ committed: true, paths: ['fix.mjs'] });
+    const [msgFile, message] = writeFile.mock.calls[0];
+    expect(msgFile).toBe('/lane/.delivery-commit-msg-gate-fix.txt');
+    expect(message).toMatch(/gate-failure fix/);
+    expect(message).toMatch(/Co-Authored-By: Claude Sonnet 5 <noreply@anthropic\.com>/);
+  });
+
+  it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitBuildTurn(
+      { lane: '/lane', item: '1234' },
+      { run, writeFile, touchedFiles: () => [] },
+    );
+    expect(result).toEqual({ committed: false, paths: [] });
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('defaults `provider` to Claude when the caller passes none, same as every other CLAUDE_RESTRICTED_PROVIDER default in this file', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    commitBuildTurn({ lane: '/lane', item: '1234' }, { run, writeFile, touchedFiles: () => ['a.mjs'] });
+    const [, message] = writeFile.mock.calls[0];
+    expect(message).toMatch(/Co-Authored-By: Claude Sonnet 5 <noreply@anthropic\.com>/);
+  });
+});
+
+describe('runGateWithOneRetry commits the build turn itself (#3565 — before the agent-commit redesign this '
+  + 'never happened; the wrapper now commits BEFORE the first verify, and again after any resume)', () => {
+  it('calls commitTurn with phase "build" before the first verify, using the resolved lane path', async () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') {
+        return JSON.stringify({ verdict: { ok: true, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 0, unrun: 0, checks: [], blocking: [] } });
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const commitTurn = vi.fn(() => ({ committed: true, paths: ['a.mjs'] }));
+    const provider = { name: 'codex', spawn: vi.fn() };
+    const result = await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, commitTurn });
+    expect(result.status).toBe('green');
+    expect(commitTurn).toHaveBeenCalledTimes(1);
+    expect(commitTurn.mock.calls[0][0]).toEqual({ lane: '/real/pool/lane-3', item: '3371', provider, phase: 'build' });
+    expect(provider.spawn).not.toHaveBeenCalled(); // green on the first try — no resume, no gate-fix commit
+  });
+
+  it('commits AGAIN with phase "gate-fix" after the resume, before the second verify', async () => {
+    let verifyCalls = 0;
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') {
+        verifyCalls += 1;
+        return JSON.stringify({
+          verdict: {
+            ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+            checks: [{ name: 'test:unit', outcome: 'fail' }],
+            blocking: [{ check: 'test:unit', why: 'failed', detail: 'x' }],
+          },
+        });
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const commitTurn = vi.fn(() => ({ committed: true, paths: ['a.mjs'] }));
+    const provider = { name: 'codex', spawn: vi.fn() };
+    const result = await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, commitTurn });
+    expect(result.status).toBe('red');
+    expect(verifyCalls).toBe(2);
+    expect(commitTurn).toHaveBeenCalledTimes(2);
+    expect(commitTurn.mock.calls[0][0].phase).toBe('build');
+    expect(commitTurn.mock.calls[1][0].phase).toBe('gate-fix');
+  });
+});
+
+describe('resumeAgentWithGateFailure prompt (#3565 — never asks the agent to commit any more)', () => {
+  it('the genuine-fail prompt never says "commit" and tells the agent the wrapper commits for it', async () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return JSON.stringify({
+        verdict: {
+          ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+          checks: [{ name: 'test:unit', outcome: 'fail' }],
+          blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
+        },
+      });
+      if (cmd === 'git') return '';
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => null);
+    await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
+    const prompt = provider.spawn.mock.calls[0][0].prompt;
+    expect(prompt).toMatch(/Your gate failed/);
+    expect(prompt).not.toMatch(/commit again/);
+    expect(prompt).toMatch(/do NOT run `git commit` yourself/);
+  });
+});
+
+describe('prefixOwnPathMentions / sanitizeOwnLocusMentions (#3565 real-trial finding — the delivery agent '
+  + 'is never taught the locus-prefix convention, so its own backlog prose trips the pre-commit backstop '
+  + 'once the WRAPPER is the one committing)', () => {
+  it('prefixes a bare mention of a given ref with `we:`, leaving an already-prefixed one alone', () => {
+    const content = 'See `scripts/foo.mjs` and we:scripts/bar.mjs for details.';
+    const result = prefixOwnPathMentions(content, ['scripts/foo.mjs', 'scripts/bar.mjs']);
+    expect(result).toBe('See `we:scripts/foo.mjs` and we:scripts/bar.mjs for details.');
+  });
+
+  it('fixes every occurrence of a repeated bare mention, not just the first', () => {
+    const content = 'a.mjs then a.mjs again';
+    expect(prefixOwnPathMentions(content, ['a.mjs'])).toBe('we:a.mjs then we:a.mjs again');
+  });
+
+  it('is a no-op for a path that never appears in the content', () => {
+    const content = 'nothing path-like here';
+    expect(prefixOwnPathMentions(content, ['scripts/never-mentioned.mjs'])).toBe(content);
+  });
+
+  it('sanitizeOwnLocusMentions rewrites only backlog/reports .md files among the touched paths, and skips '
+    + 'non-.md touched files entirely', () => {
+    const files = {
+      '/lane/backlog/3565-x.md': 'Fixed `scripts/foo.mjs` in this change.',
+    };
+    const readFile = vi.fn((abs) => {
+      if (!(abs in files)) throw new Error(`ENOENT: ${abs}`);
+      return files[abs];
+    });
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    sanitizeOwnLocusMentions(
+      '/lane',
+      ['backlog/3565-x.md', 'scripts/foo.mjs'],
+      { readFile, writeFile },
+    );
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(files['/lane/backlog/3565-x.md']).toBe(
+      'Fixed `we:scripts/foo.mjs` in this change.',
+    );
+  });
+
+  it('#3383 SECOND live #3565 trial finding — also prefixes a bare mention of a file the delivery never '
+    + 'touched (the touched-paths list has no idea it needs fixing; the real gate detector does)', () => {
+    const files = {
+      // Mirrors the real trial verbatim: the agent's own `## Progress` note cited `queue-store.mjs` for
+      // context — never part of the diff (`scripts/operations/file-item-io.mjs` is the only touched file
+      // here) — and the pre-commit `lint:locus` hook rejected the wrapper's commit for exactly this token.
+      '/lane/backlog/3565-x.md': 'Reused queue-store.mjs\'s exported queueHas for the alreadyQueued check.',
+    };
+    const readFile = vi.fn((abs) => files[abs]);
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    sanitizeOwnLocusMentions(
+      '/lane',
+      ['backlog/3565-x.md', 'scripts/operations/file-item-io.mjs'],
+      { readFile, writeFile },
+    );
+    expect(files['/lane/backlog/3565-x.md']).toBe(
+      'Reused we:queue-store.mjs\'s exported queueHas for the alreadyQueued check.',
+    );
+  });
+
+  it('also prefixes a file\'s bare mention of its OWN filename (the real gate flags that too — verified '
+    + 'directly against scanRepoLocusPrefixes, not assumed)', () => {
+    const files = {
+      '/lane/backlog/3565-x.md': 'Fixed `scripts/foo.mjs` per backlog/3565-x.md itself.',
+    };
+    const readFile = vi.fn((abs) => files[abs]);
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    sanitizeOwnLocusMentions(
+      '/lane',
+      ['backlog/3565-x.md', 'scripts/foo.mjs'],
+      { readFile, writeFile },
+    );
+    expect(files['/lane/backlog/3565-x.md']).toBe(
+      'Fixed `we:scripts/foo.mjs` per we:backlog/3565-x.md itself.',
+    );
+  });
+
+  it('sanitizeOwnLocusMentions never throws and never writes when the file has nothing to fix or cannot be read', () => {
+    const readFile = vi.fn(() => { throw new Error('ENOENT'); });
+    const writeFile = vi.fn();
+    expect(() => sanitizeOwnLocusMentions('/lane', ['backlog/999-missing.md'], { readFile, writeFile })).not.toThrow();
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('commitBuildTurn auto-fixes locus-prefix mentions before committing (#3565 real-trial finding)', () => {
+  it('rewrites a touched backlog .md file\'s bare self-mentions before writing the commit message / running git commit', () => {
+    const files = {
+      '/lane/backlog/1234-x.md': 'Touched `scripts/foo.mjs` in this change.',
+    };
+    const readFile = vi.fn((abs) => files[abs]);
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    const run = vi.fn(() => '');
+    commitBuildTurn(
+      { lane: '/lane', item: '1234' },
+      {
+        run, writeFile, readFile,
+        touchedFiles: () => ['backlog/1234-x.md', 'scripts/foo.mjs'],
+      },
+    );
+    expect(files['/lane/backlog/1234-x.md']).toBe('Touched `we:scripts/foo.mjs` in this change.');
+    expect(run).toHaveBeenCalledWith(
+      'git', ['commit', '-F', '/lane/.delivery-commit-msg-build.txt', '--', 'backlog/1234-x.md', 'scripts/foo.mjs'],
+      { cwd: '/lane' },
+    );
+  });
+});
+
 describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round commit)', () => {
   it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the round', () => {
     const run = vi.fn(() => '');
@@ -924,6 +1225,11 @@ describe('buildConvergeEditorArgv (#3627 gap 3 helper)', () => {
 // ================================================================================================
 describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sessionSlug)', () => {
   const fakeLoadItems = () => [{ num: '1234', slug: 'do-the-thing', scope: [] }];
+  // #3383 mechanical-dispatcher fix — `runAgentToCompletion` now resolves the lane path itself (to read the
+  // report back from the SAME lane-scoped directory the provider wrote to — see that function's own
+  // docblock), so every case here needs a fake `resolveLane` too, never the real `resolveLanePath` (which
+  // would shell a real `lane-pool.mjs status --json` this suite's sandboxed environment cannot run).
+  const fakeResolveLane = () => '/fake/pool/lane-7';
 
   it('passes claudeSessionId — a real UUID — as `sessionId` to provider.spawn, never sessionSlug', async () => {
     const claudeSessionId = '11111111-1111-4111-8111-111111111111';
@@ -932,7 +1238,10 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
 
     await runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId },
-      { readBrief: () => 'Read backlog/{{ITEM_SPEC_PATH_BASENAME}}.', readReport, loadItems: fakeLoadItems },
+      {
+        readBrief: () => 'Read backlog/{{ITEM_SPEC_PATH_BASENAME}}.', readReport, loadItems: fakeLoadItems,
+        resolveLane: fakeResolveLane,
+      },
     );
 
     expect(provider.spawn).toHaveBeenCalledTimes(1);
@@ -947,16 +1256,21 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
     const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
     await runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'ignored-in-this-assertion' },
-      { readBrief: () => 'x', readReport, loadItems: fakeLoadItems },
+      { readBrief: () => 'x', readReport, loadItems: fakeLoadItems, resolveLane: fakeResolveLane },
     );
-    expect(readReport).toHaveBeenCalledWith('conveyor-1234');
+    // #3383 — now called with the lane-scoped reports dir too (see the function's own docblock); the FIRST
+    // argument (the sidecar key) is still the assertion this test is actually about.
+    expect(readReport).toHaveBeenCalledWith('conveyor-1234', expect.any(String));
   });
 
   it('the brief env footer still carries sessionSlug (DELIVERY_SESSION), never claudeSessionId', async () => {
     const provider = { spawn: vi.fn() };
     await runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId: '22222222-2222-4222-8222-222222222222' },
-      { readBrief: () => '{{ITEM_SPEC_PATH_BASENAME}}', readReport: () => ({ status: 'done', outcome: 'done', filesTouched: [] }), loadItems: fakeLoadItems },
+      {
+        readBrief: () => '{{ITEM_SPEC_PATH_BASENAME}}', readReport: () => ({ status: 'done', outcome: 'done', filesTouched: [] }),
+        loadItems: fakeLoadItems, resolveLane: fakeResolveLane,
+      },
     );
     const { prompt } = provider.spawn.mock.calls[0][0];
     expect(prompt).toMatch(/\[env: DELIVERY_SESSION=conveyor-1234 /);
@@ -966,8 +1280,25 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
   it('throws when no done report comes back, unchanged from before this fix', async () => {
     await expect(runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'x' },
-      { readBrief: () => 'x', readReport: () => null, loadItems: fakeLoadItems },
+      { readBrief: () => 'x', readReport: () => null, loadItems: fakeLoadItems, resolveLane: fakeResolveLane },
     )).rejects.toThrow(/exited with no done report/);
+  });
+
+  // #3383 mechanical-dispatcher fix — THE regression test for the actual bug this session fixed: the
+  // read-back must resolve through the SAME lane-aware path the provider itself used, never the un-lane-aware
+  // default (which always names the primary checkout, regardless of `lane`).
+  it('reads the report back from the LANE-SCOPED reports dir (resolveReportsDir(lanePath)), never the '
+    + 'un-lane-aware default that ignores which lane the agent actually ran in', async () => {
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
+    const resolveReportsDir = vi.fn((lanePath) => `${lanePath}/.operations/delivery-reports`);
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'x' },
+      {
+        readBrief: () => 'x', readReport, loadItems: fakeLoadItems, resolveLane: fakeResolveLane, resolveReportsDir,
+      },
+    );
+    expect(resolveReportsDir).toHaveBeenCalledWith('/fake/pool/lane-7');
+    expect(readReport).toHaveBeenCalledWith('conveyor-1234', '/fake/pool/lane-7/.operations/delivery-reports');
   });
 });
 
@@ -1043,6 +1374,35 @@ describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old rea
     );
     const [, , opts] = run.mock.calls[0];
     expect(opts.env.WE_DISPATCH_KIND).toBe('fix');
+  });
+
+  // mechanical-dispatcher follow-up to #3580 — VISIBILITY, not a real Codex converge editor (see this
+  // function's own docblock). Before this, a caller's `provider` was never even threaded through to here, so
+  // a Codex-selected build's converge round left no trace anywhere that it had silently run under Claude.
+  it('with no `provider` passed, still spawns `claude` and reports both provider fields as claude-restricted', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    const result = runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '1234', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json' },
+    );
+    expect(run.mock.calls[0][0]).toBe('claude'); // the spawn itself never changes
+    expect(result.requestedProvider).toBe('claude-restricted');
+    expect(result.editorProvider).toBe('claude-restricted');
+  });
+
+  it('a Codex-selected `provider` still spawns `claude` for the editor, but the mismatch is now recorded '
+    + '(requestedProvider !== editorProvider), not silently dropped', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }));
+    const result = runConvergeEdit(
+      { prompt: 'fix it' },
+      {
+        item: '1234', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json',
+        provider: { name: 'codex' },
+      },
+    );
+    expect(run.mock.calls[0][0]).toBe('claude'); // no Codex converge editor exists yet — see the docblock
+    expect(result.requestedProvider).toBe('codex');
+    expect(result.editorProvider).toBe('claude-restricted');
   });
 });
 
@@ -1363,7 +1723,7 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
   });
 
   it('uses the injected run for BOTH the lane-pool.mjs status lookup and the gate itself, calling '
-    + '`run.mjs verify --checkout=<resolved lane path> --json` — never raw verify-lane.mjs', () => {
+    + '`run.mjs verify --checkout=<resolved lane path> --json` — never raw verify-lane.mjs', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
@@ -1372,9 +1732,10 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
         expect(args).toEqual(['scripts/operations/run.mjs', 'verify', '--checkout=/real/pool/lane-3', '--json']);
         return verifyOkJson();
       }
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
-    const result = runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371' }, { run });
+    const result = await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371' }, { run });
     expect(result).toEqual({ status: 'green', lanePath: '/real/pool/lane-3' });
     const statusCall = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/lane-pool.mjs');
     expect(statusCall).toBeDefined();
@@ -1383,17 +1744,18 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
 
   it('reads `verdict.ok` from the JSON envelope rather than relying on a non-zero exit code — the `verify` '
     + 'OPERATION reports `stopped: complete` (exit 0) even for a red gate (compute-only, no confirm/judge), '
-    + 'unlike the raw `verify-lane.mjs` home which exits 2', () => {
+    + 'unlike the raw `verify-lane.mjs` home which exits 2', async () => {
     let verifyCalls = 0;
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') { verifyCalls += 1; return verifyRedJson(); } // exit 0, verdict.ok=false
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() }; // stub — never spawns a real `claude`
-    const result = runGateWithOneRetry(
+    const result = await runGateWithOneRetry(
       { lane: 3, item: '3371', sessionSlug: 'test-3627-fake-session-no-report', provider },
       { run },
     );
@@ -1403,17 +1765,18 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
   });
 
   it('(#3627 bug 5) resumes with claudeSessionId — a real UUID — as BOTH sessionId and resumeSessionId, '
-    + 'never sessionSlug (the CLI validates --session-id/--resume as a UUID and rejects a human-readable slug)', () => {
+    + 'never sessionSlug (the CLI validates --session-id/--resume as a UUID and rejects a human-readable slug)', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyRedJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
     const claudeSessionId = '33333333-3333-4333-8333-333333333333';
-    runGateWithOneRetry(
+    await runGateWithOneRetry(
       { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider, claudeSessionId },
       { run },
     );
@@ -1426,7 +1789,7 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
   });
 
   it('(#3627 bug 5) the SAME claudeSessionId a fresh spawn used is what the resume targets — a resume must '
-    + 'never mint or receive a different id than the session it is resuming', () => {
+    + 'never mint or receive a different id than the session it is resuming', async () => {
     const claudeSessionId = '44444444-4444-4444-8444-444444444444';
 
     // The fresh spawn (mirrors what deliverItem's runAgentToCompletion call does).
@@ -1440,9 +1803,10 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyRedJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
-    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider: freshProvider, claudeSessionId }, { run });
+    await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider: freshProvider, claudeSessionId }, { run });
 
     expect(freshProvider.spawn).toHaveBeenCalledTimes(2); // the fresh spawn above + the one resume
     const [freshCall, resumeCall] = freshProvider.spawn.mock.calls.map((c) => c[0]);
@@ -1519,12 +1883,13 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
   });
 
   it('returns `gate-blocked` (carrying the agent\'s own reason) when the resumed agent\'s second report says '
-    + '`outcome: "blocked"` — even though the second verify is STILL non-ok', () => {
+    + '`outcome: "blocked"` — even though the second verify is STILL non-ok', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
@@ -1532,7 +1897,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
       status: 'done', outcome: 'blocked',
       reason: 'the gate never ran — a stale verify marker for an unrelated sha; nothing in my diff to fix',
     }));
-    const result = runGateWithOneRetry(
+    const result = await runGateWithOneRetry(
       { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider },
       { run, readReport },
     );
@@ -1543,7 +1908,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
   });
 
   it('still returns `red` when the resumed agent\'s second report says `outcome: "done"` but the gate is '
-    + 'still genuinely failing — a `done` report never overrides a real red', () => {
+    + 'still genuinely failing — a `done` report never overrides a real red', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
@@ -1555,11 +1920,12 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
           blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
         },
       });
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
     const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'] }));
-    const result = runGateWithOneRetry(
+    const result = await runGateWithOneRetry(
       { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider },
       { run, readReport },
     );
@@ -1567,17 +1933,18 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
   });
 
   it('still returns `red` (not `gate-blocked`) when no second report is available at all — an absent report '
-    + 'is not a `blocked` self-diagnosis', () => {
+    + 'is not a `blocked` self-diagnosis', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
     const readReport = vi.fn(() => null);
-    const result = runGateWithOneRetry(
+    const result = await runGateWithOneRetry(
       { lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider },
       { run, readReport },
     );
@@ -1585,24 +1952,25 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
   });
 
   it('sends the resumed agent an HONEST prompt for an `unrun` first gate — never "your gate failed, fix it" '
-    + '— and explicitly invites a `blocked` report when nothing in its own diff explains it', () => {
+    + '— and explicitly invites a `blocked` report when nothing in its own diff explains it', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
     const readReport = vi.fn(() => null);
-    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
+    await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
     const prompt = provider.spawn.mock.calls[0][0].prompt;
     expect(prompt).not.toMatch(/Your gate failed/);
     expect(prompt).toMatch(/could not RUN/);
     expect(prompt).toMatch(/outcome: 'blocked'/);
   });
 
-  it('sends the resumed agent the ORIGINAL "your gate failed, fix it" prompt for a genuine `fail` first gate', () => {
+  it('sends the resumed agent the ORIGINAL "your gate failed, fix it" prompt for a genuine `fail` first gate', async () => {
     const run = vi.fn((cmd, args) => {
       if (args[0] === 'scripts/lane-pool.mjs') {
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
@@ -1614,11 +1982,12 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
           blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
         },
       });
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
     const readReport = vi.fn(() => null);
-    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
+    await runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
     const prompt = provider.spawn.mock.calls[0][0].prompt;
     expect(prompt).toMatch(/Your gate failed/);
   });

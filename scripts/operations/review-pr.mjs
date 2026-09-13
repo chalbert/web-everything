@@ -220,7 +220,7 @@ import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 // lists differ — never that the caller and the operation hold two different derivations. `CARE_LEVEL_ORDER` is
 // the band ordering the comparison is made on; both are pure, and neither is restated here.
 import { buildShapePlan } from '../review-core-cli.mjs';
-import { CARE_LEVELS, CARE_LEVEL_ORDER } from '../lib/review-escalation.mjs';
+import { CARE_LEVELS, CARE_LEVEL_ORDER, REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -576,6 +576,13 @@ export function confirmAnswerFor(to) {
  * is #3032's reserved seam for #3007. `ADVISORY_NOTE` (#xlw02hw) belongs to `advise` and is deliberately its OWN
  * type, never `WRITE_UP`/`LABEL` — those two are the real ceremony's write and a caller (or a sink lookup keyed
  * by type) must never be able to confuse the two kinds of comment this operation can post.
+ *
+ * `AWAITING_ADVISORY_CLEAR` (mechanical-dispatcher lane) also belongs to `advise` — it is the mechanical flip of
+ * `review:awaiting-advisory` → cleared, declared as a SECOND effect right after `ADVISORY_NOTE` so the two are
+ * applied by the SAME executor, strictly in order: the note posts first, and only once it has genuinely landed
+ * does the executor move on to clear the label. It is its own type (never `LABEL`, `record`'s own effect) for
+ * the same reason `ADVISORY_NOTE` is not `WRITE_UP` — this is a plain label removal, not a verdict swap, and the
+ * two must never be confusable by a sink lookup keyed on type.
  */
 export const REVIEW_EFFECTS = Object.freeze({
   WRITE_UP: 'review.write-up',
@@ -583,6 +590,7 @@ export const REVIEW_EFFECTS = Object.freeze({
   LEDGER: LEDGER_EFFECT_TYPE,
   NOTICE: 'review.notice',
   ADVISORY_NOTE: 'review.advisory-note',
+  AWAITING_ADVISORY_CLEAR: 'review.awaiting-advisory-clear',
 });
 
 /**
@@ -950,6 +958,28 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
 }
 
 /**
+ * #xqa9ttq — CORRECTS `buildMandate`'s "if you have no tools at all, you cannot run or clone anything" branch
+ * (`we:scripts/lib/review-core.mjs`) FOR THIS SEAT SPECIFICALLY. That branch is accurate for a genuinely
+ * zero-tool Claude juror (`--tools ''`), but this seat runs on Codex, which ALWAYS gets `-s read-only` —
+ * a real, if read-only, shell (confirmed live: `git --version`/`git status` exit 0; only a write, e.g.
+ * `mktemp -d`, gets `Operation not permitted` — see `we:scripts/lib/codex-judge-spawn.mjs`). Left uncorrected,
+ * the shared mandate text would tell this juror it has "no tools at all", which is false and could lead it to
+ * either under-report what it actually checked or misdescribe why it could not run something.
+ *
+ * APPENDED RATHER THAN EDITING `buildMandate`/`buildPanelMandate` THEMSELVES: those functions are shared by
+ * every OTHER panel seat, including genuinely tool-free Claude jurors (`we:scripts/lib/judge-panel.mjs`) for
+ * whom "no tools at all" remains true — rewriting the shared text would fix this seat by breaking theirs.
+ */
+export const CODEX_ADVISORY_SANDBOX_CORRECTION = [
+  'CORRECTION TO THE ABOVE FOR YOUR SEAT SPECIFICALLY: you are not a tool-free juror. You run with a real,',
+  'read-only shell (you can run non-mutating commands and read files), but you CANNOT write, create a temp',
+  'directory, clone anything, or mutate anything — any such attempt will fail. So: ignore any instruction above',
+  'that assumes you have "no tools at all" — you do have a read-only shell — but the practical conclusion is',
+  'the same one that text reaches for a write/clone/repro step: you cannot perform it, so say so plainly rather',
+  'than describing verification you did not perform.',
+].join(' ');
+
+/**
  * #xqa9ttq — THE THIRD SEAT'S RECIPE. Same mandate/input shaping as {@link buildReviewJudgeRequest} — same
  * diff, same description, same #2336 context isolation — but structurally different in the two fields that
  * make this seat what it is:
@@ -975,9 +1005,12 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
  */
 export function buildReviewAdvisoryJudgeRequest({ read, aim = '' }) {
   return {
-    mandate: buildPanelMandate({
+    // #xqa9ttq — `CODEX_ADVISORY_SANDBOX_CORRECTION` is appended, not spliced in: it corrects the shared
+    // mandate's "no tools at all" framing for THIS seat only, without touching `buildPanelMandate`'s text
+    // (shared by every other, genuinely tool-free-or-tool-bearing, panel seat).
+    mandate: `${buildPanelMandate({
       lens: ADVISORY_JUDGE_LENS, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
-    }),
+    })} ${CODEX_ADVISORY_SANDBOX_CORRECTION}`,
     input: renderJudgeInput(read),
     shape: REVIEW_JUDGE_SHAPE,
     lens: ADVISORY_JUDGE_LENS,
@@ -999,6 +1032,7 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
   // #3319 — THE ROSTER TRAVELS ON THE VERDICT. `lens` used to be a separate parameter, which was the seam
   // through which the write-up could describe a different set of seats than the reduction was computed over.
   const lensVerdicts = verdict.lensVerdicts && typeof verdict.lensVerdicts === 'object' ? verdict.lensVerdicts : {};
+  const lensProviders = verdict.lensProviders && typeof verdict.lensProviders === 'object' ? verdict.lensProviders : {};
   const lenses = Array.isArray(verdict.lenses) && verdict.lenses.length ? verdict.lenses : Object.keys(lensVerdicts);
   const absent = PANEL_LENSES.filter((l) => !lenses.includes(l));
   const body = renderPanelComment({
@@ -1006,6 +1040,9 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
     verdict: verdict.verdict,
     disposition: read.disposition,
     lensVerdicts,
+    // #xqa9ttq — names a non-Claude seat (the Codex advisory juror) inline in its row instead of an anonymous
+    // `simplicity | advisory | accept` indistinguishable from a Claude seat.
+    lensProviders,
     // THE TABLE LISTS WHAT RAN, NOT WHAT EXISTS. `renderPanelComment` defaults `lenses` to the whole
     // `PANEL_LENSES` set, so the first live run (PR #1146) rendered `security | mandatory | (no verdict)`
     // directly under "✅ pass — no blocking findings": three mandatory lenses shown as unjudged beside a pass,
@@ -1238,12 +1275,14 @@ function renderRevProvenance(netBasis) {
 export function renderAdvisoryNote({ read, verdict } = {}) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
+  const lensProviders = v.lensProviders && typeof v.lensProviders === 'object' ? v.lensProviders : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
   const body = renderPanelComment({
     findings: v.findings,
     verdict: v.verdict,
     disposition: read.disposition,
     lensVerdicts,
+    lensProviders,
     lenses,
     mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
     heading: `⚠️ Advisory review (informational only) — ${read.repo}#${read.pr}`,
@@ -1592,9 +1631,12 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           { step: JUDGE_STEPS[0], lens: view.input.lens, answer: view.findings.judge },
           { step: JUDGE_STEPS[1], lens: SECURITY_LENS, answer: view.findings.judgeSecurity },
           // #xqa9ttq — THE THIRD SEAT, ONLY WHEN SEATED. `ADVISORY_JUDGE_LENS` is a LITERAL here, exactly
-          // like `SECURITY_LENS` above, for the same reason: it is not caller-negotiable.
+          // like `SECURITY_LENS` above, for the same reason: it is not caller-negotiable. `provider: 'codex'`
+          // is the SAME literal `buildReviewAdvisoryJudgeRequest` pins on this seat's actual judge request
+          // (`providerName: 'codex'`) — carried here too so the posted comment can name this row as Codex
+          // instead of rendering it indistinguishable from a Claude seat (the gap this fixes).
           ...(codexAdvisory
-            ? [{ step: ADVISORY_JUDGE_SEAT.step, lens: ADVISORY_JUDGE_LENS, answer: view.findings.judgeAdvisory }]
+            ? [{ step: ADVISORY_JUDGE_SEAT.step, lens: ADVISORY_JUDGE_LENS, answer: view.findings.judgeAdvisory, provider: 'codex' }]
             : []),
         ];
 
@@ -1678,6 +1720,12 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
         const lensVerdicts = Object.fromEntries(
           lenses.map((lens) => [lens, deriveVerdict({ findings: lensAdmitted[lens] })]),
         );
+        // #xqa9ttq — WHICH LENS RAN ON A NON-CLAUDE PROVIDER, keyed the same way as `lensVerdicts` so the
+        // renderer can zip the two together. Built straight off `seats` (never re-derived from the lens name),
+        // so a future non-codex provider seat carries its own label for free.
+        const lensProviders = Object.fromEntries(
+          seats.filter((s) => s.provider).map((s) => [s.lens, s.provider]),
+        );
         const humanRequired = read.humanRequired === true;
         const verdict = derivePanelVerdict({
           lensVerdicts,
@@ -1713,6 +1761,9 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           // still expects one gets an honest "both of them" rather than half the truth. Nothing DECIDES on it —
           // every consumer that needs the roster reads `lenses`.
           lens: lenses.join(', '),
+          // #xqa9ttq — carried beside `lensVerdicts` so both render call sites (`renderVerdictWriteUp`,
+          // `renderAdvisoryNote`) can pass it straight to `renderPanelComment`/`renderPanelVerdictTable`.
+          lensProviders,
           findings,
           // #x6t2z6h — WHAT THE VERDICT WAS ACTUALLY REDUCED FROM, declared rather than left to be inferred by
           // subtracting two lists. A reader that wants "why is this an accept when the comment shows a blocker"
@@ -1737,7 +1788,7 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
       effects: (view) => {
         const read = view.findings.read;
         if (read.humanRequired !== true) return [];
-        return [{
+        const effects = [{
           type: REVIEW_EFFECTS.ADVISORY_NOTE,
           payload: {
             pr: view.input.pr,
@@ -1748,6 +1799,26 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           // would risk a second one, exactly the reason `record`'s own LABEL effect is `false` (see there).
           idempotent: false,
         }];
+        // mechanical-dispatcher — THE MECHANICAL FLIP OF `review:awaiting-advisory`, ATOMIC WITH THE COMMENT
+        // ABOVE, NEVER A SEPARATE POLL/CRON. Declared as a SECOND effect, so the executor (which applies effects
+        // strictly ascending and HALTS at the first that does not land) can only ever reach this one AFTER the
+        // advisory note has genuinely posted. If the note fails or errors, this effect never runs and the PR
+        // stays labeled `review:awaiting-advisory` — it cannot be gamed into reading "advised" with no comment
+        // behind it. Declared ONLY when the PR still actually carries the label (mirrors
+        // `we:scripts/review-set-label.mjs#presentRemoveLabels`), so a PR opened before this label existed, or
+        // one some other path already cleared, gets no spurious remove-label call.
+        if (hasReviewLabel(read.labels, REVIEW_LABELS.awaitingAdvisory)) {
+          effects.push({
+            type: REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR,
+            payload: { pr: view.input.pr, repo: view.input.repo },
+            // IDEMPOTENT: TRUE — a plain label removal carries none of the durable-comment ambiguity
+            // `ADVISORY_NOTE`/`record`'s LABEL effect carry. Either it lands, or the sink finds the label
+            // already gone (a prior attempt landed after all) and no-ops — both reach the SAME end state
+            // (the label absent), so replaying it on an unknown outcome is safe.
+            idempotent: true,
+          });
+        }
+        return effects;
       },
     }),
 

@@ -45,8 +45,9 @@ import {
   parseFixRunArgv,
   resolveRepoSlug,
   runFixCli,
+  selectFixAgentProvider,
 } from '../fix-run.mjs';
-import { planFixDispatchWrapper } from '../fix-dispatch-wrapper.mjs';
+import { planFixDispatchWrapper, FIX_AGENT_PROVIDERS } from '../fix-dispatch-wrapper.mjs';
 
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits for a `fix` launch, trimmed to what a
  *  provider reads. `pr`/`reason` have ridden the payload since #3332; #3640 forwards them onto the port. */
@@ -237,6 +238,30 @@ describe('#3640 — PR-keyed, not item-keyed: build\'s assumptions do NOT carry 
     expect(calls[0].argv.slice(1)).toEqual(['--pr=2108', '--session=fix-2108']);
   });
 
+  // mechanical-dispatcher (epic #3383, Part 2) — the DRIVER honours the target item's own `deliveryAgent:`
+  // marker for `fix`, exactly as it does for `build`.
+  it('appends `--provider=<marker>` when the item carries a `deliveryAgent:` marker', () => {
+    const { fn: spawnDetached, calls } = recordingSpawnDetached();
+    const readDeliveryAgentMarker = vi.fn(() => 'codex');
+    fixDetachedProvider(fixPayload(), { spawnDetached, readDeliveryAgentMarker });
+    expect(readDeliveryAgentMarker).toHaveBeenCalledWith('3629');
+    expect(calls[0].argv.slice(1)).toEqual(['--pr=2108', '--session=fix-2108', '--num=3629', '--provider=codex']);
+  });
+
+  it('adds no `--provider=` at all when the item carries no marker', () => {
+    const { fn: spawnDetached, calls } = recordingSpawnDetached();
+    fixDetachedProvider(fixPayload(), { spawnDetached, readDeliveryAgentMarker: () => null });
+    expect(calls[0].argv.join(' ')).not.toMatch(/--provider=/);
+  });
+
+  it('reads the marker with an empty item id when the repair has no known item — `readItemDeliveryAgentMarker`\'s '
+    + 'own real default degrades an empty key to `null`, so no special case is needed here', () => {
+    const { fn: spawnDetached } = recordingSpawnDetached();
+    const readDeliveryAgentMarker = vi.fn(() => null);
+    fixDetachedProvider(fixPayload({ num: null }), { spawnDetached, readDeliveryAgentMarker });
+    expect(readDeliveryAgentMarker).toHaveBeenCalledWith(''); // `normNum(null)` is `''`, never `null`
+  });
+
   it('the sink forwards `pr` (and `reason`) onto the port request — without it the provider has nothing', async () => {
     const seen = [];
     const sinks = createDispatchSinks({
@@ -309,7 +334,7 @@ describe('#3640 — restart survival (the item\'s second acceptance clause)', ()
 describe('#3640 — fix-run.mjs, the per-dispatch process', () => {
   it('parses the argv the provider builds, and refuses a missing required flag BY NAME', () => {
     expect(parseFixRunArgv(['--pr=2108', '--session=fix-2108', '--num=3629']))
-      .toEqual({ pr: '2108', item: '3629', sessionSlug: 'fix-2108', repo: null });
+      .toEqual({ pr: '2108', item: '3629', sessionSlug: 'fix-2108', repo: null, provider: '' });
     expect(parseFixRunArgv(['--pr=2108', '--session=fix-2108']).item).toBeNull();
     expect(() => parseFixRunArgv(['--session=fix-2108'])).toThrow(/--pr=/);
     expect(() => parseFixRunArgv(['--pr=2108'])).toThrow(/--session=/);
@@ -368,5 +393,38 @@ describe('#3640 — fix-run.mjs, the per-dispatch process', () => {
       write: () => {}, writeErr: () => {},
     });
     expect(result.repo).toBe('chalbert/frontierui');
+  });
+});
+
+// mechanical-dispatcher (epic #3383, Part 1) — the SAME flag-wins-env-fallback provider selection
+// `deliver-item-run.mjs#selectDeliveryAgentProvider` proves for `build`, mirrored here for `fix`.
+describe('#3383 — fix-run.mjs provider selection', () => {
+  it('selects the fix agent provider: flag beats env, env beats the default, and Claude IS the default', () => {
+    expect(selectFixAgentProvider('', {}).name).toBe('claude-restricted');
+    expect(selectFixAgentProvider('', { DELIVERY_AGENT_PROVIDER: 'codex' }).name).toBe('codex');
+    expect(selectFixAgentProvider('codex', {}).name).toBe('codex');
+    expect(selectFixAgentProvider('claude-restricted', { DELIVERY_AGENT_PROVIDER: 'codex' }).name)
+      .toBe('claude-restricted');
+    expect(selectFixAgentProvider('codex', {}).provider).toBe(FIX_AGENT_PROVIDERS.codex);
+  });
+
+  it('refuses an unknown provider name BEFORE any lane/PR work happens, exiting the CLI with code 1', async () => {
+    expect(() => selectFixAgentProvider('gemini', {})).toThrow(/--provider must be one of|unknown delivery agent provider/);
+    let dispatched = false;
+    const res = await runFixCli(['--pr=2108', '--session=fix-2108', '--provider=gemini'], {
+      repoSlug: () => 'chalbert/web-everything', write: () => {}, writeErr: () => {}, env: {},
+      dispatch: async () => { dispatched = true; return { result: 'ok' }; },
+    });
+    expect(res).toMatchObject({ code: 1, result: null });
+    expect(dispatched).toBe(false);
+  });
+
+  it('hands the CHOSEN provider to `dispatchFix` as its second argument', async () => {
+    let seenProvider = null;
+    await runFixCli(['--pr=2108', '--session=fix-2108', '--provider=codex'], {
+      repoSlug: () => 'chalbert/web-everything', write: () => {}, writeErr: () => {}, env: {},
+      dispatch: async (_launch, provider) => { seenProvider = provider; return { result: 'ok' }; },
+    });
+    expect(seenProvider).toBe(FIX_AGENT_PROVIDERS.codex);
   });
 });
