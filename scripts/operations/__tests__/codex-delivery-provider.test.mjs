@@ -30,6 +30,8 @@ import {
   defaultDeliveryDenyPaths, defaultSpawnCodexAgent, codexThreadIdPath, readCodexThreadId, writeCodexThreadId,
 } from '../codex-delivery-provider.mjs';
 import { usageReportSecretDir } from '../../lib/usage-report-secret-paths.mjs';
+import { parseCodexTurnTokenUsage, recordCodexTurnUsage } from '../codex-delivery-provider.mjs';
+import { createMemoryTelemetryStore, createTelemetryRecorder, setActiveRecorder } from '../telemetry-store.mjs';
 
 const LANE = '/Users/x/workspace/.lanes/web-everything/lane-7';
 const DENY = ['/Users/x/workspace/webeverything/**'];
@@ -228,5 +230,71 @@ describe('the sessionSlug → Codex thread id sidecar', () => {
   it('never throws on an unwritable/unreadable sidecar — it degrades to null', () => {
     expect(writeCodexThreadId('s', 'tid', '/nonexistent-root-\0/')).toBeNull();
     expect(readCodexThreadId('s', '/definitely/not/a/real/root/')).toBeNull();
+  });
+});
+
+
+// ── SELF-TRACKED TOKEN USAGE (epic #3383 usage-ledger follow-up) ───────────────────────────────────────────
+describe('parseCodexTurnTokenUsage', () => {
+  it("reads the terminal turn.completed event's own usage block from a real-shaped JSONL stream", () => {
+    const stdout = [
+      JSON.stringify({ type: 'thread.started', thread_id: 't1' }),
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 10 } }),
+    ].join('\n');
+    expect(parseCodexTurnTokenUsage(stdout)).toEqual({ tokensIn: 100, tokensOut: 10, tokensCacheRead: 40, tokensCacheWrite: 0 });
+  });
+
+  it("scans from the END for the terminal event — an earlier retry's own turn.started never wins", () => {
+    const stdout = [
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({ type: 'error', message: 'transient' }),
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2 } }),
+    ].join('\n');
+    expect(parseCodexTurnTokenUsage(stdout)).toEqual({ tokensIn: 5, tokensOut: 2, tokensCacheRead: 0, tokensCacheWrite: 0 });
+  });
+
+  it('returns null (never throws) when there is no terminal event at all', () => {
+    expect(parseCodexTurnTokenUsage('')).toBeNull();
+    expect(parseCodexTurnTokenUsage(JSON.stringify({ type: 'turn.started' }))).toBeNull();
+    expect(parseCodexTurnTokenUsage('not json at all')).toBeNull();
+  });
+
+  it('returns null when the terminal event carries no usage block', () => {
+    expect(parseCodexTurnTokenUsage(JSON.stringify({ type: 'turn.completed' }))).toBeNull();
+  });
+});
+
+describe('recordCodexTurnUsage', () => {
+  it('records the four dispatch.tokens.* metrics against the ACTIVE recorder, tagged provider:codex + the delivery model', () => {
+    const store = createMemoryTelemetryStore();
+    const rec = createTelemetryRecorder({ store, enabled: true, now: () => new Date('2026-09-12T10:00:00.000Z'), resource: {} });
+    const restore = setActiveRecorder(rec);
+    try {
+      const stdout = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 10 } });
+      recordCodexTurnUsage(stdout);
+      const metrics = store.readAll().events.filter((e) => e.event === 'metric');
+      expect(metrics).toHaveLength(4);
+      const byName = Object.fromEntries(metrics.map((m) => [m.name, m]));
+      expect(byName['dispatch.tokens.input'].value).toBe(100);
+      expect(byName['dispatch.tokens.output'].value).toBe(10);
+      expect(byName['dispatch.tokens.cache_read'].value).toBe(40);
+      expect(byName['dispatch.tokens.cache_write'].value).toBe(0);
+      for (const m of metrics) {
+        expect(m.attributes.provider).toBe('codex');
+        expect(m.attributes.model).toBe(CODEX_DELIVERY_MODEL);
+      }
+    } finally { restore(); }
+  });
+
+  it('records nothing (never throws) when stdout carries no usage — e.g. a resume with no terminal event yet', () => {
+    const store = createMemoryTelemetryStore();
+    const rec = createTelemetryRecorder({ store, enabled: true, now: () => new Date(), resource: {} });
+    const restore = setActiveRecorder(rec);
+    try {
+      expect(() => recordCodexTurnUsage('not json')).not.toThrow();
+      expect(store.readAll().events.filter((e) => e.event === 'metric')).toHaveLength(0);
+    } finally { restore(); }
   });
 });

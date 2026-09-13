@@ -17,7 +17,7 @@ Live-caught 2026-09-07 root-causing PRs #1939/#1932 (2 stuck open PRs the mechan
 
 ## Done when
 
-1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/runner.test.mjs -t xpshzms` fails against
+1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/runner.test.mjs -t 3571` fails against
    the pre-fix call order (dispatchPass before mechanicalPasses) and passes against the current one — verified
    live by temporarily swapping the two calls back and re-running.
 
@@ -27,6 +27,6 @@ Live-caught 2026-09-07 root-causing PRs #1939/#1932 (2 stuck open PRs the mechan
   directly to `origin/lane/mechanical-dispatcher` per Rule 4 of mechanical-delivery-doctrine (commit
   `8ada649d`, before this item's own build turn started).
 - This turn added the missing executable regression test pinning that call order (`we:skills-src/conveyor/__tests__/runner.test.mjs`, test
-  `xpshzms (#3571)`), confirmed red against the old order and green against the current one, and closes out
+  `3571 (#3571)`), confirmed red against the old order and green against the current one, and closes out
   the item's remaining "Done when" gap. Committed + pushed straight to `origin/lane/mechanical-dispatcher`,
   no PR/review ceremony, same Rule 4 basis as the code fix itself.

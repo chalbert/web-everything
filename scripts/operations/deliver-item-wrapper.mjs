@@ -122,7 +122,7 @@ import {
 // `guard-lane.mjs`/`guard-bash.mjs` hooks); `CODEX_PROVIDER` further down is the thin composition of these.
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
-  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
 } from './codex-delivery-provider.mjs';
 // RE-EXPORTED so every existing caller/test that imports these names from THIS file (their pre-extraction
 // home) keeps working unchanged — the extraction moved WHERE they are defined, never what imports them.
@@ -835,6 +835,8 @@ const CODEX_PROVIDER = {
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
+    // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
+    recordCodexTurnUsage(stdout);
     // Record the thread id on a FRESH spawn only — a resume re-announces the same id, so re-writing it is
     // noise. Best-effort by construction (`writeCodexThreadId` never throws): losing the crumb costs the
     // ability to resume, which the guard above then reports loudly, and must never fail a build that worked.

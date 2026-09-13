@@ -847,3 +847,40 @@ export async function spanAroundAsyncWithCpu(name, opts, fn) {
   try { span.ok(cpu); } catch { /* ignore */ }
   return out;
 }
+
+// ── SELF-TRACKED TOKEN USAGE RECORDING (epic #3383, usage-ledger follow-up) ────────────────────────────────
+//
+// ONE place every provider's own turn-result parser converges, so the usage-ledger aggregator
+// (`scripts/usage-report/usage-report.mjs`) reads ONE consistent shape regardless of which CLI produced the
+// numbers. Ambient by design — same pattern `acquireLane`/`runVerifyOperation` already use (see the header
+// above): a provider's spawn function calls this directly, with no recorder threaded through its signature,
+// and it degrades to the null recorder's no-op when nothing is active (a test that never installed one, or
+// telemetry disabled via `WE_TELEMETRY=0`).
+//
+// TODAY THIS IS CODEX-ONLY. Claude's own token usage is covered by the OFFICIAL OpenTelemetry export Claude
+// Code itself emits (`claude_code.token.usage`/`claude_code.cost.usage`, ingested by the sibling
+// `claude-otel-collector.mjs` into its own store) — that is real, harness-reported data covering EVERY
+// Claude Code process (the interactive orchestrator included), not just this repo's own dispatched agents, so
+// it is strictly better than a per-dispatch estimate reconstructed from a spawn's own stdout. Codex has no
+// such export, so its dispatch wrappers (`deliver-item-wrapper.mjs`'s `CODEX_PROVIDER`,
+// `fix-dispatch-wrapper.mjs`'s `FIX_CODEX_PROVIDER`, `ci-heal-dispatch-wrapper.mjs`'s codex provider)
+// call this directly from their own already-captured `--json` stdout.
+/**
+ * Record one model's token usage as four count metrics (`dispatch.tokens.*`), tagged `provider`/`model` in
+ * their attributes. Never throws (`recordMetric` already isn't).
+ * @param {{provider: string, model?: (string|null), tokensIn?: number, tokensOut?: number,
+ *          tokensCacheRead?: number, tokensCacheWrite?: number}} usage
+ * @param {{recorder?: object}} [o] - inject a specific recorder (tests); defaults to whichever is ACTIVE.
+ */
+export function recordTokenUsage({
+  provider, model = null, tokensIn = 0, tokensOut = 0, tokensCacheRead = 0, tokensCacheWrite = 0,
+} = {}, { recorder = null } = {}) {
+  try {
+    const rec = recorder || activeRecorder();
+    const attributes = { provider: String(provider || 'unknown'), model: model == null ? null : String(model) };
+    rec.recordMetric('dispatch.tokens.input', tokensIn, { unit: 'count', attributes, trace: true });
+    rec.recordMetric('dispatch.tokens.output', tokensOut, { unit: 'count', attributes, trace: true });
+    rec.recordMetric('dispatch.tokens.cache_read', tokensCacheRead, { unit: 'count', attributes, trace: true });
+    rec.recordMetric('dispatch.tokens.cache_write', tokensCacheWrite, { unit: 'count', attributes, trace: true });
+  } catch { /* telemetry must never mask a real spawn result */ }
+}

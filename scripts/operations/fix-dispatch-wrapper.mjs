@@ -126,7 +126,7 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 // are, which `FIX_CODEX_PROVIDER` below supplies via `buildFixAgentEnv`/`resolveFixReportsDir`, unchanged.
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
-  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
 } from './codex-delivery-provider.mjs';
 
 /**
@@ -400,6 +400,8 @@ const FIX_CODEX_PROVIDER = {
       persistFailure('fix-spawn-failures', sessionSlug, e, { resumeSessionId });
       throw e;
     }
+    // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
+    recordCodexTurnUsage(stdout);
     if (!resumeThreadId) {
       const threadId = parseCodexThreadId(stdout);
       if (threadId) writeThreadId(sessionSlug, threadId);
