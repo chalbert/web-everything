@@ -2303,3 +2303,21 @@ label-editing tool access to every spawned review session — this is the same d
 would generalize that discipline to build/fix/delivery dispatch's own PR-opening step too, which carries no
 such restriction today. This is a plan/vision addition, not something built in this entry — recorded here so
 a future design pass inherits it rather than re-discovering it.
+
+## Open question flagged, not resolved (2026-09-13) — the #2502 PR-duplication cleanup may be a symptom of an incomplete WE→plateau-app migration for a piece of this epic's own mechanism
+
+While closing out a cluster of duplicate PRs filed against `#2502` (WE #2060 + plateau-app #151, both
+superseded by WE #2073 + plateau-app #152), the operator noted the duplication itself — the SAME fix
+(threading the drain sweep's per-PR head SHA into the journal, adding a head-SHA-churn stuck signal) filed
+independently in both `web-everything` and `plateau-app` under matching branch names/numbers — may not be
+coincidence. It may instead be a symptom of an earlier, uncompleted effort to migrate some piece of this
+epic's own mechanical-dispatch functionality (the drain sweep / stuck-signal detection this cluster touches)
+out of `web-everything` and into `plateau-app`, left half-finished, so work kept landing in both places.
+
+**Not resolved here — flagged for a fresh look later.** The actual placement question — what piece of this
+mechanism belongs in WE vs. in `plateau-app`, and whether a migration is genuinely in flight or was only ever
+attempted — is a real architectural call this cleanup pass deliberately did NOT make. It needs its own
+dedicated decision turn (read both repos' history for the drain-sweep/stuck-signal code, confirm whether a
+migration was ever started or ratified, and rule where this mechanism's canonical home is going forward),
+not a byproduct of closing duplicate PRs. Recorded here, on this epic's own tracker, so whoever picks this up
+next does not have to re-derive the observation from the closed PRs.
