@@ -701,7 +701,20 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // of `delivery-report-store.mjs` to recompute its own script-location-relative default, which resolves to
     // a DIFFERENT directory because `lanePath` is a separate `git clone`, not a worktree (see
     // `buildDeliveryAgentEnv`'s own docblock for the full mechanism and the false-negative this fixes).
-    const reportsDir = resolveReportsDir();
+    //
+    // #3383 mechanical-dispatcher FOLLOW-UP FIX — bug 9's own "resolve ONCE, hand down" shape was right, but
+    // WHAT it resolved to was wrong: called with no argument, `resolveDeliveryReportsDir()` falls back to its
+    // own SCRIPT-LOCATION default, which names wherever THIS WRAPPER's own physical copy of the file lives —
+    // always the primary checkout (`deliver-item-run.mjs` is spawned with `cwd: REPO_ROOT`), never `lanePath`,
+    // regardless of which lane the delivery is actually for. That silently told every spawned agent to write
+    // its completion report OUTSIDE its own lane. Claude's `--restricted` mode never caught this because
+    // `guard-lane.mjs`/`guard-bash.mjs` only gate the Edit/Write/Bash TOOLS, and `delivery-report-cli.mjs
+    // report` runs as a plain child process the agent shells out to — invisible to those hooks either way —
+    // so the wrong-directory write just silently succeeded. Codex's real OS-level lane sandbox has no such
+    // blind spot: a write outside `lanePath` came back `EPERM`, which is exactly how this was found (item
+    // #3476). Passing `lanePath` here makes the resolution LANE-AWARE — `deliveryReportsDir(lanePath)` inside
+    // `resolveDeliveryReportsDir`, not the script-location default — for both providers, going forward.
+    const reportsDir = resolveReportsDir(lanePath);
     // #3627 bug 7(b) — REAL env vars (see `buildDeliveryAgentEnv`'s own docblock), not the old text-appended
     // `[env: ...]` footer `fillMinimalBrief` still also appends below (kept — see that function's own comment
     // — the brief's prose reads naturally either way, and real env vars are what the CLI actually needs).
@@ -773,7 +786,11 @@ const CODEX_PROVIDER = {
     // provider-independent: they are about where the CHILD is and where its report lands, not about which CLI
     // the child is, so re-deriving either here would just be re-introducing them for the second provider.
     const lanePath = resolveLane(lane, { run: runFn });
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher follow-up fix — SAME lane-aware resolution as CLAUDE_RESTRICTED_PROVIDER
+    // above (see its own comment for the full root-cause account): `resolveReportsDir()` called with no
+    // argument silently named the primary checkout regardless of `lanePath`, which Codex's real sandbox
+    // correctly refused (`EPERM`) rather than tolerating like Claude's soft, hook-based one did.
+    const reportsDir = resolveReportsDir(lanePath);
     const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
     const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
     // Codex mints its OWN thread id and has no `--session-id`, so `resumeSessionId` (a CLAUDE-side UUID the
@@ -875,6 +892,9 @@ export async function runAgentToCompletion(
   {
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadDeliveryReport,
+    resolveLane = resolveLanePath,
+    resolveReportsDir = resolveDeliveryReportsDir,
+    run: runFn = run,
     loadItems,
   } = {},
 ) {
@@ -886,7 +906,14 @@ export async function runAgentToCompletion(
   // `CLAUDE_RESTRICTED_PROVIDER.spawn`'s own docblock.
   provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // BLOCKS — see DeliveryAgentProvider's own docblock.
 
-  const report = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider itself just
+  // resolved and handed to the spawned agent (see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`),
+  // never this process's own script-location default — which is always the primary checkout, not the lane.
+  // `resolveLane`/`resolveReportsDir` mirror the exact same seams each provider already uses, so a test can
+  // assert on this independently of which provider ran.
+  const lanePath = resolveLane(lane, { run: runFn });
+  const reportsDir = resolveReportsDir(lanePath);
+  const report = readReport(sessionSlug, reportsDir);
   if (!report || report.status !== 'done') {
     // The agent's process exited without ever sending a `done` report — a crash, per #3436's own precedent.
     // Nothing to poll for: the process is gone, so there is nothing further to wait on. This is itself a
@@ -966,7 +993,9 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
  *  convention) so this second-report branch is testable without a real delivery-report sidecar on disk. */
 export function runGateWithOneRetry(
   { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
-  { run: runFn = run, readReport = tryReadDeliveryReport } = {},
+  {
+    run: runFn = run, readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
+  } = {},
 ) {
   const lanePath = resolveLanePath(lane, { run: runFn });
   const first = runVerifyOperation(lanePath, { run: runFn });
@@ -984,7 +1013,10 @@ export function runGateWithOneRetry(
   resumeAgentWithGateFailure({
     sessionSlug, lane, item, attemptTag, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
   }); // SKETCH — see below
-  const retryReport = readReport(sessionSlug); // agent's fresh report after the resume — 'done' (fixed) or 'blocked' (couldn't)
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the resume just used
+  // (see `runAgentToCompletion`'s own comment for the full root-cause account), never the wrapper's own
+  // script-location default.
+  const retryReport = readReport(sessionSlug, resolveReportsDir(lanePath)); // agent's fresh report after the resume — 'done' (fixed) or 'blocked' (couldn't)
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
 

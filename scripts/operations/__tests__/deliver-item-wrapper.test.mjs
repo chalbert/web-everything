@@ -223,6 +223,15 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
     });
   });
 
+  // #3383 mechanical-dispatcher fix — the actual #3476 regression test for the Codex provider: this MUST
+  // resolve the reports dir WITH the resolved lane path, never bare (see the Claude describe block's own
+  // regression test, above, for the full root-cause account — this is the same bug, in the second provider).
+  it('resolves the reports dir WITH the resolved lane path — never bare', () => {
+    const o = io();
+    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
+  });
+
   it('blocks on the DELIVERY budget, never dispatch-lane-io\'s 60s fire-and-forget one (#3627 bug 6)', () => {
     const o = io();
     DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
@@ -420,6 +429,22 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     expect(io.resolveReportsDir).toHaveBeenCalledTimes(1);
     const [, opts] = io.spawnAgent.mock.calls[0];
     expect(opts.env.OPERATION_DELIVERY_REPORTS_DIR).toBe('/real/repo/.operations/delivery-reports');
+  });
+
+  // #3383 mechanical-dispatcher fix — THE regression test for the actual #3476 finding: `resolveReportsDir`
+  // must be called WITH the resolved lane path, never with no argument at all. Calling it bare silently falls
+  // back to the SCRIPT-LOCATION default, which always names the primary checkout regardless of which lane
+  // this delivery is for — invisible under Claude's soft, hook-based `--restricted` sandbox (a Bash-shelled
+  // write is not gated by `guard-lane.mjs`/`guard-bash.mjs` at all), but a hard `EPERM` under Codex's real
+  // OS-level lane jail.
+  it('calls `resolveReportsDir` WITH the resolved lane path — never bare — so the reports dir this resolves '
+    + 'to is the AGENT\'s own lane, not wherever the wrapper process happens to be running from', () => {
+    const io = fakeIo({ resolveReportsDir: vi.fn(() => '/real/pool/lane-3/.operations/delivery-reports') });
+    DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: '55555555-5555-4555-8555-555555555555', prompt: 'p', lane: 3, sessionSlug: 'conveyor-3371', item: '3371', attemptTag: '' },
+      io,
+    );
+    expect(io.resolveReportsDir).toHaveBeenCalledWith('/real/pool/lane-3'); // io.resolveLane's own fixed return
   });
 
   it('a resume (resumeAgentWithGateFailure\'s own call shape) gets the SAME OPERATION_DELIVERY_REPORTS_DIR '
@@ -946,6 +971,11 @@ describe('buildConvergeEditorArgv (#3627 gap 3 helper)', () => {
 // ================================================================================================
 describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sessionSlug)', () => {
   const fakeLoadItems = () => [{ num: '1234', slug: 'do-the-thing', scope: [] }];
+  // #3383 mechanical-dispatcher fix — `runAgentToCompletion` now resolves the lane path itself (to read the
+  // report back from the SAME lane-scoped directory the provider wrote to — see that function's own
+  // docblock), so every case here needs a fake `resolveLane` too, never the real `resolveLanePath` (which
+  // would shell a real `lane-pool.mjs status --json` this suite's sandboxed environment cannot run).
+  const fakeResolveLane = () => '/fake/pool/lane-7';
 
   it('passes claudeSessionId — a real UUID — as `sessionId` to provider.spawn, never sessionSlug', async () => {
     const claudeSessionId = '11111111-1111-4111-8111-111111111111';
@@ -954,7 +984,10 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
 
     await runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId },
-      { readBrief: () => 'Read backlog/{{ITEM_SPEC_PATH_BASENAME}}.', readReport, loadItems: fakeLoadItems },
+      {
+        readBrief: () => 'Read backlog/{{ITEM_SPEC_PATH_BASENAME}}.', readReport, loadItems: fakeLoadItems,
+        resolveLane: fakeResolveLane,
+      },
     );
 
     expect(provider.spawn).toHaveBeenCalledTimes(1);
@@ -969,16 +1002,21 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
     const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
     await runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'ignored-in-this-assertion' },
-      { readBrief: () => 'x', readReport, loadItems: fakeLoadItems },
+      { readBrief: () => 'x', readReport, loadItems: fakeLoadItems, resolveLane: fakeResolveLane },
     );
-    expect(readReport).toHaveBeenCalledWith('conveyor-1234');
+    // #3383 — now called with the lane-scoped reports dir too (see the function's own docblock); the FIRST
+    // argument (the sidecar key) is still the assertion this test is actually about.
+    expect(readReport).toHaveBeenCalledWith('conveyor-1234', expect.any(String));
   });
 
   it('the brief env footer still carries sessionSlug (DELIVERY_SESSION), never claudeSessionId', async () => {
     const provider = { spawn: vi.fn() };
     await runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId: '22222222-2222-4222-8222-222222222222' },
-      { readBrief: () => '{{ITEM_SPEC_PATH_BASENAME}}', readReport: () => ({ status: 'done', outcome: 'done', filesTouched: [] }), loadItems: fakeLoadItems },
+      {
+        readBrief: () => '{{ITEM_SPEC_PATH_BASENAME}}', readReport: () => ({ status: 'done', outcome: 'done', filesTouched: [] }),
+        loadItems: fakeLoadItems, resolveLane: fakeResolveLane,
+      },
     );
     const { prompt } = provider.spawn.mock.calls[0][0];
     expect(prompt).toMatch(/\[env: DELIVERY_SESSION=conveyor-1234 /);
@@ -988,8 +1026,25 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
   it('throws when no done report comes back, unchanged from before this fix', async () => {
     await expect(runAgentToCompletion(
       { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'x' },
-      { readBrief: () => 'x', readReport: () => null, loadItems: fakeLoadItems },
+      { readBrief: () => 'x', readReport: () => null, loadItems: fakeLoadItems, resolveLane: fakeResolveLane },
     )).rejects.toThrow(/exited with no done report/);
+  });
+
+  // #3383 mechanical-dispatcher fix — THE regression test for the actual bug this session fixed: the
+  // read-back must resolve through the SAME lane-aware path the provider itself used, never the un-lane-aware
+  // default (which always names the primary checkout, regardless of `lane`).
+  it('reads the report back from the LANE-SCOPED reports dir (resolveReportsDir(lanePath)), never the '
+    + 'un-lane-aware default that ignores which lane the agent actually ran in', async () => {
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
+    const resolveReportsDir = vi.fn((lanePath) => `${lanePath}/.operations/delivery-reports`);
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider: { spawn: vi.fn() }, claudeSessionId: 'x' },
+      {
+        readBrief: () => 'x', readReport, loadItems: fakeLoadItems, resolveLane: fakeResolveLane, resolveReportsDir,
+      },
+    );
+    expect(resolveReportsDir).toHaveBeenCalledWith('/fake/pool/lane-7');
+    expect(readReport).toHaveBeenCalledWith('conveyor-1234', '/fake/pool/lane-7/.operations/delivery-reports');
   });
 });
 

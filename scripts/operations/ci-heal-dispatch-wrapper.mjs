@@ -400,7 +400,10 @@ const CI_HEAL_AGENT_PROVIDER = {
   ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
-    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(), reason });
+    // #3383 mechanical-dispatcher fix — lane-aware (see `deliver-item-wrapper.mjs`'s equivalent fix for the
+    // full root-cause account): un-parameterized, `resolveReportsDir()` named the primary checkout regardless
+    // of `lanePath`.
+    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(lanePath), reason });
     try {
       // `cwd: lanePath` is load-bearing: `--restricted` confines the file tools to the process's own working
       // directory, so a wrong cwd sandboxes the agent into the wrong repo entirely (#3627 bug 7(a), live).
@@ -433,7 +436,8 @@ const CI_HEAL_CODEX_PROVIDER = {
       denyPaths = null,
     } = {},
   ) {
-    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(), reason });
+    // #3383 mechanical-dispatcher fix — same lane-aware resolution as `CI_HEAL_AGENT_PROVIDER` above.
+    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(lanePath), reason });
     const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
     const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
     if (resumeSessionId && !resumeThreadId) {
@@ -504,11 +508,14 @@ export async function runCiHealAgentToCompletion(
     // transform, and a redundant `//` collapses harmlessly on a real POSIX read.
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/ci-heal-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadFixReport,
+    resolveReportsDir = resolveFixReportsDir,
   } = {},
 ) {
   const prompt = readBrief();
   provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item, reason }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const report = readReport(sessionSlug, resolveReportsDir(lanePath));
   if (!report || report.status !== 'done') {
     throw new Error(`ci-heal-dispatch-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }

@@ -599,6 +599,24 @@ describe('CI_HEAL_AGENT_PROVIDERS registry / resolveCiHealAgentProvider (#3383)'
     expect(() => resolveCiHealAgentProvider('gemini')).toThrow(/unknown delivery agent provider "gemini"/);
     expect(() => resolveCiHealAgentProvider('gemini')).toThrow(/claude-restricted\|codex/);
   });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test for the CLAUDE ci-heal provider.
+  it('claude-restricted-ci-heal.spawn resolves the reports dir WITH the (already-resolved) lane path — never bare', () => {
+    const io = {
+      ensureSettingsFile: vi.fn(() => '/fake/.operations/ci-heal-agent-hooks-settings.json'),
+      spawnAgent: vi.fn(),
+      persistFailure: vi.fn(),
+      resolveReportsDir: vi.fn(() => '/tmp/ci-heal-reports'),
+    };
+    CI_HEAL_AGENT_PROVIDERS['claude-restricted'].spawn(
+      {
+        sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', prompt: 'p', lanePath: '/tmp/ci-heal-lane-3',
+        sessionSlug: 'ci-heal-743', pr: 743, item: '2638', reason: 'red-ci',
+      },
+      io,
+    );
+    expect(io.resolveReportsDir).toHaveBeenCalledWith('/tmp/ci-heal-lane-3');
+  });
 });
 
 // #3383 — CI_HEAL_CODEX_PROVIDER.spawn, mirroring `fix-dispatch-wrapper.test.mjs`'s own `FIX_CODEX_PROVIDER`
@@ -641,6 +659,15 @@ describe('CI_HEAL_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Code
       LANE: LANE_PATH,
       CI_HEAL_REASON: 'red-ci',
     });
+  });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test (mirrors `fix-dispatch-wrapper.test.mjs`'s
+  // own equivalent test): `resolveReportsDir` must be called WITH the (already-resolved) lane path, never
+  // bare — bare, it silently names the primary checkout regardless of `lanePath`.
+  it('resolves the reports dir WITH the (already-resolved) lane path — never bare', () => {
+    const o = io();
+    CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
   });
 
   it('blocks on the fix/delivery-shared budget', () => {

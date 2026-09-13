@@ -22,7 +22,7 @@
  * `./deliver-item-wrapper.test.mjs` states in its own header.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   CLAUDE_RESTRICTED_PREPARE_PROVIDER,
@@ -230,6 +230,13 @@ describe('#3644 — the ONE agent turn', () => {
     expect(prompt).toContain('[env: PREPARE_SESSION=prepare-decision-2568 PREPARE_ITEM=2568 LANE=6 ATTEMPT_TAG=]');
   });
 
+  // #3383 mechanical-dispatcher fix — `runPrepareAgentToCompletion` now resolves the lane path itself (to
+  // read the report back from the SAME lane-scoped directory the provider wrote to — mirrors
+  // `deliver-item-wrapper.mjs#runAgentToCompletion`'s own equivalent fix), so every case below needs a fake
+  // `resolveLane` too, never the real `resolveLanePath` (which would shell a real `lane-pool.mjs status
+  // --json` against this machine's own lane pool — slow, and not hermetic).
+  const fakeResolveLane = () => '/fake/pool/lane-6';
+
   it('spawns ONCE, blocking, and reads the structured report back — no polling anywhere', () => {
     const spawns = [];
     const provider = { name: 'fake', spawn: (req) => spawns.push(req) };
@@ -240,6 +247,7 @@ describe('#3644 — the ONE agent turn', () => {
         readBrief: () => '# brief {{ITEM_SPEC_PATH_BASENAME}}',
         readReport: () => report,
         loadItems: () => [{ num: '2568', specPath: 'backlog/2568-a-decision.md', slug: 'a-decision' }],
+        resolveLane: fakeResolveLane,
       },
     ).then((got) => {
       expect(got).toBe(report);
@@ -260,24 +268,51 @@ describe('#3644 — the ONE agent turn', () => {
       readBrief: () => '# brief {{ITEM_SPEC_PATH_BASENAME}}',
       readReport,
       loadItems: () => [{ num: '2568', specPath: 'backlog/2568-a.md', slug: 'a' }],
+      resolveLane: fakeResolveLane,
     });
     await expect(runPrepareAgentToCompletion(base, io(() => null))).rejects.toThrow(/no done report/);
     await expect(runPrepareAgentToCompletion(base, io(() => ({ status: 'started' })))).rejects.toThrow(/no done report/);
   });
 
+  // #3383 mechanical-dispatcher fix — the #3476 regression test: the read-back must resolve through the
+  // SAME lane-aware path the provider itself used, never an un-lane-aware default.
+  it('reads the report back from the LANE-SCOPED reports dir (resolveReportsDir(lanePath))', async () => {
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
+    const resolveReportsDir = vi.fn((lanePath) => `${lanePath}/.operations/delivery-reports`);
+    await runPrepareAgentToCompletion(
+      {
+        item: '2568', sessionSlug: 'prepare-decision-2568', lane: 6, attemptTag: '',
+        provider: { name: 'fake', spawn: vi.fn() }, claudeSessionId: 'u',
+      },
+      {
+        readBrief: () => '# brief {{ITEM_SPEC_PATH_BASENAME}}',
+        readReport,
+        loadItems: () => [{ num: '2568', specPath: 'backlog/2568-a.md', slug: 'a' }],
+        resolveLane: fakeResolveLane,
+        resolveReportsDir,
+      },
+    );
+    expect(resolveReportsDir).toHaveBeenCalledWith('/fake/pool/lane-6');
+    expect(readReport).toHaveBeenCalledWith('prepare-decision-2568', '/fake/pool/lane-6/.operations/delivery-reports');
+  });
+
   it('the provider spawns into the LANE, with this kind\'s env and its OWN failure-capture directory', () => {
     const spawned = [];
     const persisted = [];
+    const resolveReportsDir = vi.fn(() => '/ops/delivery-reports');
     CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn(
       { sessionId: 'uuid-1', prompt: 'go', lane: 6, sessionSlug: 'prepare-decision-2568', item: '2568', attemptTag: '' },
       {
         ensureSettingsFile: () => '/ops/settings.json',
         spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); },
         resolveLane: () => '/x/.lanes/lane-6',
-        resolveReportsDir: () => '/ops/delivery-reports',
+        resolveReportsDir,
         persistFailure: (...a) => persisted.push(a),
       },
     );
+    // #3383 mechanical-dispatcher fix — the #3476 regression test: `resolveReportsDir` must be called WITH
+    // the resolved lane path, never bare.
+    expect(resolveReportsDir).toHaveBeenCalledWith('/x/.lanes/lane-6');
     expect(spawned).toHaveLength(1);
     // #3627 bug 7(a) — `--restricted` confines the file tools to the process's own working directories, so a
     // wrong cwd sandboxes the agent into the wrong repo entirely.

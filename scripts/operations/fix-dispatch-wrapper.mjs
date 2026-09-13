@@ -336,7 +336,10 @@ const FIX_AGENT_PROVIDER = {
   ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher fix — lane-aware: `resolveReportsDir()` called with no argument named the
+    // primary checkout regardless of `lanePath` (see `deliver-item-wrapper.mjs`'s own comment on the same fix
+    // for the full root-cause account — same bug, same shape, this wrapper's own copy of it).
+    const reportsDir = resolveReportsDir(lanePath);
     const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
     try {
       spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
@@ -374,7 +377,8 @@ const FIX_CODEX_PROVIDER = {
       denyPaths = null,
     } = {},
   ) {
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher fix — same lane-aware resolution as `FIX_AGENT_PROVIDER` above.
+    const reportsDir = resolveReportsDir(lanePath);
     const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
     const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
     // Same resume contract as `CODEX_PROVIDER`: Codex mints its own thread id, so `resumeSessionId` (the
@@ -445,11 +449,14 @@ export async function runFixAgentToCompletion(
     // own documented note on this), and a redundant `//` collapses harmlessly on a real POSIX read either way.
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/fix-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadFixReport,
+    resolveReportsDir = resolveFixReportsDir,
   } = {},
 ) {
   const prompt = readBrief();
   provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const report = readReport(sessionSlug, resolveReportsDir(lanePath));
   if (!report || report.status !== 'done') {
     throw new Error(`fix-dispatch-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }
@@ -480,7 +487,9 @@ function resumeFixAgentWithGateFailure({
 /** @returns {{status: ('green'|'red'|'gate-blocked'), lanePath: string, reason?: (string|null)}} */
 export function runFixGateWithOneRetry(
   { lanePath, pr, item, sessionSlug, provider = FIX_AGENT_PROVIDER, claudeSessionId },
-  { run: runFn = run, readReport = tryReadFixReport } = {},
+  {
+    run: runFn = run, readReport = tryReadFixReport, resolveReportsDir = resolveFixReportsDir,
+  } = {},
 ) {
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
@@ -488,7 +497,8 @@ export function runFixGateWithOneRetry(
   resumeFixAgentWithGateFailure({
     sessionSlug, lanePath, pr, item, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
   });
-  const retryReport = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — same lane-aware read-back as `runFixAgentToCompletion` above.
+  const retryReport = readReport(sessionSlug, resolveReportsDir(lanePath));
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
 

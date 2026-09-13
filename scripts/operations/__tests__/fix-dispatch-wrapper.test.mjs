@@ -663,6 +663,23 @@ describe('FIX_AGENT_PROVIDERS registry / resolveFixAgentProvider (#3383)', () =>
     expect(() => resolveFixAgentProvider('gemini')).toThrow(/unknown delivery agent provider "gemini"/);
     expect(() => resolveFixAgentProvider('gemini')).toThrow(/claude-restricted\|codex/);
   });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test for the CLAUDE fix provider (mirrors the
+  // `codex` describe block's own equivalent test, above): `resolveReportsDir` must be called WITH the
+  // (already-resolved) lane path, never bare.
+  it('claude-restricted-fix.spawn resolves the reports dir WITH the (already-resolved) lane path — never bare', () => {
+    const io = {
+      ensureSettingsFile: vi.fn(() => '/fake/.operations/fix-agent-hooks-settings.json'),
+      spawnAgent: vi.fn(),
+      persistFailure: vi.fn(),
+      resolveReportsDir: vi.fn(() => '/tmp/fix-reports'),
+    };
+    FIX_AGENT_PROVIDERS['claude-restricted'].spawn(
+      { sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', prompt: 'p', lanePath: '/tmp/fix-lane-3', sessionSlug: 'fix-2108', pr: 2108, item: '3629' },
+      io,
+    );
+    expect(io.resolveReportsDir).toHaveBeenCalledWith('/tmp/fix-lane-3');
+  });
 });
 
 // #3383 — FIX_CODEX_PROVIDER.spawn. Same port contract `CODEX_PROVIDER.spawn` satisfies for `build`
@@ -709,6 +726,17 @@ describe('FIX_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Codex sp
     const o = io();
     FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(FIX_AGENT_SPAWN_TIMEOUT_MS);
+  });
+
+  // #3383 mechanical-dispatcher fix — the #3476 regression test: `resolveReportsDir` must be called WITH the
+  // (already-resolved) lane path, never bare. Bare, it silently falls back to the SCRIPT-LOCATION default,
+  // which always names the primary checkout regardless of `lanePath` — invisible under Claude's soft,
+  // hook-based `--restricted` sandbox, but a hard `EPERM` under Codex's real OS-level lane jail (see
+  // `deliver-item-wrapper.test.mjs`'s own equivalent regression test for the full root-cause account).
+  it('resolves the reports dir WITH the (already-resolved) lane path — never bare', () => {
+    const o = io();
+    FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
   });
 
   it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', () => {

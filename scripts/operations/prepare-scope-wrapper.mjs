@@ -227,8 +227,11 @@ export const CLAUDE_RESTRICTED_PREPARE_PROVIDER = {
   ) {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
+    // #3383 mechanical-dispatcher fix — lane-aware (see `deliver-item-wrapper.mjs`'s equivalent fix for the
+    // full root-cause account): un-parameterized, `resolveReportsDir()` named the primary checkout regardless
+    // of `lanePath`.
     const prepareEnv = buildPrepareAgentEnv({
-      sessionSlug, item, lanePath, itemSpecPath, reportsDir: resolveReportsDir(),
+      sessionSlug, item, lanePath, itemSpecPath, reportsDir: resolveReportsDir(lanePath),
     });
     try {
       // `cwd: lanePath` is load-bearing, not cosmetic: `--restricted` confines the file tools to the process's
@@ -265,11 +268,14 @@ export async function runPrepareAgentToCompletion(
     // and a redundant `//` collapses harmlessly on a real POSIX read.
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/prepare-scope-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadDeliveryReport,
+    resolveReportsDir = resolveDeliveryReportsDir,
   } = {},
 ) {
   const prompt = readBrief();
   provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, item, itemSpecPath }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const report = readReport(sessionSlug, resolveReportsDir(lanePath));
   if (!report || report.status !== 'done') {
     throw new Error(
       `prepare-scope-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`,
@@ -315,7 +321,9 @@ export function runPrepareGateWithOneRetry(
     lanePath, item, sessionSlug, itemSpecPath,
     provider = CLAUDE_RESTRICTED_PREPARE_PROVIDER, claudeSessionId,
   },
-  { run: runFn = run, readReport = tryReadDeliveryReport } = {},
+  {
+    run: runFn = run, readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
+  } = {},
 ) {
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
@@ -324,7 +332,8 @@ export function runPrepareGateWithOneRetry(
     sessionSlug, lanePath, item, itemSpecPath, failureOutput: first.detail, gateOutcome: first.outcome,
     provider, claudeSessionId,
   });
-  const retryReport = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — same lane-aware read-back as `runPrepareAgentToCompletion` above.
+  const retryReport = readReport(sessionSlug, resolveReportsDir(lanePath));
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
 

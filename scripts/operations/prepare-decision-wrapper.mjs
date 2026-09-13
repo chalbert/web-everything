@@ -422,7 +422,10 @@ export const CLAUDE_RESTRICTED_PREPARE_PROVIDER = {
     const settingsFile = ensureSettingsFile();
     const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
     const lanePath = resolveLane(lane, { run: runFn });
-    const reportsDir = resolveReportsDir();
+    // #3383 mechanical-dispatcher fix — lane-aware (see `deliver-item-wrapper.mjs`'s equivalent fix for the
+    // full root-cause account): un-parameterized, `resolveReportsDir()` named the primary checkout regardless
+    // of `lanePath`.
+    const reportsDir = resolveReportsDir(lanePath);
     const prepareEnv = buildPrepareAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
     try {
       spawnAgent(argv, {
@@ -459,12 +462,19 @@ export async function runPrepareAgentToCompletion(
   {
     readBrief = () => readFileSync(PREPARE_DECISION_BRIEF_V2, 'utf8'),
     readReport = tryReadDeliveryReport,
+    resolveLane = resolveLanePath,
+    resolveReportsDir = resolveDeliveryReportsDir,
+    run: runFn = run,
     loadItems,
   } = {},
 ) {
   const prompt = fillPrepareBrief(readBrief(), { item, sessionSlug, lane, attemptTag }, { loadItems });
   provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // BLOCKS.
-  const report = readReport(sessionSlug);
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
+  // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
+  const lanePath = resolveLane(lane, { run: runFn });
+  const reportsDir = resolveReportsDir(lanePath);
+  const report = readReport(sessionSlug, reportsDir);
   if (!report || report.status !== 'done') {
     throw new Error(`prepare-decision-wrapper: agent for ${sessionSlug} exited with no done report (crash or refused effect)`);
   }
