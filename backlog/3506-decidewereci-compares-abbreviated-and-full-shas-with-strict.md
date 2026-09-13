@@ -1,8 +1,9 @@
 ---
 bornAs: xiem56m
 kind: task
-status: open
+status: active
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-13"
 tags: []
 ---
 
@@ -16,3 +17,10 @@ we:scripts/readiness/couple-plan.mjs decideWeReCi compares landed, base and main
    sha asserts `ff-skip`, not `rebase`. Red before, green after.
 2. Comparison is prefix-aware in both directions, matching what `SHA_RE` and `we:scripts/readiness/lane-manifest.mjs` admit.
 3. The reason string can no longer attribute a squash-merge or a re-stack to what was only a length mismatch.
+
+## Progress
+
+- Confirmed the spec still applies: both verdict comparisons use strict equality.
+- Added regression coverage for bidirectional abbreviations, normalization, invalid inputs, conflicting suffixes, and the CLI call path. Confirmed seven regression failures before implementation, including the required 7-hex base/full landed case and CLI verdict.
+- Implemented prefix-aware comparisons after validation, including base/main consistency so an abbreviated landed hash cannot hide conflicting longer hashes. Length-only differences now skip re-CI without a squash/re-stack reason.
+- Validation: `node_modules/.bin/vitest run we:scripts/readiness/__tests__/couple-plan.test.mjs` — all 26 tests pass. Working-tree edits are ready for the wrapper.
