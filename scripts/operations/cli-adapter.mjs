@@ -739,11 +739,12 @@ export function createDefaultJudge({
       sessionId: outcome.sessionId,
       loadedContextTokens: outcome.loadedContextTokens,
       usage: outcome.usage,
-      // THE CODEX JUDGE TRANSCRIPT FIX — only `codexJudgeSpawn` (`we:scripts/lib/codex-judge-spawn.mjs`)
-      // returns this; `judgeSpawn`'s (Claude's) outcome carries no such field, so `outcome.transcriptFile` is
-      // `undefined` for that provider and `normalizeJudgeTelemetry`'s string whitelist silently drops it —
-      // no branch needed here for the two providers to coexist. A PATH ONLY, never transcript content, per
-      // that whitelist's own discipline.
+      // THE JUDGE TRANSCRIPT FIX — `codexJudgeSpawn` (`we:scripts/lib/codex-judge-spawn.mjs`) and
+      // `antigravityJudgeSpawn` (`we:scripts/lib/antigravity-judge-spawn.mjs`, #3383's mirror of the same
+      // fix) both return this; `judgeSpawn`'s (Claude's) outcome carries no such field, so
+      // `outcome.transcriptFile` is `undefined` for that provider and `normalizeJudgeTelemetry`'s string
+      // whitelist silently drops it — no per-provider branch needed here for all three to coexist. A PATH
+      // ONLY, never transcript content, per that whitelist's own discipline.
       transcriptFile: outcome.transcriptFile,
       // #3203 — the juror hit the WALL and its answer was recovered from the killed process. Recorded so the
       // row says which happened: a bound being hit and a crash used to be indistinguishable here, and a

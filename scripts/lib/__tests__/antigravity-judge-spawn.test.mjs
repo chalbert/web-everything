@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync, readFileSync, mkdtempSync, rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ANTIGRAVITY_CLI,
   ANTIGRAVITY_EFFORT_MAP,
@@ -20,6 +24,9 @@ import {
   parseAntigravityJudgeOutcome,
   antigravityLoadedContextTokens,
   antigravityJudgeSpawn,
+  resolveAntigravityJudgeTranscriptDir,
+  extractAntigravityJudgeSessionId,
+  persistAntigravityJudgeTranscript,
 } from '../antigravity-judge-spawn.mjs';
 import { JudgeTimeoutError } from '../judge-spawn.mjs';
 
@@ -228,6 +235,90 @@ describe('antigravityLoadedContextTokens — agy\'s own usage key names (#3633 p
   });
 });
 
+describe('resolveAntigravityJudgeTranscriptDir — env override, else the home-dir default (mirrors the Codex sibling)', () => {
+  it('honours ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR when set', () => {
+    expect(resolveAntigravityJudgeTranscriptDir({ ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR: '/tmp/custom-agy-transcripts' }))
+      .toBe('/tmp/custom-agy-transcripts');
+  });
+
+  it('falls back to a home-dir default when unset/blank', () => {
+    expect(resolveAntigravityJudgeTranscriptDir({})).toMatch(/\.antigravity-judge-transcripts$/);
+    expect(resolveAntigravityJudgeTranscriptDir({ ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR: '   ' })).toMatch(/\.antigravity-judge-transcripts$/);
+  });
+});
+
+describe('extractAntigravityJudgeSessionId — the conversation_id off `init`, falling back to `result`, independent of parse success', () => {
+  it('extracts the conversation_id from the init event when present', () => {
+    const stdout = [
+      JSON.stringify({ event: 'init', conversation_id: 'conv-xyz', init: {} }),
+      JSON.stringify({ event: 'result', result: { conversation_id: 'conv-xyz', status: 'SUCCESS' } }),
+    ].join('\n');
+    expect(extractAntigravityJudgeSessionId(stdout)).toBe('conv-xyz');
+  });
+
+  it('falls back to the terminal result event\'s own conversation_id when there is no init event', () => {
+    const stdout = JSON.stringify({ event: 'result', result: { conversation_id: 'conv-from-result', status: 'SUCCESS' } });
+    expect(extractAntigravityJudgeSessionId(stdout)).toBe('conv-from-result');
+  });
+
+  it('returns null when neither event carries a non-empty conversation_id (e.g. the auth-failure shape)', () => {
+    expect(extractAntigravityJudgeSessionId('')).toBeNull();
+    expect(extractAntigravityJudgeSessionId(JSON.stringify({ event: 'result', result: { conversation_id: '', status: 'ERROR' } })))
+      .toBeNull();
+  });
+
+  it('still finds the id even when the run goes on to a status: ERROR terminal — the transcript-persistence case', () => {
+    const stdout = [
+      JSON.stringify({ event: 'init', conversation_id: 'conv-failed-run', init: {} }),
+      JSON.stringify({ event: 'result', result: { conversation_id: 'conv-failed-run', status: 'ERROR', error: 'boom' } }),
+    ].join('\n');
+    expect(extractAntigravityJudgeSessionId(stdout)).toBe('conv-failed-run');
+  });
+});
+
+describe('persistAntigravityJudgeTranscript — THE FIX: the raw stream-json JSONL is written to a durable local file', () => {
+  it('writes the exact stdout bytes to <dir>/antigravity-judge-<sessionId>.jsonl and returns that path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'antigravity-judge-transcript-test-'));
+    try {
+      const stdout = `${JSON.stringify({ event: 'init', conversation_id: 'sess-1' })}\n${JSON.stringify({ event: 'result', result: {} })}`;
+      const file = persistAntigravityJudgeTranscript({ stdout, sessionId: 'sess-1', dir });
+      expect(file).toBe(join(dir, 'antigravity-judge-sess-1.jsonl'));
+      expect(readFileSync(file, 'utf8')).toBe(stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to a random `unknown-<id>` name when no sessionId is available, never silently dropping the run', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'antigravity-judge-transcript-test-'));
+    try {
+      const file = persistAntigravityJudgeTranscript({ stdout: 'whatever', sessionId: null, dir, mkId: () => 'fixed-id' });
+      expect(file).toBe(join(dir, 'antigravity-judge-unknown-fixed-id.jsonl'));
+      expect(readFileSync(file, 'utf8')).toBe('whatever');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the directory if it does not exist yet', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'antigravity-judge-transcript-test-'));
+    const dir = join(parent, 'nested', 'deeper');
+    try {
+      const file = persistAntigravityJudgeTranscript({ stdout: 'x', sessionId: 't', dir });
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('NEVER throws — a write failure is a best-effort loss, returning null, not a crashed judge call', () => {
+    const boom = () => { throw new Error('disk is full'); };
+    expect(() => persistAntigravityJudgeTranscript({ stdout: 'x', sessionId: 't', dir: '/nonexistent', ensureDir: boom }))
+      .not.toThrow();
+    expect(persistAntigravityJudgeTranscript({ stdout: 'x', sessionId: 't', dir: '/nonexistent', ensureDir: boom })).toBeNull();
+  });
+});
+
 describe('antigravityJudgeSpawn — exercised over an injected spawn (real temp files, fake process)', () => {
   function resultJsonl(result) {
     return [
@@ -338,6 +429,94 @@ describe('antigravityJudgeSpawn — exercised over an injected spawn (real temp 
     };
     await antigravityJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
     expect(existsSync(workDirSeen)).toBe(false);
+  });
+
+  // THE FIX — #3649's run-quality recording mechanism could not score this seat's runs because the raw
+  // stream-json JSONL was captured only to parse the answer, then discarded. These prove it is now durably
+  // persisted, OUTSIDE the temp working directory the test right above proves gets deleted (so the transcript
+  // survives that cleanup), keyed by the same conversation_id the outcome reports as `sessionId`.
+  describe('THE FIX — the raw stream-json JSONL is now persisted to a durable file, independent of workDir cleanup', () => {
+    it('persists the transcript and returns its path as `transcriptFile`, via the real (non-injected) writer', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'antigravity-judge-transcript-integration-'));
+      try {
+        const { fn } = fakeSpawn({ stdout: resultJsonl(OK_RESULT) });
+        const r = await antigravityJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, transcriptDir: dir });
+        expect(r.transcriptFile).toBe(join(dir, 'antigravity-judge-sess-1.jsonl'));
+        // THE EXACT SAME BYTES the outcome was parsed from — not a paraphrase, not a summary.
+        expect(readFileSync(r.transcriptFile, 'utf8')).toBe(resultJsonl(OK_RESULT));
+        // Survives the workDir cleanup the test above proves happens — a DIFFERENT directory entirely.
+        expect(existsSync(r.transcriptFile)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('calls the injected `persistTranscript` with the captured stdout and the extracted session id', async () => {
+      const { fn } = fakeSpawn({ stdout: resultJsonl(OK_RESULT) });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/transcript/path.jsonl'; };
+      const r = await antigravityJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].sessionId).toBe('sess-1');
+      expect(calls[0].stdout).toBe(resultJsonl(OK_RESULT));
+      expect(r.transcriptFile).toBe('/fake/transcript/path.jsonl');
+    });
+
+    it('persists the transcript even when the run goes on to a `status: "ERROR"` — never lost on failure', async () => {
+      const errorJsonl = [
+        JSON.stringify({ event: 'init', conversation_id: 'sess-failed', init: {} }),
+        JSON.stringify({ event: 'result', result: { conversation_id: 'sess-failed', status: 'ERROR', error: 'boom', usage: {} } }),
+      ].join('\n');
+      const { fn } = fakeSpawn({ stdout: errorJsonl });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/failed.jsonl'; };
+      await expect(antigravityJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript }))
+        .rejects.toThrow(/the juror failed/);
+      expect(calls).toHaveLength(1); // persisted BEFORE the parse threw, not skipped because of the throw
+      expect(calls[0].sessionId).toBe('sess-failed');
+    });
+
+    it('persists the transcript even on the silent-tool-denial failure (#3633 probe 7) — the most common failure this seat sees', async () => {
+      const deniedResult = {
+        conversation_id: 'sess-denied', status: 'SUCCESS', response: '', num_turns: 1, usage: {},
+        denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+      };
+      const { fn } = fakeSpawn({ stdout: resultJsonl(deniedResult) });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/denied.jsonl'; };
+      await expect(antigravityJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript }))
+        .rejects.toThrow(AntigravityToolDeniedError);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].sessionId).toBe('sess-denied');
+    });
+
+    it('a transcript-write failure never crashes an otherwise-successful judge call — best effort only', async () => {
+      const { fn } = fakeSpawn({ stdout: resultJsonl(OK_RESULT) });
+      const persistTranscript = () => null; // simulates a disk-write failure
+      const r = await antigravityJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript });
+      expect(r.value).toEqual({ verdict: 'accept', finding: 'ok' });
+      expect(r.transcriptFile).toBeNull();
+    });
+
+    // THE EXPLICIT CONFIRMATION #3383's own mandate asks for: persisting the transcript adds NOTHING to what
+    // this seat can DO. It is still a genuinely TOOL-FREE juror — never `--dangerously-skip-permissions`,
+    // never `--sandbox` — and a tool-bearing request is still refused before ever spawning. The fix is
+    // strictly "read the same bytes onto disk", not a new capability.
+    it('still never passes --dangerously-skip-permissions or --sandbox, and still refuses a tool-bearing request, with the new transcript params present', async () => {
+      const { fn, seen } = fakeSpawn({ stdout: resultJsonl(OK_RESULT) });
+      await antigravityJudgeSpawn({
+        mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, transcriptDir: '/tmp/whatever-agy-transcripts',
+      });
+      expect(seen.argv).not.toContain('--dangerously-skip-permissions');
+      expect(seen.argv).not.toContain('--sandbox');
+
+      let called = false;
+      const spy = (...a) => { called = true; return fn(...a); };
+      await expect(antigravityJudgeSpawn({
+        mandate: 'm', input: 'i', shape: SHAPE, allowedTools: ['Read'], spawnFn: spy, transcriptDir: '/tmp/whatever-agy-transcripts',
+      })).rejects.toThrow(/no configurable tool allow-list/);
+      expect(called).toBe(false); // refused BEFORE the spawn that would have persisted anything
+    });
   });
 
   describe('a juror that hits the wall (#3633 probe 17 — --print-timeout does not cap the auth wait; the parent kills it)', () => {

@@ -134,8 +134,11 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdtempSync, mkdirSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './judge-spawn.mjs';
 
@@ -399,9 +402,91 @@ export function antigravityLoadedContextTokens(usage = {}) {
 }
 
 /**
- * THE ONE FUNCTION AN ANTIGRAVITY-BACKED `judge` STEP WOULD CALL — not yet called by any (see the file
- * header: this is a standalone, unwired primitive). Spawns a tool-free `agy` juror and returns its validated
- * answer, in the same `JudgeProviderOutcome` shape `judgeSpawn`/`codexJudgeSpawn` return.
+ * THE DURABLE TRANSCRIPT DIRECTORY — mirrors `we:scripts/lib/codex-judge-spawn.mjs#resolveCodexJudgeTranscriptDir`
+ * exactly, for the SAME confirmed defect on this sibling seat (#3383): `antigravityJudgeSpawn` captured the
+ * full raw stream-json JSONL stdout purely to parse the schema-constrained answer out of it, then discarded
+ * the buffer — this seat has NO rollout-file fallback at all (unlike Codex's `--ephemeral`-suppressed one, `agy`
+ * simply never writes one to a caller-visible path for THIS invocation shape), so nothing on disk held a
+ * completed judge run's transcript unless this module puts it there itself. `ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR`
+ * honours an override (tests, or a caller wanting a different location); the default sits in the user's home
+ * directory — NOT the OS tmpdir — for the same durability reason Codex's sibling default does.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function resolveAntigravityJudgeTranscriptDir(env = process.env) {
+  const override = env?.ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR;
+  return (typeof override === 'string' && override.trim()) ? override.trim() : join(homedir(), '.antigravity-judge-transcripts');
+}
+
+/**
+ * The session identifier off `agy`'s own stream-json JSONL — extracted directly and independently of
+ * {@link parseAntigravityJudgeOutcome}'s own success/failure, for the same reason
+ * `extractCodexJudgeThreadId` is: the transcript must be persisted even when the run goes on to fail (the
+ * silent-tool-denial shape, a `status: "ERROR"`, a kill) — those are exactly the runs a human or the run-quality
+ * scorer most wants to read afterward.
+ *
+ * `agy` names this `conversation_id`, NOT `thread_id` (Codex's term) — read off the EARLIEST event that
+ * carries one, the `{"event":"init", conversation_id, ...}` line (this module's own header item 7 and #3633
+ * probe 20's raw JSON both confirm `init` carries it; `antigravity-judge-spawn.test.mjs`'s own fixtures put it
+ * at that event's TOP level, not nested under `init`), falling back to the terminal `{"event":"result",
+ * result: {conversation_id, ...}}` line for a stream that has no `init` event at all — both name the SAME
+ * value per the file header, so either suffices. An empty string (the auth-failure shape's own
+ * `conversation_id: ""`) counts as "no id", not a real one. PURE.
+ * @param {string} stdout
+ * @returns {string|null}
+ */
+export function extractAntigravityJudgeSessionId(stdout) {
+  const lines = String(stdout).split('\n').map(parseJsonlLine).filter(Boolean);
+  const init = lines.find((l) => l?.event === 'init' && typeof l.conversation_id === 'string' && l.conversation_id);
+  if (init) return init.conversation_id;
+  const result = lines.find((l) => l?.event === 'result' && l?.result && typeof l.result.conversation_id === 'string' && l.result.conversation_id);
+  return result ? result.result.conversation_id : null;
+}
+
+/**
+ * PERSIST THE RAW STREAM-JSON JSONL STDOUT `antigravityJudgeSpawn` already captures in memory to a durable
+ * local file — mirrors `persistCodexJudgeTranscript` exactly (`we:scripts/lib/codex-judge-spawn.mjs`), same
+ * fix for the same class of gap on this sibling seat. Writes to
+ * `<dir>/antigravity-judge-<sessionId>.jsonl`, named by the same `conversation_id`/`sessionId`
+ * `antigravityJudgeSpawn` already returns, so a later reader (`we:scripts/conveyor/run-quality-scorer.mjs`)
+ * can find it from a run record's stamped `transcriptFile` path alone. Unscrubbed at rest, same discipline as
+ * the Codex sibling and Claude's own local judge transcripts — scrubbing happens only at the point evidence is
+ * EXCERPTED into a published finding (`we:scripts/lib/secret-scrub.mjs`).
+ *
+ * NEVER THROWS — a transcript that fails to write is a best-effort loss, not a reason to fail a judge call
+ * that otherwise completed; the caller gets `null` back and the run proceeds exactly as it did before this
+ * existed.
+ *
+ * @param {object} o
+ * @param {string} o.stdout - the raw stream-json JSONL captured from the spawn, whatever its length.
+ * @param {string|null} o.sessionId - from {@link extractAntigravityJudgeSessionId}; a run with none gets a
+ *   random id so nothing is silently dropped, labelled `unknown-` so a reader can tell the difference from a
+ *   real one.
+ * @param {string} o.dir - the durable directory (see {@link resolveAntigravityJudgeTranscriptDir}).
+ * @param {(dir: string) => void} [o.ensureDir] - injectable `mkdirSync`, for tests.
+ * @param {(path: string, data: string) => void} [o.writeFile] - injectable `writeFileSync`, for tests.
+ * @param {() => string} [o.mkId] - injectable id generator for the `sessionId == null` fallback, for tests.
+ * @returns {string|null} the file path written, or `null` on any failure.
+ */
+export function persistAntigravityJudgeTranscript({
+  stdout, sessionId, dir, ensureDir = (d) => mkdirSync(d, { recursive: true }), writeFile = writeFileSync, mkId = randomUUID,
+} = {}) {
+  try {
+    ensureDir(dir);
+    const name = `antigravity-judge-${sessionId || `unknown-${mkId()}`}.jsonl`;
+    const file = join(dir, name);
+    writeFile(file, String(stdout));
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE ONE FUNCTION AN ANTIGRAVITY-BACKED `judge` STEP CALLS — wired into `we:scripts/operations/
+ * cli-adapter.mjs#resolveJudgeProvider`'s `'antigravity'` name (`review-pr.mjs`'s fifth seat). Spawns a
+ * tool-free `agy` juror and returns its validated answer, in the same `JudgeProviderOutcome` shape
+ * `judgeSpawn`/`codexJudgeSpawn` return.
  *
  * DOES NOT TRANSFORM `shape` — unlike `codexJudgeSpawn`, there is nothing to transform (file header item 3).
  *
@@ -426,9 +511,18 @@ export function antigravityLoadedContextTokens(usage = {}) {
  * @param {(prefix: string) => string} [opts.mkTempDir] - injectable `mkdtempSync`, for tests.
  * @param {(path: string, data: string) => void} [opts.writeFile] - injectable, for tests.
  * @param {(path: string, opts: object) => void} [opts.removeFile] - injectable, for tests.
+ * @param {string} [opts.transcriptDir] - the durable directory {@link persistAntigravityJudgeTranscript}
+ *   writes to; injectable (tests; a caller wanting a different location) but defaults to
+ *   {@link resolveAntigravityJudgeTranscriptDir}'s real, durable default.
+ * @param {Function} [opts.persistTranscript] - injectable for tests; defaults to the real
+ *   {@link persistAntigravityJudgeTranscript}.
  * @returns {Promise<{value: object, sessionId: string, costUsd: number, durationMs: number, wallMs: number,
  *                    numTurns: number, stopReason: string, usage: object, loadedContextTokens: number,
- *                    timedOut: boolean, argv: string[]}>}
+ *                    timedOut: boolean, argv: string[], transcriptFile: string|null}>} `transcriptFile` is the
+ *   durable local path {@link persistAntigravityJudgeTranscript} wrote the raw stream-json JSONL to (or `null`
+ *   if the write itself failed) — never the transcript content, per `we:scripts/operations/run-record.mjs`'s
+ *   telemetry whitelist, which this field (reusing the SAME `transcriptFile` name the Codex sibling seat
+ *   already added there) is designed to pass through unmodified.
  */
 export async function antigravityJudgeSpawn({
   mandate,
@@ -445,6 +539,12 @@ export async function antigravityJudgeSpawn({
   mkTempDir = (prefix) => mkdtempSync(prefix),
   writeFile = writeFileSync,
   removeFile = (p, o) => rmSync(p, o),
+  // THE FIX (mirrors codex-judge-spawn.mjs's own persistence fix, #3383): the raw stream-json JSONL this
+  // function already captures used to be discarded once parsed. `transcriptDir` + `persistTranscript` are
+  // injectable (tests; a caller wanting a different location) but default to the real durable write — see
+  // `persistAntigravityJudgeTranscript`'s own header.
+  transcriptDir = resolveAntigravityJudgeTranscriptDir(env),
+  persistTranscript = persistAntigravityJudgeTranscript,
 } = {}) {
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('antigravity-judge-spawn: `mandate` must be a non-empty string');
@@ -522,13 +622,21 @@ export async function antigravityJudgeSpawn({
 
   const wallMs = Date.now() - startedAt;
 
+  // THE FIX — persist the raw stream-json JSONL BEFORE any parse can throw, keyed by the session id this run
+  // reports (a random fallback id when even that is missing), so the transcript survives regardless of
+  // whether the run went on to succeed, hit the silent-tool-denial failure, a `status: "ERROR"`, or the
+  // timeout wall. Best-effort: `persistTranscript` never throws (see its own header), so a disk-write failure
+  // here can never turn a completed judge call into a failed one.
+  const judgeSessionId = extractAntigravityJudgeSessionId(result.stdout);
+  const transcriptFile = persistTranscript({ stdout: result.stdout, sessionId: judgeSessionId, dir: transcriptDir });
+
   if (result.timedOut) {
     let outcome = null;
     try { outcome = parseAntigravityJudgeOutcome({ stdout: result.stdout, stderr: result.stderr }); } catch { outcome = null; }
     if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout: result.stdout, stderr: result.stderr });
     return {
       ...outcome, durationMs: wallMs, wallMs, timedOut: true,
-      loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv,
+      loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv, transcriptFile,
     };
   }
   const outcome = parseAntigravityJudgeOutcome({
@@ -537,6 +645,6 @@ export async function antigravityJudgeSpawn({
   });
   return {
     ...outcome, durationMs: wallMs, wallMs, timedOut: false,
-    loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv,
+    loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv, transcriptFile,
   };
 }

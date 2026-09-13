@@ -3,6 +3,7 @@ import {
   scoreRecords, scoreCodexTranscriptFile, mapCodexJudgeEventsToRecords,
   readCodexJudgeTranscriptRecords, scoreCodexJudgeTranscriptFile,
   summarizeCodexJsonStreamRecord, scoreCodexJsonStreamStdout,
+  mapAntigravityJudgeEventsToRecords, readAntigravityJudgeTranscriptRecords, scoreAntigravityJudgeTranscriptFile,
 } from '../run-quality-scorer.mjs';
 import { RUBRIC_VERSION, EVALUABLE_CRITERIA } from '../run-quality-rubric.mjs';
 
@@ -331,5 +332,106 @@ describe('scoreCodexJsonStreamStdout (#3383 — scores directly off REAL capture
   it('empty stdout scores null, never 100 — never 100 on an empty read', () => {
     expect(scoreCodexJsonStreamStdout('').score).toBeNull();
     expect(scoreCodexJsonStreamStdout('').criteriaEvaluated).toBe(0);
+  });
+});
+
+describe('mapAntigravityJudgeEventsToRecords — the antigravity-judge-spawn.mjs stream shape (`event`/`step_update`, '
+  + 'a THIRD shape, distinct from both Codex ones)', () => {
+  it('maps a step_update carrying a tool_name into an ordered tool_call + tool_output pair', () => {
+    const events = [
+      { event: 'init', conversation_id: 'conv-1' },
+      {
+        event: 'step_update',
+        step_update: {
+          tool_name: 'run_command', tool_info: { parameters: { command: 'git status --short' }, output: 'clean\n' }, status: 'SUCCESS',
+        },
+      },
+      { event: 'result', result: { conversation_id: 'conv-1', status: 'SUCCESS' } },
+    ];
+    const records = mapAntigravityJudgeEventsToRecords(events);
+    expect(records).toEqual([
+      { kind: 'tool_call', name: 'run_command', input: JSON.stringify({ command: 'git status --short' }) },
+      { kind: 'tool_output', text: 'clean\n', isError: false },
+      { kind: 'turn_complete' },
+    ]);
+  });
+
+  it('flags a TOOL_ERROR status as an error output — the auto-denied-tool shape #3633 probe 7 found', () => {
+    const events = [{
+      event: 'step_update',
+      step_update: { tool_name: 'run_command', tool_info: { parameters: { command: 'git status' }, output: 'permission check failed' }, status: 'TOOL_ERROR' },
+    }];
+    const records = mapAntigravityJudgeEventsToRecords(events);
+    expect(records[1]).toEqual({ kind: 'tool_output', text: 'permission check failed', isError: true });
+  });
+
+  it('every terminal `result` event yields a turn_complete record, regardless of status', () => {
+    expect(mapAntigravityJudgeEventsToRecords([{ event: 'result', result: { status: 'SUCCESS' } }]))
+      .toEqual([{ kind: 'turn_complete' }]);
+    expect(mapAntigravityJudgeEventsToRecords([{ event: 'result', result: { status: 'ERROR', error: 'boom' } }]))
+      .toEqual([{ kind: 'turn_complete' }]);
+  });
+
+  it('skips an `init` event and a `step_update` carrying no tool_name, without throwing', () => {
+    const events = [
+      { event: 'init', conversation_id: 'conv-1' },
+      { event: 'step_update', step_update: { some_other_field: 1 } },
+      { event: 'something.else' },
+    ];
+    expect(mapAntigravityJudgeEventsToRecords(events)).toEqual([]);
+  });
+
+  it('non-array input degrades to an empty list rather than throwing', () => {
+    expect(mapAntigravityJudgeEventsToRecords(null)).toEqual([]);
+    expect(mapAntigravityJudgeEventsToRecords(undefined)).toEqual([]);
+  });
+});
+
+describe('readAntigravityJudgeTranscriptRecords / scoreAntigravityJudgeTranscriptFile — THE FIX, end to end', () => {
+  // A REALISTIC Antigravity judge transcript for the ORDINARY case this genuinely tool-free seat produces:
+  // no tool call was ever unlocked (see antigravity-judge-spawn.mjs's own file header), so the only records
+  // are the init/result bookends — exactly the shape #3649's scorer previously had NOTHING to read at all,
+  // since no transcript was ever persisted for this seat before this fix.
+  const realisticJudgeStream = [
+    JSON.stringify({ event: 'init', conversation_id: 'sess-advisory-1' }),
+    JSON.stringify({ event: 'result', result: { conversation_id: 'sess-advisory-1', status: 'SUCCESS', structured_output: { verdict: 'accept', finding: 'looks fine' }, usage: { input_tokens: 100, output_tokens: 10 } } }),
+  ].join('\n');
+
+  it('readAntigravityJudgeTranscriptRecords parses a file (injected reader) into summarizeRecord-shaped entries', () => {
+    const records = readAntigravityJudgeTranscriptRecords('/fake/path.jsonl', { readFile: () => realisticJudgeStream });
+    expect(records).toEqual([{ kind: 'turn_complete' }]);
+  });
+
+  it('THE FIX: scoreAntigravityJudgeTranscriptFile now produces a REAL score for a tool-free advisory run, never null/0', () => {
+    const out = scoreAntigravityJudgeTranscriptFile('/fake/path.jsonl', { readFile: () => realisticJudgeStream });
+    // Before this fix, this exact class of run (no persisted transcript at all — antigravityJudgeSpawn
+    // discarded its captured stdout once parsed) was correctly but unhelpfully recorded `score: null,
+    // criteriaEvaluated: 0`. With a real transcript file to read, it is neither:
+    expect(out.criteriaEvaluated).toBeGreaterThan(0);
+    expect(out.score).not.toBeNull();
+    expect(out.score).toBe(100); // a clean run — nothing blacklisted, no abandoned test, no redundant reads
+  });
+
+  it('still scores null/0 on a genuinely empty transcript — never fabricates a perfect score either', () => {
+    const out = scoreAntigravityJudgeTranscriptFile('/fake/empty.jsonl', { readFile: () => '' });
+    expect(out.criteriaEvaluated).toBe(0);
+    expect(out.score).toBeNull();
+  });
+
+  it('scores a real deduction when a step_update shows the seat attempting a blacklisted operation (even though '
+    + 'it was auto-denied — the attempt itself is what the hunter names)', () => {
+    const dirtyStream = [
+      JSON.stringify({ event: 'init', conversation_id: 'sess-advisory-2' }),
+      JSON.stringify({
+        event: 'step_update',
+        step_update: {
+          tool_name: 'run_command', tool_info: { parameters: { command: 'git reset --hard origin/main' }, output: 'permission check failed' }, status: 'TOOL_ERROR',
+        },
+      }),
+      JSON.stringify({ event: 'result', result: { conversation_id: 'sess-advisory-2', status: 'SUCCESS', denied_actions: [{ action: 'command' }] } }),
+    ].join('\n');
+    const out = scoreAntigravityJudgeTranscriptFile('/fake/dirty.jsonl', { readFile: () => dirtyStream });
+    expect(out.score).toBeLessThan(100);
+    expect(out.deductions.find((d) => d.criterion === 'blacklisted-operation')).toBeTruthy();
   });
 });

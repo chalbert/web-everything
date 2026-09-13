@@ -357,4 +357,83 @@ export function scoreCodexJsonStreamStdout(stdout, { fieldMax = 400 } = {}) {
   return scoreRecords(lines.map((l) => summarizeCodexJsonStreamRecord(l, fieldMax)));
 }
 
+/**
+ * THE ANTIGRAVITY-JUDGE-SEAT WIRING (#3383's mirror of the Codex fix above, `we:scripts/lib/
+ * antigravity-judge-spawn.mjs`'s `persistAntigravityJudgeTranscript`). `agy`'s own `--output-format
+ * stream-json` STDOUT STREAM is a THIRD shape, different again from both the Codex rollout file and the
+ * Codex judge's own `--json` stream: events key off an `event` field (not `type`), and the two this mapper
+ * reads are the terminal `{"event":"result", result: {...}}` line (proven byte-for-byte — probe 1 and this
+ * repo's own `antigravity-judge-spawn.test.mjs` fixtures both confirm it) and `{"event":"step_update",
+ * step_update: {tool_name, tool_info: {parameters, output}, ...}}` for an attempted tool call.
+ *
+ * NOT A REUSE OF `mapCodexJudgeEventsToRecords` — the two providers' raw stream shapes do not overlap at all
+ * (`type`/`item.completed` vs `event`/`step_update`), so this is a THIRD, separate adapter rather than a
+ * strained fit onto the Codex one.
+ *
+ * THE `step_update.tool_name`/`tool_info.parameters`/`tool_info.output` FIELD NAMES trace to
+ * `backlog/3633-probe-antigravity-cli-against-the-judge-contract.md`'s own prose ("`step_update` events carry
+ * the full tool trace (`tool_name`, `tool_info.parameters`, `tool_info.output`)") — that probe never quoted a
+ * raw `step_update` JSON line verbatim the way it did for `result` (probe 1) and `init` (probe 20), so this
+ * mapper reads those fields TOLERANTLY (a `step_update` missing `tool_name` is skipped, never guessed at
+ * further) rather than asserting a byte-exact shape nothing has proven — mirroring
+ * `mapCodexJudgeEventsToRecords`'s own "skip, don't mis-map" discipline for its `file_change`/unrecognised
+ * case. What IS proven byte-for-byte is the terminal `result` event, and EVERY one of those always yields a
+ * `turn_complete` record — which is what keeps a persisted, genuinely TOOL-FREE run (the ordinary case for
+ * this seat: no tool call was ever unlocked in the first place, see `antigravity-judge-spawn.mjs`'s own file
+ * header) from degrading back to `criteriaEvaluated: 0 / score: null` the way an actually-empty/unreadable
+ * transcript file correctly still does.
+ *
+ * PURE. Never throws on a malformed/unrecognised event.
+ *
+ * @param {object[]} events - `parseJsonlEvents`-shaped entries (this module's own generic JSONL-line split —
+ *   it makes no Codex-specific assumption about the parsed shape, so it is reused here rather than
+ *   re-implemented).
+ * @returns {object[]} `summarizeRecord`-shaped entries `scoreRecords` can consume directly.
+ */
+export function mapAntigravityJudgeEventsToRecords(events) {
+  const out = [];
+  for (const e of (Array.isArray(events) ? events : [])) {
+    if (e?.event === 'result') { out.push({ kind: 'turn_complete' }); continue; }
+    if (e?.event !== 'step_update' || !e.step_update || typeof e.step_update !== 'object') continue;
+    const step = e.step_update;
+    const toolName = typeof step.tool_name === 'string' ? step.tool_name : null;
+    if (!toolName) continue; // no wired hunter reads a step_update carrying no tool name today.
+    const params = step.tool_info?.parameters;
+    out.push({ kind: 'tool_call', name: toolName, input: typeof params === 'string' ? params : JSON.stringify(params ?? {}) });
+    const output = step.tool_info?.output;
+    const status = typeof step.status === 'string' ? step.status : '';
+    out.push({
+      kind: 'tool_output',
+      text: typeof output === 'string' ? output : JSON.stringify(output ?? ''),
+      isError: /ERROR/i.test(status) || Boolean(step.error),
+    });
+  }
+  return out;
+}
+
+/**
+ * THE REAL (non-injected) READER for an Antigravity judge's own persisted transcript — mirrors
+ * `readCodexJudgeTranscriptRecords` exactly: a judge transcript is one bounded schema-constrained call, so the
+ * whole file is read, no bounded-tail guard needed.
+ * @param {string} file
+ * @param {{readFile?: (p:string) => string}} [io]
+ * @returns {object[]} `summarizeRecord`-shaped entries.
+ */
+export function readAntigravityJudgeTranscriptRecords(file, { readFile = (p) => readFileSync(p, 'utf8') } = {}) {
+  return mapAntigravityJudgeEventsToRecords(parseJsonlEvents(readFile(file)));
+}
+
+/**
+ * Score an Antigravity advisory-judge-seat run from its persisted transcript FILE PATH — the #3383 counterpart
+ * to `scoreCodexJudgeTranscriptFile` above, closing the identical gap for this seat: before
+ * `antigravity-judge-spawn.mjs` persisted anything, this seat's runs had no transcript for #3649 to read and
+ * were correctly (but unhelpfully) recorded `score: null, criteriaEvaluated: 0`.
+ * @param {string} file - an `antigravity-judge-spawn.mjs#persistAntigravityJudgeTranscript` path.
+ * @param {{readFile?: (p:string) => string}} [io]
+ * @returns {{rubricVersion: string, criteriaEvaluated: number, deductions: object[], score: number|null}}
+ */
+export function scoreAntigravityJudgeTranscriptFile(file, io = {}) {
+  return scoreRecords(readAntigravityJudgeTranscriptRecords(file, io));
+}
+
 export { RUBRIC_VERSION };
