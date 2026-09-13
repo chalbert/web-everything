@@ -21,9 +21,17 @@
  * are included deliberately: they are context the model was given, and cheapness is not absence. Output
  * tokens are excluded — they are the answer, not the context.
  *
- * WHAT IT CANNOT CONTROL, STATED SO THE NUMBER IS READ HONESTLY. Prompt-cache state (a warm cache moves
- * both wall clock and the cache split), server-side load, model routing, and the repo's size at the commit
- * measured. Wall clock is the NOISIEST figure here and a single pair proves nothing about it — use
+ * READS PER WRITE (#3514). Each arm keeps ONE session id for the whole run, reused by every `--repeat`
+ * iteration, so iteration 2+ presents the same session and prefix as iteration 1 and the warm read is actually
+ * exercised. Every spawn still carries `--no-session-persistence`, so reuse resumes nothing — the juror stays
+ * throwaway; only the cache sees continuity. Per arm the summary then derives, from the same `usage` blocks:
+ *   • reads per write — `Σ cache_read_input_tokens / Σ cache_creation_input_tokens` (null when nothing was written);
+ *   • cache hit rate  — `Σ cache_read_input_tokens / Σ loaded context` (null when nothing was loaded).
+ * With `--repeat=1` there is no second presentation, so a near-zero reads-per-write is the expected cold figure.
+ *
+ * WHAT IT CANNOT CONTROL, STATED SO THE NUMBER IS READ HONESTLY. Prompt-cache state left by OTHER runs (a
+ * cache already warm before iteration 1 moves both wall clock and the cache split), server-side load, model
+ * routing, and the repo's size at the commit measured. Wall clock is the NOISIEST figure here and a single pair proves nothing about it — use
  * `--repeat` and read the median. Loaded context is far more stable, because it is a property of what was
  * assembled rather than of how fast the network was.
  *
@@ -43,6 +51,7 @@ import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { hostname, platform, release } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { buildJudgeArgv, deriveSessionId, parseJudgeOutcome, loadedContextTokens } from './lib/judge-spawn.mjs';
 
 // ── The fixed stimulus. Held constant across both arms and across runs, so the only variable is the flags. ──
@@ -99,21 +108,36 @@ function runOnce(argv, { cwd, cli }) {
 
 // ── Conditions. Printed with every number, because a number without them is what got withdrawn. ────────────
 
-function conditions({ cwd, model, effort, budget, cli, repeat }) {
+/**
+ * One session id per arm, for the whole run — seeded by the run's own timestamp so two runs never share one,
+ * while every iteration inside a run does.
+ */
+export function armSessionIds(stamp) {
+  return { treatment: deriveSessionId(`measure-t-${stamp}`), control: deriveSessionId(`measure-c-${stamp}`) };
+}
+
+export function conditions({ cwd, model, effort, budget, cli, repeat, treatmentOnly = false }, now = new Date()) {
   const safe = (fn, fallback = 'unknown') => { try { return fn(); } catch { return fallback; } };
+  // A probe that fails falls back to 'unknown'; its stderr would only be noise ahead of the block.
+  const quiet = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+  const measuredAtUtc = now.toISOString();
+  const ids = armSessionIds(measuredAtUtc);
   return {
-    measuredAtUtc: new Date().toISOString(),
+    measuredAtUtc,
     cwd,
     cwdHasClaudeMd: existsSync(`${cwd}/CLAUDE.md`),
     cwdHasAgentsMd: existsSync(`${cwd}/AGENTS.md`),
-    gitHead: safe(() => execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()),
-    gitBranch: safe(() => execFileSync('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim()),
+    gitHead: safe(() => execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], quiet).trim()),
+    gitBranch: safe(() => execFileSync('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], quiet).trim()),
     cli,
-    cliVersion: safe(() => execFileSync(cli, ['--version'], { encoding: 'utf8' }).trim()),
+    cliVersion: safe(() => execFileSync(cli, ['--version'], quiet).trim()),
     model,
     effort,
     maxBudgetUsd: budget,
     repeat,
+    sessionReuse: 'one session id per arm, reused by every --repeat iteration (--no-session-persistence)',
+    treatmentSessionId: ids.treatment,
+    controlSessionId: treatmentOnly ? null : ids.control,
     node: process.version,
     os: `${platform()} ${release()}`,
     host: hostname(),
@@ -121,6 +145,38 @@ function conditions({ cwd, model, effort, budget, cli, repeat }) {
     input: INPUT,
     shape: SHAPE,
     loadedContextDefinition: 'input_tokens + cache_creation_input_tokens + cache_read_input_tokens (from the CLI usage block)',
+    readsPerWriteDefinition: 'sum cache_read_input_tokens / sum cache_creation_input_tokens over the arm\'s successful runs',
+    cacheHitRateDefinition: 'sum cache_read_input_tokens / sum loaded context over the arm\'s successful runs',
+  };
+}
+
+/** The cache halves of one `usage` block. A missing or non-numeric field counts as 0, as in `loadedContextTokens`. */
+export function cacheSplit(usage = {}) {
+  const n = (k) => (typeof usage?.[k] === 'number' && Number.isFinite(usage[k]) ? usage[k] : 0);
+  return { read: n('cache_read_input_tokens'), write: n('cache_creation_input_tokens') };
+}
+
+/**
+ * Reads per write and cache hit rate for one arm, summed over its SUCCESSFUL runs (errored and skipped runs
+ * carry no `usage` and would only dilute the ratio). Both ratios are null rather than 0 or Infinity when their
+ * denominator is 0 — "nothing was written" is not "no reads per write".
+ */
+export function cacheSummary(runs = []) {
+  const ok = runs.filter((r) => r && !r.error);
+  let read = 0;
+  let write = 0;
+  let loaded = 0;
+  for (const r of ok) {
+    const c = cacheSplit(r.usage);
+    read += c.read;
+    write += c.write;
+    loaded += loadedContextTokens(r.usage ?? {});
+  }
+  return {
+    cacheReadTokens: read,
+    cacheWriteTokens: write,
+    readsPerWrite: write > 0 ? Number((read / write).toFixed(2)) : null,
+    cacheHitRate: loaded > 0 ? Number((read / loaded).toFixed(3)) : null,
   };
 }
 
@@ -131,46 +187,34 @@ const median = (xs) => {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 };
 
-// ── Main ────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Measure. The loop, separable from argv and stdout so the reuse and the summary are testable. ────────────
 
-async function main() {
-  const arg = (name, fallback) => {
-    const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
-    return hit ? hit.slice(name.length + 3) : fallback;
-  };
-  const has = (name) => process.argv.includes(`--${name}`);
-
-  const cwd = arg('cwd', process.cwd());
-  const model = arg('model', 'haiku');
-  const effort = arg('effort', 'medium');
-  const budget = Number(arg('budget', '0.5'));
-  const cli = arg('cli', 'claude');
-  const repeat = Math.max(1, Number(arg('repeat', '1')));
-  const treatmentOnly = has('treatment-only');
-  const asJson = has('json');
-
-  const cond = conditions({ cwd, model, effort, budget, cli, repeat });
+/**
+ * Runs `repeat` iterations of both arms and summarizes them. `run` is `runOnce` unless a test substitutes it;
+ * `onPair` sees each pair as it lands.
+ */
+export async function measure(opts, { run = runOnce, cond = conditions(opts), onPair = () => {} } = {}) {
+  const { cwd, model, effort, budget, cli, repeat, treatmentOnly } = opts;
   const pairs = [];
 
+  // ONE session id per arm, taken from the conditions block and reused by every iteration (#3514): a fresh id
+  // per iteration never presents the same session twice, so no warm read was ever measured.
+  const tArgv = treatmentArgv({ model, effort, budget, sessionId: cond.treatmentSessionId });
+  const cArgv = treatmentOnly ? null : controlArgv({ model, effort, budget, sessionId: cond.controlSessionId });
+
   for (let i = 0; i < repeat; i += 1) {
-    // A fresh session id per arm per iteration — a juror is throwaway and must not resume anything.
-    const t = await runOnce(treatmentArgv({ model, effort, budget, sessionId: deriveSessionId(`measure-t-${i}-${Date.now()}`) }), { cwd, cli });
-    const c = treatmentOnly
-      ? null
-      : await runOnce(controlArgv({ model, effort, budget, sessionId: deriveSessionId(`measure-c-${i}-${Date.now()}`) }), { cwd, cli });
-    pairs.push({ iteration: i + 1, treatment: t, control: c });
-    if (!asJson) {
-      const fmt = (r) => (r ? (r.error ? `ERROR ${r.error}` : `${r.tokens} tok, ${r.wallMs} ms wall, ${r.apiMs} ms api, $${(r.costUsd ?? 0).toFixed(4)}`) : 'skipped');
-      process.stdout.write(`  run ${i + 1}  treatment: ${fmt(t)}\n`);
-      process.stdout.write(`  run ${i + 1}  control  : ${fmt(c)}\n`);
-    }
+    const t = await run(tArgv, { cwd, cli });
+    const c = cArgv ? await run(cArgv, { cwd, cli }) : null;
+    const pair = { iteration: i + 1, treatment: t, control: c };
+    pairs.push(pair);
+    onPair(pair);
   }
 
   const okT = pairs.map((p) => p.treatment).filter((r) => r && !r.error);
   const okC = pairs.map((p) => p.control).filter((r) => r && !r.error);
   const summary = {
-    treatment: { runs: okT.length, medianTokens: median(okT.map((r) => r.tokens)), medianWallMs: median(okT.map((r) => r.wallMs)) },
-    control: { runs: okC.length, medianTokens: median(okC.map((r) => r.tokens)), medianWallMs: median(okC.map((r) => r.wallMs)) },
+    treatment: { runs: okT.length, medianTokens: median(okT.map((r) => r.tokens)), medianWallMs: median(okT.map((r) => r.wallMs)), ...cacheSummary(okT) },
+    control: { runs: okC.length, medianTokens: median(okC.map((r) => r.tokens)), medianWallMs: median(okC.map((r) => r.wallMs)), ...cacheSummary(okC) },
     totalCostUsd: Number([...okT, ...okC].reduce((a, r) => a + (r.costUsd ?? 0), 0).toFixed(4)),
   };
   if (summary.treatment.medianTokens != null && summary.control.medianTokens) {
@@ -179,25 +223,78 @@ async function main() {
   if (summary.treatment.medianWallMs != null && summary.control.medianWallMs) {
     summary.wallRatio = Number((summary.control.medianWallMs / summary.treatment.medianWallMs).toFixed(2));
   }
+  return { conditions: cond, pairs, summary };
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const fmtRatio = (v, pct = false) => (v == null ? 'n/a' : pct ? `${(v * 100).toFixed(1)}%` : `${v}`);
+
+async function main() {
+  const arg = (name, fallback) => {
+    const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+    return hit ? hit.slice(name.length + 3) : fallback;
+  };
+  const has = (name) => process.argv.includes(`--${name}`);
+
+  const opts = {
+    cwd: arg('cwd', process.cwd()),
+    model: arg('model', 'haiku'),
+    effort: arg('effort', 'medium'),
+    budget: Number(arg('budget', '0.5')),
+    cli: arg('cli', 'claude'),
+    repeat: Math.max(1, Number(arg('repeat', '1'))),
+    treatmentOnly: has('treatment-only'),
+  };
+  const asJson = has('json');
+  const out = (line) => process.stdout.write(line);
+
+  const cond = conditions(opts);
+
+  // The conditions block prints FIRST, so not even a per-run line reaches the reader ahead of the block that
+  // produced it — a run that dies halfway still leaves its figures stamped.
+  if (!asJson) {
+    out('── conditions ──────────────────────────────────────────────\n');
+    for (const [k, v] of Object.entries(cond)) {
+      if (k === 'shape') continue;
+      out(`  ${k.padEnd(26)} ${typeof v === 'string' ? v : JSON.stringify(v)}\n`);
+    }
+    out('\n── runs ────────────────────────────────────────────────────\n');
+  }
+
+  const fmt = (r) => {
+    if (!r) return 'skipped';
+    if (r.error) return `ERROR ${r.error}`;
+    const c = cacheSplit(r.usage);
+    return `${r.tokens} tok (cache read ${c.read}, write ${c.write}), ${r.wallMs} ms wall, ${r.apiMs} ms api, $${(r.costUsd ?? 0).toFixed(4)}`;
+  };
+  const onPair = asJson ? undefined : (p) => {
+    out(`  run ${p.iteration}  treatment: ${fmt(p.treatment)}\n`);
+    out(`  run ${p.iteration}  control  : ${fmt(p.control)}\n`);
+  };
+
+  const { pairs, summary } = await measure(opts, { cond, onPair });
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify({ conditions: cond, pairs, summary }, null, 2)}\n`);
+    out(`${JSON.stringify({ conditions: cond, pairs, summary }, null, 2)}\n`);
     return;
   }
 
-  process.stdout.write('\n── conditions ──────────────────────────────────────────────\n');
-  for (const [k, v] of Object.entries(cond)) {
-    if (k === 'shape') continue;
-    process.stdout.write(`  ${k.padEnd(26)} ${typeof v === 'string' ? v : JSON.stringify(v)}\n`);
+  out('\n── result (medians) ────────────────────────────────────────\n');
+  out(`  treatment (--safe-mode --tools "")   ${summary.treatment.medianTokens} tok   ${summary.treatment.medianWallMs} ms\n`);
+  out(`  control   (neither flag)             ${summary.control.medianTokens} tok   ${summary.control.medianWallMs} ms\n`);
+  if (summary.contextRatio) out(`  context ratio  control / treatment = ${summary.contextRatio}x\n`);
+  if (summary.wallRatio) out(`  wall ratio     control / treatment = ${summary.wallRatio}x\n`);
+  out('\n── cache (summed over successful runs, one session id per arm) ─\n');
+  for (const [label, arm] of [['treatment', summary.treatment], ['control  ', summary.control]]) {
+    if (!arm.runs) { out(`  ${label}  no successful runs\n`); continue; }
+    out(`  ${label}  reads per write ${fmtRatio(arm.readsPerWrite)}   hit rate ${fmtRatio(arm.cacheHitRate, true)}   (read ${arm.cacheReadTokens}, write ${arm.cacheWriteTokens})\n`);
   }
-  process.stdout.write('\n── result (medians) ────────────────────────────────────────\n');
-  process.stdout.write(`  treatment (--safe-mode --tools "")   ${summary.treatment.medianTokens} tok   ${summary.treatment.medianWallMs} ms\n`);
-  process.stdout.write(`  control   (neither flag)             ${summary.control.medianTokens} tok   ${summary.control.medianWallMs} ms\n`);
-  if (summary.contextRatio) process.stdout.write(`  context ratio  control / treatment = ${summary.contextRatio}x\n`);
-  if (summary.wallRatio) process.stdout.write(`  wall ratio     control / treatment = ${summary.wallRatio}x\n`);
-  process.stdout.write(`  spent on this measurement            $${summary.totalCostUsd}\n`);
-  process.stdout.write('\n  These numbers are valid ONLY with the conditions block above. #3028: a figure quoted\n');
-  process.stdout.write('  without its conditions is what got withdrawn twice. Re-run rather than re-cite.\n');
+  out(`  spent on this measurement            $${summary.totalCostUsd}\n`);
+  out('\n  These numbers are valid ONLY with the conditions block above. #3028: a figure quoted\n');
+  out('  without its conditions is what got withdrawn twice. Re-run rather than re-cite.\n');
 }
 
-main().catch((e) => { process.stderr.write(`${e.stack}\n`); process.exitCode = 1; });
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((e) => { process.stderr.write(`${e.stack}\n`); process.exitCode = 1; });
+}
