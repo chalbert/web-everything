@@ -2113,3 +2113,62 @@ population exists is the one that un-parks it.
 `#3649` itself builds none of the five pieces its ruling names (reader-widening on `#3477`, the rubric, the
 scorecard store, the subject-class stamp, the router) — those are still unfiled follow-on work, distinct from
 the `3651` arm-trigger card above.
+
+## Operator goal, recorded for the record (2026-09-13): point our own interactive build skills at the driver once it's trustworthy
+
+**This is a stated target the operator wants, not a "could do someday" idea — treat it as real backlog intent
+to revisit as the blockers below clear, not something a future session should second-guess away.** The
+operator's own words: "As soon as the driver is ready, I want our skills to point to it for building." Once
+this epic's mechanical dispatcher/driver is validated and trustworthy enough — **quality-proven on real work,
+not just mechanically working** — the repo's own interactive dev workflows under `we:skills-src/` (the skills
+that currently handle building/delivering a backlog item by driving an interactive session —
+`next-backlog-item`, `batch-backlog-items`, `workflow`, and anything else that dispatches build work today)
+should be changed to route their build path through the driver, rather than the driver staying purely a
+separate background/parallel system while the interactive skills keep doing their own thing. This is the
+natural endpoint of this whole epic's target shape (see "The target shape" section above) applied to the
+repo's own tooling, not a new idea.
+
+**Why this isn't done yet — the blockers as of today (2026-09-13):**
+
+1. **The driver has been exercised exactly once in a bounded, supervised test run**, against item `#3604` —
+   it correctly reported the item `"blocked"`, and this was the first time the new unified delivery telemetry
+   (`fe2d96ac6`, "traces, spans and the four golden signals" — see the session update above) was proven live
+   end-to-end rather than only unit-tested. One correct outcome on one item is evidence the mechanism can work,
+   not evidence it reliably does — nowhere near enough real-work volume to trust it as the default build path
+   for the skills operators actually use day to day.
+2. **Codex delivery-provider quality is still completely unvalidated on real work.** `CODEX_PROVIDER` (the
+   write-capable second delivery agent, `e53073fef`, "WE #3580") is technically real and wired, opt-in via
+   `--provider=`/`DELIVERY_AGENT_PROVIDER`, Claude staying the default. But the sibling validation thread in
+   this same file (the "Codex reviewer-seat validation concluded, judgment gap found" follow-up above) found
+   the mechanism clean while the JUDGMENT was not: 4 of 4 real live-fire runs came back with zero findings,
+   including one confirmed miss on a genuine blocker a Claude juror caught in the same diff. That was the
+   reviewer seat specifically, not the delivery-agent build seat, but it is the closest real evidence this repo
+   has on Codex's judgment quality on real diffs, and it is not reassuring. Nothing here should be read as
+   routing default build work through Codex, or through any driver path that leans on Codex judgment, until a
+   comparable live-fire validation exists for the DELIVERY side, not just the reviewer side.
+3. **Provider-selection wiring for `fix`/`ci-heal` kinds — checked directly at the time of this entry, and it
+   is done, on the branch, not yet on `main`.** As of this session's check, `origin/lane/mechanical-dispatcher`
+   already has: `WE #3640` (`20129c38e`, wires `fix` dispatch to
+   `we:scripts/operations/fix-dispatch-wrapper.mjs`'s mechanical arc), `WE #3642` (`00e81eacb`, wires `ci-heal`
+   dispatch to `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`'s mechanical arc), and `161f1bd4d` ("thread
+   the selected delivery provider into the converge round") — which fixed a real gap where
+   `we:scripts/operations/deliver-item-wrapper.mjs`, `we:scripts/operations/fix-dispatch-wrapper.mjs`, and
+   `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` all resolved a provider for the build spawn but never
+   passed it to the converge round, so a Codex-selected build's converge silently ran under Claude with no
+   record of the hand-off. All three commits are dated 2026-09-12 18:22 through 2026-09-13 07:40 (local),
+   pushed to the branch, not yet graduated to `main` per this epic's own "prove on the branch, graduate later"
+   build strategy (see "How to build it" above). So this specific blocker is functionally cleared at the
+   mechanism level — what remains is everything else on this list, especially live-fire proof and a rollout
+   policy, before any of it is trusted to replace an interactive skill's default path.
+4. **No risk/rollout policy exists yet for when the driver should be trusted to run unattended long enough to
+   actually replace interactive workflows.** Nothing in this epic currently states a bar — how many real items,
+   what mix of kinds, what failure rate, what escalation behavior — that would justify flipping a skill's
+   default build path from "drive it yourself, interactively" to "hand it to the driver." Until that bar is
+   named and met, pointing the skills at the driver is a goal to work toward, not a change to make.
+
+**What "done" looks like for this goal, so a future session recognizes it**: the driver has cleared a stated
+rollout bar (once one exists — see blocker 4) on real work across the kinds it needs to cover, and
+`we:skills-src/next-backlog-item`, `we:skills-src/batch-backlog-items`, `we:skills-src/workflow` (and any
+sibling interactive delivery skill) have been changed so their build step calls into the driver instead of
+driving an interactive session's own tool calls turn by turn — at which point the driver stops being a
+separate parallel system and becomes THE way this repo builds.
