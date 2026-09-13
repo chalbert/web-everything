@@ -32,6 +32,8 @@ import { validateRequest, APPLIABLE_TARGETS } from '../../apply-review-request.m
 // seat at all, so it pins the env explicitly to keep both halves in agreement regardless of the registry's
 // live contents (today or after a future probation/graduation change).
 process.env.REVIEW_PR_CODEX_ADVISORY = '0';
+// #x8n4crp — the fourth seat's own env var needs the identical pin, for the identical reason.
+process.env.REVIEW_PR_CODEX_CORRECTNESS_ADVISORY = '0';
 
 const BASE_INPUT = { pr: 4242, repo: 'chalbert/web-everything' };
 const CLEAN_ANSWER = { summary: 'nothing blocking', findings: [] };

@@ -2684,6 +2684,19 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
       const floor = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT] });
       expect(floor.mandatorySeated).not.toContain(ADVISORY_JUDGE_LENS);
     });
+
+    // #x8n4crp's fourth seat gets its probation default from the SAME wiring (`correctnessAdvisoryFromEnv`
+    // now mirrors `codexAdvisoryFromEnv`'s default exactly) — the identical structural guarantee applies,
+    // proven the same way plus its own stronger isolation (CORRECTNESS_ADVISORY_LENS is outside
+    // ADVISORY_LENSES/PANEL_LENSES entirely, not just outside MANDATORY_LENSES — see that seat's own
+    // "core safety property" describe block above).
+    it('seating BOTH probation-defaulted seats at once still never changes seatsFloor', () => {
+      const withoutEither = decideLensFloor({ lens: 'simplicity' });
+      const withBoth = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT, CORRECTNESS_ADVISORY_SEAT] });
+      expect(withBoth.seatsFloor).toBe(withoutEither.seatsFloor);
+      expect(withBoth.mandatorySeated).toEqual(withoutEither.mandatorySeated);
+      expect(withBoth.mandatorySeated).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
   });
 
   describe('buildReviewAdvisoryJudgeRequest', () => {
@@ -2803,21 +2816,33 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
 // ── #x8n4crp — THE OPT-IN FOURTH SEAT: A CORRECTNESS-FLAVOURED CODEX JUROR, DISTINCT FROM MANDATORY_LENSES ────
 describe('#x8n4crp — the opt-in Codex correctness-advisory seat (judgeCorrectnessAdvisory)', () => {
   describe('correctnessAdvisoryFromEnv', () => {
-    it('is false when the env var is unset, or set to anything other than the literal string "1"', () => {
-      expect(correctnessAdvisoryFromEnv({})).toBe(false);
-      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: 'true' })).toBe(false);
-      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '0' })).toBe(false);
-      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '' })).toBe(false);
+    it('is false for any EXPLICITLY SET env value other than the literal string "1" — never depends on probation once the caller has opted out on purpose', () => {
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: 'true' }, { isOnProbation: () => true })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '0' }, { isOnProbation: () => true })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '' }, { isOnProbation: () => true })).toBe(false);
     });
 
-    it('is true only for the exact literal "1"', () => {
-      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' })).toBe(true);
+    it('is true for the exact literal "1", regardless of probation status', () => {
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(true);
+    });
+
+    // #3383 — the probation default, mirroring codexAdvisoryFromEnv's own.
+    it('when the env var is UNSET, defaults to the injected probation check', () => {
+      expect(correctnessAdvisoryFromEnv({}, { isOnProbation: () => true })).toBe(true);
+      expect(correctnessAdvisoryFromEnv({}, { isOnProbation: () => false })).toBe(false);
+    });
+
+    it('when the env var is UNSET and no override is injected, calls the REAL default probation check', () => {
+      expect(correctnessAdvisoryFromEnv({})).toBe(defaultCodexAdvisoryProbationCheck());
     });
 
     it('is a SEPARATE env var from the third seat\'s own — flipping one does not seat the other', () => {
       expect(CORRECTNESS_ADVISORY_ENV_VAR).not.toBe(CODEX_ADVISORY_ENV_VAR);
-      expect(codexAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' })).toBe(false);
-      expect(correctnessAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' })).toBe(false);
+      // #3383 — the OTHER seat's own env var is still unset in each call below, so each falls through to
+      // its own probation default; pin it false to isolate the property this test actually asserts (env
+      // independence), not today's live probation status.
+      expect(codexAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
     });
   });
 

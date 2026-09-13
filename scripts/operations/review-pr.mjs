@@ -436,13 +436,23 @@ export const CORRECTNESS_ADVISORY_SEAT = Object.freeze({ step: 'judgeCorrectness
 export const CORRECTNESS_ADVISORY_ENV_VAR = 'REVIEW_PR_CODEX_CORRECTNESS_ADVISORY';
 
 /**
- * #x8n4crp — READS {@link CORRECTNESS_ADVISORY_ENV_VAR}. Mirrors `codexAdvisoryFromEnv` exactly (only the
- * literal `'1'` seats it; anything else, including `'true'`, does not).
+ * #x8n4crp — READS {@link CORRECTNESS_ADVISORY_ENV_VAR}. Mirrors `codexAdvisoryFromEnv` exactly, INCLUDING
+ * its #3383 probation default: an explicit `'1'` seats it, an explicit non-`'1'` value (including `'true'`)
+ * never seats it, and — new here — an UNSET env var now falls through to the LIVE `{provider:'codex',
+ * model:CODEX_MODEL}` probation status for the `'advisory-review'` role, exactly like the third seat. This
+ * is in fact the seat the operator's probation ruling is MOST about: it is the correctness-lensed seat this
+ * session's real validation showed catches genuine bugs, and probation exists specifically to accumulate
+ * real performance data on it without ever letting it gate. Structurally non-blocking regardless of this
+ * default, for the same reason as the third seat: `CORRECTNESS_ADVISORY_LENS` is deliberately never added to
+ * `MANDATORY_LENSES`/`PANEL_LENSES`, and `reviewPrOperation`'s own registration-time check refuses outright
+ * if it ever collided with `MANDATORY_LENSES` — see this constant's own docblock.
  * @param {object} [env]
+ * @param {{isOnProbation?: Function}} [deps] - injectable, mirroring `codexAdvisoryFromEnv`'s own seam.
  * @returns {boolean}
  */
-export function correctnessAdvisoryFromEnv(env = process.env) {
-  return env?.[CORRECTNESS_ADVISORY_ENV_VAR] === '1';
+export function correctnessAdvisoryFromEnv(env = process.env, { isOnProbation = defaultCodexAdvisoryProbationCheck } = {}) {
+  if (env && Object.hasOwn(env, CORRECTNESS_ADVISORY_ENV_VAR)) return env[CORRECTNESS_ADVISORY_ENV_VAR] === '1';
+  return isOnProbation();
 }
 
 /**
