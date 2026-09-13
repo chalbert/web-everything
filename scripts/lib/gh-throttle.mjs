@@ -79,6 +79,54 @@
  * `--body-file`/`--*-file` flag instead, the same reason `we:scripts/lib/review-label-provider.mjs` posts
  * comments via a temp file rather than piped stdin) will NOT see the same stdin bytes on a second attempt. This
  * mirrors an inherent limit of retrying any subprocess call with piped input; it is not special to this module.
+ *
+ * ================================================================================================
+ * SELF-CALIBRATION AGAINST GitHub'S REAL LIVE RATE-LIMIT SIGNALS (epic #3383's git-manager vision, first real
+ * slice — the guessed exponential backoff above was the whole story until now; a `gh pr create` that failed
+ * TWICE in one day with no automatic retry at all is what motivated closing that gap).
+ *
+ * THREE signals exist, and they are NEVER conflated — doing so would misclassify the exact failure that hit us:
+ *   1. PRIMARY limit (REST) — `x-ratelimit-remaining` / `x-ratelimit-reset` RESPONSE HEADERS on every REST call.
+ *      `remaining: 0` means THIS quota (core/graphql/search/…) is exhausted until `reset` (a UNIX-epoch-seconds
+ *      seconds timestamp).
+ *   2. PRIMARY limit (GraphQL) — the SAME numbers, but IN-BAND: a `rateLimit { limit cost remaining resetAt }`
+ *      field in the response BODY, present ONLY when the query itself asks for it (GitHub never attaches it
+ *      unrequested). {@link parseGraphQLRateLimit} reads it for a future caller that does; none of this pass's
+ *      wired call sites query for it (`gh pr create` is REST).
+ *   3. SECONDARY (abuse/burst) limit — the ~100-concurrent / 900-REST-points-per-minute ceiling this module's
+ *      concurrency cap already exists to avoid (see above), and the one that actually hit us twice. GitHub's own
+ *      docs are explicit that this is a DIFFERENT mechanism from the primary quota — it is NEVER reported by
+ *      `x-ratelimit-*`, and is knowable only REACTIVELY, from a `Retry-After` header on the 403/429 response that
+ *      triggered it. {@link classifyRateLimitSignal} checks for `retry-after` FIRST and treats its presence as
+ *      secondary UNCONDITIONALLY, so a response that carried both header families would still resolve to the one
+ *      that actually told us how long to wait — the conflation risk named up front, closed by construction
+ *      rather than by convention.
+ *
+ * HOW THE SIGNAL REACHES US AT ALL. `gh` is a subprocess we shell out to — this module never makes the HTTP call
+ * itself — so the only way to see its real response headers is `GH_DEBUG=api`, which makes `gh` print a full
+ * request/response trace to STDERR (empirically confirmed, 2026-09: a successful call's STDOUT is byte-for-byte
+ * untouched, so this is invisible to the common case; only a FAILURE's `stderr` gains the extra trace text, and
+ * the Authorization header is redacted by `gh` itself before it ever reaches this trace). {@link
+ * parseGhDebugResponseHeaders} parses that trace's response-header block back into a plain header map.
+ *
+ * THIS IS WHY HEADER CALIBRATION IS OPT-IN PER CALL (`opts.throttle.calibrateHeaders`), NEVER THE DEFAULT.
+ * `runGhSync`'s existing contract — proven for real against the live `gh` binary in
+ * `gh-throttle.fidelity.test.mjs` — is that a THROWN error's `.stderr` is byte-identical to a raw `execFileSync`
+ * throw. Turning `GH_DEBUG` on unconditionally would break that promise for every one of this wrapper's current
+ * adopters (`review-label-provider.mjs`, `ci-queue-watch.mjs`, `runner.mjs`), none of which asked for it. Only
+ * the ONE call site this pass wires in — `forge-land-provider.mjs#createGhLandProvider`'s `create()`, i.e. the
+ * exact `gh pr create` that failed twice today — opts in. Every other call through this module keeps its
+ * existing GUESSED backoff ({@link retryBackoffMs}) exactly as before: {@link calibratedBackoffMs} falls back to
+ * it whenever no real header was available, which is automatically true whenever `calibrateHeaders` is off (no
+ * `GH_DEBUG` trace exists to parse), so the fallback path is not a separate case to keep in sync — it IS the
+ * pre-existing behavior, reached the same way it always was.
+ *
+ * TELEMETRY (the recorded vision's own "must include telemetry" requirement) — every classified rate-limit hit
+ * records `gh.throttle.rate_limited` (+ `gh.throttle.backoff_ms` on a retry, `gh.throttle.exhausted` on a final
+ * give-up) via `operations/telemetry-store.mjs`'s existing recorder, tagged with WHICH signal source calibrated
+ * the wait — so a later capacity read can tell "we backed off using GitHub's own told wait" from "we were still
+ * guessing," across every adopter of this module, not just the one call site with headers turned on.
+ * ================================================================================================
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -92,6 +140,8 @@ import { defaultPoolRoot } from './lane-pool-paths.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import { classifyPrOpenFailure } from '../conveyor/infra-blocked.mjs';
 import { writeAllSync } from './write-all-sync.mjs';
+import { retryAfterMs } from '../readiness/model-proposer.mjs';
+import { createTelemetryRecorder } from '../operations/telemetry-store.mjs';
 
 // ── TUNING (env-overridable, mirroring heavy-admission.mjs's own resolve*() convention) ────────────────────
 
@@ -183,6 +233,125 @@ export function retryBackoffMs(attempt, { baseMs = DEFAULT_RETRY_BASE_MS, factor
   return Math.min(capMs, Math.round(raw));
 }
 
+// ── self-calibration against GitHub's REAL rate-limit signals (see the module header) ──────────────────────
+
+/** Ceiling on a HEADER-DERIVED wait (a real `Retry-After` or a primary-limit reset) — GitHub can legitimately
+ *  ask for a wait longer than the GUESSED backoff's own cap (a primary quota's reset can be most of an hour
+ *  away), but a malformed or bogus header must never stall a caller indefinitely. Overridable via
+ *  `WE_GH_THROTTLE_HEADER_WAIT_CAP_MS`. */
+export const DEFAULT_HEADER_WAIT_CAP_MS = 10 * 60_000;
+
+export function resolveHeaderWaitCapMs(env = process.env) {
+  const n = Number(env.WE_GH_THROTTLE_HEADER_WAIT_CAP_MS);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_HEADER_WAIT_CAP_MS;
+}
+
+/**
+ * Parse `GH_DEBUG=api`'s response-header trace lines (`< Header-Name: value`) out of a `gh` invocation's
+ * stderr — the ONLY way to see GitHub's real rate-limit headers when shelling `gh` as a subprocess (see the
+ * module header). Takes the LAST `< HTTP/… <status>` block in the text (`gh` can retry internally before the
+ * failure it finally surfaces to us, so an earlier block's headers would not describe the actual error), and
+ * reads header lines until the block ends (the first line that does not start with `<` — the blank separator
+ * before the response body). Pure — text in, a lowercased header map out; `{}` on no match. Never throws.
+ * @param {string|null|undefined} text
+ * @returns {Record<string,string>}
+ */
+export function parseGhDebugResponseHeaders(text) {
+  const lines = String(text ?? '').split('\n');
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^<\s*HTTP\/\S+\s+\d+/.test(lines[i])) start = i; // keep updating — the LAST response block wins
+  }
+  if (start === -1) return {};
+  const headers = {};
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.startsWith('<')) break; // block ends at the blank line separating headers from the body
+    const m = line.match(/^<\s*([A-Za-z0-9-]+):\s*(.*)$/);
+    if (m) headers[m[1].toLowerCase()] = m[2].trim();
+  }
+  return headers;
+}
+
+/**
+ * Extract a GraphQL response body's IN-BAND `rateLimit` field — GitHub attaches it only when the query itself
+ * requests one (`rateLimit { limit cost remaining resetAt }` or similar), never automatically, unlike the REST
+ * headers {@link parseGhDebugResponseHeaders} reads. None of this pass's wired call sites query for it (`gh pr
+ * create` is REST) — this exists so a future GraphQL-based caller has ONE shared parse to reuse rather than
+ * re-deriving its own. Pure. Returns null on anything unparseable/absent.
+ * @param {string|object|null|undefined} body  a parsed JSON object, or its raw text
+ * @returns {{limit:(number|null), remaining:number, resetEpochSec:(number|null), cost:(number|null)}|null}
+ */
+export function parseGraphQLRateLimit(body) {
+  try {
+    const obj = typeof body === 'string' ? JSON.parse(body) : body;
+    const rl = obj?.data?.rateLimit;
+    if (!rl || typeof rl.remaining !== 'number') return null;
+    const resetEpochSec = rl.resetAt ? Math.floor(Date.parse(rl.resetAt) / 1000) : null;
+    return { limit: rl.limit ?? null, remaining: rl.remaining, resetEpochSec, cost: rl.cost ?? null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Classify a header map (from {@link parseGhDebugResponseHeaders}, or hand-built by a test/caller) into which
+ * of the two DISTINCT rate-limit mechanisms it evidences — never both, never conflated (see the module
+ * header). `retry-after` is checked FIRST and is UNCONDITIONALLY secondary: GitHub only ever sends that header
+ * on the abuse/burst-limit response, never on an ordinary 200 with headroom to spare. Pure.
+ * @param {Record<string,string>} headers
+ * @returns {{kind:('secondary'|'primary'|'none'), retryAfterRaw?:string, remaining?:number, resetEpochSec?:number}}
+ */
+export function classifyRateLimitSignal(headers) {
+  const h = headers || {};
+  if (h['retry-after'] != null) return { kind: 'secondary', retryAfterRaw: h['retry-after'] };
+  const remaining = h['x-ratelimit-remaining'] != null ? Number(h['x-ratelimit-remaining']) : null;
+  const resetEpochSec = h['x-ratelimit-reset'] != null ? Number(h['x-ratelimit-reset']) : null;
+  if (remaining === 0 && Number.isFinite(resetEpochSec)) return { kind: 'primary', remaining, resetEpochSec };
+  return { kind: 'none' };
+}
+
+/**
+ * The self-calibrated wait before the next retry — GitHub's OWN told wait when a real signal is available,
+ * falling back to the existing GUESSED exponential backoff ({@link retryBackoffMs}) only when it is not (no
+ * header calibration for this call, or a trace that carried neither signal). NEVER re-derives the primary/
+ * secondary distinction itself — it branches on {@link classifyRateLimitSignal}'s verdict alone, so this
+ * function and that one can never disagree about which failure is which. Pure.
+ * @param {{headers?:object, attempt:number, tuning?:object, nowMs?:number, headerCapMs?:number}} o
+ * @returns {{ms:number, source:('secondary-retry-after'|'primary-reset'|'guessed-backoff')}}
+ */
+export function calibratedBackoffMs({ headers = {}, attempt, tuning = {}, nowMs = Date.now(), headerCapMs = DEFAULT_HEADER_WAIT_CAP_MS } = {}) {
+  const signal = classifyRateLimitSignal(headers);
+  if (signal.kind === 'secondary') {
+    const ms = retryAfterMs(signal.retryAfterRaw, nowMs); // reused from model-proposer.mjs — not re-derived
+    if (ms != null) return { ms: Math.min(ms, headerCapMs), source: 'secondary-retry-after' };
+  }
+  if (signal.kind === 'primary') {
+    const ms = Math.max(0, signal.resetEpochSec * 1000 - nowMs);
+    return { ms: Math.min(ms, headerCapMs), source: 'primary-reset' };
+  }
+  return { ms: retryBackoffMs(attempt, tuning), source: 'guessed-backoff' };
+}
+
+/**
+ * Best-effort telemetry for a rate-limit hit/backoff (epic #3383's "must include telemetry" ask) — reuses
+ * `operations/telemetry-store.mjs`'s existing recorder rather than inventing a second store. NEVER throws
+ * past this call (the recorder's own purity discipline already guarantees this; the try/catch here is cheap,
+ * redundant insurance against a future change to that contract) — a telemetry hiccup must never turn a
+ * successful retry loop into a broken one.
+ * @param {string} name  one of `gh.throttle.rate_limited` | `gh.throttle.backoff_ms` | `gh.throttle.exhausted`
+ * @param {number} value
+ * @param {{op?:string, attempt?:number, source?:string, outcome?:string, unit?:string}} [o]
+ */
+function recordGhThrottleMetric(name, value, { op, attempt, source, outcome, unit = 'count' } = {}) {
+  try {
+    const tel = createTelemetryRecorder({ kind: 'gh-throttle' });
+    tel.recordMetric(name, value, { unit, attributes: { op: op || 'unknown', attempt, source, ...(outcome ? { outcome } : {}) } });
+  } catch {
+    /* best-effort — see docblock */
+  }
+}
+
 // ── the concurrency semaphore — thin orchestration over heavy-admission.mjs's own primitives ────────────────
 
 /**
@@ -268,6 +437,13 @@ export function runGhSync(args, opts = {}) {
   const pid = throttle.pid || process.pid;
   const owner = throttle.owner || `${pid}:${randomUUID()}`;
   const exec = throttle.exec || ((a, o) => execFileSync('gh', a, o));
+  // Header self-calibration is OPT-IN per call (see the module header) — OFF unless a caller explicitly asks,
+  // so every existing adopter's byte-identical-stderr contract (proven in gh-throttle.fidelity.test.mjs) is
+  // unaffected by default. `opLabel` is the low-cardinality telemetry tag; a caller may override it
+  // (`throttle.op`), else it derives from the gh subcommand itself (e.g. "pr create", "pr view").
+  const calibrateHeaders = !!throttle.calibrateHeaders;
+  const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
+  const opLabel = throttle.op || (Array.isArray(args) ? args.slice(0, 2).join(' ') : 'unknown');
 
   mkdirSync(lockRoot, { recursive: true });
 
@@ -281,7 +457,12 @@ export function runGhSync(args, opts = {}) {
     let result;
     let failure = null;
     try {
-      result = exec(args, execOpts);
+      // `GH_DEBUG=api` is added ONLY when this call opted into header calibration, and ONLY if the caller
+      // did not already ask for a specific debug mode of its own — never silently overridden. It changes
+      // nothing about a SUCCESSFUL call (stdout is untouched; execFileSync discards stderr on success either
+      // way — see the module header), so this stays inert for the common case even when calibration is on.
+      const callExecOpts = calibrateHeaders ? withDebugEnv(execOpts) : execOpts;
+      result = exec(args, callExecOpts);
     } catch (e) {
       failure = e;
     } finally {
@@ -290,13 +471,35 @@ export function runGhSync(args, opts = {}) {
     if (!failure) return result;
 
     const text = `${failure && failure.stderr ? String(failure.stderr) : ''}\n${failure && failure.message ? String(failure.message) : ''}`;
-    const retryable = attempt < maxAttempts && isRateLimitShaped(text);
-    if (!retryable) throw failure;
+    if (!isRateLimitShaped(text)) throw failure;
+
+    // A REAL signal (only ever present when `calibrateHeaders` put a `GH_DEBUG` trace into this failure's
+    // stderr) beats the guessed backoff — see `calibratedBackoffMs`'s own docblock for the fallback contract.
+    const headers = parseGhDebugResponseHeaders(failure && failure.stderr);
+
+    if (attempt >= maxAttempts) {
+      recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
+      recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
+      throw failure;
+    }
+
+    const backoff = calibratedBackoffMs({ headers, attempt, tuning: retryTuning, nowMs: now(), headerCapMs });
+    recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: backoff.source, outcome: 'retry' });
+    recordGhThrottleMetric('gh.throttle.backoff_ms', backoff.ms, { op: opLabel, attempt, source: backoff.source, unit: 'ms' });
 
     // Sleep OUTSIDE the held slot — a multi-second backoff must not idle a scarce concurrency slot other
     // pending `gh` calls could use in the meantime.
-    sleep(retryBackoffMs(attempt, retryTuning));
+    sleep(backoff.ms);
   }
+}
+
+/** Merge `GH_DEBUG=api` into an `execFileSync` opts bag, UNLESS the caller already set its own `GH_DEBUG` (an
+ *  explicit caller choice always wins — this never overrides one). Used only when a call opted into header
+ *  calibration (`throttle.calibrateHeaders`); see the module header for why this is never the default. */
+function withDebugEnv(execOpts) {
+  const baseEnv = execOpts.env || process.env;
+  if (baseEnv.GH_DEBUG) return execOpts;
+  return { ...execOpts, env: { ...baseEnv, GH_DEBUG: 'api' } };
 }
 
 /**
@@ -339,6 +542,8 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } =
   const now = throttle.now || (() => Date.now());
   const pid = throttle.pid || process.pid;
   const owner = throttle.owner || `${pid}:${randomUUID()}`;
+  const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
+  const opLabel = throttle.op || (Array.isArray(argv) ? argv.slice(0, 2).join(' ') : 'unknown');
 
   mkdirSync(lockRoot, { recursive: true });
 
@@ -348,6 +553,11 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } =
     const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
     let r;
     try {
+      // This front door NEVER adds `GH_DEBUG` itself (unlike `runGhSync`'s opt-in) — its documented contract
+      // is full-process byte-for-byte transparency, and turning debug tracing on would leak into a caller's
+      // own relayed stderr. It still reads real headers OPPORTUNISTICALLY (below) when an operator's own
+      // ambient `GH_DEBUG=api` happens to be set — `spawn` inherits `process.env` unless overridden, so
+      // nothing here suppresses that; it is simply never the one turning it on.
       r = spawn('gh', argv, { stdio: ['inherit', 'pipe', 'pipe'] });
     } finally {
       if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
@@ -355,9 +565,19 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } =
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
     const stderrText = r.stderr ? r.stderr.toString('utf8') : '';
     const failed = typeof r.status === 'number' && r.status !== 0;
-    const retryable = failed && attempt < maxAttempts && isRateLimitShaped(stderrText);
-    if (!retryable) return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
-    sleep(retryBackoffMs(attempt, retryTuning));
+    if (!failed || !isRateLimitShaped(stderrText)) {
+      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+    }
+    const headers = parseGhDebugResponseHeaders(stderrText); // usually {} here — see the comment above
+    if (attempt >= maxAttempts) {
+      recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
+      recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
+      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+    }
+    const backoff = calibratedBackoffMs({ headers, attempt, tuning: retryTuning, nowMs: now(), headerCapMs });
+    recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: backoff.source, outcome: 'retry' });
+    recordGhThrottleMetric('gh.throttle.backoff_ms', backoff.ms, { op: opLabel, attempt, source: backoff.source, unit: 'ms' });
+    sleep(backoff.ms);
   }
 }
 
