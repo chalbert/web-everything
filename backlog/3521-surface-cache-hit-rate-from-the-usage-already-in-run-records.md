@@ -6,6 +6,7 @@ status: open
 scope: ["we:scripts/operations/run-record.mjs"]
 dateOpened: "2026-09-06"
 tags: [cost, observability, operations, prompt-caching]
+deliveryAgent: codex
 relatedReport: reports/2026-09-06-token-optimisation-research.md
 ---
 
