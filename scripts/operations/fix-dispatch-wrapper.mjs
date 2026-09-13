@@ -109,13 +109,25 @@ import {
   REPO_ROOT, RESTRICTED_PROVIDER_TOOLS, run, acquireLane, releaseAllPools, buildRestrictedProviderArgv,
   createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
-import { runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS } from './deliver-item-wrapper.mjs';
+import {
+  runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS, DELIVERY_AGENT_PROVIDER_NAMES,
+  DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
+} from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
 import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+// mechanical-dispatcher (epic #3383, Part 1) — the REAL Codex spawn primitives, REUSED verbatim from the
+// `build` kind's own provider (`deliver-item-wrapper.mjs#CODEX_PROVIDER`) rather than re-derived: every one of
+// these is already live-verified against `codex exec` (see that file's own header for the evidence trail), and
+// none of it is delivery-specific — only the ENV a spawned agent gets and the reports dir it reads back from
+// are, which `FIX_CODEX_PROVIDER` below supplies via `buildFixAgentEnv`/`resolveFixReportsDir`, unchanged.
+import {
+  buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+} from './codex-delivery-provider.mjs';
 
 /**
  * ABSOLUTE path to THIS CHECKOUT's own `fix-report-cli.mjs` (bug #xu2pp2m/1, confirmed live on real PR #2027,
@@ -334,6 +346,87 @@ const FIX_AGENT_PROVIDER = {
     }
   },
 };
+
+/**
+ * FIX_CODEX_PROVIDER — mechanical-dispatcher (epic #3383) Part 1: the `fix` kind's OWN Codex implementation of
+ * the `DeliveryAgentProvider` port, structurally identical to `deliver-item-wrapper.mjs#CODEX_PROVIDER` (same
+ * resolve-lane-path-already-done → build-argv → BLOCK → capture-failure order, same thread-id sidecar keyed by
+ * `sessionSlug`) but supplying FIX's own env (`buildFixAgentEnv`, not `buildDeliveryAgentEnv`) and FIX's own
+ * reports dir/failure-sidecar name, exactly as `FIX_AGENT_PROVIDER` above parallels `CLAUDE_RESTRICTED_PROVIDER`
+ * for the Claude half. Every CLI-specific detail — which flags, why no `-s`, what replaces the Claude-only
+ * hooks — is NOT restated here; it lives once, in `codex-delivery-provider.mjs`'s own header, and every
+ * function this spawns is imported from there unchanged.
+ *
+ * `lanePath` arrives ALREADY RESOLVED (unlike the `build` kind's `CODEX_PROVIDER`, which takes a bare lane
+ * NUMBER and resolves it itself) — `dispatchFix`/`runFixAgentToCompletion` already hand every provider a real
+ * path, so this one does not call `resolveLanePath` at all.
+ */
+const FIX_CODEX_PROVIDER = {
+  name: 'codex',
+  spawn(
+    { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
+    {
+      spawnAgent = defaultSpawnCodexAgent,
+      persistFailure = persistSpawnFailure,
+      resolveReportsDir = resolveFixReportsDir,
+      readThreadId = readCodexThreadId,
+      writeThreadId = writeCodexThreadId,
+      denyPaths = null,
+    } = {},
+  ) {
+    const reportsDir = resolveReportsDir();
+    const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
+    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
+    // Same resume contract as `CODEX_PROVIDER`: Codex mints its own thread id, so `resumeSessionId` (the
+    // CLAUDE-side UUID every provider is handed) is only the SIGNAL that this is a resume; the real id comes
+    // from this provider's own sidecar map, keyed by `sessionSlug` (here, `fix-<PR>`).
+    const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
+    if (resumeSessionId && !resumeThreadId) {
+      throw new Error(
+        `fix-dispatch-wrapper: FIX_CODEX_PROVIDER cannot resume session ${sessionSlug} — no Codex thread id was `
+        + 'recorded for it (the fresh spawn never reached `thread.started`, or its sidecar was removed). '
+        + 'Refusing to silently start a NEW session, which would lose the repair context the resume exists to carry.',
+      );
+    }
+    const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
+    let stdout;
+    try {
+      stdout = spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
+    } catch (e) {
+      persistFailure('fix-spawn-failures', sessionSlug, e, { resumeSessionId });
+      throw e;
+    }
+    if (!resumeThreadId) {
+      const threadId = parseCodexThreadId(stdout);
+      if (threadId) writeThreadId(sessionSlug, threadId);
+    }
+    void sessionId; // unused — Codex mints its own id (see above).
+  },
+};
+
+/** The `fix` provider registry — same keys as `deliver-item-wrapper.mjs#DELIVERY_AGENT_PROVIDERS`
+ *  (`DELIVERY_AGENT_PROVIDER_NAMES`), so an operator (or a `deliveryAgent:` item marker) who has learned the
+ *  `build` kind's vocabulary needs no second one for `fix`. */
+export const FIX_AGENT_PROVIDERS = Object.freeze({
+  'claude-restricted': FIX_AGENT_PROVIDER,
+  codex: FIX_CODEX_PROVIDER,
+});
+
+/**
+ * Name → `fix` provider, refusing an unknown name by NAME — mirrors
+ * `deliver-item-wrapper.mjs#resolveDeliveryAgentProvider` down to the error wording, because an operator who
+ * has met one selection seam should not have to learn a second shape for this one.
+ * @param {string} [name] - one of {@link DELIVERY_AGENT_PROVIDER_NAMES}.
+ * @returns {object}
+ */
+export function resolveFixAgentProvider(name = DEFAULT_DELIVERY_AGENT_PROVIDER_NAME) {
+  const provider = FIX_AGENT_PROVIDERS[String(name).trim()];
+  if (provider) return provider;
+  throw new Error(
+    `fix-dispatch-wrapper: unknown delivery agent provider ${JSON.stringify(name)} — one of `
+    + `${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}`,
+  );
+}
 
 /**
  * Reads the static brief template + spawns the agent through the provider, BLOCKING until it exits — no

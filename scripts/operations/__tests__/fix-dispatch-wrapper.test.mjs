@@ -29,12 +29,13 @@ vi.mock('node:fs', async (importOriginal) => {
 
 import {
   FIX_LANE_PURPOSE, FIX_LOOP_ACQUIRE_WAIT_MS, FIX_FINDING_SCRATCH_FILENAME, CHANGES_REQUESTED_MARKERS,
-  FIX_REPORT_CLI_PATH,
+  FIX_REPORT_CLI_PATH, FIX_AGENT_SPAWN_TIMEOUT_MS, FIX_AGENT_PROVIDERS, resolveFixAgentProvider,
   planFixDispatchWrapper, findLatestChangesRequestedComment, resolveFixTarget, buildFixAgentEnv,
   pushLaneRef, rearmReview, standDown, runFixGateWithOneRetry, dispatchFix,
 } from '../fix-dispatch-wrapper.mjs';
 import { newFixReport, writeFixReport, tryReadFixReport } from '../fix-report-store.mjs';
 import { REPAIR_AGENT_KIND } from '../dispatch-lane.mjs';
+import { DELIVERY_AGENT_PROVIDER_NAMES } from '../deliver-item-wrapper.mjs';
 
 describe('planFixDispatchWrapper', () => {
   it('accepts a positive integer PR and an owner/repo slug, deriving the fix-<pr> session slug', () => {
@@ -640,5 +641,102 @@ describe('#3640 — the wrapper arc, with a converge round that actually EDITS',
       rmSync(reportsDir, { recursive: true, force: true });
       rmSync(lane, { recursive: true, force: true });
     }
+  });
+});
+
+// ================================================================================================
+// mechanical-dispatcher (epic #3383, Part 1) — the `fix` kind's OWN provider registry, reusing the CODEX spawn
+// mechanics `codex-delivery-provider.mjs` already proved live for `build`, never re-derived.
+// ================================================================================================
+describe('FIX_AGENT_PROVIDERS registry / resolveFixAgentProvider (#3383)', () => {
+  it('names the same two providers `build` does, matching vocabulary', () => {
+    expect(Object.keys(FIX_AGENT_PROVIDERS)).toEqual(DELIVERY_AGENT_PROVIDER_NAMES);
+    expect(FIX_AGENT_PROVIDERS['claude-restricted'].name).toBe('claude-restricted-fix');
+    expect(FIX_AGENT_PROVIDERS.codex.name).toBe('codex');
+    expect(typeof FIX_AGENT_PROVIDERS.codex.spawn).toBe('function');
+  });
+
+  it('resolves by name, defaults to claude-restricted, and refuses an unknown name by NAME', () => {
+    expect(resolveFixAgentProvider()).toBe(FIX_AGENT_PROVIDERS['claude-restricted']);
+    expect(resolveFixAgentProvider('codex')).toBe(FIX_AGENT_PROVIDERS.codex);
+    expect(resolveFixAgentProvider(' codex ')).toBe(FIX_AGENT_PROVIDERS.codex);
+    expect(() => resolveFixAgentProvider('gemini')).toThrow(/unknown delivery agent provider "gemini"/);
+    expect(() => resolveFixAgentProvider('gemini')).toThrow(/claude-restricted\|codex/);
+  });
+});
+
+// #3383 — FIX_CODEX_PROVIDER.spawn. Same port contract `CODEX_PROVIDER.spawn` satisfies for `build`
+// (`deliver-item-wrapper.test.mjs`'s own suite), mirrored here for the `fix` kind: `lanePath` arrives already
+// resolved (no `resolveLane` call, unlike `build`'s provider, which takes a bare lane NUMBER).
+describe('FIX_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Codex spawn mechanics for `fix`)', () => {
+  const LANE_PATH = '/tmp/fix-lane-9';
+  const THREAD_EVENT = '{"type":"thread.started","thread_id":"01a0-fix-thread"}\n{"type":"turn.completed"}\n';
+
+  const io = (over = {}) => ({
+    spawnAgent: vi.fn(() => THREAD_EVENT),
+    persistFailure: vi.fn(),
+    resolveReportsDir: vi.fn(() => '/tmp/fix-reports'),
+    readThreadId: vi.fn(() => null),
+    writeThreadId: vi.fn(),
+    denyPaths: ['/tmp/primary/**'],
+    ...over,
+  });
+
+  const REQ = { sessionId: 'claude-uuid', prompt: 'REPAIR IT', lanePath: LANE_PATH, sessionSlug: 'fix-2108', pr: '2108', item: '3629' };
+
+  it('spawns `codex exec` in the ALREADY-RESOLVED lane clone, no `resolveLane` call needed', () => {
+    const o = io();
+    FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    const [argv, opts] = o.spawnAgent.mock.calls[0];
+    expect(argv.slice(0, 3)).toEqual(['exec', '-C', LANE_PATH]);
+    expect(opts.cwd).toBe(LANE_PATH);
+  });
+
+  it('stamps the SAME real fix env vars the Claude fix provider does', () => {
+    const o = io();
+    FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
+      WE_DISPATCH_KIND: REPAIR_AGENT_KIND,
+      FIX_SESSION: 'fix-2108',
+      FIX_PR: '2108',
+      FIX_ITEM: '3629',
+      LANE: LANE_PATH,
+      OPERATION_FIX_REPORTS_DIR: '/tmp/fix-reports',
+    });
+  });
+
+  it('blocks on the fix/delivery-shared budget, never dispatch-lane-io\'s 60s fire-and-forget one', () => {
+    const o = io();
+    FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(FIX_AGENT_SPAWN_TIMEOUT_MS);
+  });
+
+  it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', () => {
+    const o = io();
+    FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.writeThreadId).toHaveBeenCalledWith('fix-2108', '01a0-fix-thread');
+  });
+
+  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', () => {
+    const o = io({ readThreadId: vi.fn(() => 'recorded-tid') });
+    FIX_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
+    expect(o.readThreadId).toHaveBeenCalledWith('fix-2108');
+    const argv = o.spawnAgent.mock.calls[0][0];
+    expect(argv.slice(0, 3)).toEqual(['exec', 'resume', 'recorded-tid']);
+    expect(o.writeThreadId).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', () => {
+    const o = io({ readThreadId: vi.fn(() => null) });
+    expect(() => FIX_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
+      .toThrow(/cannot resume session fix-2108/);
+    expect(o.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('captures the child\'s output on a spawn failure and rethrows untouched, under fix\'s own sidecar name', () => {
+    const boom = new Error('spawnSync codex ETIMEDOUT');
+    const o = io({ spawnAgent: vi.fn(() => { throw boom; }) });
+    expect(() => FIX_AGENT_PROVIDERS.codex.spawn(REQ, o)).toThrow(boom);
+    expect(o.persistFailure).toHaveBeenCalledWith('fix-spawn-failures', 'fix-2108', boom, { resumeSessionId: null });
   });
 });

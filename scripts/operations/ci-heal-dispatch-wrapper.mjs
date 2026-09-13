@@ -101,7 +101,9 @@ import {
   REPO_ROOT, run, acquireLane, releaseAllPools, buildRestrictedProviderArgv, createHooksSettingsWriter,
   persistSpawnFailure,
 } from './minimal-context-provider.mjs';
-import { runConverge } from './deliver-item-wrapper.mjs';
+import {
+  runConverge, DELIVERY_AGENT_PROVIDER_NAMES, DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
+} from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
 import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
@@ -112,6 +114,14 @@ import {
 } from './fix-dispatch-wrapper.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+// mechanical-dispatcher (epic #3383, Part 1) — REUSED verbatim from `fix-dispatch-wrapper.mjs`'s own Codex
+// provider, which itself reuses these from `codex-delivery-provider.mjs`; see that file's own header for the
+// live-verification trail. `CI_HEAL_CODEX_PROVIDER` below only differs from `FIX_CODEX_PROVIDER` in the ENV it
+// builds (`buildCiHealAgentEnv`, which carries `reason` alongside everything `buildFixAgentEnv` already does).
+import {
+  buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+} from './codex-delivery-provider.mjs';
 
 /** The lane-pool `--purpose` this wrapper's acquire carries — the SAME string
  *  `we:skills-src/conveyor/fix-agent-ci-brief.md` step 1 already used, so a lane's purpose field keeps meaning
@@ -401,6 +411,75 @@ const CI_HEAL_AGENT_PROVIDER = {
     }
   },
 };
+
+/**
+ * CI_HEAL_CODEX_PROVIDER — mechanical-dispatcher (epic #3383) Part 1: the `ci-heal` kind's own Codex
+ * implementation of the `DeliveryAgentProvider` port. Structurally identical to
+ * `fix-dispatch-wrapper.mjs#FIX_CODEX_PROVIDER` — same reused `codex-delivery-provider.mjs` primitives, same
+ * resume-by-thread-id sidecar keyed on `sessionSlug` (here `ci-heal-<PR>`, so it can never collide with a
+ * `fix-<PR>` sidecar on the same PR) — differing only in the env it builds (`buildCiHealAgentEnv`, which adds
+ * `CI_HEAL_REASON` on top of everything `buildFixAgentEnv` already carries) and its own failure-sidecar name.
+ */
+const CI_HEAL_CODEX_PROVIDER = {
+  name: 'codex',
+  spawn(
+    { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item, reason } = {},
+    {
+      spawnAgent = defaultSpawnCodexAgent,
+      persistFailure = persistSpawnFailure,
+      resolveReportsDir = resolveFixReportsDir,
+      readThreadId = readCodexThreadId,
+      writeThreadId = writeCodexThreadId,
+      denyPaths = null,
+    } = {},
+  ) {
+    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(), reason });
+    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
+    const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
+    if (resumeSessionId && !resumeThreadId) {
+      throw new Error(
+        `ci-heal-dispatch-wrapper: CI_HEAL_CODEX_PROVIDER cannot resume session ${sessionSlug} — no Codex thread `
+        + 'id was recorded for it (the fresh spawn never reached `thread.started`, or its sidecar was removed). '
+        + 'Refusing to silently start a NEW session, which would lose the heal context the resume exists to carry.',
+      );
+    }
+    const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
+    let stdout;
+    try {
+      stdout = spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...env }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
+    } catch (e) {
+      persistFailure('ci-heal-spawn-failures', sessionSlug, e, { resumeSessionId });
+      throw e;
+    }
+    if (!resumeThreadId) {
+      const threadId = parseCodexThreadId(stdout);
+      if (threadId) writeThreadId(sessionSlug, threadId);
+    }
+    void sessionId; // unused — Codex mints its own id (see `FIX_CODEX_PROVIDER`'s own docblock).
+  },
+};
+
+/** The `ci-heal` provider registry — same keys as `deliver-item-wrapper.mjs#DELIVERY_AGENT_PROVIDERS` /
+ *  `fix-dispatch-wrapper.mjs#FIX_AGENT_PROVIDERS`. */
+export const CI_HEAL_AGENT_PROVIDERS = Object.freeze({
+  'claude-restricted': CI_HEAL_AGENT_PROVIDER,
+  codex: CI_HEAL_CODEX_PROVIDER,
+});
+
+/**
+ * Name → `ci-heal` provider, refusing an unknown name by NAME — mirrors
+ * `deliver-item-wrapper.mjs#resolveDeliveryAgentProvider`/`fix-dispatch-wrapper.mjs#resolveFixAgentProvider`.
+ * @param {string} [name] - one of {@link DELIVERY_AGENT_PROVIDER_NAMES}.
+ * @returns {object}
+ */
+export function resolveCiHealAgentProvider(name = DEFAULT_DELIVERY_AGENT_PROVIDER_NAME) {
+  const provider = CI_HEAL_AGENT_PROVIDERS[String(name).trim()];
+  if (provider) return provider;
+  throw new Error(
+    `ci-heal-dispatch-wrapper: unknown delivery agent provider ${JSON.stringify(name)} — one of `
+    + `${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}`,
+  );
+}
 
 /**
  * Reads the static brief + spawns the agent through the provider, BLOCKING until it exits, then reads the

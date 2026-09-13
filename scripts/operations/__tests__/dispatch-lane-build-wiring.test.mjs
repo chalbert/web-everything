@@ -170,6 +170,23 @@ describe('#3645 — the build dispatch is MECHANICAL by default', () => {
     deliverItemDetachedProvider(buildPayload({ sessionSlug: 'conveyor-3645b' }), { spawnDetached });
     expect(calls[0].argv).toContain('--attempt=b');
   });
+
+  // mechanical-dispatcher (epic #3383, Part 2) — the DRIVER'S ONLY provider-selection logic: an explicit,
+  // per-item `deliveryAgent:` frontmatter marker, honoured verbatim, never a driver-side "should this item use
+  // Codex" judgment. See `delivery-agent-marker.mjs`'s own header for why.
+  it('appends `--provider=<marker>` when the item carries a `deliveryAgent:` marker', () => {
+    const { fn: spawnDetached, calls } = recordingSpawnDetached();
+    const readDeliveryAgentMarker = vi.fn(() => 'codex');
+    deliverItemDetachedProvider(buildPayload(), { spawnDetached, readDeliveryAgentMarker });
+    expect(readDeliveryAgentMarker).toHaveBeenCalledWith('3645');
+    expect(calls[0].argv).toContain('--provider=codex');
+  });
+
+  it('adds no `--provider=` at all when the item carries no marker', () => {
+    const { fn: spawnDetached, calls } = recordingSpawnDetached();
+    deliverItemDetachedProvider(buildPayload(), { spawnDetached, readDeliveryAgentMarker: () => null });
+    expect(calls[0].argv.join(' ')).not.toMatch(/--provider=/);
+  });
 });
 
 describe('#3645 — restart survival', () => {

@@ -43,6 +43,9 @@ import {
   defaultSpawnDetached,
   deliveryDispatchLogPath,
 } from '../detached-dispatch.mjs';
+// mechanical-dispatcher (epic #3383) Part 2 — the per-item `deliveryAgent:` frontmatter opt-in. See that
+// module's own header for why this is read here (an explicit human marker), never decided by this provider.
+import { readItemDeliveryAgentMarker } from '../delivery-agent-marker.mjs';
 import { join } from 'node:path';
 
 /** The per-dispatch process `deliverItemDetachedProvider` starts. Resolved by SCRIPT LOCATION, never cwd —
@@ -78,7 +81,8 @@ export const DELIVER_ITEM_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations', 
  * is no CLI confirmation line to parse before the handle is known.
  *
  * @param {{sessionSlug?: string, num?: string|number, lane?: string|number, scope?: string, cwd?: string}} request
- * @param {{spawnDetached?: Function, logPathFor?: Function, attemptTagFor?: Function}} [io]
+ * @param {{spawnDetached?: Function, logPathFor?: Function, attemptTagFor?: Function,
+ *   readDeliveryAgentMarker?: Function}} [io]
  * @returns {string} the `pid:<n>` handle.
  */
 export function deliverItemDetachedProvider(request, {
@@ -86,6 +90,7 @@ export function deliverItemDetachedProvider(request, {
   logPathFor = deliveryDispatchLogPath,
   attemptTagFor = sessionSlugAttemptTag,
   runScript = DELIVER_ITEM_RUN_SCRIPT,
+  readDeliveryAgentMarker = readItemDeliveryAgentMarker,
 } = {}) {
   const sessionSlug = String(request?.sessionSlug ?? '').trim();
   const num = normNum(request?.num);
@@ -108,6 +113,12 @@ export function deliverItemDetachedProvider(request, {
     `--scope=${String(request?.scope ?? '')}`,
     `--attempt=${attemptTag}`,
   ];
+  // mechanical-dispatcher (epic #3383) Part 2 — THE DRIVER'S ONLY provider-selection logic, and it is
+  // deliberately not a judgment call: honour item #`num`'s own `deliveryAgent:` frontmatter marker, verbatim,
+  // when it has one. No automatic "should this item use Codex" reasoning lives here — see
+  // `delivery-agent-marker.mjs`'s own header for why that is a separate, later decision from this plumbing.
+  const deliveryAgent = readDeliveryAgentMarker(num);
+  if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
   const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
   const pid = Number(child?.pid);
   if (!Number.isInteger(pid) || pid <= 0) {

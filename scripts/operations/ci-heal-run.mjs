@@ -47,7 +47,8 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { dispatchCiHeal, planCiHealDispatchWrapper } from './ci-heal-dispatch-wrapper.mjs';
+import { dispatchCiHeal, planCiHealDispatchWrapper, resolveCiHealAgentProvider } from './ci-heal-dispatch-wrapper.mjs';
+import { DEFAULT_DELIVERY_AGENT_PROVIDER_NAME } from './deliver-item-wrapper.mjs';
 import { REPO_ROOT } from './detached-dispatch.mjs';
 
 /** Refused rather than defaulted: a heal with no PR has nothing to resolve, and no session slug has nothing
@@ -58,7 +59,8 @@ const REQUIRED_FLAGS = Object.freeze(['pr', 'session']);
 /**
  * PURE. `--k=v` argv → the shape {@link runCiHealCli} works with, refusing a missing required flag by NAME.
  * @param {string[]} argv
- * @returns {{pr: string, item: (string|null), sessionSlug: string, repo: (string|null), reason: (string|null)}}
+ * @returns {{pr: string, item: (string|null), sessionSlug: string, repo: (string|null), reason: (string|null),
+ *   provider: string}}
  */
 export function parseCiHealRunArgv(argv = []) {
   const flags = {};
@@ -84,7 +86,24 @@ export function parseCiHealRunArgv(argv = []) {
     sessionSlug: String(flags.session).trim(),
     repo: repo || null,
     reason: reason || null,
+    // #3383 (mechanical-dispatcher) — parsed, NOT validated, here — same split `fix-run.mjs#parseFixRunArgv`
+    // keeps for its own `--provider=`. `selectCiHealAgentProvider` below owns the name check + env fallback.
+    provider: String(flags.provider ?? '').trim(),
   };
+}
+
+/**
+ * #3383 (mechanical-dispatcher, Part 1) — WHICH CLI RUNS THE CI-HEAL AGENT. Same flag-wins-env-fallback shape
+ * `fix-run.mjs#selectFixAgentProvider`/`deliver-item-run.mjs#selectDeliveryAgentProvider` already use, so one
+ * selection mechanism covers all three dispatch kinds.
+ *
+ * @param {string} flagValue - the parsed `--provider=` value, `''` when absent.
+ * @param {Record<string, (string|undefined)>} [env] - the environment to read `DELIVERY_AGENT_PROVIDER` from.
+ * @returns {{name: string, provider: object}}
+ */
+export function selectCiHealAgentProvider(flagValue, env = process.env) {
+  const name = String(flagValue || env.DELIVERY_AGENT_PROVIDER || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
+  return { name, provider: resolveCiHealAgentProvider(name) };
 }
 
 /**
@@ -148,7 +167,8 @@ export function assertSessionSlugAgrees(dispatchedSlug, wrapperSlug) {
  * mechanism worked.
  *
  * @param {string[]} argv
- * @param {{dispatch?: Function, repoSlug?: Function, write?: Function, writeErr?: Function}} [io]
+ * @param {{dispatch?: Function, repoSlug?: Function, write?: Function, writeErr?: Function,
+ *   selectProvider?: Function, env?: object}} [io]
  * @returns {Promise<{code: number, result: object|null}>}
  */
 export async function runCiHealCli(argv = [], {
@@ -156,8 +176,11 @@ export async function runCiHealCli(argv = [], {
   repoSlug = resolveRepoSlug,
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
+  selectProvider = selectCiHealAgentProvider,
+  env = process.env,
 } = {}) {
   let launch;
+  let selected;
   try {
     launch = parseCiHealRunArgv(argv);
     const repo = launch.repo ?? repoSlug();
@@ -166,6 +189,9 @@ export async function runCiHealCli(argv = [], {
       launch.sessionSlug,
       planCiHealDispatchWrapper({ pr: launch.pr, repo, item: launch.item, reason: launch.reason }).sessionSlug,
     );
+    // #3383 — resolved BEFORE the heal starts, so a bad `--provider=` exits here rather than after a lane and a
+    // rebase have already happened (see `selectCiHealAgentProvider`'s own docblock).
+    selected = selectProvider(launch.provider, env);
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };
@@ -173,12 +199,13 @@ export async function runCiHealCli(argv = [], {
   write(
     `ci-heal-run: starting CI heal of PR #${launch.pr}`
     + `${launch.item ? ` (item #${launch.item})` : ''} in ${launch.repo} `
-    + `(session ${launch.sessionSlug}, reason ${launch.reason ?? 'unknown'}) — pid ${process.pid}\n`,
+    + `(session ${launch.sessionSlug}, reason ${launch.reason ?? 'unknown'}, provider ${selected.name}) `
+    + `— pid ${process.pid}\n`,
   );
   try {
     const result = await dispatch({
       pr: launch.pr, repo: launch.repo, item: launch.item, reason: launch.reason,
-    });
+    }, selected.provider);
     write(`ci-heal-run: PR #${launch.pr} finished — ${result?.result ?? '(no result reported)'}\n`);
     return { code: 0, result };
   } catch (e) {

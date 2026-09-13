@@ -47,6 +47,9 @@ import {
   defaultSpawnDetached,
   deliveryDispatchLogPath,
 } from '../detached-dispatch.mjs';
+// mechanical-dispatcher (epic #3383) Part 2 — see `build.mjs`'s own note; identical use here, keyed on the
+// heal's OPTIONAL `num` (the item, when known), same as `fix.mjs`.
+import { readItemDeliveryAgentMarker } from '../delivery-agent-marker.mjs';
 import { join } from 'node:path';
 
 /** The per-dispatch process {@link ciHealDetachedProvider} starts. Resolved by SCRIPT LOCATION, never cwd —
@@ -65,13 +68,15 @@ export const CI_HEAL_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations', 'ci-h
  * `resolveInFlight`.
  *
  * @param {{sessionSlug?: string, pr?: string|number, num?: string|number, reason?: string|null, cwd?: string}} request
- * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string}} [io]
+ * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string,
+ *   readDeliveryAgentMarker?: Function}} [io]
  * @returns {string} the `pid:<n>` handle.
  */
 export function ciHealDetachedProvider(request, {
   spawnDetached = defaultSpawnDetached,
   logPathFor = deliveryDispatchLogPath,
   runScript = CI_HEAL_RUN_SCRIPT,
+  readDeliveryAgentMarker = readItemDeliveryAgentMarker,
 } = {}) {
   const sessionSlug = String(request?.sessionSlug ?? '').trim();
   const pr = normNum(request?.pr);
@@ -84,6 +89,10 @@ export function ciHealDetachedProvider(request, {
   const argv = [String(runScript), `--pr=${pr}`, `--session=${sessionSlug}`];
   if (num) argv.push(`--num=${num}`);
   if (reason) argv.push(`--reason=${reason}`);
+  // mechanical-dispatcher (epic #3383) Part 2 — honour the TARGET ITEM's own `deliveryAgent:` marker, when
+  // there is a known item to read one from.
+  const deliveryAgent = readDeliveryAgentMarker(num);
+  if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
 
   const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
   const pid = Number(child?.pid);
