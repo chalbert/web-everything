@@ -2397,3 +2397,43 @@ actual coding/delivery work, because that work is architecturally a different, s
    never gated by, or part of, the "all operations" plan's stated scope above, and should not be conflated
    with it going forward — it is a different system with its own provider seam, already proven
    independently.
+
+## Operator goal, recorded for the record (2026-09-13): make the lane-concurrency admission cap resource-aware instead of a flat count
+
+**Real, durable operator intent — not built now, just recorded**, in the same terms as this epic's other
+forward-looking goals above (the capacity-planning split and the git-manager coordination layer) — not a
+"could do someday" idea a future session should second-guess away.
+
+**Trigger, confirmed live today.** `we:scripts/lib/lane-concurrency.mjs`'s host-wide shared pool (default cap
+8, coordinated across all concurrent sessions via `~/workspace/.lanes/web-everything/`) is a flat, count-based
+admission control: it treats every lane as equal weight regardless of what the item actually requires. A real
+proof-run attempt today hit exactly this limit — roughly 40+ of 63 lanes leased host-wide, the shared pool
+saturated, real work blocked purely by lane COUNT, not by any actual measured resource exhaustion (CPU, memory,
+or otherwise).
+
+**The operator's stated view, recorded in substance, verbatim in intent:**
+1. The current flat-count cap is a deliberately crude stopgap against oversaturation, acknowledged as such by
+   the operator — not a permanent design. It exists to keep the host from being overrun, not because a fixed
+   count of 8 is the right unit of capacity.
+2. Once the per-process resource telemetry built earlier today (the `host.process.*` categories in
+   `we:scripts/operations/telemetry.mjs` / `we:scripts/operations/host-process-sample.mjs`, landed at
+   `6305d81dc`) accumulates enough real data on actual load per lane, capacity admission could become
+   resource-aware instead of a flat count — e.g. admitting based on measured/estimated compute load rather than
+   a fixed number of concurrent lanes.
+3. A further idea: estimate a story/item's likely compute cost DURING PREPARATION/scoping — alongside the
+   existing "scope" sizing already done at prepare-time — so a text-only change with no unit tests is
+   recognized as needing much less capacity than a heavy build+test cycle. A future admission system could then
+   weight concurrent admission by this per-item cost estimate, rather than treating every item as the same unit
+   of capacity regardless of what it actually costs to run.
+
+**Distinct from, but connected to, the capacity-planning goal recorded above.** That earlier entry is about
+measuring total hardware capacity and splitting the command-queue pool from the lane pool. This goal is
+narrower and different in kind: it is specifically about making the EXISTING admission mechanism
+(`we:scripts/lib/lane-concurrency.mjs`'s flat cap) smarter, using the real per-process telemetry data already
+being collected plus a per-item cost estimate made at prepare-time — not a question of provisioning
+more/different hardware.
+
+**Explicitly not built yet.** No resource-aware admission logic, no per-item cost-estimation step, and no
+telemetry-driven cap adjustment exist as of this entry — `we:scripts/lib/lane-concurrency.mjs`'s cap is still a
+flat, static count. This is operator intent to revisit once the telemetry above has accumulated enough real
+data to design against, not a change already in flight.
