@@ -2,9 +2,10 @@
 bornAs: x37kvib
 kind: decision
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/conveyor/", "we:skills-src/inspect-agent-health/", "we:scripts/operations/", "we:docs/agent/"]
 dateOpened: "2026-09-12"
+dateStarted: "2026-09-13"
 preparedDate: "2026-09-12"
 relatedTo: ["3475", "3477", "3422", "3593", "3594", "2436", "2822", "3095"]
 relatedReport: reports/2026-09-12-run-quality-benchmark-for-dispatched-agent-runs.md
@@ -189,6 +190,10 @@ forever. The fork's ruling reversed; the outcome-join above is what survives of 
 scored at all; and both branches stay distinguishable on merit (can the artifact still be read) with cost
 stripped out.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 1 (a) — score at the agent's own session end,
+on `#3477`'s existing triggers, joining the outcome later. Ratified fork-by-fork, in review across sessions;
+the item stays `active` (not `resolved`) pending the remaining six forks.
+
 # Fork 2 — What is the canonical record, and is a single comparable number ever published?
 
 **Supported by default, not forked — the vector→scalar direction.** A scalar cannot be decomposed back into a
@@ -257,6 +262,12 @@ record).
 **Screen:** clear — what is published is visible to every consumer of the trend, so it is not an impl detail;
 and with both branches free to build, (a) still asserts a comparability the subjects lack, which is a merit
 difference, not a cost one.
+
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 2 (b) — the deduction vector is the record;
+a 0–100 scalar is derived and published only as an aggregate over a declared comparability class (`model ×
+effort × dispatch-kind`), never as a per-run headline, and is `null` — never 100 — when `criteriaEvaluated` is
+zero. Ratified fork-by-fork, in review across sessions; the item stays `active` (not `resolved`) pending the
+remaining five forks.
 
 # Fork 3 — Is the rubric versioned, and what happens when a criterion is added?
 
