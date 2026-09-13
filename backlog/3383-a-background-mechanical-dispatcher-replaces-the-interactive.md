@@ -2397,3 +2397,66 @@ actual coding/delivery work, because that work is architecturally a different, s
    never gated by, or part of, the "all operations" plan's stated scope above, and should not be conflated
    with it going forward — it is a different system with its own provider seam, already proven
    independently.
+
+## Operator goal, recorded for the record (2026-09-13): every new model/provider release must earn its way out of probation before it gets blocking/gating authority
+
+**This is a stated standing principle the operator wants applied going forward, not a "could do someday" idea
+— treat it as real, durable operator intent, in the same terms as this epic's other recorded operator goals
+above.** It generalizes directly from what this epic is building right now for Codex specifically (see the
+Codex reviewer-seat validation follow-up and the `#3649` ratification, both above, same day): a probation
+state a new model or provider release must sit in before this system trusts it with any authority that can
+block or gate other work.
+
+**The principle, stated plainly:**
+
+- **Every new model or provider release — a new Claude version, a new Codex version, Antigravity, Grok, an
+  open-weight model, or anything else added to this system in the future — goes through the same probation
+  state this epic is building right now, before it is trusted with any blocking/gating authority.** Not just
+  Codex, and not just today's roster: this is a standing gate on every future addition, named in advance so a
+  future session does not have to re-derive it from first principles the way this session had to reconstruct
+  the Codex case.
+- **Probation means three things together, not any one of them alone:**
+  1. **It can do real fix/build/review work.** Probation is not a sandbox that only runs toy tasks — it is
+     seated on genuine work, the same way `CODEX_PROVIDER` (`#3580`) already dispatches real `build`/`fix`/
+     `ci-heal` work and the Codex reviewer seat (`#3581`) already ran against 4 real, currently-open PRs.
+  2. **It is seated as an advisory participant only — never blocking.** Its output can inform a decision but
+     can never itself be the reason something is held, rejected, or gated. This is exactly the shape the
+     Codex reviewer seat already has today (`--codex-advisory`, `judgeAdvisory`) and exactly why the finding
+     above — 4 of 4 empty accepts, including a genuine missed blocker on `#2107` — was safe to learn from
+     rather than a live incident: nothing was ever gated on that seat's verdict.
+  3. **Its real performance is recorded, via `#3649`'s mechanism, not informally remembered.** Every probation
+     run's transcript is scored against `#3649`'s versioned rubric and persisted as a vector-canonical
+     scorecard — the same recording path this epic ratified fork-by-fork this same day, not a second,
+     bespoke tracking scheme invented per provider.
+- **Promotion out of probation is an explicit decision, grounded in the accumulated recorded data — never
+  assumed just because a new version or provider becomes available.** A new Claude release, a new Codex
+  release, or a first-time entrant (Antigravity, Grok, an open-weight model) does not inherit blocking/gating
+  authority by default, by vendor reputation, or by benchmark claims made outside this system. It earns it the
+  same way `#3649`'s own `3651` follow-up already requires for arming the run-quality router itself: a real,
+  named, checkable trigger (here, an operator decision reviewing the accumulated probation data), not a
+  default that fires silently.
+
+**Why this generalizes beyond Codex — the identity-keying requirement.** Codex is the first real instance
+exercising this mechanism, not the whole of it. **The probation state itself, and `#3649`'s recording of it,
+must be keyed by provider *and* model identity together — never hardcoded to one provider, and never
+collapsed to "provider" alone.** `#3649`'s own scorecard schema already carries a `model` field alongside
+`dispatchKind` and the stamped `rubricVersion` (see `meanScore({ rubricVersion, model, effort, dispatchKind })`
+in that card's own worked example) — this principle is the operating rule that field exists to serve: a
+future Claude version, a future Codex version, or a brand-new provider is a **distinct identity** in this
+scheme, starting its own probation record from zero. **A newer model release must never automatically inherit
+an older model's accumulated trust** just because it shares a provider name or a family label — "Codex" is not
+one identity forever; "Codex version X" and "Codex version X+1" are two separate identities under this
+principle, each starting cold. The same holds across a Claude version bump: today's Claude is the trusted
+default delivery provider by virtue of a long track record recorded the old way (informally, pre-`#3649`); a
+future Claude version is not exempt from this same probation-and-record discipline merely for sharing the
+`Claude` name — the identity key is provider+model, not provider alone, and probation applies to a genuinely
+new model identity even from an already-trusted provider.
+
+**Current state, for concreteness, not as the point of this entry.** As of today: Codex is proven-wired for
+real build/fix/ci-heal delivery work (`#3580`) and has one seat already run in advisory-only mode against real
+PRs (`#3581`'s reviewer-seat trial, 4/4 empty, one confirmed miss) — exactly probation-shape, mechanism clean,
+judgment not yet trusted, nothing blocked on its verdict. `#3649`'s recording mechanism is ratified fork-by-
+fork this same session but ships v1 recording-only, router disarmed, arming gated on `#3651`'s own named
+trigger. This entry does not change any of that; it records the general rule those specific facts are the
+first instance of, so the rule outlives this specific Codex episode and applies unprompted to whatever comes
+next.
