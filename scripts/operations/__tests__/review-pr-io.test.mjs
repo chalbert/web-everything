@@ -352,6 +352,52 @@ describe('the advisory-note sink', () => {
 });
 
 /**
+ * mechanical-dispatcher lane — the `advise` step's OTHER sink: the mechanical flip of `review:awaiting-advisory`.
+ * Both `readLabels`/`setLabels` are injected exactly as `postComment` is above, so this is testable with no `gh`
+ * on PATH. The one behaviour worth pinning: this sink RE-READS the PR's LIVE labels before writing, and treats
+ * the label already being absent as the desired end state rather than a failure — never `we:scripts/
+ * review-set-label.mjs`'s single home, which always couples a comment with a full verdict swap (#2644).
+ */
+describe('the awaiting-advisory-clear sink', () => {
+  it('removes review:awaiting-advisory when the PR still carries it', async () => {
+    const setCalls = [];
+    const sinks = createReviewPrSinks({
+      root,
+      readLabels: () => [{ name: 'review:human' }, { name: 'review:awaiting-advisory' }],
+      setLabels: (repo, pr, spec) => { setCalls.push({ repo, pr, spec }); },
+    });
+    const result = await sinks[REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR](
+      { pr: 9, repo: 'o/n' },
+      { ...CTX, type: REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR, step: 'advise' },
+    );
+    expect(setCalls).toEqual([{ repo: 'o/n', pr: 9, spec: { remove: ['review:awaiting-advisory'] } }]);
+    expect(result).toEqual({ cleared: true });
+  });
+
+  it('no-ops (never calls `setLabels`) when the live PR no longer carries the label', async () => {
+    // `gh pr edit --remove-label` ERRORS on an absent label — a naive replay could crash on exactly the state
+    // this sink is supposed to treat as already-done (idempotent: true relies on this).
+    const setCalls = [];
+    const sinks = createReviewPrSinks({
+      root,
+      readLabels: () => [{ name: 'review:human' }],
+      setLabels: (repo, pr, spec) => { setCalls.push({ repo, pr, spec }); },
+    });
+    const result = await sinks[REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR](
+      { pr: 9, repo: 'o/n' },
+      { ...CTX, type: REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR, step: 'advise' },
+    );
+    expect(setCalls).toEqual([]);
+    expect(result).toEqual({ cleared: false, alreadyAbsent: true });
+  });
+
+  it('defaults to the real `gh`-backed provider when no `readLabels`/`setLabels` are injected', () => {
+    const sinks = createReviewPrSinks({ root });
+    expect(typeof sinks[REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]).toBe('function');
+  });
+});
+
+/**
  * THE ROUND NUMBER IS ROUNDS SINCE THE LAST CLEAR, not rows ever written (#3072; PR #1178 review, finding 3).
  *
  * `history` holds every verdict a PR has ever carried, including rows from an already-CONVERGED loop, so

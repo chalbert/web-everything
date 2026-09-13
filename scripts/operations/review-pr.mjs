@@ -220,7 +220,7 @@ import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 // lists differ — never that the caller and the operation hold two different derivations. `CARE_LEVEL_ORDER` is
 // the band ordering the comparison is made on; both are pure, and neither is restated here.
 import { buildShapePlan } from '../review-core-cli.mjs';
-import { CARE_LEVELS, CARE_LEVEL_ORDER } from '../lib/review-escalation.mjs';
+import { CARE_LEVELS, CARE_LEVEL_ORDER, REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -576,6 +576,13 @@ export function confirmAnswerFor(to) {
  * is #3032's reserved seam for #3007. `ADVISORY_NOTE` (#xlw02hw) belongs to `advise` and is deliberately its OWN
  * type, never `WRITE_UP`/`LABEL` — those two are the real ceremony's write and a caller (or a sink lookup keyed
  * by type) must never be able to confuse the two kinds of comment this operation can post.
+ *
+ * `AWAITING_ADVISORY_CLEAR` (mechanical-dispatcher lane) also belongs to `advise` — it is the mechanical flip of
+ * `review:awaiting-advisory` → cleared, declared as a SECOND effect right after `ADVISORY_NOTE` so the two are
+ * applied by the SAME executor, strictly in order: the note posts first, and only once it has genuinely landed
+ * does the executor move on to clear the label. It is its own type (never `LABEL`, `record`'s own effect) for
+ * the same reason `ADVISORY_NOTE` is not `WRITE_UP` — this is a plain label removal, not a verdict swap, and the
+ * two must never be confusable by a sink lookup keyed on type.
  */
 export const REVIEW_EFFECTS = Object.freeze({
   WRITE_UP: 'review.write-up',
@@ -583,6 +590,7 @@ export const REVIEW_EFFECTS = Object.freeze({
   LEDGER: LEDGER_EFFECT_TYPE,
   NOTICE: 'review.notice',
   ADVISORY_NOTE: 'review.advisory-note',
+  AWAITING_ADVISORY_CLEAR: 'review.awaiting-advisory-clear',
 });
 
 /**
@@ -1780,7 +1788,7 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
       effects: (view) => {
         const read = view.findings.read;
         if (read.humanRequired !== true) return [];
-        return [{
+        const effects = [{
           type: REVIEW_EFFECTS.ADVISORY_NOTE,
           payload: {
             pr: view.input.pr,
@@ -1791,6 +1799,26 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           // would risk a second one, exactly the reason `record`'s own LABEL effect is `false` (see there).
           idempotent: false,
         }];
+        // mechanical-dispatcher — THE MECHANICAL FLIP OF `review:awaiting-advisory`, ATOMIC WITH THE COMMENT
+        // ABOVE, NEVER A SEPARATE POLL/CRON. Declared as a SECOND effect, so the executor (which applies effects
+        // strictly ascending and HALTS at the first that does not land) can only ever reach this one AFTER the
+        // advisory note has genuinely posted. If the note fails or errors, this effect never runs and the PR
+        // stays labeled `review:awaiting-advisory` — it cannot be gamed into reading "advised" with no comment
+        // behind it. Declared ONLY when the PR still actually carries the label (mirrors
+        // `we:scripts/review-set-label.mjs#presentRemoveLabels`), so a PR opened before this label existed, or
+        // one some other path already cleared, gets no spurious remove-label call.
+        if (hasReviewLabel(read.labels, REVIEW_LABELS.awaitingAdvisory)) {
+          effects.push({
+            type: REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR,
+            payload: { pr: view.input.pr, repo: view.input.repo },
+            // IDEMPOTENT: TRUE — a plain label removal carries none of the durable-comment ambiguity
+            // `ADVISORY_NOTE`/`record`'s LABEL effect carry. Either it lands, or the sink finds the label
+            // already gone (a prior attempt landed after all) and no-ops — both reach the SAME end state
+            // (the label absent), so replaying it on an unknown outcome is safe.
+            idempotent: true,
+          });
+        }
+        return effects;
       },
     }),
 

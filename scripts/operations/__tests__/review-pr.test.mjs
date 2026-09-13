@@ -786,6 +786,67 @@ describe('#xlw02hw the advise step posts an advisory note on review:human, befor
   });
 });
 
+// ── mechanical-dispatcher lane: `review:awaiting-advisory` FLIPS ATOMICALLY WITH THE ADVISORY NOTE ────────
+describe('mechanical-dispatcher: `advise` also clears review:awaiting-advisory, atomically with the note', () => {
+  it('declares AWAITING_ADVISORY_CLEAR as a SECOND effect when the PR still carries the label', async () => {
+    const { registry } = registryFor({ labels: ['review:human', 'review:awaiting-advisory'] });
+    const store = createMemoryRunStore();
+    const posted = [];
+    const cleared = [];
+    const sinks = {
+      [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; },
+      [REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]: async (payload) => { cleared.push(payload); return { cleared: true }; },
+    };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-clear-1', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+    expect(posted).toHaveLength(1);
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]).toEqual({ repo: BASE_INPUT.repo, pr: BASE_INPUT.pr });
+    // ORDER MATTERS: the clear is effect index 1, strictly after the note at index 0, on the SAME `advise` step.
+    const adviseEffects = out.run.effects.filter((e) => e.step === 'advise');
+    expect(adviseEffects.map((e) => e.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE, REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]);
+    expect(adviseEffects.every((e) => e.status === 'applied')).toBe(true);
+  });
+
+  it('declares NO clear effect when the PR never carried (or already lost) review:awaiting-advisory', async () => {
+    // A PR opened before this label existed, or one some other path already cleared — no spurious remove call.
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-clear-2', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+    const adviseEffects = out.run.effects.filter((e) => e.step === 'advise');
+    expect(adviseEffects.map((e) => e.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE]);
+  });
+
+  it('a failed advisory-note post HALTS before the clear ever applies — the label cannot be gamed off', async () => {
+    const { registry } = registryFor({ labels: ['review:human', 'review:awaiting-advisory'] });
+    const store = createMemoryRunStore();
+    const cleared = [];
+    const sinks = {
+      [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => { throw new Error('gh pr comment: network blip'); },
+      [REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]: async (payload) => { cleared.push(payload); return { cleared: true }; },
+    };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-clear-3', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    // The clear sink is NEVER called — the executor halts at the first effect that does not land.
+    expect(cleared).toEqual([]);
+    expect(out.stopped).toBe('effect-halted');
+    const adviseEffects = out.run.effects.filter((e) => e.step === 'advise');
+    expect(adviseEffects.find((e) => e.type === REVIEW_EFFECTS.ADVISORY_NOTE).status).not.toBe('applied');
+    const clearEntry = adviseEffects.find((e) => e.type === REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR);
+    expect(clearEntry.status).not.toBe('applied');
+  });
+});
+
 // ── #3063 THE GATE-SELF REFUSAL, AS AN OPERATOR-VISIBLE STOP ─────────────────────────────────────────────
 // The pure-core refusal above is pinned; nothing before this drove it out through `runOperationCli`, so the
 // exit code and the printed lines were unasserted. This is that seam — a `record` refusal renders as

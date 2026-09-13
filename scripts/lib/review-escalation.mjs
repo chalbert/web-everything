@@ -40,6 +40,16 @@ export const REVIEW_LABELS = {
   changes: 'review:changes',   // reviewer wants changes → the author lane fixes hot-context + re-pushes
   human: 'review:human',       // #2285 v1 — the diff edits the gate's DECLARATIVE LEASH (the contract / roster / invariant suites) or the STATUTE layer; only a HUMAN may clear it. Policy-tier derivation code (#2771/#2785) and the engine tier (#2445) are agent-reviewable
   redteamAccepted: 'redteam:accepted', // #2439 — the INDEPENDENT hardened validator (a fresh-context adversary that took no part in the negotiation and never saw the peers' self-assessment) signed off on the FINAL diff. The "non-author accepts" invariant, applied by the drain; enforcement (requiring it before an engine-tier auto-land) is #2412's concern
+  // mechanical-dispatcher lane — the operator's standing rule: a review:human PR is never reviewed cold, and
+  // "hasn't had its advisory panel run yet" must be visible as a LABEL, not something checked by grepping for a
+  // bot comment. Applied ALONGSIDE review:human at every site that adds it (pr-land.mjs at PR-open,
+  // merge-ai-prs.mjs's park + its two tamper-triggered re-parks); removed ONLY by review-pr.mjs's `advise` step,
+  // atomically with the moment it actually posts the panel's findings comment for that PR (#xlw02hw) — never a
+  // separate poll/cron that could drift out of sync with whether the comment really landed. The removal is
+  // declared as a SECOND effect there, strictly ordered after the comment post: the executor halts at the first
+  // effect that does not land, so a failed/errored post leaves this label in place rather than silently
+  // dropping it with no comment behind it.
+  awaitingAdvisory: 'review:awaiting-advisory',
 };
 
 /**
@@ -55,6 +65,9 @@ export const REVIEW_LABEL_META = {
   [REVIEW_LABELS.changes]:  { color: 'D93F0B', description: 'Reviewer wants changes — the author lane fixes hot-context and re-pushes (#2171)' },
   [REVIEW_LABELS.human]:    { color: 'B60205', description: 'The diff edits the gate policy or the statute layer — only a human may clear it (#2285, #2445 two-tier flip)' },
   [REVIEW_LABELS.redteamAccepted]: { color: '5319E7', description: 'An independent hardened validator signed off on the final diff — the non-author-accepts invariant (#2439)' },
+  // Description kept ≤100 chars: GitHub's `label create`/`edit` refuses a longer one (measured live, #2156/#2157
+  // backfill) — unlike the pre-existing labels above, this one is minted fresh through that same validated path.
+  [REVIEW_LABELS.awaitingAdvisory]: { color: 'FEF2C0', description: 'review:human PR awaiting its advisory panel; cleared once it posts (mechanical-dispatcher)' },
 };
 
 /** Default rubric thresholds (tuning knobs — loose to start). The VALUES live in the machine-diffable contract
