@@ -19,10 +19,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  HARD_MAX_BYTES, HARD_MAX_LINES, HARD_MAX_FIELD, STALL_S,
+  HARD_MAX_BYTES, HARD_MAX_LINES, HARD_MAX_FIELD, HARD_META_BYTES, STALL_S,
   parseArgs, threadIdFromAny, tailLines, countLines, readSessionMeta,
   truncate, stripControlSequences, flattenParts, exitCodeOf,
-  summarizeRecord, detectPendingCall, detectOpenTurn, buildVerdict,
+  summarizeRecord, formatRecord, detectPendingCall, detectOpenTurn, buildVerdict,
 } from '../codex-transcript.mjs';
 
 let dir;
@@ -48,9 +48,14 @@ describe('parseArgs — hard ceilings clamp even an explicit oversized override'
     expect(parseArgs(['tid', '--lines=999999']).lines).toBe(HARD_MAX_LINES);
     expect(parseArgs(['tid', '--field-max=999999']).fieldMax).toBe(HARD_MAX_FIELD);
   });
+  it('clamps --meta-bytes to HARD_META_BYTES no matter how large the request', () => {
+    const opts = parseArgs(['tid', '--meta-bytes=999999999999']);
+    expect(opts.metaBytes).toBe(HARD_META_BYTES);
+  });
   it('floor-clamps a too-small request', () => {
     expect(parseArgs(['tid', '--max-bytes=1']).maxBytes).toBe(1024);
     expect(parseArgs(['tid', '--lines=-5']).lines).toBe(1);
+    expect(parseArgs(['tid', '--meta-bytes=1']).metaBytes).toBe(1024);
   });
 });
 
@@ -225,6 +230,63 @@ describe('truncate / stripControlSequences — command STDOUT is echoed verbatim
     const out = truncate('z'.repeat(100), 10);
     expect(out).toContain('truncated');
     expect(out.length).toBeLessThan(60);
+  });
+});
+
+// ── security: a crafted rollout must not smuggle escape sequences via the "identifier" fields ──────
+// `truncate()` already sanitizes free-text fields (message/tool-output content). These fields carry the
+// SAME attacker-controlled JSON but are short scalars printed as-is (no truncation) in the human-readable
+// report — so they need the identical stripping, not a separate mechanism.
+describe('summarizeRecord / readSessionMeta — name/role/callId/turnId/cwd/approvalPolicy are sanitized', () => {
+  const evil = '\x1b]0;pwned\x07innocent-looking-name';
+  const evilClean = 'innocent-looking-name';
+
+  it('strips an escape sequence smuggled in a tool_call name and call_id', () => {
+    const r = summarizeRecord(JSON.stringify(rec('response_item', {
+      type: 'custom_tool_call', call_id: evil, name: evil, input: 'x',
+    })), 400);
+    expect(r.name).toBe(evilClean);
+    expect(r.callId).toBe(evilClean);
+    expect(formatRecord(r)).not.toContain('\x1b');
+  });
+
+  it('strips an escape sequence smuggled in a tool_output call_id', () => {
+    const r = summarizeRecord(JSON.stringify(rec('response_item', {
+      type: 'custom_tool_call_output', call_id: evil, output: [{ type: 'input_text', text: 'ok' }],
+    })), 400);
+    expect(r.callId).toBe(evilClean);
+  });
+
+  it('strips an escape sequence smuggled in a message role', () => {
+    const r = summarizeRecord(JSON.stringify(rec('response_item', {
+      type: 'message', role: evil, content: [{ type: 'input_text', text: 'hi' }],
+    })), 400);
+    expect(r.role).toBe(evilClean);
+    expect(formatRecord(r)).not.toContain('\x1b');
+  });
+
+  it('strips an escape sequence smuggled in a task_started turn_id', () => {
+    const r = summarizeRecord(JSON.stringify(rec('event_msg', { type: 'task_started', turn_id: evil })), 400);
+    expect(r.turnId).toBe(evilClean);
+  });
+
+  it('strips an escape sequence smuggled in turn_context.cwd and approval_policy', () => {
+    const r = summarizeRecord(JSON.stringify(rec('turn_context', { cwd: evil, approval_policy: evil })), 400);
+    expect(r.cwd).toBe(evilClean);
+    expect(r.approvalPolicy).toBe(evilClean);
+    expect(formatRecord(r)).not.toContain('\x1b');
+  });
+
+  it('strips an escape sequence smuggled in the session_meta header (cwd, originator, etc.)', () => {
+    const file = join(dir, 'evil-meta.jsonl');
+    writeRecords(file, [
+      rec('session_meta', { session_id: evil, timestamp: evil, cwd: evil, originator: evil, cli_version: evil, source: evil, model_provider: evil }),
+      rec('event_msg', { type: 'task_started' }),
+    ]);
+    const meta = readSessionMeta(file, 512_000);
+    expect(meta.threadId).toBe(evilClean);
+    expect(meta.cwd).toBe(evilClean);
+    expect(meta.originator).toBe(evilClean);
   });
 });
 

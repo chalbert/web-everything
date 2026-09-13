@@ -236,13 +236,13 @@ function readSessionMeta(file, maxBytes) {
     if (o?.type !== 'session_meta') return null;
     const p = o.payload || {};
     return {
-      threadId: p.session_id ?? p.id ?? null,
-      startedAt: p.timestamp ?? null,
-      cwd: p.cwd ?? null,
-      originator: p.originator ?? null,   // e.g. "codex_exec"
-      cliVersion: p.cli_version ?? null,
-      source: p.source ?? null,
-      modelProvider: p.model_provider ?? null,
+      threadId: sanitizeScalar(p.session_id ?? p.id ?? null),
+      startedAt: sanitizeScalar(p.timestamp ?? null),
+      cwd: sanitizeScalar(p.cwd ?? null),
+      originator: sanitizeScalar(p.originator ?? null),   // e.g. "codex_exec"
+      cliVersion: sanitizeScalar(p.cli_version ?? null),
+      source: sanitizeScalar(p.source ?? null),
+      modelProvider: sanitizeScalar(p.model_provider ?? null),
       contextWindow: p.context_window?.window_id ? null : (p.context_window ?? null),
     };
   } catch {
@@ -260,6 +260,16 @@ function readSessionMeta(file, maxBytes) {
 const ESCAPE_OR_CONTROL_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 function stripControlSequences(s) {
   return s.replace(ESCAPE_OR_CONTROL_RE, '');
+}
+
+// Same sanitization as free-text fields (`truncate`), applied to short scalar fields — name, role,
+// call/turn ids, cwd, approval policy — that are printed as-is (no truncation) in the human-readable
+// report. These come straight out of the attacker-controlled rollout JSON just like tool output/message
+// text does, so a crafted `name`/`cwd`/etc. is just as capable of injecting a terminal escape sequence
+// into an operator's terminal (#review-2155-finding-2). Non-strings (null/undefined/numbers) pass through
+// unchanged — only actual text is ever control-stripped.
+function sanitizeScalar(v) {
+  return typeof v === 'string' ? stripControlSequences(v) : v;
 }
 
 function truncate(str, max) {
@@ -298,7 +308,7 @@ function summarizeRecord(raw, fieldMax) {
   // `function_call` carries JSON in `arguments`. Both pair to their output via `call_id`.
   if (pt === 'custom_tool_call' || pt === 'function_call') {
     return {
-      kind: 'tool_call', ts, callId: p.call_id ?? null, name: p.name ?? null,
+      kind: 'tool_call', ts, callId: sanitizeScalar(p.call_id ?? null), name: sanitizeScalar(p.name ?? null),
       input: truncate(p.input ?? p.arguments ?? '', fieldMax),
     };
   }
@@ -306,14 +316,14 @@ function summarizeRecord(raw, fieldMax) {
     const flat = flattenParts(p.output);
     const code = exitCodeOf(flat);
     return {
-      kind: 'tool_output', ts, callId: p.call_id ?? null, exitCode: code,
+      kind: 'tool_output', ts, callId: sanitizeScalar(p.call_id ?? null), exitCode: code,
       isError: code != null && code !== 0,
       text: truncate(flat, fieldMax),
     };
   }
   if (pt === 'message') {
     return {
-      kind: 'message', ts, role: p.role ?? null,
+      kind: 'message', ts, role: sanitizeScalar(p.role ?? null),
       text: truncate(flattenParts(p.content).trim(), fieldMax),
     };
   }
@@ -322,7 +332,7 @@ function summarizeRecord(raw, fieldMax) {
     // is no content to report: `summary` is empty and `encrypted_content` is not decryptable here.
     return { kind: 'reasoning', ts, encrypted: !!p.encrypted_content, hasSummary: Array.isArray(p.summary) && p.summary.length > 0 };
   }
-  if (pt === 'task_started') return { kind: 'turn_started', ts, turnId: p.turn_id ?? null, contextWindow: p.model_context_window ?? null };
+  if (pt === 'task_started') return { kind: 'turn_started', ts, turnId: sanitizeScalar(p.turn_id ?? null), contextWindow: p.model_context_window ?? null };
   if (pt === 'task_complete') return { kind: 'turn_complete', ts };
   if (pt === 'token_count') {
     const info = p.info || {};
@@ -336,7 +346,7 @@ function summarizeRecord(raw, fieldMax) {
       quotaResetsAt: rl.primary?.resets_at ?? null,
     };
   }
-  if (o.type === 'turn_context') return { kind: 'turn_context', ts, cwd: p.cwd ?? null, approvalPolicy: p.approval_policy ?? null };
+  if (o.type === 'turn_context') return { kind: 'turn_context', ts, cwd: sanitizeScalar(p.cwd ?? null), approvalPolicy: sanitizeScalar(p.approval_policy ?? null) };
   return { kind: o.type === 'event_msg' ? `event:${pt || 'unknown'}` : (o.type || 'unknown'), ts };
 }
 
