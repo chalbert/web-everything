@@ -9,6 +9,7 @@ scope:
   - we:scripts/check-standards.mjs
   - we:scripts/check-standards-rules.mjs
 tags: [check-standards, gate, hygiene, footgun]
+deliveryAgent: codex
 ---
 
 # Lint invisible characters (U+200B, U+FEFF, U+00A0) out of scripts and docs source
