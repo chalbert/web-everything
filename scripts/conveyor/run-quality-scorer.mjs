@@ -28,9 +28,11 @@
  * is defence in depth, not the only gate.
  */
 
+import { readFileSync } from 'node:fs';
 import { isBlacklistedOperation, DEFAULT_OPERATION_BLACKLIST } from './hiccup-classify.mjs';
 import { scrubReasons } from '../lib/secret-scrub.mjs';
 import { CRITERIA_BY_ID, EVALUABLE_CRITERIA, RUBRIC_VERSION } from './run-quality-rubric.mjs';
+import { parseJsonlEvents } from '../codex-direct-task.mjs';
 
 /** Backgrounding shapes a command's own text can carry — the `passive-wait-no-poll` hunt. */
 const BACKGROUND_PATTERN_RE = /(&\s*$|\bnohup\b|\bdisown\b|--background\b|run_in_background\s*[:=]\s*true)/i;
@@ -178,6 +180,79 @@ export function scoreCodexTranscriptFile(rolloutFile, { readTranscriptRecords } 
     throw new TypeError('run-quality-scorer: `readTranscriptRecords` must be supplied — this module never reads the filesystem itself, see codex-transcript.mjs for the real reader');
   }
   return scoreRecords(readTranscriptRecords(rolloutFile));
+}
+
+/**
+ * THE ADVISORY-JUDGE-SEAT WIRING (confirmed root cause fix, `we:scripts/lib/codex-judge-spawn.mjs`). That
+ * provider's raw `codex exec --json` STDOUT STREAM is a DIFFERENT shape from the ROLLOUT FILE
+ * `scoreCodexTranscriptFile`/`summarizeRecord` (`we:skills-src/inspect-codex-transcript/codex-transcript.mjs`)
+ * read: a rollout record is `{timestamp, type, payload: {...}}`; the judge's own stream (identical family to
+ * `we:scripts/codex-direct-task.mjs`'s agentic stream, which `parseJsonlEvents` already parses) is flatter —
+ * `{type: 'item.completed', item: {type: 'command_execution'|'agent_message'|…, …}}`, with NO `payload`
+ * wrapper. `persistCodexJudgeTranscript` (`codex-judge-spawn.mjs`) persists exactly THIS stream shape — Codex's
+ * `--ephemeral` flag (kept, deliberately — see that module's header) means there is no rollout file for this
+ * seat's runs to fall back to. `mapCodexJudgeEventsToRecords` is therefore a NEW adapter, not a reuse of
+ * `summarizeRecord`, translating the stream's `command_execution` (which — unlike a rollout's separate call/
+ * output pair — carries the command AND its output+exit code on the SAME item) into the ordered
+ * `tool_call`/`tool_output` pair `scoreRecords`'s hunters already expect, and `agent_message` into `message`.
+ *
+ * PURE. Never throws on a malformed/unrecognised event — an event this function does not name a mapping for
+ * (a `thread.started`, a bare `turn.started`, a `file_change`) is simply skipped, since no wired hunter reads
+ * anything else today; widen this the day a hunter needs one of them.
+ *
+ * @param {object[]} events - `parseJsonlEvents`-shaped entries, oldest to newest.
+ * @returns {object[]} `summarizeRecord`-shaped entries `scoreRecords` can consume directly.
+ */
+export function mapCodexJudgeEventsToRecords(events) {
+  const out = [];
+  for (const e of (Array.isArray(events) ? events : [])) {
+    if (e?.type !== 'item.completed' || !e.item) {
+      if (e?.type === 'turn.completed' || e?.type === 'turn.failed') out.push({ kind: 'turn_complete' });
+      continue;
+    }
+    const { item } = e;
+    if (item.type === 'command_execution') {
+      out.push({ kind: 'tool_call', name: 'shell', input: String(item.command ?? '') });
+      out.push({
+        kind: 'tool_output',
+        text: String(item.aggregated_output ?? ''),
+        isError: item.exit_code != null && item.exit_code !== 0,
+      });
+    } else if (item.type === 'agent_message') {
+      out.push({ kind: 'message', role: 'assistant', text: String(item.text ?? '') });
+    }
+    // `file_change` and anything else: no wired hunter reads it today — skipped, not mis-mapped.
+  }
+  return out;
+}
+
+/**
+ * THE REAL (non-injected) READER for a Codex judge's own persisted transcript — the concrete
+ * `readTranscriptRecords`-shaped function `scoreCodexJudgeTranscriptFile` below wires by default. Reads the
+ * WHOLE file (unlike `inspect-codex-transcript`'s deliberately bounded tail read): a judge transcript is one
+ * bounded schema-constrained call, not an open-ended coding session, so there is no unbounded-file hazard to
+ * guard against here the way there is for `codex-transcript.mjs`'s subject.
+ * @param {string} file
+ * @param {{readFile?: (p:string) => string}} [io]
+ * @returns {object[]} `summarizeRecord`-shaped entries.
+ */
+export function readCodexJudgeTranscriptRecords(file, { readFile = (p) => readFileSync(p, 'utf8') } = {}) {
+  return mapCodexJudgeEventsToRecords(parseJsonlEvents(readFile(file)));
+}
+
+/**
+ * Score a Codex advisory-judge-seat run from its persisted transcript FILE PATH — closing the exact gap the
+ * confirmed root cause named: before `codex-judge-spawn.mjs` persisted anything, this seat's runs had no
+ * transcript to read and were correctly (but unhelpfully) recorded `score: null, criteriaEvaluated: 0`. With a
+ * real `transcriptFile` in hand (from a run record's stamped telemetry — see `we:scripts/operations/
+ * run-record.mjs`'s `transcriptFile` telemetry field), this now reads real content and can score a real
+ * deduction vector. `readFile` is injectable for tests; production callers get the real filesystem read.
+ * @param {string} file - a `codex-judge-spawn.mjs#persistCodexJudgeTranscript` path.
+ * @param {{readFile?: (p:string) => string}} [io]
+ * @returns {{rubricVersion: string, criteriaEvaluated: number, deductions: object[], score: number|null}}
+ */
+export function scoreCodexJudgeTranscriptFile(file, io = {}) {
+  return scoreRecords(readCodexJudgeTranscriptRecords(file, io));
 }
 
 export { RUBRIC_VERSION };

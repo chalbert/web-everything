@@ -232,6 +232,27 @@ describe('the pure core', () => {
     }
   });
 
+  // THE CODEX JUDGE TRANSCRIPT FIX — `transcriptFile` (we:scripts/lib/codex-judge-spawn.mjs's
+  // `persistCodexJudgeTranscript`) is a durable LOCAL PATH, added to the string whitelist alongside
+  // `sessionId`/`stopReason`/`lens`/`model`/`effort` — never transcript CONTENT, which this whitelist's own
+  // design (see the block comment above `TELEMETRY_STRINGS`) exists to keep off a record that is serialized to
+  // disk and printed verbatim by `--json`.
+  it('normalizeJudgeTelemetry keeps `transcriptFile` — a path, whitelisted like the other juror-identity strings', () => {
+    const row = normalizeJudgeTelemetry({
+      step: 'judgeAdvisory',
+      stepIndex: 2,
+      telemetry: { costUsd: 0, sessionId: 'thread-abc', transcriptFile: '/Users/x/.codex-judge-transcripts/codex-judge-thread-abc.jsonl' },
+    });
+    expect(row.transcriptFile).toBe('/Users/x/.codex-judge-transcripts/codex-judge-thread-abc.jsonl');
+  });
+
+  it('normalizeJudgeTelemetry drops `transcriptFile` when it is not a non-empty string (undefined, empty, non-string)', () => {
+    for (const transcriptFile of [undefined, '', null, 42, {}]) {
+      expect(normalizeJudgeTelemetry({ step: 'judgeAdvisory', telemetry: { costUsd: 0, transcriptFile } }))
+        .not.toHaveProperty('transcriptFile');
+    }
+  });
+
   it('totalJudgeSpend sums the meter, and reports zero for a run that spawned nothing', () => {
     const run = { ...sample(), telemetry: [{ costUsd: 0.02, wallMs: 100 }, { costUsd: 0.03, wallMs: 250, durationMs: 200 }] };
     expect(totalJudgeSpend(run)).toEqual({ jurors: 2, costUsd: 0.05, wallMs: 350, durationMs: 200 });

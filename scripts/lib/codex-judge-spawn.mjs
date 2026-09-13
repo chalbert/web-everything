@@ -81,8 +81,11 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './judge-spawn.mjs';
 
@@ -446,6 +449,79 @@ export function codexLoadedContextTokens(usage = {}) {
 }
 
 /**
+ * THE DURABLE TRANSCRIPT DIRECTORY — mirrors `we:scripts/codex-direct-task.mjs#resolveCodexHome`'s own
+ * env-override-then-home-dir-fallback shape, but for OUR OWN captured stdout rather than Codex's own rollout
+ * file. THIS PROVIDER ALWAYS SPAWNS WITH `--ephemeral` (an intentional, RETAINED isolation property — see the
+ * file header; it protects actor-identity/non-resumability and is unrelated to transcript persistence, and
+ * removing it would reintroduce a real risk) — an ephemeral Codex run writes NO rollout file at all, so
+ * nothing else on disk holds this run's transcript unless this module puts it there itself.
+ * `CODEX_JUDGE_TRANSCRIPT_DIR` honours an override (tests, or a caller wanting a different location); the
+ * default sits in the user's home directory — NOT the OS tmpdir, which can be swept far more aggressively —
+ * so a persisted transcript survives at least as long as an operator's own machine session, for the same
+ * reason `~/.codex/sessions` does.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function resolveCodexJudgeTranscriptDir(env = process.env) {
+  const override = env?.CODEX_JUDGE_TRANSCRIPT_DIR;
+  return (typeof override === 'string' && override.trim()) ? override.trim() : join(homedir(), '.codex-judge-transcripts');
+}
+
+/**
+ * The `thread_id` off a `thread.started` event in a Codex judge's raw JSONL stdout — extracted directly and
+ * independently of {@link parseCodexJudgeOutcome}'s own success/failure, because the transcript must be
+ * persisted even when the run goes on to fail (a `turn.failed`, an unparseable answer, a kill) — those are
+ * exactly the runs a human or the run-quality scorer most wants to read afterward. PURE.
+ * @param {string} stdout
+ * @returns {string|null}
+ */
+export function extractCodexJudgeThreadId(stdout) {
+  const lines = String(stdout).split('\n').map(parseJsonlLine).filter(Boolean);
+  const started = lines.find((l) => l?.type === 'thread.started');
+  return (typeof started?.thread_id === 'string' && started.thread_id) ? started.thread_id : null;
+}
+
+/**
+ * PERSIST THE RAW JSONL STDOUT `codexJudgeSpawn` already captures in memory to a durable local file — THE FIX
+ * for the confirmed defect this module shipped with: the function buffered the whole `codex exec --json`
+ * stream purely to parse the schema-constrained answer out of it, then discarded the buffer, so once
+ * `--ephemeral` (correctly, and NOT removed — see the file header) suppressed Codex's own rollout file,
+ * nothing on disk recorded what a judge run actually did. This writes the SAME bytes
+ * {@link parseCodexJudgeOutcome} already parses, to `<dir>/codex-judge-<threadId>.jsonl` — named by the same
+ * `thread_id`/`sessionId` `codexJudgeSpawn` already returns, so a later reader (`we:scripts/conveyor/
+ * run-quality-scorer.mjs`) can find it from a run record's stamped `transcriptFile` path alone. Scrubbing is
+ * NOT done here, matching how Claude's own local judge transcripts are handled: unscrubbed at rest, scrubbed
+ * only at the point evidence is EXCERPTED into a published finding (`we:scripts/lib/secret-scrub.mjs`).
+ *
+ * NEVER THROWS — a transcript that fails to write is a best-effort loss, not a reason to fail a judge call
+ * that otherwise completed; the caller gets `null` back and the run proceeds exactly as it did before this
+ * existed.
+ *
+ * @param {object} o
+ * @param {string} o.stdout - the raw JSONL captured from the spawn, whatever its length.
+ * @param {string|null} o.threadId - from {@link extractCodexJudgeThreadId}; a run with none gets a random id
+ *   so nothing is silently dropped, labelled `unknown-` so a reader can tell the difference from a real one.
+ * @param {string} o.dir - the durable directory (see {@link resolveCodexJudgeTranscriptDir}).
+ * @param {(dir: string) => void} [o.ensureDir] - injectable `mkdirSync`, for tests.
+ * @param {(path: string, data: string) => void} [o.writeFile] - injectable `writeFileSync`, for tests.
+ * @param {() => string} [o.mkId] - injectable id generator for the `threadId == null` fallback, for tests.
+ * @returns {string|null} the file path written, or `null` on any failure.
+ */
+export function persistCodexJudgeTranscript({
+  stdout, threadId, dir, ensureDir = (d) => mkdirSync(d, { recursive: true }), writeFile = writeFileSync, mkId = randomUUID,
+} = {}) {
+  try {
+    ensureDir(dir);
+    const name = `codex-judge-${threadId || `unknown-${mkId()}`}.jsonl`;
+    const file = join(dir, name);
+    writeFile(file, String(stdout));
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * THE ONE FUNCTION A CODEX-BACKED `judge` STEP CALLS. Spawns a read-only-shell Codex juror and returns its
  * validated answer, in the same `JudgeProviderOutcome` shape `judgeSpawn` returns.
  *
@@ -478,7 +554,10 @@ export function codexLoadedContextTokens(usage = {}) {
  * @param {(path: string, opts: object) => void} [opts.removeFile] - injectable, for tests.
  * @returns {Promise<{value: object, sessionId: string, costUsd: number, durationMs: number, wallMs: number,
  *                    numTurns: number, stopReason: string, usage: object, loadedContextTokens: number,
- *                    timedOut: boolean, argv: string[]}>}
+ *                    timedOut: boolean, argv: string[], transcriptFile: string|null}>} `transcriptFile` is the
+ *   durable local path {@link persistCodexJudgeTranscript} wrote the raw JSONL to (or `null` if the write
+ *   itself failed) — never the transcript content, per `we:scripts/operations/run-record.mjs`'s telemetry
+ *   whitelist, which this field is designed to pass through unmodified.
  */
 export async function codexJudgeSpawn({
   mandate,
@@ -496,6 +575,11 @@ export async function codexJudgeSpawn({
   writeFile = writeFileSync,
   readFile = (p) => readFileSync(p, 'utf8'),
   removeFile = (p, o) => rmSync(p, o),
+  // THE FIX (confirmed root cause): the raw JSONL this function already captures used to be discarded once
+  // parsed. `transcriptDir` + `persistTranscript` are injectable (tests; a caller wanting a different
+  // location) but default to the real durable write — see `persistCodexJudgeTranscript`'s own header.
+  transcriptDir = resolveCodexJudgeTranscriptDir(env),
+  persistTranscript = persistCodexJudgeTranscript,
 } = {}) {
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('codex-judge-spawn: `mandate` must be a non-empty string');
@@ -578,13 +662,21 @@ export async function codexJudgeSpawn({
 
   const wallMs = Date.now() - startedAt;
 
+  // THE FIX — persist the raw JSONL BEFORE any parse can throw, keyed by the thread id this run reports (a
+  // random fallback id when even that is missing), so the transcript survives regardless of whether the run
+  // went on to succeed, fail its schema, or hit the timeout wall. Best-effort: `persistTranscript` never
+  // throws (see its own header), so a disk-write failure here can never turn a completed judge call into a
+  // failed one.
+  const judgeThreadId = extractCodexJudgeThreadId(result.stdout);
+  const transcriptFile = persistTranscript({ stdout: result.stdout, threadId: judgeThreadId, dir: transcriptDir });
+
   if (result.timedOut) {
     let outcome = null;
     try { outcome = parseCodexJudgeOutcome({ stdout: result.stdout, stderr: result.stderr, lastMessage }); } catch { outcome = null; }
     if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout: result.stdout, stderr: result.stderr });
     return {
       ...outcome, durationMs: wallMs, wallMs, timedOut: true,
-      loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv,
+      loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv, transcriptFile,
     };
   }
   const outcome = parseCodexJudgeOutcome({
@@ -594,6 +686,6 @@ export async function codexJudgeSpawn({
   });
   return {
     ...outcome, durationMs: wallMs, wallMs, timedOut: false,
-    loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv,
+    loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv, transcriptFile,
   };
 }

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { scoreRecords, scoreCodexTranscriptFile } from '../run-quality-scorer.mjs';
+import {
+  scoreRecords, scoreCodexTranscriptFile, mapCodexJudgeEventsToRecords,
+  readCodexJudgeTranscriptRecords, scoreCodexJudgeTranscriptFile,
+} from '../run-quality-scorer.mjs';
 import { RUBRIC_VERSION, EVALUABLE_CRITERIA } from '../run-quality-rubric.mjs';
 
 const toolCall = (input, extra = {}) => ({ kind: 'tool_call', name: 'shell', input, ...extra });
@@ -138,5 +141,119 @@ describe('scoreCodexTranscriptFile — the file-reading adapter', () => {
   it('scores whatever the injected reader returns', () => {
     const out = scoreCodexTranscriptFile('/some/path', { readTranscriptRecords: () => [toolCall('git status')] });
     expect(out.score).toBe(100);
+  });
+});
+
+describe('mapCodexJudgeEventsToRecords — the codex-judge-spawn.mjs STREAM shape, not the rollout-file shape', () => {
+  it('maps a command_execution item into an ordered tool_call + tool_output pair', () => {
+    const events = [
+      { type: 'thread.started', thread_id: 't' },
+      { type: 'turn.started' },
+      {
+        type: 'item.completed',
+        item: { id: 'item_1', type: 'command_execution', command: 'git status --short', aggregated_output: 'clean\n', exit_code: 0 },
+      },
+      { type: 'turn.completed', usage: {} },
+    ];
+    const records = mapCodexJudgeEventsToRecords(events);
+    expect(records).toEqual([
+      { kind: 'tool_call', name: 'shell', input: 'git status --short' },
+      { kind: 'tool_output', text: 'clean\n', isError: false },
+      { kind: 'turn_complete' },
+    ]);
+  });
+
+  it('flags a non-zero exit code as an error output', () => {
+    const events = [{
+      type: 'item.completed',
+      item: { type: 'command_execution', command: 'npm test', aggregated_output: 'FAIL\n1 failing', exit_code: 1 },
+    }];
+    const records = mapCodexJudgeEventsToRecords(events);
+    expect(records[1]).toEqual({ kind: 'tool_output', text: 'FAIL\n1 failing', isError: true });
+  });
+
+  it('maps an agent_message item into a message record', () => {
+    const events = [{ type: 'item.completed', item: { type: 'agent_message', text: '{"verdict":"accept"}' } }];
+    expect(mapCodexJudgeEventsToRecords(events)).toEqual([{ kind: 'message', role: 'assistant', text: '{"verdict":"accept"}' }]);
+  });
+
+  it('skips a thread.started/turn.started/file_change/unrecognised item without throwing', () => {
+    const events = [
+      { type: 'thread.started', thread_id: 't' },
+      { type: 'turn.started' },
+      { type: 'item.completed', item: { type: 'file_change', changes: [{ path: 'x', kind: 'update' }] } },
+      { type: 'something.else' },
+    ];
+    expect(mapCodexJudgeEventsToRecords(events)).toEqual([]);
+  });
+
+  it('a turn.failed also produces a turn_complete record — the run still concluded, just not cleanly', () => {
+    const events = [{ type: 'turn.failed', error: { message: 'boom' } }];
+    expect(mapCodexJudgeEventsToRecords(events)).toEqual([{ kind: 'turn_complete' }]);
+  });
+
+  it('non-array input degrades to an empty list rather than throwing', () => {
+    expect(mapCodexJudgeEventsToRecords(null)).toEqual([]);
+    expect(mapCodexJudgeEventsToRecords(undefined)).toEqual([]);
+  });
+});
+
+describe('readCodexJudgeTranscriptRecords / scoreCodexJudgeTranscriptFile — THE FIX, end to end', () => {
+  // A REALISTIC advisory-judge-seat transcript — the exact stream shape `codex-judge-spawn.mjs` now persists
+  // to disk (see `we:backlog/3649-*.md`'s own proof-advisory-scratch row, which recorded `score: null,
+  // criteriaEvaluated: 0` for lack of exactly this file).
+  const realisticJudgeStream = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'sess-advisory-1' }),
+    JSON.stringify({ type: 'turn.started' }),
+    JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'command_execution', command: 'git status --short', aggregated_output: '', exit_code: 0 },
+    }),
+    JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '{"verdict":"accept","finding":"looks fine"}' },
+    }),
+    JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 10 } }),
+  ].join('\n');
+
+  it('readCodexJudgeTranscriptRecords parses a file (injected reader) into summarizeRecord-shaped entries', () => {
+    const records = readCodexJudgeTranscriptRecords('/fake/path.jsonl', { readFile: () => realisticJudgeStream });
+    expect(records).toEqual([
+      { kind: 'tool_call', name: 'shell', input: 'git status --short' },
+      { kind: 'tool_output', text: '', isError: false },
+      { kind: 'message', role: 'assistant', text: '{"verdict":"accept","finding":"looks fine"}' },
+      { kind: 'turn_complete' },
+    ]);
+  });
+
+  it('THE FIX: scoreCodexJudgeTranscriptFile now produces a REAL score for an advisory-seat run, never null/0', () => {
+    const out = scoreCodexJudgeTranscriptFile('/fake/path.jsonl', { readFile: () => realisticJudgeStream });
+    // Before this fix, this exact class of run (no persisted transcript — `--ephemeral` suppresses Codex's own
+    // rollout) was correctly but unhelpfully recorded `score: null, criteriaEvaluated: 0` (see
+    // `we:scripts/conveyor/run-scorecards.json`'s `proof-advisory-scratch` row). With a real transcript file to
+    // read, it is neither:
+    expect(out.criteriaEvaluated).toBeGreaterThan(0);
+    expect(out.score).not.toBeNull();
+    expect(out.score).toBe(100); // a clean run — nothing blacklisted, no abandoned test, no redundant reads
+  });
+
+  it('still scores null/0 on a genuinely empty transcript — never fabricates a perfect score either', () => {
+    const out = scoreCodexJudgeTranscriptFile('/fake/empty.jsonl', { readFile: () => '' });
+    expect(out.criteriaEvaluated).toBe(0);
+    expect(out.score).toBeNull();
+  });
+
+  it('scores a real deduction when the advisory seat ran a blacklisted operation', () => {
+    const dirtyStream = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'sess-advisory-2' }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'command_execution', command: 'git reset --hard origin/main', aggregated_output: '', exit_code: 0 },
+      }),
+      JSON.stringify({ type: 'turn.completed', usage: {} }),
+    ].join('\n');
+    const out = scoreCodexJudgeTranscriptFile('/fake/dirty.jsonl', { readFile: () => dirtyStream });
+    expect(out.score).toBeLessThan(100);
+    expect(out.deductions.find((d) => d.criterion === 'blacklisted-operation')).toBeTruthy();
   });
 });

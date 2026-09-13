@@ -7,7 +7,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   CODEX_CLI,
   CODEX_EFFORT_MAP,
@@ -20,6 +22,9 @@ import {
   codexJudgeSpawn,
   requireAllProperties,
   stripNulls,
+  resolveCodexJudgeTranscriptDir,
+  extractCodexJudgeThreadId,
+  persistCodexJudgeTranscript,
 } from '../codex-judge-spawn.mjs';
 import { JudgeTimeoutError } from '../judge-spawn.mjs';
 
@@ -232,6 +237,84 @@ describe('codexLoadedContextTokens — Codex\'s own usage key names, distinct fr
   });
 });
 
+describe('resolveCodexJudgeTranscriptDir — env override, else the home-dir default (mirrors resolveCodexHome)', () => {
+  it('honours CODEX_JUDGE_TRANSCRIPT_DIR when set', () => {
+    expect(resolveCodexJudgeTranscriptDir({ CODEX_JUDGE_TRANSCRIPT_DIR: '/tmp/custom-judge-transcripts' }))
+      .toBe('/tmp/custom-judge-transcripts');
+  });
+
+  it('falls back to a home-dir default when unset/blank', () => {
+    expect(resolveCodexJudgeTranscriptDir({})).toMatch(/\.codex-judge-transcripts$/);
+    expect(resolveCodexJudgeTranscriptDir({ CODEX_JUDGE_TRANSCRIPT_DIR: '   ' })).toMatch(/\.codex-judge-transcripts$/);
+  });
+});
+
+describe('extractCodexJudgeThreadId — the thread_id off `thread.started`, independent of parse success', () => {
+  it('extracts the thread_id from a clean stream', () => {
+    const stdout = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-xyz' }),
+      JSON.stringify({ type: 'turn.completed', usage: {} }),
+    ].join('\n');
+    expect(extractCodexJudgeThreadId(stdout)).toBe('thread-xyz');
+  });
+
+  it('returns null when there is no thread.started event at all (e.g. a spawn that produced nothing)', () => {
+    expect(extractCodexJudgeThreadId('')).toBeNull();
+    expect(extractCodexJudgeThreadId(JSON.stringify({ type: 'turn.completed' }))).toBeNull();
+  });
+
+  it('still finds the thread_id even when the stream goes on to a turn.failed — the transcript-persistence case', () => {
+    const stdout = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-failed-run' }),
+      JSON.stringify({ type: 'turn.failed', error: { message: 'boom' } }),
+    ].join('\n');
+    expect(extractCodexJudgeThreadId(stdout)).toBe('thread-failed-run');
+  });
+});
+
+describe('persistCodexJudgeTranscript — THE FIX: the raw JSONL is written to a durable local file', () => {
+  it('writes the exact stdout bytes to <dir>/codex-judge-<threadId>.jsonl and returns that path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-test-'));
+    try {
+      const stdout = JSON.stringify({ type: 'thread.started', thread_id: 'sess-1' }) + '\n' + JSON.stringify({ type: 'turn.completed' });
+      const file = persistCodexJudgeTranscript({ stdout, threadId: 'sess-1', dir });
+      expect(file).toBe(join(dir, 'codex-judge-sess-1.jsonl'));
+      expect(readFileSync(file, 'utf8')).toBe(stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to a random `unknown-<id>` name when no threadId is available, never silently dropping the run', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-test-'));
+    try {
+      const file = persistCodexJudgeTranscript({ stdout: 'whatever', threadId: null, dir, mkId: () => 'fixed-id' });
+      expect(file).toBe(join(dir, 'codex-judge-unknown-fixed-id.jsonl'));
+      expect(readFileSync(file, 'utf8')).toBe('whatever');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the directory if it does not exist yet', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-test-'));
+    const dir = join(parent, 'nested', 'deeper');
+    try {
+      const file = persistCodexJudgeTranscript({ stdout: 'x', threadId: 't', dir });
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('NEVER throws — a write failure is a best-effort loss, returning null, not a crashed judge call', () => {
+    const boom = () => { throw new Error('disk is full'); };
+    expect(() => persistCodexJudgeTranscript({ stdout: 'x', threadId: 't', dir: '/nonexistent', ensureDir: boom }))
+      .not.toThrow();
+    expect(persistCodexJudgeTranscript({ stdout: 'x', threadId: 't', dir: '/nonexistent', ensureDir: boom })).toBeNull();
+  });
+});
+
 describe('codexJudgeSpawn — exercised over an injected spawn (real temp files, fake process)', () => {
   /** A fake `child_process.spawn` that writes the last-message file (as the real CLI does) and replays JSONL. */
   function fakeSpawn({ stdout, code = 0, writeLastMessage = null }) {
@@ -322,6 +405,71 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
     };
     await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
     expect(existsSync(workDirSeen)).toBe(false);
+  });
+
+  // THE FIX — #3649's run-quality recording mechanism could not score this seat's runs because the raw
+  // JSONL was captured only to parse the answer, then discarded. These prove it is now durably persisted,
+  // OUTSIDE the temp working directory the test right above proves gets deleted (so the transcript survives
+  // that cleanup), keyed by the same thread id the outcome reports as `sessionId`.
+  describe('THE FIX — the raw JSONL is now persisted to a durable file, independent of workDir cleanup', () => {
+    it('persists the transcript and returns its path as `transcriptFile`, via the real (non-injected) writer', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-integration-'));
+      try {
+        const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+        const r = await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, transcriptDir: dir });
+        expect(r.transcriptFile).toBe(join(dir, 'codex-judge-sess-1.jsonl'));
+        // THE EXACT SAME BYTES the outcome was parsed from — not a paraphrase, not a summary.
+        expect(readFileSync(r.transcriptFile, 'utf8')).toBe(okJsonl);
+        // Survives the workDir cleanup the test above proves happens — a DIFFERENT directory entirely.
+        expect(existsSync(r.transcriptFile)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('calls the injected `persistTranscript` with the captured stdout and the extracted thread id', async () => {
+      const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/transcript/path.jsonl'; };
+      const r = await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].threadId).toBe('sess-1');
+      expect(calls[0].stdout).toBe(okJsonl);
+      expect(r.transcriptFile).toBe('/fake/transcript/path.jsonl');
+    });
+
+    it('persists the transcript even when the run goes on to a `turn.failed` — never lost on failure', async () => {
+      const failedJsonl = [
+        JSON.stringify({ type: 'thread.started', thread_id: 'sess-failed' }),
+        JSON.stringify({ type: 'turn.failed', error: { message: 'boom' } }),
+      ].join('\n');
+      const { fn } = fakeSpawn({ stdout: failedJsonl });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/failed.jsonl'; };
+      await expect(codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript }))
+        .rejects.toThrow(/the juror failed/);
+      expect(calls).toHaveLength(1); // persisted BEFORE the parse threw, not skipped because of the throw
+      expect(calls[0].threadId).toBe('sess-failed');
+    });
+
+    it('a transcript-write failure never crashes an otherwise-successful judge call — best effort only', async () => {
+      const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      const persistTranscript = () => null; // simulates a disk-write failure
+      const r = await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript });
+      expect(r.value).toEqual({ verdict: 'accept', finding: 'ok' });
+      expect(r.transcriptFile).toBeNull();
+    });
+
+    // THE EXPLICIT CONFIRMATION THE TASK ASKS FOR: `--ephemeral` is UNTOUCHED by this fix. It protects
+    // actor-identity/non-resumability (unrelated to transcript persistence) and removing it would reintroduce
+    // a real risk — this module's own transcript file is what closes the observability gap instead.
+    it('still passes `--ephemeral` on every real spawn — the fix persists OUR OWN copy, it does not touch the flag', async () => {
+      const { fn, seen } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
+      expect(seen.argv).toContain('--ephemeral');
+      // and it is not, say, `--no-ephemeral` or a value-taking flag masquerading as it:
+      expect(seen.argv[seen.argv.indexOf('--ephemeral') + 1]).not.toBe('false');
+    });
   });
 
   describe('a juror that hits the wall (probe 6 — no CLI timeout flag; the parent kills it)', () => {
