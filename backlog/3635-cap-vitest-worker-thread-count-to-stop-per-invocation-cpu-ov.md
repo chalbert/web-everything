@@ -1,15 +1,25 @@
 ---
 bornAs: x1jcikc
 kind: task
-status: open
+status: resolved
 scope: ["we:vitest.config.ts", "we:vitest.shared.ts", "we:vitest.integration.config.ts", "we:vitest.maas-conformance.config.ts"]
 dateOpened: "2026-09-07"
+dateResolved: "2026-09-13"
+graduatedTo: none
 tags: []
 ---
 
 # Cap vitest worker/thread count to stop per-invocation CPU oversubscription
 
 we:vitest.config.ts / we:vitest.shared.ts had no pool/maxThreads/maxForks config, so a single vitest invocation defaults (via tinypool) to one worker per available CPU core (12 on a real host). we:scripts/readiness/heavy-admission.mjs (#3461) caps concurrent HEAVY COMMANDS at 2 host-wide, but never bounded worker threads WITHIN one invocation — two admitted vitest runs could grab up to 24 threads across 12 cores, and the admission semaphore itself fails open on a 20-minute timeout (documented, observed live), so a 3rd concurrent run is real too. Fix: add an explicit maxThreads/maxForks cap (4) via we:vitest.shared.ts, applied in we:vitest.config.ts, we:vitest.integration.config.ts, we:vitest.maas-conformance.config.ts. Build-ready infra tuning, filed lightweight for tracking.
+
+**Landed as `ab7ac270c` ("Cap vitest worker/thread count to stop per-invocation CPU oversubscription")** —
+`we:vitest.shared.ts#maxTestWorkers` (4) is applied in all four scoped files exactly as described. Discovered
+resolved-but-unmarked while merging `origin/lane/mechanical-dispatcher` into WE PR #2156 (`#3383`/`#xw0odtv`):
+this card's own `bornAs` hash (`x1jcikc`) was independently re-numbered on two diverged branches — this repo's
+own history as `#3650` (see that card), the merge target's as this `#3635` — a duplicate JIT-mint discovered
+only when the two branches' histories finally met. Resolving both here rather than deleting either, per the
+backlog's own audit-trail rule.
 
 ## Done when
 
