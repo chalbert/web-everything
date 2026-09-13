@@ -1942,7 +1942,7 @@ and should simply be released.
   constellation says a checkout goes").
 - **`#3649`** — confirmed accurately described: `status: open`, `kind: decision`, `preparedDate: 2026-09-12` set,
   landed to `main` via `PR #2149` (merged). Genuinely prepared and awaiting ratification, not yet ruled.
-- **`x4vs5xl` / `PR #2150`** — confirmed: `OPEN`, "file: gh pr checkout bypasses the branch-switch guard on the
+- **`3652` / `PR #2150`** — confirmed: `OPEN`, "file: gh pr checkout bypasses the branch-switch guard on the
   shared primary checkout." Filed, not fixed, exactly as stated.
 - **"Fix what you find by default" memory** — confirmed:
   `we:agent-memory-src/prototype-fix-what-you-find-by-default.md`, landed to `main` via `PR #2148` (merged).
