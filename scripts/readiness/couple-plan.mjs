@@ -57,6 +57,11 @@ export function isSha(s) {
   return SHA_RE.test(normSha(s));
 }
 
+/** Compare already validated, normalized hashes, accepting an abbreviation in either direction. */
+function shaMatches(a, b) {
+  return a.startsWith(b) || b.startsWith(a);
+}
+
 /**
  * Decide open-order + the WE half's stack-base for a cross-locus couple, so BOTH PRs open before either lands
  * (overlapped first CI). Pure — the caller supplies the impl lane's already-PUSHED tip sha; this module never
@@ -99,14 +104,14 @@ export function planCoupleOpen({ implRepo, weRepo = 'we', implRef, weRef, implTi
  * Skip the WE re-CI ONLY when the WE half's first CI is provably STILL valid against current `main` — i.e. the
  * impl landed EXACTLY as the sha the WE half was overlap-stacked on, AND `main` has not advanced past it:
  *
- *     landedImplSha === stackedBaseSha   &&   mainTipSha === landedImplSha
+ *     All three normalized shas are prefix-compatible (abbreviations accepted in either direction).
  *
  * Every other configuration falls back to today's rebase + re-CI (each with its own reason so the drain log and
  * the tests distinguish them):
  *   • `stackedBaseSha` unknown (the WE half was NOT stacked — opened off main) → rebase.
- *   • `landedImplSha !== stackedBaseSha` → the impl landed as a DIFFERENT sha: a squash-merge, or a
+ *   • landed impl and stacked base have conflicting prefixes → the impl landed as a DIFFERENT sha: a squash-merge, or a
  *     `review:changes` re-stack superseded the base → rebase (never land the WE half on a stale impl).
- *   • `mainTipSha !== landedImplSha` → `main` advanced past the impl land (another couple landed between) →
+ *   • main conflicts with the landed impl or stacked base → `main` advanced past the impl land (another couple landed between) →
  *     rebase (the WE first CI no longer reflects main's tip).
  *   • any missing / malformed sha → rebase (never skip on incomplete proof).
  *
@@ -127,10 +132,11 @@ export function decideWeReCi({ stackedBaseSha, landedImplSha, mainTipSha } = {})
   if (!isSha(landed)) return rebase('landed impl sha unknown/invalid — fail-safe to rebase + re-CI');
   if (!isSha(main)) return rebase('main tip sha unknown/invalid — fail-safe to rebase + re-CI');
 
-  if (landed !== base) {
+  if (!shaMatches(landed, base)) {
     return rebase(`landed impl ${landed.slice(0, 8)} ≠ stacked base ${base.slice(0, 8)} (squash-merge or review:changes re-stack superseded the base) — rebase + re-CI`);
   }
-  if (main !== landed) {
+  // Prefix matching is not transitive: a short landed hash must not hide conflicting base/main suffixes.
+  if (!shaMatches(main, landed) || !shaMatches(main, base)) {
     return rebase(`main ${main.slice(0, 8)} advanced past the landed impl ${landed.slice(0, 8)} — rebase + re-CI`);
   }
   return {
