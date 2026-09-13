@@ -1990,3 +1990,73 @@ Check, in this order:
    threads; worth a look. Several `fix-*`/`review-*` background entries show `state: blocked` but are ~24h+ old
    debris from unrelated earlier work, consistent with the already-documented stale-`claude agents`-bookkeeping
    gap — not new, not urgent.
+
+## Follow-up (2026-09-12 night, after the list above) — item 2 (Codex reviewer-seat validation) reached a
+## verdict: the mechanism is clean, the JUDGMENT is not — 4 of 4 real runs came back empty, including one real miss
+
+Item 2 above was left as "workbench ready, no recorded verdict yet." It has since concluded. Everything below
+is read directly off the four persisted completion records the live-fire run itself wrote
+(`review-pr-9c12fca6…` = PR #2107, `review-pr-e64b290a…` = PR #2130, `review-pr-268cdedd…` = PR #2147,
+`review-pr-19d6b92a…` = PR #2043) and their `judge`/`judgeAdvisory` telemetry, not a paraphrase of a summary.
+
+### The live-fire run itself: plumbing proven, judgment not
+
+`--codex-advisory` ran against these 4 real, currently-open PRs, real diffs, confirmed non-degraded reads
+(`degraded: false` on every request). Every one of the four `judgeAdvisory` (Codex, simplicity lens) steps came
+back the same shape: exactly 1 turn, `stopReason: "turn.completed"`, `costUsd: 0`, **zero findings**
+(`findings: []`):
+
+| PR | wall time | reasoning tokens (output) | loaded context tokens (diff-proportional) |
+|----|-----------|---------------------------|--------------------------------------------|
+| #2043 | 7.2s | 76 | 24,625 |
+| #2147 | 9.2s | 103 | 29,101 |
+| #2130 | 11.4s | 108 | 42,651 |
+| #2107 | 12.2s | 180 | 87,103 |
+
+**4 of 4 real runs: empty.** Reasoning effort does not track diff size the way it should: from the smallest
+diff (#2043) to the largest (#2107) the loaded context grew ~3.5x but reasoning output grew only ~2.4x — the
+seat gives proportionally *less* attention as the diff gets bigger, the opposite of what a careful review would
+need.
+
+### The miss that matters: PR #2107
+
+On #2107, Codex's advisory seat's own words: "no concrete simplicity findings survived scrutiny" — a rubber
+stamp. The same diff, same run, reviewed by the Claude correctness juror, produced a `CONFIRMED`,
+`disposition: blocker`, `worseThanBase: true` finding: `commitConvergeRound`
+(`we:scripts/operations/deliver-item-wrapper.mjs`) shells `git commit -F <msgfile> -- <paths>` with no preceding
+`git add`, which throws on any round whose accepted edit adds a brand-new (untracked) file — verified against
+real git, not the test suite's mocked `run` (every existing test for this path mocks `run`, which is why it was
+never caught). Codex looked at the identical diff and found nothing.
+
+### The control probe: the seat itself is not broken
+
+A separate synthetic-diff control probe (a scratch script driving the same real request builder and provider,
+against a contrived diff with an unused dead function and redundant branches — built to be found) confirmed the
+wiring CAN produce a real, correctly-shaped finding when exercised in isolation. So this is not a broken
+integration — it is a real judgment-quality gap on dense, real-world diffs specifically.
+
+### Verdict, per `#3581`'s own bar (Codex must prove itself as reviewer before delivery work trusts it)
+
+**Mechanism: validated.** No recurrence of the earlier false-accept bug, correctly tool-free, cheap, fast.
+**Reviewer judgment: NOT validated.** Four empty accepts in a row — one of them a genuine miss on a confirmed
+blocker — is not evidence of added signal.
+
+This does **not** call into question item 1 above (the Codex delivery-agent provider build) — the operator
+already explicitly, and separately, chose to move that forward ahead of this gate; that call stands as made. It
+**does** leave open a real, unresolved question: should the advisory seat itself be trusted or adjusted (a
+harder mandate? reasoning effort/budget forced to a floor regardless of diff size?) before `#2117`'s pilot is
+treated as proven. Nothing here forces that call tonight — it is a "decide with fresh eyes" item, not a
+"blocked" one.
+
+### Two smaller residuals, for the record
+
+- **A `blocked-on-infra` labeling gap, confirmed by direct inspection.** In
+  `we:scripts/operations/review-dispatch-wrapper.mjs` (prototype branch, `origin/lane/mechanical-dispatcher`),
+  the `blocked-on-infra` classification built when `we:scripts/operations/review-loop-cli.mjs` itself crashes
+  (`classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null }`, no `label`)
+  carries no error detail into `reportDone`, while the sibling `acquireLane`-throw path a few lines above builds
+  `classified` with `label: String((e && e.message) || e).slice(0, 500)` from the same kind of caught error
+  before reporting. Worth aligning so every `blocked-on-infra` path carries its error as a `label`, not just
+  some of them.
+- **Lane-pool reaped a live sibling agent's lease mid-run tonight** — no data lost, but the mechanism that let a
+  live lease get reaped out from under a running sibling is worth checking before trusting it unattended again.
