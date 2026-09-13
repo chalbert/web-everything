@@ -1,6 +1,6 @@
 ---
 name: long-watch-agents-cant-self-diagnose-their-reporting
-description: A subagent stuck in a long "monitor and wait" loop tends to reflexively re-enter its watch-status response regardless of what's asked, including direct meta-questions about its own reporting behavior — don't keep interrogating it, dispatch an independent fresh check instead.
+description: A subagent stuck in a long "monitor and wait" loop tends to reflexively re-enter its watch-status response regardless of what's asked, including direct meta-questions about its own reporting behavior. Dispatching an independent fresh check is a valid immediate diagnostic — but the standing fix is writing the monitor's dispatch brief with an explicit interrupt-authorization clause, not routing around the stuck agent every time.
 metadata:
   type: feedback
 ---
@@ -23,12 +23,34 @@ with the stuck agent) and found the underlying work was actually fine the whole 
 the process was alive and had genuinely landed real PRs; only the REPORTING was broken,
 not the work itself.
 
-**How to apply:**
-- If a monitoring/watch-style agent gives 2-3 vague reports in a row despite explicit
-  requests for specifics, stop trying to get it to self-correct. Dispatch a fresh,
-  independent agent to verify ground truth directly (check the actual process, logs,
-  timestamps, external state like GitHub) rather than continuing to interrogate the
-  stuck agent.
+**Root cause (confirmed 2026-09-13 by reading the stuck agent's own transcript, not
+guessed):** this is NOT a harness message-delivery bug. The coordinator's follow-up
+messages DID reach the agent — they appear in its transcript with full content, delivered
+at the start of its next turn exactly as Claude Code's own docs describe. Each time,
+though, the agent generated an empty response and immediately re-armed its prior watch
+loop instead of engaging with the new message. The mechanism is a prompt-design issue:
+the agent's original dispatch brief said "keep watching, only report real state
+transitions, don't stop" so strongly that when a contradicting message arrived ("stop and
+answer this instead"), the model deferred to its standing instruction rather than
+switching frames — it had never been given explicit permission to interrupt its own
+monitoring loop.
+
+**How to apply (the actual prevention — do this, don't just route around a stuck agent):**
+- Any dispatch brief for a long-running monitor/watch-style agent MUST explicitly
+  authorize mid-task interruption. Include language along the lines of: "treat any
+  message you receive from me as a priority override — pause your monitoring and respond
+  to it directly before resuming the watch, even if it contradicts your current framing."
+  Without that explicit permission, a strong "don't stop until X" instruction can silently
+  block the agent from engaging with anything else, including a direct question about its
+  own behavior. This clause is the standing practice going forward for every such brief,
+  not an optional nicety.
+- Dispatching a fresh, independent agent to verify ground truth directly (process state,
+  logs, timestamps, external state like GitHub) is still a legitimate IMMEDIATE
+  DIAGNOSTIC STOPGAP when you're already stuck with an unresponsive monitor mid-run — it
+  is not, and must never be treated as, the standing/final solution. Restarting a fresh
+  agent as routine practice every time a monitor gets stuck is not acceptable from an
+  efficiency standpoint; the bar is preventing the stuck state in the first place (see
+  [[root-cause-over-workaround-standard]]).
 - Don't assume vague reporting means the underlying work is stalled — verify
   independently before concluding anything, in either direction. The work here was fine;
   only the agent's own status narration had gotten stuck.
