@@ -1759,7 +1759,7 @@ driver checkout, a real `record-good` write, a real reset, and a real `restart-r
 new code. **That end-to-end live run is the next concrete step before trusting this pipeline**, not a code
 change — the code appears complete and is exercised in isolation, just never chained together for real.
 
-### 7. `#xnq6brj` / backlog `#3646` — filed, not fixed. Confirmed still open.
+### 7. `#3646` / backlog `#3646` — filed, not fixed. Confirmed still open.
 
 `we:skills-src/conveyor/runner.mjs`'s SIGTERM/SIGINT handler cannot fire while the runner is inside a blocking
 `execFileSync` call (one of its own mechanical passes) — Node only dispatches signals on the event loop.
@@ -1781,7 +1781,7 @@ fix has landed for this — only the diagnosis and the card.
 
 ### 9. PR #2113 — needs a real disposition decision, not indefinite open status
 
-Confirmed still `OPEN` against `main` (`gh pr view 2113`): "WE #xu2pp2m: extract shared minimal-context
+Confirmed still `OPEN` against `main` (`gh pr view 2113`): "WE #3629: extract shared minimal-context
 primitives + build the mechanical review-dispatch wrapper." Its content was already merged into
 `lane/mechanical-dispatcher` via a local branch merge back on `5129bd1fd` ("Merge branch 'pr-2113' into
 lane/mechanical-dispatcher") — i.e., the review-dispatch-wrapper code this PR carries is *already living and
