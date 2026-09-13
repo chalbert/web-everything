@@ -2322,6 +2322,17 @@ migration was ever started or ratified, and rule where this mechanism's canonica
 not a byproduct of closing duplicate PRs. Recorded here, on this epic's own tracker, so whoever picks this up
 next does not have to re-derive the observation from the closed PRs.
 
+### Correction (2026-09-13) — the entry above misnames which PRs actually survived the cleanup
+
+Checked directly against live PR state (`gh pr view <n> --json state,mergedAt`) rather than trusted as
+written: **`WE #2073` and `plateau-app #152` — the two PRs the paragraph above names as the survivors — are
+themselves `CLOSED`, not merged.** The cluster was four duplicate/near-duplicate PRs in total, not two:
+`WE #2060`, `WE #2073`, `WE #2083` (all three `CLOSED`) and `plateau-app #151`/`plateau-app #152` (both
+`CLOSED`). **The PRs that actually survived are `WE #2087`** (`MERGED` 2026-09-08) **and `plateau-app #155`**
+(still `OPEN`, unmerged, as of this correction) — a different pair than the one named above. The substance of
+the open-question section itself (the WE↔plateau-app migration-symptom question) is unaffected; only the
+specific "which PR survived" citation was wrong.
+
 ## Session update (2026-09-13) — durable operator intent: extend Codex as a provider beyond build/fix/ci-heal to every declared operation
 
 **Where this stands as of today, proven not just wired.** `#3564` → `PR #2169` ("WE #3564: delivery build")
@@ -2500,3 +2511,164 @@ more/different hardware.
 telemetry-driven cap adjustment exist as of this entry — `we:scripts/lib/lane-concurrency.mjs`'s cap is still a
 flat, static count. This is operator intent to revisit once the telemetry above has accumulated enough real
 data to design against, not a change already in flight.
+
+## Session update (2026-09-13, continued) — the Codex delivery pipeline proven end-to-end across three real items, plus two real infrastructure bugs it surfaced and fixed
+
+**Proven, not just wired.** Three real items went through
+`we:scripts/operations/deliver-item-run.mjs --provider=codex` and landed: `#3564` → `PR #2169`, `#3565` →
+`PR #2172`, `#3506` → `PR #2176` — all three `MERGED`, all three carrying a real `Co-Authored-By: Codex`
+trailer on their build commit (`193395f50`, `a528b1486`, `8ccea68d9` respectively — confirmed by
+`git log --grep="Co-Authored-By: Codex"`), and all three came back from an independent review pass with
+`review:accepted`. This is the delivery-agent side of the pipeline the earlier "reviewer-seat judgment gap"
+finding (above) does NOT call into question — that finding was about the advisory REVIEWER seat, not the
+delivery-agent BUILD seat these three items exercised.
+
+**Two real infrastructure bugs found and fixed along the way, both confirmed present on
+`origin/lane/mechanical-dispatcher`:**
+- `56a333e63` — "delivery: fix commitBuildTurn's locus-prefix auto-fix to cover EVERY bare mention, not just
+  touched paths" (`#3383`/`#3565`).
+- `f70b0641e` — "delivery: fix commitBuildTurn/commitConvergeRound crashing on a genuinely new (never-tracked)
+  touched file" (`#3383`/`#3564`) — this is the same untracked-file/`git commit -F` class of bug the earlier
+  Codex-reviewer-seat validation night caught as a miss on `#2107`; it recurred on a real live delivery and got
+  a real fix this time.
+
+**A separate, structural bug in the `deliveryAgent: codex` marker itself was also found and fixed**:
+`f74d16cd2` — "mechanical-dispatcher: fix deliveryAgent: marker invisible when REPO_ROOT is stale" (confirmed
+on the branch) — a lane-acquire ordering bug where the marker read a stale `REPO_ROOT`, making a real
+`deliveryAgent: codex` marker invisible to the dispatcher.
+
+## Session update (2026-09-13, continued) — two new advisory judge seats (Codex correctness, Antigravity), plus the generic model-probation system underneath both of them, plus #3649's recording mechanism actually BUILT (not just ratified)
+
+**Fourth judge seat — Codex correctness-advisory**, `467ffb79f` ("review-pr: add a genuinely NEW fourth judge
+seat — Codex correctness-advisory (#3383)"), extended to the probation default by `df00bd9e9`. Distinct from
+the pre-existing `simplicity` lens seat; structurally non-blocking (advisory only), same shape as every other
+seat this epic has proven out.
+
+**Fifth judge seat — Antigravity advisory-review**, `bbd469c0b` ("review-pr: wire Antigravity in as a genuine
+fifth judge seat"), backed by a new tool-free primitive `63102bde8` ("add we:antigravity-judge-spawn.mjs: a
+tool-free Antigravity CLI judge primitive"). Built tool-free deliberately — `we:backlog/3633`'s known finding
+that Antigravity's own `--sandbox` flag only confines the shell, not Antigravity's own file tools, informed
+keeping this seat advisory/non-delivery-capable rather than write-capable. Same non-blocking pattern as the
+Codex seat; registered in probation.
+
+**The generic model-probation system underneath both new seats**: `f4395e2af` ("mechanical-dispatcher: generic
+{provider,model} probation status + #3649 run-quality recording mechanism (epic #3383)") adds
+`we:scripts/lib/model-probation.mjs`, keyed by `{provider, model}` identity plus role
+(`unvalidated|probation|trusted`) — exactly the identity-keying the operator-goal entry above ("every new
+model/provider release must earn its way out of probation") calls for. Both Codex seats and the new
+Antigravity seat default to live `probation` status under this system, confirmed by the same commit.
+
+**`#3649` itself — ratified fork-by-fork earlier today (`PR #2157`), but its own header noted it "builds none
+of the five pieces its ruling names." That gap is now substantially closed, same commit (`f4395e2af`)**: the
+run-quality recording mechanism is real and has scored actual Codex runs, not test fixtures only. Building it
+surfaced a real gap the ratification itself did not anticipate: **advisory judge seats were running effectively
+ephemeral for scoring purposes** — no durable transcript, nothing for `#3649`'s scorer to read. Codex's side
+of this gap is fixed: `52c8a00ce` ("fix(codex-judge-spawn): persist the judge's raw JSONL transcript so #3649
+can score it (not null)") adds `persistCodexJudgeTranscript`, confirmed wired as the default
+`persistTranscript` in `we:scripts/lib/codex-judge-spawn.mjs`.
+
+**Two pieces of this thread remain genuinely unfinished, checked directly against the branch rather than
+assumed done:**
+- **Antigravity's equivalent transcript-persistence fix has NOT landed.** Grepping
+  `origin/lane/mechanical-dispatcher` for `persistAntigravity`/`AntigravityJudgeTranscript` returns nothing —
+  no commit, no function. The Antigravity seat added this same session (`bbd469c0b`) is exposed to the same
+  ephemeral-transcript gap Codex's seat had, unfixed as of this update.
+- **`appendScorecard` (`we:scripts/conveyor/run-scorecard-store.mjs`) still has zero real callers outside its
+  own test file**, confirmed by grep — every other reference is documentation or the test suite. Wiring it
+  into real dispatch completions (so a real Codex/Antigravity run's score is actually persisted, not just
+  persistable) has not landed. Both of these were reportedly dispatched as follow-on fix work; **no resulting
+  commit or PR was found on `main` or `origin/lane/mechanical-dispatcher` as of this check** — treat both as
+  still pending, not landed, until a fresh session finds the actual commit.
+
+**A third in-flight item from the same thread, also unconfirmed as landed:** the `fix`-kind Codex dispatch
+finding that it is 100% blocked by a sandbox-vs-report-path collision (Codex's sandbox denies reading the
+primary checkout, but the fix-report CLI path resolves there) — a fix was reportedly dispatched for this too.
+No commit or PR addressing a sandbox/report-path collision was found on either branch as of this check. Flag
+for a fresh session to search current state directly (`git log --grep=sandbox -i`, open PR list) rather than
+assume it landed.
+
+## Session update (2026-09-13, continued) — automatic driver-based Codex routing: the MARKERS are proven landed; the actual live-fire dispatch is NOT yet confirmed to have executed
+
+**What is confirmed landed**: two PRs merged straight to `main` (content-only backlog edits, no lane/
+mechanical-dispatcher involved) set real `deliveryAgent: codex` markers on three existing backlog items,
+intended as live-fire targets for automatic (non-manual) driver-initiated Codex routing:
+- `PR #2181` (merged) — marks `#3428` and `#2866` `deliveryAgent: codex`.
+- `PR #2183` (merged) — marks `#3360` `deliveryAgent: codex`, adds a `scope` to `#3428`.
+
+Both confirmed present on `origin/main` by direct file read: all three backlog files (`#3360`, `#3428`,
+`#2866`) carry `deliveryAgent: codex` in their frontmatter as of this check.
+
+**What is NOT confirmed**: whether the driver has actually picked any of these up and completed a real
+automatic dispatch. As of this check — `status: open` on all three items on `origin/main`, no build commit
+for any of them found anywhere, `gh pr list --search "3360"` / `--search "3428"` return no PR touching either
+item's actual work, no `codex` process running host-wide, and no lane reservation referencing either item
+number. **This is a correction to how this milestone should be read going forward**: the markers making
+`#3360`/`#3428` eligible for automatic routing are real and landed; a completed, real, driver-initiated
+end-to-end proof run for either item is not yet evidenced by repo state at the time of this check. A fresh
+session should re-verify directly (`gh pr list --search "3360"`, `--search "3428"`, `gh pr view` on any hit,
+and the backlog files' own `status` field) before treating automatic routing as proven, rather than carrying
+forward an optimistic assumption. (Real driver-initiated Codex deliveries — with real `Co-Authored-By: Codex`
+commits — ARE proven for `#3564`/`#3565`/`#3506` via manual `--provider=codex`, per the session update above;
+that is a separate, already-confirmed claim from the *automatic*, marker-driven routing this section is about.)
+
+## Session update (2026-09-13, continued) — new decision filed and prepared: graduation criteria for exiting probation
+
+`xeagmug` — "Define graduation criteria for a model/provider to exit probation status" — was filed via
+`PR #2185` (merged) and JIT-numbered to `#3654` on land. A `/prepare` pass then ran against it and merged via
+`PR #2187` ("prepare #3654: graduation criteria for a model/provider to exit probation"), confirmed by reading
+the PR body directly. Four forks were framed and `preparedDate` stamped — **ready to ratify, not yet ratified**:
+
+1. **Volume/mix**: a minimum trial count plus at least one genuinely informative (failure/edge-case) trial,
+   not count alone — exact N deliberately deferred, consistent with `#3649` Fork 4's own precedent.
+2. **What's measured**: success rate as a floor, plus a confirmed severity-calibration miss as an independent,
+   necessary-but-not-sufficient veto.
+3. **Per-role vs. global**: the bar scales with the role's eventual authority (`advisory-review` lightest,
+   `delivery` moderate, a future blocking/gating role strictest).
+4. **Per-provider vs. uniform**: one uniform floor for every `{provider, model}` identity — no identity buys
+   an easier bar by reputation; a project may optionally tighten (never loosen) per identity.
+
+Each fork was attacked by a separately-dispatched skeptic sub-agent (all four `SURVIVES-WITH-AMENDMENT`) and
+cleared by a fresh-context two-confusion screen, per the PR body. This item directly answers the "no
+graduation criteria exist yet" gap the probation system above was built without.
+
+## Session update (2026-09-13, continued) — cross-session coordination, provider-evaluation filings, stray-session hygiene, and the POC-branch CI gap
+
+**Cross-session coordination with a peer session (`webeverything-85`)**: a real file-conflict risk was found
+and reconciled on `we:scripts/operations/dispatch-lane-io.mjs` / `we:scripts/operations/review-dispatch.mjs` —
+both `PR #2130` ("WE #3331: read a --bg dispatch's REAL session id back off stdout") and `PR #2003` ("WE
+#3331: graduate the session-identity fix from lane/mechanical-dispatcher") touch the same two files under the
+same `#3331` card, confirmed by diffing both PRs' file lists directly. **Both remain genuinely `OPEN` as of
+this check** — the reconciliation is a plan, not yet executed; whoever lands one of these next should check
+the other for the same edit first. Separately, `we:scripts/lib/codex-judge-spawn.mjs` work was clarified as
+duplicate (not conflicting) effort with the peer session, not a second real conflict.
+
+**Three provider-evaluation items filed for later work, all via one PR (`PR #2179`, confirmed `OPEN`,
+unmerged as of this check):**
+- `x8hzy1m` — probe Cursor as an additional dispatch provider.
+- `xhprieg` — probe Grok (top-tier subscription) as a bulk high-volume dispatch provider.
+- `xldrls6` — probe open-weight PAYG models (DeepSeek, Qwen) as a bulk high-volume dispatch provider.
+
+**Stray-session/orphaned-watcher hygiene**: the behavioral memory fix landed —
+`we:agent-memory-src/no-stray-sessions-or-orphaned-watchers.md`, `PR #2174`, confirmed `MERGED`. A follow-on
+design-only safety-net item, `x25vnei` ("design a stray-resource monitoring safety net"), was filed via
+`PR #2177`, confirmed still `OPEN`/unmerged as of this check.
+
+**`clear-stuck-session` mechanized and wired into the reaper**, both confirmed present on
+`origin/lane/mechanical-dispatcher`: `81d5c9745` ("operations: add clear-stuck-session — mechanize the GH
+#77683 zombie-session workaround") and `2142bd0c0` ("conveyor: session-reaper mechanizes the #77683 repair via
+clear-stuck-session"). A docs follow-up pointing stuck-session cleanup at the new mechanized path instead of
+the old manual workaround (`PR #2170`) is filed but confirmed still `OPEN`, unmerged.
+
+**POC-branch CI gap — filed AND landed.** `xj0174p` ("allow GitHub Actions CI to be enabled for POC branches,
+not just main") was filed and merged via `PR #2171`, then JIT-numbered to `#3653` on land (confirmed:
+`git log` shows `cbd4ac3e7 drain: JIT-number xj0174p→#3653 at land`). This closes the gap where PRs on
+`lane/mechanical-dispatcher` never got real GitHub Actions CI.
+
+**Duplicate/escalated PR resolutions, checked directly rather than transcribed:**
+- The `#2502` cluster — see the "Correction" subsection above; the real surviving PRs are `WE #2087`
+  (`MERGED`) and `plateau-app #155` (`OPEN`), not the pair the original entry named.
+- `frontier-ui #2755` (`#45` vs. `#47`) — both PRs are duplicates of the same native Go SSR renderer
+  foundation work and, confirmed directly against the `frontierui` repo, **both remain `OPEN` as of this
+  check** — record this as "duplication identified, not yet resolved on either PR," not as already landed.
+- `#3331` `#2130` vs. `#2003` — the same pair covered under "cross-session coordination" above; both `OPEN`,
+  reconciliation not yet executed.
