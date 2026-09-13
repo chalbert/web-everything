@@ -101,7 +101,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // installs it so the shared helpers in `minimal-context-provider.mjs` emit into it without being passed one;
 // `spanAround` wraps a single existing call in a span without changing its behaviour. All three are
 // never-throwing by construction — see `telemetry-store.mjs`'s purity discipline.
-import { recorderFor, setActiveRecorder, spanAround } from './telemetry-store.mjs';
+import { recorderFor, setActiveRecorder, spanAround, cpuUsageDeltaMs } from './telemetry-store.mjs';
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
@@ -304,13 +304,27 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // THE EXPENSIVE SPAN. This is the single longest phase in the system (capped at 60 minutes by
     // `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and until #3383 it was timed by nothing at all — the exact gap
     // `readiness/conveyor-instrument.mjs` reports as `authoring: {ms: null, reason: 'no-dispatch-signal'}`.
-    const turn = root.child('agent.turn', { attributes: { item: String(item), timeoutMs: DELIVERY_AGENT_SPAWN_TIMEOUT_MS } });
+    // `lane`/`dispatchKind`/`provider` (#3383 per-process-attribution follow-on) tag the span so a per-agent
+    // CPU rollup can be sliced by any of the three without a second lookup — see `cpuUsageDeltaMs`'s own
+    // caller-facing docblock in `telemetry-store.mjs` for exactly what the `cpu*Ms` attributes below do (and do
+    // not) measure before reading them as "what the agent cost".
+    const turn = root.child('agent.turn', {
+      attributes: {
+        item: String(item), timeoutMs: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
+        lane: String(lane), dispatchKind: 'build', provider: provider.name,
+      },
+    });
+    const turnCpuStart = process.cpuUsage();
     let report;
     try {
       report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
-      turn.ok({ outcome: report && report.outcome ? String(report.outcome) : 'unreported', filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0 });
+      turn.ok({
+        outcome: report && report.outcome ? String(report.outcome) : 'unreported',
+        filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0,
+        ...cpuUsageDeltaMs(turnCpuStart),
+      });
     } catch (e) {
-      turn.fail(e, { outcome: 'agent-spawn-failed' });
+      turn.fail(e, { outcome: 'agent-spawn-failed', ...cpuUsageDeltaMs(turnCpuStart) });
       throw e;
     }
 

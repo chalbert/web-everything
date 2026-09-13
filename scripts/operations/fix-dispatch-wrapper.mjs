@@ -114,7 +114,7 @@ import {
   DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
 } from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsyncWithCpu } from './telemetry-store.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
@@ -699,9 +699,14 @@ export async function dispatchFix(
   try {
     // #3383 — THE EXPENSIVE SPAN. A fixer agent turn shares the delivery agent's 60-minute ceiling
     // (`FIX_AGENT_SPAWN_TIMEOUT_MS === DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and, until now, was timed by nothing.
-    // `spanAroundAsync` closes it `ok` on return and `error` on throw and rethrows the original untouched, so
-    // the `catch` below — which owns the real report/release contract — runs exactly as it did before.
-    agentReport = await spanAroundAsync('agent.turn', { attributes: { pr: planned.pr, item: planned.item ?? null } }, () =>
+    // `spanAroundAsyncWithCpu` (per-process-attribution follow-on) closes it `ok` on return and `error` on
+    // throw, rethrows the original untouched, and merges a `process.cpuUsage()` delta into the closing
+    // attributes — see that function's own docblock in `telemetry-store.mjs` for exactly what `cpu*Ms` does and
+    // does not measure. The `catch` below — which owns the real report/release contract — runs exactly as it
+    // did before.
+    agentReport = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: { pr: planned.pr, item: planned.item ?? null, lane: lanePath, dispatchKind: 'fix', provider: provider.name },
+    }, () =>
       runFixAgentToCompletion(
         { pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
         { run: runFn },

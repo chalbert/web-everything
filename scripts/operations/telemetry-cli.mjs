@@ -137,7 +137,10 @@ export function renderReport(signals, { hours }) {
   // than interleaved among lane-pool/admission gauges. `host.cpu.count` is folded into the load lines rather
   // than printed as its own gauge — a constant core count next to a load average is the number a reader
   // actually wants (load1 vs cores), not a fourth line to cross-reference by hand.
-  const hostGauges = Object.entries(signals.saturation.gauges).filter(([name]) => name.startsWith('host.'));
+  // `host.process.*` (#3383 per-process-attribution follow-on) gets its OWN section below — excluded here so
+  // the whole-machine gauges above stay exactly what they always were.
+  const hostGauges = Object.entries(signals.saturation.gauges)
+    .filter(([name]) => name.startsWith('host.') && !name.startsWith('host.process.'));
   L.push('HOST — is the machine itself the constraint?');
   if (!hostGauges.length) {
     L.push('    (no host samples recorded in this window)');
@@ -150,6 +153,36 @@ export function renderReport(signals, { hours }) {
       const suffix = name.startsWith('host.cpu.load') && Number.isFinite(cores) ? ` (of ${cores} cores)` : '';
       L.push(`    ${name.padEnd(26)} last ${fmt(g.last)}  max ${fmt(g.max)}  mean ${fmt(g.mean)}${suffix}  (n=${g.samples})`);
     }
+  }
+  L.push('');
+
+  // #3383 follow-on — per-process attribution: who is actually consuming the host, broken into the six closed
+  // `host.process.*` categories (`host-process-sample.mjs`). A dedicated table rather than folded into the
+  // gauge list above: the capacity-planning question this whole feature exists to answer ("what's competing
+  // for headroom") reads as a comparison ACROSS categories, which a table serves far better than six
+  // interleaved single-line gauges would. `other`'s row is never omitted — see `summarizeProcessSample`'s own
+  // docblock for why that catch-all is the honesty check that makes the six numbers auditable against
+  // `host.cpu.load1`/`host.mem.free_bytes` above, rather than a curated subset that could quietly undercount.
+  L.push('HOST PROCESSES — who is actually consuming it (mean over the window)');
+  const PROCESS_CATEGORY_ORDER = ['conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other'];
+  const g = signals.saturation.gauges;
+  const anyProcessSamples = PROCESS_CATEGORY_ORDER.some((cat) => g[`host.process.${cat}.cpu_pct`]);
+  if (!anyProcessSamples) {
+    L.push('    (no per-process samples recorded in this window)');
+  } else {
+    L.push(`    ${'category'.padEnd(20)} ${'cpu%'.padStart(10)} ${'mem'.padStart(10)}`);
+    let cpuTotal = 0;
+    let memTotal = 0;
+    for (const cat of PROCESS_CATEGORY_ORDER) {
+      const cpuG = g[`host.process.${cat}.cpu_pct`];
+      const memG = g[`host.process.${cat}.mem_bytes`];
+      const cpuMean = cpuG ? cpuG.mean : 0;
+      const memMean = memG ? memG.mean : 0;
+      cpuTotal += Number(cpuMean) || 0;
+      memTotal += Number(memMean) || 0;
+      L.push(`    ${cat.padEnd(20)} ${Number(cpuMean).toFixed(1).padStart(9)}% ${fmtBytes(memMean).padStart(10)}`);
+    }
+    L.push(`    ${'— total (all 6) —'.padEnd(20)} ${Number(cpuTotal).toFixed(1).padStart(9)}% ${fmtBytes(memTotal).padStart(10)}`);
   }
   L.push('');
 

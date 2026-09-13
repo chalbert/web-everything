@@ -105,7 +105,7 @@ import {
   runConverge, DELIVERY_AGENT_PROVIDER_NAMES, DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
 } from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsyncWithCpu } from './telemetry-store.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import {
@@ -715,8 +715,16 @@ export async function dispatchCiHeal(
   let agentReport;
   try {
     // #3383 — THE EXPENSIVE SPAN, same reasoning as the fix wrapper's: the agent turn is this dispatch's
-    // dominant cost and was previously untimed. `spanAroundAsync` never alters the return value or the throw.
-    agentReport = await spanAroundAsync('agent.turn', { attributes: { pr: planned.pr, item: planned.item ?? null, reason: planned.reason ?? null } }, () =>
+    // dominant cost and was previously untimed. `spanAroundAsyncWithCpu` (per-process-attribution follow-on)
+    // never alters the return value or the throw, and merges a `process.cpuUsage()` delta into the closing
+    // attributes — see that function's own docblock in `telemetry-store.mjs` for exactly what `cpu*Ms` does and
+    // does not measure.
+    agentReport = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: {
+        pr: planned.pr, item: planned.item ?? null, reason: planned.reason ?? null,
+        lane: lanePath, dispatchKind: 'ci-heal', provider: provider.name,
+      },
+    }, () =>
       runCiHealAgentToCompletion(
         { pr: planned.pr, item: planned.item, reason: planned.reason, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
         { run: runFn },

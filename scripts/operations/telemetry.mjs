@@ -183,12 +183,42 @@ export const METRIC_NAMES = Object.freeze([
   // RAW bytes, not a pre-computed ratio: free/total is one division away in any later analysis, but a ratio
   // alone could never recover the total — raw is strictly more information for the same two numbers.
   'host.mem.free_bytes', 'host.mem.total_bytes',
+  // ── PER-CATEGORY PROCESS ATTRIBUTION (#3383 follow-on — the WHOLE-MACHINE gauges above can say the host is
+  // loaded but never say by what; these say what). Sampled by the SAME tick-loop cadence, from ONE `ps`
+  // snapshot enumerating every process on the host — see `host-process-sample.mjs` for the actual `ps`
+  // invocation, the parser, and the category-matching rules (which live there, not here, because that is
+  // where the real judgment calls are made and tested). Six closed categories, checked in priority order:
+  // `conveyor` (the driver/runner itself + anything under `skills-src/conveyor/`), `drain` (the merge-queue
+  // daemon), `dispatched_agents` (a live `claude`/`codex` CHILD this system's own wrappers spawned — matched
+  // on argv shape, never the bare binary name, so the operator's own interactive session is never
+  // double-counted into it), `vscode`, `chrome`, and `other` — the deliberately-never-omitted catch-all that
+  // keeps the six numbers honest about not covering 100% of machine load (see `summarizeProcessSample`'s own
+  // docblock for why `other`'s sum is the audit check, not a shrug).
+  //
+  // TWO metrics per category — CPU and MEMORY are separate names (never one name with a `metric` attribute),
+  // the same "low-cardinality name, high-cardinality detail in attributes" rule `dispatch.tokens.*` above
+  // already follows: a plain sum-by-name rollup answers "how much CPU did chrome cost" with no attribute
+  // filter. `cpu_pct` is the RAW SUM of `ps`'s own `%CPU` column across every matched process — "percent of
+  // one core", so a bucket can legitimately read over 100 on a multi-core host with several matched processes
+  // (never pre-divided by `host.cpu.count`, which is recorded alongside for a reader to divide by); `mem_bytes`
+  // is summed RSS in raw bytes, matching `host.mem.*`'s own raw-over-ratio convention.
+  'host.process.conveyor.cpu_pct', 'host.process.conveyor.mem_bytes',
+  'host.process.drain.cpu_pct', 'host.process.drain.mem_bytes',
+  'host.process.dispatched_agents.cpu_pct', 'host.process.dispatched_agents.mem_bytes',
+  'host.process.vscode.cpu_pct', 'host.process.vscode.mem_bytes',
+  'host.process.chrome.cpu_pct', 'host.process.chrome.mem_bytes',
+  'host.process.other.cpu_pct', 'host.process.other.mem_bytes',
 ]);
 
 /** Metric units — kept tiny and explicit so a renderer never has to guess whether 1200 is ms or a count.
  *  `bytes` (#3383) is for `host.mem.*` — distinct from `count` so a renderer can choose human-sized formatting
- *  (`1.2GB`) without needing to special-case a metric name to know it holds a byte quantity. */
-export const METRIC_UNITS = Object.freeze(['count', 'ms', 'ratio', 'bytes']);
+ *  (`1.2GB`) without needing to special-case a metric name to know it holds a byte quantity. `percent` (#3383
+ *  follow-on, per-process attribution) is for `host.process.*.cpu_pct` — deliberately NOT `ratio`: every
+ *  existing `ratio` metric (`lane.pool.utilization`) is a 0..1 fraction, while a `ps`-derived CPU-percent sum
+ *  is 0..100-per-core and can legitimately exceed 100 for a multi-process bucket on a multi-core host: folding
+ *  it into `ratio` would make a renderer guess which scale a given sample is on, exactly what this list exists
+ *  to prevent. */
+export const METRIC_UNITS = Object.freeze(['count', 'ms', 'ratio', 'bytes', 'percent']);
 
 /**
  * THE CROSS-WRAPPER FAILURE VOCABULARY — the one place that says which of the six wrappers' own outcome words

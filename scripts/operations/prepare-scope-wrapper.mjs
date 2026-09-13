@@ -77,7 +77,7 @@ import {
   buildRestrictedProviderArgv, createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
+import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu } from './telemetry-store.mjs';
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { SCOPE_AUTHORING_AGENT_KIND } from './dispatch-lane.mjs';
 import {
@@ -506,9 +506,18 @@ async function prepareScopeInner(
 
   try {
     const lanePath = resolveLanePath(lane, { run: runFn });
-    const report = await runPrepareAgentToCompletion({
+    // #3383 per-process-attribution follow-on — this wrapper had NO `agent.turn` span at all before now (its
+    // own telemetry envelope, further down, only ever opened the root `dispatch` span — see that envelope's
+    // own docblock for why). Added here, wrapping the identical call the un-instrumented version made, so this
+    // wrapper's dominant cost is finally visible next to the other five's, with the same CPU-delta caveat
+    // `spanAroundAsyncWithCpu`'s own docblock states (`telemetry-store.mjs`).
+    const report = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: {
+        item: item == null ? null : String(item), lane: String(lane), dispatchKind: 'prepare', provider: provider.name,
+      },
+    }, () => runPrepareAgentToCompletion({
       item, sessionSlug, lanePath, itemSpecPath, provider, claudeSessionId,
-    });
+    }));
 
     if (report.outcome === 'blocked') {
       // The live brief's Escalations case 1, decided by the WRAPPER reading a report rather than by the agent

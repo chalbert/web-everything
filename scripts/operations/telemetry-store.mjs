@@ -766,3 +766,84 @@ export async function spanAroundAsync(name, opts, fn) {
   try { span.ok(); } catch { /* ignore */ }
   return out;
 }
+
+// ── PER-DISPATCH CPU ATTRIBUTION (#3383 follow-on — the harder, per-agent-turn case) ────────────────────
+//
+// `hostMetrics`/`readHostSample` (the earlier #3383 landing) only ever answer "is the HOST loaded" — never
+// "how much of THIS ONE dispatch's cost was CPU". This is the per-span half: sample `process.cpuUsage()`
+// immediately before and after the wrapped call, and merge the delta into the span's own `ok`/`fail`
+// attributes, so `agent.turn` (and any other span a caller wraps this way) carries a real resource-cost number
+// next to its wall-clock duration, not just the duration alone.
+//
+// STATED PLAINLY, THE ONE THING THIS DOES NOT MEASURE — read this before trusting the number it produces.
+// `process.cpuUsage()` reports the CALLING process's OWN CPU time; it has NO view into a spawned CHILD's
+// resource usage. Every one of the six dispatch wrappers spawns its agent via `execFileSync`/`spawnSync`
+// (`dispatch-lane-io.mjs#defaultSpawnAgent`, `codex-delivery-provider.mjs#defaultSpawnCodexAgent`) — a
+// SYNCHRONOUS call that blocks this wrapper process in a kernel wait while the real work happens in a
+// different process entirely. Confirmed by direct test against this Node runtime (v22): `spawnSync`'s return
+// object carries no `resourceUsage` field at all — unlike the ASYNC `child_process.spawn()` API, whose
+// `ChildProcess#resourceUsage()` (populated from the exited child's own `getrusage(2)`/`wait4(2)` data) is the
+// API that would give a REAL per-child figure. Switching six wrappers from their proven, verified, blocking
+// `execFileSync` shape to an async `spawn()` + `resourceUsage()` shape is a materially larger, riskier change
+// than "wire in a sample" and was explicitly left out of THIS pass — the wrapper's own blocking-call docblocks
+// name exactly why that shape was chosen (a real, live-tested `--restricted`/hooks/env spawn) and this follow-
+// on does not re-litigate it.
+//
+// SO WHAT DOES THIS ACTUALLY MEASURE, AND WHY RECORD IT ANYWAY. The wrapper process's own user+system CPU time
+// spent while blocked on the child — which is normally SMALL (a blocked `wait4` costs ~nothing) but not
+// exactly zero: `execFileSync` pumps the child's stdout/stderr through a pipe into an in-memory buffer as it
+// arrives, and that read-and-copy loop is real, if modest, CPU work charged to THIS process, roughly
+// proportional to how much the child printed. It is recorded because the epic asked for it explicitly, it is
+// cheap and harmless to capture, and — see `host-process-sample.mjs` — it is NOT the system's only per-agent
+// signal: the tick-loop's `host.process.dispatched_agents.*` category (recorded independently, every tick,
+// system-wide) observes the actual agent CHILD process from OUTSIDE via `ps`, which is the genuinely
+// meaningful per-agent-cost number this repo has today. Treat `cpuUserMs`/`cpuSystemMs`/`cpuTotalMs` below as
+// "this wrapper's own overhead while waiting", not "what the agent cost".
+/**
+ * PURE-ISH (its only external effect is reading `process.cpuUsage()`, a snapshot with no side effect of its
+ * own) — the millisecond delta between two `process.cpuUsage()` reads, keyed the way a span's `attributes` bag
+ * expects. Microseconds → milliseconds, rounded (a span attribute is not the place for sub-millisecond noise).
+ * @param {{user: number, system: number}} before - a prior `process.cpuUsage()` snapshot.
+ * @returns {{cpuUserMs: number, cpuSystemMs: number, cpuTotalMs: number}}
+ */
+export function cpuUsageDeltaMs(before) {
+  const delta = process.cpuUsage(before);
+  const userMs = Math.round(delta.user / 1000);
+  const systemMs = Math.round(delta.system / 1000);
+  return { cpuUserMs: userMs, cpuSystemMs: systemMs, cpuTotalMs: userMs + systemMs };
+}
+
+/**
+ * THE `async` TWIN OF {@link spanAroundAsync}, WITH A CPU SAMPLE MERGED IN. Identical contract otherwise —
+ * `fn`'s return value and any throw pass through completely unaltered, and every telemetry call inside is
+ * never-throwing by construction. See the section header above for exactly what `cpuUserMs`/`cpuSystemMs`/
+ * `cpuTotalMs` do and do not measure before reading them as "the agent's CPU cost".
+ * @param {string} name one of `SPAN_NAMES` (used for `agent.turn` today)
+ * @param {{attributes?: object, attempt?: number, kind?: string, parent?: string|null, recorder?: object}} opts
+ * @param {() => Promise<T>} fn
+ * @template T
+ * @returns {Promise<T>}
+ */
+export async function spanAroundAsyncWithCpu(name, opts, fn) {
+  const rec = (opts && opts.recorder) || activeRecorder();
+  let span;
+  try {
+    span = rec.startSpan(name, opts || {});
+  } catch {
+    span = nullSpan();
+  }
+  const before = process.cpuUsage();
+  let out;
+  try {
+    out = await fn();
+  } catch (e) {
+    let cpu = {};
+    try { cpu = cpuUsageDeltaMs(before); } catch { /* telemetry must never mask the real error */ }
+    try { span.fail(e, cpu); } catch { /* ignore */ }
+    throw e;
+  }
+  let cpu = {};
+  try { cpu = cpuUsageDeltaMs(before); } catch { /* ignore */ }
+  try { span.ok(cpu); } catch { /* ignore */ }
+  return out;
+}

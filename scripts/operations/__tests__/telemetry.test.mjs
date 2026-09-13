@@ -911,6 +911,50 @@ describe('the read CLI', () => {
     expect(text).toContain('no host samples recorded in this window');
   });
 
+  // #3383 follow-on — per-process attribution: the six `host.process.*` categories get their OWN table,
+  // separate from the whole-machine HOST section above (no double-reporting either way).
+  it('report breaks per-process samples into their OWN table, all six categories, with an honest total', () => {
+    const { store, now } = loaded();
+    const categories = {
+      conveyor: { cpu: 12.5, mem: 100 * 1024 * 1024 },
+      drain: { cpu: 3, mem: 40 * 1024 * 1024 },
+      dispatched_agents: { cpu: 220, mem: 900 * 1024 * 1024 },
+      vscode: { cpu: 15, mem: 800 * 1024 * 1024 },
+      chrome: { cpu: 40, mem: 1200 * 1024 * 1024 },
+      other: { cpu: 30, mem: 500 * 1024 * 1024 },
+    };
+    for (const [cat, { cpu, mem }] of Object.entries(categories)) {
+      store.append(`${JSON.stringify({
+        v: 1, event: 'metric', name: `host.process.${cat}.cpu_pct`, kind: 'runner', value: cpu, unit: 'percent',
+        timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+      })}\n`, '2026-09-12');
+      store.append(`${JSON.stringify({
+        v: 1, event: 'metric', name: `host.process.${cat}.mem_bytes`, kind: 'runner', value: mem, unit: 'bytes',
+        timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+      })}\n`, '2026-09-12');
+    }
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('HOST PROCESSES — who is actually consuming it');
+    for (const cat of Object.keys(categories)) expect(text).toContain(cat);
+    // The catch-all is never omitted — it must appear even though it is the least "interesting" category.
+    expect(text).toContain('other');
+    // A total row sums all six — auditable against the whole-machine `host.cpu.load1` figure elsewhere in the
+    // same report (this test only checks the total row itself renders; the cross-check is a human/analysis
+    // task this report exists to support, not something the CLI computes on its own).
+    expect(text).toContain('total (all 6)');
+    // The generic SATURATION and whole-machine HOST sections must not ALSO print these per-process names.
+    const beforeProcessTable = text.slice(0, text.indexOf('HOST PROCESSES'));
+    expect(beforeProcessTable).not.toContain('host.process.');
+  });
+
+  it('report says so plainly when no per-process samples landed in the window', () => {
+    const { store, now } = loaded();
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('no per-process samples recorded in this window');
+  });
+
   it('renderTrace says so plainly when a trace has no spans', () => {
     expect(renderTrace('i9999', [])).toContain('no spans recorded');
   });
@@ -955,6 +999,27 @@ describe('METRIC_NAMES / DISPATCH_KINDS cover what the system actually has', () 
 
   it('the `bytes` unit exists so a byte-valued gauge never has to lie and call itself a `count`', () => {
     expect(METRIC_UNITS).toContain('bytes');
+  });
+
+  // #3383 follow-on — per-process attribution: the six closed `host.process.*` categories, CPU + memory each.
+  it('covers all six host.process.* categories, CPU and memory each', () => {
+    for (const cat of ['conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other']) {
+      expect(METRIC_NAMES).toContain(`host.process.${cat}.cpu_pct`);
+      expect(METRIC_NAMES).toContain(`host.process.${cat}.mem_bytes`);
+    }
+  });
+
+  it('the `percent` unit exists, distinct from `ratio`, so a 0..100+ CPU-percent sum is never mistaken for a 0..1 fraction', () => {
+    expect(METRIC_UNITS).toContain('percent');
+    expect(METRIC_UNITS).toContain('ratio');
+  });
+
+  it('a `host.process.*.cpu_pct` metric validates with unit `percent`', () => {
+    const rec = newMetric({
+      name: 'host.process.chrome.cpu_pct', kind: 'runner', value: 42, unit: 'percent',
+      timestamp: '2026-09-12T10:00:00.000Z',
+    });
+    expect(validateTelemetryEvent(rec)).toEqual({ ok: true, errors: [] });
   });
 });
 

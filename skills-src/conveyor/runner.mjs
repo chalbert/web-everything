@@ -76,6 +76,12 @@ import { writeDriverMode, driverModeFor } from '../../scripts/conveyor/driver-mo
 // (admission decisions, lane-pool pressure, heavy-command queue wait) that belong to no single item, and that
 // spans alone cannot express. Never throws by construction; see `telemetry-store.mjs`'s purity discipline.
 import { createTelemetryRecorder } from '../../scripts/operations/telemetry-store.mjs';
+// #3383 follow-on — per-process attribution: categorize EVERY process on the host (not just this system's own)
+// into the six named `host.process.*` buckets, from one `ps` snapshot per tick. See that file's own header for
+// the pure/IO split and the category-matching rules; `readProcessSample` is the one IO edge, never throwing.
+import {
+  readProcessSample, summarizeProcessSample, processCategoryMetrics,
+} from '../../scripts/operations/host-process-sample.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -837,9 +843,14 @@ export function tickMetrics(surface) {
  *   • DISK I/O, NETWORK — no `node:os` accessor exists for either; adding them would mean shelling out
  *     (`iostat`/`nettop`/`/proc/...`), which this file's own no-subprocess discipline (mirrored from
  *     `telemetry-store.mjs`) argues against for a per-tick sample.
- *   • PER-PROCESS / PER-CONTAINER breakdown — `os.loadavg()`/`os.freemem()` are whole-HOST aggregates; they
- *     cannot attribute load to any one dispatch, lane, or agent turn. See the file header's #3383 discussion of
- *     the harder per-agent-turn case (child `process.cpuUsage()`), deliberately left for later.
+ *   • PER-PROCESS / PER-CONTAINER breakdown from THESE `os.*` samples specifically — `os.loadavg()`/
+ *     `os.freemem()` are whole-HOST aggregates and cannot themselves attribute load to any one process. This
+ *     is now covered by a SIBLING sample, not by this function: {@link module:host-process-sample} categorizes
+ *     every process on the host (via `ps`, once per tick, right alongside this one — see `emitTickMetrics`)
+ *     into the `host.process.*` buckets, and the harder per-agent-turn case (a delivery agent's own CPU cost)
+ *     is covered by `telemetry-store.mjs#spanAroundAsyncWithCpu` on the `agent.turn` span itself. Neither
+ *     follow-on touches `hostMetrics`/`readHostSample` here, which is why this docblock still describes only
+ *     the whole-machine `os.*` gauges.
  *
  * @param {{loadavg?: number[], freeBytes?: number, totalBytes?: number, cpuCount?: number}} [sample]
  * @returns {Array<{name: string, value: number, unit: string, attributes: object}>}
@@ -907,6 +918,13 @@ function emitTickMetrics(recorder, surface, ctx) {
       recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
     }
     for (const m of hostMetrics(readHostSample())) {
+      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
+    }
+    // #3383 follow-on — per-process attribution: ONE `ps` shell-out per tick (matching the whole-machine
+    // sample's own cadence, never a hot path), bucketed into the six `host.process.*` categories. See
+    // `host-process-sample.mjs` for the full pure/IO split; `readProcessSample` never throws (an empty sample
+    // on any `ps` failure), so a missing/unexpected `ps` degrades to six zeroed categories, not a broken tick.
+    for (const m of processCategoryMetrics(summarizeProcessSample(readProcessSample()))) {
       recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
     }
     span.ok();

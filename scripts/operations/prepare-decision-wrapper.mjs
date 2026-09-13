@@ -109,7 +109,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
+import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu } from './telemetry-store.mjs';
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
@@ -217,7 +217,13 @@ async function prepareDecisionInner(launch, provider = CLAUDE_RESTRICTED_PREPARE
     hold({ item, sessionSlug });
 
     // ---- 3. THE ONE AGENT TURN. Research + author the forks. Everything else on this page is mechanical. --
-    const report = await runAgent({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
+    // #3383 per-process-attribution follow-on — same new `agent.turn` span `prepare-scope-wrapper.mjs` gained
+    // (this wrapper's own telemetry envelope, further down, otherwise only opens the root `dispatch` span).
+    const report = await spanAroundAsyncWithCpu('agent.turn', {
+      attributes: {
+        item: item == null ? null : String(item), lane: String(lane), dispatchKind: 'prepare-decision', provider: provider.name,
+      },
+    }, () => runAgent({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId }));
 
     // ---- 4. `blocked` → could-not-prepare. NO stamp, NO PR, at any amount of partial authoring. -----------
     // `filesTouched` is deliberately NOT consulted (unlike the build wrapper's two-way `blocked` split): a
