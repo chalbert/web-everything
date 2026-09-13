@@ -7,10 +7,18 @@ status: resolved
 scope: ["we:scripts/lib/judge-spawn.mjs"]
 dateOpened: "2026-09-11"
 dateResolved: "2026-09-11"
+relatedTo: ["3633"]
 tags: [operations, multi-provider, probe]
 ---
 
 # Probe Gemini CLI as a third judge provider
+
+> **CORRECTION (2026-09-13):** this probe ran against the standalone, individual-tier **Gemini CLI**
+> (`@google/gemini-cli` 0.59.0), which has since been retired (2026-06-18). It is **not** a probe of Google's current
+> offering, **Antigravity CLI** (`agy`) — a different binary with a different flag surface, probed separately
+> in `#3633` with a DIFFERENT verdict ("yes — buildable, with caveats"). This card's "NOT buildable" verdict is
+> correct for the tool it tested and must not be read as settling anything about `agy` or any later Google CLI.
+> See `#3633` for the current-tool probe and recommendation.
 
 `#3371` probed Codex CLI against the judge contract and returned a "yes, with caveats". This item runs the
 SAME probe battery against the epic's OTHER researched candidate, Gemini CLI, for the reason `#3369` goal 4
