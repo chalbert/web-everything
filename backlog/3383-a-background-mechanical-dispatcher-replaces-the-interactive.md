@@ -3013,3 +3013,111 @@ not just main") was filed and merged via `PR #2171`, then JIT-numbered to `#3653
   check** — record this as "duplication identified, not yet resolved on either PR," not as already landed.
 - `#3331` `#2130` vs. `#2003` — the same pair covered under "cross-session coordination" above; both `OPEN`,
   reconciliation not yet executed.
+
+## Session update (2026-09-13, continued) — Codex fix/ci-heal sandbox bug fixed + `#3649` scorecard wired to all four real call sites; Antigravity seated as a fifth judge (not yet trialed); a genuine, still-unresolved `#3654` numbering collision between `main` and the prototype branch
+
+Everything below was re-verified directly against `git log`/`git show`/`gh pr view` at the time of this
+update, not transcribed from an earlier summary — several claims that looked landed going in turned out to
+still be in flight, and are corrected accordingly rather than recorded as done.
+
+### Confirmed landed
+
+**Codex fix/ci-heal sandbox-vs-report-path bug fixed, `#3649`'s scorecard wired to all 4 real dispatch call
+sites — `a0d328fb1`, on `origin/lane/mechanical-dispatcher`.** Two bugs, both closed in one commit: (1) every
+Codex `fix`/`ci-heal` dispatch was blocked before the agent could even check in `started`, because
+`we:scripts/operations/fix-dispatch-wrapper.mjs`'s report-CLI path pointed at the primary checkout while the
+Codex sandbox's own deny-list blocked reading that whole root — fixed by staging the report CLI's dependency
+closure into the agent's own lane at dispatch time; (2) `appendScorecard` (`we:scripts/conveyor/run-scorecard-store.mjs`)
+had zero real callers, so `we:scripts/conveyor/run-scorecards.json` stayed empty for every genuine dispatch —
+fixed by wiring `recordCodexRunScorecard` into all four real call sites
+(`we:scripts/operations/deliver-item-wrapper.mjs#CODEX_PROVIDER`,
+`we:scripts/operations/fix-dispatch-wrapper.mjs#FIX_CODEX_PROVIDER`,
+`we:scripts/operations/ci-heal-dispatch-wrapper.mjs#CI_HEAL_CODEX_PROVIDER`,
+`we:scripts/lib/codex-judge-spawn.mjs#codexJudgeSpawn`). Verified live, not just unit-tested: a real fix-kind
+Codex dispatch against real, untouched PR #2032 produced a real `started` check-in and a genuine,
+non-synthetic `we:scripts/conveyor/run-scorecards.json` row.
+
+**Antigravity judge-transcript persistence fixed — `042ae4f62`, mirroring Codex's own equivalent fix
+(`52c8a00ce`).** `we:scripts/lib/antigravity-judge-spawn.mjs` now persists its raw stream-json transcript
+instead of leaving it `null`, so `#3649`'s scorer can actually read it. Confirmed present on
+`origin/lane/mechanical-dispatcher`.
+
+**Antigravity wired as a genuine fifth judge seat — `bbd469c0b`, plus its standalone primitive `63102bde8`.**
+Mirrors the Codex correctness-advisory seat exactly: a new `judgeAntigravityReview` step on its own
+`antigravity-review` lens (disjoint from every existing lens set by construction), opt-in via
+`REVIEW_PR_ANTIGRAVITY_REVIEW`, registered on `probation` for `{provider: antigravity, model: gemini-3.1-pro,
+role: advisory-review}` — **the commit's own text states this identity "has zero prior review trials,"
+unlike Codex's seat which had build-side trials first.** Read literally: the seat is wired, not yet exercised.
+**No real Antigravity review trial has run as of this check** — no scorecard row, no PR review referencing it
+was found anywhere in the repo. Anyone picking this up should not assume a first trial has happened; it is
+still an open action item, not a completed one.
+
+### A genuine, real numbering collision — confirmed by reading both branches directly, still unresolved
+
+`#3654` currently means two different things depending which branch you read, and this is a real divergence,
+not a stale false alarm:
+
+- On `origin/main`: `we:backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob.md` —
+  "Define graduation criteria for a model/provider to exit probation status," `status: open`,
+  `preparedDate: "2026-09-13"`. Confirmed real, safe, and complete: four forks, each attacked by a separately
+  dispatched skeptic sub-agent (all four `SURVIVES-WITH-AMENDMENT`), cleared by a fresh-context screen —
+  **ready to ratify, not yet ratified.** (This is the same item already recorded above under "new decision
+  filed and prepared"; nothing about it needed correcting.)
+- On `origin/lane/mechanical-dispatcher`: `we:backlog/3654-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher.md`
+  — a different card entirely ("Codex model routing: pin a Codex model per rung, or keep inheriting"),
+  assigned that same number by the branch's own independent JIT-numbering heal
+  (`f4395e2af`'s commit message: `we:scripts/backlog-renumber-collisions.mjs` resolved a 3635/3636/3637
+  collision to 3654/3655/3656 locally, against a `main` merge-base that was already stale by the time `main`'s
+  own drain separately numbered the graduation-criteria item `#3654`).
+
+**Both files exist, under the same number, on their respective branches, right now.** This has not been
+healed — see "still not done" below; the merge that would surface and resolve this collision (main wins,
+per the newly-adopted tiebreaker below) has not happened yet.
+
+**Correction: the standing "main always wins a numbering collision" rule is not yet actually written down.**
+No file at `we:agent-memory-src/backlog-numbering-must-resolve-against-main.md` (or any equivalent) exists on
+`main`, on `origin/lane/mechanical-dispatcher`, or anywhere else in this repo's history as of this check —
+confirmed by direct search. Treat this as a **decided-in-conversation-but-not-yet-authored** rule: the
+principle behind it is now explicit here on this tracker (main wins; a lane's own JIT-heal must ultimately
+defer to it), but the durable agent-memory artifact still needs to be written by whoever next touches this.
+Do not carry forward an assumption that it already exists.
+
+### Two small bugs filed, PR still open — correcting a "landed" assumption
+
+`xpg5itz` ("`we:scripts/lane-pool.mjs#ensureDeps` leaks `npm ci`'s inherited stdout into an acquire's
+captured lane path") and `x5s6e69` ("`dispatchFix` leaks its acquired lane when the finding-scratch-file write
+throws early") — both found live while fixing `a0d328fb1` above, both filed as backlog cards, no fix attempted
+in the same PR. **`PR #2188` is confirmed `OPEN`, not merged**, as of this check (`gh pr view 2188`). Filing
+happened; landing has not.
+
+### Checked and confirmed still in flight — not recorded as done
+
+- **`#3521` automatic Codex-routing proof-run.** A marker commit (`d8ff48145`, "mark #3521 deliveryAgent:
+  codex") is pushed to its own small branch, `origin/lane/mark-3521-deliveryagent-codex`, based on current
+  `main` — **not** part of `lane/mechanical-dispatcher`. No PR exists for that branch (`gh pr list --search
+  "3521"` returns nothing touching it), and no further dispatch, PR, or run record for `#3521` was found
+  anywhere. The marker is in place; the actual automatic-routing run it sets up has not been observed to
+  complete.
+- **Antigravity's first real review trial** — see above: wired, on probation, zero trials recorded.
+- **Cursor / Grok / open-weight-PAYG provider research** — still filing-only, exactly as already recorded
+  above under "Three provider-evaluation items filed." Re-confirmed directly from each commit's own message
+  (`b467e029c`, `0fcf8fc52`): *"Filing only, per the operator's explicit request; no build or deep research
+  performed."* No CLI capability was actually probed for any of the three candidates; `PR #2179` carrying all
+  three remains `OPEN`.
+- **A git-manager slice for `gh pr create`/`open-pr` specifically** — not built. Direct inspection of
+  `we:scripts/operations/open-pr-io.mjs` and `we:scripts/pr-land.mjs` (the actual `gh pr create` call site)
+  shows no `we:scripts/lib/gh-throttle.mjs` wiring and no new self-calibrating, live-rate-limit-header-driven
+  logic added there. What exists there today predates this session: `we:scripts/pr-land.mjs`'s own `#2659`
+  infra-blocked path (classifies a post-push `gh pr create` failure and auto-retries with backoff via the
+  conveyor tick, not a live `x-ratelimit-*` reader) and the separately-landed `we:scripts/lib/gh-throttle.mjs`
+  (`#3621`, a concurrency cap plus reactive retry, wired into only ~3 of the repo's ~84 `gh`-calling sites,
+  not `open-pr`/`pr-land` among them). The full git-manager vision recorded earlier in this file is still just
+  that — a vision, not a build; nothing changed on that front this session.
+- **A full merge of current `origin/main` into `lane/mechanical-dispatcher`** — not completed, not pushed.
+  `git merge-base lane/mechanical-dispatcher origin/main` still resolves to `4261ef224`, ~15 merged PRs behind
+  current `main` (through and including `PR #2189`'s tracker update). Worth flagging for whoever picks this up
+  next: two lanes (`lane-1`, `lane-3`) are currently leased under the purpose `merge-mechanical-dispatcher-main`
+  (acquired ~18:55 EDT this same evening), but as checked directly, both sit on plain `main`, far behind, with
+  no merge attempted and no commits toward it — and the PIDs recorded on their leases are no longer running.
+  This reads as a stale or abandoned start, not active in-progress work; confirm before assuming it is being
+  handled.
