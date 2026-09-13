@@ -12,6 +12,7 @@ import {
   chooseFreeLane,
   ownLaneNumber,
   leaseBody,
+  laneBaseRef,
   describeLease,
   leaseOwnedBy,
   leaseOwnedByCaller,
@@ -134,6 +135,22 @@ describe('leaseBody / describeLease / leaseOwnedBy', () => {
   it('leaseBody no longer carries an ancestry field (r2 — pid-ancestry removed)', () => {
     const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', pid: 111, ownerSession: 'sess-uuid-A' });
     expect('ancestry' in b).toBe(false);
+  });
+  it('#3637 — leaseBody OMITS `base` when the acquire declared none (byte-identical marker to today)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' });
+    expect('base' in b).toBe(false);
+    expect(laneBaseRef(b)).toBeNull();
+  });
+  it('#3637 — leaseBody PERSISTS `--base=<ref>`, so a POC-forked lane carries its target durably', () => {
+    const b = leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z', base: 'lane/mechanical-dispatcher' });
+    expect(b.base).toBe('lane/mechanical-dispatcher');
+    expect(laneBaseRef(b)).toBe('lane/mechanical-dispatcher');
+  });
+  it('#3637 — laneBaseRef is null for a pre-#3637 marker or a blank value, never a guess', () => {
+    expect(laneBaseRef(null)).toBeNull();
+    expect(laneBaseRef({})).toBeNull();
+    expect(laneBaseRef({ base: '   ' })).toBeNull();
+    expect(laneBaseRef({ base: 42 })).toBeNull();
   });
   it('leaseBody defaults workflowLane to false and carries an explicit true through (#2413)', () => {
     expect(leaseBody({ session: 's', acquiredAt: '2026-07-05T12:00:00.000Z' }).workflowLane).toBe(false);

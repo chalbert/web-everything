@@ -21,7 +21,7 @@ Follow-up to #3621's amendment: the gh-throttle wrapper (we:scripts/lib/gh-throt
 ## Progress
 
 - **Slice landed (2026-09-11):** `we:scripts/review-set-label.mjs`'s own last bare `execFileSync` — the
-  `computeNetDiffText` exec closure at its `#x169fqe` net-diff read — now goes through
+  `computeNetDiffText` exec closure at its `#2979` net-diff read — now goes through
   `we:scripts/lib/gh-throttle.mjs#execFileSyncThrottled`, the same importable seam
   `we:scripts/conveyor/ci-queue-watch.mjs#defaultListRuns` already defaults to. This site was found live tonight:
   two independent review sessions (`review-2121`, `review-2122`) ran a full jury to a genuine "accept" verdict
