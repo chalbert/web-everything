@@ -401,10 +401,29 @@ export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR
 export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out, heartbeat = () => true } = {}) => {
     const { execFileSync } = await import('node:child_process');
-    const runQuiet = (relPath, extraArgs = []) => {
+    // `repo` here is a GitHub `owner/repo` SLUG (this runner's own `--repo` flag, threaded through for the
+    // `gh`-calling passes below). `runQuiet` forwards it as `--repo=<repo>` to every pass by default, which is
+    // harmless for passes that either consume it as that same slug (`ci-queue-watch.mjs`,
+    // `parked-pr-conflict-watch.mjs`, `duplicate-pr-watch.mjs`, `parked-pr-progress-watch.mjs`,
+    // `reconcile-pass.mjs`, `reconcile-fix-dispatch.mjs`) or silently ignore an unrecognized flag
+    // (`branch-drift.mjs`, `session-reaper.mjs`, `lease-reaper.mjs`).
+    //
+    // `conveyor/lane-pool-health-watch.mjs` is the one pass where this is NOT harmless — live incident, found
+    // debugging a recurring "could not determine an origin URL" failure every tick. That pass's OWN `--repo`
+    // flag (threaded to `lane-pool.mjs status --json --repo=<...>`) means a CHECKOUT PATH
+    // (`lane-pool.mjs`'s `resolveRepo()` resolves it with `resolve(flags.repo || cwd())` and derives the origin
+    // URL from `git remote get-url origin` run THERE) — a completely different contract from the GH slug this
+    // runner threads everywhere else. Forwarding the slug here made `lane-pool.mjs` `resolve()` a nonexistent
+    // path (`<cwd>/<owner>/<repo>`, e.g. `.../wev-scratch-dispatcher-9/chalbert/web-everything`), whose `git`
+    // calls silently no-op to null (`tryGit` swallows the "no such directory" failure) and the resolver reports
+    // the whole thing as "no origin", not "bad path" — hence `resolveRepo` failing loud with `could not
+    // determine an origin URL`, every tick, forever (this pass never needs `--repo` at all: `defaultListLaneStatus`
+    // already reads `root`'s OWN pool via `cwd`, no selector required). So this one pass opts OUT of the
+    // default forward entirely — seen live in `wev-scratch-dispatcher-9/run.log`.
+    const runQuiet = (relPath, extraArgs = [], { forwardRepo = true } = {}) => {
       try {
         const args = [join(scriptsDir, relPath), ...extraArgs];
-        if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
+        if (forwardRepo && typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
         execFileSync('node', args, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
       } catch (e) {
         process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
@@ -434,7 +453,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix
     // or accumulated through any path other than a normal release. See that file's own header for the full
     // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
-    runQuiet('conveyor/lane-pool-health-watch.mjs');
+    runQuiet('conveyor/lane-pool-health-watch.mjs', [], { forwardRepo: false });
     // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
     // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
     // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own

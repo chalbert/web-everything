@@ -736,7 +736,7 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
 //        its own wiring silently regressing. ─────────────────────────────────────────────────────────────
 
 describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes, in order, every tick', () => {
-  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through', async () => {
+  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through (except lane-pool-health-watch.mjs, whose OWN --repo means a checkout path, not this GH slug — #3383 live incident)', async () => {
     const calls = [];
     const execFileSync = vi.fn((cmd, args) => {
       calls.push([cmd, ...args]);
@@ -763,7 +763,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/branch-drift.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=owner/repo',
-      'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=owner/repo',
+      'node /scripts/conveyor/lane-pool-health-watch.mjs',
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
