@@ -2,10 +2,12 @@
 bornAs: x27e4xs
 kind: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["3145"]
 relatedTo: ["3028", "3050", "3057"]
 dateOpened: "2026-08-17"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 scope:
   - we:scripts/lib/judge-panel.mjs
   - we:scripts/lib/review-core.mjs
@@ -46,3 +48,24 @@ that lands PRs is now strictly weaker at exactly the class of finding the probe 
 3. Whatever is ruled, the drain's auto-review documents which finding classes its panel can and cannot
    reach, so nobody reads a tool-free `accept` as a tool-backed one.
 4. `npm run check:standards` — 0 new errors.
+
+## Progress
+
+1. **Ruling recorded** — panel seats stay tool-free by design (`we:scripts/lib/judge-panel.mjs`, header
+   block "RULING (#3158 / x27e4xs)"): threading `allowedTools` + a per-seat lane `cwd` through `judgePanel`
+   means N seats need N lane clones, and nothing in the repo provisions or bills for that today. The
+   mutation probe stays with whichever transport can actually run it, not with every panel seat by default.
+2. **Mandate no longer instructs the impossible** — `MUTATION_PROBE_RULE` and `buildMandate`'s isolation
+   clause (`we:scripts/lib/review-core.mjs`) now self-scope on tool availability, the same phrasing pattern
+   #3094 used to self-scope by lens: a tool-bearing juror still gets "BREAK the line"; a tool-free juror is
+   told to name the test it believes WOULD redden and say plainly it ran nothing — never a caller flag, so
+   the #3094 "present for every lens, nothing to forget" invariant still holds for every seat.
+3. **Drain doc updated** — `we:skills-src/drain/SKILL.md`'s panel-review callout now describes the
+   self-scoped wording (previously described the clauses as flatly "unrunnable") and names which finding
+   class (an actually-run mutation) a tool-free panel still cannot reach.
+4. **Gate** — `npm run check:standards` requested via `we:scripts/verify-lane.mjs` and came back green.
+   New tests pinning both branches of the self-scoped wording, plus the updated golden fixture, land in
+   `we:scripts/lib/__tests__/review-core.test.mjs` (where `MUTATION_PROBE_RULE`/`buildMandate` live); a new
+   test in `we:scripts/lib/__tests__/judge-panel.test.mjs` separately pins that every seat's argv carries
+   `--tools ''` and never `--allowedTools`, and that no seat gets its own `cwd` — the RULING's guarantee,
+   caught by a #3158 red-team round as asserted only in prose otherwise. Full unit suite green locally.
