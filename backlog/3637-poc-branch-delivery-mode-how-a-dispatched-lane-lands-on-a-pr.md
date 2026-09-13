@@ -416,3 +416,15 @@ fast-forward-with-rebase-retry lander, the ancestry completion axis, the five bl
    `we:docs/agent/platform-decisions.md`: rule 10 is epic `#3383`'s scoped operating doctrine, and that
    skill's own header states the amendment path — "If a rule itself changes, edit it here first, then note
    the change on the card."
+
+---
+
+_Numbering note (2026-09-13 merge):_ this item, `bornAs: x7ppgg6`, was JIT-numbered independently on two
+branches before they diverged — `#3637` on `origin/main`, `#3656` on `lane/mechanical-dispatcher` — surfacing
+as a byte-identical duplicate `bornAs` twin at the `lane/mechanical-dispatcher` ↔ `origin/main` merge (epic
+`#3383`). Since every other reference to this decision across the repo (`we:docs/agent/backlog-workflow.md`,
+`we:docs/agent/platform-decisions.md`, `we:skills-src/conveyor/delivery-agent-brief.md`,
+`we:skills-src/mechanical-delivery-doctrine/SKILL.md`, and every `we:scripts/` citation) already used
+`origin/main`'s number, `#3637` is kept as this decision's sole surviving number and the `#3656` copy is
+retired rather than carried forward as a live twin — both resolved, so `check:standards`' `duplicateBornAs`
+rule reads this as a harmless audit-trail smudge, not a live-cost duplicate.

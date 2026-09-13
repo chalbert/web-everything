@@ -322,3 +322,18 @@ contradicted the catalogue table above.
 Also in that PR: the `codifiedIn` link in the doc shipped with a `.md` suffix the site permalink does not
 serve, and we:skills-src/use-codex/SKILL.md documented neither `--tier` nor `--clear-rollout-after-run`.
 Both fixed.
+
+---
+
+_Numbering note (2026-09-13 merge):_ this item, `bornAs: x8wbivt`, was JIT-numbered independently on two
+branches before they diverged — `#3635` on `origin/main`, `#3654` on `lane/mechanical-dispatcher` —
+surfacing as a byte-identical duplicate `bornAs` twin at the `lane/mechanical-dispatcher` ↔ `origin/main`
+merge (epic `#3383`). Since every other reference to this decision across the repo (`we:docs/agent/backlog-workflow.md`,
+`we:skills-src/use-codex/SKILL.md`, `we:agent-memory-src/new-review-seats-must-earn-their-place.md`,
+`we:agent-memory-src/delegate-work-to-codex-when-feasible.md`, and every `we:scripts/` citation) already used
+`origin/main`'s number, `#3635` is kept as this decision's sole surviving number; `lane/mechanical-dispatcher`'s
+`#3654` was reclaimed by the distinct, unrelated "graduation criteria for exiting probation" decision
+(`origin/main`'s own `#3654`, `bornAs: xeagmug`) once the two branches merged — a genuine numeric collision
+(different `bornAs`, same NNN), resolved in `origin/main`'s favor since it landed and was cited first. Both
+copies of this decision were already `status: resolved`, so `check:standards`' `duplicateBornAs` rule reads
+this as a harmless audit-trail smudge, not a live-cost duplicate.

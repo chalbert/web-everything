@@ -2,11 +2,11 @@
 bornAs: xo6ev1z
 kind: story
 size: 5
-parent: "3656"
+parent: "3637"
 status: active
 scaffoldedBy: "3637-poc-fast-lander"
 dateScaffolded: "2026-09-12"
-blockedBy: ["3656"]
+blockedBy: ["3637"]
 scope: ["we:scripts/operations/poc-land.mjs", "we:scripts/lib/poc-branches.mjs", "we:scripts/readiness/drain-lock.mjs", "we:scripts/lib/lane-lease.mjs", "we:scripts/check-backlog-item.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-12"
 tags: []
@@ -16,9 +16,9 @@ tags: []
 
 A lock-serialized, fast-forward-only lander that lands a lane's commits onto a registered POC branch with no review tax, plus the poc-branches registry and the deliveryTarget frontmatter field that names the target.
 
-This is the follow-on build `#3656`'s ruling named and deliberately did not build. That decision settled the
+This is the follow-on build `#3637`'s ruling named and deliberately did not build. That decision settled the
 design (transport **A′**, the `deliveryTarget:` field, and the registry built now rather than deferred); this
-item is the implementation, including the blockers `#3656`'s own survey found.
+item is the implementation, including the blockers `#3637`'s own survey found.
 
 ## What this builds
 
