@@ -2356,3 +2356,44 @@ shape the way build/fix/ci-heal roughly do: `review-pr`'s juror is tool-bearing 
 under. So which operations even HAVE an "agent seat" a provider could be substituted into is itself part of
 the undone design work here, not a given — one atomic operation at a time, a real independent review each
 time, no blind trust that a provider swap proven for one operation transfers to the rest.
+
+### Correction (2026-09-13) — the entry above conflates two separate systems; splitting scope into two tracks
+
+Direct investigation confirms the paragraph above frames the `build`/`fix`/`ci-heal` delivery lifecycle as if
+it belonged to the same `op()`-registered system as the rest of the `OPERATIONS` table it lists. It does not
+— these are two separate layers, not one:
+
+- **`dispatch-lane` IS a real `op()`-registered operation.** It is genuinely declared in
+  `we:scripts/operations/run.mjs`'s `OPERATIONS` table (via `we:scripts/operations/registry.mjs`'s `op()`
+  engine), three steps — read, plan, dispatch — with one `effect` step. That effect is what STARTS a build; it
+  does not complete one. This part of the plan above is accurate.
+- **The actual build/fix/ci-heal delivery lifecycle is a separate, hand-rolled script, not an `op()`
+  declaration.** Lane acquire, agent spawn, gate, converge, PR open — the work
+  `we:scripts/operations/deliver-item-wrapper.mjs` describes — runs via a per-kind provider handoff triggered
+  after `dispatch-lane`'s effect fires. It never touches `we:scripts/operations/registry.mjs` or
+  `we:scripts/operations/step-kinds.mjs`. It predates, and sits entirely outside, the `op()` declaration
+  framework the rest of this entry is describing.
+- **There is, and never has been, a `build` key in `OPERATIONS`.** Confirmed directly by grep of
+  `we:scripts/operations/run.mjs`: every `_OP` entry in the table is `review-pr`, `review-prep`,
+  `record-verdict`, `verify`, `mutation-check`, `gap-sweep-status`, `resolve`, `scaffold`, `file-item`,
+  `suggest-next`, `pr-status`, `gate-health`, `route-pr-outcome`, `dispatch-lane`, `claim`, `open-pr`,
+  `explore`, `stage-pr-view` — no `build`, `fix`, or `ci-heal` entry exists among them, now or ever.
+
+**What this means for the plan.** Today's proven Codex delivery work (`#3564`/`#3565`) already lives in the
+separate delivery-lifecycle layer (`we:scripts/operations/deliver-item-wrapper.mjs`'s per-kind provider
+handoff), which is NOT part of the `op()`-registered set this entry's "extend to every operation" plan
+describes. Extending Codex "to every operation" would only reach the `op()`-registered layer —
+`dispatch-lane`'s own decision step, plus the genuinely `op()`-registered operations (`review-pr`, `claim`,
+`resolve`, `scaffold`, `file-item`, and the rest listed above). It would NOT automatically cover more of the
+actual coding/delivery work, because that work is architecturally a different, separate system.
+
+**Scope, going forward, splits into two explicit tracks — do not conflate them:**
+
+1. **Extending Codex within the `op()`-registered operations themselves** — e.g. a judge/juror seat inside
+   `review-pr`-style operations, and potentially the `dispatch-lane` decision step itself. This is the part
+   the plan above actually describes, and it remains undone, unscoped work.
+2. **The already-proven, separate delivery-lifecycle work** (`we:scripts/operations/deliver-item-wrapper.mjs`'s
+   per-kind provider handoff) that today's real Codex deliveries (`#3564`, `#3565`) actually used. This was
+   never gated by, or part of, the "all operations" plan's stated scope above, and should not be conflated
+   with it going forward — it is a different system with its own provider seam, already proven
+   independently.
