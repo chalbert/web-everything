@@ -632,8 +632,11 @@ export async function dispatchFix(
       // `repair` for the same reason `buildFixAgentEnv` stamps it (#3640): the converge EDITOR is another
       // restricted agent this wrapper spawns outside the fixer's own turn, so it is a wrapper-owned agent, not
       // a `fix` LAUNCH. Passing the launch kind here would put the editor under a guard contract written for
-      // an agent that runs its own lifecycle.
-      { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND },
+      // an agent that runs its own lifecycle. `provider` threaded through (mechanical-dispatcher follow-up to
+      // #3580) — was resolved above for `runFixGateWithOneRetry` and silently never reached the converge round;
+      // see `deliver-item-wrapper.mjs#runConvergeEdit`'s docblock for why this is visibility only, not a real
+      // Codex converge editor.
+      { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND, provider },
     );
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });

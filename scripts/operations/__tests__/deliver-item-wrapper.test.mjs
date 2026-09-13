@@ -14,7 +14,7 @@
  * REJECTED after a real smoke test showed a `--settings=<hooks file>` layered on top of it never fires.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -783,6 +783,28 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     expect(editorCall.opts.env.WE_DISPATCH_KIND).toBe('fix');
   });
 
+  // mechanical-dispatcher follow-up to #3580 — a Codex-selected build `provider` was previously never even
+  // threaded down to the converge round at all (not "ignored" — genuinely absent from the call). This proves
+  // the END-TO-END path from `runConverge`'s own `provider` option into the round's real `.converge-obs-*.json`
+  // record, the same artifact an operator already inspects after a run.
+  it('threads a `provider` option from runConverge down into the editor round\'s recorded `.converge-obs-*.json`', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }),
+      steps: [landStep],
+    });
+
+    runConverge(
+      { lane, item: '1234' },
+      { run, ensureSettingsFile: () => '/fake/hooks.json', provider: { name: 'codex' } },
+    );
+
+    const obs = JSON.parse(readFileSync(join(lane, '.converge-obs-1-0.json'), 'utf8'));
+    expect(obs.editResult.requestedProvider).toBe('codex');
+    expect(obs.editResult.editorProvider).toBe('claude-restricted'); // the editor itself never changes — no Codex implementation exists yet
+  });
+
   it('creates NO commit for a round the editor did NOT advance (`advanced: false`, dismissed-only) — no empty/'
     + 'spurious commit (#3627 bug 14)', () => {
     const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
@@ -1043,6 +1065,35 @@ describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old rea
     );
     const [, , opts] = run.mock.calls[0];
     expect(opts.env.WE_DISPATCH_KIND).toBe('fix');
+  });
+
+  // mechanical-dispatcher follow-up to #3580 — VISIBILITY, not a real Codex converge editor (see this
+  // function's own docblock). Before this, a caller's `provider` was never even threaded through to here, so
+  // a Codex-selected build's converge round left no trace anywhere that it had silently run under Claude.
+  it('with no `provider` passed, still spawns `claude` and reports both provider fields as claude-restricted', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    const result = runConvergeEdit(
+      { prompt: 'fix it' },
+      { item: '1234', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json' },
+    );
+    expect(run.mock.calls[0][0]).toBe('claude'); // the spawn itself never changes
+    expect(result.requestedProvider).toBe('claude-restricted');
+    expect(result.editorProvider).toBe('claude-restricted');
+  });
+
+  it('a Codex-selected `provider` still spawns `claude` for the editor, but the mismatch is now recorded '
+    + '(requestedProvider !== editorProvider), not silently dropped', () => {
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }));
+    const result = runConvergeEdit(
+      { prompt: 'fix it' },
+      {
+        item: '1234', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json',
+        provider: { name: 'codex' },
+      },
+    );
+    expect(run.mock.calls[0][0]).toBe('claude'); // no Codex converge editor exists yet — see the docblock
+    expect(result.requestedProvider).toBe('codex');
+    expect(result.editorProvider).toBe('claude-restricted');
   });
 });
 

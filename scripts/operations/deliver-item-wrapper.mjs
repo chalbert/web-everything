@@ -353,8 +353,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // ---- 4. Converge — driven BY THE WRAPPER, not the agent (this session's call on step 6, see the design
     // amendment on #3627: KEEP the substance, MOVE the driving). SKETCH — the exact init/step loop shape is
     // taken from the live brief's own step 6 prose, not verified against `converge-cli.mjs`'s real output. --
-    const convergeVerdict = spanAround('converge.round', { attributes: { item: String(item) } },
-      () => runConverge({ lane: gate.lanePath, item }));
+    // `provider` threaded through (mechanical-dispatcher follow-up to #3580) — see `runConvergeEdit`'s own
+    // docblock ("VISIBILITY fix") for why this does not make Codex the converge editor; it only makes the
+    // requested build provider visible to, and recorded by, the round that runs regardless.
+    const convergeVerdict = spanAround('converge.round', { attributes: { item: String(item), buildProvider: provider.name } },
+      () => runConverge({ lane: gate.lanePath, item }, { provider }));
 
     // ---- 5. Map outcome + convergeVerdict + statute-touch to a park mode, via the EXISTING deterministic
     // rubric (`review-escalation.mjs`) — REAL import, SKETCH call (the real `scoreEscalation` signature takes
@@ -1201,12 +1204,31 @@ export function parseConvergeEditResult(rawOut) {
  * (`applyRevision`, `converge-transports.mjs`) never references `$LANE`/`$DELIVERY_SESSION` — it hardcodes the
  * absolute lane path directly into the instruction text — so nothing in this call's actual prompt would read
  * them; adding unused env vars here would be padding, not a fix for a real gap this prompt has.
+ *
+ * `provider` (mechanical-dispatcher follow-up to #3580) — NOT a real second implementation, a VISIBILITY fix.
+ * Before this, `deliverItem`/`fix-dispatch-wrapper.mjs`/`ci-heal-dispatch-wrapper.mjs` all resolve a real
+ * {@link DeliveryAgentProvider} (`CLAUDE_RESTRICTED_PROVIDER` or `CODEX_PROVIDER`) for the BUILD spawn, hold it
+ * in a local `provider` variable, and then called `runConverge`/`runConvergeEdit` with NO provider argument at
+ * all — not "falls back to Claude", genuinely un-passed, so a Codex-delivered item's converge editor ran under
+ * Claude with no record anywhere that a hand-off had even happened. `CODEX_PROVIDER`'s own docblock already
+ * says this boundary is deliberate ("the port's real boundary today, not an oversight" — no Codex
+ * implementation of the editor role has been built OR live-verified: it would need its own argv builder,
+ * parallel to `codex-delivery-provider.mjs#buildCodexDeliveryArgv`, AND a parser that turns Codex's `--json`
+ * event stream into the same `{advanced, dismissed}` shape `parseConvergeEditResult` extracts from Claude's
+ * `--output-format json` envelope — neither exists, so building one here blind, with no live run to confirm
+ * the JSON actually comes back in a parseable shape, would be exactly the kind of unverified claim this
+ * codebase's own discipline refuses (see `codex-delivery-provider.mjs`'s file header, "measured, not
+ * reasoned", throughout). So the spawn below is UNCHANGED — still always `claude` — but `provider` is now a
+ * real parameter, and the requested build provider (which may be Codex) travels alongside the ACTUAL editor
+ * provider (always `'claude-restricted'` today) in the return value, so this is a stated fact in the round's
+ * own `.converge-obs-*.json` record and in `convergeVerdict`, not a silent gap. Building and live-verifying a
+ * real Codex converge editor is a genuine follow-up (file it rather than guess at it here).
  */
 export function runConvergeEdit(
   editInstruction,
   {
     item, round, lane, run: runFn, ensureSettingsFile = ensureDeliveryHooksSettingsFile, newSessionId = randomUUID,
-    dispatchKind = 'delivery',
+    dispatchKind = 'delivery', provider = CLAUDE_RESTRICTED_PROVIDER,
   },
 ) {
   const settingsFile = ensureSettingsFile();
@@ -1226,7 +1248,9 @@ export function runConvergeEdit(
   // (`dispatch-lane.mjs#WRAPPER_AGENT_KINDS`) — the same half of the value space this default's own
   // `'delivery'` has always been in. The gap that note called an open follow-up is closed.
   const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: dispatchKind } });
-  return parseConvergeEditResult(out);
+  // Additive fields only — see this function's own docblock ("VISIBILITY fix") for why these two are always
+  // `requestedProvider !== editorProvider` on a Codex-selected delivery, on purpose, not a bug.
+  return { ...parseConvergeEditResult(out), requestedProvider: provider.name, editorProvider: CLAUDE_RESTRICTED_PROVIDER.name };
 }
 
 /** Shell `review-core-cli.mjs invite` for the jury-growth delta (#2640), per the SKILL's `invite` row. A
@@ -1309,7 +1333,10 @@ export function commitConvergeRound(
  */
 export function runConverge(
   { lane, item, goal },
-  { run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile, dispatchKind = 'delivery' } = {},
+  {
+    run: runFn = run, ensureSettingsFile = ensureDeliveryHooksSettingsFile, dispatchKind = 'delivery',
+    provider = CLAUDE_RESTRICTED_PROVIDER,
+  } = {},
 ) {
   const state = `${lane}/.converge-state.json`;
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `converge` operation is registered
@@ -1348,7 +1375,7 @@ export function runConverge(
       obs.lensResults = lastLensResults;
       obs.redTeamResult = runConvergeRedTeam(step.redTeam, { lane, item, round: step.round, material, run: runFn });
     } else if (step.action === 'edit') {
-      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile, dispatchKind });
+      obs.editResult = runConvergeEdit(step.edit, { item, round: step.round, lane, run: runFn, ensureSettingsFile, dispatchKind, provider });
       // BUG-14 FIX — commit a genuinely accepted round's real edits NOW, before the `step` call below reads
       // the lane's state (`converge-cli.mjs`'s own `read` action re-reads the lane fresh each round, so a
       // later round must see THIS round's commit, not just uncommitted working-tree changes it happens to

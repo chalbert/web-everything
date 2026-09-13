@@ -681,8 +681,9 @@ export async function dispatchCiHeal(
         { lane: lanePath, item: planned.pr, goal: `repair the failing required check on PR #${planned.pr}${planned.item ? ` (item #${planned.item})` : ''}` },
         // `repair` for the same reason `buildFixAgentEnv` stamps it (#3640): the converge EDITOR is another
         // restricted agent this wrapper spawns outside the heal agent's own turn, so it is a wrapper-owned
-        // agent, never a `ci-heal` LAUNCH.
-        { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND },
+        // agent, never a `ci-heal` LAUNCH. `provider` threaded through (mechanical-dispatcher follow-up to
+        // #3580) — see `fix-dispatch-wrapper.mjs`'s identical note; this reuses the same shared function.
+        { run: runFn, ensureSettingsFile, dispatchKind: REPAIR_AGENT_KIND, provider },
       );
     } catch (e) {
       reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });
