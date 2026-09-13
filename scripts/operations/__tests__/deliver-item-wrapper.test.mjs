@@ -63,7 +63,7 @@ import {
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
-  convergeRoundTouchedFiles, commitConvergeRound,
+  convergeRoundTouchedFiles, commitConvergeRound, commitBuildTurn, coAuthorTrailerFor,
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
@@ -907,6 +907,149 @@ describe('convergeRoundTouchedFiles (#3627 bug 14 helper — the real touched-fi
   });
 });
 
+describe('coAuthorTrailerFor (#3565 — the trailer a WRAPPER-OWNED commit carries per provider)', () => {
+  it('names Codex for the codex provider', () => {
+    expect(coAuthorTrailerFor('codex')).toBe('Co-Authored-By: Codex <noreply@openai.com>');
+  });
+
+  it('defaults to Claude for the claude-restricted provider and for any unrecognized/absent name', () => {
+    expect(coAuthorTrailerFor('claude-restricted')).toBe('Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>');
+    expect(coAuthorTrailerFor(undefined)).toBe('Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>');
+    expect(coAuthorTrailerFor('some-future-provider')).toBe('Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>');
+  });
+});
+
+describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; the agent never runs git)', () => {
+  it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the build phase + provider trailer', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitBuildTurn(
+      { lane: '/lane', item: '1234', provider: { name: 'codex' } },
+      { run, writeFile, touchedFiles: () => ['a.mjs', 'b.md'] },
+    );
+    expect(result).toEqual({ committed: true, paths: ['a.mjs', 'b.md'] });
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const [msgFile, message] = writeFile.mock.calls[0];
+    expect(msgFile).toBe('/lane/.delivery-commit-msg-build.txt');
+    expect(message).toMatch(/delivery build/);
+    expect(message).toMatch(/Co-Authored-By: Codex <noreply@openai\.com>/);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith('git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run.mock.calls[0][1]).not.toContain('-A');
+    expect(run.mock.calls[0][1]).not.toContain('--all');
+  });
+
+  it('names the gate-fix phase distinctly (own message file, own text) for a resumed turn\'s commit', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitBuildTurn(
+      { lane: '/lane', item: '1234', provider: { name: 'claude-restricted' }, phase: 'gate-fix' },
+      { run, writeFile, touchedFiles: () => ['fix.mjs'] },
+    );
+    expect(result).toEqual({ committed: true, paths: ['fix.mjs'] });
+    const [msgFile, message] = writeFile.mock.calls[0];
+    expect(msgFile).toBe('/lane/.delivery-commit-msg-gate-fix.txt');
+    expect(message).toMatch(/gate-failure fix/);
+    expect(message).toMatch(/Co-Authored-By: Claude Sonnet 5 <noreply@anthropic\.com>/);
+  });
+
+  it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const result = commitBuildTurn(
+      { lane: '/lane', item: '1234' },
+      { run, writeFile, touchedFiles: () => [] },
+    );
+    expect(result).toEqual({ committed: false, paths: [] });
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('defaults `provider` to Claude when the caller passes none, same as every other CLAUDE_RESTRICTED_PROVIDER default in this file', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    commitBuildTurn({ lane: '/lane', item: '1234' }, { run, writeFile, touchedFiles: () => ['a.mjs'] });
+    const [, message] = writeFile.mock.calls[0];
+    expect(message).toMatch(/Co-Authored-By: Claude Sonnet 5 <noreply@anthropic\.com>/);
+  });
+});
+
+describe('runGateWithOneRetry commits the build turn itself (#3565 — before the agent-commit redesign this '
+  + 'never happened; the wrapper now commits BEFORE the first verify, and again after any resume)', () => {
+  it('calls commitTurn with phase "build" before the first verify, using the resolved lane path', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') {
+        return JSON.stringify({ verdict: { ok: true, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 0, unrun: 0, checks: [], blocking: [] } });
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const commitTurn = vi.fn(() => ({ committed: true, paths: ['a.mjs'] }));
+    const provider = { name: 'codex', spawn: vi.fn() };
+    const result = runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, commitTurn });
+    expect(result.status).toBe('green');
+    expect(commitTurn).toHaveBeenCalledTimes(1);
+    expect(commitTurn.mock.calls[0][0]).toEqual({ lane: '/real/pool/lane-3', item: '3371', provider, phase: 'build' });
+    expect(provider.spawn).not.toHaveBeenCalled(); // green on the first try — no resume, no gate-fix commit
+  });
+
+  it('commits AGAIN with phase "gate-fix" after the resume, before the second verify', () => {
+    let verifyCalls = 0;
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') {
+        verifyCalls += 1;
+        return JSON.stringify({
+          verdict: {
+            ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+            checks: [{ name: 'test:unit', outcome: 'fail' }],
+            blocking: [{ check: 'test:unit', why: 'failed', detail: 'x' }],
+          },
+        });
+      }
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const commitTurn = vi.fn(() => ({ committed: true, paths: ['a.mjs'] }));
+    const provider = { name: 'codex', spawn: vi.fn() };
+    const result = runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, commitTurn });
+    expect(result.status).toBe('red');
+    expect(verifyCalls).toBe(2);
+    expect(commitTurn).toHaveBeenCalledTimes(2);
+    expect(commitTurn.mock.calls[0][0].phase).toBe('build');
+    expect(commitTurn.mock.calls[1][0].phase).toBe('gate-fix');
+  });
+});
+
+describe('resumeAgentWithGateFailure prompt (#3565 — never asks the agent to commit any more)', () => {
+  it('the genuine-fail prompt never says "commit" and tells the agent the wrapper commits for it', () => {
+    const run = vi.fn((cmd, args) => {
+      if (args[0] === 'scripts/lane-pool.mjs') {
+        return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
+      }
+      if (args[0] === 'scripts/operations/run.mjs') return JSON.stringify({
+        verdict: {
+          ok: false, cwd: '/real/pool/lane-3', suite: 'run', passed: 1, failed: 1, unrun: 0,
+          checks: [{ name: 'test:unit', outcome: 'fail' }],
+          blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
+        },
+      });
+      if (cmd === 'git') return '';
+      throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
+    });
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => null);
+    runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider }, { run, readReport });
+    const prompt = provider.spawn.mock.calls[0][0].prompt;
+    expect(prompt).toMatch(/Your gate failed/);
+    expect(prompt).not.toMatch(/commit again/);
+    expect(prompt).toMatch(/do NOT run `git commit` yourself/);
+  });
+});
+
 describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round commit)', () => {
   it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the round', () => {
     const run = vi.fn(() => '');
@@ -1478,6 +1621,7 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
         expect(args).toEqual(['scripts/operations/run.mjs', 'verify', '--checkout=/real/pool/lane-3', '--json']);
         return verifyOkJson();
       }
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const result = runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371' }, { run });
@@ -1496,6 +1640,7 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') { verifyCalls += 1; return verifyRedJson(); } // exit 0, verdict.ok=false
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() }; // stub — never spawns a real `claude`
@@ -1515,6 +1660,7 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyRedJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
@@ -1546,6 +1692,7 @@ describe('runGateWithOneRetry (#3627 bug 2 — threads the injected run through 
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyRedJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     runGateWithOneRetry({ lane: 3, item: '3371', sessionSlug: 'conveyor-3371', provider: freshProvider, claudeSessionId }, { run });
@@ -1631,6 +1778,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
@@ -1661,6 +1809,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
           blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
         },
       });
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
@@ -1679,6 +1828,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
@@ -1697,6 +1847,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
         return JSON.stringify({ lanes: [{ lane: 3, path: '/real/pool/lane-3', exists: true }] });
       }
       if (args[0] === 'scripts/operations/run.mjs') return verifyUnrunJson();
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };
@@ -1720,6 +1871,7 @@ describe('runGateWithOneRetry (#3627 attempt-5 finding — honors a resumed agen
           blocking: [{ check: 'test:unit', why: 'failed', detail: '1 error(s)' }],
         },
       });
+      if (cmd === 'git') return ''; // #3565 — the wrapper's own build/gate-fix commit reads `git status --porcelain`
       throw new Error(`unexpected: ${cmd} ${JSON.stringify(args)}`);
     });
     const provider = { spawn: vi.fn() };

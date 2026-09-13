@@ -1011,9 +1011,13 @@ export function runGateWithOneRetry(
   { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
   {
     run: runFn = run, readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
+    commitTurn = commitBuildTurn,
   } = {},
 ) {
   const lanePath = resolveLanePath(lane, { run: runFn });
+  // #3565 — the WRAPPER commits the agent's OWN build turn here, before the gate ever runs — the agent never
+  // touches `.git` itself any more (see `commitBuildTurn`'s own header for the full redesign reasoning).
+  commitTurn({ lane: lanePath, item, provider, phase: 'build' }, { run: runFn });
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
 
@@ -1033,6 +1037,9 @@ export function runGateWithOneRetry(
   // (see `runAgentToCompletion`'s own comment for the full root-cause account), never the wrapper's own
   // script-location default.
   const retryReport = readReport(sessionSlug, resolveReportsDir(lanePath)); // agent's fresh report after the resume — 'done' (fixed) or 'blocked' (couldn't)
+  // #3565 — commit whatever the resumed turn changed, same wrapper-owned reasoning as the build commit above,
+  // BEFORE the second verify reads the lane. A `blocked` retry that touched nothing no-ops harmlessly here.
+  commitTurn({ lane: lanePath, item, provider, phase: 'gate-fix' }, { run: runFn });
   const second = runVerifyOperation(lanePath, { run: runFn });
   if (second.outcome === 'pass') return { status: 'green', lanePath, retryReport };
 
@@ -1064,14 +1071,19 @@ function resumeAgentWithGateFailure({
   // turn correctly explaining there was nothing in its own diff to fix. Explicitly inviting a `blocked` report
   // here is what `runGateWithOneRetry` above now reads and honors, instead of that self-diagnosis happening
   // only by the agent's own initiative against a misleading prompt.
+  // #3565 redesign — NEITHER branch asks the agent to commit any more. The agent's OWN job ends at "the
+  // files in $LANE are correct"; `runGateWithOneRetry` commits this resumed turn's fix itself, the same
+  // wrapper-owned way it already commits the original build (see `commitBuildTurn`'s own header for why —
+  // this is the #3565 Codex sandbox finding applied as a structural fix, not a sandbox carve-out).
   const prompt = gateOutcome === 'unrun'
     ? `The verification gate could not RUN for your commit in $LANE (this looks like a wrapper/environment `
       + `problem, not necessarily a problem in your own diff):\n\n${failureOutput}\n\nIf you can see something `
-      + `genuinely wrong in your own change, fix it, commit again, and send a fresh \`done\` report exactly as `
-      + `before. If you cannot find anything wrong in your own diff, do not guess at a code change — send a `
-      + `report with \`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
-    : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
-      + `\`done\` report exactly as before.`;
+      + `genuinely wrong in your own change, fix it in $LANE and send a fresh \`done\` report exactly as `
+      + `before — do NOT run \`git commit\` yourself; the wrapper commits your fix for you. If you cannot find `
+      + `anything wrong in your own diff, do not guess at a code change — send a report with `
+      + `\`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
+    : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, then send a fresh \`done\` report exactly `
+      + `as before — do NOT run \`git commit\` yourself; the wrapper commits your fix for you.`;
   // BUG-5 FIX: both `sessionId` and `resumeSessionId` are `claudeSessionId` — the real UUID minted once in
   // `deliverItem` and reused by the fresh spawn — never `sessionSlug`. `--resume <id>` must name the SAME CLI
   // session the fresh spawn created, and that id must itself be a UUID (CLI-enforced).
@@ -1368,6 +1380,75 @@ export function commitConvergeRound(
   const message = `WE #${item}: converge round ${round} revision\n\n`
     + 'Commits the accepted editor findings from this round of the #3627 delivery-pipeline converge loop '
     + '(runConvergeEdit reported advanced:true) before the loop continues and before the PR opens.\n';
+  writeFile(msgFile, message);
+  runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
+  return { committed: true, paths };
+}
+
+/**
+ * Map a {@link DeliveryAgentProvider}'s `.name` to the `Co-Authored-By` trailer for a commit made ON ITS
+ * BEHALF (#3565's redesign — see `commitBuildTurn`'s own header). PURE, and defaults to the Claude trailer
+ * for any name this does not recognize: a wrapper-authored commit must always carry SOME correctly-shaped
+ * trailer, and silently omitting one for an unrecognized/future provider name would be worse than a
+ * slightly-imprecise default.
+ */
+export function coAuthorTrailerFor(providerName) {
+  if (providerName === 'codex') return 'Co-Authored-By: Codex <noreply@openai.com>';
+  return 'Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>';
+}
+
+/**
+ * Commit the delivery agent's OWN turn ON ITS BEHALF — WRAPPER-OWNED, generalizing `commitConvergeRound`'s
+ * already-proven "the wrapper computes the real diff and commits it, never the agent" pattern (bug 14, above)
+ * to the FIRST commit in a delivery (the initial build, `phase: 'build'`) and to a gate-failure RESUME's own
+ * fix (`phase: 'gate-fix'`) — not just a converge round's revision.
+ *
+ * WHY THIS MOVED OUT OF THE AGENT'S OWN JOB ENTIRELY (#3565). A real Codex delivery trial confirmed Codex's OS
+ * sandbox denies `.git` writes inside its own lane. Traced to root cause, not guessed: every lane is
+ * `git clone --reference <primary>` (`scripts/lane-pool.mjs#cloneLane`), so a lane's own
+ * `.git/objects/info/alternates` file points AT the primary checkout's `.git/objects` verbatim — ordinary git
+ * plumbing (`status`, `log`, `commit`) reads through that pointer. The sandbox's own `filesystem` deny map
+ * (correctly) ALSO denies reading the primary checkout, so `git status`/`git commit` inside the lane failed
+ * `fatal: bad object HEAD` (live-reproduced against real `codex exec` with the exact production argv this
+ * repo's `codex-delivery-provider.mjs` builds). The fix on the table was carving `.git/objects` out of that
+ * deny map — but the STRUCTURALLY BETTER fix is this one: the dispatched agent, Claude OR Codex, never needs
+ * `.git` access at all, because it never runs git itself. Two independent reasons this beats a sandbox
+ * carve-out:
+ *   1. It GUARANTEES the commit-message/trailer convention mechanically (this function, {@link
+ *      coAuthorTrailerFor}) instead of hoping every agent, on every provider, formats a commit correctly.
+ *   2. It is a STRONGER isolation guarantee than any deny-list: a deny-list is only as good as what someone
+ *      remembered to block, where no path to `.git` at all structurally blocks a force-push, a
+ *      `reset --hard`, or a history rewrite from inside the agent's own turn — not by a rule the agent could
+ *      misconfigure or a deny-list entry someone forgot, but because there is no `.git` to reach.
+ * Applies UNIFORMLY to both providers — neither `CLAUDE_RESTRICTED_PROVIDER` nor `CODEX_PROVIDER` needs its
+ * own sandbox carve-out for this any more, because neither one's agent turn touches `.git`. Codex's sandbox
+ * denying `.git` writes is therefore not a bug any more — it is simply correct, and stays exactly as strict as
+ * it already is.
+ *
+ * Reuses {@link convergeRoundTouchedFiles}'s real `git status --porcelain` read — its own logic was never
+ * converge-specific (it is exactly "the real, live-diffed touched-file list in this lane, minus this
+ * wrapper's own bookkeeping litter"), so a second, parallel implementation would just be the same read typed
+ * twice. No-ops (`{committed: false, paths: []}`) when there is nothing to commit — an agent that reported
+ * `done`/fixed the gate but genuinely left nothing new in the working tree never produces an empty, spurious
+ * commit.
+ *
+ * @param {{lane: string, item: string|number, provider?: DeliveryAgentProvider, phase?: 'build'|'gate-fix'}} o
+ * @param {{run?: Function, writeFile?: Function, touchedFiles?: Function}} [deps]
+ */
+export function commitBuildTurn(
+  { lane, item, provider = CLAUDE_RESTRICTED_PROVIDER, phase = 'build' },
+  { run: runFn = run, writeFile = writeFileSync, touchedFiles = convergeRoundTouchedFiles } = {},
+) {
+  const paths = touchedFiles(lane, { run: runFn });
+  if (!paths.length) return { committed: false, paths: [] };
+  const msgFile = `${lane}/.delivery-commit-msg-${phase}.txt`;
+  const subject = phase === 'gate-fix' ? `WE #${item}: gate-failure fix` : `WE #${item}: delivery build`;
+  const body = phase === 'gate-fix'
+    ? "Commits the delivery agent's fix after a red gate resumed it for one retry (#3383/#3565) — the wrapper "
+      + "makes this commit on the agent's behalf; the agent itself never runs git.\n"
+    : "Commits the delivery agent's build turn (#3383/#3565) — the wrapper makes this commit on the agent's "
+      + "behalf; the agent itself never runs git (see this function's own header for why that moved here).\n";
+  const message = `${subject}\n\n${body}\n${coAuthorTrailerFor(provider?.name)}\n`;
   writeFile(msgFile, message);
   runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
   return { committed: true, paths };
