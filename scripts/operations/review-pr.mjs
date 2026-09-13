@@ -1024,6 +1024,7 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
   // #3319 — THE ROSTER TRAVELS ON THE VERDICT. `lens` used to be a separate parameter, which was the seam
   // through which the write-up could describe a different set of seats than the reduction was computed over.
   const lensVerdicts = verdict.lensVerdicts && typeof verdict.lensVerdicts === 'object' ? verdict.lensVerdicts : {};
+  const lensProviders = verdict.lensProviders && typeof verdict.lensProviders === 'object' ? verdict.lensProviders : {};
   const lenses = Array.isArray(verdict.lenses) && verdict.lenses.length ? verdict.lenses : Object.keys(lensVerdicts);
   const absent = PANEL_LENSES.filter((l) => !lenses.includes(l));
   const body = renderPanelComment({
@@ -1031,6 +1032,9 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
     verdict: verdict.verdict,
     disposition: read.disposition,
     lensVerdicts,
+    // #xqa9ttq — names a non-Claude seat (the Codex advisory juror) inline in its row instead of an anonymous
+    // `simplicity | advisory | accept` indistinguishable from a Claude seat.
+    lensProviders,
     // THE TABLE LISTS WHAT RAN, NOT WHAT EXISTS. `renderPanelComment` defaults `lenses` to the whole
     // `PANEL_LENSES` set, so the first live run (PR #1146) rendered `security | mandatory | (no verdict)`
     // directly under "✅ pass — no blocking findings": three mandatory lenses shown as unjudged beside a pass,
@@ -1263,12 +1267,14 @@ function renderRevProvenance(netBasis) {
 export function renderAdvisoryNote({ read, verdict } = {}) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
+  const lensProviders = v.lensProviders && typeof v.lensProviders === 'object' ? v.lensProviders : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
   const body = renderPanelComment({
     findings: v.findings,
     verdict: v.verdict,
     disposition: read.disposition,
     lensVerdicts,
+    lensProviders,
     lenses,
     mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
     heading: `⚠️ Advisory review (informational only) — ${read.repo}#${read.pr}`,
@@ -1617,9 +1623,12 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           { step: JUDGE_STEPS[0], lens: view.input.lens, answer: view.findings.judge },
           { step: JUDGE_STEPS[1], lens: SECURITY_LENS, answer: view.findings.judgeSecurity },
           // #xqa9ttq — THE THIRD SEAT, ONLY WHEN SEATED. `ADVISORY_JUDGE_LENS` is a LITERAL here, exactly
-          // like `SECURITY_LENS` above, for the same reason: it is not caller-negotiable.
+          // like `SECURITY_LENS` above, for the same reason: it is not caller-negotiable. `provider: 'codex'`
+          // is the SAME literal `buildReviewAdvisoryJudgeRequest` pins on this seat's actual judge request
+          // (`providerName: 'codex'`) — carried here too so the posted comment can name this row as Codex
+          // instead of rendering it indistinguishable from a Claude seat (the gap this fixes).
           ...(codexAdvisory
-            ? [{ step: ADVISORY_JUDGE_SEAT.step, lens: ADVISORY_JUDGE_LENS, answer: view.findings.judgeAdvisory }]
+            ? [{ step: ADVISORY_JUDGE_SEAT.step, lens: ADVISORY_JUDGE_LENS, answer: view.findings.judgeAdvisory, provider: 'codex' }]
             : []),
         ];
 
@@ -1703,6 +1712,12 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
         const lensVerdicts = Object.fromEntries(
           lenses.map((lens) => [lens, deriveVerdict({ findings: lensAdmitted[lens] })]),
         );
+        // #xqa9ttq — WHICH LENS RAN ON A NON-CLAUDE PROVIDER, keyed the same way as `lensVerdicts` so the
+        // renderer can zip the two together. Built straight off `seats` (never re-derived from the lens name),
+        // so a future non-codex provider seat carries its own label for free.
+        const lensProviders = Object.fromEntries(
+          seats.filter((s) => s.provider).map((s) => [s.lens, s.provider]),
+        );
         const humanRequired = read.humanRequired === true;
         const verdict = derivePanelVerdict({
           lensVerdicts,
@@ -1738,6 +1753,9 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           // still expects one gets an honest "both of them" rather than half the truth. Nothing DECIDES on it —
           // every consumer that needs the roster reads `lenses`.
           lens: lenses.join(', '),
+          // #xqa9ttq — carried beside `lensVerdicts` so both render call sites (`renderVerdictWriteUp`,
+          // `renderAdvisoryNote`) can pass it straight to `renderPanelComment`/`renderPanelVerdictTable`.
+          lensProviders,
           findings,
           // #x6t2z6h — WHAT THE VERDICT WAS ACTUALLY REDUCED FROM, declared rather than left to be inferred by
           // subtracting two lists. A reader that wants "why is this an accept when the comment shows a blocker"

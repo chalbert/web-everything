@@ -1152,14 +1152,21 @@ export function buildPanelMandate({
  * Render the per-lens verdict table the drain posts on escalation (#2310's "how a split verdict is surfaced to
  * the operator" spec line) — one row per lens, tagged mandatory/advisory, so a human reading the escalation
  * comment sees at a glance WHICH lens(es) disagreed and whether the disagreement was ever blocking. Pure.
- * @param {{lensVerdicts?: Object<string, string>, mandatoryLenses?: string[], lenses?: string[]}} [o]
+ *
+ * #xqa9ttq — `lensProviders` (optional, `{ [lens]: providerName }`) NAMES a non-Claude juror inline in the
+ * lens cell (`simplicity (codex)`) rather than leaving it indistinguishable from a Claude seat. Omitted or
+ * `'claude'` renders the lens bare, byte-identical to before this param existed — a caller that never seats a
+ * second provider (every run before #xqa9ttq's Codex advisory seat) sees no change at all.
+ * @param {{lensVerdicts?: Object<string, string>, mandatoryLenses?: string[], lenses?: string[], lensProviders?: Object<string, string>}} [o]
  * @returns {string} a markdown table.
  */
-export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = MANDATORY_LENSES, lenses = PANEL_LENSES } = {}) {
+export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = MANDATORY_LENSES, lenses = PANEL_LENSES, lensProviders = {} } = {}) {
   const rows = lenses.map((lens) => {
     const verdict = lensVerdicts[lens] ?? '(no verdict)';
     const weight = mandatoryLenses.includes(lens) ? 'mandatory' : 'advisory';
-    return `| ${lens} | ${weight} | ${verdict} |`;
+    const provider = lensProviders?.[lens];
+    const lensLabel = provider && provider !== 'claude' ? `${lens} (${provider})` : lens;
+    return `| ${lensLabel} | ${weight} | ${verdict} |`;
   });
   return ['| lens | weight | verdict |', '| --- | --- | --- |', ...rows].join('\n');
 }
