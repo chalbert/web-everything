@@ -21,8 +21,9 @@ import {
   RUNNER_LEASE_PATH,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned, runnerLeaseStatus,
 } from '../runner-lock.mjs';
+import { METRIC_NAMES, METRIC_UNITS } from '../../../scripts/operations/telemetry.mjs';
 import {
-  carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
+  carryForward, shouldStop, tickSurface, tickMetrics, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
   bookkeepingForDispatch, installShutdownHandlers, finalEventLine, SHUTDOWN_SIGNALS,
   recordLaunchPosture,
@@ -212,7 +213,19 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   });
   it('is total on a bare tick output (all empties, never throws)', () => {
     const s = tickSurface({});
-    expect(s).toEqual({ statusLine: '', counts: null, notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
+    expect(s).toEqual({ statusLine: '', counts: null, notes: [], suppressedBuilds: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
+  });
+
+  // #3383 — the projection's own describe-block promises it "drops nothing", and until now it dropped
+  // `suppressedBuilds`: the record of which planned builds were REFUSED and why. That is the runner's primary
+  // saturation signal (`capToConcurrency` computes it against `WE_MAX_CONCURRENT_LANES` every tick), and
+  // `tickMetrics` reads it straight off the surface — so it has to survive the projection.
+  it('projects suppressedBuilds — the DENIAL half of the dispatch decision', () => {
+    const s = tickSurface({ decisions: {
+      spawnBuilds: [{ num: 1, lane: 1 }],
+      suppressedBuilds: [{ num: 7, lane: 4, by: 'capacity-cap' }, { num: 8, lane: 5, by: 'build-guard' }],
+    } });
+    expect(s.suppressedBuilds).toEqual([{ num: 7, lane: 4, by: 'capacity-cap' }, { num: 8, lane: 5, by: 'build-guard' }]);
   });
 });
 
@@ -806,5 +819,84 @@ describe('recordLaunchPosture — whether this runner was SUPPOSED to keep runni
     expect(res.ok).toBe(false);
     expect(warns.join('')).toContain('will assume resident');
     // …and "assume resident" is precisely the pre-#3383 behaviour, so the failure mode is the old behaviour.
+  });
+});
+
+// #3383 — the SATURATION half of the four golden signals. `tickMetrics` is pure over the surface, so every
+// rule below is asserted against a plain object with no clock, no disk, and no running conveyor.
+describe('tickMetrics — the saturation signals the runner computes every tick and used to discard', () => {
+  const surface = (decisions) => tickSurface({ decisions });
+
+  it('counts admitted dispatches across EVERY kind, with the per-kind split as attributes', () => {
+    const m = tickMetrics(surface({
+      spawnBuilds: [{ num: 1 }, { num: 2 }], spawnPrepareScope: [{ num: 3 }],
+      spawnPrepareDecision: [], spawnFixes: [{ pr: 9 }], spawnCiHeals: [],
+    }));
+    const admitted = m.find((x) => x.name === 'dispatch.admitted');
+    expect(admitted.value).toBe(4);
+    expect(admitted.attributes).toMatchObject({ builds: 2, prepareScope: 1, prepareDecision: 0, fixes: 1, ciHeals: 0 });
+  });
+
+  it('emits ONE dispatch.denied sample PER REASON — a count without the why is not actionable', () => {
+    const m = tickMetrics(surface({
+      suppressedBuilds: [
+        { num: 7, by: 'capacity-cap' }, { num: 8, by: 'capacity-cap' }, { num: 9, by: 'build-guard' },
+      ],
+    }));
+    const denied = m.filter((x) => x.name === 'dispatch.denied');
+    expect(denied).toHaveLength(2);
+    expect(denied.find((d) => d.attributes.reason === 'capacity-cap').value).toBe(2);
+    expect(denied.find((d) => d.attributes.reason === 'build-guard').value).toBe(1);
+  });
+
+  it('emits a ZERO denial sample when nothing was refused — a rate needs a denominator', () => {
+    // Without the zero, a reader cannot tell "the cap was never hit" from "the runner was not running".
+    const denied = tickMetrics(surface({})).filter((x) => x.name === 'dispatch.denied');
+    expect(denied).toHaveLength(1);
+    expect(denied[0]).toMatchObject({ value: 0, attributes: { reason: 'none' } });
+  });
+
+  it('classifies a suppression with no `by` rather than dropping it', () => {
+    const m = tickMetrics(surface({ suppressedBuilds: [{ num: 7 }] }));
+    expect(m.find((x) => x.name === 'dispatch.denied').attributes.reason).toBe('unclassified');
+  });
+
+  it('counts lanes withheld by the concurrent-lane cap, from the notes the tick already emits', () => {
+    const m = tickMetrics(surface({ notes: [
+      { kind: 'capacity-cap', lane: 4 }, { kind: 'capacity-cap', lane: 5 }, { kind: 'build-ttl' },
+    ] }));
+    expect(m.find((x) => x.name === 'lane.pool.leased').value).toBe(2);
+  });
+
+  it('counts heavy-command semaphore waiters — a signal that lived for one tick and then vanished', () => {
+    const m = tickMetrics(surface({ notes: [
+      { kind: 'waiting-for-capacity', num: 1 }, { kind: 'waiting-for-capacity', num: 2 },
+    ] }));
+    expect(m.find((x) => x.name === 'heavy.admission.waiting').value).toBe(2);
+  });
+
+  it('reads the traffic terms straight off the structured counts', () => {
+    const m = tickMetrics(surface({
+      counts: { building: 2, preparing: 1, fixing: 1, healing: 0, queued: 7, parked: 2, verdict: 'ok' },
+    }));
+    expect(m.find((x) => x.name === 'queue.depth').value).toBe(7);
+    expect(m.find((x) => x.name === 'dispatch.inflight').value).toBe(4);
+  });
+
+  it('every sample carries a name from the closed METRIC_NAMES vocabulary and a valid unit', () => {
+    const m = tickMetrics(surface({ suppressedBuilds: [{ by: 'capacity-cap' }], notes: [{ kind: 'capacity-cap' }] }));
+    for (const x of m) {
+      expect(METRIC_NAMES).toContain(x.name);
+      expect(METRIC_UNITS).toContain(x.unit);
+      expect(Number.isFinite(x.value)).toBe(true);
+    }
+  });
+
+  it('is TOTAL on a bare or junk surface — the tick loop must never be taken down by its own telemetry', () => {
+    for (const junk of [undefined, null, {}, { counts: 'nope', notes: 'nope', dispatch: null, suppressedBuilds: 5 }]) {
+      expect(() => tickMetrics(junk)).not.toThrow();
+      const m = tickMetrics(junk);
+      expect(m.every((x) => Number.isFinite(x.value))).toBe(true);
+    }
   });
 });

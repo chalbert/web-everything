@@ -93,6 +93,11 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // REAL — every one of these is an existing exported function this session read directly.
+// #3383 — delivery telemetry. `createTelemetryRecorder` mints this dispatch's trace; `setActiveRecorder`
+// installs it so the shared helpers in `minimal-context-provider.mjs` emit into it without being passed one;
+// `spanAround` wraps a single existing call in a span without changing its behaviour. All three are
+// never-throwing by construction — see `telemetry-store.mjs`'s purity discipline.
+import { recorderFor, setActiveRecorder, spanAround } from './telemetry-store.mjs';
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
@@ -259,23 +264,51 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   const { item, lane, scope, sessionSlug, attemptTag } = launch;
   const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
 
+  // ---- 0. Telemetry (#3383) — the root `dispatch` span for this whole delivery, and the ambient recorder
+  // every shared helper below (`acquireLane`, `runVerifyOperation`) emits its own spans into. The trace id is
+  // DERIVED from the item, so this delivery, a later fix dispatch against its PR, and the review that lands
+  // it all join without anything being passed between those three separate processes. `attemptTag` rides as
+  // an attribute rather than as part of the trace id — attempt 2 of #3441 belongs in the SAME trace as
+  // attempt 1, which is what makes "how many attempts did this item take" answerable at all.
+  //
+  // Nothing below is in a `try` for telemetry's sake: every call on the recorder is already never-throwing by
+  // construction (see `telemetry-store.mjs`'s purity discipline), and a `restoreTelemetry()` in the outermost
+  // `finally` is the only cleanup this needs.
+  const tel = recorderFor({ kind: 'build', item, attributes: { item: String(item), sessionSlug } });
+  const restoreTelemetry = setActiveRecorder(tel);
+  const root = tel.startSpan('dispatch', {
+    attributes: { item: String(item), lane: String(lane), attemptTag: attemptTag || null, scope: scope || null },
+  });
+
+  try {
   // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
   // `claudeSessionId` threaded through — see `acquireLane`'s own docblock (#3627 secondary finding, live
   // #3371 attempt 4) for why `--adopt` needs the delivery agent's own future session id, not whatever this
   // wrapper process itself inherited.
   acquireLane({ lane, sessionSlug, scope, item, claudeSessionId });
   try {
-    claimItem({ item, sessionSlug });
+    spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug }));
 
     // ---- 2. Spawn the MINIMAL agent, wait for its structured report (SKETCH) -----------------------------
-    const report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
+    // THE EXPENSIVE SPAN. This is the single longest phase in the system (capped at 60 minutes by
+    // `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and until #3383 it was timed by nothing at all — the exact gap
+    // `readiness/conveyor-instrument.mjs` reports as `authoring: {ms: null, reason: 'no-dispatch-signal'}`.
+    const turn = root.child('agent.turn', { attributes: { item: String(item), timeoutMs: DELIVERY_AGENT_SPAWN_TIMEOUT_MS } });
+    let report;
+    try {
+      report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
+      turn.ok({ outcome: report && report.outcome ? String(report.outcome) : 'unreported', filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0 });
+    } catch (e) {
+      turn.fail(e, { outcome: 'agent-spawn-failed' });
+      throw e;
+    }
 
     // ---- 3. Act on the report — every branch below is what USED TO be the agent's own job -----------------
     if (report.outcome === 'blocked' && (!report.filesTouched || report.filesTouched.length === 0)) {
       // Pre-build stop, same shape as today's brief's Escalations case 0 — but decided by the WRAPPER
       // reading the report, never by the agent reasoning about claim/release CLI mechanics.
       releaseClaimAndLane({ item, lane, sessionSlug });
-      return { item, result: `not-ready (${report.reason})` };
+      return finish(`not-ready (${report.reason})`, { status: 'unset', outcome: 'not-ready', reason: report.reason });
     }
 
     if (report.outcome === 'blocked') {
@@ -285,15 +318,17 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // partial work and release (safest, matches "no PR is opened" bar 0 sets), or open a draft/park PR so
       // the partial diff is not silently lost? Left open for whoever actually specs this out.
       releaseClaimAndLane({ item, lane, sessionSlug });
-      return { item, result: `blocked-mid-build (${report.reason})` };
+      return finish(`blocked-mid-build (${report.reason})`, { status: 'error', outcome: 'blocked-mid-build', reason: report.reason });
     }
 
     // outcome is 'done' or 'needs-human-judgment' from here — both have a real diff. Run the gate FIRST in
     // either case: a needs-human-judgment report still needs a green gate before anyone reviews it.
+    // (The `verify.gate` span itself is emitted one level down, inside `runVerifyOperation`, so it is
+    // captured identically for every wrapper rather than six times over — see that function.)
     const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
     if (gate.status === 'red') {
       releaseClaimAndLane({ item, lane, sessionSlug });
-      return { item, result: 'gate-red' };
+      return finish('gate-red', { status: 'error', outcome: 'gate-red' });
     }
     if (gate.status === 'gate-blocked') {
       // #3627 attempt-5 finding — the resumed agent's own honest `blocked` self-diagnosis (see
@@ -301,13 +336,14 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // gate — this attempt did not produce a landable diff either way — but the reported result names the
       // agent's own reason instead of pretending the gate itself failed.
       releaseClaimAndLane({ item, lane, sessionSlug });
-      return { item, result: `gate-blocked (${gate.reason || 'no reason reported'})` };
+      return finish(`gate-blocked (${gate.reason || 'no reason reported'})`, { status: 'error', outcome: 'gate-blocked', reason: gate.reason || null });
     }
 
     // ---- 4. Converge — driven BY THE WRAPPER, not the agent (this session's call on step 6, see the design
     // amendment on #3627: KEEP the substance, MOVE the driving). SKETCH — the exact init/step loop shape is
     // taken from the live brief's own step 6 prose, not verified against `converge-cli.mjs`'s real output. --
-    const convergeVerdict = runConverge({ lane: gate.lanePath, item });
+    const convergeVerdict = spanAround('converge.round', { attributes: { item: String(item) } },
+      () => runConverge({ lane: gate.lanePath, item }));
 
     // ---- 5. Map outcome + convergeVerdict + statute-touch to a park mode, via the EXISTING deterministic
     // rubric (`review-escalation.mjs`) — REAL import, SKETCH call (the real `scoreEscalation` signature takes
@@ -322,7 +358,8 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     if (!foundForPr) {
       throw new Error(`deliver-item-wrapper: could not resolve a slug for item #${item} — findItem returned nothing`);
     }
-    const prResult = openPr({ item, attemptTag, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug });
+    const prResult = spanAround('pr.open', { attributes: { item: String(item), park: parkDecision.label } },
+      () => openPr({ item, attemptTag, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug }));
 
     // ---- 7. Forward the optional learning, if the agent supplied one (REAL CLI surface). --------------------
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
@@ -331,13 +368,33 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // `prResult` is `open-pr.mjs`'s `classifySubmit` shape (via `run.mjs open-pr --json`), which names the
     // PR number `pr`, never `number` — `report.number` is always `undefined` and prior wording printed
     // "PR #undefined" live even when the PR opened correctly (bug 13, confirmed live on real PR #2109).
-    return { item, result: `PR #${prResult.pr} (${parkDecision.label})` };
+    return finish(`PR #${prResult.pr} (${parkDecision.label})`, {
+      status: 'ok', outcome: 'pr-opened', pr: prResult.pr ?? null, park: parkDecision.label,
+    });
   } catch (e) {
     // A wrapper-side failure (acquire refused, claim refused, gate script itself threw) is NOT the agent's
     // outcome — it never reached the agent, or the agent's own report is irrelevant to it. Release what was
     // acquired and surface the raw error; there is no report to interpret.
     releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true });
     throw e;
+  }
+  } catch (e) {
+    // #3383 — the root span closes `error` on ANY escape, including the rethrow above. This is the outer of
+    // two catches on purpose: the inner one owns the real release/cleanup contract and is left untouched, so
+    // telemetry cannot alter what a failure does, only record that it happened.
+    root.fail(e, { outcome: 'wrapper-threw' });
+    throw e;
+  } finally {
+    restoreTelemetry();
+  }
+
+  /** Close the root span and return the wrapper's own unchanged `{item, result}` shape. Declared as a
+   *  hoisted function so every early return above reads as a one-line change from what it was. */
+  function finish(result, { status = 'unset', ...attrs } = {}) {
+    if (status === 'error') root.fail(attrs.outcome || result, attrs);
+    else if (status === 'ok') root.ok(attrs);
+    else root.end({ status: 'unset', statusMessage: String(result), attributes: attrs });
+    return { item, result };
   }
 }
 

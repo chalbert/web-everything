@@ -34,6 +34,14 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
+// #3383 — the delivery-telemetry recorder. Imported here, in the ONE module all six dispatch wrappers share,
+// so `lane.acquire` and `verify.gate` spans are captured for EVERY dispatch kind from a single edit rather
+// than six divergent ones. `activeRecorder()` returns the null recorder when no wrapper has installed one, so
+// an uninstrumented caller (and every existing test) behaves exactly as before. See that module's header for
+// why the recorder is ambient rather than threaded through these signatures, and for the never-throw contract
+// that makes it safe to call from inside a real delivery's critical path.
+import { activeRecorder } from './telemetry-store.mjs';
+
 /** The repo root, resolved by SCRIPT LOCATION (this file lives in `scripts/operations/`, same depth as
  *  `deliver-item-wrapper.mjs`, so this resolves to the identical path that file's own `REPO_ROOT` did). Used
  *  for reading/writing THIS module's own files (`.operations/`, etc.) — never as the cwd for a spawned
@@ -254,7 +262,25 @@ export function acquireLane(
   { run: runFn = run } = {},
 ) {
   const env = { ...process.env, CLAUDE_CODE_SESSION_ID: claudeSessionId };
+
+  // #3383 — the `lane.acquire` span. This is the highest-value single instrumentation point in the system:
+  // it is 6/6 across the wrappers, and it is where the one saturation fact the wrappers currently THROW AWAY
+  // lives. Today a bounded-wait acquire that finds no free lane returns an empty path, the caller turns it
+  // into the string `'blocked-on-infra (no free lane)'`, and the fact that the pool was saturated — and for
+  // how long the caller waited before giving up — is lost. `shape` distinguishes the numbered (tick-planned)
+  // acquire from the unnumbered (take-any-free-lane) one, because only the latter can starve.
+  const laneSpan = activeRecorder().startSpan('lane.acquire', {
+    attributes: {
+      purpose, shape: lane != null ? 'numbered' : 'unnumbered',
+      ...(lane != null ? { lane: String(lane) } : {}),
+      ...(waitMs != null ? { waitMs } : {}),
+      ...(base != null ? { base: String(base) } : {}),
+      ...(item != null ? { item: String(item) } : {}),
+    },
+  });
+
   let acquireOut;
+  try {
   if (lane != null) {
     // NUMBERED — the ORIGINAL argv, unchanged (order is a real, test-pinned contract).
     acquireOut = runFn('node', [
@@ -279,10 +305,17 @@ export function acquireLane(
     args.push('--adopt');
     acquireOut = runFn('node', args, { env });
   }
+  } catch (e) {
+    // A THROWN acquire (the pool CLI itself crashed or refused) — an `error` span, then the original error
+    // propagates untouched. Telemetry is a bystander here, never a participant.
+    laneSpan.fail(e, { outcome: 'acquire-threw' });
+    throw e;
+  }
 
   // A freshly acquired lane must never inherit a STALE `.git/.lane-verify` marker from a prior occupant's run
   // (#3627 attempt-5 live-run finding) — best-effort: a marker-reset failure must not fail the whole acquire.
   if (lane != null) {
+    laneSpan.ok({ outcome: 'acquired' });
     try {
       const lanePath = resolveLanePath(lane, { run: runFn });
       resetStaleVerifyMarker(lanePath, { run: runFn, claudeSessionId });
@@ -293,6 +326,16 @@ export function acquireLane(
   }
 
   const lanePath = String(acquireOut ?? '').trim();
+  if (lanePath === '') {
+    // THE POOL-SATURATION SIGNAL (#3383). Not an exception and not a crash — the bounded wait expired with
+    // every lane occupied. Recorded as an `error` span with the classified outcome `no-free-lane`, so
+    // `goldenSignals` counts it in BOTH the error rate (this dispatch did not happen) and, via the reason
+    // breakdown, as capacity rather than as a defect. That distinction is the whole point of classifying the
+    // reason instead of only counting failures.
+    laneSpan.fail('no free lane after bounded wait', { outcome: 'no-free-lane' });
+  } else {
+    laneSpan.ok({ outcome: 'acquired', lane: lanePath.split('/').pop() });
+  }
   try {
     resetStaleVerifyMarker(lanePath, { run: runFn, claudeSessionId });
   } catch {
@@ -381,21 +424,44 @@ export function resolveLanePath(lane, { run: runFn = run } = {}) {
  * `runVerifyOperation` docblock (unchanged here) for the full reasoning and the #3627 live-run finding this
  * discipline traces to.
  */
-export function runVerifyOperation(lanePath, { run: runFn = run } = {}) {
+export function runVerifyOperation(lanePath, { run: runFn = run, attempt = 1 } = {}) {
+  // #3383 — the `verify.gate` span, the second 6/6-adjacent seam (3 of the 6 wrappers route their gate
+  // through here, and the other three reach it via `runGateWithOneRetry`). `attempt` is threaded so a RETRIED
+  // gate is distinguishable from a first pass — the uniform retry axis the wrappers have never had. The gate
+  // is a DURABLE span name: it runs `test:unit && check:standards`, minutes long, and a process killed inside
+  // it is exactly the case worth seeing as `abandoned` rather than as silence.
+  const span = activeRecorder().startSpan('verify.gate', {
+    attempt,
+    attributes: { lane: String(lanePath ?? '').split('/').pop() || null },
+  });
+  /** Close the span from the three-valued verdict, then hand the caller's own result straight back. The
+   *  THREE-VALUED reading is preserved end to end: only `fail` is an `error` span. An `unrun` is a stale or
+   *  foreign marker — an environment fact, not evidence about the diff — so it closes `unset`, which is
+   *  precisely what OTel's third status code is for, and it keeps `unrun` out of the gate's error RATE. */
+  const close = (result) => {
+    if (result.outcome === 'pass') span.ok({ outcome: 'pass' });
+    else if (result.outcome === 'fail') {
+      span.fail(`gate red (${Number(result.verdict?.failed) || 0} failing)`, {
+        outcome: 'gate-red', failed: Number(result.verdict?.failed) || 0,
+      });
+    } else span.end({ status: 'unset', statusMessage: 'gate unrun', attributes: { outcome: 'unrun' } });
+    return result;
+  };
+
   let out;
   try {
     out = runFn('node', ['scripts/operations/run.mjs', 'verify', `--checkout=${lanePath}`, '--json']);
   } catch (e) {
-    return { outcome: 'unrun', detail: String(e.stdout || e.message || e), verdict: null };
+    return close({ outcome: 'unrun', detail: String(e.stdout || e.message || e), verdict: null });
   }
   let parsed;
   try {
     parsed = JSON.parse(out);
   } catch {
-    return { outcome: 'unrun', detail: String(out), verdict: null };
+    return close({ outcome: 'unrun', detail: String(out), verdict: null });
   }
   const verdict = parsed.verdict || {};
-  if (verdict.ok === true) return { outcome: 'pass', detail: null, verdict };
+  if (verdict.ok === true) return close({ outcome: 'pass', detail: null, verdict });
   const outcome = (Number(verdict.failed) || 0) > 0 ? 'fail' : 'unrun';
-  return { outcome, detail: JSON.stringify(verdict.blocking ?? verdict, null, 2), verdict };
+  return close({ outcome, detail: JSON.stringify(verdict.blocking ?? verdict, null, 2), verdict });
 }

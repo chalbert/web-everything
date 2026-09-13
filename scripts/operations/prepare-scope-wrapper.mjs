@@ -76,6 +76,8 @@ import {
   REPO_ROOT, run, RESTRICTED_PROVIDER_TOOLS, acquireLane, releaseLane, resolveLanePath,
   buildRestrictedProviderArgv, createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
+// #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
+import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { SCOPE_AUTHORING_AGENT_KIND } from './dispatch-lane.mjs';
 import {
@@ -461,7 +463,7 @@ function dropLearning({ sessionSlug, learning }, { run: runFn = run } = {}) {
  *   — every one of them injectable for the same reason the sibling wrappers' are: the whole arc must be
  *   assertable with no lane pool, no `claude`, and no real report sidecar on disk.
  */
-export async function prepareScope(
+async function prepareScopeInner(
   launch,
   provider = CLAUDE_RESTRICTED_PREPARE_PROVIDER,
   {
@@ -534,4 +536,58 @@ export async function prepareScope(
     releaseLane({ lane, sessionSlug, bestEffort: true }, { run: runFn });
     throw e;
   }
+}
+
+/**
+ * #3383 — THE TELEMETRY ENVELOPE around {@link prepareScopeInner}, which is the unmodified function this export used
+ * to be. Structured as a wrapper rather than as edits inside that function for one reason: unlike the fix and
+ * ci-heal wrappers, this one has NO single terminal-outcome chokepoint (it writes no completion record), so
+ * its outcome is declared at four separate `return` sites plus a rethrow. Wrapping the whole call closes the
+ * root `dispatch` span on ALL of them — including any a future edit adds — with no chance of missing one, and
+ * leaves the delivery logic itself byte-for-byte untouched.
+ *
+ * THE OUTCOME IS READ OFF THE `result` STRING, which is this wrapper's only outcome channel. That is a real
+ * coupling and is named here rather than hidden: the four shapes are `could-not-predict (…)`,
+ * `gate-red`, `gate-blocked (…)` and `… PR #<n> (…)`. Anything unrecognised closes `unset` rather than being
+ * guessed into `ok` — an unclassifiable outcome must not silently improve the success rate. The right long-term
+ * fix is for these two wrappers to write a completion record like the other four do; that is deliberately out
+ * of scope here (it changes delivery behaviour, this does not).
+ *
+ * Every telemetry call below is never-throwing by construction, and the inner function's return value and any
+ * throw pass through completely unaltered.
+ */
+export async function prepareScope(...args) {
+  const launch = args[0] ?? {};
+  const item = launch.item ?? null;
+  const tel = recorderFor({
+    kind: 'prepare', item,
+    attributes: { item: item == null ? null : String(item), sessionSlug: launch.sessionSlug ?? null },
+  });
+  setActiveRecorder(tel);
+  tel.startRoot({
+    item: item == null ? null : String(item),
+    lane: launch.lane == null ? null : String(launch.lane),
+    attemptTag: launch.attemptTag ?? null,
+  });
+  try {
+    const out = await prepareScopeInner(...args);
+    tel.closeRoot({ outcome: classifyPrepareResult(out && out.result), label: (out && out.result) ?? null });
+    return out;
+  } catch (e) {
+    tel.closeRoot({ outcome: 'wrapper-threw', error: e });
+    throw e;
+  }
+}
+
+/** Map this wrapper's `result` string onto the shared cross-wrapper outcome vocabulary
+ *  (`telemetry.mjs#ERROR_OUTCOMES` / `#OK_OUTCOMES`). PURE, and exported so a test pins the mapping rather
+ *  than inferring it from a recorded span. Returns `null` for anything unrecognised — see the envelope's
+ *  docblock for why that deliberately closes the span `unset` instead of `ok`. */
+export function classifyPrepareResult(result) {
+  const r = String(result ?? '');
+  if (r.startsWith('could-not-')) return 'could-not-predict';
+  if (r === 'gate-red') return 'gate-red';
+  if (r.startsWith('gate-blocked')) return 'gate-blocked';
+  if (/PR #\d+/.test(r)) return 'pr-opened';
+  return null;
 }

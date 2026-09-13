@@ -71,6 +71,10 @@ import { QUEUE_SCOPE_ENV, isQueueScopeEnabled, readScopedQueueIds } from '../../
 import { writeLineSync } from '../../scripts/lib/write-all-sync.mjs';
 import { normNum } from '../../scripts/conveyor/queue-store.mjs';
 import { writeDriverMode, driverModeFor } from '../../scripts/conveyor/driver-mode.mjs';
+// #3383 — the delivery-telemetry recorder. The runner's own trace carries the host-level SATURATION metrics
+// (admission decisions, lane-pool pressure, heavy-command queue wait) that belong to no single item, and that
+// spans alone cannot express. Never throws by construction; see `telemetry-store.mjs`'s purity discipline.
+import { createTelemetryRecorder } from '../../scripts/operations/telemetry-store.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -117,6 +121,13 @@ export function tickSurface(out) {
     // the rendered line's text.
     counts: d.counts && typeof d.counts === 'object' ? d.counts : null,
     notes: Array.isArray(d.notes) ? d.notes : [],
+    // #3383 — the DENIAL half of the dispatch decision, which this projection used to drop despite its own
+    // describe-block promising it "drops nothing". Each entry is `{num, lane, by}` where `by` is the reason a
+    // planned build was NOT dispatched (`'capacity-cap'` when the concurrent-lane ceiling was hit, or a guard
+    // name). Without it the surface can say how many dispatches happened but never how many were REFUSED, and
+    // the refusal rate is the system's primary saturation signal — the one `capToConcurrency` computes every
+    // tick and nothing has ever recorded. See `emitTickMetrics`.
+    suppressedBuilds: Array.isArray(d.suppressedBuilds) ? d.suppressedBuilds : [],
     dispatch: {
       builds: Array.isArray(d.spawnBuilds) ? d.spawnBuilds : [],
       prepareScope: Array.isArray(d.spawnPrepareScope) ? d.spawnPrepareScope : [],
@@ -735,8 +746,104 @@ function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
 
 /** Build the real `emit` effect: print the tick's status line + notes, and the dispatch/watch decisions the
  *  judgment layer executes (the runner spends no model context, so it surfaces them — #2701 clause 3). */
-function makeCliEmit({ json = false } = {}) {
+/**
+ * #3383 — PURE. Derive this tick's TELEMETRY METRIC SAMPLES from the already-computed surface. Returns a flat
+ * list of `{name, value, unit, attributes}`, ready to hand to a recorder; emits nothing itself, touches no
+ * clock and no disk, so the whole saturation-capture rule set is unit-testable against a plain object.
+ *
+ * THE FOUR GOLDEN SIGNALS NEED A SATURATION TERM, AND THIS IS WHERE THE SYSTEM ALREADY COMPUTES ONE — it just
+ * throws it away every tick. Everything below is read from numbers `planTick` has already worked out:
+ *
+ *   • `dispatch.admitted` / `dispatch.denied` — how many planned launches went out versus were refused, with
+ *     the refusal REASON attached (`by`, e.g. `capacity-cap`). This is the headline saturation signal:
+ *     `capToConcurrency` computes it against `WE_MAX_CONCURRENT_LANES` on every single tick and it has never
+ *     been persisted, so "is the concurrency ceiling actually binding?" has never been answerable from data.
+ *   • `heavy.admission.waiting` — how many lanes are queued on the heavy-command semaphore
+ *     (`readiness/heavy-admission.mjs`, cap 2 by default). Surfaced today as one `waiting-for-capacity` note
+ *     that is re-derived and discarded every tick, so the wait is visible for 120 seconds and then gone.
+ *   • `lane.pool.leased` — lanes withheld because the concurrent-lane cap was reached (`capacity-cap` notes),
+ *     the pool-pressure counterpart to the admission counter.
+ *   • `queue.depth` / `queue.ready` / `dispatch.inflight` — the TRAFFIC terms, straight off `counts`.
+ *
+ * Emitted even when zero. A tick that denied nothing is a real, load-bearing observation: without the zeros a
+ * reader cannot tell "the cap was never hit" from "the runner was not running", and a denial RATE needs the
+ * denominator.
+ *
+ * @param {object} surface the projection from {@link tickSurface}
+ * @returns {Array<{name: string, value: number, unit: string, attributes: object}>}
+ */
+export function tickMetrics(surface) {
+  const s = surface || {};
+  const d = s.dispatch || {};
+  const notes = Array.isArray(s.notes) ? s.notes : [];
+  const suppressed = Array.isArray(s.suppressedBuilds) ? s.suppressedBuilds : [];
+  const counts = s.counts && typeof s.counts === 'object' ? s.counts : {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const len = (a) => (Array.isArray(a) ? a.length : 0);
+
+  const admitted = len(d.builds) + len(d.prepareScope) + len(d.prepareDecision) + len(d.fixes) + len(d.ciHeals);
+  const capacityCapLanes = notes.filter((x) => x && x.kind === 'capacity-cap').length;
+  const waiting = notes.filter((x) => x && x.kind === 'waiting-for-capacity').length;
+
+  const out = [
+    { name: 'dispatch.admitted', value: admitted, unit: 'count', attributes: {
+      builds: len(d.builds), prepareScope: len(d.prepareScope), prepareDecision: len(d.prepareDecision),
+      fixes: len(d.fixes), ciHeals: len(d.ciHeals),
+    } },
+    { name: 'dispatch.inflight', value: n(counts.building) + n(counts.preparing) + n(counts.fixing) + n(counts.healing), unit: 'count', attributes: {
+      building: n(counts.building), preparing: n(counts.preparing), fixing: n(counts.fixing), healing: n(counts.healing),
+    } },
+    { name: 'queue.depth', value: n(counts.queued), unit: 'count', attributes: {} },
+    { name: 'queue.ready', value: admitted, unit: 'count', attributes: {} },
+    { name: 'lane.pool.leased', value: capacityCapLanes, unit: 'count', attributes: { source: 'capacity-cap-notes' } },
+    { name: 'heavy.admission.waiting', value: waiting, unit: 'count', attributes: {} },
+  ];
+
+  // One `dispatch.denied` sample PER REASON, so the golden-signals rollup's `admission.reasons` breakdown
+  // answers WHY the system refused work, not merely how often — the same "a count without the classification
+  // is not actionable" discipline the error signal follows. A tick with no denials still emits one zero
+  // sample so the denial rate has a denominator.
+  const byReason = {};
+  for (const x of suppressed) {
+    const reason = (x && x.by) ? String(x.by) : 'unclassified';
+    byReason[reason] = (byReason[reason] || 0) + 1;
+  }
+  if (Object.keys(byReason).length === 0) {
+    out.push({ name: 'dispatch.denied', value: 0, unit: 'count', attributes: { reason: 'none' } });
+  } else {
+    for (const [reason, value] of Object.entries(byReason).sort(([a], [b]) => a.localeCompare(b))) {
+      out.push({ name: 'dispatch.denied', value, unit: 'count', attributes: { reason } });
+    }
+  }
+  return out;
+}
+
+/**
+ * #3383 — IO. Record this tick as one `runner.tick` span plus {@link tickMetrics}' samples. Wrapped whole in a
+ * try/catch on top of the recorder's own never-throw contract — belt and braces, because this runs inside the
+ * RESIDENT driver, where the discipline is the watchdog's: an observability bug must never be able to stop
+ * the conveyor. The tick span is zero-width by construction (the surface is already computed by the time
+ * `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the same
+ * trace, not to time the tick.
+ */
+function emitTickMetrics(recorder, surface, ctx) {
+  try {
+    const span = recorder.startSpan('runner.tick', {
+      attributes: { tick: ctx && ctx.tick, statusLine: (surface && surface.statusLine) || null },
+    });
+    for (const m of tickMetrics(surface)) {
+      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
+    }
+    span.ok();
+  } catch {
+    // Deliberately silent and total: the conveyor keeps ticking regardless of what telemetry does.
+  }
+}
+
+function makeCliEmit({ json = false, recorder = null } = {}) {
+  const tel = recorder || createTelemetryRecorder({ kind: 'runner', traceId: `runner-${process.pid}` });
   return (surface, ctx) => {
+    emitTickMetrics(tel, surface, ctx);
     if (json) { process.stdout.write(JSON.stringify({ tick: ctx.tick, ...surface }) + '\n'); return; }
     const { dispatch } = surface;
     const counts = `${dispatch.builds.length} build · ${dispatch.prepareScope.length + dispatch.prepareDecision.length} prepare · ${dispatch.fixes.length} fix · ${dispatch.ciHeals.length} heal · ${surface.armWatchers.length} watch`;

@@ -110,6 +110,8 @@ import {
   createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
 import { runConverge, DELIVERY_AGENT_SPAWN_TIMEOUT_MS } from './deliver-item-wrapper.mjs';
+// #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
@@ -455,6 +457,13 @@ function reportStarted({ sessionSlug, pr, item }, { run: runFn = run } = {}) {
 }
 
 function reportDone({ sessionSlug, classified }, { run: runFn = run } = {}) {
+  // #3383 — THE TERMINAL-OUTCOME CHOKEPOINT, reused as the telemetry close. Every exit branch in this
+  // wrapper funnels its classified outcome through here, so closing the root `dispatch` span here catches
+  // all of them — including branches a future edit adds — and guarantees the span's outcome and the
+  // completion record's outcome are read from the SAME object at the SAME moment, so they can never
+  // disagree. `closeRoot` is idempotent, never throws, and maps this wrapper's own outcome vocabulary onto
+  // an OTel status via the shared `classifyOutcomeStatus` table (`telemetry.mjs#ERROR_OUTCOMES`).
+  activeRecorder().closeRoot({ outcome: classified && classified.outcome, label: classified && classified.label });
   const args = ['scripts/operations/completion-cli.mjs', 'report', `--session=${sessionSlug}`, '--status=done', `--outcome=${classified.outcome}`];
   if (classified.label) args.push(`--label=${classified.label}`);
   runFn('node', args);
@@ -495,6 +504,18 @@ export async function dispatchFix(
   } = {},
 ) {
   const planned = planFixDispatchWrapper({ pr, repo, item });
+
+  // #3383 — the root `dispatch` span for this whole fix dispatch. Keyed on the ITEM when this wrapper was
+  // given one (so it joins the build's own trace for the same backlog item) and on the PR otherwise; see
+  // `deriveTraceId`. Installed as the ambient recorder so the shared `acquireLane`/`runVerifyOperation`
+  // helpers emit `lane.acquire`/`verify.gate` into this trace without being passed anything. Closed at the
+  // `reportDone` chokepoint below, which also self-uninstalls the ambient recorder.
+  const tel = recorderFor({
+    kind: 'fix', item: planned.item ?? null, pr: planned.pr,
+    attributes: { pr: planned.pr, repo: planned.repo, sessionSlug: planned.sessionSlug, ...(planned.item != null ? { item: String(planned.item) } : {}) },
+  });
+  setActiveRecorder(tel);
+  tel.startRoot({ pr: planned.pr, repo: planned.repo, ...(planned.item != null ? { item: String(planned.item) } : {}) });
   const claudeSessionId = String(newSessionId());
 
   // Bug #xu2pp2m/2 (confirmed live on real PR #2027, 2026-09-09): `sessionSlug` is `fix-<pr>` — IDENTICAL
@@ -558,10 +579,15 @@ export async function dispatchFix(
 
   let agentReport;
   try {
-    agentReport = await runFixAgentToCompletion(
-      { pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
-      { run: runFn },
-    );
+    // #3383 — THE EXPENSIVE SPAN. A fixer agent turn shares the delivery agent's 60-minute ceiling
+    // (`FIX_AGENT_SPAWN_TIMEOUT_MS === DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and, until now, was timed by nothing.
+    // `spanAroundAsync` closes it `ok` on return and `error` on throw and rethrows the original untouched, so
+    // the `catch` below — which owns the real report/release contract — runs exactly as it did before.
+    agentReport = await spanAroundAsync('agent.turn', { attributes: { pr: planned.pr, item: planned.item ?? null } }, () =>
+      runFixAgentToCompletion(
+        { pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
+        { run: runFn },
+      ));
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });
     releaseAllPools(planned.sessionSlug, { run: runFn });

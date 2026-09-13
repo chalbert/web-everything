@@ -81,6 +81,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { run, acquireLane, releaseAllPools } from './minimal-context-provider.mjs';
+// #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
+import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
@@ -223,6 +225,25 @@ function reportDone({ sessionSlug, classified }, { run: runFn = run } = {}) {
 export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {}, { run: runFn = run, newActorId = randomUUID, waitMs = REVIEW_LOOP_ACQUIRE_WAIT_MS } = {}) {
   const planned = planReviewDispatchWrapper({ pr, repo });
 
+  // #3383 — this wrapper is addressed by PR, not by item, so its trace keys on `p<pr>`. A scoring pass joins
+  // it back to the build's `i<item>` trace through the completion record, which is the one existing store
+  // that already carries `item` AND `pr` together — see `deriveTraceId`'s own docblock. Keying honestly by
+  // what this process actually knows beats inventing an item number it would have to guess at.
+  const tel = recorderFor({ kind: 'review', pr: planned.pr, attributes: { pr: planned.pr, repo: planned.repo, sessionSlug: planned.sessionSlug } });
+  setActiveRecorder(tel);
+  const root = tel.startRoot({ pr: planned.pr, repo: planned.repo });
+  /** Close the root span from the classified outcome and hand back the wrapper's own unchanged shape. The
+   *  status mapping is NOT decided here — it is delegated to the shared `classifyOutcomeStatus` table so all
+   *  six wrappers agree on what counts as a failure. Under that table `blocked-on-infra` (the one outcome
+   *  meaning no review happened) closes `error`, while `bounced` — a real review verdict asking for changes —
+   *  closes `ok`, because counting a bounce as an error would make the error rate measure review STRICTNESS
+   *  rather than system reliability. `closeRoot` also self-uninstalls the ambient recorder. */
+  const closeRoot = (classified) => tel.closeRoot({
+    outcome: classified && classified.outcome,
+    label: (classified && classified.label) || null,
+    attributes: { verdict: classified?.verdict ?? null, runId: classified?.runId ?? null },
+  });
+
   // Durable trace BEFORE anything else can fail (mirrors the brief's own step-0 reasoning).
   reportStarted(planned, { run: runFn });
 
@@ -254,6 +275,7 @@ export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {
     };
     reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
     releaseAllPools(planned.sessionSlug, { run: runFn });
+    closeRoot(classified);
     throw e;
   }
   if (!lanePath) {
@@ -261,11 +283,16 @@ export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {
     // step 1 does; no retry loop here either.
     const classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null };
     reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
+    closeRoot({ ...classified, label: 'no free lane' });
     return { ...planned, lanePath: null, classified, raw: null };
   }
 
   let raw = null;
   let classified;
+  // The `review.loop` span — the whole judging round (two independently-spawned jurors inside
+  // `review-loop-cli.mjs`), and this wrapper's single expensive phase. Durable, so a process killed mid-review
+  // shows up as `abandoned` rather than as nothing at all.
+  const loopSpan = root.child('review.loop', { attributes: { pr: planned.pr, codexAdvisory: !!codexAdvisory } });
   try {
     const out = runFn('node', [
       'scripts/operations/review-loop-cli.mjs', `--pr=${planned.pr}`, `--repo=${planned.repo}`,
@@ -285,7 +312,9 @@ export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {
     });
     raw = JSON.parse(out);
     classified = classifyReviewLoopOutcome(raw);
+    loopSpan.ok({ outcome: classified.outcome, verdict: classified.verdict, loopOutcome: classified.loopOutcome, runId: classified.runId });
   } catch (e) {
+    loopSpan.fail(e, { outcome: BLOCKED_ON_INFRA });
     // Whatever this session's stdout carried (`e.stdout`, when the CLI itself refused/crashed) is preserved
     // for the completion record's own detail, mirroring `runVerifyOperation`'s "an operation-level crash is
     // reported, never silently swallowed" discipline (`we:scripts/operations/minimal-context-provider.mjs`).
@@ -295,6 +324,7 @@ export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {
 
   reportDone({ sessionSlug: planned.sessionSlug, classified }, { run: runFn });
   releaseAllPools(planned.sessionSlug, { run: runFn });
+  closeRoot(classified);
 
   return { ...planned, lanePath, classified, raw };
 }

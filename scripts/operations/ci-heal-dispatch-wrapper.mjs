@@ -102,6 +102,8 @@ import {
   persistSpawnFailure,
 } from './minimal-context-provider.mjs';
 import { runConverge } from './deliver-item-wrapper.mjs';
+// #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsync } from './telemetry-store.mjs';
 import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import {
@@ -482,6 +484,13 @@ function reportStarted({ sessionSlug, pr, item }, { run: runFn = run } = {}) {
 }
 
 function reportDone({ sessionSlug, classified }, { run: runFn = run } = {}) {
+  // #3383 — THE TERMINAL-OUTCOME CHOKEPOINT, reused as the telemetry close. Every exit branch in this
+  // wrapper funnels its classified outcome through here, so closing the root `dispatch` span here catches
+  // all of them — including branches a future edit adds — and guarantees the span's outcome and the
+  // completion record's outcome are read from the SAME object at the SAME moment, so they can never
+  // disagree. `closeRoot` is idempotent, never throws, and maps this wrapper's own outcome vocabulary onto
+  // an OTel status via the shared `classifyOutcomeStatus` table (`telemetry.mjs#ERROR_OUTCOMES`).
+  activeRecorder().closeRoot({ outcome: classified && classified.outcome, label: classified && classified.label });
   const args = ['scripts/operations/completion-cli.mjs', 'report', `--session=${sessionSlug}`, '--status=done', `--outcome=${classified.outcome}`];
   if (classified.label) args.push(`--label=${classified.label}`);
   runFn('node', args);
@@ -528,6 +537,18 @@ export async function dispatchCiHeal(
   } = {},
 ) {
   const planned = planCiHealDispatchWrapper({ pr, repo, item, reason });
+
+  // #3383 — the root `dispatch` span for this whole ci-heal dispatch. Keyed on the ITEM when this wrapper was
+  // given one (so it joins the build's own trace for the same backlog item) and on the PR otherwise; see
+  // `deriveTraceId`. Installed as the ambient recorder so the shared `acquireLane`/`runVerifyOperation`
+  // helpers emit `lane.acquire`/`verify.gate` into this trace without being passed anything. Closed at the
+  // `reportDone` chokepoint below, which also self-uninstalls the ambient recorder.
+  const tel = recorderFor({
+    kind: 'ci-heal', item: planned.item ?? null, pr: planned.pr,
+    attributes: { pr: planned.pr, repo: planned.repo, sessionSlug: planned.sessionSlug, ...(planned.item != null ? { item: String(planned.item) } : {}) },
+  });
+  setActiveRecorder(tel);
+  tel.startRoot({ pr: planned.pr, repo: planned.repo, ...(planned.item != null ? { item: String(planned.item) } : {}) });
   const claudeSessionId = String(newSessionId());
 
   // Same bug-#xu2pp2m/2 hazard the fix wrapper documents, and the same answer: `ci-heal-<pr>` is IDENTICAL
@@ -607,10 +628,13 @@ export async function dispatchCiHeal(
 
   let agentReport;
   try {
-    agentReport = await runCiHealAgentToCompletion(
-      { pr: planned.pr, item: planned.item, reason: planned.reason, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
-      { run: runFn },
-    );
+    // #3383 — THE EXPENSIVE SPAN, same reasoning as the fix wrapper's: the agent turn is this dispatch's
+    // dominant cost and was previously untimed. `spanAroundAsync` never alters the return value or the throw.
+    agentReport = await spanAroundAsync('agent.turn', { attributes: { pr: planned.pr, item: planned.item ?? null, reason: planned.reason ?? null } }, () =>
+      runCiHealAgentToCompletion(
+        { pr: planned.pr, item: planned.item, reason: planned.reason, sessionSlug: planned.sessionSlug, lanePath, provider, claudeSessionId },
+        { run: runFn },
+      ));
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });
     releaseAllPools(planned.sessionSlug, { run: runFn });
