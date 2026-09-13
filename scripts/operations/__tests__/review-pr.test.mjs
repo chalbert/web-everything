@@ -66,6 +66,14 @@ import {
   buildReviewAdvisoryJudgeRequest,
   codexAdvisoryFromEnv,
   CODEX_ADVISORY_ENV_VAR,
+  // #x8n4crp — the opt-in FOURTH (Codex, correctness-advisory) seat.
+  CORRECTNESS_ADVISORY_LENS,
+  CORRECTNESS_ADVISORY_SEAT,
+  CORRECTNESS_ADVISORY_EFFORT,
+  buildReviewCorrectnessAdvisoryJudgeRequest,
+  buildReviewCorrectnessAdvisoryMandate,
+  correctnessAdvisoryFromEnv,
+  CORRECTNESS_ADVISORY_ENV_VAR,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -127,11 +135,12 @@ function stubReader({
 /**
  * A registry holding one freshly-built declaration over a stub reader.
  * @param {object} readerOptions - forwarded to `stubReader`.
- * @param {{codexAdvisory?: boolean}} [opOptions] - #xqa9ttq — forwarded to `reviewPrOperation`. Defaulted to
- *   `false` so every EXISTING caller of this helper keeps building today's two-seat declaration unchanged.
+ * @param {{codexAdvisory?: boolean, correctnessAdvisory?: boolean}} [opOptions] - #xqa9ttq/#x8n4crp — forwarded
+ *   to `reviewPrOperation`. Both default to `false` so every EXISTING caller of this helper keeps building
+ *   today's two-seat declaration unchanged.
  */
-function registryFor(readerOptions, { codexAdvisory = false } = {}) {
-  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions), codexAdvisory });
+function registryFor(readerOptions, { codexAdvisory = false, correctnessAdvisory = false } = {}) {
+  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions), codexAdvisory, correctnessAdvisory });
   const registry = createRegistry();
   registry.register(declaration);
   return { declaration, registry };
@@ -2735,6 +2744,206 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
       expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
       expect(floor.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
       expect(floor.seatsFloor).toBe(true);
+    });
+  });
+});
+
+// ── #x8n4crp — THE OPT-IN FOURTH SEAT: A CORRECTNESS-FLAVOURED CODEX JUROR, DISTINCT FROM MANDATORY_LENSES ────
+describe('#x8n4crp — the opt-in Codex correctness-advisory seat (judgeCorrectnessAdvisory)', () => {
+  describe('correctnessAdvisoryFromEnv', () => {
+    it('is false when the env var is unset, or set to anything other than the literal string "1"', () => {
+      expect(correctnessAdvisoryFromEnv({})).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: 'true' })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '0' })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '' })).toBe(false);
+    });
+
+    it('is true only for the exact literal "1"', () => {
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' })).toBe(true);
+    });
+
+    it('is a SEPARATE env var from the third seat\'s own — flipping one does not seat the other', () => {
+      expect(CORRECTNESS_ADVISORY_ENV_VAR).not.toBe(CODEX_ADVISORY_ENV_VAR);
+      expect(codexAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' })).toBe(false);
+    });
+  });
+
+  describe('CORRECTNESS_ADVISORY_LENS: the core safety property', () => {
+    it('is NOT the literal "correctness", and is not a member of MANDATORY_LENSES', () => {
+      expect(CORRECTNESS_ADVISORY_LENS).not.toBe(DEFAULT_LENS);
+      expect(CORRECTNESS_ADVISORY_LENS).not.toBe('correctness');
+      expect(MANDATORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+
+    it('is also not a member of the shared ADVISORY_LENSES/PANEL_LENSES set (scoped to this file only)', () => {
+      expect(ADVISORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      expect(PANEL_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+  });
+
+  describe('buildReviewCorrectnessAdvisoryJudgeRequest', () => {
+    it('carries no allowedTools, no model, pins providerName to codex, and uses its OWN (medium) effort', () => {
+      const request = buildReviewCorrectnessAdvisoryJudgeRequest({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' },
+      });
+      expect(request.allowedTools).toBeUndefined();
+      expect(request.model).toBeUndefined();
+      expect(request.providerName).toBe('codex');
+      expect(request.lens).toBe(CORRECTNESS_ADVISORY_LENS);
+      expect(request.effort).toBe(CORRECTNESS_ADVISORY_EFFORT);
+      expect(request.effort).toBe('medium');
+    });
+
+    it('the mandate\'s topic word is the real DEFAULT_LENS ("correctness"), not the bookkeeping lens', () => {
+      const mandate = buildReviewCorrectnessAdvisoryMandate({ read: { netChangedFiles: NET_PATHS, title: 'a PR' } });
+      expect(mandate).toContain(`mandate: ${DEFAULT_LENS}.`);
+      expect(mandate).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+
+    it('folds in an `aim` hypothesis exactly like the panel mandate does, fenced', () => {
+      const mandate = buildReviewCorrectnessAdvisoryMandate({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' }, aim: 'the guard is inverted',
+      });
+      expect(mandate).toContain('WHERE THE CALLER THINKS THE DEFECT IS');
+      expect(mandate).toContain('the guard is inverted');
+    });
+  });
+
+  it('is NOT declared by default — the default declaration is byte-identical to before this card', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(judgeSteps).not.toContain('judgeCorrectnessAdvisory');
+  });
+
+  it('can be seated WITHOUT the third seat — the two opt-in seats are independent', () => {
+    const { declaration } = registryFor({}, { correctnessAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeCorrectnessAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    expect(names).not.toContain('judgeAdvisory');
+  });
+
+  it('when BOTH opt-in seats are on, declares them in order — third seat before fourth', () => {
+    const { declaration } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual([
+      'read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'judgeCorrectnessAdvisory',
+      'reduce', 'advise', 'confirm', 'stageVerdict', 'record',
+    ]);
+    const step = declaration.steps.find((s) => s.name === 'judgeCorrectnessAdvisory');
+    expect(step.step.kind).toBe('judge');
+    // Isolated exactly like every other seat: it reads none of the sibling jurors' findings.
+    expect(step.step.reads).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('the seated request is pinned to codex, tool-free, on CORRECTNESS_ADVISORY_LENS, at its OWN effort', () => {
+    const { registry } = registryFor({}, { correctnessAdvisory: true });
+    const { requests } = atConfirm({
+      registry, input: BASE_INPUT, id: 'run-correctness-advisory-request',
+      answers: {
+        [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeCorrectnessAdvisory: CLEAN_ANSWER,
+      },
+    });
+    const request = requests.judgeCorrectnessAdvisory;
+    expect(request.lens).toBe(CORRECTNESS_ADVISORY_LENS);
+    expect(request.providerName).toBe('codex');
+    expect(request.allowedTools).toBeUndefined();
+    expect(request.model).toBeUndefined();
+    expect(request.effort).toBe('medium');
+    // The two MANDATORY seats are UNTOUCHED — still tool-bearing, still `JUDGE_EFFORT` ('high').
+    expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[0]].effort).toBe('high');
+  });
+
+  it('the registration-time roster check still holds for the 3-seat (fourth-only) build (no drift, no throw)', () => {
+    expect(() => registryFor({}, { correctnessAdvisory: true })).not.toThrow();
+  });
+
+  it('the registration-time roster check still holds for the 4-seat build (no drift, no throw)', () => {
+    expect(() => registryFor({}, { codexAdvisory: true, correctnessAdvisory: true })).not.toThrow();
+  });
+
+  describe('THE CORE PROPERTY: a `changes` finding from this seat NEVER reaches the MANDATORY_LENSES bucket', () => {
+    it('mandatory lenses accept, the correctness-advisory seat reports a blocker — the panel verdict is still `accept`', () => {
+      const { registry } = registryFor({}, { correctnessAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-correctness-advisory-cannot-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          // The Codex seat reports a BLOCKER-shaped finding — exactly the shape that flips a MANDATORY lens's
+          // own per-lens verdict to `changes`. Seated on this seat's own (non-mandatory) lens, it must not be
+          // able to do the same to the PANEL verdict — the whole reason this seat's lens is disjoint from
+          // `MANDATORY_LENSES` rather than the literal `'correctness'`.
+          judgeCorrectnessAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      // The per-lens verdict is honestly `changes` — the finding is not hidden or downgraded.
+      expect(run.verdict.lensVerdicts[CORRECTNESS_ADVISORY_LENS]).toBe('changes');
+      // …but the PANEL verdict, reduced only over `mandatoryLenses`, is still `accept` — proof this seat's
+      // finding never merged into the MANDATORY_LENSES bucket the mandatory `correctness` seat owns.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, CORRECTNESS_ADVISORY_LENS]);
+      // The finding still SURFACES — advisory means "informs", not "invisible".
+      expect(run.verdict.findings.some((f) => f.category === CORRECTNESS_ADVISORY_LENS)).toBe(true);
+      // And it renders distinguishably from the mandatory `correctness` seat's own row — never bare `correctness`.
+      expect(run.verdict.lensProviders[CORRECTNESS_ADVISORY_LENS]).toBe('codex, advisory');
+    });
+
+    it('the MANDATORY correctness seat reporting the identical blocker DOES flip the verdict — the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { correctnessAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-correctness-advisory-mandatory-does-block',
+        answers: {
+          [JUDGE_STEPS[0]]: BLOCKING_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeCorrectnessAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('changes');
+    });
+
+    it('`decideLensFloor` over the 3-seat (fourth-only) roster: the seat is counted as advisory, never mandatory', () => {
+      const seats = Object.freeze([...JUDGE_SEATS, CORRECTNESS_ADVISORY_SEAT]);
+      const floor = decideLensFloor({ lens: DEFAULT_LENS, seats });
+      expect(floor.seated).toEqual([DEFAULT_LENS, SECURITY_LENS, CORRECTNESS_ADVISORY_LENS]);
+      // `mandatorySeated` NEVER carries this seat's lens — the core safety property.
+      expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+      expect(floor.mandatorySeated).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      // `advisorySeated` is derived from the SHARED `ADVISORY_LENSES` (`we:scripts/lib/jury-core.mjs`), which
+      // this seat's bookkeeping lens is deliberately NOT a member of (see `CORRECTNESS_ADVISORY_LENS`'s own
+      // docblock) — so it does not appear there either. What matters is the disjunction from `mandatorySeated`
+      // above, not membership in a shared vocabulary this seat was built to stay OUT of.
+      expect(floor.advisorySeated).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      expect(floor.seatsFloor).toBe(true);
+    });
+  });
+
+  describe('COEXISTENCE: both the third (simplicity) and fourth (correctness-advisory) seats run without collision', () => {
+    it('both seats run in the SAME 4-seat build, each keeping its own lens, provider label, and verdict', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-both-codex-seats-coexist',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+          judgeCorrectnessAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS, CORRECTNESS_ADVISORY_LENS]);
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('accept');
+      expect(run.verdict.lensVerdicts[CORRECTNESS_ADVISORY_LENS]).toBe('changes');
+      // Neither seat's lens ever equals the other's, and neither equals a MANDATORY_LENSES entry.
+      expect(ADVISORY_JUDGE_LENS).not.toBe(CORRECTNESS_ADVISORY_LENS);
+      expect(MANDATORY_LENSES).not.toContain(ADVISORY_JUDGE_LENS);
+      expect(MANDATORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      // A `changes` vote from the fourth seat still cannot flip a panel whose mandatory lenses both accepted.
+      expect(run.verdict.verdict).toBe('accept');
+      // Both are labelled as non-Claude, and distinguishably from one another.
+      expect(run.verdict.lensProviders[ADVISORY_JUDGE_LENS]).toBe('codex');
+      expect(run.verdict.lensProviders[CORRECTNESS_ADVISORY_LENS]).toBe('codex, advisory');
     });
   });
 });

@@ -32,7 +32,9 @@ import { createFileCallLogStore } from './call-log-store.mjs';
 import {
   createDefaultJudge, runOperationCli, buildCliSpec, cwdFlagValue, hasJsonFlag,
 } from './cli-adapter.mjs';
-import { reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv } from './review-pr.mjs';
+import {
+  reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv, correctnessAdvisoryFromEnv,
+} from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
 import { stagePrViewOperation, STAGE_PR_VIEW_OP } from './stage-pr-view.mjs';
 import { createPayloadReader, createStagePrViewSinks, defaultViewDir } from './stage-pr-view-io.mjs';
@@ -105,6 +107,10 @@ export const OPERATIONS = Object.freeze({
   // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
   // `record-verdict-io.mjs`'s registration below reads the SAME env var. It composes with `json` above
   // rather than replacing it: the two knobs are independent (one shapes stdout, the other seats a juror).
+  // #x8n4crp — `correctnessAdvisory` reads `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY=1` off the environment
+  // (`correctnessAdvisoryFromEnv`), a SEPARATE env var from `codexAdvisory`'s own — the two Codex seats are
+  // independently opt-in and OFF by default. Same reasoning as `codexAdvisory` for why an env var and not a
+  // CLI flag, and why `record-verdict-io.mjs`'s registration below must read the SAME env var.
   // #xu2pp2m — `cwd` IS THREADED INTO THE READER, not only into the judge factory. See
   // `we:scripts/operations/cli-adapter.mjs#cwdFlagValue` for the live PR #2122 false-accept this closes: the
   // reader used to be built with NO arguments, so `--cwd=<lane>` steered the jurors' working tree while the
@@ -114,6 +120,7 @@ export const OPERATIONS = Object.freeze({
     declaration: reviewPrOperation({
       readPr: createReviewPrReader(cwd ? { cwd } : {}),
       codexAdvisory: codexAdvisoryFromEnv(),
+      correctnessAdvisory: correctnessAdvisoryFromEnv(),
     }),
     sinks: createReviewPrSinks({ json }),
   }),

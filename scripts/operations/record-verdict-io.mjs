@@ -47,7 +47,7 @@ import { advance, runStatus } from './engine.mjs';
 import { applyPendingEffects } from './effect-executor.mjs';
 import { createRegistry } from './registry.mjs';
 import {
-  reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor, codexAdvisoryFromEnv,
+  reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor, codexAdvisoryFromEnv, correctnessAdvisoryFromEnv,
 } from './review-pr.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -271,10 +271,15 @@ export async function advanceReviewPrToWriteUp(record, { to, store, sinks = crea
   if (!answer || !record || record.op !== 'review-pr') return record;
 
   const registry = createRegistry();
-  // #xqa9ttq — SAME `REVIEW_PR_CODEX_ADVISORY` ENV VAR `run.mjs` READS. This registration must seat the same
-  // roster the run was STARTED with, or a resume here would be reasoning about a run shape that no longer
-  // exists — see `codexAdvisoryFromEnv`'s own docs (`we:scripts/operations/review-pr.mjs`).
-  registry.register(reviewPrOperation({ readPr: createReviewPrReader(), codexAdvisory: codexAdvisoryFromEnv() }));
+  // #xqa9ttq / #x8n4crp — SAME TWO ENV VARS `run.mjs` READS (`REVIEW_PR_CODEX_ADVISORY` and
+  // `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY`). This registration must seat the same roster the run was STARTED
+  // with, or a resume here would be reasoning about a run shape that no longer exists — see
+  // `codexAdvisoryFromEnv`/`correctnessAdvisoryFromEnv`'s own docs (`we:scripts/operations/review-pr.mjs`).
+  registry.register(reviewPrOperation({
+    readPr: createReviewPrReader(),
+    codexAdvisory: codexAdvisoryFromEnv(),
+    correctnessAdvisory: correctnessAdvisoryFromEnv(),
+  }));
   if (runStatus(record, { registry }) !== 'awaiting-confirm') return record;
 
   // TWO `advance` calls, not one: the first resolves the `confirm` resume (an answer is recorded, cursor moves
