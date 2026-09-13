@@ -283,7 +283,10 @@ export function moveJobDirAside({ shortId, jobDirPath }, {
   // not run, distinctly from "verified and it is still listed".
   let stillListed = null;
   try {
-    const after = Array.isArray(listAgents()) ? listAgents() : [];
+    // ONE call, not two (found integration-testing WE #3383's session-reaper wiring — the previous
+    // `Array.isArray(listAgents()) ? listAgents() : []` invoked the subprocess twice for one verification).
+    const result = listAgents();
+    const after = Array.isArray(result) ? result : [];
     stillListed = !!findListingEntry(shortId, after);
   } catch {
     stillListed = null;

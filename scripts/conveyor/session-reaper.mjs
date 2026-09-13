@@ -79,6 +79,32 @@
  * it logs {@link stopSession}'s own `alreadyGone` distinction and moves on, exactly as best-effort as
  * `lease-reaper.mjs`'s own per-candidate try/catch.
  *
+ * THE #77683 REPAIR — WHEN `claude stop`/`claude rm` GENUINELY FAIL, NOT MERELY REPORT UNRELIABLY. A DIFFERENT
+ * known upstream bug (GitHub #77683) leaves a session listed forever, its job directory never cleaned up, and
+ * `claude stop`/`rm` refuse it outright rather than the merely-unconfirmed-success case just above. `we:scripts/
+ * operations/clear-stuck-session.mjs` mechanizes the by-hand fix for exactly that shape (read → assess →
+ * authorize → move), but its own `authorize` step is a real human `confirm` — reasoned, at the time it was
+ * built, from "this moves a directory outside the repo's own git tree" alone, without weighing it against what
+ * THIS file already does unattended.
+ *
+ * THAT WEIGHING, DONE HERE: this reaper already `claude stop`s a `done`/`failed` session with NO human step and
+ * NO liveness re-check of its own — TERMINAL_REAP_STATES is the whole gate. It already `claude stop`s a
+ * `blocked`/`working` one on nothing stronger than ONE independently-read fact (a backlog card's `status:`, or
+ * one `gh pr view`) — the ground-truth axis above. `clear-stuck-session.mjs#assessStuck` is a STRICTER gate than
+ * either: five independently-verified facts, including a REUSE of `reconcile-core.mjs#assessLiveness` — the
+ * exact liveness rule this repo's own reconcile pass already trusts unattended elsewhere — plus a run-store
+ * scan this reaper's own axes have no equivalent of at all. Requiring a HUMAN for the stricter gate while
+ * trusting the weaker ones unattended would not be a safety margin; it would be an inconsistency this reaper's
+ * own track record does not justify. So: THIS reaper's own call into `clear-stuck-session` supplies a TRUSTED
+ * `proceed` programmatically ({@link clearStuckSessionAutoConfirm}) instead of stopping for a human — but it
+ * NEVER skips `assessStuck` itself, and it never fires for anything this reaper did not already, independently,
+ * decide to reap (see {@link attemptClearStuckSession}'s call site in `main()`: only a candidate `stopSession
+ * WithRetry` already tried and failed on ever reaches it). A MANUAL invocation — `run.mjs clear-stuck-session
+ * --session=<id>` with no `--answer` — is untouched: `clearStuckSessionAutoConfirm` is never wired into that
+ * CLI path, so the interactive confirm still stops there exactly as `clear-stuck-session.mjs`'s own header
+ * describes. `--no-clear-stuck` is the same kind of rollback/A-B escape hatch `--no-ground-truth` already is
+ * for the axis above, for the same reason.
+ *
  * WHY `id`, NOT `sessionId` — the near-universal `claude stop` FAILURE `we:backlog/3435-*.md`'s "Found live"
  * finding 3 recorded (all five sessions, including `conveyor-3421b`, came back "No job matching" on `claude
  * stop <sessionId>`) was read at the time as a CLI/registry-staleness limitation, the same family as the
@@ -111,6 +137,16 @@ import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
+// THE #77683 REPAIR (see the file header) — driving `clear-stuck-session` end to end, in-process, with a
+// TRUSTED `proceed` this reaper's own call path supplies. Nothing here is a second implementation of that
+// operation's own verdict: `assessStuck` (reached through `clearStuckSessionOperation`) is the ONLY thing that
+// decides whether anything actually moves.
+import { driveRun } from '../operations/cli-adapter.mjs';
+import { startRun } from '../operations/engine.mjs';
+import { createRegistry } from '../operations/registry.mjs';
+import { createFileRunStore, newRunId } from '../operations/run-store.mjs';
+import { CLEAR_STUCK_SESSION_OP, clearStuckSessionOperation } from '../operations/clear-stuck-session.mjs';
+import { createClearStuckSessionReader, createClearStuckSessionSinks } from '../operations/clear-stuck-session-io.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -366,6 +402,93 @@ export function stopSessionWithRetry({ handle, exec = execFileSync, sleep = slee
   throw lastErr;
 }
 
+// ── THE #77683 REPAIR — clear-stuck-session, driven with a TRUSTED `proceed` (see the file header) ───────────
+
+/**
+ * THE autoConfirm POLICY for a `clear-stuck-session` run THIS FILE drives ITSELF — never the interactive CLI
+ * (`run.mjs clear-stuck-session --session=<id>` wires no `autoConfirm` at all, so a manual invocation still
+ * stops for a human exactly as that operation's own header describes). Scoped as narrowly as it can be: it
+ * answers ONLY the one `authorize` confirm step this ONE operation declares (`step === 'authorize'`, `of ===
+ * 'operator'` — both checked, belt-and-braces, even though this policy is never handed any OTHER declaration's
+ * `pending`) and it answers the SAME way every time, `proceed` — it is not a judgement call, it is this
+ * reaper's own already-established trust (see the file header's "THE #77683 REPAIR" section) expressed as a
+ * value. It never manufactures a move: `clear-stuck-session.mjs#planMove` still refuses unless `assessStuck`
+ * separately confirmed the session stuck, so a `proceed` here only ever PERMITS a move the verdict already
+ * found genuine, exactly as it would for a human answering the same question.
+ *
+ * @param {{kind?: string, step?: string, of?: string}|null} pending - the run's `pending` record.
+ * @returns {{value: 'proceed'}|null}
+ */
+export function clearStuckSessionAutoConfirm(pending) {
+  if (!pending || pending.kind !== 'confirm' || pending.step !== 'authorize' || pending.of !== 'operator') return null;
+  return { value: 'proceed' };
+}
+
+/**
+ * ATTEMPT the `clear-stuck-session` repair for ONE handle whose `claude stop` genuinely failed (not
+ * `alreadyGone` — {@link stopSessionWithRetry} already resolves that on its own) — the #77683 shape this
+ * reaper could previously do nothing about beyond logging a failure. Drives the DECLARED operation end to end
+ * — `read` → `assess` → `authorize` (auto-answered, see {@link clearStuckSessionAutoConfirm}) → `move` (an
+ * `effect`, applied through the real sink) — building a fresh registry per call, exactly as `we:scripts/
+ * operations/review-loop-cli.mjs` does for ITS own unattended driver.
+ *
+ * NEVER TURNS "UNCONFIRMED" INTO "CLEARED". `assessStuck`'s verdict is read back off the completed run
+ * (`outcome.run.verdict.confirmedStuck`) — a run that completes with `confirmedStuck: false` (a real liveness
+ * signal, a bound run-store record, a state other than `"blocked"` …) reports `cleared: false`, and the
+ * candidate is left exactly as the ORIGINAL `claude stop` failure the caller already logged. So is a run that
+ * for any other reason does not reach `stopped: 'complete'` (a `step-refused`, an `effect-halted` move).
+ *
+ * @param {object} o
+ * @param {string} o.handle - the short session id (`session.id`), the SAME handle `stopSessionWithRetry` just
+ *   failed on.
+ * @param {(o: {session: string, pr: number}) => object} [o.readStuckFacts] - injected so a test never touches
+ *   real `fs`/`claude`/`ps`; the real caller (`main()` below) uses the real reader.
+ * @param {Record<string, Function>} [o.sinks] - the `QUARANTINE_MOVE_EFFECT` sink table.
+ * @param {{read: Function, write: Function}} [o.store] - the operation run-store; defaults to the real file
+ *   store so a reaper-driven clear leaves the SAME kind of audit trail a manual `run.mjs clear-stuck-session`
+ *   invocation would.
+ * @param {() => string} [o.mintRunId]
+ * @returns {Promise<{cleared: boolean, runId: (string|null), stopped: string, confirmedStuck: boolean, reason: string}>}
+ */
+export async function attemptClearStuckSession({
+  handle,
+  readStuckFacts = createClearStuckSessionReader(),
+  sinks = createClearStuckSessionSinks(),
+  store = createFileRunStore(),
+  mintRunId = () => newRunId(CLEAR_STUCK_SESSION_OP),
+} = {}) {
+  const registry = createRegistry();
+  const declaration = clearStuckSessionOperation({ readStuckFacts });
+  registry.register(declaration);
+
+  const run = startRun({ op: declaration.name, id: mintRunId(), input: { session: handle }, registry });
+  store.write(run);
+
+  const outcome = await driveRun({
+    run,
+    registry,
+    store,
+    sinks,
+    // `clear-stuck-session` declares no `judge` step — this must never be called; a loud refusal beats a
+    // silent stub returning nothing meaningful if that ever stops being true.
+    judge: async () => {
+      throw new Error('session-reaper: clear-stuck-session declared a `judge` step this caller cannot answer');
+    },
+    autoConfirm: clearStuckSessionAutoConfirm,
+    attemptedBy: 'session-reaper',
+  });
+
+  const confirmedStuck = outcome.run?.verdict?.confirmedStuck === true;
+  const cleared = confirmedStuck && outcome.stopped === 'complete';
+  const reason = confirmedStuck
+    ? (cleared
+      ? 'confirmed stuck (assessStuck) and cleared'
+      : `confirmed stuck but the run did not complete (stopped: ${outcome.stopped}${outcome.error ? `, error: ${String(outcome.error?.message || outcome.error).split('\n')[0]}` : ''})`)
+    : (outcome.run?.verdict?.reason || 'clear-stuck-session did not confirm this session as stuck');
+
+  return { cleared, runId: outcome.run?.id ?? null, stopped: outcome.stopped, confirmedStuck, reason };
+}
+
 const log = (m) => process.stderr.write(m + '\n');
 
 function parseFlags(argv) {
@@ -379,13 +502,17 @@ function parseFlags(argv) {
   return flags;
 }
 
-function main(argv) {
+async function main(argv) {
   const flags = parseFlags(argv);
   const dryRun = !!flags['dry-run'];
   // `--no-ground-truth` is an escape hatch back to the original state-only axis, for a rollback or an
   // A/B live comparison — the default is ON, matching the operator's own instruction that this axis should
   // actually run, not merely exist.
   const groundTruthFor = flags['no-ground-truth'] ? null : makeGroundTruthResolver({ exec: execFileSync });
+  // `--no-clear-stuck` is the SAME kind of rollback/A-B escape hatch, one axis over: the default is ON — a
+  // `claude stop` failure attempts the `clear-stuck-session` repair (see the file header's "THE #77683 REPAIR")
+  // unless this flag disables it, in which case a failed stop is reported exactly as it always was.
+  const clearStuck = !flags['no-clear-stuck'];
 
   let sessions;
   try {
@@ -409,6 +536,7 @@ function main(argv) {
 
   let stopped = 0;
   let alreadyGone = 0;
+  let cleared = 0;
   let failures = 0;
   let anomalies = 0;
   const done = [];
@@ -442,7 +570,30 @@ function main(argv) {
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
       // as per-candidate, not pass-fatal. Reaches here only after `STOP_RETRY_ATTEMPTS` all failed, so this IS
       // a real (not merely transient) failure — worth saying so, since the retry count is otherwise invisible.
-      log(`  ⚠ ${handle}: stop failed after ${STOP_RETRY_ATTEMPTS} attempts (${String(e?.message || e).split('\n')[0]}) — left for the next tick`);
+      const stopErr = String(e?.message || e).split('\n')[0];
+      // THE #77683 REPAIR (see the file header) — a `claude stop` failure this deep (every retry exhausted) is
+      // exactly the shape `clear-stuck-session` exists for. Attempted ONLY here, never pre-emptively: this
+      // reaper's own `classifySessionReap`/ground-truth axes already decided this candidate should go, and
+      // `stopSessionWithRetry` already tried the ordinary path first — `clear-stuck-session`'s OWN `assessStuck`
+      // is what actually decides whether anything moves, never this catch block.
+      let repair = null;
+      if (clearStuck) {
+        try {
+          repair = await attemptClearStuckSession({ handle });
+        } catch (repairErr) {
+          repair = { cleared: false, reason: `clear-stuck-session itself threw: ${String(repairErr?.message || repairErr).split('\n')[0]}` };
+        }
+      }
+      if (repair?.cleared) {
+        cleared++;
+        log(`  cleared ${handle} via clear-stuck-session (run ${repair.runId}; ${reason}; ${session.name ?? 'unnamed'}) — \`claude stop\` had failed: ${stopErr}`);
+        done.push({ id: handle, sessionId: normalizeHandle(session.sessionId) || null, name: session.name ?? null, reason, alreadyGone: false, clearedViaClearStuckSession: true, clearStuckRunId: repair.runId });
+        continue;
+      }
+      log(
+        `  ⚠ ${handle}: stop failed after ${STOP_RETRY_ATTEMPTS} attempts (${stopErr})`
+        + `${clearStuck ? ` — clear-stuck-session did not confirm it stuck (${repair?.reason ?? 'unknown'})` : ''} — left for the next tick`,
+      );
       failures++;
     }
   }
@@ -454,6 +605,7 @@ function main(argv) {
           scanned: sessions.length,
           stopped: dryRun ? 0 : stopped,
           alreadyGone: dryRun ? 0 : alreadyGone,
+          cleared: dryRun ? 0 : cleared,
           failures: dryRun ? 0 : failures,
           anomalies,
           wouldStop: dryRun
@@ -469,17 +621,24 @@ function main(argv) {
   } else {
     log(
       `session-reaper: ${sessions.length} session(s) listed · ` +
-        `${dryRun ? `${reap.length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${keep.length} kept`,
+        `${dryRun ? `${reap.length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${cleared ? `, ${cleared} cleared via clear-stuck-session` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${keep.length} kept`,
     );
   }
   // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its
   // `id` (the anomaly case — see the loop above) — mirrors lease-reaper.mjs's own convention, so a cron/loop
   // wrapper can tell a clean sweep from a partial one. `runQuiet` (the runner's own caller) swallows this
-  // either way — it is surfaced for anyone invoking the CLI directly.
+  // either way — it is surfaced for anyone invoking the CLI directly. A session `clear-stuck-session` actually
+  // CLEARED does not count against this — it is a successful outcome, not a failure the next tick needs to see.
   process.exit(failures > 0 || anomalies > 0 ? 1 : 0);
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main(process.argv.slice(2));
+  main(process.argv.slice(2)).catch((e) => {
+    // A crash in the async repair path (a bug, not a per-candidate failure `main()` already catches) must not
+    // vanish as an unhandled rejection — surfaced the same way the top-level listing-read failure is, and still
+    // best-effort: the NEXT tick gets a clean attempt.
+    log(`  ⚠ session-reaper crashed: ${String(e?.message || e).split('\n')[0]}`);
+    process.exit(1);
+  });
 }
