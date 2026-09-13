@@ -213,15 +213,24 @@ export function findLatestChangesRequestedComment(comments) {
 
 /**
  * REAL — `gh pr view <pr> --json headRefName,comments --repo <repo>`. Returns the PR's own lane ref (for
- * `acquireLane`'s `base`) and the latest changes-requested finding's body text, or `null` when the PR carries
- * no such comment (a PR reached this wrapper without ever being bounced — nothing for a fixer to do).
- * @param {{pr: number, repo: string}} o
+ * `acquireLane`'s `base`) and the finding text a fixer should act on, or `null` findingBody when there is
+ * nothing to repair.
+ *
+ * `findingOverride` (#Part-3 autofix — `we:scripts/conveyor/autofix-review-findings.mjs`) SKIPS the
+ * changes-requested comment scan and uses the supplied text verbatim instead. This is what lets a caller with
+ * ONE ALREADY-CLASSIFIED advisory-panel finding (never a `review:changes` bounce — a `review:human` PR's
+ * advisory note is posted before any human ceremony and sets no label at all, so it never carries the
+ * `CHANGES_REQUESTED_MARKERS` shape {@link findLatestChangesRequestedComment} scans for) hand this wrapper a
+ * narrowly-scoped brief directly, while still fetching the real `headRefName` a lane needs to reconstitute the
+ * PR's own branch. `headRefName` is ALWAYS read for real — only the finding-text source branches.
+ * @param {{pr: number, repo: string, findingOverride?: (string|null)}} o
  * @param {{run?: Function}} [io]
  * @returns {{headRefName: string, findingBody: (string|null)}}
  */
-export function resolveFixTarget({ pr, repo }, { run: runFn = run } = {}) {
+export function resolveFixTarget({ pr, repo, findingOverride = null } = {}, { run: runFn = run } = {}) {
   const out = runFn('gh', ['pr', 'view', String(pr), '--json', 'headRefName,comments', '--repo', repo]);
   const parsed = JSON.parse(out);
+  if (findingOverride) return { headRefName: parsed.headRefName, findingBody: findingOverride };
   const comment = findLatestChangesRequestedComment(parsed.comments);
   return { headRefName: parsed.headRefName, findingBody: comment ? comment.body : null };
 }
@@ -484,7 +493,13 @@ function describeError(e) {
  * reconstituted at that ref, spawn the minimal fix agent exactly once (plus, rarely, one gate-failure resume),
  * drive ONE converge pass on the repair, then re-push + re-arm (or stand down), release, return.
  *
- * @param {{pr: number|string, repo: string, item?: (number|string|null)}} o
+ * `findingOverride` (#Part-3 autofix) supplies the finding text directly instead of scanning the PR's
+ * changes-requested comments — see {@link resolveFixTarget}'s own docblock. `rearmReview`'s label swap is a
+ * safe no-op on a PR that never carried `review:changes` in the first place (`decideRearm`'s own INVARIANT:
+ * only a `review:changes` PR is re-armed) — exactly the case a `review:human` advisory-driven auto-fix lands
+ * on, so this function needs no separate hand-back branch for that caller.
+ *
+ * @param {{pr: number|string, repo: string, item?: (number|string|null), findingOverride?: (string|null)}} o
  * @param {DeliveryAgentProvider} [provider]
  * `ensureSettingsFile` is injectable for the same reason every other impure call in this file is (see the
  * header's own IMPURE note): it is an `mkdirSync`+`writeFileSync` into `${REPO_ROOT}.operations`, and it is the
@@ -496,7 +511,7 @@ function describeError(e) {
  * @param {{newSessionId?: () => string, run?: Function, waitMs?: number, ensureSettingsFile?: Function}} [deps]
  */
 export async function dispatchFix(
-  { pr, repo, item } = {},
+  { pr, repo, item, findingOverride = null } = {},
   provider = FIX_AGENT_PROVIDER,
   {
     newSessionId = randomUUID, run: runFn = run, waitMs = FIX_LOOP_ACQUIRE_WAIT_MS,
@@ -537,7 +552,7 @@ export async function dispatchFix(
 
   let target;
   try {
-    target = resolveFixTarget(planned, { run: runFn });
+    target = resolveFixTarget({ pr: planned.pr, repo: planned.repo, findingOverride }, { run: runFn });
   } catch (e) {
     reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'blocked-on-infra', label: describeError(e) } }, { run: runFn });
     throw e;

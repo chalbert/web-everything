@@ -162,6 +162,7 @@ import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 // #xu2pp2m — THE MECHANICAL ARC THIS FILE NOW DEFAULTS TO. See the header block: the wrapper IS the three
 // commands `review-agent-brief.md` told a spawned agent to type, done as pure Node with no LLM turn.
 import { BLOCKED_ON_INFRA, dispatchReviewMechanical } from './review-dispatch-wrapper.mjs';
+import { autoFixAfterReview } from '../conveyor/autofix-review-findings.mjs';
 
 /** The review-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
  *  (`#xy8di3v`, extending `#3418`/`#xqyyoje`'s fix to the review-dispatch path). Passed via
@@ -568,8 +569,37 @@ export function dispatchReviewCli(argv = [], {
   }
 }
 
+/**
+ * #Part-3 autofix — fires ONLY for the exact population Part 2 (`8cb872a96`) already dispatches the advisory
+ * panel for: a `review:human` PR whose review just parked on the human-clearance confirm
+ * (`classified.outcome === 'parked'` AND `raw.verdict.humanRequired === true`). Reads the SAME structured
+ * `verdict.findings` the advisory comment was already rendered from (`we:scripts/conveyor/
+ * autofix-review-findings.mjs`'s own header) — it re-runs no judge and posts no second review. A `--agent`
+ * dispatch (`mode !== 'mechanical'`) and every non-parked/non-human outcome are left untouched, byte-identical
+ * to before this existed.
+ * @param {{code: number, mode: string, result: object|null}} cliResult
+ * @param {{autoFixFn?: Function, writeErr?: Function}} [io]
+ * @returns {Promise<{ran: boolean, autofix?: object, error?: string}>}
+ */
+export async function runAutoFixRoute(cliResult, { autoFixFn = autoFixAfterReview, writeErr = (l) => writeLineSync(2, l) } = {}) {
+  const { mode, result } = cliResult ?? {};
+  if (mode !== 'mechanical') return { ran: false };
+  const humanParked = result?.classified?.outcome === 'parked' && result?.raw?.verdict?.humanRequired === true;
+  if (!humanParked) return { ran: false };
+  try {
+    const autofix = await autoFixFn({ pr: result.pr, repo: result.repo, findings: result.raw.verdict.findings });
+    return { ran: true, autofix };
+  } catch (e) {
+    const message = String(e?.message ?? e);
+    writeErr(`review-dispatch: auto-fix route failed (advisory comment + verdict are unaffected): ${message}`);
+    return { ran: true, error: message };
+  }
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
-  const { code } = dispatchReviewCli(process.argv.slice(2));
-  process.exitCode = code;
+  const cliResult = dispatchReviewCli(process.argv.slice(2));
+  runAutoFixRoute(cliResult).finally(() => {
+    process.exitCode = cliResult.code;
+  });
 }

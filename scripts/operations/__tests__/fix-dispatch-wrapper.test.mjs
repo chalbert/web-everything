@@ -116,6 +116,17 @@ describe('resolveFixTarget', () => {
     const run = vi.fn(() => JSON.stringify({ headRefName: 'lane/2108-foo', comments: [{ body: 'unrelated' }] }));
     expect(resolveFixTarget({ pr: 2108, repo: 'a/b' }, { run }).findingBody).toBeNull();
   });
+
+  it('#Part-3 autofix — findingOverride SKIPS the comment scan and is used verbatim, headRefName is still real', () => {
+    const run = vi.fn(() => JSON.stringify({
+      headRefName: 'lane/2108-foo',
+      // NO changes-requested comment at all — the advisory-note population this override exists for never
+      // carries one (review:human posts an advisory note, not a changes-requested bounce).
+      comments: [{ body: 'some unrelated PR chatter' }],
+    }));
+    const target = resolveFixTarget({ pr: 2108, repo: 'a/b', findingOverride: 'fix only src/foo.mjs:12' }, { run });
+    expect(target).toEqual({ headRefName: 'lane/2108-foo', findingBody: 'fix only src/foo.mjs:12' });
+  });
 });
 
 describe('buildFixAgentEnv', () => {
@@ -374,6 +385,25 @@ describe('dispatchFix', () => {
     expect(run.mock.calls.some((c) => c[1]?.[1] === 'acquire')).toBe(false);
     const doneCall = run.mock.calls.find((c) => c[1]?.includes('--status=done'));
     expect(doneCall[1]).toEqual(expect.arrayContaining(['--outcome=not-applicable']));
+  });
+
+  it('#Part-3 autofix — findingOverride dispatches even when the PR carries NO changes-requested comment '
+    + '(the review:human advisory-note population this exists for never has one), scoped to the override text', async () => {
+    const run = fakeRun({ findingBody: null }); // no changes-requested comment on the PR at all
+    const provider = {
+      spawn: vi.fn(({ sessionSlug, pr, item, lanePath }) => {
+        expect(readFileSync(join(lanePath, FIX_FINDING_SCRATCH_FILENAME), 'utf8')).toContain('fix only src/foo.mjs:12 — off-by-one');
+        writeFixReport({ ...newFixReport({ session: sessionSlug, pr, item }), status: 'done', outcome: 'fixed', filesTouched: ['a.mjs'] });
+      }),
+    };
+    const result = await dispatchFix(
+      { pr: 2108, repo: 'chalbert/web-everything', findingOverride: 'fix only src/foo.mjs:12 — off-by-one' },
+      provider,
+      { run, newSessionId: () => 'sess-override' },
+    );
+    expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+    expect(provider.spawn).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(lane, FIX_FINDING_SCRATCH_FILENAME))).toBe(false); // cleaned up after the turn
   });
 
   it('when acquire fails because --base does not resolve (the lane ref is gone), reports not-applicable, '

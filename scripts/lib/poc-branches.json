@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "branches": [
+    {
+      "branch": "lane/mechanical-dispatcher",
+      "purpose": "Epic #3383's own prototype branch — the background mechanical dispatcher (conveyor runner, dispatch brief, tick loop) built and iterated ahead of main.",
+      "owner": "3383",
+      "dateOpened": "2026-08-28",
+      "target": "main",
+      "scope": ["we:scripts/conveyor/", "we:skills-src/conveyor/"],
+      "graduationItem": "3443"
+    }
+  ]
+}
