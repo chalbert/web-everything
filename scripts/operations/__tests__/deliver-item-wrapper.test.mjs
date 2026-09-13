@@ -1056,7 +1056,7 @@ describe('resumeAgentWithGateFailure prompt (#3565 — never asks the agent to c
 describe('prefixOwnPathMentions / sanitizeOwnLocusMentions (#3565 real-trial finding — the delivery agent '
   + 'is never taught the locus-prefix convention, so its own backlog prose trips the pre-commit backstop '
   + 'once the WRAPPER is the one committing)', () => {
-  it('prefixes a bare mention of a touched path with `we:`, leaving an already-prefixed one alone', () => {
+  it('prefixes a bare mention of a given ref with `we:`, leaving an already-prefixed one alone', () => {
     const content = 'See `scripts/foo.mjs` and we:scripts/bar.mjs for details.';
     const result = prefixOwnPathMentions(content, ['scripts/foo.mjs', 'scripts/bar.mjs']);
     expect(result).toBe('See `we:scripts/foo.mjs` and we:scripts/bar.mjs for details.');
@@ -1072,10 +1072,10 @@ describe('prefixOwnPathMentions / sanitizeOwnLocusMentions (#3565 real-trial fin
     expect(prefixOwnPathMentions(content, ['scripts/never-mentioned.mjs'])).toBe(content);
   });
 
-  it('sanitizeOwnLocusMentions rewrites only backlog/reports .md files among the touched paths, excluding '
-    + 'each file from its OWN mention list, and skips non-.md touched files entirely', () => {
+  it('sanitizeOwnLocusMentions rewrites only backlog/reports .md files among the touched paths, and skips '
+    + 'non-.md touched files entirely', () => {
     const files = {
-      '/lane/backlog/3565-x.md': 'Fixed `scripts/foo.mjs` per backlog/3565-x.md itself.',
+      '/lane/backlog/3565-x.md': 'Fixed `scripts/foo.mjs` in this change.',
     };
     const readFile = vi.fn((abs) => {
       if (!(abs in files)) throw new Error(`ENOENT: ${abs}`);
@@ -1089,7 +1089,44 @@ describe('prefixOwnPathMentions / sanitizeOwnLocusMentions (#3565 real-trial fin
     );
     expect(writeFile).toHaveBeenCalledTimes(1);
     expect(files['/lane/backlog/3565-x.md']).toBe(
-      'Fixed `we:scripts/foo.mjs` per backlog/3565-x.md itself.',
+      'Fixed `we:scripts/foo.mjs` in this change.',
+    );
+  });
+
+  it('#3383 SECOND live #3565 trial finding — also prefixes a bare mention of a file the delivery never '
+    + 'touched (the touched-paths list has no idea it needs fixing; the real gate detector does)', () => {
+    const files = {
+      // Mirrors the real trial verbatim: the agent's own `## Progress` note cited `queue-store.mjs` for
+      // context — never part of the diff (`scripts/operations/file-item-io.mjs` is the only touched file
+      // here) — and the pre-commit `lint:locus` hook rejected the wrapper's commit for exactly this token.
+      '/lane/backlog/3565-x.md': 'Reused queue-store.mjs\'s exported queueHas for the alreadyQueued check.',
+    };
+    const readFile = vi.fn((abs) => files[abs]);
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    sanitizeOwnLocusMentions(
+      '/lane',
+      ['backlog/3565-x.md', 'scripts/operations/file-item-io.mjs'],
+      { readFile, writeFile },
+    );
+    expect(files['/lane/backlog/3565-x.md']).toBe(
+      'Reused we:queue-store.mjs\'s exported queueHas for the alreadyQueued check.',
+    );
+  });
+
+  it('also prefixes a file\'s bare mention of its OWN filename (the real gate flags that too — verified '
+    + 'directly against scanRepoLocusPrefixes, not assumed)', () => {
+    const files = {
+      '/lane/backlog/3565-x.md': 'Fixed `scripts/foo.mjs` per backlog/3565-x.md itself.',
+    };
+    const readFile = vi.fn((abs) => files[abs]);
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    sanitizeOwnLocusMentions(
+      '/lane',
+      ['backlog/3565-x.md', 'scripts/foo.mjs'],
+      { readFile, writeFile },
+    );
+    expect(files['/lane/backlog/3565-x.md']).toBe(
+      'Fixed `we:scripts/foo.mjs` per we:backlog/3565-x.md itself.',
     );
   });
 

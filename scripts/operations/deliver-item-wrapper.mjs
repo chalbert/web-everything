@@ -108,6 +108,10 @@ import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-rep
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
 import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/review-escalation.mjs';
 import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
+// #3383 mechanical-dispatcher fix (live #3565 trial) — the REAL locus-prefix detector, reused so
+// `sanitizeOwnLocusMentions` below prefixes every bare mention the `lint:locus` pre-commit hook would
+// itself flag, not just mentions of the delivery's own touched paths (see that function's own header).
+import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
 // #xu2pp2m — EXTRACTED to the shared module both this wrapper and `we:scripts/operations/
 // review-dispatch-wrapper.mjs` now import: the proven `CLAUDE_RESTRICTED_PROVIDER` argv shape, hooks-settings
 // generation, lane acquire/release, and the gate-running pattern. See that file's own header for why. Every
@@ -1480,27 +1484,37 @@ export function coAuthorTrailerFor(providerName) {
 // #3565 real-trial finding (live, 2026-09-13): the delivery agent is DELIBERATELY never taught the
 // `we:`/`fui:`/`plateau:` locus-prefix citation convention (delivery-agent-brief-v2.md's own header — "no
 // cited convention, no doctrine reference"), so its own `## Progress`/`## Done when` prose routinely quotes
-// the files it just touched by their BARE repo-relative path. Under the OLD design the agent's own `git
-// commit` hit `.githooks/pre-commit`'s `npm run lint:locus` backstop (#883/#1574) directly and could fix its
-// own text in the same turn; under this redesign the WRAPPER commits after the agent has already exited, so
-// that same rejection had nowhere to go — it just failed the whole delivery (reproduced live: `git commit`
-// exited non-zero, "2 bare code-path ref(s) ... lack a <repo>: prefix", the wrapper's own best-effort release
-// then discarded a genuinely-passing build for a trivially-fixable citation nit).
-// NARROW, MECHANICAL FIX, not a general locus-prefix auto-fixer: only the delivery's OWN other touched
-// paths, inside the delivery's OWN touched backlog/reports markdown files, get a `we:` prefixed onto any bare
-// mention — see `prefixOwnPathMentions`'s own header for why this is safe without re-implementing
-// `scanRepoLocusPrefixes`'s fuller exemption rules (fenced blocks, globs, URLs, npm specifiers).
+// files by their BARE repo-relative path. Under the OLD design the agent's own `git commit` hit
+// `.githooks/pre-commit`'s `npm run lint:locus` backstop (#883/#1574) directly and could fix its own text
+// in the same turn; under this redesign the WRAPPER commits after the agent has already exited, so that
+// same rejection had nowhere to go — it just failed the whole delivery (reproduced live: `git commit`
+// exited non-zero, "2 bare code-path ref(s) ... lack a <repo>: prefix", the wrapper's own best-effort
+// release then discarded a genuinely-passing build for a trivially-fixable citation nit).
+//
+// #3383 mechanical-dispatcher fix (SECOND live #3565 trial, still 2026-09-13, AFTER the first narrow fix
+// above had already landed): the first fix only prefixed bare mentions of the delivery's OWN touched
+// paths, on the theory that those are the only bare mentions an agent's prose would ever introduce. A
+// fresh Codex trial disproved that theory directly — its own `## Progress` note cited an UNTOUCHED
+// existing file bare (`queue-store.mjs`, named for context, never itself part of the diff), which the
+// touched-paths-only fixer had no way to catch (it was never in that list), and `lint:locus` rejected the
+// wrapper's commit again for exactly the same reason, just a different token. `sanitizeOwnLocusMentions`
+// below now finds every bare mention `we:scripts/check-standards-rules.mjs#findUnmarkedLocusRefs` (the
+// REAL gate's own detector, reused rather than re-approximated) would itself flag in the file's full
+// content — touched or not, self-referencing or not — so nothing the gate would reject can slip past this
+// fix. `LOCUS_MD_CORPUS_RE` still scopes WHICH touched files get scanned (only the delivery's own touched
+// backlog/reports markdown — never every corpus file in the repo, which would be a different, unbounded
+// job); it is only the CONTENT scan inside each one that widened.
 const LOCUS_MD_CORPUS_RE = /(?:^|\/)(?:backlog|reports)\/[^/]+\.md$/;
 
 /**
- * PURE. Prefix every BARE mention of one of `touchedPaths` inside `content` with `we:`, leaving an
- * ALREADY-prefixed mention (`we:<path>`, `fui:<path>`, …) untouched. Scoped to the delivery's own known,
- * just-touched paths rather than every path-like token in the document — see {@link commitBuildTurn}'s own
- * header for why this is the safe, narrow fix rather than a second copy of `scanRepoLocusPrefixes`.
+ * PURE. Prefix every BARE mention of one of `refs` inside `content` with `we:`, leaving an ALREADY-prefixed
+ * mention (`we:<path>`, `fui:<path>`, …) untouched. Generic over its `refs` list — {@link
+ * sanitizeOwnLocusMentions} is the only caller, and (as of the #3383 fix above) feeds it every unmarked
+ * token `findUnmarkedLocusRefs` finds in the document's own content, not a caller-guessed subset.
  */
-export function prefixOwnPathMentions(content, touchedPaths) {
+export function prefixOwnPathMentions(content, refs) {
   let next = String(content ?? '');
-  for (const p of Array.isArray(touchedPaths) ? touchedPaths : []) {
+  for (const p of Array.isArray(refs) ? refs : []) {
     if (typeof p !== 'string' || !p) continue;
     const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`(?<!(?:we|fui|plateau|webeverything|frontierui|plateau-app):)${escaped}`, 'g');
@@ -1515,6 +1529,11 @@ export function prefixOwnPathMentions(content, touchedPaths) {
  * commit passes the repo's locus-prefix backstop. Errors reading/writing one file are swallowed (best-effort
  * — this is a convenience fix-up, never the reason a real build+commit fails for an unrelated fs hiccup);
  * `git commit` below is still the real, authoritative gate.
+ *
+ * #3383 mechanical-dispatcher fix — the ref list to prefix now comes from `findUnmarkedLocusRefs(before)`
+ * (the real `lint:locus` detector run against THIS file's own current content), not from `paths` (the
+ * delivery's touched-file list). See {@link LOCUS_MD_CORPUS_RE}'s own comment above for the live trial that
+ * found the gap this closes.
  */
 export function sanitizeOwnLocusMentions(lane, paths, { readFile = readFileSync, writeFile = writeFileSync } = {}) {
   for (const p of paths) {
@@ -1522,7 +1541,9 @@ export function sanitizeOwnLocusMentions(lane, paths, { readFile = readFileSync,
     try {
       const abs = `${lane}/${p}`;
       const before = readFile(abs, 'utf8');
-      const after = prefixOwnPathMentions(before, paths.filter((other) => other !== p));
+      const refs = findUnmarkedLocusRefs(before);
+      if (!refs.length) continue;
+      const after = prefixOwnPathMentions(before, refs);
       if (after !== before) writeFile(abs, after);
     } catch { /* best-effort — see docblock */ }
   }
