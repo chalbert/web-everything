@@ -950,6 +950,28 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
 }
 
 /**
+ * #xqa9ttq — CORRECTS `buildMandate`'s "if you have no tools at all, you cannot run or clone anything" branch
+ * (`we:scripts/lib/review-core.mjs`) FOR THIS SEAT SPECIFICALLY. That branch is accurate for a genuinely
+ * zero-tool Claude juror (`--tools ''`), but this seat runs on Codex, which ALWAYS gets `-s read-only` —
+ * a real, if read-only, shell (confirmed live: `git --version`/`git status` exit 0; only a write, e.g.
+ * `mktemp -d`, gets `Operation not permitted` — see `we:scripts/lib/codex-judge-spawn.mjs`). Left uncorrected,
+ * the shared mandate text would tell this juror it has "no tools at all", which is false and could lead it to
+ * either under-report what it actually checked or misdescribe why it could not run something.
+ *
+ * APPENDED RATHER THAN EDITING `buildMandate`/`buildPanelMandate` THEMSELVES: those functions are shared by
+ * every OTHER panel seat, including genuinely tool-free Claude jurors (`we:scripts/lib/judge-panel.mjs`) for
+ * whom "no tools at all" remains true — rewriting the shared text would fix this seat by breaking theirs.
+ */
+export const CODEX_ADVISORY_SANDBOX_CORRECTION = [
+  'CORRECTION TO THE ABOVE FOR YOUR SEAT SPECIFICALLY: you are not a tool-free juror. You run with a real,',
+  'read-only shell (you can run non-mutating commands and read files), but you CANNOT write, create a temp',
+  'directory, clone anything, or mutate anything — any such attempt will fail. So: ignore any instruction above',
+  'that assumes you have "no tools at all" — you do have a read-only shell — but the practical conclusion is',
+  'the same one that text reaches for a write/clone/repro step: you cannot perform it, so say so plainly rather',
+  'than describing verification you did not perform.',
+].join(' ');
+
+/**
  * #xqa9ttq — THE THIRD SEAT'S RECIPE. Same mandate/input shaping as {@link buildReviewJudgeRequest} — same
  * diff, same description, same #2336 context isolation — but structurally different in the two fields that
  * make this seat what it is:
@@ -975,9 +997,12 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
  */
 export function buildReviewAdvisoryJudgeRequest({ read, aim = '' }) {
   return {
-    mandate: buildPanelMandate({
+    // #xqa9ttq — `CODEX_ADVISORY_SANDBOX_CORRECTION` is appended, not spliced in: it corrects the shared
+    // mandate's "no tools at all" framing for THIS seat only, without touching `buildPanelMandate`'s text
+    // (shared by every other, genuinely tool-free-or-tool-bearing, panel seat).
+    mandate: `${buildPanelMandate({
       lens: ADVISORY_JUDGE_LENS, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
-    }),
+    })} ${CODEX_ADVISORY_SANDBOX_CORRECTION}`,
     input: renderJudgeInput(read),
     shape: REVIEW_JUDGE_SHAPE,
     lens: ADVISORY_JUDGE_LENS,
