@@ -164,10 +164,32 @@ export const BOOKKEEPING_MARKERS = Object.freeze([
  * The label phases where this pass has something to dispatch, and what it dispatches. Everything else is a
  * refusal — `owed-elsewhere` when a phase means real work by someone else, `nothing-owed` when it does not.
  * `classifyPr` produces the keys; they are not re-derived here.
+ *
+ * `needs-human` DISPATCHES `review` TOO (mechanical-dispatcher lane, per the ratified operator ruling that
+ * every PR earns the automated advisory panel — `review:human` included — rather than being reviewed cold).
+ * THIS DOES NOT WEAKEN THE HUMAN-CLEARANCE GATE. `needs-human` fires the exact same `review` dispatch
+ * `needs-review` already does — `we:scripts/operations/review-dispatch.mjs` (now `review-dispatch-wrapper.mjs`'s
+ * purely mechanical path by default, #xu2pp2m) → `review-loop-cli.mjs` → the declared `review-pr` operation —
+ * and that operation already refuses to self-clear a `review:human` PR at THREE independent layers this file
+ * never touches or re-derives:
+ *   1. `we:scripts/lib/review-loop-policy.mjs#reviewLoopAutoConfirm`'s refusal 1 declines to answer the
+ *      operation's own `confirm` step for a HUMAN-addressed PR unconditionally — the run PARKS (`stopped:
+ *      'confirm'`, classified `parked` by `review-dispatch-wrapper.mjs#classifyReviewLoopOutcome`), it never
+ *      reaches `record`.
+ *   2. `we:scripts/review-set-label.mjs#decideSetLabel`'s INVARIANT 2 refuses `--to=accepted` on a
+ *      `review:human` PR even if something upstream ever tried, in the PURE core no caller can route around.
+ *   3. The `--agent` fallback path's dispatched session carries a `--disallowedTools` deny list
+ *      (`we:scripts/operations/review-dispatch.mjs#REVIEW_DISPATCH_DISALLOWED_TOOLS`) refusing `gh` and
+ *      `review-set-label.mjs` outright, before the model's own judgment is even consulted.
+ * What DOES happen on a `review:human` PR: `review-pr`'s `advise` step (#xlw02hw) posts an automatic,
+ * non-recording advisory comment — the panel's findings/verdict, informational only, never a label swap —
+ * then the run parks, exactly as `we:skills-src/review/review-agent-brief.md` already documents ("park for a
+ * human … report it and exit; do not attempt to clear it yourself"). So this line only makes sure that panel
+ * is ever DISPATCHED for a `review:human` PR at all — before this, `needs-human` sat in `OWED_ELSEWHERE` and no
+ * automated path ever ran the panel on it; a human reviewed cold unless they ran `/review` themselves.
  */
-const OWED = Object.freeze({ bounced: 'fix', 'needs-review': 'review' });
+const OWED = Object.freeze({ bounced: 'fix', 'needs-review': 'review', 'needs-human': 'review' });
 const OWED_ELSEWHERE = Object.freeze({
-  'needs-human': 'a human must clear the review gate on this PR',
   'ci-red': 'a required check is failing — the conveyor tick plans CI-heals, this pass does not',
   conflicted: 'the branch needs a rebase before it can merge',
 });
@@ -523,17 +545,19 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
  *
  * EVERY PR THIS PASS HAS AN OPINION ABOUT, EXCEPT `nothing-owed`. `nothing-owed` is the ONLY refusal kind that
  * genuinely means "reviewed and queued, already landed, or a signal-free PR unrelated to this loop" — see
- * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for `needs-human`, `ci-red`, and
- * `conflicted` phases alike, which are real conveyor-dispatched PRs stuck on something this pass does not run
- * (a human clear, a CI-heal, a rebase) — NOT unrelated PRs. Before this function existed,
- * `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded `owed-elsewhere` wholesale on the mistaken
- * premise that it "covers every unrelated human PR" — confirmed live 2026-09-05 on PR #1920: its `needs-human`
- * refusal (kind `owed-elsewhere`) was excluded from every tick's refresh sweep, so its stale
- * `review-status:reviewing` label — left over from a session that no longer exists in `claude agents --json`
- * at all — was NEVER re-derived and cleared. `review-status-tag.mjs` is idempotent and name-keyed (matches
- * `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a PR with nothing live simply clears any
- * stale label — safe to call on every candidate this returns, including a genuinely-foreign PR that happens to
- * reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst, never a wrong label).
+ * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for `ci-red` and `conflicted` phases
+ * alike (`needs-human` DID too, until it moved into {@link OWED} — see that map's own docblock — so it now
+ * surfaces via `reviewsOwed` instead of a refusal, which is a STRICTLY WIDER inclusion, not a narrower one),
+ * which are real conveyor-dispatched PRs stuck on something this pass does not run (a CI-heal, a rebase) — NOT
+ * unrelated PRs. Before this function existed, `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded
+ * `owed-elsewhere` wholesale on the mistaken premise that it "covers every unrelated human PR" — confirmed live
+ * 2026-09-05 on PR #1920: its `needs-human` refusal (kind `owed-elsewhere`, back when that phase was still one)
+ * was excluded from every tick's refresh sweep, so its stale `review-status:reviewing` label — left over from a
+ * session that no longer exists in `claude agents --json` at all — was NEVER re-derived and cleared.
+ * `review-status-tag.mjs` is idempotent and name-keyed (matches `review-<pr>`/`fix-<pr>` sessions fresh each
+ * call), so calling it on a PR with nothing live simply clears any stale label — safe to call on every candidate
+ * this returns, including a genuinely-foreign PR that happens to reach `owed-elsewhere` (a wasted `gh`/`claude
+ * agents` read at worst, never a wrong label).
  * @param {Array<{prNumber:number}>} reviewsOwed - the `kind:'review'` subset of this pass's own `dispatch`
  * @param {Array<{kind:string, prNumber:number}>} refusals - this pass's own `refusals`
  * @returns {Array<{prNumber:number}>} reviewsOwed, plus every refusal except `nothing-owed`

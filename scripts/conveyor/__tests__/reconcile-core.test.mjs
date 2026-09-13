@@ -224,6 +224,49 @@ describe('case 3 — refusal 2: a PR with nothing to fix never gets a fixer (#32
   });
 });
 
+// ── CASE 3b — `needs-human` DISPATCHES `review` TOO (mechanical-dispatcher lane) ────────────────────────────────
+describe('case 3b — a `review:human` PR now gets the SAME `review` dispatch a `review:pending` one does', () => {
+  /** Same shape as #1576 (case 3) but gate-self — `review:human`, not `review:pending`. */
+  const prGateSelf = (over = {}) => ({
+    number: 1801, state: 'OPEN',
+    headRefName: 'lane/statute-touch', headRefOid: '1801'.repeat(10),
+    labels: lbl('review:human', 'checking'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: pendingRollup, comments: [], ...over,
+  });
+
+  it('before this change `needs-human` sat in `OWED_ELSEWHERE` and dispatched nothing — now it dispatches `review` even with zero prior findings (mirrors case 3\'s `review:pending` shape)', () => {
+    const plan = planReconcile({ prs: [prGateSelf()], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(1);
+    expect(plan.dispatch[0]).toMatchObject({ kind: 'review', prNumber: 1801, phase: 'needs-human', findings: 0 });
+    // A `no-findings` refusal is ALSO recorded alongside the dispatch — "nothing to fix" is not "nothing to
+    // do", exactly as case 3 pins for `review:pending`. It is not a second dispatch and it does not suppress
+    // the review one.
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].kind).toBe('no-findings');
+  });
+
+  it('a `review:human` PR that already carries a finding still dispatches `review`, same as `review:pending`', () => {
+    const plan = planReconcile({ prs: [prGateSelf({ comments: [finding()] })], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(1);
+    expect(plan.dispatch[0]).toMatchObject({ kind: 'review', prNumber: 1801, findings: 1 });
+  });
+
+  it('the SAME round cap applies — `needs-human` is not exempt from `cap-exhausted`', () => {
+    const plan = planReconcile({
+      prs: [prGateSelf({ comments: [finding()] })], agents: [], durableCounts: { 1801: NEGOTIATION_ROUND_CAP }, now: NOW,
+    });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('cap-exhausted');
+  });
+
+  it('a LIVE session already bound to the PR still refuses dispatch — `needs-human` is not exempt from refusal 4 either', () => {
+    const agents = [{ pid: 42, pidAlive: true, cwd: '/lane', laneHeadOid: prGateSelf().headRefOid }];
+    const plan = planReconcile({ prs: [prGateSelf()], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('live-process');
+  });
+});
+
 // ── CASE 4 — REFUSAL 3: THE CAP SURVIVES A RESTART, OR IT IS NOT A CAP ────────────────────────────────────────
 describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY from the PR (#3296)', () => {
   it('a fresh pass carrying NOTHING in refuses on the PR\'s own count', () => {
@@ -535,8 +578,11 @@ describe('case 6 — the discovery queries, pinned literally (#3296)', () => {
 });
 
 describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920 staleness, x5v8yy9)', () => {
-  it('includes an owed-elsewhere refusal (e.g. needs-human) — it is a real conveyor PR, not an unrelated one', () => {
-    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'needs-human' }];
+  it('includes an owed-elsewhere refusal (e.g. ci-red) — it is a real conveyor PR, not an unrelated one', () => {
+    // `needs-human` used to be this example (PR #1920's own incident) — it moved from `OWED_ELSEWHERE` into
+    // `OWED` (mechanical-dispatcher lane: `needs-human` now dispatches `review` too), so it no longer reaches
+    // `owed-elsewhere` at all. `ci-red` is the same shape today.
+    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'ci-red' }];
     expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
