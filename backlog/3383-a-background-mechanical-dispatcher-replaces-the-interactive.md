@@ -2105,11 +2105,11 @@ risk-assessment-of-the-fix axis (blacklist first); and v1 ships **recording-only
 disarmed.
 
 **Open follow-up, tracked as its own card so it survives past this session:** the router ships disarmed on
-purpose. Arming it is filed as `xsptg6b` ("Arm the run-quality router once v1's rubricVersion has a complete
+purpose. Arming it is filed as `3651` ("Arm the run-quality router once v1's rubricVersion has a complete
 run population"), parked `maturityGated` (`adoptionSignal`: one complete run population under a single
 `rubricVersion`), `blockedBy: ["3649"]`. Nothing arms automatically — the next session that finds that
 population exists is the one that un-parks it.
 
 `#3649` itself builds none of the five pieces its ruling names (reader-widening on `#3477`, the rubric, the
 scorecard store, the subject-class stamp, the router) — those are still unfiled follow-on work, distinct from
-the `xsptg6b` arm-trigger card above.
+the `3651` arm-trigger card above.

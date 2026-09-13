@@ -1,4 +1,5 @@
 ---
+bornAs: xsptg6b
 kind: story
 size: 2
 status: parked

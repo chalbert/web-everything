@@ -787,9 +787,9 @@ card is `one-off`. The rider is written into that anchor.
 
 **Durable follow-up — arming the router.** Fork 7 ships the router built but disarmed for v1. The trigger to
 flip it ("one complete `rubricVersion` population exists") is not left in chat: it is filed as its own
-tracked card, `xsptg6b` ("Arm the run-quality router once v1's rubricVersion has a complete run population"),
+tracked card, `3651` ("Arm the run-quality router once v1's rubricVersion has a complete run population"),
 parked `maturityGated` with a named `adoptionSignal` trigger and `blockedBy: ["3649"]`. It is JIT-numbered at
-land per this repo's convention (bornAs `xsptg6b`).
+land per this repo's convention (bornAs `3651`).
 
 ## Recommendation, in one place
 
