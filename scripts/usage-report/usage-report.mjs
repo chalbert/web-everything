@@ -46,6 +46,16 @@
  *     total the buckets returned, and the CLI's default `--since` window plus `daysUntilNextUtcMonth` together
  *     give "spend so far this cycle" and "days left in the cycle" side by side — the best available proxy for
  *     runway, assembled locally from real numbers rather than a renewal field that does not exist.
+ *   - UPDATE (2026-09-13): the operator separately supplied the REAL usage-window renewal schedule for both
+ *     providers — no API exposes it, so this is an operator-confirmed fact, not a derivation. Anthropic renews
+ *     weekly, every Friday 16:00 America/New_York; OpenAI renews weekly, every Saturday 09:02 (zone assumed
+ *     America/New_York — not independently stated for OpenAI). This is DISTINCT from the monthly UTC spend cap
+ *     above (a pay-as-you-go org ceiling) — both are surfaced, labeled separately, never conflated. Config
+ *     lives in `ANTHROPIC_RENEWAL`/`OPENAI_RENEWAL` (plain, easily-editable objects — a schedule/zone/day may
+ *     still change); the DST-aware "time until next renewal" math is `nextWeeklyRenewalUtc`/
+ *     `describeWeeklyRenewal` below, built on `Intl.DateTimeFormat` against the IANA zone (no date library —
+ *     this repo has none, native-first #75 — following the same `formatToParts`-over-locale-pattern idiom
+ *     `scripts/lib/local-date.mjs` already established for zone-aware date handling).
  *
  * ── THE THREAT MODEL AND WHY THE SECRET LIVES WHERE IT DOES ──────────────────────────────────────────────
  * An Anthropic or OpenAI ADMIN key is not a scoped "usage-only" credential — neither provider offers one;
@@ -84,9 +94,10 @@
  *
  * ── PURE / IMPURE SPLIT ──────────────────────────────────────────────────────────────────────────────────
  * Every parser/formatter below (`sumAnthropicUsage`, `sumAnthropicCost`, `sumOpenAIUsage`, `sumOpenAICost`,
- * `extractRateLimitHeaders`, `daysUntilNextUtcMonth`, `renderSummary`, the `build*Params` argv-shape
- * builders) is PURE — fixture data in, a value out, no fs/network/clock (a clock is passed in explicitly
- * where needed). The tests exercise ONLY these, with recorded fixture JSON shaped exactly like the real
+ * `extractRateLimitHeaders`, `daysUntilNextUtcMonth`, `nextWeeklyRenewalUtc`, `describeWeeklyRenewal`,
+ * `renderSummary`, the `build*Params` argv-shape builders) is PURE — fixture data in, a value out, no
+ * fs/network/clock (a clock is passed in explicitly where needed). The tests exercise ONLY these, with
+ * recorded fixture JSON shaped exactly like the real
  * response bodies quoted above — never a real network call, per this task's own instruction. All impure I/O
  * (the `security` CLI shell-out, the external `.env` file read, the actual `fetch` calls) is confined to
  * thin wrapper functions the CLI section below composes, injectable so nothing in this file needs live
@@ -109,6 +120,22 @@ export const ANTHROPIC_VERSION = '2023-06-01';
 export const OPENAI_BASE = 'https://api.openai.com';
 export const OPENAI_USAGE_PATH = '/v1/organization/usage/completions';
 export const OPENAI_COST_PATH = '/v1/organization/costs';
+
+// ── weekly usage-window renewal config — DISTINCT from the monthly UTC spend-cap boundary computed by
+// `daysUntilNextUtcMonth` below. The spend cap is a pay-as-you-go ORG-LEVEL ceiling; this is the actual
+// plan USAGE-WINDOW renewal, i.e. when the operator's real usage allowance resets. Neither provider
+// exposes this via API (see this file's header) — these are operator-supplied facts, kept as plain,
+// easily-editable config rather than baked into the DST math itself, since a schedule/zone/day may still
+// change or be corrected. `cadence: 'weekly'` is the only cadence `describeWeeklyRenewal` below resolves
+// today; a different cadence would need its own resolver, not a new field bolted onto this same shape.
+/** Confirmed by the operator (2026-09-13): Anthropic's usage window renews every Friday at 16:00,
+ *  America/New_York (DST-aware — `nextWeeklyRenewalUtc` below resolves the correct EST/EDT offset for
+ *  the target date itself, not for "now"). */
+export const ANTHROPIC_RENEWAL = { cadence: 'weekly', dayOfWeek: 'Friday', time: '16:00', timezone: 'America/New_York' };
+/** Confirmed by the operator (2026-09-13): OpenAI's usage window renews every Saturday at 09:02. Zone
+ *  assumed `America/New_York` — not independently stated for OpenAI, but no other zone was given and
+ *  that's the operator's own zone; revisit this assumption if it turns out wrong. */
+export const OPENAI_RENEWAL = { cadence: 'weekly', dayOfWeek: 'Saturday', time: '09:02', timezone: 'America/New_York' };
 
 // ── secret loading (impure) ─────────────────────────────────────────────────────────────────────────────
 
@@ -315,6 +342,106 @@ export function daysUntilNextUtcMonth(now = new Date()) {
   return { days: Math.floor(msRemaining / 86400000), resetsAt: nextMonthStart.toISOString() };
 }
 
+// ── weekly usage-window renewal (DST-aware) — computes the REAL "usage window renews" instant for
+// `ANTHROPIC_RENEWAL`/`OPENAI_RENEWAL` above, distinct from the monthly UTC spend-cap boundary above this
+// comment. No date library: this repo has none (native-first, #75) and `scripts/lib/local-date.mjs`
+// already establishes the pattern this follows — resolve everything through `Intl.DateTimeFormat` against
+// the IANA zone name, read wall-clock components back via `formatToParts` (never a locale's default
+// pattern, which can silently degrade on a small-icu Node), and never hard-code a fixed UTC offset for a
+// zone that has two of them (EST/EDT) depending on the calendar date.
+
+/** The IANA zone's UTC offset in ms (east-positive) AT a given instant — the one DST-aware primitive
+ *  everything below composes. Formats `instant` in `timeZone`, reads the wall-clock parts back as if they
+ *  were themselves a UTC instant, and the difference from the real instant IS the zone's offset at that
+ *  moment (negative for America/New_York: -18000000ms in EST, -14400000ms in EDT). */
+function zoneOffsetMs(instant, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(instant).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const asUtc = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute), Number(parts.second),
+  );
+  return asUtc - instant.getTime();
+}
+
+/** Convert a WALL-CLOCK date+time as read in `timeZone` (e.g. "2026-09-18 16:00" America/New_York) to the
+ *  real UTC instant it names — the DST-aware inverse of `zoneOffsetMs`. Two passes: right around a DST
+ *  transition the offset at the naive guess and the offset at the real instant can differ by exactly one
+ *  hour, and re-deriving the guess from the corrected offset is enough to converge (the zone only ever
+ *  has two possible offsets, so it never needs a third pass). */
+function zonedWallClockToUtc(y, m, d, hour, minute, timeZone) {
+  let utcMs = Date.UTC(y, m - 1, d, hour, minute, 0);
+  for (let i = 0; i < 2; i += 1) utcMs = Date.UTC(y, m - 1, d, hour, minute, 0) - zoneOffsetMs(new Date(utcMs), timeZone);
+  return new Date(utcMs);
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** The next occurrence, at or after `now`, of a weekly renewal described as `{ dayOfWeek, time, timezone }`
+ *  (`time` is zone-local 24h `HH:MM`). Pure given `now`. DST-SAFE BY CONSTRUCTION: the target day's own
+ *  wall-clock-to-UTC conversion resolves the IANA zone's offset AT THE TARGET DATE (via `zoneOffsetMs`
+ *  called on a guess already anchored to that date), never at "now" — so a renewal whose upcoming week
+ *  straddles a spring-forward/fall-back transition still lands on the correct zone-local hour instead of
+ *  drifting by the one-hour shift. */
+export function nextWeeklyRenewalUtc(now, { dayOfWeek, time, timezone }) {
+  const targetDow = WEEKDAYS.indexOf(dayOfWeek);
+  if (targetDow < 0) throw new Error(`nextWeeklyRenewalUtc: dayOfWeek "${dayOfWeek}" is not a weekday name`);
+  const [hour, minute] = String(time).split(':').map(Number);
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const nowDow = WEEKDAYS.indexOf(parts.weekday);
+  const y = Number(parts.year); const m = Number(parts.month); const d = Number(parts.day);
+
+  // Advance the ZONE-LOCAL calendar date by `days` (plain Gregorian arithmetic via Date.UTC — this is
+  // calendar-day rollover, not an instant, so it needs no timezone awareness itself) then resolve that
+  // rolled-over date's own wall-clock target time to a real UTC instant.
+  const advance = (days) => {
+    const rolled = new Date(Date.UTC(y, m - 1, d + days));
+    return zonedWallClockToUtc(rolled.getUTCFullYear(), rolled.getUTCMonth() + 1, rolled.getUTCDate(), hour, minute, timezone);
+  };
+
+  const daysToTarget = (targetDow - nowDow + 7) % 7;
+  let target = advance(daysToTarget);
+  if (target.getTime() <= now.getTime()) target = advance(daysToTarget + 7); // today's own occurrence already passed
+  return target;
+}
+
+/** Render a resolved renewal instant as a short zone-local label, e.g. "Friday 2026-09-18 16:00 EDT" — the
+ *  zone abbreviation (`timeZoneName: 'short'`) is what actually proves DST was handled correctly to a
+ *  reader: EDT vs EST on either side of a transition, not a UTC instant they'd have to convert by hand. */
+function formatZonedRenewalLabel(instant, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short',
+  }).formatToParts(instant).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  return `${parts.weekday} ${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
+}
+
+/**
+ * The full "time until next usage-window renewal" for one provider — pure given `now`. `renewalConfig` is
+ * one of `ANTHROPIC_RENEWAL`/`OPENAI_RENEWAL` above, or `null` for a provider whose renewal window is not
+ * yet known/confirmed — this then returns `null` rather than guessing, so a future provider (or a value
+ * reverted to unknown) degrades to "not shown" instead of a fabricated countdown.
+ * @returns {{resetsAt: string, label: string, days: number, hours: number, minutes: number}|null}
+ */
+export function describeWeeklyRenewal(renewalConfig, now = new Date()) {
+  if (!renewalConfig) return null;
+  if (renewalConfig.cadence !== 'weekly') throw new Error(`describeWeeklyRenewal: unsupported cadence "${renewalConfig.cadence}"`);
+  const target = nextWeeklyRenewalUtc(now, renewalConfig);
+  const totalMinutes = Math.floor((target.getTime() - now.getTime()) / 60000);
+  return {
+    resetsAt: target.toISOString(),
+    label: formatZonedRenewalLabel(target, renewalConfig.timezone),
+    days: Math.floor(totalMinutes / 1440),
+    hours: Math.floor((totalMinutes % 1440) / 60),
+    minutes: totalMinutes % 60,
+  };
+}
+
 // ── formatting (pure) — style mirrors we:scripts/operations/telemetry-cli.mjs's fmtMs/fmtBytes/pct helpers ─
 
 export function fmtNum(n) {
@@ -335,7 +462,17 @@ export function renderSummary(result) {
   L.push('');
 
   const cap = daysUntilNextUtcMonth(new Date(result.generatedAt));
-  L.push(`Anthropic org-level monthly spend cap resets ${cap.resetsAt} (${cap.days} day(s) from now, UTC calendar month — see this tool's own header for why this is the closest real "renewal window" available; neither provider exposes a true subscription/billing renewal date via API).`);
+  L.push(`Anthropic org-level MONTHLY SPEND CAP resets ${cap.resetsAt} (${cap.days} day(s) from now, UTC calendar month) — a pay-as-you-go org ceiling, DISTINCT from the actual usage-window renewal below (see this tool's own header).`);
+  L.push('');
+
+  const anthropicRenewal = describeWeeklyRenewal(ANTHROPIC_RENEWAL, new Date(result.generatedAt));
+  const openaiRenewal = describeWeeklyRenewal(OPENAI_RENEWAL, new Date(result.generatedAt));
+  L.push(anthropicRenewal
+    ? `Anthropic usage window renews: ${anthropicRenewal.label} (in ${anthropicRenewal.days}d ${anthropicRenewal.hours}h) — the actual plan usage-window renewal, distinct from the monthly spend cap above.`
+    : 'Anthropic usage window renewal: not yet known — ANTHROPIC_RENEWAL is unset.');
+  L.push(openaiRenewal
+    ? `OpenAI usage window renews: ${openaiRenewal.label} (in ${openaiRenewal.days}d ${openaiRenewal.hours}h).`
+    : 'OpenAI usage window renewal: not yet known — pending; see OPENAI_RENEWAL in usage-report.mjs.');
   L.push('');
 
   for (const provider of ['anthropic', 'openai']) {
@@ -447,7 +584,13 @@ export async function runUsageReportCli(argv, {
     }),
   ]);
 
-  const result = { generatedAt: nowDate.toISOString(), sinceHours: hours, anthropic, openai };
+  const result = {
+    generatedAt: nowDate.toISOString(), sinceHours: hours,
+    monthlySpendCap: daysUntilNextUtcMonth(nowDate),
+    anthropicRenewal: describeWeeklyRenewal(ANTHROPIC_RENEWAL, nowDate),
+    openaiRenewal: describeWeeklyRenewal(OPENAI_RENEWAL, nowDate),
+    anthropic, openai,
+  };
   out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderSummary(result)}\n`);
   return 0;
 }

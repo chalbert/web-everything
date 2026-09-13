@@ -155,3 +155,32 @@ What **is** real and used by this tool instead:
 - The daily cost-report buckets ARE something this tool sums itself (`sumAnthropicCost`/`sumOpenAICost`), so
   "spend so far" next to "days left in the UTC calendar month" is the best available runway proxy — real
   numbers assembled locally, not a renewal field that does not exist.
+
+### The real usage-window renewal (operator-supplied, 2026-09-13) — distinct from the spend cap above
+
+The monthly spend-cap boundary above is a proxy; it is **not** the actual usage-window renewal. Neither
+provider's API exposes that either, so this is an **operator-confirmed fact**, not a derivation:
+
+- **Anthropic**: renews **weekly**, every **Friday at 16:00 America/New_York**.
+- **OpenAI**: renews **weekly**, every **Saturday at 09:02** (timezone assumed `America/New_York` — not
+  independently stated for OpenAI, but no other zone was given and that's the operator's own zone).
+
+Both live in `usage-report.mjs` as plain, easily-editable config objects — `ANTHROPIC_RENEWAL` /
+`OPENAI_RENEWAL`, shape `{ cadence: 'weekly', dayOfWeek, time, timezone }` — precisely so a corrected
+schedule, a confirmed OpenAI timezone, or a future provider needs only a config edit, not a code change.
+A renewal not yet known/confirmed is `null`, and `describeWeeklyRenewal(null, …)` returns `null` rather
+than guessing — the pattern to follow if either ever needs to go back to "pending".
+
+`nextWeeklyRenewalUtc`/`describeWeeklyRenewal` compute the DST-aware "time until next renewal" with no
+date library (this repo has none — native-first, #75): `Intl.DateTimeFormat` against the IANA zone name,
+reading wall-clock parts back via `formatToParts` rather than a locale's default string pattern — the same
+idiom `scripts/lib/local-date.mjs` already established for zone-aware date handling elsewhere in this
+repo. The offset used for a given renewal instant is always resolved **at that target date**, never at
+"now" — so a renewal whose upcoming week crosses a DST transition (spring-forward/fall-back) still lands
+on the correct wall-clock hour instead of drifting by an hour. `__tests__/usage-report.test.mjs` includes a
+DST-boundary case exercising exactly that (a "now" in EST whose next occurrence falls after the
+spring-forward transition, asserted to resolve in EDT).
+
+Both windows are surfaced in the report output, human-readable and `--json`, labeled distinctly so they
+are never confused: "MONTHLY SPEND CAP" (the org-level pay-as-you-go ceiling) vs. "usage window renews"
+(the actual plan renewal).

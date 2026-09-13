@@ -4,6 +4,7 @@ import {
   buildAnthropicParams, buildOpenAIParams,
   sumAnthropicUsage, sumAnthropicCost, sumOpenAIUsage, sumOpenAICost,
   extractRateLimitHeaders, daysUntilNextUtcMonth, fmtNum, fmtUsd, renderSummary,
+  ANTHROPIC_RENEWAL, OPENAI_RENEWAL, nextWeeklyRenewalUtc, describeWeeklyRenewal,
   runUsageReportCli,
 } from '../usage-report.mjs';
 
@@ -246,6 +247,80 @@ describe('daysUntilNextUtcMonth', () => {
   });
 });
 
+describe('nextWeeklyRenewalUtc / describeWeeklyRenewal — the ACTUAL usage-window renewal, DST-aware', () => {
+  it('finds next Friday 16:00 America/New_York from an ordinary mid-week instant (EDT, no DST crossing)', () => {
+    // Sunday 2026-09-13 12:00 UTC = 08:00 EDT. Next Friday is 2026-09-18, still EDT (UTC-4).
+    const now = new Date('2026-09-13T12:00:00Z');
+    const target = nextWeeklyRenewalUtc(now, ANTHROPIC_RENEWAL);
+    expect(target.toISOString()).toBe('2026-09-18T20:00:00.000Z');
+  });
+
+  it('rolls to next week when today IS the renewal weekday but the time already passed', () => {
+    // Friday 2026-09-18 21:00 UTC = 17:00 EDT — an hour past today's 16:00 renewal — so this must land on
+    // 2026-09-25, not repeat today's already-past instant.
+    const now = new Date('2026-09-18T21:00:00Z');
+    const target = nextWeeklyRenewalUtc(now, ANTHROPIC_RENEWAL);
+    expect(target.toISOString()).toBe('2026-09-25T20:00:00.000Z');
+  });
+
+  it('uses TODAY\'s own occurrence when the renewal weekday has arrived but the time has not yet passed', () => {
+    // Friday 2026-09-18 19:00 UTC = 15:00 EDT — before today's 16:00 renewal.
+    const now = new Date('2026-09-18T19:00:00Z');
+    const target = nextWeeklyRenewalUtc(now, ANTHROPIC_RENEWAL);
+    expect(target.toISOString()).toBe('2026-09-18T20:00:00.000Z');
+  });
+
+  it('DST BOUNDARY: a renewal whose target week falls after a spring-forward transition uses EDT, not ' +
+    '"now"\'s EST offset — proving the offset is resolved for the TARGET date, not for "now"', () => {
+    // Saturday 2026-03-07 12:00 UTC = 07:00 EST (the day before the 2026-03-08 02:00->03:00 spring-forward).
+    // The next Friday is 2026-03-13 — five days AFTER the transition, so it must resolve in EDT (UTC-4),
+    // not EST (UTC-5). A bug that reused "now"'s EST offset would produce 21:00 UTC instead of 20:00 UTC —
+    // a full hour off, and the whole reason this test exists.
+    const now = new Date('2026-03-07T12:00:00Z');
+    const target = nextWeeklyRenewalUtc(now, ANTHROPIC_RENEWAL);
+    expect(target.toISOString()).toBe('2026-03-13T20:00:00.000Z');
+  });
+
+  it('DST BOUNDARY: OpenAI\'s Saturday renewal also resolves EDT correctly straddling the same transition', () => {
+    // Wednesday 2026-03-04 12:00 UTC = 07:00 EST. Next Saturday is 2026-03-07 — still BEFORE the 2026-03-08
+    // spring-forward — so this one must stay in EST (UTC-5): 09:02 EST = 14:02 UTC.
+    const now = new Date('2026-03-04T12:00:00Z');
+    const target = nextWeeklyRenewalUtc(now, OPENAI_RENEWAL);
+    expect(target.toISOString()).toBe('2026-03-07T14:02:00.000Z');
+  });
+
+  it('throws on a dayOfWeek that is not a real weekday name', () => {
+    expect(() => nextWeeklyRenewalUtc(new Date('2026-09-13T12:00:00Z'), { dayOfWeek: 'Fridayy', time: '16:00', timezone: 'America/New_York' }))
+      .toThrow(/not a weekday name/);
+  });
+
+  describe('describeWeeklyRenewal', () => {
+    it('returns the resets-at instant, a zone-local label proving the correct EST/EDT abbreviation, and the day/hour countdown', () => {
+      const now = new Date('2026-09-13T12:00:00Z');
+      const r = describeWeeklyRenewal(ANTHROPIC_RENEWAL, now);
+      expect(r.resetsAt).toBe('2026-09-18T20:00:00.000Z');
+      expect(r.label).toBe('Friday 2026-09-18 16:00 EDT');
+      expect(r.days).toBe(5);
+      expect(r.hours).toBe(8);
+    });
+
+    it('labels the DST-boundary-crossing case with EDT (not EST), matching the resolved instant', () => {
+      const now = new Date('2026-03-07T12:00:00Z');
+      const r = describeWeeklyRenewal(ANTHROPIC_RENEWAL, now);
+      expect(r.label).toBe('Friday 2026-03-13 16:00 EDT');
+    });
+
+    it('returns null for a not-yet-known renewal config, rather than guessing', () => {
+      expect(describeWeeklyRenewal(null, new Date('2026-09-13T12:00:00Z'))).toBeNull();
+    });
+
+    it('throws on an unsupported cadence rather than silently misinterpreting it', () => {
+      expect(() => describeWeeklyRenewal({ cadence: 'monthly', dayOfWeek: 'Friday', time: '16:00', timezone: 'America/New_York' }))
+        .toThrow(/unsupported cadence/);
+    });
+  });
+});
+
 describe('fmtNum / fmtUsd', () => {
   it('formats large numbers with thousands separators, and USD to two decimals', () => {
     expect(fmtNum(1234567)).toBe('1,234,567');
@@ -263,6 +338,19 @@ describe('renderSummary', () => {
     });
     expect(text).toContain('ANTHROPIC_ADMIN_KEY');
     expect(text).toContain('OPENAI_ADMIN_KEY');
+  });
+
+  it('renders BOTH the monthly spend-cap boundary AND the weekly usage-window renewal, labeled distinctly', () => {
+    const text = renderSummary({
+      generatedAt: '2026-09-13T12:00:00.000Z',
+      anthropic: { keyConfigured: false },
+      openai: { keyConfigured: false },
+    });
+    expect(text).toContain('MONTHLY SPEND CAP resets 2026-10-01T00:00:00.000Z');
+    expect(text).toContain('Anthropic usage window renews: Friday 2026-09-18 16:00 EDT (in 5d 8h)');
+    expect(text).toContain('OpenAI usage window renews: Saturday 2026-09-19 09:02 EDT (in 6d 1h)');
+    // the two must never be confused for one another
+    expect(text).toContain('distinct from the monthly spend cap above');
   });
 
   it('renders usage/cost totals and an explicit "(none — expected)" line when no rate-limit headers came back', () => {
@@ -309,6 +397,12 @@ describe('runUsageReportCli', () => {
     const parsed = JSON.parse(captured);
     expect(parsed.anthropic.usage.totalInputTokens).toBe(1800);
     expect(parsed.openai.cost.totalUsd).toBeCloseTo(0.07, 6);
+    // --json must ALSO carry both renewal windows, not just the human-readable text — the monthly spend
+    // cap and the weekly usage-window renewal, labeled distinctly, per-provider.
+    expect(parsed.monthlySpendCap.resetsAt).toBe('2026-10-01T00:00:00.000Z');
+    expect(parsed.anthropicRenewal.resetsAt).toBe('2026-09-18T20:00:00.000Z');
+    expect(parsed.anthropicRenewal.label).toBe('Friday 2026-09-18 16:00 EDT');
+    expect(parsed.openaiRenewal.resetsAt).toBe('2026-09-19T13:02:00.000Z');
   });
 
   it('reports a per-provider HTTP error without throwing, when a fetch resolves non-ok', async () => {
