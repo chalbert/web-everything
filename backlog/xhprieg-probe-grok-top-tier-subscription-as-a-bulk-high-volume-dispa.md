@@ -50,5 +50,7 @@ Operator's own hypothesis, to be TESTED not assumed: a high-tier ('top') Grok su
 ## Lineage
 
 Filed under epic `#3383` (the mechanical dispatcher). Mirrors `#3371`'s probe shape and cites `#3581`'s
-risk-tiered surface framing for how to state the verdict. Companion item: the sibling Cursor probe filed the
-same session.
+risk-tiered surface framing for how to state the verdict. Companion items: the sibling Cursor probe filed the
+same session (`#x8hzy1m`), and the later-filed open-weight PAYG probe (`#xldrls6`, DeepSeek/Qwen/etc.), which
+evaluates candidates for this SAME proposed bulk/high-volume executor role — the two are not independent;
+whoever prepares either must compare candidates against each other rather than in isolation.
