@@ -193,6 +193,7 @@ import {
   IMPACT_LEVELS,
   MANDATORY_LENSES,
   PANEL_LENSES,
+  buildMandate,
   buildPanelFindings,
   buildPanelMandate,
   derivePanelVerdict,
@@ -200,6 +201,14 @@ import {
   deriveLoopOutcome,
   normalizeFindings,
   renderReviewNotice,
+  // #x8n4crp — the FOURTH seat (correctness-advisory) composes its own mandate through the UNGATED
+  // `buildMandate`, never `buildPanelMandate` — see `CORRECTNESS_ADVISORY_LENS`'s own docblock for why. These
+  // three are the exact pieces `buildPanelMandate` itself uses to build the aim-hypothesis block and the
+  // mutation-probe instruction; imported here rather than re-implemented so the seat's mandate carries the
+  // identical wording those blocks already have everywhere else.
+  FENCED_DATA_RULE,
+  fenceUntrusted,
+  MUTATION_PROBE_RULE,
 } from '../lib/review-core.mjs';
 import { CITATION_SCOPES, DISPOSITIONS, VERDICTS, scopeFindingsToCitedFiles } from '../lib/jury-core.mjs';
 import { renderPanelComment } from '../lib/review-render.mjs';
@@ -367,6 +376,85 @@ export function defaultCodexAdvisoryProbationCheck() {
   const status = liveProbationStatusFor({ provider: 'codex', model: CODEX_MODEL, role: 'advisory-review' });
   return status === 'probation' || status === 'trusted';
 }
+
+/**
+ * #x8n4crp — THE FOURTH SEAT'S LENS: a genuinely NEW, distinct Codex seat judging under a CORRECTNESS-flavoured
+ * mandate, seated ALONGSIDE (never in place of) the existing `judgeAdvisory` (`simplicity`) seat above. Built
+ * under epic #3383 after real-pipeline validation showed the existing seat catches real bugs when handed a
+ * `correctness` lens instead of `simplicity` — but RE-LENSING that existing seat directly would have been
+ * wrong: the panel treats any `correctness`-lensed seat as MANDATORY/blocking (confirmed mechanism — see
+ * `MANDATORY_LENSES` and `assertMandatoryLensSeated`/`decideLensFloor`, which read the seated lens strings, not
+ * a seat's provider), so a `judgeAdvisory` run re-lensed to the literal string `'correctness'` would have
+ * quietly become a BLOCKING seat the caller never chose to make mandatory.
+ *
+ * WHY THE LITERAL STRING IS NOT `'correctness'` AND IS NOT ADDED TO `ADVISORY_LENSES`/`PANEL_LENSES` EITHER —
+ * both would recreate the same hazard from a different angle:
+ *   - `'correctness'` verbatim IS `MANDATORY_LENSES[0]` (`DEFAULT_LENS`) — using it here would make
+ *     `MANDATORY_LENSES.filter((l) => lenses.includes(l))` (this file's `reduce` step) treat THIS seat's
+ *     per-lens verdict as one of the mandatory ones a `changes` vote from ANY of must flip the panel to
+ *     `changes`. That is the exact collision this seat exists to avoid — see the test proving a blocking
+ *     finding from this seat never reaches `MANDATORY_LENSES`'s bucket.
+ *   - Adding a new member to `ADVISORY_LENSES` (`we:scripts/lib/jury-core.mjs`) would NOT collide with the
+ *     mandatory bucket, but it would reach far past this one seat: `PANEL_LENSES` (`= [...MANDATORY_LENSES,
+ *     ...ADVISORY_LENSES]`) is the fan-out set `panelRigorForCareLevel` and the wider jury-core panel machinery
+ *     use EVERYWHERE ELSE this repo runs a panel — `converge`, the drain's own auto-review, every other
+ *     operation that calls `buildPanelMandate`/`buildValidatorMandate`. Registering a Codex-only, review-pr-only
+ *     seat there would silently grow every OTHER caller's rigor band by one juror it never asked to seat. That
+ *     is not this card's bill.
+ *
+ * So `CORRECTNESS_ADVISORY_LENS` is a PLAIN, HARD-CODED string that is a member of neither array — it exists
+ * ONLY inside this file's own bookkeeping (`JUDGE_STEPS`-shaped seat lists, `lensVerdicts`, `lensProviders`,
+ * `findings.category`), which is lens-agnostic (`derivePanelVerdict`/`buildPanelFindings` accept any string key
+ * — see their own JSDoc; nothing there gates on `PANEL_LENSES`). The ONE place that DOES gate on `PANEL_LENSES`
+ * is `buildPanelMandate` itself, which is exactly why this seat's mandate is built through the UNGATED
+ * `buildMandate` instead (see {@link buildReviewCorrectnessAdvisoryMandate}) — the correctness-flavoured
+ * INSTRUCTION TEXT still reads `DEFAULT_LENS` (`'correctness'`) as its topic word, only the BOOKKEEPING key
+ * differs, and registration-time (`reviewPrOperation`) refuses outright if that ever stops being disjoint from
+ * `MANDATORY_LENSES` — see the check there.
+ *
+ * Rendered in the panel table as `${CORRECTNESS_ADVISORY_LENS} (codex, advisory)` — see this seat's `provider`
+ * entry in `reduce`'s local `seats` list, which carries the `', advisory'` suffix `renderPanelVerdictTable`
+ * appends verbatim so the row can never be mistaken for the mandatory `correctness` seat's own row.
+ */
+export const CORRECTNESS_ADVISORY_LENS = 'codex-correctness';
+
+/**
+ * #x8n4crp — THE FOURTH SEAT, AS DATA, kept OUT of {@link JUDGE_SEATS} — exactly like {@link ADVISORY_JUDGE_SEAT},
+ * this one is opt-in (see `reviewPrOperation`'s `correctnessAdvisory` param). It is INDEPENDENT of the existing
+ * `codexAdvisory` opt-in: a caller may seat neither, either, or both third-party seats, and the two never share
+ * a gate — see `CORRECTNESS_ADVISORY_ENV_VAR`.
+ */
+export const CORRECTNESS_ADVISORY_SEAT = Object.freeze({ step: 'judgeCorrectnessAdvisory', lens: CORRECTNESS_ADVISORY_LENS });
+
+/**
+ * #x8n4crp — THE ENV VAR NAME both `run.mjs` and `record-verdict-io.mjs` read to decide `correctnessAdvisory`,
+ * mirroring {@link CODEX_ADVISORY_ENV_VAR}'s own reasoning exactly (independent registrations of the same
+ * operation must seat the same roster; no CLI `--flag` can reach a step list fixed at registration). A SEPARATE
+ * env var from the existing seat's, deliberately: the two Codex seats are independently opt-in, so flipping one
+ * on must never silently seat the other.
+ */
+export const CORRECTNESS_ADVISORY_ENV_VAR = 'REVIEW_PR_CODEX_CORRECTNESS_ADVISORY';
+
+/**
+ * #x8n4crp — READS {@link CORRECTNESS_ADVISORY_ENV_VAR}. Mirrors `codexAdvisoryFromEnv` exactly (only the
+ * literal `'1'` seats it; anything else, including `'true'`, does not).
+ * @param {object} [env]
+ * @returns {boolean}
+ */
+export function correctnessAdvisoryFromEnv(env = process.env) {
+  return env?.[CORRECTNESS_ADVISORY_ENV_VAR] === '1';
+}
+
+/**
+ * #x8n4crp — VALIDATED DEFAULT EFFORT for the fourth seat's Codex spawn, independent of {@link JUDGE_EFFORT}
+ * (which stays `'high'` for the two Claude-backed mandatory seats and the existing `judgeAdvisory` seat — see
+ * `buildReviewAdvisoryJudgeRequest`, unchanged by this card). Measured live against real PRs during this
+ * session: `medium` returned 2 findings in 34s for 281 tokens, against `max`'s 6 findings in 508s for ~14k
+ * tokens — `medium` is the best value/cost tradeoff for an ADVISORY seat whose findings never block, and is
+ * the ratified default here. A caller wanting more thoroughness still gets it by turning the seat on with a
+ * richer request built by hand; this constant only fixes what `reviewPrOperation`'s own wiring asks for.
+ */
+export const CORRECTNESS_ADVISORY_EFFORT = 'medium';
 
 /**
  * WHICH LENSES A RUN WOULD ACTUALLY SEAT, given the caller's `--lens`. Resolves {@link CALLER_CHOSEN_LENS}
@@ -1060,6 +1148,87 @@ export function buildReviewAdvisoryJudgeRequest({ read, aim = '' }) {
 }
 
 /**
+ * #x8n4crp — THE FOURTH SEAT'S FRAMING TEXT, appended after the ungated correctness-flavoured base mandate (see
+ * {@link buildReviewCorrectnessAdvisoryMandate}). Tells the juror plainly what its seat IS and is NOT, so it
+ * never assumes it is the run's one mandatory correctness juror (it cannot see that one's findings, and must
+ * not soften or hedge on the assumption something else already caught the real bugs).
+ */
+export const CORRECTNESS_ADVISORY_FRAMING = [
+  'You are an INDEPENDENT correctness reviewer running ALONGSIDE this PR\'s panel — a second, structurally',
+  'different opinion on the SAME diff a separate, mandatory `correctness`-lensed juror ALSO judges. You cannot',
+  'see that juror\'s findings, and it cannot see yours: each of you starts from the diff alone. Judge for the',
+  'same thing that mandatory juror judges for — genuine correctness bugs: logic errors, broken invariants,',
+  'behaviour this diff introduces that is actually wrong — using your own judgement, not a guess at what the',
+  'other juror already covered. Your OWN verdict here is ADVISORY: it is reported to the operator, and it never',
+  'blocks this PR from landing on its own, however severe your findings are. Do NOT soften a finding because of',
+  'that — report exactly what you would report if your verdict could block, and let the operator weigh it.',
+].join(' ');
+
+/**
+ * #x8n4crp — THE FOURTH SEAT'S MANDATE. Built through the UNGATED `buildMandate` — never `buildPanelMandate`,
+ * which throws on any lens outside `PANEL_LENSES` (see {@link CORRECTNESS_ADVISORY_LENS}'s own docblock for why
+ * this seat's bookkeeping lens is deliberately NOT a `PANEL_LENSES` member). The base mandate's TOPIC WORD is
+ * still the real `DEFAULT_LENS` (`'correctness'`) — so the juror is instructed to judge for correctness exactly
+ * the way the mandatory seat is — only the SEAT'S OWN bookkeeping key differs.
+ *
+ * Composed to match what `buildPanelMandate` would have added, piece for piece, since this seat cannot go
+ * through it: the aim-hypothesis block (#3094, only when `aim` is non-empty — identical wording, built from the
+ * same `FENCED_DATA_RULE`/`fenceUntrusted` pieces `buildPanelMandate` itself uses) and the unconditional
+ * mutation-probe instruction (#3094's own ruling: it is not gated on the lens, since the wording is a natural
+ * no-op for a finding that changes no behaviour). `CODEX_ADVISORY_SANDBOX_CORRECTION` is appended last, exactly
+ * as it is for the existing `judgeAdvisory` seat, since this seat runs on the identical read-only Codex shell.
+ *
+ * @param {object} o
+ * @param {object} o.read - the `read` step's finding.
+ * @param {string} [o.aim] - the caller's #3094 hypothesis, or `''`.
+ * @returns {string}
+ */
+export function buildReviewCorrectnessAdvisoryMandate({ read, aim = '' }) {
+  const base = buildMandate({ mandate: DEFAULT_LENS, goal: read.title, fenced: true });
+  const parts = [base, CORRECTNESS_ADVISORY_FRAMING];
+  const aimText = typeof aim === 'string' ? aim.trim() : '';
+  if (aimText) {
+    if (!base.includes(FENCED_DATA_RULE)) parts.push(FENCED_DATA_RULE);
+    parts.push(
+      'WHERE THE CALLER THINKS THE DEFECT IS — A HYPOTHESIS, STATED BY THE CALLER, NOT ESTABLISHED. Search there',
+      'FIRST and report what you actually find. It is NOT a finding, NOT evidence, and NOT a conclusion you are',
+      'being asked to reach: if the named defect is NOT there, say so explicitly and in those words — "the aim',
+      'names X; X is not present here, and this is why" — and that is a COMPLETE answer to the aim, not a failed',
+      'one. Never manufacture an instance of it to satisfy the hypothesis, and never let it narrow you: anything',
+      'else your lens finds is still yours to report. The hypothesis, quoted verbatim:',
+      fenceUntrusted('aim', aimText),
+    );
+  }
+  parts.push(MUTATION_PROBE_RULE);
+  return `${parts.join(' ')} ${CODEX_ADVISORY_SANDBOX_CORRECTION}`;
+}
+
+/**
+ * #x8n4crp — THE FOURTH SEAT'S RECIPE. Same shape as {@link buildReviewAdvisoryJudgeRequest} — no `allowedTools`,
+ * no `model`, `providerName: 'codex'` — but its own mandate builder ({@link buildReviewCorrectnessAdvisoryMandate})
+ * and its own effort ({@link CORRECTNESS_ADVISORY_EFFORT}, `'medium'` — NOT the shared `JUDGE_EFFORT` the other
+ * three seats use).
+ *
+ * @param {object} o
+ * @param {object} o.read - the `read` step's finding.
+ * @param {string} [o.aim] - the caller's #3094 hypothesis, or `''`.
+ * @returns {object} the judge request.
+ */
+export function buildReviewCorrectnessAdvisoryJudgeRequest({ read, aim = '' }) {
+  return {
+    mandate: buildReviewCorrectnessAdvisoryMandate({ read, aim }),
+    input: renderJudgeInput(read),
+    shape: REVIEW_JUDGE_SHAPE,
+    lens: CORRECTNESS_ADVISORY_LENS,
+    effort: CORRECTNESS_ADVISORY_EFFORT,
+    budget: JUDGE_BUDGET_USD,
+    // #x8n4crp — PINS THIS SEAT TO CODEX, independent of the run's `--provider` flag, exactly like the existing
+    // third seat. See `createDefaultJudge`.
+    providerName: 'codex',
+  };
+}
+
+/**
  * The durable verdict write-up posted as the PR comment. EXTENDS `renderPanelComment`
  * (`we:scripts/lib/review-render.mjs`, #2432) rather than hand-rolling markdown — the operation adds only the
  * three lines that are ITS business: who decided, on what basis, and whether that basis was degraded.
@@ -1355,7 +1524,7 @@ export function renderAdvisoryNote({ read, verdict } = {}) {
  * BUILD THE DECLARATION. `readPr` is the injected reader (see the header); {@link ./review-pr-io.mjs} supplies
  * the real one and tests supply a stub. Built per call so nothing leaks between registries.
  *
- * @param {{readPr: (o: {pr: number, repo: string}) => object, codexAdvisory?: boolean}} deps
+ * @param {{readPr: (o: {pr: number, repo: string}) => object, codexAdvisory?: boolean, correctnessAdvisory?: boolean}} deps
  * @param {boolean} [deps.codexAdvisory] - #xqa9ttq — OPT-IN THIRD SEAT. `false` by default: the declaration is
  *   BYTE-IDENTICAL to before this card when omitted, which is deliberate (see the rationale below the roster
  *   check at the bottom of this function, and the file header's "THE THIRD SEAT" section). `true` appends
@@ -1363,9 +1532,16 @@ export function renderAdvisoryNote({ read, verdict } = {}) {
  *   The real binding (`we:scripts/operations/run.mjs`) reads this off `REVIEW_PR_CODEX_ADVISORY=1` in the
  *   environment (mirroring `JUDGE_PROVIDER`'s existing env-fallback shape, since a CLI `--flag` cannot reach
  *   here — the step list is fixed at REGISTRATION, before any run's argv is parsed).
+ * @param {boolean} [deps.correctnessAdvisory] - #x8n4crp — OPT-IN FOURTH SEAT, INDEPENDENT of `codexAdvisory`.
+ *   `false` by default, for the identical reason. `true` appends {@link CORRECTNESS_ADVISORY_SEAT} — a
+ *   read-only-shell Codex juror judging under a correctness-flavoured mandate on {@link CORRECTNESS_ADVISORY_LENS}
+ *   (never the literal `'correctness'` — see that constant's own docblock for why) — as a further `judge` step,
+ *   after `judgeAdvisory` when both are seated. The real binding reads this off
+ *   `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY=1` (`correctnessAdvisoryFromEnv`), a SEPARATE env var from the third
+ *   seat's own, so the two Codex seats are toggled independently.
  * @returns {object} the frozen declaration from `op()`.
  */
-export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
+export function reviewPrOperation({ readPr, codexAdvisory = false, correctnessAdvisory = false } = {}) {
   if (typeof readPr !== 'function') {
     throw new TypeError(
       'review-pr: needs a `readPr({pr, repo})` reader — the io is INJECTED so the declaration stays testable '
@@ -1393,11 +1569,31 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
       + `which is not one of ${PANEL_LENSES.join(', ')}. Re-decide that seat rather than judging on nothing.`,
     );
   }
-  // #xqa9ttq — THE ACTUAL ROSTER FOR THIS BUILD. A LOCAL copy, never a mutation of the exported `JUDGE_SEATS`:
-  // every seat-shape check below (the floor refusal in `read`, the roster-consistency check at the bottom of
-  // this function) reads THIS, so an opted-in build validates against the roster it actually declares, and an
-  // opted-OUT build (the default) reads exactly the same `JUDGE_SEATS` reference it always has.
-  const seats = codexAdvisory ? Object.freeze([...JUDGE_SEATS, ADVISORY_JUDGE_SEAT]) : JUDGE_SEATS;
+  // #x8n4crp — THE CORE SAFETY PROPERTY THIS FOURTH SEAT EXISTS FOR, ENFORCED AT REGISTRATION: its bookkeeping
+  // lens must NEVER collide with a `MANDATORY_LENSES` entry. Re-lensing the THIRD seat's own lens directly to
+  // the literal `'correctness'` would have made a `changes` finding from it flip the whole panel — this seat's
+  // very reason to exist is to get a correctness-flavoured Codex opinion WITHOUT that collision, so a future
+  // edit that ever set `CORRECTNESS_ADVISORY_LENS` to a mandatory string must fail here, loudly, before any run
+  // record exists — never surface as a silently-blocking advisory seat on a live PR.
+  if (correctnessAdvisory && MANDATORY_LENSES.includes(CORRECTNESS_ADVISORY_LENS)) {
+    throw new Error(
+      `review-pr: \`CORRECTNESS_ADVISORY_LENS\` resolved to ${JSON.stringify(CORRECTNESS_ADVISORY_LENS)}, which IS `
+      + `a member of \`MANDATORY_LENSES\` ([${MANDATORY_LENSES.join(', ')}]). That is exactly the collision this `
+      + 'seat exists to avoid: a `changes` verdict from an advisory seat lensed as a mandatory string would flip '
+      + 'the whole panel to `changes`, silently promoting an advisory opinion to a blocking one. Give '
+      + '`CORRECTNESS_ADVISORY_LENS` a string disjoint from `MANDATORY_LENSES` and re-register.',
+    );
+  }
+  // #xqa9ttq / #x8n4crp — THE ACTUAL ROSTER FOR THIS BUILD. A LOCAL copy, never a mutation of the exported
+  // `JUDGE_SEATS`: every seat-shape check below (the floor refusal in `read`, the roster-consistency check at
+  // the bottom of this function) reads THIS, so an opted-in build validates against the roster it actually
+  // declares, and a build with BOTH flags off reads exactly the same `JUDGE_SEATS` reference it always has. The
+  // two opt-in seats are INDEPENDENT — either, both, or neither may be appended — and always in this fixed
+  // order (third seat before fourth) so the declared `judge` steps below stay in the same order as this array.
+  let seats = JUDGE_SEATS;
+  if (codexAdvisory) seats = [...seats, ADVISORY_JUDGE_SEAT];
+  if (correctnessAdvisory) seats = [...seats, CORRECTNESS_ADVISORY_SEAT];
+  seats = Object.freeze(seats);
 
   const declaration = op(REVIEW_PR_OP, {
     input: {
@@ -1628,6 +1824,31 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
       }),
     } : {}),
 
+    // ── (opt-in) judgeCorrectnessAdvisory ──────────────────────────────────────────────────────────────────
+    // #x8n4crp — THE FOURTH SEAT, DECLARED ONLY WHEN `correctnessAdvisory` IS TRUE, INDEPENDENT of the third
+    // seat's own `codexAdvisory` flag (a run may seat neither, either, or both). A read-only-shell Codex
+    // panelist judging under a CORRECTNESS-flavoured mandate on `CORRECTNESS_ADVISORY_LENS` — see
+    // `buildReviewCorrectnessAdvisoryJudgeRequest` for its own recipe (no `allowedTools`, `providerName:
+    // 'codex'`, its own `CORRECTNESS_ADVISORY_EFFORT`).
+    //
+    // SAME ISOLATION PROPERTY AS EVERY OTHER SEAT HERE: it reads none of the sibling jurors' findings, so it
+    // starts from the diff alone.
+    //
+    // ADVISORY, NOT MANDATORY, AND THAT IS ENFORCED STRUCTURALLY, NOT BY CONVENTION — the exact property this
+    // seat exists to prove: `CORRECTNESS_ADVISORY_LENS` is not a member of `MANDATORY_LENSES` (refused at
+    // registration above if it ever became one), so `reduce`'s `mandatoryLenses: MANDATORY_LENSES.filter(l =>
+    // lenses.includes(l))` below can NEVER include it — a blocking finding from this seat cannot flip the panel
+    // verdict on its own (see the test coverage for this exact property, mirroring the third seat's own).
+    ...(correctnessAdvisory ? {
+      judgeCorrectnessAdvisory: judgeStep({
+        reads: ['input.aim', 'findings.read'],
+        request: (view) => buildReviewCorrectnessAdvisoryJudgeRequest({
+          read: view.findings.read,
+          aim: typeof view.input.aim === 'string' ? view.input.aim : '',
+        }),
+      }),
+    } : {}),
+
     // ── 4. reduce ───────────────────────────────────────────────────────────────────────────────────────────
     // THE PANEL REDUCER DECIDES; this step only feeds it. `derivePanelVerdict` (`we:scripts/lib/jury-core.mjs`)
     // is #2310's ratified reduction and is IMPORTED, never restated — adding a second answer to "what does this
@@ -1659,6 +1880,8 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
         // only name a leaf that EXISTS at that point in the run (`op()`'s own registration-time check, above),
         // and `findings.judgeAdvisory` does not exist at all in the opted-out (default) declaration.
         ...(codexAdvisory ? ['findings.judgeAdvisory'] : []),
+        // #x8n4crp — SAME RULE, for the fourth seat, independent of the third's own flag.
+        ...(correctnessAdvisory ? ['findings.judgeCorrectnessAdvisory'] : []),
       ],
       fn: (view) => {
         const read = view.findings.read;
@@ -1675,6 +1898,20 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           // instead of rendering it indistinguishable from a Claude seat (the gap this fixes).
           ...(codexAdvisory
             ? [{ step: ADVISORY_JUDGE_SEAT.step, lens: ADVISORY_JUDGE_LENS, answer: view.findings.judgeAdvisory, provider: 'codex' }]
+            : []),
+          // #x8n4crp — THE FOURTH SEAT, ONLY WHEN SEATED, INDEPENDENT of the third's own flag.
+          // `CORRECTNESS_ADVISORY_LENS` is a LITERAL here for the same reason `ADVISORY_JUDGE_LENS` is above: it
+          // is not caller-negotiable. `provider: 'codex, advisory'` (not the bare `'codex'` the third seat
+          // uses) so `renderPanelVerdictTable`'s `${lens} (${provider})` label reads
+          // `codex-correctness (codex, advisory)` — self-documenting as both non-Claude AND non-blocking, so
+          // this row can never be mistaken for the mandatory `correctness` seat's own row.
+          ...(correctnessAdvisory
+            ? [{
+              step: CORRECTNESS_ADVISORY_SEAT.step,
+              lens: CORRECTNESS_ADVISORY_LENS,
+              answer: view.findings.judgeCorrectnessAdvisory,
+              provider: 'codex, advisory',
+            }]
             : []),
         ];
 
@@ -2033,8 +2270,9 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
   // is the exact failure mode #3344 exists to rule out. REFUSED AT REGISTRATION, before any run record, for
   // the same reason the `SECURITY_LENS` check above is.
   const declaredJudgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
-  // #xqa9ttq — `seats`, NOT the module-level `JUDGE_SEATS`: this build's actual roster, which is 2 seats when
-  // `codexAdvisory` is false (identical to `JUDGE_SEATS`) and 3 when true.
+  // #xqa9ttq / #x8n4crp — `seats`, NOT the module-level `JUDGE_SEATS`: this build's actual roster, which is 2
+  // seats when both `codexAdvisory` and `correctnessAdvisory` are false (identical to `JUDGE_SEATS`), 3 when
+  // exactly one is true, and 4 when both are.
   const roster = seats.map((seat) => seat.step);
   if (declaredJudgeSteps.length !== roster.length || declaredJudgeSteps.some((n, i) => n !== roster[i])) {
     throw new Error(
