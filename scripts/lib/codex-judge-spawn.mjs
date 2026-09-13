@@ -79,6 +79,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CODEX_EFFORT_MAP, CODEX_MODEL, assertCodexModel } from './codex-model-routing.mjs';
 import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './judge-spawn.mjs';
 
 /**
@@ -195,20 +196,27 @@ export function stripNulls(value) {
 export const CODEX_CLI = 'codex';
 
 /**
- * The shared care→rigor dial's effort enum (`judge-spawn.mjs#EFFORT_LEVELS`) does not match Codex's own
- * `model_reasoning_effort` values one-to-one. Mapped where a real Codex level exists; `xhigh`/`max` CLAMP
- * DOWN to `high` rather than being refused or passed through unrecognised, because a clamp is a degraded-but-
- * working request and a refusal is a request that cannot run at all — the same "a bound being hit is not a
- * crash" reasoning `JUDGE_TIMEOUT_MS`'s header already uses, applied to an effort level instead of a clock.
- * RE-DERIVE if Codex ever adds a level above `high`.
+ * The care→rigor dial's effort vocabulary, RE-EXPORTED from `#3635`'s single source
+ * (`we:scripts/lib/codex-model-routing.mjs`) rather than kept as a local copy.
+ *
+ * This file used to define its own map, which CLAMPED `xhigh`/`max` down to `high` and offered no `ultra`, on
+ * the stated assumption that Codex stops at `high`. `#3635` measured that assumption and found it false — and
+ * its 2026-09-12 follow-up correction names THIS file as the clamp's origin, since `codex-direct-task.mjs`
+ * had copied the convention from here. `gpt-6-astra`'s `supported_reasoning_levels` are
+ * `low·medium·high·xhigh·max·ultra` in the CLI's own server-fetched catalogue, and a live
+ * `codex exec -c model_reasoning_effort=<level>` ping at each of `xhigh`/`max`/`ultra` completed normally.
+ *
+ * So the clamp was not a "degraded-but-working request" as the old header argued — it was silently sending a
+ * WEAKER level than the caller asked for, recording nothing, on levels that would have worked as asked. That
+ * is the precise failure mode Fork 1 exists to close, one axis over. The map is now an identity over all six.
  */
-export const CODEX_EFFORT_MAP = Object.freeze({
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'high',
-  max: 'high',
-});
+export { CODEX_EFFORT_MAP };
+
+/**
+ * The ratified model pin, re-exported so a reader of THIS file (and its tests) can name the value
+ * `buildCodexJudgeArgv` now always emits, without reaching past it to the routing module.
+ */
+export { CODEX_MODEL };
 
 /**
  * A Codex `turn.failed` whose error is OpenAI's strict-schema 400 (`#3371` probe 3) — a CALLER bug (the shape
@@ -260,11 +268,16 @@ export function assertNoCodexTools(allowedTools) {
  *   parse seam).
  * @param {string} opts.cwd - a scratch working directory. NOT a lane — this provider is tool-free, so `-C`
  *   only decides how much ambient repo doctrine gets loaded (probe 9), never what the juror can write.
- * @param {string} [opts.model] - Codex's `-m`.
+ * @param {string} [opts.model] - Codex's `-m`. #3635: defaults to the ratified `CODEX_MODEL` pin and is
+ *   ALWAYS emitted — there is no code path here that omits `-m`. A caller must name a model to get a
+ *   different one; it can no longer get an unrecorded one by saying nothing.
  * @param {string} [opts.effort] - one of `judge-spawn.mjs`'s `EFFORT_LEVELS`; mapped via `CODEX_EFFORT_MAP`.
+ *   Left UNSET-able on purpose — see the `-c model_reasoning_effort` note in the body.
  * @returns {string[]} argv AFTER the binary name.
  */
-export function buildCodexJudgeArgv({ schemaFile, outputLastMessageFile, cwd, model, effort } = {}) {
+export function buildCodexJudgeArgv({
+  schemaFile, outputLastMessageFile, cwd, model = CODEX_MODEL, effort,
+} = {}) {
   if (typeof schemaFile !== 'string' || !schemaFile.trim()) {
     throw new TypeError('codex-judge-spawn: `schemaFile` must be a non-empty path');
   }
@@ -284,12 +297,23 @@ export function buildCodexJudgeArgv({ schemaFile, outputLastMessageFile, cwd, mo
     '--ephemeral',                  // no session persistence — the `--no-session-persistence` analogue.
     '-C', cwd,
   ];
-  if (model !== undefined) {
-    if (typeof model !== 'string' || !model.trim() || model.trim().startsWith('-')) {
-      throw new TypeError(`codex-judge-spawn: \`model\` must be a plain non-empty string, got ${JSON.stringify(model)}`);
-    }
-    argv.push('-m', model.trim());
-  }
+  // #3635 Fork 1, RATIFIED: "Every Codex invocation names its model explicitly — never the CLI's own
+  // implicit default." UNCONDITIONAL, not `if (model !== undefined)` as this previously read: no caller
+  // supplied a model, so every judge run inherited whatever `codex exec` resolves to — measured live as
+  // `gpt-6-astra`, the top rung. The hole is not that the inherited model is WRONG (it is the same model this
+  // pin names); it is that nothing recorded the choice, so a server-side catalogue re-rank — the CLI fetches
+  // and caches its model list with a `priority` order, no release needed — would silently move the judge seat
+  // onto a different model with no diff, no log and no transcript entry to notice it by.
+  argv.push('-m', assertCodexModel(model, 'codex-judge-spawn'));
+  // EFFORT IS DELIBERATELY STILL OPTIONAL, and that is a KNOWN, NARROWER residual of the same rule — recorded
+  // rather than fixed here. #3635 applies "never implicit" to effort too (`resolveCodexEffort` pins the
+  // `sonnet` rung's `medium` when a caller names neither `tier` nor `effort`), and omitting `-c
+  // model_reasoning_effort` lets Codex pick its own `default_reasoning_level`. That default is measured as
+  // `medium` — the same value the `sonnet` rung would pin — so the gap costs no behaviour TODAY, only the
+  // record. It is left alone on purpose: the judge seat's right default effort is exactly what the live
+  // effort-level investigation is measuring, and pinning a rung here now would pre-empt its answer with a
+  // guess. Close it when that lands, by resolving through `resolveCodexEffort` the way the delivery provider
+  // and `codex-direct-task.mjs` already do.
   if (effort !== undefined) {
     const mapped = CODEX_EFFORT_MAP[effort];
     if (!mapped) {

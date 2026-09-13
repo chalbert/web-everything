@@ -125,6 +125,9 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
+import {
+  CODEX_EFFORT_MAP, CODEX_MODEL, assertCodexModel, resolveCodexEffort,
+} from '../lib/codex-model-routing.mjs';
 import { buildNativeDenyCodexArgs } from '../lib/isolation-provider.mjs';
 import { REPO_ROOT } from './minimal-context-provider.mjs';
 
@@ -132,40 +135,44 @@ import { REPO_ROOT } from './minimal-context-provider.mjs';
 export const CODEX_CLI = 'codex';
 
 /**
- * The Codex model pin. RATIFIED as a repo rule (#x8wbivt, 2026-09-11 —
- * `we:docs/agent/backlog-workflow.md#codex-model-routing`) on measured evidence: 89 logged `codex exec` runs
- * across 8 selectable models, and this one scored top on every probe at the lowest reasoning-token burn. The
- * rule's own words are "never inherit, never implicit", so `-m` is ALWAYS passed and there is no code path
- * here that omits it. Confirmed live in this file's own probes (`-m gpt-6-astra`, real write-capable runs).
+ * The Codex model pin — NOW AN IMPORT, discharging this constant's own follow-up note.
  *
- * A LOCAL COPY, NOT AN IMPORT — the same deliberate, documented call `we:scripts/codex-direct-task.mjs`'s own
- * `CODEX_EFFORT_MAP` makes for the same reason ("kept as a local copy because `codex-judge-spawn.mjs` is a
- * different, unmerged lane's file at the time this was written"). #x8wbivt's constants landed on `main` AFTER
- * this prototype branch forked, so importing them from here would not resolve. CONSOLIDATE to that single
- * source when this branch merges — that is a real follow-up, not a note to ignore.
+ * It shipped as a hand-copied `'gpt-6-astra'` literal with a header that flagged the duplication and said
+ * *"CONSOLIDATE to that single source when this branch merges — that is a real follow-up, not a note to
+ * ignore."* The blocker it named (#x8wbivt's constants landed on `main` AFTER this prototype branch forked,
+ * so the import would not resolve) is gone: `origin/main` is merged into this branch and the constants now
+ * live in `we:scripts/lib/codex-model-routing.mjs`, the single source all three Codex call sites share.
+ *
+ * The BEHAVIOUR here is unchanged — this provider already passed `-m` unconditionally, so it was never the
+ * Fork-1 hole that `codex-judge-spawn.mjs` was. What changes is that a re-ratification of the pin (a new
+ * model, a retired catalogue entry) now reaches this file on its own, instead of needing someone to remember
+ * a third copy existed. `CODEX_DELIVERY_MODEL` is KEPT as a name — it is this module's published surface and
+ * its tests use it — but it is now an alias of the ratified constant, not a second declaration of it.
  */
-export const CODEX_DELIVERY_MODEL = 'gpt-6-astra';
+export const CODEX_DELIVERY_MODEL = CODEX_MODEL;
 
 /**
- * The `model_reasoning_effort` levels this provider accepts. IDENTITY, not a clamp: `#x8wbivt` re-checked the
- * older clamp-to-`high` convention (still present on this branch's `codex-direct-task.mjs` /
- * `codex-judge-spawn.mjs`) against the CLI's own server-fetched catalogue AND against execution —
- * `gpt-6-astra`'s `supported_reasoning_levels` are all six below, and a live ping at each of `xhigh`/`max`/
- * `ultra` completed normally. Clamping was therefore silently DOWNGRADING an explicit choice and recording
- * nothing. A caller who overrides `model` may name a level that model does not offer; Codex answers that with
- * its own error. This map validates the VOCABULARY, not the entitlement.
+ * The `model_reasoning_effort` levels this provider accepts — the keys of the shared `CODEX_EFFORT_MAP`,
+ * derived rather than retyped, so this list cannot drift from the one `codex-direct-task.mjs` and
+ * `codex-judge-spawn.mjs` validate against.
+ *
+ * IDENTITY, not a clamp: `#x8wbivt` re-checked the older clamp-to-`high` convention against the CLI's own
+ * server-fetched catalogue AND against execution — `gpt-6-astra`'s `supported_reasoning_levels` are all six,
+ * and a live ping at each of `xhigh`/`max`/`ultra` completed normally. Clamping was therefore silently
+ * DOWNGRADING an explicit choice and recording nothing. A caller who overrides `model` may name a level that
+ * model does not offer; Codex answers that with its own error. This validates the VOCABULARY, not the
+ * entitlement.
  */
-export const CODEX_DELIVERY_EFFORT_LEVELS = Object.freeze([
-  'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
-]);
+export const CODEX_DELIVERY_EFFORT_LEVELS = Object.freeze(Object.keys(CODEX_EFFORT_MAP));
 
 /**
  * The delivery agent's default reasoning effort. `'medium'` is the `sonnet` rung of #x8wbivt's ratified
  * three-rung ladder — the rung that card's routing rule makes the default for ordinary build-shaped work, and
- * chosen EXPLICITLY here rather than inherited (the same card refuses an implicit default). Overridable per
- * call via `buildCodexDeliveryArgv`'s `effort`.
+ * chosen EXPLICITLY here rather than inherited (the same card refuses an implicit default). Resolved THROUGH
+ * `resolveCodexEffort` rather than retyped as `'medium'`, so re-ratifying the ladder moves this too.
+ * Overridable per call via `buildCodexDeliveryArgv`'s `effort`.
  */
-export const CODEX_DELIVERY_EFFORT = 'medium';
+export const CODEX_DELIVERY_EFFORT = resolveCodexEffort({ tier: 'sonnet' });
 
 /**
  * The `.operations/` sidecar holding the `sessionSlug → Codex thread id` map — the same sidecar family
@@ -251,9 +258,7 @@ export function buildCodexDeliveryArgv({
   if (typeof cwd !== 'string' || !cwd.trim()) {
     throw new TypeError('codex-delivery-provider: `cwd` must be the resolved lane clone path');
   }
-  if (typeof model !== 'string' || !model.trim() || model.trim().startsWith('-')) {
-    throw new TypeError(`codex-delivery-provider: \`model\` must be a plain non-empty string, got ${JSON.stringify(model)}`);
-  }
+  const pinnedModel = assertCodexModel(model, 'codex-delivery-provider');
   if (!CODEX_DELIVERY_EFFORT_LEVELS.includes(effort)) {
     throw new TypeError(
       `codex-delivery-provider: \`effort\` must be one of ${CODEX_DELIVERY_EFFORT_LEVELS.join('|')}, `
@@ -269,7 +274,9 @@ export function buildCodexDeliveryArgv({
   const common = [
     '--json',
     '--skip-git-repo-check',
-    '-m', model.trim(),
+    // #3635 Fork 1: unconditional, on BOTH the fresh-spawn and the `exec resume` path (`common` is shared by
+    // construction, so a resume can never silently drop the pin the first turn was run under).
+    '-m', pinnedModel,
     '-c', `model_reasoning_effort=${effort}`,
     ...sandboxArgs,
   ];
