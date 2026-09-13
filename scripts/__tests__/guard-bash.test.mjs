@@ -594,6 +594,29 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
     allowed("sed 's/x/y/w /tmp/scratch.md' file.txt");
     allowed("sed -n '/pat/w /tmp/scratch.md' file.txt");
   });
+
+  // #2108 review r3 — SED_ADDR_W missed a NEGATED address (`/pat/!w file`), GNU's `first~step` address
+  // extension (`0~3w file`), and the uppercase `W` command — three more real sed write shapes with no
+  // `-i`/`--in-place` anywhere, verified against real sed to genuinely write the named file.
+  it('denies a sed address-write via negation, GNU step address, or the uppercase W command (#2108 review r3)', () => {
+    denied("sed -n '/pat/!w backlog/2200-a.md' file.txt");
+    denied("sed -n '3,5!w backlog/2200-a.md' file.txt");
+    denied("sed -n '0~3w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/W backlog/2200-a.md' file.txt");
+  });
+
+  // #2108 review r3 — an earlier GNU-only flag that takes a SEPARATE argument (`-l N`) shifted the
+  // no-`-e`/no-`-f` fallback's "first operand" pick onto that consumed numeral instead of the real
+  // script, so the actual `w`-write in the script text was never scanned at all.
+  it('still finds the sed script (and its w-write) past a preceding arg-taking flag like -l N (#2108 review r3)', () => {
+    denied("sed -l 80 's/x/y/w backlog/2200-a.md' file.txt");
+  });
+
+  // #2108 review r3 — the deny arm's `atCommand` gate never matched a `gsed` invocation even though
+  // fileWriteTargets/sedScriptTexts already support prog === 'gsed' internally — unreachable from here.
+  it('denies a gsed in-place write into backlog|reports, matching sed (#2108 review r3 coverage gap)', () => {
+    denied('gsed -i s/x/y/ backlog/2200-a.md');
+  });
 });
 
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
