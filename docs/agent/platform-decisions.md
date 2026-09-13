@@ -3641,6 +3641,22 @@ trust-chain (engine = agent-clearable on a converged independent panel) and #248
 and [#agent-convergence-independent-validation](#agent-convergence-independent-validation) (independence rests on a
 distinct validator, never peer/self agreement).
 
+**Rider — the independence invariant extends to an automated run-quality judge's own findings, on a non-PR
+path (#3649, ratified 2026-09-13).** #3649's run-quality auditor scores a dispatched agent's transcript and can
+auto-apply low-risk fixes for a **bounded one-off work agent** — but when the reviewed subject is itself a
+**conveyor/driver-class process** (a runner or driver that queues, dispatches, or supervises other work as
+part of its own operation), the auditor is **report-only, always**, regardless of how low-risk a finding
+looks: it emits findings and a score and hands them off, never applying a fix directly. This is not a
+stricter rival rule but an **entailment** of this anchor's clause-3 independence invariant, reached by a
+different route: an auditor auto-applying its own finding against a live driver would be the same
+self-approval hole clause 3 closes (judge and approver of the same change), reached through an automated-judge
+path instead of a PR. `subjectClass` is stamped on the dispatch record at launch time and read back, never
+re-derived from the transcript afterward; a transcript with no dispatch record is driver-class by default
+(fail-closed). Composes with, and does not subsume, [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)'s
+`#2077` rider (`RUN_TOOLING` touch-set test): the two key on different tests — this rider on the **subject
+class** that produced the transcript, `#2077` on the **edit's touch-set** — and an auto-applied fix must clear
+both. Lineage: [#3649](/backlog/3649-run-quality-benchmark-score-a-dispatched-agent-s-own-transcr/).
+
 ---
 
 ### "Which trust tier owns X" defaults to a contract-split — engine-tier the impl, policy-tier a `*.contract.json` for the definition {#contract-split-for-tier-ownership}
