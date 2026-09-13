@@ -122,9 +122,9 @@
  * `buildCodexDeliveryArgv`, `parseCodexThreadId` and `assertDenyPathsUsable` are PURE — no fs, no spawn, no
  * clock — so the argv, which IS the contract with the CLI, is assertable by a test with no subprocess at all.
  */
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
+import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 import { buildNativeDenyCodexArgs } from '../lib/isolation-provider.mjs';
 import { REPO_ROOT } from './minimal-context-provider.mjs';
 import { usageReportSecretDir } from '../lib/usage-report-secret-paths.mjs';
@@ -341,22 +341,32 @@ export function readCodexThreadId(sessionSlug, repoRoot = REPO_ROOT) {
 }
 
 /**
- * The blocking spawn primitive — the Codex counterpart to `dispatch-lane-io.mjs#defaultSpawnAgent`, which
- * hardcodes `'claude'` and so cannot be reused. RETURNS STDOUT (unlike the Claude one, which discards it),
- * because the thread id this port's resume branch depends on exists nowhere else.
+ * The blocking spawn primitive — the Codex counterpart to `dispatch-lane-io.mjs#spawnAgentToCompletion`, which
+ * hardcodes `'claude'` and so cannot be reused. Resolves `{stdout, stderr, resourceUsage}` (unlike the Claude
+ * one's own `spawnAgentToCompletion`, whose caller discards `stdout`), because the thread id this port's resume
+ * branch depends on exists nowhere else.
+ *
+ * #3383 follow-up — ASYNC now, built on `scripts/lib/spawn-to-completion.mjs#spawnToCompletion` (was
+ * `execFileSync`; see that module's own header for the full execFileSync-equivalence contract this inherits
+ * unchanged — stdout/stderr capture, exit-code/signal/timeout/maxBuffer handling — and for why the `resourceUsage`
+ * field it also returns is honestly `null` on real Node, not a real per-child CPU reading: `ChildProcess` has no
+ * `resourceUsage()` method at all, contrary to an earlier assumption). Every EXISTING caller already awaits
+ * this (`CODEX_PROVIDER.spawn` and its `fix`/`ci-heal` siblings, all async), so this conversion is a drop-in:
+ * the same blocking-until-done semantics, just implemented via an awaited promise instead of a synchronous
+ * return.
  *
  * `stdio: ['ignore', 'pipe', 'pipe']` is LOAD-BEARING, not housekeeping — see the file header's stdin-trap
- * note. `killSignal: 'SIGKILL'` mirrors `defaultSpawnAgent`: a wedged agent is still reclaimed when the
- * caller's `timeout` fires.
+ * note. `killSignal: 'SIGKILL'` mirrors `dispatch-lane-io.mjs#spawnAgentToCompletion`: a wedged agent is still
+ * reclaimed when the caller's `timeout` fires.
  */
-export function defaultSpawnCodexAgent(argv, opts = {}, { exec = execFileSync } = {}) {
-  return exec(CODEX_CLI, argv, {
+export function defaultSpawnCodexAgent(argv, opts = {}, io = {}) {
+  return spawnToCompletion(CODEX_CLI, argv, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
     killSignal: 'SIGKILL',
     ...opts,
-  });
+  }, io);
 }
 
 

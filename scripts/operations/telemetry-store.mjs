@@ -775,30 +775,29 @@ export async function spanAroundAsync(name, opts, fn) {
 // attributes, so `agent.turn` (and any other span a caller wraps this way) carries a real resource-cost number
 // next to its wall-clock duration, not just the duration alone.
 //
-// STATED PLAINLY, THE ONE THING THIS DOES NOT MEASURE — read this before trusting the number it produces.
-// `process.cpuUsage()` reports the CALLING process's OWN CPU time; it has NO view into a spawned CHILD's
-// resource usage. Every one of the six dispatch wrappers spawns its agent via `execFileSync`/`spawnSync`
-// (`dispatch-lane-io.mjs#defaultSpawnAgent`, `codex-delivery-provider.mjs#defaultSpawnCodexAgent`) — a
-// SYNCHRONOUS call that blocks this wrapper process in a kernel wait while the real work happens in a
-// different process entirely. Confirmed by direct test against this Node runtime (v22): `spawnSync`'s return
-// object carries no `resourceUsage` field at all — unlike the ASYNC `child_process.spawn()` API, whose
-// `ChildProcess#resourceUsage()` (populated from the exited child's own `getrusage(2)`/`wait4(2)` data) is the
-// API that would give a REAL per-child figure. Switching six wrappers from their proven, verified, blocking
-// `execFileSync` shape to an async `spawn()` + `resourceUsage()` shape is a materially larger, riskier change
-// than "wire in a sample" and was explicitly left out of THIS pass — the wrapper's own blocking-call docblocks
-// name exactly why that shape was chosen (a real, live-tested `--restricted`/hooks/env spawn) and this follow-
-// on does not re-litigate it.
+// #3383 MECHANICAL-DISPATCHER FOLLOW-UP — THE SPAWN SIDE WAS FIXED; THE CPU NUMBER ITSELF WAS NOT, AND THAT IS
+// AN HONEST FINDING, NOT A DEFERRAL. This section originally documented, correctly, that `process.cpuUsage()`
+// measures the WRAPPER process, never the spawned agent, because every dispatch wrapper spawned its agent via
+// the SYNCHRONOUS `execFileSync`/`spawnSync`. The follow-up brief assumed the fix was `ChildProcess
+// #resourceUsage()` on the ASYNC `child_process.spawn()` API. THAT METHOD DOES NOT EXIST — verified against
+// real Node v18.2.0 and v22.1.0 (`ChildProcess.prototype` has no such member, for a plain `spawn()` OR a
+// `fork()`) and against `@types/node`'s own `child_process.d.ts` (silent on it) versus `process.d.ts` (which
+// DOES declare `resourceUsage()`, but on `process` — the CURRENT process — never a child). See
+// `scripts/lib/spawn-to-completion.mjs`'s own header for the full verification trail.
 //
-// SO WHAT DOES THIS ACTUALLY MEASURE, AND WHY RECORD IT ANYWAY. The wrapper process's own user+system CPU time
-// spent while blocked on the child — which is normally SMALL (a blocked `wait4` costs ~nothing) but not
-// exactly zero: `execFileSync` pumps the child's stdout/stderr through a pipe into an in-memory buffer as it
-// arrives, and that read-and-copy loop is real, if modest, CPU work charged to THIS process, roughly
-// proportional to how much the child printed. It is recorded because the epic asked for it explicitly, it is
-// cheap and harmless to capture, and — see `host-process-sample.mjs` — it is NOT the system's only per-agent
-// signal: the tick-loop's `host.process.dispatched_agents.*` category (recorded independently, every tick,
-// system-wide) observes the actual agent CHILD process from OUTSIDE via `ps`, which is the genuinely
-// meaningful per-agent-cost number this repo has today. Treat `cpuUserMs`/`cpuSystemMs`/`cpuTotalMs` below as
-// "this wrapper's own overhead while waiting", not "what the agent cost".
+// What DID land: every wrapper's full-turn agent spawn now goes through `scripts/lib/spawn-to-completion.mjs
+// #spawnToCompletion` (via `dispatch-lane-io.mjs#spawnAgentToCompletion` / `codex-delivery-provider.mjs
+// #defaultSpawnCodexAgent`) — a real, tested improvement (async, streaming, non-blocking-event-loop, the exact
+// `execFileSync` contract preserved) — but it does not, and cannot, supply a real per-child rusage reading on
+// today's Node. `recordChildResourceUsage`/`takeChildResourceUsage` below are kept anyway, as the narrow,
+// ambient side-channel (mirroring this file's own `setActiveRecorder`/`activeRecorder` pattern) a provider's
+// `spawn()` would use to hand a real reading up to the `agent.turn` span IF one were ever available — a
+// forward-compatible no-op today, never a fabricated number. `resolveTurnCpuAttributes` reflects this honestly:
+// it prefers a real child reading when one exists (`cpuSource: 'child'`), and otherwise falls back to the
+// ORIGINAL wrapper-only `process.cpuUsage()` delta (`cpuSource: 'wrapper'`) — which, in practice, is what every
+// `agent.turn` span reports today. The genuinely reliable per-agent-cost signal remains what the prior #3383
+// landing already built for exactly this reason: `host-process-sample.mjs`'s external, `ps`-based sampling of
+// the live dispatched child from OUTSIDE the wrapper process.
 /**
  * PURE-ISH (its only external effect is reading `process.cpuUsage()`, a snapshot with no side effect of its
  * own) — the millisecond delta between two `process.cpuUsage()` reads, keyed the way a span's `attributes` bag
@@ -814,10 +813,70 @@ export function cpuUsageDeltaMs(before) {
 }
 
 /**
+ * PURE. A child's `userCPUTime`/`systemCPUTime` (Node's `getrusage(2)`-shaped convention, both in
+ * MICROSECONDS — the same unit `process.cpuUsage()` uses) → the same `cpuUserMs`/`cpuSystemMs`/`cpuTotalMs`
+ * shape {@link cpuUsageDeltaMs} produces, so a span attribute reader never has to know which of the two
+ * measured it. Returns `null` for a `null`/missing `resourceUsage` — which is EVERY real call today: real
+ * Node's `ChildProcess` has no `resourceUsage()` method at all (see `spawn-to-completion.mjs`'s own header for
+ * the verification trail), so this function exists only to stay forward-compatible with a future/injected
+ * spawn primitive that does supply one, never because today's real spawns populate it.
+ * @param {{userCPUTime: number, systemCPUTime: number}|null} resourceUsage
+ * @returns {{cpuUserMs: number, cpuSystemMs: number, cpuTotalMs: number}|null}
+ */
+export function childCpuUsageMs(resourceUsage) {
+  if (!resourceUsage) return null;
+  const userMs = Math.round(resourceUsage.userCPUTime / 1000);
+  const systemMs = Math.round(resourceUsage.systemCPUTime / 1000);
+  return { cpuUserMs: userMs, cpuSystemMs: systemMs, cpuTotalMs: userMs + systemMs };
+}
+
+// The ambient side-channel a provider's `spawn()` uses to hand its just-finished child's `resourceUsage`
+// (always `null` today — see above) back up to whichever `agent.turn` span wraps it — the same shape this
+// file's own `setActiveRecorder`/`activeRecorder` pair already establishes for the telemetry recorder itself.
+// Module-local and single-slot: every real dispatch wrapper process runs exactly ONE agent spawn (or one fresh
+// spawn then one resume spawn, strictly sequential, never concurrent) per process lifetime, so there is never
+// a second write to race the first read.
+let lastChildResourceUsage = null;
+
+/** Record a just-finished child's `resourceUsage()` (or `null`) for the next {@link takeChildResourceUsage}
+ *  read. Called by a provider's `spawn()` right after its spawn settles — on the SUCCESS path with the
+ *  resolved value's `resourceUsage`, and on the FAILURE path with the rejected error's own `.resourceUsage`
+ *  (see `spawn-to-completion.mjs`'s header for why a rejection carries one too). Never throws. */
+export function recordChildResourceUsage(resourceUsage) {
+  lastChildResourceUsage = resourceUsage || null;
+}
+
+/** Read back and CLEAR the last {@link recordChildResourceUsage} write — clearing means a span that finds
+ *  nothing recorded (no spawn happened inside it) never accidentally reads a STALE reading left over from an
+ *  earlier, unrelated span. Never throws. */
+export function takeChildResourceUsage() {
+  const ru = lastChildResourceUsage;
+  lastChildResourceUsage = null;
+  return ru;
+}
+
+/**
+ * THE COMBINATOR both {@link spanAroundAsyncWithCpu} and `deliver-item-wrapper.mjs`'s own manual `agent.turn`
+ * span code use: prefer the REAL child `resourceUsage` a provider's `spawn()` just recorded over the
+ * wrapper-process-only `cpuUsageDeltaMs` fallback, and NAME which one produced the numbers (`cpuSource`) so a
+ * reader of the span never mistakes one for the other — the exact confusion the original, wrapper-only
+ * measurement risked.
+ * @param {{user: number, system: number}} before - a prior `process.cpuUsage()` snapshot (the fallback path).
+ * @returns {{cpuUserMs: number, cpuSystemMs: number, cpuTotalMs: number, cpuSource: ('child'|'wrapper')}}
+ */
+export function resolveTurnCpuAttributes(before) {
+  const ru = takeChildResourceUsage();
+  const child = childCpuUsageMs(ru);
+  if (child) return { ...child, cpuSource: 'child' };
+  return { ...cpuUsageDeltaMs(before), cpuSource: 'wrapper' };
+}
+
+/**
  * THE `async` TWIN OF {@link spanAroundAsync}, WITH A CPU SAMPLE MERGED IN. Identical contract otherwise —
  * `fn`'s return value and any throw pass through completely unaltered, and every telemetry call inside is
  * never-throwing by construction. See the section header above for exactly what `cpuUserMs`/`cpuSystemMs`/
- * `cpuTotalMs` do and do not measure before reading them as "the agent's CPU cost".
+ * `cpuTotalMs`/`cpuSource` do and do not measure before reading them as "the agent's CPU cost" — `cpuSource:
+ * 'child'` is the real figure; `cpuSource: 'wrapper'` is the old, honest-but-not-the-agent fallback.
  * @param {string} name one of `SPAN_NAMES` (used for `agent.turn` today)
  * @param {{attributes?: object, attempt?: number, kind?: string, parent?: string|null, recorder?: object}} opts
  * @param {() => Promise<T>} fn
@@ -838,12 +897,12 @@ export async function spanAroundAsyncWithCpu(name, opts, fn) {
     out = await fn();
   } catch (e) {
     let cpu = {};
-    try { cpu = cpuUsageDeltaMs(before); } catch { /* telemetry must never mask the real error */ }
+    try { cpu = resolveTurnCpuAttributes(before); } catch { /* telemetry must never mask the real error */ }
     try { span.fail(e, cpu); } catch { /* ignore */ }
     throw e;
   }
   let cpu = {};
-  try { cpu = cpuUsageDeltaMs(before); } catch { /* ignore */ }
+  try { cpu = resolveTurnCpuAttributes(before); } catch { /* ignore */ }
   try { span.ok(cpu); } catch { /* ignore */ }
   return out;
 }

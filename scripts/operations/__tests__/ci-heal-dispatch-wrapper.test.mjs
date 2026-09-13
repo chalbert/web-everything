@@ -626,7 +626,7 @@ describe('CI_HEAL_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Code
   const THREAD_EVENT = '{"type":"thread.started","thread_id":"01a0-ci-heal-thread"}\n{"type":"turn.completed"}\n';
 
   const io = (over = {}) => ({
-    spawnAgent: vi.fn(() => THREAD_EVENT),
+    spawnAgent: vi.fn(() => ({ stdout: THREAD_EVENT, resourceUsage: null })),
     persistFailure: vi.fn(),
     resolveReportsDir: vi.fn(() => '/tmp/fix-reports'),
     readThreadId: vi.fn(() => null),
@@ -640,17 +640,17 @@ describe('CI_HEAL_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Code
     item: '2638', reason: 'red-ci',
   };
 
-  it('spawns `codex exec` in the ALREADY-RESOLVED lane clone', () => {
+  it('spawns `codex exec` in the ALREADY-RESOLVED lane clone', async () => {
     const o = io();
-    CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
     const [argv, opts] = o.spawnAgent.mock.calls[0];
     expect(argv.slice(0, 3)).toEqual(['exec', '-C', LANE_PATH]);
     expect(opts.cwd).toBe(LANE_PATH);
   });
 
-  it('stamps the SAME real ci-heal env vars the Claude ci-heal provider does, including CI_HEAL_REASON', () => {
+  it('stamps the SAME real ci-heal env vars the Claude ci-heal provider does, including CI_HEAL_REASON', async () => {
     const o = io();
-    CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
       WE_DISPATCH_KIND: REPAIR_AGENT_KIND,
       FIX_SESSION: 'ci-heal-743',
@@ -664,44 +664,44 @@ describe('CI_HEAL_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Code
   // #3383 mechanical-dispatcher fix — the #3476 regression test (mirrors `fix-dispatch-wrapper.test.mjs`'s
   // own equivalent test): `resolveReportsDir` must be called WITH the (already-resolved) lane path, never
   // bare — bare, it silently names the primary checkout regardless of `lanePath`.
-  it('resolves the reports dir WITH the (already-resolved) lane path — never bare', () => {
+  it('resolves the reports dir WITH the (already-resolved) lane path — never bare', async () => {
     const o = io();
-    CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
   });
 
-  it('blocks on the fix/delivery-shared budget', () => {
+  it('blocks on the fix/delivery-shared budget', async () => {
     const o = io();
-    CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(FIX_AGENT_SPAWN_TIMEOUT_MS);
   });
 
-  it('records the thread id Codex minted, keyed by sessionSlug (ci-heal-<pr>, never fix-<pr>)', () => {
+  it('records the thread id Codex minted, keyed by sessionSlug (ci-heal-<pr>, never fix-<pr>)', async () => {
     const o = io();
-    CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.writeThreadId).toHaveBeenCalledWith('ci-heal-743', '01a0-ci-heal-thread');
   });
 
-  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', () => {
+  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', async () => {
     const o = io({ readThreadId: vi.fn(() => 'recorded-tid') });
-    CI_HEAL_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
     expect(o.readThreadId).toHaveBeenCalledWith('ci-heal-743');
     const argv = o.spawnAgent.mock.calls[0][0];
     expect(argv.slice(0, 3)).toEqual(['exec', 'resume', 'recorded-tid']);
     expect(o.writeThreadId).not.toHaveBeenCalled();
   });
 
-  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', () => {
+  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', async () => {
     const o = io({ readThreadId: vi.fn(() => null) });
-    expect(() => CI_HEAL_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
-      .toThrow(/cannot resume session ci-heal-743/);
+    await expect(CI_HEAL_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
+      .rejects.toThrow(/cannot resume session ci-heal-743/);
     expect(o.spawnAgent).not.toHaveBeenCalled();
   });
 
-  it('captures the child\'s output on a spawn failure and rethrows untouched, under ci-heal\'s own sidecar name', () => {
+  it('captures the child\'s output on a spawn failure and rethrows untouched, under ci-heal\'s own sidecar name', async () => {
     const boom = new Error('spawnSync codex ETIMEDOUT');
     const o = io({ spawnAgent: vi.fn(() => { throw boom; }) });
-    expect(() => CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o)).toThrow(boom);
+    await expect(CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o)).rejects.toThrow(boom);
     expect(o.persistFailure).toHaveBeenCalledWith('ci-heal-spawn-failures', 'ci-heal-743', boom, { resumeSessionId: null });
   });
 });

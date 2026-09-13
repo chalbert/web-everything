@@ -77,8 +77,8 @@ import {
   buildRestrictedProviderArgv, createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu } from './telemetry-store.mjs';
-import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { SCOPE_AUTHORING_AGENT_KIND } from './dispatch-lane.mjs';
 import {
   tryReadDeliveryReport, deleteDeliveryReport, resolveDeliveryReportsDir,
@@ -216,13 +216,14 @@ function persistPrepareSpawnFailure(sessionSlug, error, opts = {}) {
  */
 export const CLAUDE_RESTRICTED_PREPARE_PROVIDER = {
   name: 'claude-restricted (prepare-scope)',
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, item, itemSpecPath } = {},
     {
       ensureSettingsFile = ensurePrepareHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       persistFailure = persistPrepareSpawnFailure,
       resolveReportsDir = resolveDeliveryReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
@@ -237,12 +238,15 @@ export const CLAUDE_RESTRICTED_PREPARE_PROVIDER = {
       // `cwd: lanePath` is load-bearing, not cosmetic: `--restricted` confines the file tools to the process's
       // own working directory, so a wrong cwd sandboxes the agent into editing the wrong repo entirely
       // (`#3627` bug 7(a), confirmed live).
-      spawnAgent(argv, {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); `await` is the only "wait".
+      const { resourceUsage } = (await spawnAgent(argv, {
         cwd: lanePath,
         env: { ...process.env, ...prepareEnv },
         timeout: PREPARE_AGENT_SPAWN_TIMEOUT_MS,
-      }); // BLOCKS — the only "wait" in the whole arc.
+      })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -272,7 +276,7 @@ export async function runPrepareAgentToCompletion(
   } = {},
 ) {
   const prompt = readBrief();
-  provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, item, itemSpecPath }); // BLOCKS.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, item, itemSpecPath }); // AWAITS.
   // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
   // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
   const report = readReport(sessionSlug, resolveReportsDir(lanePath));
@@ -287,7 +291,7 @@ export async function runPrepareAgentToCompletion(
 /** The resume prompt — `unrun` is NOT treated as "your change is broken" (the same `#3627` attempt-5 finding
  *  both sibling wrappers already encode): a gate that could not RUN is an environment problem, and telling an
  *  agent to fix code that may be fine invites a guessed edit. */
-function resumePrepareAgentWithGateFailure({
+async function resumePrepareAgentWithGateFailure({
   sessionSlug, lanePath, item, itemSpecPath, failureOutput, gateOutcome = 'fail',
   provider = CLAUDE_RESTRICTED_PREPARE_PROVIDER, claudeSessionId,
 }) {
@@ -300,9 +304,9 @@ function resumePrepareAgentWithGateFailure({
     : `Your gate failed:\n\n${failureOutput}\n\nThis is almost always the \`scope:\` frontmatter you wrote in `
       + `${itemSpecPath} — a malformed YAML shape, or an empty \`scope: []\` (which the gate errors on by `
       + 'design). Fix that one file, then send a fresh `done` report exactly as before.';
-  provider.spawn({
+  await provider.spawn({
     sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lanePath, sessionSlug, item, itemSpecPath,
-  }); // BLOCKS.
+  }); // AWAITS.
 }
 
 /**
@@ -316,7 +320,7 @@ function resumePrepareAgentWithGateFailure({
  *
  * @returns {{status: ('green'|'red'|'gate-blocked'), lanePath: string, reason?: (string|null)}}
  */
-export function runPrepareGateWithOneRetry(
+export async function runPrepareGateWithOneRetry(
   {
     lanePath, item, sessionSlug, itemSpecPath,
     provider = CLAUDE_RESTRICTED_PREPARE_PROVIDER, claudeSessionId,
@@ -328,7 +332,7 @@ export function runPrepareGateWithOneRetry(
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
 
-  resumePrepareAgentWithGateFailure({
+  await resumePrepareAgentWithGateFailure({
     sessionSlug, lanePath, item, itemSpecPath, failureOutput: first.detail, gateOutcome: first.outcome,
     provider, claudeSessionId,
   });
@@ -527,7 +531,7 @@ async function prepareScopeInner(
       return { item, result: `could-not-predict (${report.reason || 'no reason reported'})` };
     }
 
-    const gate = runPrepareGateWithOneRetry({
+    const gate = await runPrepareGateWithOneRetry({
       lanePath, item, sessionSlug, itemSpecPath, provider, claudeSessionId,
     }, { run: runFn });
     if (gate.status === 'red') {

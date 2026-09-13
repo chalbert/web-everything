@@ -330,10 +330,10 @@ describe('#3644 — the ONE agent turn', () => {
     expect(persisted).toEqual([]);
   });
 
-  it('captures the child\'s output on a spawn failure, then rethrows the real error untouched', () => {
+  it('captures the child\'s output on a spawn failure, then rethrows the real error untouched', async () => {
     const persisted = [];
     const boom = new Error('spawnSync claude ETIMEDOUT');
-    expect(() => CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn(
+    await expect(CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn(
       { sessionId: 'u', prompt: 'go', lane: 6, sessionSlug: 's', item: '2568' },
       {
         ensureSettingsFile: () => '/ops/s.json',
@@ -342,7 +342,7 @@ describe('#3644 — the ONE agent turn', () => {
         resolveReportsDir: () => '/r',
         persistFailure: (slug, err, opts) => { persisted.push({ slug, err, opts }); return null; },
       },
-    )).toThrow(boom);
+    )).rejects.toThrow(boom);
     expect(persisted[0].slug).toBe('s');
     expect(persisted[0].err).toBe(boom);
   });

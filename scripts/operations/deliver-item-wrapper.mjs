@@ -101,8 +101,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // installs it so the shared helpers in `minimal-context-provider.mjs` emit into it without being passed one;
 // `spanAround` wraps a single existing call in a span without changing its behaviour. All three are
 // never-throwing by construction — see `telemetry-store.mjs`'s purity discipline.
-import { recorderFor, setActiveRecorder, spanAround, cpuUsageDeltaMs } from './telemetry-store.mjs';
-import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { recorderFor, setActiveRecorder, spanAround, resolveTurnCpuAttributes, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
@@ -309,9 +309,12 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and until #3383 it was timed by nothing at all — the exact gap
     // `readiness/conveyor-instrument.mjs` reports as `authoring: {ms: null, reason: 'no-dispatch-signal'}`.
     // `lane`/`dispatchKind`/`provider` (#3383 per-process-attribution follow-on) tag the span so a per-agent
-    // CPU rollup can be sliced by any of the three without a second lookup — see `cpuUsageDeltaMs`'s own
-    // caller-facing docblock in `telemetry-store.mjs` for exactly what the `cpu*Ms` attributes below do (and do
-    // not) measure before reading them as "what the agent cost".
+    // CPU rollup can be sliced by any of the three without a second lookup. `resolveTurnCpuAttributes` prefers
+    // the REAL child `resourceUsage` `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn` record via
+    // `recordChildResourceUsage` (now that both spawn asynchronously — see `dispatch-lane-io.mjs
+    // #spawnAgentToCompletion` / `codex-delivery-provider.mjs#defaultSpawnCodexAgent`'s own headers) over the
+    // wrapper-only `process.cpuUsage()` fallback — see that function's own docblock in `telemetry-store.mjs`
+    // for exactly what `cpu*Ms`/`cpuSource` do and do not measure before reading them as "what the agent cost".
     const turn = root.child('agent.turn', {
       attributes: {
         item: String(item), timeoutMs: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
@@ -325,10 +328,10 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       turn.ok({
         outcome: report && report.outcome ? String(report.outcome) : 'unreported',
         filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0,
-        ...cpuUsageDeltaMs(turnCpuStart),
+        ...resolveTurnCpuAttributes(turnCpuStart),
       });
     } catch (e) {
-      turn.fail(e, { outcome: 'agent-spawn-failed', ...cpuUsageDeltaMs(turnCpuStart) });
+      turn.fail(e, { outcome: 'agent-spawn-failed', ...resolveTurnCpuAttributes(turnCpuStart) });
       throw e;
     }
 
@@ -354,7 +357,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // either case: a needs-human-judgment report still needs a green gate before anyone reviews it.
     // (The `verify.gate` span itself is emitted one level down, inside `runVerifyOperation`, so it is
     // captured identically for every wrapper rather than six times over — see that function.)
-    const gate = runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
+    const gate = await runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
     if (gate.status === 'red') {
       releaseClaimAndLane({ item, lane, sessionSlug });
       return finish('gate-red', { status: 'error', outcome: 'gate-red' });
@@ -495,9 +498,13 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
 //    stay exactly where they are; only what sits BETWEEN them and the call site becomes a named port." Here,
 //    the port is `DeliveryAgentProvider` — one provider per CLI a delivery agent might run under.
 //
-//    `defaultSpawnAgent` (REAL, imported below) blocks via `execFileSync` until its child process exits — the
-//    fact this whole no-polling design rests on (FIRM REQUIREMENT 4) — and stays the shared low-level spawn
-//    primitive every provider's `spawn` ultimately calls; what varies PER PROVIDER is only the argv/settings
+//    `spawnAgentToCompletion` (REAL, imported below from `dispatch-lane-io.mjs`) does not RETURN — i.e. this
+//    provider's own `await` does not resolve — until its child process exits: the fact this whole no-polling
+//    design rests on (FIRM REQUIREMENT 4). #3383 mechanical-dispatcher follow-up converted it from a
+//    synchronous `execFileSync` call to an awaited async `spawn()` (see that function's own header for why —
+//    the sync call could not expose the child's real CPU usage), with the exact same blocking-until-done
+//    semantics from this provider's own caller's perspective. It stays the shared low-level spawn primitive
+//    every Claude-based provider's `spawn` ultimately calls; what varies PER PROVIDER is only the argv/settings
 //    a given CLI needs to achieve "minimal context, no hooks lost, no polling."
 // ================================================================================================
 
@@ -701,15 +708,16 @@ const CLAUDE_RESTRICTED_PROVIDER = {
   // `runGateWithOneRetry`, `runConvergeEdit`). Real call sites (`runAgentToCompletion`,
   // `resumeAgentWithGateFailure`) pass `{ sessionId, prompt, resumeSessionId?, lane, sessionSlug, item,
   // attemptTag }` — `lane`/`sessionSlug`/`item`/`attemptTag` added by bug 7's fix, below.
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
     {
       ensureSettingsFile = ensureDeliveryHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       resolveLane = resolveLanePath,
       run: runFn = run,
       persistFailure = persistDeliverySpawnFailure,
       resolveReportsDir = resolveDeliveryReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
@@ -750,16 +758,28 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     try {
       // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
       // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without
-      // this override `defaultSpawnAgent` silently applies its own 60s default here too, SIGKILLing a real
+      // this override `spawnAgentToCompletion` silently applies its own 60s default here too, SIGKILLing a real
       // build+gate+converge turn before it can finish — see `DELIVERY_AGENT_SPAWN_TIMEOUT_MS`'s own docblock.
-      spawnAgent(argv, {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`, blocking synchronously); see
+      // `dispatch-lane-io.mjs#spawnAgentToCompletion`'s own header for the full contract this preserves. The
+      // `await` IS the "wait" now, same as the sync call was — the caller still does not proceed until the
+      // agent's turn has actually finished. `resourceUsage` is threaded through to `deliverItem`'s `agent.turn`
+      // span via `recordChildResourceUsage`/`resolveTurnCpuAttributes` — honestly `null` on real Node today
+      // (no `ChildProcess#resourceUsage()` exists; see `spawn-to-completion.mjs`'s own header), kept only for
+      // forward compatibility.
+      const { resourceUsage } = (await spawnAgent(argv, {
         cwd: lanePath,
         env: { ...process.env, ...deliveryEnv },
         timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
-      }); // BLOCKS — the only "wait".
+      })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
       // Observability fix — capture what the child actually said before this bubbles up further (see
       // `persistDeliverySpawnFailure`'s own docblock for why this exists and exactly what it captures).
+      // `e.resourceUsage` (present whenever the child actually started — see `spawn-to-completion.mjs`'s own
+      // header) is recorded too, so an agent turn that fails still reports its real CPU cost, not a fabricated
+      // zero.
+      recordCpu(e && e.resourceUsage);
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -796,7 +816,7 @@ const CODEX_PROVIDER = {
   name: 'codex',
   // Same `(request, io?)` shape as `CLAUDE_RESTRICTED_PROVIDER.spawn` — `io` exists ONLY so a test can assert
   // what this spawns without a real `codex` process or a real filesystem.
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
     {
       spawnAgent = defaultSpawnCodexAgent,
@@ -807,6 +827,7 @@ const CODEX_PROVIDER = {
       readThreadId = readCodexThreadId,
       writeThreadId = writeCodexThreadId,
       denyPaths = null,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     // Identical resolution order to the Claude provider — the SAME single source of truth for the lane path
@@ -838,14 +859,21 @@ const CODEX_PROVIDER = {
     const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
     let stdout;
     try {
-      // BLOCKS — the only "wait", exactly as in the Claude provider, and budgeted on the same clock
-      // (`DELIVERY_AGENT_SPAWN_TIMEOUT_MS`): this call covers the agent's whole real build turn.
-      stdout = spawnAgent(argv, {
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); the `await` is still the only
+      // "wait", exactly as the sync call was, and budgeted on the same clock (`DELIVERY_AGENT_SPAWN_TIMEOUT_MS`)
+      // — see `codex-delivery-provider.mjs#defaultSpawnCodexAgent`'s own header for the full contract this
+      // preserves. `resourceUsage` is threaded through to the `agent.turn` span — honestly `null` on real Node
+      // today (no `ChildProcess#resourceUsage()` exists; see `spawn-to-completion.mjs`'s own header), kept only
+      // for forward compatibility.
+      const spawned = (await spawnAgent(argv, {
         cwd: lanePath,
         env: { ...process.env, ...deliveryEnv },
         timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
-      });
+      })) || {};
+      stdout = spawned.stdout;
+      recordCpu(spawned.resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure(sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -934,7 +962,7 @@ export async function runAgentToCompletion(
   // #3627 bug 7 — `lane`/`sessionSlug`/`item`/`attemptTag` threaded through so the provider can resolve the
   // real lane path (`cwd`) and mint the real env vars the brief needs (`buildDeliveryAgentEnv`) — see
   // `CLAUDE_RESTRICTED_PROVIDER.spawn`'s own docblock.
-  provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // BLOCKS — see DeliveryAgentProvider's own docblock.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // AWAITS — see DeliveryAgentProvider's own docblock.
 
   // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider itself just
   // resolved and handed to the spawned agent (see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`),
@@ -1021,7 +1049,7 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
  *  it said (the bug: `second.ok` used to be the ONLY thing this function looked at after the resume).
  *  `readReport` is injectable (mirrors `runAgentToCompletion`'s own `readReport = tryReadDeliveryReport`
  *  convention) so this second-report branch is testable without a real delivery-report sidecar on disk. */
-export function runGateWithOneRetry(
+export async function runGateWithOneRetry(
   { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
   {
     run: runFn = run, readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
@@ -1044,7 +1072,7 @@ export function runGateWithOneRetry(
   // #3627 attempt-5 finding — `gateOutcome` threaded through so the resume prompt itself can stop telling an
   // agent "your gate failed, fix it" when the true outcome is `unrun` (nothing in its diff to fix) — see
   // `resumeAgentWithGateFailure` below.
-  resumeAgentWithGateFailure({
+  await resumeAgentWithGateFailure({
     sessionSlug, lane, item, attemptTag, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
   }); // SKETCH — see below
   // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the resume just used
@@ -1076,7 +1104,7 @@ export function runGateWithOneRetry(
  *  own either. Goes THROUGH THE SAME PROVIDER PORT the initial spawn used (`provider.spawn` with
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
-function resumeAgentWithGateFailure({
+async function resumeAgentWithGateFailure({
   sessionSlug, lane, item, attemptTag, failureOutput, gateOutcome = 'fail', provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId,
 }) {
   // #3627 attempt-5 finding — an `unrun` gate gets an HONEST prompt, not "your gate failed, fix it": that
@@ -1104,7 +1132,7 @@ function resumeAgentWithGateFailure({
   // #3627 bug 7 — this prompt says `$LANE` above, same as the fresh brief, so this resume needs the SAME real
   // cwd/env treatment (`lane`/`sessionSlug`/`item`/`attemptTag` threaded through to the provider) or a resumed
   // agent hits the identical "no real $LANE to cd into" failure the fresh spawn did.
-  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag }); // BLOCKS.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag }); // AWAITS.
 }
 
 // #xu2pp2m — `resolveLanePath` EXTRACTED to `./minimal-context-provider.mjs` (imported above), unchanged: the

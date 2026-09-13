@@ -62,6 +62,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
@@ -1211,6 +1212,36 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
   return exec('claude', argv, {
     encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
   });
+}
+
+/**
+ * #3383 follow-up (the harder, per-agent-CPU half) — the ASYNC counterpart to {@link defaultSpawnAgent}, built
+ * for a dispatch wrapper's own full-turn BLOCKING agent spawn (`CLAUDE_RESTRICTED_PROVIDER.spawn` and its four
+ * siblings across `deliver-item-wrapper.mjs`/`fix-dispatch-wrapper.mjs`/`ci-heal-dispatch-wrapper.mjs`/
+ * `prepare-scope-wrapper.mjs`/`prepare-decision-wrapper.mjs`), NOT for `defaultClaudeProvider`'s fire-and-forget
+ * `--bg` dispatch just above (which stays on `defaultSpawnAgent`/`execFileSync` — it returns almost instantly
+ * once the CLI backgrounds the session, so an async child-rusage read has nothing to offer there).
+ *
+ * WHY THIS EXISTS: `execFileSync` is a SYNCHRONOUS call that blocks the whole event loop for the entire agent
+ * turn, forces the sync exec family's own internal buffering, and gives no way to react to partial output —
+ * real, independent problems worth fixing on their own. It was ALSO once assumed to be the fix for a second,
+ * separate problem: `telemetry-store.mjs#cpuUsageDeltaMs`'s own header documents that a wrapper's
+ * `process.cpuUsage()` sample measures the WRAPPER, never the spawned agent. That second problem is NOT fixed
+ * by this conversion — `scripts/lib/spawn-to-completion.mjs`'s own header documents, with verification against
+ * real Node, that `ChildProcess` has no `resourceUsage()` method at all; a per-child real-CPU reading was never
+ * actually available here. This function still inherits `spawnToCompletion`'s full execFileSync-equivalence
+ * contract (stdout/stderr capture, exit-code/signal/timeout/maxBuffer handling) unchanged, and `resourceUsage`
+ * stays in its return shape only as a forward-compatible, always-`null`-today field.
+ *
+ * @param {string[]} argv
+ * @param {object} [opts]
+ * @param {{spawnFn?: Function}} [io] - injected ONLY so a test can assert the spawn without a real `claude`.
+ * @returns {Promise<{stdout: string, stderr: string, resourceUsage: object|null}>}
+ */
+export function spawnAgentToCompletion(argv, opts = {}, io = {}) {
+  return spawnToCompletion('claude', argv, {
+    encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
+  }, io);
 }
 
 /** The dispatched agent's own standing identity, appended as a system prompt (#xqyyoje) — see the file's own

@@ -36,6 +36,40 @@ import { createMemoryTelemetryStore, createTelemetryRecorder, setActiveRecorder 
 const LANE = '/Users/x/workspace/.lanes/web-everything/lane-7';
 const DENY = ['/Users/x/workspace/webeverything/**'];
 
+/**
+ * #3383 mechanical-dispatcher follow-up — `defaultSpawnCodexAgent` is now ASYNC, built on
+ * `scripts/lib/spawn-to-completion.mjs#spawnToCompletion`'s real async `child_process.spawn()` primitive
+ * instead of the old synchronous `execFileSync`. Its own injectable seam is therefore `spawnFn` (a
+ * `child_process.spawn`-shaped function returning an EventEmitter-ish `ChildProcess`), not the old bare
+ * `exec` (an `execFileSync`-shaped function returning a plain string synchronously). This fakes JUST enough
+ * of a real `ChildProcess` for `spawnToCompletion` to drive to completion: `stdout`/`stderr` streams that
+ * replay their buffered chunks on `.on('data', …)`, an `'exit'` event fired on the next microtask (mirroring
+ * a real child's async exit), and a real-shaped `resourceUsage()`.
+ */
+function fakeChildProcess({ stdout = '', stderr = '', code = 0, signal = null, resourceUsage = { userCPUTime: 1000, systemCPUTime: 500 } } = {}) {
+  const dataHandlers = { stdout: [], stderr: [] };
+  const exitHandlers = [];
+  const errorHandlers = [];
+  const makeStream = (key) => ({ on(ev, cb) { if (ev === 'data') dataHandlers[key].push(cb); return this; } });
+  const child = {
+    stdout: makeStream('stdout'),
+    stderr: makeStream('stderr'),
+    on(ev, cb) {
+      if (ev === 'exit') exitHandlers.push(cb);
+      if (ev === 'error') errorHandlers.push(cb);
+      return child;
+    },
+    kill: vi.fn(),
+    resourceUsage: () => resourceUsage,
+  };
+  queueMicrotask(() => {
+    if (stdout) dataHandlers.stdout.forEach((cb) => cb(Buffer.from(stdout)));
+    if (stderr) dataHandlers.stderr.forEach((cb) => cb(Buffer.from(stderr)));
+    exitHandlers.forEach((cb) => cb(code, signal));
+  });
+  return child;
+}
+
 describe('buildCodexDeliveryArgv — the fresh-spawn shape', () => {
   it('is the exact argv a real `codex exec` run was verified against', () => {
     expect(buildCodexDeliveryArgv({ prompt: 'BUILD', cwd: LANE, denyPaths: DENY })).toEqual([
@@ -183,26 +217,36 @@ describe('defaultSpawnCodexAgent — the blocking primitive', () => {
   // THE SINGLE MOST LOAD-BEARING OPTION IN THIS FILE. `codex exec`'s own help: a positional prompt PLUS a
   // piped, never-closed stdin hangs forever. `execFileSync` cannot write to a child's stdin, so `'ignore'`
   // (i.e. /dev/null, immediate EOF) is the only thing standing between this provider and a 60-minute hang.
-  it('hands the child an IGNORED stdin — the stdin-trap avoidance the positional prompt depends on', () => {
-    const exec = vi.fn(() => '');
-    defaultSpawnCodexAgent(['exec', 'x'], { cwd: LANE }, { exec });
-    expect(exec.mock.calls[0][2].stdio).toEqual(['ignore', 'pipe', 'pipe']);
+  it('hands the child an IGNORED stdin — the stdin-trap avoidance the positional prompt depends on', async () => {
+    const spawnFn = vi.fn(() => fakeChildProcess({}));
+    await defaultSpawnCodexAgent(['exec', 'x'], { cwd: LANE }, { spawnFn });
+    expect(spawnFn.mock.calls[0][2].stdio).toEqual(['ignore', 'pipe', 'pipe']);
   });
 
-  it('calls the `codex` binary and returns the child\'s stdout (the thread id lives nowhere else)', () => {
-    const exec = vi.fn(() => 'STDOUT-BACK');
-    expect(defaultSpawnCodexAgent(['exec'], {}, { exec })).toBe('STDOUT-BACK');
-    expect(exec.mock.calls[0][0]).toBe(CODEX_CLI);
+  it('calls the `codex` binary and returns the child\'s stdout (the thread id lives nowhere else)', async () => {
+    const spawnFn = vi.fn(() => fakeChildProcess({ stdout: 'STDOUT-BACK' }));
+    const result = await defaultSpawnCodexAgent(['exec'], {}, { spawnFn });
+    expect(result.stdout).toBe('STDOUT-BACK');
+    expect(spawnFn.mock.calls[0][0]).toBe(CODEX_CLI);
     expect(CODEX_CLI).toBe('codex');
   });
 
-  it('keeps SIGKILL reclamation and a caller-supplied timeout, mirroring defaultSpawnAgent', () => {
-    const exec = vi.fn(() => '');
-    defaultSpawnCodexAgent(['exec'], { timeout: 1234 }, { exec });
-    const opts = exec.mock.calls[0][2];
-    expect(opts.killSignal).toBe('SIGKILL');
-    expect(opts.timeout).toBe(1234);
-    expect(opts.encoding).toBe('utf8');
+  // #3383 mechanical-dispatcher follow-up — `timeout`/`killSignal` are now consumed BY `spawnToCompletion`
+  // itself (its own dedicated suite, `scripts/lib/__tests__/spawn-to-completion.test.mjs`, proves the real
+  // kill-on-timeout behavior with fake timers) rather than forwarded to the raw `spawn()` call, so this test
+  // asserts defaultSpawnCodexAgent threads its OWN real CLI defaults into that shared primitive — verified via
+  // a real `getrusage`-shaped `resourceUsage` coming back out, proving the whole chain is wired end to end.
+  it('keeps SIGKILL reclamation and a caller-supplied timeout, mirroring dispatch-lane-io.mjs#spawnAgentToCompletion', async () => {
+    const spawnFn = vi.fn(() => fakeChildProcess({ resourceUsage: { userCPUTime: 4200, systemCPUTime: 800 } }));
+    const result = await defaultSpawnCodexAgent(['exec'], { timeout: 1234 }, { spawnFn });
+    // `timeout`/`killSignal`/`encoding`/`maxBuffer` are extracted by `spawnToCompletion` before the raw
+    // `spawn()` call, so they never appear in `spawnFn`'s own opts — only genuine child-process options
+    // (`cwd`, `env`, `stdio`) do. `stdio` is the one this file's own defaults set unconditionally.
+    expect(spawnFn.mock.calls[0][2]).not.toHaveProperty('timeout');
+    expect(spawnFn.mock.calls[0][2]).not.toHaveProperty('killSignal');
+    expect(spawnFn.mock.calls[0][2].stdio).toEqual(['ignore', 'pipe', 'pipe']);
+    // The real payoff of the async conversion: a genuine child `resourceUsage` comes back, not fabricated.
+    expect(result.resourceUsage).toEqual({ userCPUTime: 4200, systemCPUTime: 800 });
   });
 });
 

@@ -114,8 +114,8 @@ import {
   DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
 } from './deliver-item-wrapper.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
-import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsyncWithCpu } from './telemetry-store.mjs';
-import { defaultSpawnAgent } from './dispatch-lane-io.mjs';
+import { activeRecorder, recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
+import { spawnAgentToCompletion } from './dispatch-lane-io.mjs';
 import { REPAIR_AGENT_KIND } from './dispatch-lane.mjs';
 import { tryReadFixReport, resolveFixReportsDir, deleteFixReport } from './fix-report-store.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
@@ -325,13 +325,14 @@ export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }
 
 const FIX_AGENT_PROVIDER = {
   name: 'claude-restricted-fix',
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
     {
       ensureSettingsFile = ensureFixHooksSettingsFile,
-      spawnAgent = defaultSpawnAgent,
+      spawnAgent = spawnAgentToCompletion,
       persistFailure = persistSpawnFailure,
       resolveReportsDir = resolveFixReportsDir,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
@@ -342,8 +343,16 @@ const FIX_AGENT_PROVIDER = {
     const reportsDir = resolveReportsDir(lanePath);
     const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
     try {
-      spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
+      // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); see
+      // `dispatch-lane-io.mjs#spawnAgentToCompletion`'s own header for the preserved contract. `await` is the
+      // only "wait", same as the sync call was. `resourceUsage` is threaded to the wrapping `agent.turn` span
+      // (`spanAroundAsyncWithCpu`, in `dispatchFix`) via `recordChildResourceUsage` — honestly `null` on real
+      // Node today (no `ChildProcess#resourceUsage()` exists; see `spawn-to-completion.mjs`'s own header),
+      // kept only for forward compatibility.
+      const { resourceUsage } = (await spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS })) || {};
+      recordCpu(resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure('fix-spawn-failures', sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -366,7 +375,7 @@ const FIX_AGENT_PROVIDER = {
  */
 const FIX_CODEX_PROVIDER = {
   name: 'codex',
-  spawn(
+  async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
     {
       spawnAgent = defaultSpawnCodexAgent,
@@ -375,6 +384,7 @@ const FIX_CODEX_PROVIDER = {
       readThreadId = readCodexThreadId,
       writeThreadId = writeCodexThreadId,
       denyPaths = null,
+      recordCpu = recordChildResourceUsage,
     } = {},
   ) {
     // #3383 mechanical-dispatcher fix — same lane-aware resolution as `FIX_AGENT_PROVIDER` above.
@@ -395,8 +405,13 @@ const FIX_CODEX_PROVIDER = {
     const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
     let stdout;
     try {
-      stdout = spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS }); // BLOCKS.
+      // #3383 mechanical-dispatcher follow-up — ASYNC now; see
+      // `codex-delivery-provider.mjs#defaultSpawnCodexAgent`'s own header. `await` is the only "wait".
+      const spawned = (await spawnAgent(argv, { cwd: lanePath, env: { ...process.env, ...fixEnv }, timeout: FIX_AGENT_SPAWN_TIMEOUT_MS })) || {};
+      stdout = spawned.stdout;
+      recordCpu(spawned.resourceUsage);
     } catch (e) {
+      recordCpu(e && e.resourceUsage);
       persistFailure('fix-spawn-failures', sessionSlug, e, { resumeSessionId });
       throw e;
     }
@@ -455,7 +470,7 @@ export async function runFixAgentToCompletion(
   } = {},
 ) {
   const prompt = readBrief();
-  provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item }); // BLOCKS.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, lanePath, sessionSlug, pr, item }); // AWAITS.
   // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider just used,
   // never this process's own script-location default (see `deliver-item-wrapper.mjs`'s equivalent fix).
   const report = readReport(sessionSlug, resolveReportsDir(lanePath));
@@ -472,7 +487,7 @@ export async function runFixAgentToCompletion(
 //    analogue of that function's own `retryReport.outcome === 'blocked'` check).
 // ================================================================================================
 
-function resumeFixAgentWithGateFailure({
+async function resumeFixAgentWithGateFailure({
   sessionSlug, lanePath, pr, item, failureOutput, gateOutcome = 'fail', provider = FIX_AGENT_PROVIDER, claudeSessionId,
 }) {
   const prompt = gateOutcome === 'unrun'
@@ -483,11 +498,11 @@ function resumeFixAgentWithGateFailure({
       + `report with \`outcome: 'blocked'\` and a precise \`reason\` describing what you observed instead.`
     : `Your gate failed:\n\n${failureOutput}\n\nFix it in $LANE, commit again, then send a fresh `
       + `\`done\` report exactly as before.`;
-  provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lanePath, sessionSlug, pr, item }); // BLOCKS.
+  await provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lanePath, sessionSlug, pr, item }); // AWAITS.
 }
 
 /** @returns {{status: ('green'|'red'|'gate-blocked'), lanePath: string, reason?: (string|null)}} */
-export function runFixGateWithOneRetry(
+export async function runFixGateWithOneRetry(
   { lanePath, pr, item, sessionSlug, provider = FIX_AGENT_PROVIDER, claudeSessionId },
   {
     run: runFn = run, readReport = tryReadFixReport, resolveReportsDir = resolveFixReportsDir,
@@ -496,7 +511,7 @@ export function runFixGateWithOneRetry(
   const first = runVerifyOperation(lanePath, { run: runFn });
   if (first.outcome === 'pass') return { status: 'green', lanePath };
 
-  resumeFixAgentWithGateFailure({
+  await resumeFixAgentWithGateFailure({
     sessionSlug, lanePath, pr, item, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
   });
   // #3383 mechanical-dispatcher fix — same lane-aware read-back as `runFixAgentToCompletion` above.
@@ -734,7 +749,7 @@ export async function dispatchFix(
     return { ...planned, lanePath, result: `stood-down (${agentReport.outcome})` };
   }
 
-  const gate = runFixGateWithOneRetry(
+  const gate = await runFixGateWithOneRetry(
     { lanePath, pr: planned.pr, item: planned.item, sessionSlug: planned.sessionSlug, provider, claudeSessionId },
     { run: runFn },
   );
