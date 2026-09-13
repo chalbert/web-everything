@@ -2321,3 +2321,38 @@ dedicated decision turn (read both repos' history for the drain-sweep/stuck-sign
 migration was ever started or ratified, and rule where this mechanism's canonical home is going forward),
 not a byproduct of closing duplicate PRs. Recorded here, on this epic's own tracker, so whoever picks this up
 next does not have to re-derive the observation from the closed PRs.
+
+## Session update (2026-09-13) — durable operator intent: extend Codex as a provider beyond build/fix/ci-heal to every declared operation
+
+**Where this stands as of today, proven not just wired.** `#3564` → `PR #2169` ("WE #3564: delivery build")
+went through the real `we:scripts/operations/deliver-item-run.mjs --provider=codex` path (#3580's wiring) and
+came back independently reviewed carrying `review:accepted` with no findings. As of this write-up it is still
+parked — `review:human` per this card's own rule 5/6, the human clearance ceremony hasn't run yet — so it has
+not merged. But that parking is a process gate, not a doubt about the work: the delivery-and-review chain
+itself is now proven end to end for the first time, not merely assembled. (Reproduce directly: `gh pr view
+2169 --json title,labels,state,mergedAt`.)
+
+**A live, real goal, NOT yet built, NOT yet designed, NOT yet scoped — recorded here per this file's own
+"operation manager" convention (see that thread earlier in this file) so a future session doesn't have to
+re-derive it from scratch.** The operator's own stated direction is to extend what Codex can be used for,
+eventually, past the three delivery kinds it is wired into today — `build` (`we:scripts/operations/deliver-item-run.mjs`),
+`fix` (`we:scripts/operations/fix-run.mjs`), `ci-heal` (`we:scripts/operations/ci-heal-run.mjs`), all three
+taking `--provider=codex` per #3580 — to every operation this system declares, i.e. the full `OPERATIONS`
+table in `we:scripts/operations/run.mjs` (built out via `we:scripts/operations/registry.mjs`'s `op()` engine).
+That table already runs well past the three delivery kinds: `review-pr`, `review-prep`, `record-verdict`,
+`verify`, `mutation-check`, `gap-sweep-status`, `restart-runner`, `clear-stuck-session`, `resolve`, `scaffold`,
+`file-item`, `suggest-next`, `pr-status`, `gate-health`, `route-pr-outcome`, `dispatch-lane`, `claim`,
+`explore`, `open-pr`, `stage-pr-view` — none of which have any Codex wiring today, and none of which this
+session has scoped.
+
+**How to approach it — not new doctrine, the same discipline this epic already proved works.** #3564/#3565
+took build/fix/ci-heal from merely "wired" to actually "proven" by validating ONE real case with a real
+independent review before trusting the class — never by assuming three wired operations meant the fourth
+would just work. The same discipline applies here, harder, because the candidate operations don't share one
+shape the way build/fix/ci-heal roughly do: `review-pr`'s juror is tool-bearing and lane-scoped
+(`assertLaneCwd` refuses a spawn with no lane) in a way none of the three proven delivery kinds are;
+`claim`/`resolve` are cheap reads-then-writes that may not need an agent seat at all; `restart-runner` and
+`clear-stuck-session` are already fully mechanical passes today with no agent in the loop to swap a provider
+under. So which operations even HAVE an "agent seat" a provider could be substituted into is itself part of
+the undone design work here, not a given — one atomic operation at a time, a real independent review each
+time, no blind trust that a provider swap proven for one operation transfers to the rest.
