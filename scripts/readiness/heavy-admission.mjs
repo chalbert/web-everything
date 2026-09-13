@@ -13,6 +13,26 @@
  * always be acquired freely." The heavy command itself queues on this semaphore right before it actually runs
  * — see `verify-lane.mjs`'s `execSync(GATE, …)` call site for the wired example.
  *
+ * A GENERAL-PURPOSE `run` CLI MODE (#3383 finding) — the ONLY caller wired into this semaphore before this mode
+ * existed was `verify-lane.mjs` itself. Every OTHER path that runs one of the same named heavy commands directly
+ * — `skills-src/batch-backlog-items/parallel-execute.workflow.js`'s per-lane `npm run check:standards` + `npm
+ * test -- run` gate (step 4, deliberately NOT routed through `verify-lane.mjs` — see that file's own #3321
+ * comment for why), `AGENTS.md`'s own Definition-of-Done line ("Run affected tests … for broad changes, `npm
+ * test`"), and `docs/agent/testing.md`'s worked examples — runs the SAME heavy commands with ZERO admission-queue
+ * coordination, so N parallel `/workflow` lanes (or an ad-hoc interactive/subagent run) can each launch a full
+ * `test:unit`/`check:standards` pass at once regardless of the cap. `#3105`'s `guard-bash.mjs` PreToolUse deny
+ * only reaches a MECHANICALLY-DISPATCHED agent (one with `WE_DISPATCH_KIND` set); a `/workflow`/`/batch` parallel
+ * lane, or the operator's own interactive session, carries no such env var and is unaffected by that guard, so
+ * it is never forced through `verify-lane.mjs` either. `run` (see {@link runUnderAdmission} and the CLI section
+ * below) gives any such caller a one-line way to opt IN to the SAME semaphore `verify-lane.mjs` uses — never a
+ * second/parallel limiter — by wrapping its command: `node scripts/readiness/heavy-admission.mjs run --
+ * <command…>` acquires a slot (fail-open on timeout, exactly like `verify-lane.mjs`), runs `<command…>`
+ * synchronously in the foreground with inherited stdio, and releases the slot in a `finally` — the identical
+ * acquire → execSync → release sequencing `verify-lane.mjs` already has, just exported for any OTHER call site
+ * to reuse rather than re-deriving it. Wiring `parallel-execute.workflow.js`'s own step 4 (and the other
+ * documented direct-invocation sites) through this wrapper is a follow-up this investigation recommends but does
+ * not itself make — see the finding's own PR/commit message for the full list.
+ *
  * MECHANISM — generalized from the two existing single-holder advisory locks named in #3456's own "what this
  * decision does NOT settle" section:
  *   • `file-locks.mjs` (#1936) — ONE atomic `mkdir`/`O_EXCL` lock dir per reserved PATH, with a heartbeat-TTL
@@ -55,6 +75,7 @@
  * `waiting` intent markers this module writes, which `tick-core.mjs` surfaces as `waiting-for-capacity` notes).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { reserve, releaseLockDir, readLockEntry } from './file-locks.mjs';
@@ -267,6 +288,60 @@ export async function acquireSlotBlocking({
   }
 }
 
+// ── run-under-admission — the general-purpose wrapper (#3383 finding) ──────────────────────────────────
+
+/**
+ * Run `command` synchronously in the FOREGROUND, admitted through the SAME capacity semaphore
+ * `verify-lane.mjs`'s own gate execution already uses (#3461) — never a parallel/second limiter. Mirrors
+ * `verify-lane.mjs`'s own call site exactly: {@link acquireSlotBlocking} (fail-open on a queuing timeout) →
+ * a synchronous, inherited-stdio execution → {@link releaseOwnedSlot} in a `finally` (only when a slot was
+ * actually won). Exported so the CLI's `run` mode and any other IN-PROCESS caller (a future operation, a
+ * workflow script) share ONE tested acquire/execute/release sequencing rather than each re-deriving it —
+ * the same reuse discipline this module's own header applies to `file-locks.mjs`'s primitives.
+ *
+ * FAILS OPEN, LIKE `verify-lane.mjs`: a timed-out admission still runs `command` unslotted (with a stderr
+ * warning) rather than refusing to run it at all — a queuing timeout must never strand an otherwise-healthy
+ * caller behind a stuck semaphore, exactly the residual-risk tradeoff `acquireSlotBlocking`'s own doc names.
+ *
+ * @param {object} opts
+ * @param {string} opts.lockRoot
+ * @param {number} opts.cap
+ * @param {string} opts.owner
+ * @param {string|null} [opts.lane]
+ * @param {string|null} [opts.num]
+ * @param {number} [opts.timeoutMs]
+ * @param {number} [opts.leaseMinutes]
+ * @param {string} opts.command            the shell command to run (passed to `exec`, so `&&`/`;` work)
+ * @param {string} [opts.cwd]              defaults to process.cwd()
+ * @param {(cmd:string, opts:object)=>void} [opts.exec]  defaults to `execSync` — injectable for tests
+ * @param {(msg:string)=>void} [opts.log]  defaults to `process.stderr.write` — injectable for tests
+ * @param {() => number} [opts.now]
+ * @param {(ms:number) => Promise<void>} [opts.sleep]
+ * @returns {Promise<{ exitCode:number, admission:object }>}
+ */
+export async function runUnderAdmission({
+  lockRoot, cap, owner, lane = null, num = null, timeoutMs = DEFAULT_TIMEOUT_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
+  command, cwd = process.cwd(), exec = (cmd, o) => execSync(cmd, o), log = (m) => process.stderr.write(m),
+  now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+}) {
+  mkdirSync(lockRoot, { recursive: true });
+  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, timeoutMs, leaseMinutes, now, sleep });
+  if (admission.timedOut) {
+    log(`⚠ heavy-command admission: timed out after ${admission.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted.\n`);
+  } else if (admission.waitedMs > 0) {
+    log(`heavy-command admission: acquired slot-${admission.slot} after waiting ${admission.waitedMs}ms (cap=${cap}).\n`);
+  }
+  let exitCode = 0;
+  try {
+    exec(command, { cwd, stdio: 'inherit' });
+  } catch (e) {
+    exitCode = Number.isFinite(e && e.status) ? e.status : 1;
+  } finally {
+    if (admission.ok) releaseOwnedSlot({ lockRoot, cap, owner });
+  }
+  return { exitCode, admission };
+}
+
 // ── status — what `tick-core.mjs` reads for the `waiting-for-capacity` note ────────────────────────────
 
 export function admissionStatus({ lockRoot, cap }) {
@@ -289,8 +364,21 @@ function parseFlags(argv) {
   return { flags, positionals };
 }
 
+/** Re-quote a single already-split argv word for a shell command line — a no-op for a plain word, single-quoted
+ *  (embedded `'` escaped the POSIX way) for anything containing whitespace or shell-meaningful characters. Lets
+ *  `run`'s command tail (argv words `execSync`'s underlying `/bin/sh -c` must re-parse) round-trip an argument
+ *  that itself contains a space, rather than silently gluing it to its neighbour. */
+export function shellQuoteWord(w) {
+  return /^[A-Za-z0-9_\-.\/:=@%,]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`;
+}
+
 async function main(argv) {
-  const { flags, positionals } = parseFlags(argv);
+  // `run`'s command tail lives after a literal `--` and must never be parsed as this CLI's OWN flags (a
+  // `--coverage` meant for vitest would otherwise be read as a flag of THIS script). Split there first; only
+  // the pre-`--` slice feeds `parseFlags`. Every other mode has no `--` in its argv, so this is a no-op for them.
+  const dashDashIdx = argv.indexOf('--');
+  const preArgv = dashDashIdx === -1 ? argv : argv.slice(0, dashDashIdx);
+  const { flags, positionals } = parseFlags(preArgv);
   const repo = typeof flags.repo === 'string' ? flags.repo : process.cwd();
   const cap = flags.cap != null ? Number(flags.cap) : resolveCap(process.env);
   const lockRoot = admissionLockRoot(repo, process.env);
@@ -300,6 +388,17 @@ async function main(argv) {
   const asJson = !!flags.json;
   const emit = (obj) => writeAllSync(1, JSON.stringify(obj) + '\n');
   const mode = positionals[0] || 'status';
+
+  if (mode === 'run') {
+    if (dashDashIdx === -1 || dashDashIdx === argv.length - 1) {
+      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--timeout-ms=] -- <command…>\n`);
+      process.exit(3);
+    }
+    const command = argv.slice(dashDashIdx + 1).map(shellQuoteWord).join(' ');
+    const timeoutMs = flags['timeout-ms'] != null ? Number(flags['timeout-ms']) : resolveTimeoutMs(process.env);
+    const { exitCode } = await runUnderAdmission({ lockRoot, cap, owner, lane, num, timeoutMs, command, cwd: repo });
+    process.exit(exitCode);
+  }
 
   if (mode === 'status') {
     if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [] }); return; }
@@ -319,7 +418,7 @@ async function main(argv) {
     else process.stderr.write(r.ok ? `acquired slot-${r.slot} (waited ${r.waitedMs}ms)\n` : `timed out after ${r.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted\n`);
     process.exit(0); // fail-open: a queuing timeout is not a usage error, the caller proceeds regardless
   }
-  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release> [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--timeout-ms=]\n`);
+  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run> [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--timeout-ms=] [-- <command…>]\n`);
   process.exit(3);
 }
 

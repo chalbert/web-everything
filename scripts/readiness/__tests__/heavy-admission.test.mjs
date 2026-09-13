@@ -13,7 +13,7 @@ import {
   DEFAULT_ADMISSION_CAP, DEFAULT_TIMEOUT_MS, ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, slotPath,
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
   markWaiting, clearWaiting, listWaiting,
-  acquireSlotBlocking, admissionStatus,
+  acquireSlotBlocking, admissionStatus, runUnderAdmission, shellQuoteWord,
 } from '../heavy-admission.mjs';
 
 const T0 = Date.parse('2026-09-03T12:00:00.000Z');
@@ -204,5 +204,81 @@ describe('admissionStatus — the shape tick-core.mjs reads', () => {
     expect(s.held).toHaveLength(1);
     expect(s.waiting).toHaveLength(1);
     expect(s.waiting[0]).toMatchObject({ owner: 'B', lane: '5' });
+  });
+});
+
+describe('runUnderAdmission — the general-purpose wrapper (#3383): acquire → exec → release, mirroring verify-lane.mjs\'s own call site', () => {
+  it('acquires a slot, runs the command, and releases the slot on success', async () => {
+    const calls = [];
+    const exec = (cmd, opts) => { calls.push({ cmd, opts }); };
+    const r = await runUnderAdmission({
+      lockRoot, cap: 1, owner: 'A', command: 'echo hi', cwd: '/some/cwd', exec, log: () => {},
+      now: () => T0, sleep: async () => {},
+    });
+    expect(r).toEqual({ exitCode: 0, admission: { ok: true, slot: 0, timedOut: false, waitedMs: 0 } });
+    expect(calls).toEqual([{ cmd: 'echo hi', opts: { cwd: '/some/cwd', stdio: 'inherit' } }]);
+    expect(heldSlots({ lockRoot, cap: 1 })).toHaveLength(0); // released, not left held
+  });
+
+  it('propagates a failing command\'s exit code and still releases the slot (the finally)', async () => {
+    const exec = () => { const e = new Error('boom'); e.status = 7; throw e; };
+    const r = await runUnderAdmission({ lockRoot, cap: 1, owner: 'A', command: 'false', exec, log: () => {}, now: () => T0, sleep: async () => {} });
+    expect(r.exitCode).toBe(7);
+    expect(heldSlots({ lockRoot, cap: 1 })).toHaveLength(0);
+  });
+
+  it('falls back to exit code 1 when the thrown error carries no numeric status', async () => {
+    const exec = () => { throw new Error('no status field'); };
+    const r = await runUnderAdmission({ lockRoot, cap: 1, owner: 'A', command: 'false', exec, log: () => {}, now: () => T0, sleep: async () => {} });
+    expect(r.exitCode).toBe(1);
+  });
+
+  it('waits for a held slot, runs once free, and logs the wait — same acquire/log shape as verify-lane.mjs', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let clock = T0;
+    let polls = 0;
+    const sleep = async (ms) => { clock += ms; polls += 1; if (polls === 1) releaseOwnedSlot({ lockRoot, cap: 1, owner: 'HOLDER' }); };
+    const logs = [];
+    const exec = () => {};
+    const r = await runUnderAdmission({
+      lockRoot, cap: 1, owner: 'B', command: 'echo hi', exec, log: (m) => logs.push(m),
+      now: () => clock, sleep, pollMs: 100,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.admission.waitedMs).toBeGreaterThan(0);
+    expect(logs.some((m) => /acquired slot-0 after waiting/.test(m))).toBe(true);
+  });
+
+  it('FAILS OPEN on a queuing timeout — still runs the command unslotted, never refuses to run it', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let clock = T0;
+    const calls = [];
+    const exec = (cmd) => { calls.push(cmd); };
+    const logs = [];
+    const r = await runUnderAdmission({
+      lockRoot, cap: 1, owner: 'B', command: 'echo hi', exec, log: (m) => logs.push(m),
+      now: () => clock, sleep: async (ms) => { clock += ms; }, timeoutMs: 3000, pollMs: 1000,
+    });
+    expect(r.admission).toMatchObject({ ok: false, timedOut: true });
+    expect(calls).toEqual(['echo hi']); // ran anyway, unslotted
+    expect(logs.some((m) => /timed out.*proceeding unslotted/.test(m))).toBe(true);
+    expect(heldSlots({ lockRoot, cap: 1 })).toHaveLength(1); // HOLDER's own slot — nothing of ours to release
+  });
+});
+
+describe('shellQuoteWord — re-quoting the `run` CLI\'s post-`--` argv tail into one shell command line', () => {
+  it('leaves a plain word untouched', () => {
+    expect(shellQuoteWord('npx')).toBe('npx');
+    expect(shellQuoteWord('--coverage')).toBe('--coverage');
+    expect(shellQuoteWord('path/to/file.test.ts')).toBe('path/to/file.test.ts');
+  });
+
+  it('single-quotes a word containing whitespace, so it round-trips as ONE argument', () => {
+    expect(shellQuoteWord('-t "some test name"')).toBe(`'-t "some test name"'`);
+    expect(shellQuoteWord('a b')).toBe(`'a b'`);
+  });
+
+  it('escapes an embedded single quote the POSIX way', () => {
+    expect(shellQuoteWord("it's")).toBe(`'it'\\''s'`);
   });
 });
