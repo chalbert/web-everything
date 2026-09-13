@@ -22,6 +22,17 @@ import { runRecordVerdictSelfSufficient } from '../record-verdict-cli.mjs';
 import { recordVerdictOperation, STAGE_REQUEST_EFFECT } from '../record-verdict.mjs';
 import { validateRequest, APPLIABLE_TARGETS } from '../../apply-review-request.mjs';
 
+// #3383 — PIN the advisory-seat default for this whole file. `reviewPrOperation({readPr})` below (no
+// `codexAdvisory` passed) always seats the seat's hardcoded `false` default; `record-verdict-io.mjs`'s own
+// registration (which `advanceReviewPrToWriteUp`/`runRecordVerdictSelfSufficient` drive) instead calls
+// `codexAdvisoryFromEnv()`, which now defaults to the LIVE `{provider:'codex', model:CODEX_MODEL}` probation
+// status when the env var is unset. Two runs of the SAME operation started/resumed with different seat
+// counts throw ("the declaration changed under a suspended run") — a REAL cross-registration invariant
+// (`codexAdvisoryFromEnv`'s own header), not a bug in either half. This suite is not testing the advisory
+// seat at all, so it pins the env explicitly to keep both halves in agreement regardless of the registry's
+// live contents (today or after a future probation/graduation change).
+process.env.REVIEW_PR_CODEX_ADVISORY = '0';
+
 const BASE_INPUT = { pr: 4242, repo: 'chalbert/web-everything' };
 const CLEAN_ANSWER = { summary: 'nothing blocking', findings: [] };
 

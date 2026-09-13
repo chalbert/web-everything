@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "v": 1,
+      "outcome": null,
+      "scoredAt": "2026-09-13T20:37:34.681Z",
+      "rubricVersion": "2026-09-13.1",
+      "item": "proof-fix-scratch",
+      "handle": "01a09c7a-8fcb-7521-91f0-5a8af664157f",
+      "subjectClass": "work-agent",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "probationStatus": "probation",
+      "dispatchKind": "fix",
+      "criteriaEvaluated": 5,
+      "deductions": [
+        {
+          "criterion": "command-churn",
+          "weight": 0,
+          "count": 2,
+          "evidence": "evidence withheld -- failed the append-time scrub -- 1 scrub reason total",
+          "evidenceDenied": true
+        }
+      ],
+      "score": 100
+    },
+    {
+      "v": 1,
+      "outcome": null,
+      "scoredAt": "2026-09-13T20:37:34.683Z",
+      "rubricVersion": "2026-09-13.1",
+      "item": "proof-advisory-scratch",
+      "handle": "01a09c7b-91de-7ae0-a89d-d452cab83eef",
+      "subjectClass": "work-agent",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "probationStatus": "probation",
+      "dispatchKind": "advisory-review",
+      "criteriaEvaluated": 0,
+      "deductions": [],
+      "score": null
+    }
+  ]
+}

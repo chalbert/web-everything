@@ -18,7 +18,7 @@
  * are recorders, and the store is in memory.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import { advance, advanceWhileRunning, projectReads, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
@@ -66,6 +66,7 @@ import {
   buildReviewAdvisoryJudgeRequest,
   codexAdvisoryFromEnv,
   CODEX_ADVISORY_ENV_VAR,
+  defaultCodexAdvisoryProbationCheck,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -2613,15 +2614,66 @@ describe('#3335 the write-up states what was EARNED beside what SAT', () => {
 // ── #xqa9ttq — THE OPT-IN THIRD SEAT: A TOOL-FREE CODEX JUROR ON AN ADVISORY LENS ────────────────────────────
 describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
   describe('codexAdvisoryFromEnv', () => {
-    it('is false when the env var is unset, or set to anything other than the literal string "1"', () => {
-      expect(codexAdvisoryFromEnv({})).toBe(false);
-      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: 'true' })).toBe(false);
-      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' })).toBe(false);
-      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '' })).toBe(false);
+    it('is false for any EXPLICITLY SET env value other than the literal string "1" — never depends on probation once the caller has opted out on purpose', () => {
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: 'true' }, { isOnProbation: () => true })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' }, { isOnProbation: () => true })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '' }, { isOnProbation: () => true })).toBe(false);
     });
 
-    it('is true only for the exact literal "1"', () => {
-      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' })).toBe(true);
+    it('is true for the exact literal "1", regardless of probation status', () => {
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(true);
+    });
+
+    // #3383 — the probation default. UNSET is the only case that reads the registry at all, and even then
+    // only through the injected `isOnProbation`, so this suite never touches the real on-disk registry.
+    it('when the env var is UNSET, defaults to the injected probation check', () => {
+      expect(codexAdvisoryFromEnv({}, { isOnProbation: () => true })).toBe(true);
+      expect(codexAdvisoryFromEnv({}, { isOnProbation: () => false })).toBe(false);
+    });
+
+    it('when the env var is UNSET and no override is injected, calls the REAL default probation check', () => {
+      // Not stubbed — proves the real wiring reaches `defaultCodexAdvisoryProbationCheck` (and therefore the
+      // real on-disk registry) rather than only ever being exercised through an injected stub.
+      expect(codexAdvisoryFromEnv({})).toBe(defaultCodexAdvisoryProbationCheck());
+    });
+
+    it('an explicit "1" or "0" NEVER even calls the probation check — a caller can always force the seat either way', () => {
+      const isOnProbation = vi.fn(() => true);
+      codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation });
+      codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' }, { isOnProbation });
+      expect(isOnProbation).not.toHaveBeenCalled();
+    });
+  });
+
+  // #3383 — STRUCTURAL PROOF that flipping this seat on by default (via probation) cannot make it mandatory
+  // or grant it veto power over a merge, however its own verdict comes back.
+  describe('#3383 — the probation-driven default can never gate a merge', () => {
+    it('judgeAdvisory / ADVISORY_JUDGE_LENS is drawn from ADVISORY_LENSES, never MANDATORY_LENSES', () => {
+      expect(MANDATORY_LENSES).not.toContain(ADVISORY_JUDGE_LENS);
+      expect(ADVISORY_LENSES).toContain(ADVISORY_JUDGE_LENS);
+    });
+
+    it('ADVISORY_JUDGE_SEAT is absent from JUDGE_SEATS/JUDGE_STEPS — decideLensFloor never even sees it unless a caller explicitly appends it', () => {
+      expect(JUDGE_SEATS.some((s) => s.step === ADVISORY_JUDGE_SEAT.step)).toBe(false);
+      expect(JUDGE_STEPS).not.toContain(ADVISORY_JUDGE_SEAT.step);
+    });
+
+    it('seating the advisory seat (as reviewPrOperation does when codexAdvisory is true) never changes seatsFloor — the floor is computed off MANDATORY_LENSES alone', () => {
+      const withoutAdvisory = decideLensFloor({ lens: 'simplicity' });
+      const withAdvisory = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT] });
+      expect(withAdvisory.seatsFloor).toBe(withoutAdvisory.seatsFloor);
+      expect(withAdvisory.mandatorySeated).toEqual(withoutAdvisory.mandatorySeated);
+      // The seat DOES show up as an additionally-seated ADVISORY lens — it runs, it is just never counted
+      // toward the floor.
+      expect(withAdvisory.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
+    });
+
+    it('a REJECT verdict from the advisory seat alone (with the mandatory floor otherwise clean) is exactly what "advisory" means — it cannot be the reason `humanRequired` flips on its own account', () => {
+      // This is a statement about the SHAPE of the guarantee (seatsFloor/mandatorySeated are computed off
+      // MANDATORY_LENSES only, proven above) rather than a re-run of `derivePanelVerdict`'s own suite — that
+      // reduction is `we:scripts/lib/jury-core.mjs`'s own, already-tested logic and is not re-derived here.
+      const floor = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT] });
+      expect(floor.mandatorySeated).not.toContain(ADVISORY_JUDGE_LENS);
     });
   });
 

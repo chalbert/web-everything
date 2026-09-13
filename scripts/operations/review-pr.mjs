@@ -221,6 +221,8 @@ import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 // the band ordering the comparison is made on; both are pure, and neither is restated here.
 import { buildShapePlan } from '../review-core-cli.mjs';
 import { CARE_LEVELS, CARE_LEVEL_ORDER, REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
+import { liveStatusFor as liveProbationStatusFor } from '../lib/model-probation.mjs';
+import { CODEX_MODEL } from '../codex-direct-task.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -323,11 +325,47 @@ export const CODEX_ADVISORY_ENV_VAR = 'REVIEW_PR_CODEX_ADVISORY';
 /**
  * #xqa9ttq — READS {@link CODEX_ADVISORY_ENV_VAR}. `env` is a parameter, not `process.env` read directly
  * inline at each call site, so this stays unit-testable without mutating real process state.
+ *
+ * #3383 PROBATION DEFAULT, added on top of the original opt-in without changing its shape: an EXPLICIT env
+ * value still wins either way (`'1'` forces the seat on, `'0'` forces it off) — this is what keeps the
+ * existing opt-in behavior byte-identical for every caller that already sets the var. Only when the env is
+ * UNSET does the default now come from the generic `{provider, model}` probation registry
+ * (`we:scripts/lib/model-probation.mjs`) rather than a hardcoded `false`: the seat runs by default, on real
+ * PRs, exactly when the identity actually seated (`codex` / {@link CODEX_MODEL}) is declared `'probation'`
+ * (or `'trusted'`) for the `'advisory-review'` role. This is deliberately data-driven and NEVER a Codex-
+ * specific boolean — a future model's registry entry (or this one's eventual graduation/demotion) flips the
+ * default with a registry edit, never a code change here.
+ *
+ * THIS DOES NOT, AND STRUCTURALLY CANNOT, MAKE THE SEAT MANDATORY. Flipping this default only changes
+ * whether `reviewPrOperation`'s opt-in `codexAdvisory` param is asked for at all; the seat it seats
+ * (`judgeAdvisory` / {@link ADVISORY_JUDGE_LENS}) is READ off `ADVISORY_LENSES`, never `MANDATORY_LENSES`,
+ * and `decideLensFloor`/`seatedLenses` (below) compute `seatsFloor` from `MANDATORY_LENSES` alone — so this
+ * seat contributes NOTHING to whether a run has a blocking floor, on by default or not. See
+ * `__tests__/review-pr.probation-advisory.test.mjs` for the standing proof.
  * @param {object} [env]
+ * @param {{isOnProbation?: Function}} [deps] - injectable for tests, so a unit test never touches the real
+ *   on-disk probation registry.
  * @returns {boolean}
  */
-export function codexAdvisoryFromEnv(env = process.env) {
-  return env?.[CODEX_ADVISORY_ENV_VAR] === '1';
+export function codexAdvisoryFromEnv(env = process.env, { isOnProbation = defaultCodexAdvisoryProbationCheck } = {}) {
+  // UNSET (never assigned at all) is the ONLY case that falls through to the probation default — an env var
+  // set to anything else, including the empty string or a typo like `'true'`, is still an EXPLICIT "not on"
+  // exactly as it was before this default existed (never a literal `'1'` ⇒ never true), so a caller who
+  // already pins `REVIEW_PR_CODEX_ADVISORY=0` (or any other non-`'1'` value) on purpose keeps that behavior
+  // byte-identical.
+  if (env && Object.hasOwn(env, CODEX_ADVISORY_ENV_VAR)) return env[CODEX_ADVISORY_ENV_VAR] === '1';
+  return isOnProbation();
+}
+
+/**
+ * The real (non-injected) probation check `codexAdvisoryFromEnv` defaults to: is the seated Codex identity
+ * declared `'probation'` or `'trusted'` for the `'advisory-review'` role? Named and exported separately so a
+ * test can assert ON it directly without stubbing the whole default parameter chain.
+ * @returns {boolean}
+ */
+export function defaultCodexAdvisoryProbationCheck() {
+  const status = liveProbationStatusFor({ provider: 'codex', model: CODEX_MODEL, role: 'advisory-review' });
+  return status === 'probation' || status === 'trusted';
 }
 
 /**

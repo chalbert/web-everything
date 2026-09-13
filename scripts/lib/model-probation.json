@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "roles": {
+        "delivery": "probation",
+        "advisory-review": "probation"
+      },
+      "since": "2026-09-13",
+      "owner": "3383",
+      "note": "First real probation instance (epic #3383). `build`-kind delivery already had real trials before this date; `fix`/`ci-heal` delivery and the advisory-review seat do not yet — probation exists to collect that data without letting the seat gate anything. Promotion to `trusted` (or demotion to `unvalidated`) is a future ruling, not automatic — see #3651 (arm the run-quality router once a rubricVersion population exists)."
+    }
+  ]
+}

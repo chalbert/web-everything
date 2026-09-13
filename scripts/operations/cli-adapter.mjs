@@ -58,6 +58,14 @@ import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-s
 // `ERR_MODULE_NOT_FOUND: markdown-it` — a real, live-caught regression, not a hypothetical one; see
 // `codex-judge-spawn.mjs`'s own header for the full account. Do not re-introduce that edge.
 import { codexJudgeSpawn, requireAllProperties } from '../lib/codex-judge-spawn.mjs';
+// #3383 probation — the ratified Codex model pin (`#x8wbivt`), a leaf constant with no jury/markdown-it edge
+// (same safety property `codex-judge-spawn.mjs`'s own header discusses for this file). Needed so the
+// advisory judge seat's `{provider, model}` identity is a STAMPABLE fact rather than whatever `codex exec`
+// resolves implicitly — the same hole `#3635` (unmerged, `lane/3635-pin-codex-model-every-call-site`) names
+// for this exact call site. Fixed minimally HERE (default only, an explicit `request.model` still wins)
+// rather than pulled in wholesale from that branch, since our need is narrowly "the identity this probation
+// registry keys on must be real", not the fuller multi-call-site consolidation #3635 owns.
+import { CODEX_MODEL } from '../codex-direct-task.mjs';
 
 /** Flags the adapter owns. A declaration may not name an input field that collides with one. */
 export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model', 'provider']);
@@ -591,7 +599,9 @@ export function unwrapJudgeOutcome(returned) {
  */
 export function resolveJudgeProvider(name) {
   if (name === 'codex') {
-    return (request) => codexJudgeSpawn({ ...request, shape: requireAllProperties(request.shape) });
+    // `model: CODEX_MODEL` is a DEFAULT, spread first — a request that already names its own `model` (an
+    // operator override) still wins, exactly like every other override in this file.
+    return (request) => codexJudgeSpawn({ model: CODEX_MODEL, ...request, shape: requireAllProperties(request.shape) });
   }
   if (name === 'claude' || name == null) return judgeSpawn;
   throw new Error(`operations: unknown judge provider ${JSON.stringify(name)} — one of ${JUDGE_PROVIDER_NAMES.join('|')}`);

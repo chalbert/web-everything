@@ -5,7 +5,7 @@ parent: "3383"
 status: open
 scope: ["we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/runner-lock.mjs", "we:scripts/conveyor/resolve-runner-checkout.mjs", "we:scripts/conveyor/queue-store.mjs", "we:scripts/conveyor/queue.mjs", "we:scripts/conveyor/queue-work.mjs", "we:scripts/readiness/dispatch-pause.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/lib/lane-concurrency.mjs", "we:skills-src/conveyor/SKILL.md"]
 dateOpened: "2026-09-12"
-relatedTo: ["3637", "3634", "3609", "3478", "2613", "2702"]
+relatedTo: ["3656", "3634", "3609", "3478", "2613", "2702"]
 tags: []
 ---
 
@@ -20,7 +20,7 @@ The operator wants one conveyor to keep delivering while a SECOND instance dogfo
    `node --test we:scripts/conveyor/__tests__/resolve-runner-checkout.test.mjs` covers a named-lease lookup that
    resolves rather than returning `ambiguous`.
 2. **Ruled** — each fork below has an operator ruling recorded, and the ruling is codified in
-   `we:docs/agent/platform-decisions.md` (the statute layer) the way `#3637`'s POC-branch mode was.
+   `we:docs/agent/platform-decisions.md` (the statute layer) the way `#3656`'s POC-branch mode was.
 
 ---
 
@@ -37,7 +37,7 @@ Every row below was read, not assumed. This is the part that changes the answer,
 | **Lane acquire is already safe for concurrent acquirers** | Per-lane lease file created with `flag:'wx'` (atomic `O_EXCL`). Deterministic lowest-index candidate order so racers converge and exactly one wins; the loser just moves to the next lane. **There is no global/whole-pool lock anywhere.** | `we:scripts/lane-pool.mjs:909`, `:1166-1168`; `we:scripts/lib/lane-lease.mjs:87-110` |
 | **Lane pools can be fully separated if wanted** | `LANE_POOL_ROOT` env (with `~` expansion), else a `.lanes` dir under the workspace; within a root, `--pool=`/`--name=` gives a distinct `poolDir`. | `we:scripts/lib/lane-pool-paths.mjs:65-68`; `we:scripts/lane-pool.mjs:202-213` |
 | **PRs and leases match items by ITEM ID, not by branch or instance** | A conveyor PR's head ref is `lane/<num>-<slug>`; the reaper matches on that and on the `conveyor-<num>` session slug. Nothing keys off which runner dispatched it. | `we:scripts/conveyor/lease-reaper.mjs:136-167` |
-| **Delivery target is already independent of all of this** | `deliveryTarget:` frontmatter validated against a small typed registry; absent/`main` is the normal path. | `we:scripts/lib/poc-branches.mjs:202-216` (`#3637`) |
+| **Delivery target is already independent of all of this** | `deliveryTarget:` frontmatter validated against a small typed registry; absent/`main` is the normal path. | `we:scripts/lib/poc-branches.mjs:202-216` (`#3656`) |
 
 ### The three things that actually block a second instance
 
@@ -213,7 +213,7 @@ only one of them is *running* at a time. That is the right split: Fork 1(B) sepa
 
 ---
 
-# Fork 6 — Relationship to `deliveryTarget` / POC branches (`#3637`)
+# Fork 6 — Relationship to `deliveryTarget` / POC branches (`#3656`)
 
 > **Re-checked against new evidence (2026-09-12, continued) and CONFIRMED unchanged** — see the session update
 > at the foot of this card. Nothing in the operator's new scenario touches the orthogonality argument or the
@@ -258,7 +258,7 @@ That collapses the operator's literal ask to B1 + B2 alone. The named-changeset 
   Fork 5(A)'s hold labels as a separate small item when the need actually bites** ← **RECOMMENDED**.
 - **(C) Defer everything.**
 
-**Recommendation: (B),** the same posture `#3637` took on its own bootstrap-vs-N-branch question.
+**Recommendation: (B),** the same posture `#3656` took on its own bootstrap-vs-N-branch question.
 
 **The minimal slice, and why it is genuinely small:**
 
@@ -481,7 +481,7 @@ Suggested split, offered as a fork and not a ruling: **instance** = a runner plu
 3. **Cases 2 + 3 (planning + delegation) as one item, second.** They share exactly one requirement — a
    **git-tracked batch object** — so they are one design, not two. That card is where the registry question
    re-opens with this new evidence, and its own first fork is *registry file vs. a `batch:` frontmatter field on
-   each card*. My lean is the **registry file**, for two reasons: `#3637` just ruled this way for the same reason
+   each card*. My lean is the **registry file**, for two reasons: `#3656` just ruled this way for the same reason
    ("a registry is what makes a branch DECLARED rather than ad hoc"), and cases 1/3 want the batch to carry state
    of its own — shelved-or-active, which machine holds it — that a per-card field has nowhere to put. Second, not
    first, because nothing is currently blocked on it the way today's session was blocked on shelving.
