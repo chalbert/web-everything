@@ -2613,7 +2613,7 @@ that is a separate, already-confirmed claim from the *automatic*, marker-driven 
 
 ## Session update (2026-09-13, continued) — new decision filed and prepared: graduation criteria for exiting probation
 
-`xeagmug` — "Define graduation criteria for a model/provider to exit probation status" — was filed via
+`3654` — "Define graduation criteria for a model/provider to exit probation status" — was filed via
 `PR #2185` (merged) and JIT-numbered to `#3654` on land. A `/prepare` pass then ran against it and merged via
 `PR #2187` ("prepare #3654: graduation criteria for a model/provider to exit probation"), confirmed by reading
 the PR body directly. Four forks were framed and `preparedDate` stamped — **ready to ratify, not yet ratified**:
@@ -2650,7 +2650,7 @@ unmerged as of this check):**
 
 **Stray-session/orphaned-watcher hygiene**: the behavioral memory fix landed —
 `we:agent-memory-src/no-stray-sessions-or-orphaned-watchers.md`, `PR #2174`, confirmed `MERGED`. A follow-on
-design-only safety-net item, `x25vnei` ("design a stray-resource monitoring safety net"), was filed via
+design-only safety-net item, `3655` ("design a stray-resource monitoring safety net"), was filed via
 `PR #2177`, confirmed still `OPEN`/unmerged as of this check.
 
 **`clear-stuck-session` mechanized and wired into the reaper**, both confirmed present on
@@ -2659,9 +2659,9 @@ design-only safety-net item, `x25vnei` ("design a stray-resource monitoring safe
 clear-stuck-session"). A docs follow-up pointing stuck-session cleanup at the new mechanized path instead of
 the old manual workaround (`PR #2170`) is filed but confirmed still `OPEN`, unmerged.
 
-**POC-branch CI gap — filed AND landed.** `xj0174p` ("allow GitHub Actions CI to be enabled for POC branches,
+**POC-branch CI gap — filed AND landed.** `3653` ("allow GitHub Actions CI to be enabled for POC branches,
 not just main") was filed and merged via `PR #2171`, then JIT-numbered to `#3653` on land (confirmed:
-`git log` shows `cbd4ac3e7 drain: JIT-number xj0174p→#3653 at land`). This closes the gap where PRs on
+`git log` shows `cbd4ac3e7 drain: JIT-number 3653→#3653 at land`). This closes the gap where PRs on
 `lane/mechanical-dispatcher` never got real GitHub Actions CI.
 
 **Duplicate/escalated PR resolutions, checked directly rather than transcribed:**
