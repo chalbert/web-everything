@@ -84,10 +84,14 @@
  *      extracted for `we:scripts/operations/dispatch-lane-io.mjs`'s dispatcher seam (#3579, `provider` param
  *      on `createDispatchSinks`) and `we:scripts/operations/cli-adapter.mjs`'s judge seam (#3370,
  *      `createDefaultJudge`'s injected implementation) — both landed, both real. Applied here: see
- *      `DeliveryAgentProvider` below — `CLAUDE_RESTRICTED_PROVIDER` is the REAL, Claude-verified implementation;
- *      `CODEX_PROVIDER` is a NAMED SEAM ONLY, deliberately left throwing, because this session has NOT
- *      independently verified Codex CLI's actual flags for minimal-context spawning or whether it has any
- *      hook-equivalent at all — inventing those flags here would be worse than leaving the gap explicit.
+ *      `DeliveryAgentProvider` below — BOTH implementations are now REAL and independently CLI-verified:
+ *      `CLAUDE_RESTRICTED_PROVIDER` (Claude, v2.1.266) and, since #3580, `CODEX_PROVIDER` (codex-cli 0.153.4).
+ *      The Codex one was a deliberately-throwing named seam until its three unknowns — write-capable flags, a
+ *      genuinely blocking foreground invocation, and what replaces the Claude-only `guard-lane.mjs`/
+ *      `guard-bash.mjs` hooks — were each answered by real live invocations rather than guessed; the whole
+ *      evidence trail lives in `we:scripts/operations/codex-delivery-provider.mjs`'s own file header. Claude
+ *      remains the DEFAULT (see `DEFAULT_DELIVERY_AGENT_PROVIDER_NAME`); Codex is opt-in by name, and the
+ *      operator chose to build it ahead of `#3581`'s ratified reviewer-first sequencing gate knowingly.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -113,6 +117,13 @@ import {
   REPO_ROOT, run, RESTRICTED_PROVIDER_TOOLS, buildRestrictedProviderArgv, createHooksSettingsWriter,
   persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, resolveLanePath, runVerifyOperation,
 } from './minimal-context-provider.mjs';
+// #3580 — the REAL Codex implementation of the `DeliveryAgentProvider` port below. Its own file header carries
+// the full live-verification trail (which flags, which invocation blocks, and what replaces the Claude-only
+// `guard-lane.mjs`/`guard-bash.mjs` hooks); `CODEX_PROVIDER` further down is the thin composition of these.
+import {
+  buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+} from './codex-delivery-provider.mjs';
 // RE-EXPORTED so every existing caller/test that imports these names from THIS file (their pre-extraction
 // home) keeps working unchanged — the extraction moved WHERE they are defined, never what imports them.
 export {
@@ -712,29 +723,94 @@ const CLAUDE_RESTRICTED_PROVIDER = {
 };
 
 /**
- * CODEX_PROVIDER — A NAMED SEAM ONLY, deliberately NOT implemented (per operator follow-up: provider parity
- * must be an architectural requirement now, even where this session cannot verify a second CLI's real
- * mechanism yet). What is genuinely UNRESEARCHED, stated plainly rather than guessed at: Codex CLI's actual
- * flags (if any) for a minimal-context, no-project-doctrine, no-auto-memory, hooks-still-active spawn
- * equivalent to Claude's `--restricted` (+ `--tools`/`--strict-mcp-config`/`--settings`) combination;
- * whether Codex has any hook-equivalent mechanism at all, and if so its config schema (so a
- * `DELIVERY_HOOKS_SETTINGS`-equivalent trimmed-safety-net file could be written for it); and whether Codex's
- * CLI exposes a synchronous/foreground invocation this wrapper's blocking `spawn` contract can rely on the
- * same way it relies on `defaultSpawnAgent`'s `execFileSync` for Claude. Inventing plausible-looking flags
- * here would be worse than leaving this an explicit, loud gap — so `spawn` throws, naming exactly what is
- * missing, rather than silently no-op'ing or guessing.
+ * CODEX_PROVIDER — #3580. NO LONGER A SEAM: a REAL, live-verified implementation of
+ * {@link DeliveryAgentProvider}, structurally parallel to `CLAUDE_RESTRICTED_PROVIDER` above (same `spawn`
+ * signature, same injectable-`io` second parameter, same resolve-lane → build-argv → BLOCK → capture-failure
+ * order). Everything CLI-specific — which flags, why not `-s`, what replaces the Claude-only
+ * `guard-lane.mjs`/`guard-bash.mjs` hooks, and the evidence behind each — lives in
+ * `we:scripts/operations/codex-delivery-provider.mjs`'s own file header, deliberately NOT restated here (the
+ * same split this file already keeps with `minimal-context-provider.mjs`). The three short version:
+ *   1. WRITE ACCESS is `-c default_permissions=locked` + `permissions={locked={extends=":workspace",…}}`,
+ *      never `-s workspace-write` — because `codex exec resume` does not accept `-s` at all, so `-s` cannot
+ *      give this port ONE sandbox posture across both the fresh spawn and the gate-failure resume.
+ *   2. BLOCKING is real: `codex exec` is non-interactive and `execFileSync` returns when the turn ends
+ *      (measured live through this exact primitive). `stdio[0]` MUST stay `'ignore'` — see that file.
+ *   3. THE SAFETY NET is Codex's own permission profile, not a port of this repo's Claude hooks. Measured
+ *      with no model in the loop (`codex sandbox -P locked`): a write into the primary checkout and a write
+ *      into a sibling lane both come back `Operation not permitted`, and the profile has no network at all,
+ *      so `git push` — `guard-bash.mjs`'s single most important deny — is structurally impossible rather
+ *      than merely forbidden. What is left un-guarded is destructive git INSIDE the agent's own lane, whose
+ *      blast radius is one disposable clone the pool rebuilds routinely.
+ *
+ * THE ONE THING SELECTING THIS PROVIDER DOES **NOT** CHANGE, stated so nobody discovers it by surprise: the
+ * converge EDITOR this wrapper drives itself (`runConvergeEdit` / `buildConvergeEditorArgv`, further down) is
+ * a separate Claude spawn that does NOT go through this port. Choosing `codex` swaps the BUILD agent only;
+ * the convergence rounds still run under Claude. That is the port's real boundary today, not an oversight —
+ * `DeliveryAgentProvider` was only ever defined over the build/resume spawn.
  */
 const CODEX_PROVIDER = {
-  name: 'codex (UNRESEARCHED — not implemented)',
-  spawn() {
-    throw new Error(
-      'deliver-item-wrapper: CODEX_PROVIDER has no real implementation yet. Needed before use: Codex CLI\'s '
-      + 'own minimal-context/no-auto-memory spawn flags (the --restricted equivalent), whether it has any '
-      + 'hook-equivalent enforcement mechanism (the guard-lane.mjs/guard-bash.mjs equivalent), and whether it '
-      + 'supports a blocking/foreground invocation this wrapper\'s spawn contract can rely on. This is the '
-      + 'named PORT (see DeliveryAgentProvider), not a guess at Codex\'s actual mechanism — see this '
-      + 'function\'s own docblock.',
-    );
+  name: 'codex',
+  // Same `(request, io?)` shape as `CLAUDE_RESTRICTED_PROVIDER.spawn` — `io` exists ONLY so a test can assert
+  // what this spawns without a real `codex` process or a real filesystem.
+  spawn(
+    { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
+    {
+      spawnAgent = defaultSpawnCodexAgent,
+      resolveLane = resolveLanePath,
+      run: runFn = run,
+      persistFailure = persistDeliverySpawnFailure,
+      resolveReportsDir = resolveDeliveryReportsDir,
+      readThreadId = readCodexThreadId,
+      writeThreadId = writeCodexThreadId,
+      denyPaths = null,
+    } = {},
+  ) {
+    // Identical resolution order to the Claude provider — the SAME single source of truth for the lane path
+    // (#3627 bug 7(a)) and the SAME wrapper-process-resolved reports directory (#3627 bug 9). Both bugs are
+    // provider-independent: they are about where the CHILD is and where its report lands, not about which CLI
+    // the child is, so re-deriving either here would just be re-introducing them for the second provider.
+    const lanePath = resolveLane(lane, { run: runFn });
+    const reportsDir = resolveReportsDir();
+    const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
+    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
+    // Codex mints its OWN thread id and has no `--session-id`, so `resumeSessionId` (a CLAUDE-side UUID the
+    // port hands every provider) is used as the SIGNAL that this is a resume, and the actual id is looked up
+    // in this provider's own sidecar map. A resume with no recorded thread id is a hard error, never a silent
+    // downgrade to a fresh session: the whole point of the gate-failure resume is that the agent still
+    // remembers what it built, and a fresh turn would quietly lose that.
+    const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
+    if (resumeSessionId && !resumeThreadId) {
+      throw new Error(
+        `deliver-item-wrapper: CODEX_PROVIDER cannot resume session ${sessionSlug} — no Codex thread id was `
+        + 'recorded for it (the fresh spawn never reached `thread.started`, or its sidecar was removed). '
+        + 'Refusing to silently start a NEW session, which would lose the build context the resume exists to '
+        + 'carry.',
+      );
+    }
+    const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
+    let stdout;
+    try {
+      // BLOCKS — the only "wait", exactly as in the Claude provider, and budgeted on the same clock
+      // (`DELIVERY_AGENT_SPAWN_TIMEOUT_MS`): this call covers the agent's whole real build turn.
+      stdout = spawnAgent(argv, {
+        cwd: lanePath,
+        env: { ...process.env, ...deliveryEnv },
+        timeout: DELIVERY_AGENT_SPAWN_TIMEOUT_MS,
+      });
+    } catch (e) {
+      persistFailure(sessionSlug, e, { resumeSessionId });
+      throw e;
+    }
+    // Record the thread id on a FRESH spawn only — a resume re-announces the same id, so re-writing it is
+    // noise. Best-effort by construction (`writeCodexThreadId` never throws): losing the crumb costs the
+    // ability to resume, which the guard above then reports loudly, and must never fail a build that worked.
+    if (!resumeThreadId) {
+      const threadId = parseCodexThreadId(stdout);
+      if (threadId) writeThreadId(sessionSlug, threadId);
+    }
+    // `sessionId` is unused by this provider — Codex has no caller-minted session id (see above). Named in
+    // the destructure anyway so the port's request shape stays visible at both implementations.
+    void sessionId;
   },
 };
 
@@ -744,6 +820,33 @@ export const DELIVERY_AGENT_PROVIDERS = Object.freeze({
   'claude-restricted': CLAUDE_RESTRICTED_PROVIDER,
   codex: CODEX_PROVIDER,
 });
+
+/**
+ * The selectable provider names, in the SAME shape the already-landed judge seam uses
+ * (`we:scripts/operations/cli-adapter.mjs#JUDGE_PROVIDER_NAMES`) — one exported frozen list that both the
+ * resolver below and every CLI flag validator can name, so "which providers exist" is stated once.
+ */
+export const DELIVERY_AGENT_PROVIDER_NAMES = Object.freeze(Object.keys(DELIVERY_AGENT_PROVIDERS));
+
+/** The default, unchanged by #3580: Claude stays the delivery agent unless a caller names Codex on purpose. */
+export const DEFAULT_DELIVERY_AGENT_PROVIDER_NAME = 'claude-restricted';
+
+/**
+ * Name → provider, refusing an unknown name by NAME rather than returning `undefined` for a caller to trip
+ * over later. Deliberately mirrors `cli-adapter.mjs#resolveJudgeProvider` down to the error wording, because
+ * the two seams are the same shape and an operator who has met one should not have to learn the other.
+ *
+ * @param {string} [name] - one of {@link DELIVERY_AGENT_PROVIDER_NAMES}.
+ * @returns {DeliveryAgentProvider}
+ */
+export function resolveDeliveryAgentProvider(name = DEFAULT_DELIVERY_AGENT_PROVIDER_NAME) {
+  const provider = DELIVERY_AGENT_PROVIDERS[String(name).trim()];
+  if (provider) return provider;
+  throw new Error(
+    `deliver-item-wrapper: unknown delivery agent provider ${JSON.stringify(name)} — one of `
+    + `${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}`,
+  );
+}
 
 /**
  * SKETCH. Spawns the minimal-brief agent through the given provider and BLOCKS until it exits — no separate

@@ -59,6 +59,7 @@ import { SPAWN_TIMEOUT_MS, findItem } from '../dispatch-lane-io.mjs';
 import { tryReadDeliveryReport } from '../delivery-report-store.mjs';
 import {
   DELIVERY_AGENT_PROVIDERS, DELIVERY_AGENT_SPAWN_TIMEOUT_MS, buildRestrictedProviderArgv,
+  DELIVERY_AGENT_PROVIDER_NAMES, DEFAULT_DELIVERY_AGENT_PROVIDER_NAME, resolveDeliveryAgentProvider,
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
@@ -146,9 +147,132 @@ describe('DELIVERY_AGENT_PROVIDERS registry', () => {
     expect(DELIVERY_AGENT_PROVIDERS['claude-restricted'].name).toBe('claude-restricted');
   });
 
-  it('keeps the codex seam a named, deliberately-throwing placeholder (provider parity, #3627 requirement 6)', () => {
+  // #3580 — the codex key is no longer a throwing placeholder. Its own argv/thread-mapping contract is covered
+  // in `__tests__/codex-delivery-provider.test.mjs`; what belongs HERE is only that the registry, the default
+  // and the resolver behave, and that `CODEX_PROVIDER.spawn` honours the same PORT contract as the Claude one.
+  it('registers a REAL codex provider (no longer a deliberately-throwing seam)', () => {
     expect(DELIVERY_AGENT_PROVIDERS.codex).toBeDefined();
-    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn()).toThrow(/no real implementation/);
+    expect(DELIVERY_AGENT_PROVIDERS.codex.name).toBe('codex');
+    expect(typeof DELIVERY_AGENT_PROVIDERS.codex.spawn).toBe('function');
+  });
+
+  it('keeps CLAUDE the default — #3580 adds a choice, it does not change the one already made', () => {
+    expect(DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).toBe('claude-restricted');
+    expect(DELIVERY_AGENT_PROVIDER_NAMES).toEqual(['claude-restricted', 'codex']);
+    expect(resolveDeliveryAgentProvider()).toBe(DELIVERY_AGENT_PROVIDERS['claude-restricted']);
+  });
+
+  it('resolves each name, and refuses an unknown one BY NAME rather than returning undefined', () => {
+    expect(resolveDeliveryAgentProvider('codex')).toBe(DELIVERY_AGENT_PROVIDERS.codex);
+    expect(resolveDeliveryAgentProvider(' claude-restricted ')).toBe(DELIVERY_AGENT_PROVIDERS['claude-restricted']);
+    expect(() => resolveDeliveryAgentProvider('gemini')).toThrow(/unknown delivery agent provider "gemini"/);
+    expect(() => resolveDeliveryAgentProvider('gemini')).toThrow(/claude-restricted\|codex/);
+  });
+});
+
+// ================================================================================================
+// #3580 — CODEX_PROVIDER.spawn. The port contract is `(request, io?) => void, BLOCKING`; these assert that the
+// Codex implementation satisfies the SAME contract `CLAUDE_RESTRICTED_PROVIDER.spawn` does (resolved lane cwd,
+// real delivery env vars, the 60-minute delivery budget, failure capture) plus the one thing only it has: the
+// `sessionSlug → Codex thread id` mapping that stands in for Claude's caller-minted `--session-id`.
+//
+// The process boundary is MOCKED here (`spawnAgent`), never a real `codex`. The behaviour it is mocked to have
+// — blocking, returning a stdout carrying a `thread.started` event, the same id re-announced on resume — was
+// measured live against codex-cli 0.153.4 first; see `__tests__/codex-delivery-provider.test.mjs`'s header.
+// ================================================================================================
+describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
+  const LANE_PATH = '/tmp/lane-9';
+  const THREAD_EVENT = '{"type":"thread.started","thread_id":"01a0-live-thread"}\n{"type":"turn.completed"}\n';
+
+  /** The injectable `io` every test below starts from — no real fs, no real process, no real lane. */
+  const io = (over = {}) => ({
+    spawnAgent: vi.fn(() => THREAD_EVENT),
+    resolveLane: vi.fn(() => LANE_PATH),
+    run: vi.fn(),
+    persistFailure: vi.fn(),
+    resolveReportsDir: vi.fn(() => '/tmp/reports'),
+    readThreadId: vi.fn(() => null),
+    writeThreadId: vi.fn(),
+    denyPaths: ['/tmp/primary/**'],
+    ...over,
+  });
+
+  const REQ = { sessionId: 'claude-uuid', prompt: 'BUILD IT', lane: 9, sessionSlug: 'sess-9', item: '3580', attemptTag: 'b' };
+
+  it('spawns `codex exec` in the RESOLVED lane clone, not wherever the wrapper process happens to sit', () => {
+    const o = io();
+    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.resolveLane).toHaveBeenCalledWith(9, { run: o.run });
+    const [argv, opts] = o.spawnAgent.mock.calls[0];
+    expect(argv.slice(0, 3)).toEqual(['exec', '-C', LANE_PATH]);
+    expect(opts.cwd).toBe(LANE_PATH);
+  });
+
+  // #3627 bugs 7/9 are provider-INDEPENDENT (they are about where the child is and where its report lands),
+  // so the second provider must not silently re-introduce either of them.
+  it('stamps the SAME real delivery env vars the Claude provider does, including the reports-dir override', () => {
+    const o = io();
+    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
+      WE_DISPATCH_KIND: 'delivery',
+      DELIVERY_SESSION: 'sess-9',
+      DELIVERY_ITEM: '3580',
+      LANE: LANE_PATH,
+      ATTEMPT_TAG: 'b',
+      OPERATION_DELIVERY_REPORTS_DIR: '/tmp/reports',
+    });
+  });
+
+  it('blocks on the DELIVERY budget, never dispatch-lane-io\'s 60s fire-and-forget one (#3627 bug 6)', () => {
+    const o = io();
+    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(DELIVERY_AGENT_SPAWN_TIMEOUT_MS);
+    expect(DELIVERY_AGENT_SPAWN_TIMEOUT_MS).not.toBe(SPAWN_TIMEOUT_MS);
+  });
+
+  it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', () => {
+    const o = io();
+    DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.writeThreadId).toHaveBeenCalledWith('sess-9', '01a0-live-thread');
+  });
+
+  it('resumes on the RECORDED Codex thread id — never on the Claude UUID the port hands it', () => {
+    const o = io({ readThreadId: vi.fn(() => 'recorded-tid') });
+    DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o);
+    expect(o.readThreadId).toHaveBeenCalledWith('sess-9');
+    const argv = o.spawnAgent.mock.calls[0][0];
+    expect(argv.slice(0, 3)).toEqual(['exec', 'resume', 'recorded-tid']);
+    expect(argv).not.toContain('claude-uuid');
+    // A resume re-announces the same id, so re-recording it would be noise.
+    expect(o.writeThreadId).not.toHaveBeenCalled();
+  });
+
+  // A silent downgrade to a fresh session would lose exactly the build context the gate-failure resume exists
+  // to carry — the agent would be handed "your gate failed" with no memory of what it built.
+  it('REFUSES to resume when no thread id was recorded, instead of silently starting a new session', () => {
+    const o = io({ readThreadId: vi.fn(() => null) });
+    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, resumeSessionId: 'claude-uuid' }, o))
+      .toThrow(/cannot resume session sess-9/);
+    expect(o.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('captures the child\'s output on a spawn failure and rethrows untouched (same as the Claude provider)', () => {
+    const boom = new Error('spawnSync codex ETIMEDOUT');
+    const o = io({ spawnAgent: vi.fn(() => { throw boom; }) });
+    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).toThrow(boom);
+    expect(o.persistFailure).toHaveBeenCalledWith('sess-9', boom, { resumeSessionId: null });
+  });
+
+  it('refuses a deny map that would cover the agent\'s own lane, before any spawn happens', () => {
+    const o = io({ denyPaths: ['/tmp/**'] }); // LANE_PATH is /tmp/lane-9 — covered.
+    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).toThrow(/covers the agent's own lane/);
+    expect(o.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('tolerates a stream with no thread.started rather than failing a build that already succeeded', () => {
+    const o = io({ spawnAgent: vi.fn(() => '{"type":"turn.completed"}') });
+    expect(() => DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o)).not.toThrow();
+    expect(o.writeThreadId).not.toHaveBeenCalled();
   });
 });
 

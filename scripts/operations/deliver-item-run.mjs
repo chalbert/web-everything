@@ -6,7 +6,12 @@
  * production caller of `we:scripts/operations/deliver-item-wrapper.mjs#deliverItem`.
  *
  *   node scripts/operations/deliver-item-run.mjs --num=3645 --lane=2 --session=conveyor-3645 \
- *     --scope='we:scripts/...' --attempt=b
+ *     --scope='we:scripts/...' --attempt=b [--provider=claude-restricted|codex]
+ *
+ * `--provider=` (#3580, optional) picks which CLI runs the delivery AGENT — `claude-restricted` by default,
+ * `codex` to run it under Codex CLI instead. Flag wins, then `DELIVERY_AGENT_PROVIDER` in the environment,
+ * then the default; see `selectDeliveryAgentProvider` below, and
+ * `we:scripts/operations/codex-delivery-provider.mjs` for what the Codex side actually does.
  *
  * ── WHY THIS FILE EXISTS AT ALL, AND NOT JUST A DIRECT `deliverItem(...)` CALL IN THE SINK ──────────────────
  *
@@ -48,7 +53,10 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { deliverItem } from './deliver-item-wrapper.mjs';
+import {
+  deliverItem, resolveDeliveryAgentProvider, DELIVERY_AGENT_PROVIDER_NAMES,
+  DEFAULT_DELIVERY_AGENT_PROVIDER_NAME,
+} from './deliver-item-wrapper.mjs';
 
 /** Refused rather than defaulted: a delivery with no item, lane or session has nothing to acquire or claim. */
 const REQUIRED_FLAGS = Object.freeze(['num', 'lane', 'session']);
@@ -60,7 +68,10 @@ const REQUIRED_FLAGS = Object.freeze(['num', 'lane', 'session']);
  * returns `''`), and `scope` rides through to `lane-pool acquire --scope=` where an empty value is legal.
  *
  * @param {string[]} argv
- * @returns {{item: string, lane: string, scope: string, sessionSlug: string, attemptTag: string}}
+ * `provider` (#3580) is optional too and is parsed, NOT validated, here — this function stays PURE argv→shape;
+ * the name check and the env fallback belong to `selectDeliveryAgentProvider` below, which owns both.
+ *
+ * @returns {{item: string, lane: string, scope: string, sessionSlug: string, attemptTag: string, provider: string}}
  */
 export function parseDeliverItemRunArgv(argv = []) {
   const flags = {};
@@ -83,7 +94,33 @@ export function parseDeliverItemRunArgv(argv = []) {
     scope: String(flags.scope ?? '').trim(),
     sessionSlug: String(flags.session).trim(),
     attemptTag: String(flags.attempt ?? '').trim(),
+    provider: String(flags.provider ?? '').trim(),
   };
+}
+
+/**
+ * #3580 — WHICH CLI RUNS THE DELIVERY AGENT. Deliberately the SAME flag-wins-env-fallback shape
+ * `we:scripts/operations/run.mjs` already uses for the judge seam's `--provider` / `JUDGE_PROVIDER`, so an
+ * operator who has met one selection mechanism has met both: an explicit `--provider=` beats the environment,
+ * the environment beats the default, and the default is unchanged (`claude-restricted`). Codex is therefore
+ * genuinely SELECTABLE but never accidental.
+ *
+ * An unknown name is refused HERE, before a lane is acquired or an item claimed — a typo that only surfaced
+ * at `provider.spawn` would leave a real claim and a real lease held by a delivery that was never going to run.
+ *
+ * @param {string} flagValue - the parsed `--provider=` value, `''` when absent.
+ * @param {Record<string, (string|undefined)>} [env] - the environment to read `DELIVERY_AGENT_PROVIDER` from.
+ * @returns {{name: string, provider: object}}
+ */
+export function selectDeliveryAgentProvider(flagValue, env = process.env) {
+  const name = String(flagValue || env.DELIVERY_AGENT_PROVIDER || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
+  if (!DELIVERY_AGENT_PROVIDER_NAMES.includes(name)) {
+    throw new TypeError(
+      `deliver-item-run: --provider must be one of ${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}, `
+      + `got ${JSON.stringify(name)}`,
+    );
+  }
+  return { name, provider: resolveDeliveryAgentProvider(name) };
 }
 
 /**
@@ -105,20 +142,27 @@ export async function runDeliverItemCli(argv = [], {
   deliver = deliverItem,
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
+  selectProvider = selectDeliveryAgentProvider,
+  env = process.env,
 } = {}) {
   let launch;
+  let selected;
   try {
     launch = parseDeliverItemRunArgv(argv);
+    // #3580 — resolved BEFORE the delivery starts, so a bad `--provider=` exits here rather than after a lane
+    // and a claim have already been taken (see `selectDeliveryAgentProvider`'s own docblock).
+    selected = selectProvider(launch.provider, env);
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };
   }
   write(
     `deliver-item-run: starting delivery of #${launch.item} in lane ${launch.lane} `
-    + `(session ${launch.sessionSlug}, attempt ${launch.attemptTag || '1'}) — pid ${process.pid}\n`,
+    + `(session ${launch.sessionSlug}, attempt ${launch.attemptTag || '1'}, provider ${selected.name}) `
+    + `— pid ${process.pid}\n`,
   );
   try {
-    const result = await deliver(launch);
+    const result = await deliver(launch, selected.provider);
     write(`deliver-item-run: #${launch.item} finished — ${result?.result ?? '(no result reported)'}\n`);
     return { code: 0, result };
   } catch (e) {

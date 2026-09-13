@@ -45,7 +45,8 @@ import {
 } from '../dispatch-lane-io.mjs';
 import { DISPATCH_PROVIDER_REGISTRY, dispatchProviderEntry } from '../dispatch-provider-registry.mjs';
 import { DISPATCH_EFFECT, LAUNCH_KINDS, LIVENESS_SOURCES } from '../dispatch-lane.mjs';
-import { parseDeliverItemRunArgv, runDeliverItemCli } from '../deliver-item-run.mjs';
+import { parseDeliverItemRunArgv, runDeliverItemCli, selectDeliveryAgentProvider } from '../deliver-item-run.mjs';
+import { DELIVERY_AGENT_PROVIDERS } from '../deliver-item-wrapper.mjs';
 
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step actually emits, trimmed to what a provider reads. */
 const buildPayload = (over = {}) => ({
@@ -301,9 +302,44 @@ describe('#3645 — the mode knob and the per-dispatch process', () => {
   });
 
   it('`deliver-item-run.mjs` parses the launch the provider hands it, and refuses a missing one by name', () => {
+    // `provider` (#3580) is parsed but NOT validated here — empty means "nobody named one", which
+    // `selectDeliveryAgentProvider` then resolves through the env and the default.
     expect(parseDeliverItemRunArgv(['--num=3645', '--lane=4', '--session=conveyor-3645b', '--attempt=b', '--scope=we:x']))
-      .toEqual({ item: '3645', lane: '4', scope: 'we:x', sessionSlug: 'conveyor-3645b', attemptTag: 'b' });
+      .toEqual({ item: '3645', lane: '4', scope: 'we:x', sessionSlug: 'conveyor-3645b', attemptTag: 'b', provider: '' });
+    expect(parseDeliverItemRunArgv(['--num=1', '--lane=2', '--session=s', '--provider=codex']).provider).toBe('codex');
     expect(() => parseDeliverItemRunArgv(['--num=3645'])).toThrow(/--lane=.*--session=/);
+  });
+
+  // #3580 — WHICH CLI runs the delivery agent. Same flag-wins-env-fallback shape `run.mjs` uses for the judge
+  // seam's `--provider`/`JUDGE_PROVIDER`, so one selection mechanism covers both seams.
+  it('selects the delivery agent provider: flag beats env, env beats the default, and Claude IS the default', () => {
+    expect(selectDeliveryAgentProvider('', {}).name).toBe('claude-restricted');
+    expect(selectDeliveryAgentProvider('', { DELIVERY_AGENT_PROVIDER: 'codex' }).name).toBe('codex');
+    expect(selectDeliveryAgentProvider('codex', {}).name).toBe('codex');
+    // An explicit flag OUTRANKS the environment — never the other way round.
+    expect(selectDeliveryAgentProvider('claude-restricted', { DELIVERY_AGENT_PROVIDER: 'codex' }).name)
+      .toBe('claude-restricted');
+    expect(selectDeliveryAgentProvider('codex', {}).provider).toBe(DELIVERY_AGENT_PROVIDERS.codex);
+  });
+
+  it('refuses an unknown provider name BEFORE a lane is acquired or an item claimed', async () => {
+    expect(() => selectDeliveryAgentProvider('gemini', {})).toThrow(/--provider must be one of/);
+    let delivered = false;
+    const res = await runDeliverItemCli(['--num=1', '--lane=2', '--session=s', '--provider=gemini'], {
+      write: () => {}, writeErr: () => {}, env: {},
+      deliver: async () => { delivered = true; return { item: '1', result: 'ok' }; },
+    });
+    expect(res).toMatchObject({ code: 1, result: null });
+    expect(delivered).toBe(false);
+  });
+
+  it('hands the CHOSEN provider to `deliverItem` as its second argument (the port\'s own selection seam)', async () => {
+    let seenProvider = null;
+    await runDeliverItemCli(['--num=1', '--lane=2', '--session=s', '--provider=codex'], {
+      write: () => {}, writeErr: () => {}, env: {},
+      deliver: async (_launch, provider) => { seenProvider = provider; return { item: '1', result: 'ok' }; },
+    });
+    expect(seenProvider).toBe(DELIVERY_AGENT_PROVIDERS.codex);
   });
 
   it('the per-dispatch process exits 0 on every outcome `deliverItem` REASONS about, 1 only when it throws', async () => {
@@ -329,6 +365,9 @@ describe('#3645 — the mode knob and the per-dispatch process', () => {
     });
     expect(seen).toEqual({
       item: '3645', lane: '4', scope: 'we:scripts/operations', sessionSlug: 'conveyor-3645c', attemptTag: 'c',
+      // #3580 — the detached provider names no `--provider`, so the launch carries an empty one and the
+      // default applies. The seam still invents nothing: this field comes from argv like every other.
+      provider: '',
     });
   });
 
