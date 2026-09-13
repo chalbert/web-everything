@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import {
-  openPrOperation, planOpen, classifySubmit, defaultParkLabel,
+  openPrOperation, planOpen, classifySubmit, defaultParkLabel, extractSubmitResult,
   OPEN_PR_OP, SUBMIT_PR_EFFECT, OPEN_MODES, SUBMIT_OUTCOMES, HOME_REASONS,
 } from '../open-pr.mjs';
 import { createPrLandRunner, createOpenPrSinks, PR_LAND_CLI } from '../open-pr-io.mjs';
@@ -518,5 +518,73 @@ describe('the io shell — one spawn of the home, and no second route', () => {
     }
     // …and the declaration itself reaches nothing at all.
     expect(importGraph(resolve(here, '..', 'open-pr.mjs')).external).toEqual([]);
+  });
+});
+
+/**
+ * #3627 bug 13 (the REAL fix) — a caller of `run.mjs open-pr --json` must read `.pr` off
+ * `extractSubmitResult`'s return, never off the raw parsed stdout. The raw stdout is
+ * `cli-adapter.mjs#outcomePayload`'s FULL run-outcome envelope (`{runId, op, stopped, ..., findings, ...}`),
+ * which carries no top-level `pr`/`url` at all — the actual submit result sits at
+ * `findings.submit.effects[0].result`. A prior fix attempt renamed `.number` to `.pr` on the raw parsed object
+ * and still printed "PR #undefined" live (PR #2109), because the field it renamed was never at that path
+ * either. These fixtures are transcribed from a REAL `node scripts/operations/run.mjs open-pr --json` run
+ * (both a completed dry-run and a `plan`-step refusal), not hand-composed guesses.
+ */
+describe('extractSubmitResult — reads the REAL submit outcome out of the full run envelope, never the top level', () => {
+  it('extracts pr/url out of a completed run\'s nested findings.submit.effects[0].result', () => {
+    const envelope = {
+      runId: 'open-pr-abc', op: 'open-pr', stopped: 'complete', applied: ['open-pr-abc#1#0'],
+      inFlight: [], pending: null,
+      verdict: { ref: 'lane/9999-x', base: 'main', mode: 'park', parkLabel: 'review:pending' }, // the PLAN, no `pr`
+      findings: {
+        plan: { ref: 'lane/9999-x', base: 'main', mode: 'park', parkLabel: 'review:pending' },
+        submit: {
+          applied: true,
+          effects: [{
+            type: 'open-pr.submit', status: 'applied',
+            result: { outcome: 'opened', pr: 2140, url: 'https://example/pr/2140', parked: 'review:pending' },
+            error: null,
+          }],
+        },
+      },
+      telemetry: [], spend: { jurors: 0, costUsd: 0, wallMs: 0, durationMs: 0 },
+    };
+    expect(extractSubmitResult(envelope)).toEqual({ outcome: 'opened', pr: 2140, url: 'https://example/pr/2140', parked: 'review:pending' });
+  });
+
+  it('never mistakes the top-level `verdict` (the PRE-submit plan) for the submit result', () => {
+    // The plan step's own output has no `pr` field — reading `.pr` straight off `envelope.verdict` (what the
+    // first, insufficient fix attempt effectively did) would silently read `undefined` past this.
+    const envelope = {
+      stopped: 'complete', findings: { submit: { effects: [{ result: { outcome: 'opened', pr: 7, url: 'u' } }] } },
+      verdict: { ref: 'lane/1-x', base: 'main' },
+    };
+    const r = extractSubmitResult(envelope);
+    expect(r.pr).toBe(7);
+    expect(r).not.toBe(envelope.verdict);
+  });
+
+  it('synthesizes an `unrun` outcome (pr/url null) when the run never reached submit — a plan-step refusal', () => {
+    // The real shape of a bad-ref refusal: `findings` is `{}` (submit never ran) and the envelope carries its
+    // own top-level `error` instead.
+    const envelope = {
+      runId: 'open-pr-def', op: 'open-pr', stopped: 'step-refused', applied: [], inFlight: [], pending: null,
+      verdict: null, findings: {}, telemetry: [], spend: { jurors: 0, costUsd: 0, wallMs: 0, durationMs: 0 },
+      error: 'open-pr: cannot plan this PR — `ref` must be a lane/* ref, got "bad-ref"',
+    };
+    const r = extractSubmitResult(envelope);
+    expect(r.outcome).toBe('unrun');
+    expect(r.pr).toBeNull();
+    expect(r.url).toBeNull();
+    expect(r.reason).toMatch(/lane\/\* ref/);
+  });
+
+  it('never throws on a malformed/empty payload — synthesizes unrun instead', () => {
+    for (const bad of [null, undefined, {}, { findings: null }, { findings: {} }]) {
+      const r = extractSubmitResult(bad);
+      expect(r.outcome).toBe('unrun');
+      expect(r.pr).toBeNull();
+    }
   });
 });

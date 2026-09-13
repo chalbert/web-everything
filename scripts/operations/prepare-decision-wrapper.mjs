@@ -111,6 +111,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
 import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
 import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { extractSubmitResult } from './open-pr.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import {
@@ -556,7 +557,11 @@ export function openPreparePr({ item, attemptTag, lane, park, report, slug }, { 
     park.mode === 'park' ? '--mode=park' : '--mode=label-on-green',
   ];
   if (park.mode === 'park') args.push(`--parkLabel=${park.label}`);
-  return JSON.parse(runFn('node', args, { cwd: lane }));
+  // #3627 bug 13 — `run.mjs open-pr --json` prints the FULL run-outcome envelope, never a flat `{pr, url}`
+  // object; the real submit result (the only place `.pr`/`.url` live) is nested at
+  // `findings.submit.effects[0].result` (`open-pr.mjs#extractSubmitResult`'s own docblock has the full story —
+  // the same bug `deliver-item-wrapper.mjs#openPr` had, and the same fix).
+  return extractSubmitResult(JSON.parse(runFn('node', args, { cwd: lane })));
 }
 
 // Re-exported so a reader of THIS file can see the exact hooks-settings object its agent runs under without

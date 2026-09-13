@@ -45,6 +45,20 @@ import { DELIVERY_OUTCOMES } from '../delivery-report-record.mjs';
 import { NON_IMPLEMENTING_REF_RE } from '../dispatch-lane-io.mjs';
 import { decide } from '../../guard-bash.mjs';
 
+/**
+ * #3627 bug 13 — a REALISTIC `run.mjs open-pr --json` stdout: the full run-outcome envelope
+ * (`cli-adapter.mjs#outcomePayload`), never a flat `{pr}` object. The real submit result lives nested at
+ * `findings.submit.effects[0].result` (`engine.mjs#effectFinding`) — see `open-pr.mjs#extractSubmitResult`'s
+ * docblock for the full story.
+ */
+function openPrEnvelope(pr) {
+  return JSON.stringify({
+    stopped: 'complete',
+    findings: { submit: { applied: true, effects: [{ type: 'open-pr.submit', status: 'applied', result: { outcome: 'opened', pr }, error: null }] } },
+    verdict: { ref: 'lane/test', base: 'main' },
+  });
+}
+
 /** A `run` spy: records every shell-out and answers from a table of `[matcher, reply]` pairs. */
 function recordingRun(replies = []) {
   const calls = [];
@@ -180,13 +194,14 @@ describe('#3644 — the PR ref shape is load-bearing, not cosmetic', () => {
 
   it('opens through `run.mjs open-pr` with a real body file, label-on-green by default and park when parked', () => {
     const written = [];
-    const { fn, calls } = recordingRun([[/open-pr/, '{"pr":2140}']]);
+    const { fn, calls } = recordingRun([[/open-pr/, openPrEnvelope(2140)]]);
     const report = { outcome: 'done', reason: null, filesTouched: ['backlog/2568-a-decision.md'] };
     const out = openPreparePr(
       { item: '2568', attemptTag: '', lane: '/lane-6', park: { mode: 'label-on-green', label: 'ready-to-merge' }, report, slug: 'a-decision' },
       { run: fn, writeFile: (p, c) => written.push({ p, c }) },
     );
-    expect(out).toEqual({ pr: 2140 });
+    // `openPreparePr` returns the REAL `.pr` (`extractSubmitResult`'s shape), never the raw envelope it parsed.
+    expect(out).toEqual({ outcome: 'opened', pr: 2140 });
     expect(calls[0].opts.cwd).toBe('/lane-6');
     expect(calls[0].args).toEqual(expect.arrayContaining([
       '--ref=lane/2568-prepare-a-decision', '--sha=HEAD', '--base=main', '--bodyFile=/lane-6/.pr-body.md',
@@ -198,7 +213,7 @@ describe('#3644 — the PR ref shape is load-bearing, not cosmetic', () => {
     expect(written[0].p).toBe('/lane-6/.pr-body.md');
     expect(written[0].c).toContain('#2568');
 
-    const parked = recordingRun([[/open-pr/, '{"pr":2141}']]);
+    const parked = recordingRun([[/open-pr/, openPrEnvelope(2141)]]);
     openPreparePr(
       { item: '2568', attemptTag: '', lane: '/lane-6', park: { mode: 'park', label: 'review:human' }, report, slug: 'a-decision' },
       { run: parked.fn, writeFile: () => {} },

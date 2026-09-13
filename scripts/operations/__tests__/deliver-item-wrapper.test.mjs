@@ -1659,6 +1659,21 @@ describe('decideParkMode (#3627 gap 4 — the real scoreEscalation rubric)', () 
   });
 });
 
+/**
+ * #3627 bug 13 — a REALISTIC `run.mjs open-pr --json` stdout, never the flat `{pr, url}` shape a prior test
+ * (and a prior fix attempt) wrongly assumed. The real shape is the FULL run-outcome envelope
+ * (`cli-adapter.mjs#outcomePayload`); the submit result lives nested at `findings.submit.effects[0].result`
+ * (`engine.mjs#effectFinding`), never at the top level. Transcribed from an actual CLI run, not guessed.
+ */
+function openPrEnvelope(result) {
+  return JSON.stringify({
+    runId: 'open-pr-test', op: 'open-pr', stopped: 'complete', applied: ['open-pr-test#1#0'],
+    inFlight: [], pending: null, verdict: { ref: 'lane/test', base: 'main' }, // the PLAN — no `pr` here
+    findings: { plan: { ref: 'lane/test', base: 'main' }, submit: { applied: true, effects: [{ type: 'open-pr.submit', status: 'applied', result, error: null }] } },
+    telemetry: [], spend: { jurors: 0, costUsd: 0, wallMs: 0, durationMs: 0 },
+  });
+}
+
 // ================================================================================================
 // Bug 1 (found re-reading the file end-to-end before the first real #3371 run) — `openPr`'s PR ref carried a
 // literal, never-substituted `<slug>` placeholder (`lane/${item}${attemptTag}-<slug>`), which would have
@@ -1673,13 +1688,14 @@ describe('openPr (#3627 bug 1 — the real slug, never the literal <slug> placeh
   afterEach(() => { rmSync(lane, { recursive: true, force: true }); });
 
   it('builds the PR ref using the REAL slug handed in, never the literal "<slug>" placeholder text', () => {
-    const run = vi.fn(() => JSON.stringify({ number: 42, url: 'https://example/pr/42' }));
+    const run = vi.fn(() => openPrEnvelope({ outcome: 'opened', pr: 42, url: 'https://example/pr/42' }));
     const report = { reason: 'x', filesTouched: [] };
     const result = openPr(
       { item: '3371', attemptTag: '', lane, park: { mode: 'label-on-green' }, report, slug: 'some-real-slug' },
       { run },
     );
-    expect(result).toEqual({ number: 42, url: 'https://example/pr/42' });
+    // `openPr` returns the REAL `.pr`/`.url` (`extractSubmitResult`'s shape), never the raw envelope it parsed.
+    expect(result).toEqual({ outcome: 'opened', pr: 42, url: 'https://example/pr/42' });
     const openPrCall = run.mock.calls.find((c) => c[1]?.[1] === 'open-pr');
     expect(openPrCall).toBeDefined();
     const refFlag = openPrCall[1].find((a) => a.startsWith('--ref='));
@@ -1688,7 +1704,7 @@ describe('openPr (#3627 bug 1 — the real slug, never the literal <slug> placeh
   });
 
   it('includes the attemptTag between the item number and the real slug when one is given', () => {
-    const run = vi.fn(() => JSON.stringify({ number: 1 }));
+    const run = vi.fn(() => openPrEnvelope({ outcome: 'opened', pr: 1 }));
     openPr(
       { item: '3371', attemptTag: 'b', lane, park: { mode: 'label-on-green' }, report: { reason: 'x', filesTouched: [] }, slug: 'do-the-thing' },
       { run },
@@ -1706,7 +1722,7 @@ describe('openPr (#3627 bug 1 — the real slug, never the literal <slug> placeh
   it('never calls findItem/the backlog loader itself — openPr is a pure function of its params (the caller resolves the slug)', () => {
     // No `loadItems` is threaded through `openPr` at all (removed from its signature on purpose) — this test
     // simply asserts the call succeeds with a bare `run` mock and no backlog-loading machinery in play.
-    const run = vi.fn(() => JSON.stringify({ number: 7 }));
+    const run = vi.fn(() => openPrEnvelope({ outcome: 'opened', pr: 7 }));
     expect(() => openPr(
       { item: '1234', attemptTag: '', lane, park: { mode: 'park', label: 'review:human' }, report: { reason: 'x', filesTouched: [] }, slug: 'x' },
       { run },
@@ -2173,14 +2189,18 @@ describe('resetStaleVerifyMarker (#3627 attempt-5 finding — shells verify-lane
 });
 
 // ================================================================================================
-// #3627 bug 13 — `deliverItem`'s success-path result string read `prResult.number`, but `openPr`'s return is
-// `open-pr.mjs`'s `classifySubmit` shape (`run.mjs open-pr --json`), which names the PR `pr`, never `number` —
-// confirmed by reading `classifySubmit` itself (`we:scripts/operations/open-pr.mjs` lines ~305-346): every
-// return path uses `pr:`, and `open-pr-io.mjs` prints that exact object as the CLI's `--json` output. Live on
-// attempt 6/PR #2109 this printed "PR #undefined" even though the PR opened correctly. `deliverItem` itself has
-// no injection points for its own internal calls (see the file-top mock block for why every dependency here is
-// mocked at ITS OWN boundary — `execFileSync`/`readFileSync`/`findItem`/`tryReadDeliveryReport` — rather than
-// deliverItem's signature), so this drives the REAL, unmodified `deliverItem` end to end.
+// #3627 bug 13 — `deliverItem`'s success-path result string read `prResult.number`, but `openPr`'s return
+// should be `open-pr.mjs`'s `classifySubmit` shape, which names the PR `pr`, never `number`. Renaming
+// `.number` to `.pr` was NOT the full fix, though: `run.mjs open-pr --json` does not print `classifySubmit`'s
+// shape directly — it prints the FULL run-outcome envelope (`cli-adapter.mjs#outcomePayload`), which has no
+// top-level `pr`/`url` at all. The real submit result sits nested at `findings.submit.effects[0].result`
+// (confirmed empirically by actually running `run.mjs open-pr --json`, never by reading the source alone).
+// `openPr` now runs its parsed stdout through `extractSubmitResult` before returning, so `prResult.pr` reads
+// the real thing. Live on attempt 6/PR #2109 this printed "PR #undefined" even though the PR opened correctly.
+// `deliverItem` itself has no injection points for its own internal calls (see the file-top mock block for why
+// every dependency here is mocked at ITS OWN boundary — `execFileSync`/`readFileSync`/`findItem`/
+// `tryReadDeliveryReport` — rather than deliverItem's signature), so this drives the REAL, unmodified
+// `deliverItem` end to end.
 // ================================================================================================
 describe('deliverItem (#3627 bug 13 — the success-path result string names the real PR field)', () => {
   let lane;
@@ -2209,8 +2229,10 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
       }
       if (cmd === 'git') return ''; // decideParkMode's own diff-stats read; empty is a safe, real answer
       if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'open-pr') {
-        // the real classifySubmit shape: `pr`, never `number` — the exact repro for bug 13.
-        return JSON.stringify({ pr: 4321, url: 'https://example/pr/4321' });
+        // the REAL `run.mjs open-pr --json` shape: the full run-outcome envelope, with the actual `pr`/`url`
+        // nested at `findings.submit.effects[0].result` — never a flat `{pr, url}` object (that was the exact
+        // repro for bug 13 still being live after a first, insufficient fix attempt).
+        return openPrEnvelope({ outcome: 'opened', pr: 4321, url: 'https://example/pr/4321' });
       }
       throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
     });

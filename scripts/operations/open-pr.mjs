@@ -346,3 +346,36 @@ export function classifySubmit({ status, signal, stdout = '', stderr = '', error
   if (parsed.pr || parsed.url) return { outcome: 'opened', pr: parsed.pr ?? null, url: parsed.url ?? null, parked: parsed.parked ?? null };
   return { outcome: 'unrun', reason: `pr-land exited ${status ?? '?'} without opening a PR or naming a refusal: ${tail || '<empty>'}` };
 }
+
+/**
+ * Read this OPERATION's own `submit` outcome (this file's {@link classifySubmit} shape — `.pr`/`.url`/
+ * `.outcome`/`.reason`) out of the FULL run-outcome envelope that `run.mjs open-pr --json` actually prints on
+ * stdout, i.e. `cli-adapter.mjs#outcomePayload`'s `{runId, op, stopped, applied, inFlight, pending, verdict,
+ * findings, telemetry, spend}`.
+ *
+ * THE BUG THIS CLOSES (#3627 bug 13, live on PR #2109, and STILL live after a first fix attempt that only
+ * renamed `.number` to `.pr` without checking where `.pr` actually lives): a caller that does
+ * `JSON.parse(stdout).pr` gets `undefined` on every real call, because the envelope carries no top-level
+ * `pr`/`url` at all — this operation's `verdictFrom` is `'plan'` (so `run.verdict` is the PRE-submit plan, not
+ * the submission result), and the submit step's own result — the ONLY place `pr`/`url` genuinely live — is
+ * nested at `findings.submit.effects[0].result` (`engine.mjs#effectFinding`). Confirmed empirically: a real
+ * `--dryRun` invocation's JSON has no top-level `pr` key, and its actual `pr` (`null`, for a dry run) sits at
+ * exactly that nested path.
+ *
+ * When the run never reached `submit` at all (the `plan` step refused — e.g. a bad ref — so `findings` is
+ * `{}`), synthesizes the same `unrun` shape `classifySubmit` would report for "no parseable report": there is
+ * no PR to name, so `pr`/`url` are `null`, and `reason` carries the envelope's own top-level `error`.
+ *
+ * PURE — reads the parsed payload, calls nothing, spawns nothing.
+ */
+export function extractSubmitResult(payload) {
+  const result = payload?.findings?.submit?.effects?.[0]?.result;
+  if (result && typeof result === 'object') return result;
+  return {
+    outcome: 'unrun',
+    reason: payload?.error
+      ?? `open-pr: run ${JSON.stringify(payload?.stopped ?? 'unknown')} never reached its submit step — no PR was opened`,
+    pr: null,
+    url: null,
+  };
+}

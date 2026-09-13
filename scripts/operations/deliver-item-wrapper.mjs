@@ -103,6 +103,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // never-throwing by construction — see `telemetry-store.mjs`'s purity discipline.
 import { recorderFor, setActiveRecorder, spanAround, resolveTurnCpuAttributes, recordChildResourceUsage } from './telemetry-store.mjs';
 import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { extractSubmitResult } from './open-pr.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
@@ -404,9 +405,14 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
 
     // ---- 8. Exit. Same "never merge, never release, the drain lands it" contract as today. -----------------
-    // `prResult` is `open-pr.mjs`'s `classifySubmit` shape (via `run.mjs open-pr --json`), which names the
-    // PR number `pr`, never `number` — `report.number` is always `undefined` and prior wording printed
-    // "PR #undefined" live even when the PR opened correctly (bug 13, confirmed live on real PR #2109).
+    // `prResult` is `open-pr.mjs`'s `classifySubmit` shape — `.pr`, never `.number` — because `openPr` (above)
+    // now runs it through `extractSubmitResult` before returning. It did NOT used to: `openPr` used to hand
+    // back `JSON.parse(out)` UNCHANGED, i.e. `run.mjs open-pr --json`'s own full run-outcome envelope, which
+    // carries no top-level `pr`/`url` at all (the real value sits at `findings.submit.effects[0].result.pr`).
+    // Renaming `.number` to `.pr` here (the first fix attempt) therefore did not close the bug — `prResult.pr`
+    // was still reading past a field that was never there, off the wrong object. Confirmed live on real PR
+    // #2109 ("PR #undefined" printed even though the PR opened correctly) and reproduced by actually running
+    // `run.mjs open-pr --json` (bug 13; see `extractSubmitResult`'s own docblock for the full story).
     return finish(`PR #${prResult.pr} (${parkDecision.label})`, {
       status: 'ok', outcome: 'pr-opened', pr: prResult.pr ?? null, park: parkDecision.label,
     });
@@ -1814,7 +1820,10 @@ export function openPr({ item, attemptTag, lane, park, report, slug }, { run: ru
   args.push(park.mode === 'park' ? `--mode=park` : '--mode=label-on-green');
   if (park.mode === 'park') args.push(`--parkLabel=${park.label}`);
   const out = runFn('node', args, { cwd: lane });
-  return JSON.parse(out);
+  // #3627 bug 13 (real fix) — `run.mjs open-pr --json` prints the FULL run-outcome envelope, never a flat
+  // `{pr, url}` object; the actual submit result (the only place `.pr`/`.url` live) is buried at
+  // `findings.submit.effects[0].result`. See `extractSubmitResult`'s own docblock for the full story.
+  return extractSubmitResult(JSON.parse(out));
 }
 
 // #3627 follow-up — raw script call, not routed through `run.mjs`: no `learnings-drop` operation is

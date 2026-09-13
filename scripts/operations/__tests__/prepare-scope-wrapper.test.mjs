@@ -72,7 +72,7 @@ const loadItems = () => [{ num: ITEM, slug: 'build-and-wire-a-mechanical-harness
  * A recording `run` that answers every CLI the arc shells. `overrides` replaces one answer by a matcher, so a
  * test can make exactly one step fail without restating the rest.
  */
-function recordingRun({ verify = { ok: true }, porcelain = ` M ${SPEC}\n`, pr = { pr: 2200 }, onCall } = {}) {
+function recordingRun({ verify = { ok: true }, porcelain = ` M ${SPEC}\n`, pr = { outcome: 'opened', pr: 2200 }, onCall } = {}) {
   const calls = [];
   const fn = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
@@ -85,7 +85,16 @@ function recordingRun({ verify = { ok: true }, porcelain = ` M ${SPEC}\n`, pr = 
       return JSON.stringify({ lanes: [{ lane: 2, path: laneDir }] });
     }
     if (args.includes('verify')) return JSON.stringify({ verdict: typeof verify === 'function' ? verify(calls) : verify });
-    if (args.includes('open-pr')) return JSON.stringify(pr);
+    if (args.includes('open-pr')) {
+      // #3627 bug 13 — a REALISTIC `run.mjs open-pr --json` stdout: the full run-outcome envelope
+      // (`cli-adapter.mjs#outcomePayload`), never a flat `{pr}` object. The real submit result lives nested at
+      // `findings.submit.effects[0].result` — see `open-pr.mjs#extractSubmitResult`'s docblock.
+      return JSON.stringify({
+        stopped: 'complete',
+        findings: { submit: { applied: true, effects: [{ type: 'open-pr.submit', status: 'applied', result: pr, error: null }] } },
+        verdict: { ref: 'lane/test', base: 'main' },
+      });
+    }
     return '';
   };
   return { fn, calls };
@@ -340,7 +349,8 @@ describe('#3641 — the PR the wrapper opens', () => {
   it('writes that body to the lane and hands `open-pr` its real path', () => {
     const { fn: run, calls } = recordingRun();
     const out = openScopePr({ item: ITEM, lanePath: laneDir, itemSpecPath: SPEC, report: doneReport(), slug: 's' }, { run });
-    expect(out).toEqual({ pr: 2200 });
+    // `openScopePr` returns the REAL `.pr` (`extractSubmitResult`'s shape), never the raw envelope it parsed.
+    expect(out).toEqual({ outcome: 'opened', pr: 2200 });
     expect(readFileSync(`${laneDir}/.pr-body.md`, 'utf8')).toContain(`## #${ITEM}`);
     expect(calls[0].args).toContain(`--bodyFile=${laneDir}/.pr-body.md`);
   });

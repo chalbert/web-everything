@@ -79,6 +79,7 @@ import {
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
 import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
 import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { extractSubmitResult } from './open-pr.mjs';
 import { SCOPE_AUTHORING_AGENT_KIND } from './dispatch-lane.mjs';
 import {
   tryReadDeliveryReport, deleteDeliveryReport, resolveDeliveryReportsDir,
@@ -444,7 +445,11 @@ export function openScopePr({ item, lanePath, itemSpecPath, report, slug }, { ru
     'scripts/operations/run.mjs', 'open-pr', `--ref=lane/${item}-scope-${slug}`, '--sha=HEAD', '--base=main',
     `--bodyFile=${bodyFile}`, '--requireVerified=true', '--mode=label-on-green', '--json',
   ], { cwd: lanePath });
-  return JSON.parse(out);
+  // #3627 bug 13 — `run.mjs open-pr --json` prints the FULL run-outcome envelope, never a flat `{pr, url}`
+  // object; the real submit result (the only place `.pr`/`.url` live) is nested at
+  // `findings.submit.effects[0].result` (`open-pr.mjs#extractSubmitResult`'s own docblock has the full story —
+  // the same bug `deliver-item-wrapper.mjs#openPr` had, and the same fix).
+  return extractSubmitResult(JSON.parse(out));
 }
 
 /** REAL (flags lifted verbatim from the live brief's step 7). */
