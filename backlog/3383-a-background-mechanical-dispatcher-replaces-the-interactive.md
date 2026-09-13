@@ -1896,29 +1896,29 @@ never by which CLI ran the phase. **136 tests pass** (`we:scripts/operations/__t
 This item is finished for tonight; the only thing left is graduating it to `main` under `#3443`'s normal
 incremental path, same as everything else on this branch.
 
-### 4. Decision Docket convention (full fork detail for every prepared item, not just ratified ones) — written, not yet committed
+### 4. Decision Docket convention (full fork detail for every prepared item, not just ratified ones) — committed, not yet pushed or landed (progressed DURING this check — was uncommitted prose minutes earlier)
 
-Lane-18 (`decision-docket-doc`) holds a complete, ready-looking edit, **still sitting as an uncommitted working-
-tree diff** — nothing lost, but nothing durable yet either if that lane were ever reset. Adds a new
-`we:docs/agent/backlog-workflow.md` section ("Publishing the Decision Docket — full fork detail for every
-prepared item shown, never a summary row") stating the rule plainly: every prepared item the Decision Docket
-lists gets its complete fork breakdown — every option, the bold default, and each non-default option's stated
-rejection reason — never a compact summary row, and this bar does **not** vary by section (a "current batch"
-item and a merely-listed older item get the same treatment; shrink the list before thinning the detail).
-Cross-links backlog item #3562 (the standing mechanical pass this binds once built) and amends #3562's own "Why"
-section to point back at the new doc anchor. Needs: commit, `check:standards`, and a PR — none of which have
-happened yet.
+Lane-18 (`decision-docket-doc`) went from an uncommitted working-tree diff to a real commit,
+`7ade8f652` ("docs: codify the Decision Docket convention — full fork detail for every prepared item, not a
+summary row"), while this update was being written. Adds a new `we:docs/agent/backlog-workflow.md` section
+("Publishing the Decision Docket — full fork detail for every prepared item shown, never a summary row")
+stating the rule plainly: every prepared item the Decision Docket lists gets its complete fork breakdown —
+every option, the bold default, and each non-default option's stated rejection reason — never a compact
+summary row, and this bar does **not** vary by section (a "current batch" item and a merely-listed older item
+get the same treatment; shrink the list before thinning the detail). Cross-links backlog item #3562 (the
+standing mechanical pass this binds once built) and amends #3562's own "Why" section to point back at the new
+doc anchor. **Committed, local to lane-18 only as of this check** — not pushed, no PR, not landed yet.
 
-### 5. Codex-delegation memory note — DONE, committed locally, not pushed or landed
+### 5. Codex-delegation memory note — DONE, landed to `main` (landed live DURING this check)
 
-Lane-20 holds a finished commit, `9f48c6baf` ("memory: delegate work to Codex when feasible"), adding
-`we:agent-memory-src/delegate-work-to-codex-when-feasible.md` (indexed into `we:agent-memory-src/index-meta.md`)
-capturing the operator's 2026-09-12 framing verbatim: actively look for a point where handing real work to Codex
-becomes genuinely feasible (not just theoretically wired) and treat it as worth pursuing, not something to wait
-to be asked about. **This commit is local to lane-20 only** — not pushed, no PR, not landed. **Lane-8 was also
-acquired under the identical purpose (`delegate-codex-memory`) and is clean/unused** — a redundant reservation
-from the same push, superseded by lane-20's actual commit; release it rather than treating it as separate
-outstanding work.
+`we:agent-memory-src/delegate-work-to-codex-when-feasible.md` (indexed into `we:agent-memory-src/index-meta.md`),
+capturing the operator's 2026-09-12 framing verbatim (actively look for a point where handing real work to
+Codex becomes genuinely feasible, not just theoretically wired, and treat it as worth pursuing rather than
+waiting to be asked), is now on `main`: `PR #2151` merged at **2026-09-13T02:32:23Z** — after being only a
+local, unpushed commit in lane-20 earlier in this same check (the pattern repeated across two of tonight's
+five threads). **Lane-8 and lane-20 were both acquired under the identical purpose (`delegate-codex-memory`)**
+— lane-20 did the real work and it is now landed; lane-8 is a redundant, unused reservation from the same push
+and should simply be released.
 
 ### Corrections to the operator's own settled-context list, verified rather than transcribed
 
@@ -1982,9 +1982,9 @@ Check, in this order:
    claims, then commit/PR per the normal prototype-fix-or-graduate path.
 3. **Item 2** (`lane-22` plus the separate codex-validate scratch clone) — no recorded verdict yet; this is
    genuinely still open, not just unwritten-up.
-4. **Item 4** (`lane-18`, Decision Docket doc change) — finished prose, needs commit + `check:standards` + PR.
-5. **Item 5** (`lane-20`, Codex-delegation memory) — finished commit, needs push + PR; release the redundant
-   `lane-8` reservation once confirmed unused.
+4. **Item 4** (`lane-18`, Decision Docket doc change) — finished commit as of this check, needs push + PR.
+5. **Item 5** (Codex-delegation memory) — already landed (`PR #2151`); just release the redundant `lane-8` /
+   `lane-20` reservations.
 6. **Stuck-vs-working check**: `claude agents --json` shows a primary-checkout interactive session sitting on
    `"waiting for dialog open"` — a real stuck-dialog pattern seen repeatedly today, not one of tonight's five
    threads; worth a look. Several `fix-*`/`review-*` background entries show `state: blocked` but are ~24h+ old
