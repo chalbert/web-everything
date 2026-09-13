@@ -144,6 +144,29 @@ import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './j
 export const ANTIGRAVITY_CLI = 'agy';
 
 /**
+ * #3383 — THE PINNED MODEL for a review-panel seat backed by this provider (`review-pr.mjs`'s
+ * `judgeAntigravityReview`, the fifth seat), mirroring `codex-direct-task.mjs#CODEX_MODEL`'s role for the
+ * Codex seats: a stampable `{provider, model}` identity for `model-probation.json`, rather than whatever `agy`
+ * resolves implicitly (#3633 probe 9 — the CLI's own undocumented default self-reports as "Gemini 3.8 Flash"
+ * with NO exposed effort tier, so a run record could not even stamp what it actually asked for).
+ *
+ * `gemini-3.1-pro` — a BARE model id from `agy`'s own roster (#3633 probe 9's "ten models" enumeration) —
+ * deliberately NOT one of the effort-SUFFIXED ids (`gemini-3.8-flash-medium` and friends). Probe 9 also found
+ * effort is "either a model-id suffix or the flag, never both": a suffixed id conflicts with a separately
+ * passed `--effort`, while a bare id like this one REQUIRES `--effort` as its own flag (available `low|high`
+ * for this specific model). This module's seat always supplies one explicitly (see `ANTIGRAVITY_REVIEW_EFFORT`
+ * in `review-pr.mjs`), so pinning a bare id here is what keeps the two flags from ever landing on the same
+ * argv in a way `agy` refuses.
+ *
+ * NO LIVE COST/QUALITY COMPARISON HAS BEEN RUN across `agy`'s ten models for this role, unlike the Codex fourth
+ * seat's measured medium-vs-max comparison (`CORRECTNESS_ADVISORY_EFFORT`'s own docblock) — stated honestly:
+ * this is a deliberately modest, defensible starting pin for a seat with ZERO real review trials (see
+ * `model-probation.json`'s own entry for this identity), not a benchmarked choice. Revisit once probation data
+ * (#3649's run-quality recorder) accumulates.
+ */
+export const ANTIGRAVITY_MODEL = 'gemini-3.1-pro';
+
+/**
  * The shared care→rigor dial's effort enum (`judge-spawn.mjs#EFFORT_LEVELS`) does not match `agy`'s own
  * `--effort` values one-to-one — #3633 probe 9: `agy --effort` accepts exactly `low`, `medium`, `high`.
  * `xhigh`/`max` CLAMP DOWN to `high` rather than being refused, mirroring `codex-judge-spawn.mjs`'s own

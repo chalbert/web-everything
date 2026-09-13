@@ -66,6 +66,13 @@ import { codexJudgeSpawn, requireAllProperties } from '../lib/codex-judge-spawn.
 // rather than pulled in wholesale from that branch, since our need is narrowly "the identity this probation
 // registry keys on must be real", not the fuller multi-call-site consolidation #3635 owns.
 import { CODEX_MODEL } from '../codex-direct-task.mjs';
+// #3383 — THE FIFTH SEAT'S PROVIDER (Google's Antigravity CLI, `agy`), mirroring the Codex import immediately
+// above: a leaf constant with no jury/markdown-it edge, imported so `resolveJudgeProvider`'s `'antigravity'`
+// branch pins a REAL `{provider, model}` identity (`ANTIGRAVITY_MODEL`) rather than whatever `agy` resolves as
+// its own undocumented default (#3633 probe 9: the default model's effort tier is not even exposed). See
+// `antigravity-judge-spawn.mjs`'s own header for why this module is a safe, tool-free leaf import — it is
+// already the standalone primitive proven live against the real CLI (`63102bde8`), just not wired until now.
+import { antigravityJudgeSpawn, ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
 
 /** Flags the adapter owns. A declaration may not name an input field that collides with one. */
 export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model', 'provider']);
@@ -76,8 +83,11 @@ export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 
  * A single source of truth so the CLI parse, `createDefaultJudge`'s resolution, and any future caller agree
  * on the exact same spelling set — the same reason `EFFORT_LEVELS` is one exported array rather than a string
  * re-typed at each call site.
+ *
+ * #3383 — `'antigravity'` ADDED here, mirroring exactly how `'codex'` was added: additive, never reordering
+ * the existing two names and never changing the default (still `'claude'`).
  */
-export const JUDGE_PROVIDER_NAMES = Object.freeze(['claude', 'codex']);
+export const JUDGE_PROVIDER_NAMES = Object.freeze(['claude', 'codex', 'antigravity']);
 
 /**
  * The control flags that mean something ONLY to a declaration with a `judge` step — the JUROR flags.
@@ -603,9 +613,25 @@ export function resolveJudgeProvider(name) {
     // operator override) still wins, exactly like every other override in this file.
     return (request) => codexJudgeSpawn({ model: CODEX_MODEL, ...request, shape: requireAllProperties(request.shape) });
   }
+  // #3383 — `'antigravity'` wraps `antigravityJudgeSpawn` the same way, `model: ANTIGRAVITY_MODEL` spread
+  // first so an operator/request override still wins. NO schema transform — unlike Codex, `agy` accepts this
+  // repo's OPTIONAL-property shapes untransformed (`antigravity-judge-spawn.mjs`'s own header, item 3), so
+  // there is nothing analogous to `requireAllProperties` to run here.
+  if (name === 'antigravity') {
+    return (request) => antigravityJudgeSpawn({ model: ANTIGRAVITY_MODEL, ...request });
+  }
   if (name === 'claude' || name == null) return judgeSpawn;
   throw new Error(`operations: unknown judge provider ${JSON.stringify(name)} — one of ${JUDGE_PROVIDER_NAMES.join('|')}`);
 }
+
+/**
+ * #3383 — THE TOOL-FREE PROVIDER NAMES: both `'codex'` and `'antigravity'` are structurally tool-free seats
+ * (see each module's own header for why), so both share the SAME two guards below — the model-merge exclusion
+ * and the tool-bearing refusal — rather than duplicating an `effectiveProviderName === 'codex'` check per
+ * provider as they are added. A single named list so a THIRD tool-free provider, if one is ever added, extends
+ * both guards by editing one array rather than two `if` conditions.
+ */
+export const TOOL_FREE_JUDGE_PROVIDER_NAMES = Object.freeze(['codex', 'antigravity']);
 
 /**
  * The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}.
@@ -621,15 +647,16 @@ export function resolveJudgeProvider(name) {
  * @param {JudgeProvider} [o.provider] - the provider port implementation, injected for tests. Defaults to
  *   `resolveProvider(providerName)`, so an operator who supplies `providerName` alone (the normal command
  *   line case) never has to also know what function that name resolves to.
- * @param {string|null} [o.providerName] - #xqa9ttq — `'claude'` (default) or `'codex'`, one of
- *   `JUDGE_PROVIDER_NAMES`. IGNORED once `provider` is explicitly supplied — that is what keeps every existing
- *   test that injects a stub `provider` untouched by this card. IGNORED, per call, whenever THAT call's own
- *   `request.providerName` is set — see the per-request override note below.
+ * @param {string|null} [o.providerName] - #xqa9ttq/#3383 — `'claude'` (default), `'codex'`, or `'antigravity'`,
+ *   one of `JUDGE_PROVIDER_NAMES`. IGNORED once `provider` is explicitly supplied — that is what keeps every
+ *   existing test that injects a stub `provider` untouched by this card. IGNORED, per call, whenever THAT
+ *   call's own `request.providerName` is set — see the per-request override note below.
  * @param {string|null} [o.cwd] - the lane the juror runs in. Passed only when set, so a tool-free juror is
  *   unaffected and a tool-bearing one hits `assertLaneCwd`'s refusal when nobody supplied a lane (#3151).
  * @param {string|null} [o.model] - an operator override for the model the DECLARATION asked for. Absent by
  *   default: the declared literal is the norm, and an override is a deliberate command-line act. Never merged
- *   onto a request whose EFFECTIVE provider (request-level or factory-level) is `codex` — see below.
+ *   onto a request whose EFFECTIVE provider (request-level or factory-level) is tool-free
+ *   ({@link TOOL_FREE_JUDGE_PROVIDER_NAMES}) — see below.
  * @param {(name: string) => JudgeProvider} [o.resolveProvider] - #xqa9ttq — how a per-request `providerName`
  *   (and, absent one, the factory's own `providerName`) becomes a provider FUNCTION. Defaults to the real
  *   {@link resolveJudgeProvider}; injectable so a test can substitute BOTH providers at once without touching
@@ -660,22 +687,25 @@ export function createDefaultJudge({
     // adapter's parse refuses a `-`-leading value too; this is the seam that binds every caller of this
     // factory, including one that builds it by hand.
     //
-    // #xqa9ttq — NEVER MERGED ONTO AN EFFECTIVELY-CODEX REQUEST. `model` here is a Claude model name (the
-    // declaration's `JUDGE_MODEL` literal, or whatever the operator typed for the seat(s) they are steering
-    // with `--model`); a request whose effective provider is `codex` (via `request.providerName` or this
-    // factory's own) would otherwise carry that Claude model name onto Codex's `-m` flag verbatim.
-    const effective = (model && effectiveProviderName !== 'codex') ? { ...request, model } : request;
+    // #xqa9ttq/#3383 — NEVER MERGED ONTO AN EFFECTIVELY TOOL-FREE REQUEST (`codex` OR `antigravity`). `model`
+    // here is a Claude model name (the declaration's `JUDGE_MODEL` literal, or whatever the operator typed for
+    // the seat(s) they are steering with `--model`); a request whose effective provider is tool-free (via
+    // `request.providerName` or this factory's own) would otherwise carry that Claude model name onto the
+    // other CLI's own model flag verbatim.
+    const effective = (model && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName)) ? { ...request, model } : request;
     assertSafeJudgeRequest(effective);
-    // #xqa9ttq — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside `codex-judge-spawn.mjs`. A caller that
-    // injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the one
-    // place that catches "codex + tool-bearing" regardless of HOW the codex provider got here — the same
-    // belt-and-braces reasoning `assertNoForbiddenArgv`'s "reachable through judgeSpawn too" note already uses.
-    // Reads `effectiveProviderName` (request-level override included), not the factory's own `providerName`
-    // alone — otherwise a factory defaulted to `claude` with a request pinned to `codex` would sail past this.
-    if (effectiveProviderName === 'codex' && effective.allowedTools) {
+    // #xqa9ttq/#3383 — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside each provider's own spawn module. A
+    // caller that injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the
+    // one place that catches "tool-free provider + tool-bearing request" regardless of HOW that provider got
+    // here — the same belt-and-braces reasoning `assertNoForbiddenArgv`'s "reachable through judgeSpawn too"
+    // note already uses. Reads `effectiveProviderName` (request-level override included), not the factory's
+    // own `providerName` alone — otherwise a factory defaulted to `claude` with a request pinned to a tool-free
+    // provider would sail past this.
+    if (TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName) && effective.allowedTools) {
       throw new Error(
-        'operations: refusing `--provider=codex` with a TOOL-BEARING judge request — the Codex provider is '
-        + 'seated as a TOOL-FREE panelist only (#3581). Use the default `claude` provider for a tool-bearing role.',
+        `operations: refusing \`--provider=${effectiveProviderName}\` with a TOOL-BEARING judge request — the `
+        + `${effectiveProviderName} provider is seated as a TOOL-FREE panelist only (#3581/#3383). Use the `
+        + 'default `claude` provider for a tool-bearing role.',
       );
     }
     // #xqa9ttq — RESOLUTION ORDER. A REQUEST-level `providerName` always resolves via `resolveProvider` (the

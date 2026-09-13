@@ -146,4 +146,16 @@ describe('IO shell — readRegistry/writeRegistry', () => {
   it('liveStatusFor reads the real on-disk registry in one call', () => {
     expect(liveStatusFor({ provider: 'codex', model: 'gpt-6-astra', role: 'advisory-review' })).toBe('probation');
   });
+  // #3383 — the FIFTH review-panel seat's registration (`review-pr.mjs`'s `judgeAntigravityReview`), a
+  // genuinely different identity from codex's own entry above: zero prior trials in ANY role, so only
+  // `advisory-review` is declared (no `delivery` role at all — there is no Antigravity delivery agent).
+  it('the real registry file on disk also names antigravity on probation for advisory-review only', () => {
+    const reg = readRegistry({ path: PROBATION_REGISTRY_PATH });
+    expect(statusFor(reg, { provider: 'antigravity', model: 'gemini-3.1-pro', role: 'advisory-review' })).toBe('probation');
+    // No `delivery` role declared for this identity — falls through to the fail-closed default.
+    expect(statusFor(reg, { provider: 'antigravity', model: 'gemini-3.1-pro', role: 'delivery' })).toBe(DEFAULT_STATUS);
+  });
+  it('liveStatusFor reads the real antigravity entry too, independent of the codex identity', () => {
+    expect(liveStatusFor({ provider: 'antigravity', model: 'gemini-3.1-pro', role: 'advisory-review' })).toBe('probation');
+  });
 });

@@ -1,15 +1,16 @@
 /**
- * @file judge-provider-selection.test.mjs — `--provider`/`providerName` WIRING (#xqa9ttq), proving
- * `resolveJudgeProvider`/`createDefaultJudge` actually reach the Codex provider and the schema transform, not
- * merely that both are importable beside `cli-adapter.mjs`.
+ * @file judge-provider-selection.test.mjs — `--provider`/`providerName` WIRING (#xqa9ttq/#3383), proving
+ * `resolveJudgeProvider`/`createDefaultJudge` actually reach the Codex and Antigravity providers and the
+ * schema transform (Codex only), not merely that they are importable beside `cli-adapter.mjs`.
  *
- * `codex-judge-spawn.mjs` is MOCKED AT THE MODULE BOUNDARY (the same sanctioned seam `we:scripts/lib/
- * __tests__/nnn-collision-heal.wiring.test.mjs` uses) because `resolveJudgeProvider`'s `'codex'` branch calls
- * the real `codexJudgeSpawn` directly — there is no injection point at that layer, by design: the injection
- * seam for a TEST is `createDefaultJudge({ provider })`, which every other judge test in this repo already
- * uses to substitute a port-shaped fake without touching a real CLI. This file is the one place that instead
- * proves the RESOLUTION itself — the string `'codex'` actually reaching `codexJudgeSpawn`, and the shape
- * actually being transformed before it gets there — is real code, not a docstring's claim about it.
+ * `codex-judge-spawn.mjs` and `antigravity-judge-spawn.mjs` are MOCKED AT THE MODULE BOUNDARY (the same
+ * sanctioned seam `we:scripts/lib/__tests__/nnn-collision-heal.wiring.test.mjs` uses) because
+ * `resolveJudgeProvider`'s `'codex'`/`'antigravity'` branches call the real spawn functions directly — there is
+ * no injection point at that layer, by design: the injection seam for a TEST is `createDefaultJudge({
+ * provider })`, which every other judge test in this repo already uses to substitute a port-shaped fake without
+ * touching a real CLI. This file is the one place that instead proves the RESOLUTION itself — the string
+ * `'codex'`/`'antigravity'` actually reaching its own spawn function, and the Codex shape actually being
+ * transformed before it gets there — is real code, not a docstring's claim about it.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -28,6 +29,23 @@ vi.mock('../../lib/codex-judge-spawn.mjs', async (importOriginal) => {
       return {
         value: { ok: true }, sessionId: 'codex-sess', costUsd: 0, durationMs: 1, wallMs: 1, numTurns: 1,
         stopReason: 'turn.completed', usage: {}, loadedContextTokens: 0, timedOut: false, argv: [],
+      };
+    },
+  };
+});
+
+// #3383 — SAME SEAM, for `antigravityJudgeSpawn`. `importOriginal` keeps `ANTIGRAVITY_MODEL` (and every other
+// real export) untouched; only the spawn function itself is replaced with a recording stub.
+const antigravityJudgeSpawnCalls = [];
+vi.mock('../../lib/antigravity-judge-spawn.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    antigravityJudgeSpawn: async (request) => {
+      antigravityJudgeSpawnCalls.push(request);
+      return {
+        value: { fromAntigravity: true }, sessionId: 'agy-sess', costUsd: 0, durationMs: 1, wallMs: 1,
+        numTurns: 1, stopReason: 'SUCCESS', usage: {}, loadedContextTokens: 0, timedOut: false, argv: [],
       };
     },
   };
@@ -57,8 +75,8 @@ const { createDefaultJudge, resolveJudgeProvider, JUDGE_PROVIDER_NAMES, unwrapJu
 const { judgeSpawn } = await import('../../lib/judge-spawn.mjs');
 
 describe('JUDGE_PROVIDER_NAMES', () => {
-  it('is exactly claude, codex — additive, claude first/default', () => {
-    expect(JUDGE_PROVIDER_NAMES).toEqual(['claude', 'codex']);
+  it('is exactly claude, codex, antigravity — additive, claude first/default', () => {
+    expect(JUDGE_PROVIDER_NAMES).toEqual(['claude', 'codex', 'antigravity']);
   });
 });
 
@@ -85,6 +103,29 @@ describe('resolveJudgeProvider', () => {
     // THE TRANSFORM ACTUALLY RAN (#3371 probes 3/4) — every property is now required.
     expect(codexJudgeSpawnCalls[0].shape.required).toEqual(['summary', 'file']);
     expect(codexJudgeSpawnCalls[0].shape.properties.file.type).toEqual(['string', 'null']);
+  });
+
+  // #3383 — the fifth seat's provider.
+  it('\'antigravity\' resolves to a function that calls the real antigravityJudgeSpawn with the shape UNTRANSFORMED', async () => {
+    const provider = resolveJudgeProvider('antigravity');
+    expect(provider).not.toBe(judgeSpawn);
+    antigravityJudgeSpawnCalls.length = 0;
+    const shape = { type: 'object', properties: { summary: { type: 'string' }, file: { type: 'string' } }, required: ['summary'] };
+    await provider({ mandate: 'm', input: 'i', shape });
+    expect(antigravityJudgeSpawnCalls).toHaveLength(1);
+    // NO TRANSFORM — `agy` accepts this repo's optional-property shapes as-is (antigravity-judge-spawn.mjs's
+    // own header, item 3), so the shape reaches it byte-identical to what the caller passed.
+    expect(antigravityJudgeSpawnCalls[0].shape).toBe(shape);
+  });
+
+  it('\'antigravity\' pins the model default (ANTIGRAVITY_MODEL), an explicit request.model still wins', async () => {
+    const provider = resolveJudgeProvider('antigravity');
+    antigravityJudgeSpawnCalls.length = 0;
+    await provider({ mandate: 'm', input: 'i', shape: { type: 'object' } });
+    expect(antigravityJudgeSpawnCalls[0].model).toBe('gemini-3.1-pro');
+    antigravityJudgeSpawnCalls.length = 0;
+    await provider({ mandate: 'm', input: 'i', shape: { type: 'object' }, model: 'gemini-3.8-flash-low' });
+    expect(antigravityJudgeSpawnCalls[0].model).toBe('gemini-3.8-flash-low');
   });
 });
 
@@ -127,6 +168,27 @@ describe('createDefaultJudge — providerName selection end to end (no injected 
 
   it('refuses providerName: \'codex\' combined with a TOOL-BEARING request — tool-free panelist only (#3581)', async () => {
     const judgeFn = createDefaultJudge({ providerName: 'codex' });
+    await expect(judgeFn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: ['Read'], cwd: '/tmp/x',
+    })).rejects.toThrow(/TOOL-FREE panelist only/);
+  });
+
+  // #3383 — the fifth seat's provider, same coverage shape as the codex seat's above.
+  it('providerName: \'antigravity\' reaches the mocked antigravityJudgeSpawn and returns its answer', async () => {
+    antigravityJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'antigravity' });
+    const returned = await judgeFn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, runId: 'run-1', lens: 'antigravity-review',
+    });
+    expect(antigravityJudgeSpawnCalls).toHaveLength(1);
+    const { value, telemetry } = unwrapJudgeOutcome(returned);
+    expect(value).toEqual({ fromAntigravity: true });
+    expect(telemetry.sessionId).toBe('agy-sess');
+    expect(telemetry.costUsd).toBe(0);
+  });
+
+  it('refuses providerName: \'antigravity\' combined with a TOOL-BEARING request — tool-free panelist only (#3383)', async () => {
+    const judgeFn = createDefaultJudge({ providerName: 'antigravity' });
     await expect(judgeFn({
       mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: ['Read'], cwd: '/tmp/x',
     })).rejects.toThrow(/TOOL-FREE panelist only/);
@@ -195,6 +257,21 @@ describe('createDefaultJudge — a REQUEST-level `providerName` overrides the fa
     expect(codexJudgeSpawnCalls).toHaveLength(1);
   });
 
+  // #3383 — THREE opt-in seats (codex third/fourth, antigravity fifth) can now coexist on ONE run; proves the
+  // per-request override reaches each provider independently with no cross-seat collision.
+  it('sibling calls through the SAME judge function reach claude, codex, AND antigravity with no collision', async () => {
+    claudeJudgeSpawnCalls.length = 0;
+    codexJudgeSpawnCalls.length = 0;
+    antigravityJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({});
+    await judgeFn({ mandate: 'm1', input: 'i1', shape: { type: 'object' } });
+    await judgeFn({ mandate: 'm2', input: 'i2', shape: { type: 'object' }, providerName: 'codex' });
+    await judgeFn({ mandate: 'm3', input: 'i3', shape: { type: 'object' }, providerName: 'antigravity' });
+    expect(claudeJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(antigravityJudgeSpawnCalls).toHaveLength(1);
+  });
+
   it('an injectable `resolveProvider` lets a test substitute BOTH providers without the module-mock seam', async () => {
     const seen = [];
     const resolveProvider = (name) => async (req) => { seen.push({ name, req }); return { value: { via: name } }; };
@@ -222,5 +299,14 @@ describe('createDefaultJudge — a REQUEST-level `providerName` overrides the fa
     await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' } });
     expect(claudeJudgeSpawnCalls).toHaveLength(1);
     expect(claudeJudgeSpawnCalls[0].model).toBe('opus');
+  });
+
+  // #3383 — same exclusion, for the fifth seat's provider.
+  it('the operator\'s `--model` override never reaches a request whose EFFECTIVE provider is antigravity', async () => {
+    antigravityJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ model: 'opus' });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'antigravity' });
+    expect(antigravityJudgeSpawnCalls).toHaveLength(1);
+    expect(antigravityJudgeSpawnCalls[0].model).toBeUndefined();
   });
 });
