@@ -2,8 +2,9 @@
 bornAs: xdh834s
 kind: task
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-13"
 tags: []
 ---
 
@@ -13,4 +14,12 @@ Independent review of #1991 (graduating we:scripts/operations/file-item.mjs to m
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `./node_modules/.bin/vitest run we:scripts/operations/__tests__/file-item-io.test.mjs -t 'normalized duplicate'` — all six regression cases fail before the fix and pass afterward.
+
+## Progress
+
+- Sanity read confirmed the raw-string membership check remains present and the exported `queueHas` is available; the spec is current and buildable.
+- Added real queue-sink regression cases for padded numeric IDs, numeric payloads, `#` prefixes, whitespace, and mixed-case hash IDs. Each checks the returned duplicate flag and unchanged on-disk bytes (including the original timestamp).
+- Replaced the sink's local strict-string comparison with the queue store's exported `queueHas`, aligning the duplicate flag and write decision with `addToQueue` membership.
+- Validation: all six new regression cases failed against the original implementation. After the fix, `./node_modules/.bin/vitest run we:scripts/operations/__tests__/file-item-io.test.mjs -t 'createFileItemReader|the sink map|live-runner resolution'` passed all 13 selected tests, including the six regressions and existing fresh-add/replay coverage. Two existing Git-fixture tests were excluded to honor the delivery brief's no-Git constraint.
+- Implementation complete; working-tree edits left for the wrapper to commit.
