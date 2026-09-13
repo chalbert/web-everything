@@ -66,6 +66,55 @@ describe('the real incident that motivated this pass — WE PR #1920, captured l
   });
 });
 
+describe('#3383/#xw0odtv coverage-gap extension — WE PR #2156, accepted + conflicting + zero check runs', () => {
+  // The exact live shape: `review:accepted` (an independent reviewer already cleared it), `mergeable:
+  // CONFLICTING` (its base, `lane/mechanical-dispatcher`, moved since), and `statusCheckRollup` empty — CI never
+  // ran at all, because the conflict blocked it from ever starting. Neither this watch (previously scoped only
+  // to an uncleared hold) nor the drain's own rebase-repair (`isRebaseDropCandidate`, gated on the `test` check
+  // already being green) could ever reach this PR.
+  const PR_2156_SNAPSHOT = {
+    number: 2156,
+    headRefName: 'lane/3635-pin-codex-model-every-call-site',
+    mergeable: 'CONFLICTING',
+    mergeStateStatus: 'DIRTY',
+    labels: [{ name: 'review:accepted' }],
+    statusCheckRollup: [],
+    files: [{ path: 'scripts/lib/codex-judge-spawn.mjs' }, { path: 'scripts/operations/codex-delivery-provider.mjs' }],
+  };
+
+  it('is now a detected parked-conflict target — previously invisible, per the flipped isParkedConflictTarget case above', () => {
+    expect(isParkedConflictTarget(PR_2156_SNAPSHOT)).toBe(true);
+  });
+
+  it('a full sweep labels it, comments once, and dispatches the SAME fix pipeline as any other fresh conflict — not a statute-tier stand-down, since neither touched file is declarative-leash/statute', () => {
+    const calls = [];
+    const provider = {
+      ensureLabel: (repo, name) => calls.push(['ensureLabel', repo, name]),
+      setLabels: (repo, pr, spec) => calls.push(['setLabels', repo, pr, spec]),
+      postComment: (repo, pr, body) => calls.push(['postComment', repo, pr, body]),
+    };
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything',
+      listPrs: () => [PR_2156_SNAPSHOT],
+      provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+    });
+    expect(results).toEqual([{
+      num: 2156, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true,
+      routedTo: 'reconcile-finding',
+    }]);
+    expect(calls[0]).toEqual(['ensureLabel', 'chalbert/web-everything', CONFLICT_LABEL]);
+    expect(calls[1]).toEqual(['setLabels', 'chalbert/web-everything', 2156, { add: CONFLICT_LABEL, remove: [] }]);
+    expect(calls[2][3]).toContain('lane/3635-pin-codex-model-every-call-site');
+    // the bounce this drives (reconcile-finding.mjs → review-set-label.mjs `--to=changes`) strips the stale
+    // `review:accepted` as part of its own decideSetLabel — proven separately in review-set-label.mjs's own
+    // tests; this test proves the ROUTING gets it there, not the label-strip mechanics themselves.
+    expect(routed).toEqual([['finding', 2156]]);
+  });
+});
+
 describe('isParkedConflictTarget', () => {
   it('true: CONFLICTING + review:human', () => {
     expect(isParkedConflictTarget({ mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }] })).toBe(true);
@@ -79,8 +128,13 @@ describe('isParkedConflictTarget', () => {
     expect(isParkedConflictTarget({ mergeable: 'CONFLICTING', labels: [{ name: 'review:changes' }] })).toBe(true);
   });
 
-  it('false: CONFLICTING + review:accepted only (hold satisfied)', () => {
-    expect(isParkedConflictTarget({ mergeable: 'CONFLICTING', labels: [{ name: 'review:accepted' }] })).toBe(false);
+  // #3383/#xw0odtv — flipped from `false` to `true`. Previously an accepted PR was OUT OF SCOPE here (the hold
+  // was "satisfied", so this pass looked away) — but PR #2156 proved that leaves it invisible to EVERY
+  // mechanical recovery path: this watch skipped it (accepted, no uncleared hold) AND the drain's own
+  // rebase-repair skipped it too (`isRebaseDropCandidate` requires the `test` check green, which a real
+  // conflict can block from ever running — zero check runs ever recorded). See the real #2156 scenario below.
+  it('true: CONFLICTING + review:accepted only — an accepted PR whose base moved is not "satisfied", it is stuck', () => {
+    expect(isParkedConflictTarget({ mergeable: 'CONFLICTING', labels: [{ name: 'review:accepted' }] })).toBe(true);
   });
 
   it('false: CONFLICTING + review:human + review:accepted (co-present pair reads as still held per #x9xqexm)', () => {
