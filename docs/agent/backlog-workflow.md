@@ -566,6 +566,41 @@ An item with all forks stated this way — each carrying options, a bold default
 
 Example offer line: *`jsx-directive-sugar` — add the deferred `<For>/<Show>/<Resource>` layer ([live](http://localhost:3000/backlog/070-jsx-directive-sugar/) · [md](backlog/070-jsx-directive-sugar.md))*.
 
+### Publishing the Decision Docket — full fork detail for every prepared item shown, never a summary row {#decision-docket}
+
+The **Decision Docket** — the "prepared to decide" surface of the shared **Decision Board** artifact
+([backlog/3562](/backlog/3562-a-standing-mechanical-pass-keeps-the-5-highest-leverage-open/),
+[backlog/3277](/backlog/3277-declare-an-operation-that-publishes-and-refreshes-a-decision/),
+[backlog/x7wehz2](/backlog/x7wehz2-a-permanent-decision-ledger-artifact-backed-by-the-db-capabi/)) —
+lists the highest-leverage prepared decisions ranked by `check:readiness --select --json` /
+`suggest-next --tier=B --json` (same leverage heuristic as everywhere else in this doc). Until the
+standing `decision-docket-watch` mechanical pass (#3562) ships and owns the refresh, a session builds or
+refreshes this page **by hand** — and this is the one, standing convention for doing so, not a preference
+to reinvent per session:
+
+> **Every prepared item the docket lists gets its full fork breakdown — every option, not just the
+> default, with the reason each rejected option was rejected, stated on merit. A rejection you cannot see
+> is a rejection you cannot overrule.**
+
+Concretely: for **each** prepared decision the docket shows, render the complete *prepared-fork shape*
+(above) straight from the item — every `## Fork N`'s options `(a)`/`(b)`/`(c)`…, the bold recommended
+default, and the *stated rejection reason* for every non-default option — not a compact summary row
+(ID / title / unblocks-count / age). A summary row forces the decider to open the item's own file to
+actually rule on it, which defeats the docket's whole purpose: a decider must be able to rule from the
+page alone, with nothing hidden behind another click.
+
+**This bar does not vary by section or by how the item got there.** It is tempting to give full detail
+only to the items a session is actively ratifying that turn (a "Current batch" / ratified section) or the
+ones it just finished preparing (a "Prep run this session" section), and fall back to a thinner summary
+row for every other prepared item merely *listed* on the docket. Resist that split: an item's *presence*
+on the docket — not the session's proximity to it or when it was prepared — is what earns the full
+breakdown. If a docket build genuinely can't afford full detail for every item it would otherwise list,
+the fix is to **list fewer items** (shrink the ranked window, e.g. via
+`WE_DECISION_DOCKET_TARGET_COUNT` once #3562 ships), never to thin the detail on the ones that stay.
+
+This same rule binds whoever eventually builds #3562's automated pass — it is not a hand-session-only
+convention that the mechanical version is free to relax.
+
 ### When nothing is agent-ready — surface the one highest-leverage blocker
 
 If *Gather* + tiering leaves **no Tier-A item** (the ready pool is empty — everything left is Tier B/C, blocked, or needs a design call), **do not** return a long menu of open decisions. Instead pick **exactly one** item — the one whose resolution unblocks the most downstream work — and put it to the user as the single thing they need to decide. This is the **only** time selection recommends a non-Tier-A item, and it still returns just one.
