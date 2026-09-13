@@ -3,6 +3,7 @@ bornAs: xccwit5
 kind: story
 size: 2
 status: open
+scope: ["we:scripts/__tests__/citation-gate-dedup.test.mjs"]
 dateOpened: "2026-08-31"
 tags: [testing, reviewability, flagged-by-review]
 deliveryAgent: codex
