@@ -127,6 +127,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { buildNativeDenyCodexArgs } from '../lib/isolation-provider.mjs';
 import { REPO_ROOT } from './minimal-context-provider.mjs';
+import { usageReportSecretDir } from '../lib/usage-report-secret-paths.mjs';
 
 /** The binary. Named, not inlined, for the same reason `codex-judge-spawn.mjs#CODEX_CLI` is. */
 export const CODEX_CLI = 'codex';
@@ -184,7 +185,13 @@ export const CODEX_THREAD_DIR_NAME = 'codex-delivery-threads';
  */
 export function defaultDeliveryDenyPaths(repoRoot = REPO_ROOT) {
   const root = String(repoRoot).replace(/\/+$/, '');
-  return [`${root}/**`];
+  // epic #3383 — the usage-report tool's external admin-key directory is ALWAYS included here, unconditionally,
+  // alongside the caller's own repo root: a Codex delivery/repair agent must never be able to read
+  // ~/.we-usage-report/ even if a caller overrides denyPaths for its own reasons. Imported from the SAME shared
+  // constant usage-report.mjs itself resolves (scripts/lib/usage-report-secret-paths.mjs), so the two can never
+  // drift — see that module's own header for why this directory sits outside the repo entirely in the first
+  // place (a lane clone would otherwise carry it on disk regardless of any deny-list).
+  return [`${root}/**`, `${usageReportSecretDir()}/**`];
 }
 
 /**

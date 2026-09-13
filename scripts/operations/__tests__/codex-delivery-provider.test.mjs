@@ -29,6 +29,7 @@ import {
   CODEX_THREAD_DIR_NAME, buildCodexDeliveryArgv, parseCodexThreadId, assertDenyPathsUsable,
   defaultDeliveryDenyPaths, defaultSpawnCodexAgent, codexThreadIdPath, readCodexThreadId, writeCodexThreadId,
 } from '../codex-delivery-provider.mjs';
+import { usageReportSecretDir } from '../../lib/usage-report-secret-paths.mjs';
 
 const LANE = '/Users/x/workspace/.lanes/web-everything/lane-7';
 const DENY = ['/Users/x/workspace/webeverything/**'];
@@ -151,9 +152,12 @@ describe('parseCodexThreadId', () => {
 });
 
 describe('assertDenyPathsUsable / defaultDeliveryDenyPaths', () => {
-  it('defaults to denying the whole primary checkout root, glob-suffixed', () => {
-    expect(defaultDeliveryDenyPaths('/repo/root/')).toEqual(['/repo/root/**']);
-    expect(defaultDeliveryDenyPaths('/repo/root')).toEqual(['/repo/root/**']);
+  it('defaults to denying the whole primary checkout root PLUS the usage-report external secret dir, glob-suffixed', () => {
+    // #3383 — every default deny now ALSO covers ~/.we-usage-report/ (scripts/lib/usage-report-secret-paths.mjs),
+    // imported from the SAME shared module usage-report.mjs itself resolves, so the two can never drift.
+    const secretGlob = `${usageReportSecretDir()}/**`;
+    expect(defaultDeliveryDenyPaths('/repo/root/')).toEqual(['/repo/root/**', secretGlob]);
+    expect(defaultDeliveryDenyPaths('/repo/root')).toEqual(['/repo/root/**', secretGlob]);
   });
 
   it('passes a deny that does not cover the lane straight through', () => {

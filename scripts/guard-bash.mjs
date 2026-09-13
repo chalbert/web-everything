@@ -113,6 +113,20 @@
  *     Note the KIND VALUE: it is NOT the launch kind `prepare-decision`, deliberately — see that block's own
  *     comment at the table below for why the distinction is what makes this arm writable at all.
  *
+ *   • epic #3383 — a DISPATCHED agent (any `WE_DISPATCH_KIND`, every wrapper-owned and launch kind alike)
+ *     referencing the usage-report tool's external admin-key location — the directory
+ *     `~/.we-usage-report/` (`we:scripts/lib/usage-report-secret-paths.mjs`) or its macOS Keychain service
+ *     name (`we-usage-report`) — in a Bash segment. `--restricted` already confines the FILE tools
+ *     (Read/Edit/Write/Glob/Grep) to the lane cwd, a directory this external path is never under, but it
+ *     explicitly RE-ENABLES Bash (`RESTRICTED_PROVIDER_TOOLS`), and a raw shell command is not confined by
+ *     that same cwd rule — this arm closes that one gap. Scoped to a dispatched agent only (`dispatchKind`
+ *     truthy); the operator's own interactive session is the sanctioned caller of that tool and is
+ *     unaffected, same scoping `dispatchedAgentVerificationReason` (#3105) already uses. HONEST LIMIT: a
+ *     text-pattern match over the command string, same class as this file's other content checks — real,
+ *     additional enforcement layered on top of `--restricted`'s own cwd confinement and Codex's OS-enforced
+ *     native `filesystem` deny (`we:scripts/lib/isolation-provider.mjs`), never the only thing standing in
+ *     the way. See `we:scripts/usage-report/README.md` for the full threat-model writeup.
+ *
  *   • the SCOPE-AUTHORING AGENT (#3642) — `dispatchKind === 'scope-authoring'`
  *     (`WE_DISPATCH_KIND=scope-authoring`, stamped by `prepare-scope-wrapper.mjs`'s
  *     `CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn`) — same shape again, with this kind's own two differences:
@@ -144,6 +158,7 @@ import { readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug, requiredAssertionSlug } from './lib/lane-lease.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { usageReportSecretDir, USAGE_REPORT_KEYCHAIN_SERVICE } from './lib/usage-report-secret-paths.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -1901,9 +1916,32 @@ export const WRAPPER_OWNED_AGENTS = Object.freeze({
   }),
 });
 
+/**
+ * #3383 — deny a DISPATCHED agent's Bash segment that names the usage-report tool's external admin-key
+ * location. See the header bullet above for the full reasoning; in one line: `--restricted` confines the
+ * FILE tools to the lane cwd already, but re-enables Bash, and this arm closes the resulting gap for the one
+ * remaining tool. Pure, text-pattern match — the SAME class of honest limit this file's other content checks
+ * carry (never proven un-obfuscatable, real additional enforcement regardless). Scoped to `dispatchKind`
+ * truthy ONLY; returns null unconditionally for the operator's own interactive session.
+ */
+export function usageReportSecretReadReason(segment, dispatchKind) {
+  if (!dispatchKind) return null;
+  const text = String(segment || '');
+  const dir = usageReportSecretDir();
+  const namesSecretPath = text.includes(dir) || /~\/\.we-usage-report\b/.test(text);
+  const namesKeychainService = text.includes(USAGE_REPORT_KEYCHAIN_SERVICE);
+  if (!namesSecretPath && !namesKeychainService) return null;
+  return `a mechanically-dispatched ${dispatchKind} agent may not reference the usage-report tool's external admin-key location (${dir}, or its Keychain service \`${USAGE_REPORT_KEYCHAIN_SERVICE}\`) at all (#3383) — that key must never reach a dispatched agent's process. There is no override.`;
+}
+
 export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
+
+  // #3383 — checked FIRST, unconditionally on the segment text: cheap, and must fire regardless of cwd/lease
+  // context (unlike the arms below, which are gated on primaryCwd or a specific WE_DISPATCH_KIND value).
+  const usageSecret = usageReportSecretReadReason(s, dispatchKind);
+  if (usageSecret) return usageSecret;
 
   // #2302 — a backlog item-mutation (claim/resolve/scaffold/…) run from the PRIMARY checkout stamps the item on
   // primary and bypasses lane isolation (found working #2095: a primary `claim` flipped open→active, reverted +

@@ -1,0 +1,461 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/usage-report/usage-report.mjs
+ * @description Epic #3383 — a STANDALONE, read-only CLI that answers "how much Anthropic/OpenAI usage and
+ * spend has this operator's own org burned, and what's the runway before a limit bites." NOT wired into
+ * `runner.mjs`, NOT a dispatch operation, NOT registered in `DISPATCH_PROVIDER_REGISTRY` or any dispatch-
+ * related registry, and imported by NOTHING under `scripts/operations/` or `skills-src/conveyor/`. It exists
+ * entirely outside the mechanical-dispatcher's own process tree, on purpose — see the THREAT MODEL section
+ * below for why that separation is load-bearing, not incidental.
+ *
+ * ── WHAT THIS CALLS, AND NOTHING ELSE ────────────────────────────────────────────────────────────────────
+ * Four hard-coded GET endpoints, confirmed against the providers' own current API reference this session
+ * (2026-09, via WebFetch against platform.claude.com and developers.openai.com/openai's own docs — not
+ * assumed from training data):
+ *   - `GET https://api.anthropic.com/v1/organizations/usage_report/messages` — token usage, RFC 3339-bucketed
+ *     (1m/1h/1d), groupable by model/workspace/api key/etc. Requires an Admin API key (`x-api-key`) or an
+ *     `org:admin`-scoped OAuth bearer token; UNAVAILABLE for individual (non-organization) Anthropic accounts.
+ *   - `GET https://api.anthropic.com/v1/organizations/cost_report` — USD cost, `1d` buckets only.
+ *   - `GET https://api.openai.com/v1/organization/usage/completions` — token usage, unix-second buckets
+ *     (1m/1h/1d), groupable by project/user/api key/model/etc. Requires an Admin key (an ordinary project API
+ *     key is NOT sufficient).
+ *   - `GET https://api.openai.com/v1/organization/costs` — USD cost, `1d` buckets only.
+ * This file deliberately does NOT build a generic "call any admin endpoint" helper — the four paths above are
+ * hard-coded string literals, so there is no code path in this tool that could be pointed at, say, a
+ * member-management or key-provisioning admin endpoint by mistake or by a later careless edit.
+ *
+ * ── PART 1 FINDING, CARRIED HERE SO THE CODE'S OWN SHAPE EXPLAINS ITSELF (full writeup: README.md) ────────
+ * NEITHER provider exposes a subscription/billing-cycle RENEWAL date via API. Anthropic's own `/v1/
+ * organizations/me` returns only `{id, name}` — no plan/renewal field exists there or anywhere else in the
+ * Admin API. OpenAI's billing cycle renews on the calendar day you first subscribed, and that anchor date is
+ * dashboard/invoice-only, never returned by any endpoint. What IS real and derivable, and what this tool
+ * therefore surfaces instead of a renewal date it cannot get:
+ *   - Anthropic's ORG-LEVEL MONTHLY SPEND CAP (a pay-as-you-go usage-tier ceiling, separate from any personal
+ *     Claude subscription) resets on a FIXED, computable boundary: 00:00 UTC on the 1st of the next calendar
+ *     month — stated in the 429 body you get once you're already capped ("You will regain access on
+ *     2026-09-01 at 00:00 UTC"), not proactively queryable, but the boundary itself needs no API call to
+ *     compute. `daysUntilNextUtcMonth` below does exactly that, locally, no network.
+ *   - The per-minute/per-request `anthropic-ratelimit-*-reset` / `x-ratelimit-reset-*` headers describe a
+ *     SHORT, continuously-replenished token-bucket window, not a billing cycle — and, importantly, they are
+ *     attached to actual INFERENCE calls (`POST /v1/messages`, `POST /v1/chat/completions`), not to the
+ *     metadata GETs this tool makes. This tool therefore does NOT assume those specific header names will be
+ *     present on the usage_report/cost_report/costs responses; see `extractRateLimitHeaders` below — it reads
+ *     whatever rate-limit-shaped headers a response actually carries, generically, rather than hard-coding an
+ *     inference-call header set that may not apply to an admin GET.
+ *   - The daily cost-report buckets ARE something this tool can sum itself: `sumAnthropicCost`/`sumOpenAICost`
+ *     total the buckets returned, and the CLI's default `--since` window plus `daysUntilNextUtcMonth` together
+ *     give "spend so far this cycle" and "days left in the cycle" side by side — the best available proxy for
+ *     runway, assembled locally from real numbers rather than a renewal field that does not exist.
+ *
+ * ── THE THREAT MODEL AND WHY THE SECRET LIVES WHERE IT DOES ──────────────────────────────────────────────
+ * An Anthropic or OpenAI ADMIN key is not a scoped "usage-only" credential — neither provider offers one;
+ * whatever admin key exists carries full org-admin power (manage members, keys, workspaces) alongside the
+ * usage/cost read this tool needs. This repo's dispatch pipeline has FIVE spawn sites
+ * (`deliver-item-wrapper.mjs`, `fix-dispatch-wrapper.mjs`, `ci-heal-dispatch-wrapper.mjs`,
+ * `minimal-context-provider.mjs`, `dispatch-lane-io.mjs`) that all spread `{...process.env, ...}` wholesale
+ * into every dispatched agent (Claude AND Codex) they spawn — so this key must NEVER exist in the environment
+ * of any process that ever spawns a dispatched agent, and never live at a path any of those processes (or the
+ * lane clones they work in) can read. Concretely, in order of preference:
+ *   1. macOS KEYCHAIN (tried first when available) — `security find-generic-password -s we-usage-report
+ *      -a <account> -w`. See README.md for exact setup and an HONEST assessment of what this does and does
+ *      not add over a plain file for THIS threat model (a dispatched agent is a same-user-account, same-
+ *      machine subprocess — Keychain's per-application ACL identity check does not meaningfully separate it
+ *      from this tool's own invocation, since both would run through the same generic `node`/`security`
+ *      binaries; what DOES help is creating the item with NO trusted application at all, which forces every
+ *      access — this tool's own included — through an interactive OS confirmation prompt. A headless
+ *      dispatched agent (no attended GUI session) cannot satisfy that prompt, so it is structurally locked
+ *      out in a way a plain file read never is. This is believed-true from documented Keychain ACL semantics;
+ *      it was NOT live-tested in this session — see README.md for why (avoiding an unannounced OS prompt on
+ *      the operator's own screen) and treat it accordingly, same honesty standard
+ *      `we:scripts/lib/isolation-provider.mjs` holds itself to about Codex's own sandbox.
+ *   2. The external file, `~/.we-usage-report/.env` (`scripts/lib/usage-report-secret-paths.mjs`) — OUTSIDE
+ *      the repo checkout entirely (not `scripts/usage-report/.env`, even gitignored — see that module's own
+ *      header for why an in-tree path is never enough). Cross-platform fallback when Keychain is unavailable
+ *      (any non-macOS host) or not set up.
+ *   3. `process.env.ANTHROPIC_ADMIN_KEY`/`OPENAI_ADMIN_KEY`, already set — ONLY safe because this is a
+ *      one-shot standalone process that a dispatched agent never spawns and is never spawned from; see the
+ *      `.env.example` header for the explicit warning against sourcing it into a long-lived shell.
+ * BOTH the external file's directory and the Keychain service name are ALSO wired into the two real deny
+ * surfaces a dispatched agent's own process actually runs under — `we:scripts/guard-bash.mjs` (Claude's Bash
+ * tool, re-enabled under `--restricted`) and `we:scripts/operations/codex-delivery-provider.mjs`'s native
+ * Codex filesystem deny (OS-enforced Seatbelt, `we:scripts/lib/isolation-provider.mjs`) — defense in depth
+ * layered ON TOP of the structural/interactive protections above, never a substitute for them. See
+ * `we:scripts/lib/usage-report-secret-paths.mjs`'s own header for the full reasoning.
+ *
+ * ── PURE / IMPURE SPLIT ──────────────────────────────────────────────────────────────────────────────────
+ * Every parser/formatter below (`sumAnthropicUsage`, `sumAnthropicCost`, `sumOpenAIUsage`, `sumOpenAICost`,
+ * `extractRateLimitHeaders`, `daysUntilNextUtcMonth`, `renderSummary`, the `build*Params` argv-shape
+ * builders) is PURE — fixture data in, a value out, no fs/network/clock (a clock is passed in explicitly
+ * where needed). The tests exercise ONLY these, with recorded fixture JSON shaped exactly like the real
+ * response bodies quoted above — never a real network call, per this task's own instruction. All impure I/O
+ * (the `security` CLI shell-out, the external `.env` file read, the actual `fetch` calls) is confined to
+ * thin wrapper functions the CLI section below composes, injectable so nothing in this file needs live
+ * network access to be tested.
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+
+import {
+  usageReportSecretEnvPath, USAGE_REPORT_KEYCHAIN_SERVICE, USAGE_REPORT_KEYCHAIN_ACCOUNTS,
+} from '../lib/usage-report-secret-paths.mjs';
+
+// ── endpoints — hard-coded literals, deliberately not composed from a generic base+path helper ───────────
+export const ANTHROPIC_BASE = 'https://api.anthropic.com';
+export const ANTHROPIC_USAGE_PATH = '/v1/organizations/usage_report/messages';
+export const ANTHROPIC_COST_PATH = '/v1/organizations/cost_report';
+export const ANTHROPIC_VERSION = '2023-06-01';
+
+export const OPENAI_BASE = 'https://api.openai.com';
+export const OPENAI_USAGE_PATH = '/v1/organization/usage/completions';
+export const OPENAI_COST_PATH = '/v1/organization/costs';
+
+// ── secret loading (impure) ─────────────────────────────────────────────────────────────────────────────
+
+/** A tiny, dependency-free `KEY=VALUE` line reader — this repo has no `dotenv` dependency (native-first, #75)
+ *  and pulling one in for two lines would be the opposite of that. Ignores blank lines and `#` comments;
+ *  does not attempt quoting/escaping beyond a plain value, which is all `.env.example` ever needs. */
+export function parseEnvFile(text) {
+  const out = {};
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!key) continue;
+    out[key] = line.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+/** Shell out to macOS Keychain for one item. Returns the secret string, or null if the item does not exist /
+ *  `security` is unavailable / the platform is not macOS. Never throws — a missing Keychain item is exactly
+ *  as normal as a missing file, and this is tried FIRST, before the file even exists on most setups. */
+export function readKeychainSecret(account, { platform = process.platform, execFileSyncFn = execFileSync } = {}) {
+  if (platform !== 'darwin') return null;
+  try {
+    const out = execFileSyncFn('security', ['find-generic-password', '-s', USAGE_REPORT_KEYCHAIN_SERVICE, '-a', account, '-w'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const v = String(out || '').trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The full secret-loading ladder, in the order documented in this file's own header: an already-set env var
+ * (this process's own, one-shot) → macOS Keychain → the external `.env` file. Returns which SOURCE each key
+ * actually came from too, so the human summary can say so (an operator debugging "why is this empty" needs
+ * to know whether Keychain or the file was even tried, not just the end result).
+ * @param {object} [o]
+ * @param {NodeJS.ProcessEnv} [o.env]
+ * @param {string} [o.platform]
+ * @param {(account: string, opts?: object) => string|null} [o.readKeychain]
+ * @param {(path: string) => boolean} [o.existsSyncFn]
+ * @param {(path: string, enc: string) => string} [o.readFileSyncFn]
+ */
+export function loadSecrets({
+  env = process.env, platform = process.platform,
+  readKeychain = (account) => readKeychainSecret(account, { platform }),
+  existsSyncFn = existsSync, readFileSyncFn = (p) => readFileSync(p, 'utf8'),
+} = {}) {
+  const fileVars = (() => {
+    const path = usageReportSecretEnvPath(env);
+    if (!existsSyncFn(path)) return {};
+    try { return parseEnvFile(readFileSyncFn(path)); } catch { return {}; }
+  })();
+
+  const resolve = (envKey, keychainAccount) => {
+    if (env[envKey]) return { value: env[envKey], source: 'env' };
+    const kc = readKeychain(keychainAccount);
+    if (kc) return { value: kc, source: 'keychain' };
+    if (fileVars[envKey]) return { value: fileVars[envKey], source: 'file' };
+    return { value: null, source: null };
+  };
+
+  const anthropic = resolve('ANTHROPIC_ADMIN_KEY', USAGE_REPORT_KEYCHAIN_ACCOUNTS.anthropic);
+  const openai = resolve('OPENAI_ADMIN_KEY', USAGE_REPORT_KEYCHAIN_ACCOUNTS.openai);
+  return {
+    anthropicKey: anthropic.value, anthropicSource: anthropic.source,
+    openaiKey: openai.value, openaiSource: openai.source,
+  };
+}
+
+// ── request param builders (pure) ───────────────────────────────────────────────────────────────────────
+
+/** Anthropic's usage/cost report query string. Both endpoints share the same param names for what this tool
+ *  needs (`starting_at`/`ending_at`/`bucket_width`/`group_by`/`limit`/`page`); the cost endpoint only accepts
+ *  `bucket_width=1d`, enforced by the caller passing that literal rather than by this pure builder guessing. */
+export function buildAnthropicParams({ startingAt, endingAt, bucketWidth = '1d', groupBy = [], limit, page } = {}) {
+  const p = new URLSearchParams();
+  if (startingAt) p.set('starting_at', startingAt);
+  if (endingAt) p.set('ending_at', endingAt);
+  if (bucketWidth) p.set('bucket_width', bucketWidth);
+  for (const g of groupBy) p.append('group_by[]', g);
+  if (limit) p.set('limit', String(limit));
+  if (page) p.set('page', page);
+  return p;
+}
+
+/** OpenAI's usage/cost query string. `start_time`/`end_time` are UNIX SECONDS (OpenAI's published API
+ *  reference, `platform.openai.com/docs/api-reference/usage`) — distinct from Anthropic's RFC 3339 strings. */
+export function buildOpenAIParams({ startTime, endTime, bucketWidth = '1d', groupBy = [], limit, page } = {}) {
+  const p = new URLSearchParams();
+  if (startTime) p.set('start_time', String(startTime));
+  if (endTime) p.set('end_time', String(endTime));
+  if (bucketWidth) p.set('bucket_width', bucketWidth);
+  for (const g of groupBy) p.append('group_by[]', g);
+  if (limit) p.set('limit', String(limit));
+  if (page) p.set('page', page);
+  return p;
+}
+
+// ── response parsing (pure) — fixture-shaped exactly like the real bodies quoted in this file's header ────
+
+/** Sum an Anthropic `usage_report/messages` response into totals + a per-model breakdown. `model` is `null`
+ *  when the caller did not `group_by=model`; those buckets are folded under the `'(ungrouped)'` key rather
+ *  than silently dropped, so a caller who forgot to group still gets a real total. */
+export function sumAnthropicUsage(report) {
+  const byModel = {};
+  let totalInput = 0; let totalOutput = 0; let totalCacheRead = 0;
+  for (const bucket of report?.data || []) {
+    for (const r of bucket?.results || []) {
+      const key = r.model || '(ungrouped)';
+      const m = byModel[key] || (byModel[key] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 });
+      const input = Number(r.uncached_input_tokens) || 0;
+      const output = Number(r.output_tokens) || 0;
+      const cacheRead = Number(r.cache_read_input_tokens) || 0;
+      m.inputTokens += input; m.outputTokens += output; m.cacheReadTokens += cacheRead;
+      totalInput += input; totalOutput += output; totalCacheRead += cacheRead;
+    }
+  }
+  return { totalInputTokens: totalInput, totalOutputTokens: totalOutput, totalCacheReadTokens: totalCacheRead, byModel };
+}
+
+/** Sum an Anthropic `cost_report` response. `amount` is a decimal STRING in the currency's lowest unit (cents
+ *  for USD — the API reference's own example: `"123.45"` in `"USD"` means `$1.23`), so this divides by 100. */
+export function sumAnthropicCost(report) {
+  let totalUsd = 0;
+  const byModel = {};
+  for (const bucket of report?.data || []) {
+    for (const r of bucket?.results || []) {
+      const usd = (Number(r.amount) || 0) / 100;
+      totalUsd += usd;
+      const key = r.model || '(ungrouped)';
+      byModel[key] = (byModel[key] || 0) + usd;
+    }
+  }
+  return { totalUsd, byModel };
+}
+
+/** Sum an OpenAI `usage/completions` response. Same ungrouped-fold behavior as `sumAnthropicUsage`. */
+export function sumOpenAIUsage(report) {
+  const byModel = {};
+  let totalInput = 0; let totalOutput = 0; let totalCached = 0; let totalRequests = 0;
+  for (const bucket of report?.data || []) {
+    for (const r of bucket?.results || []) {
+      const key = r.model || '(ungrouped)';
+      const m = byModel[key] || (byModel[key] = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, requests: 0 });
+      const input = Number(r.input_tokens) || 0;
+      const output = Number(r.output_tokens) || 0;
+      const cached = Number(r.input_cached_tokens) || 0;
+      const requests = Number(r.num_model_requests) || 0;
+      m.inputTokens += input; m.outputTokens += output; m.cachedTokens += cached; m.requests += requests;
+      totalInput += input; totalOutput += output; totalCached += cached; totalRequests += requests;
+    }
+  }
+  return { totalInputTokens: totalInput, totalOutputTokens: totalOutput, totalCachedTokens: totalCached, totalRequests, byModel };
+}
+
+/** Sum an OpenAI `costs` response. `amount` is `{ value, currency }` — ALREADY in whole currency units
+ *  (OpenAI's own reference example: `value: 0.06, currency: "usd"`), unlike Anthropic's cents-string. */
+export function sumOpenAICost(report) {
+  let totalUsd = 0;
+  const byLineItem = {};
+  for (const bucket of report?.data || []) {
+    for (const r of bucket?.results || []) {
+      const usd = Number(r.amount?.value) || 0;
+      totalUsd += usd;
+      const key = r.line_item || '(ungrouped)';
+      byLineItem[key] = (byLineItem[key] || 0) + usd;
+    }
+  }
+  return { totalUsd, byLineItem };
+}
+
+/**
+ * Whatever rate-limit-shaped headers a response ACTUALLY carries — generic by design, not a hard-coded
+ * inference-call header set (see this file's own header for why: these two endpoints are metadata GETs, not
+ * `POST /v1/messages`/`POST /v1/chat/completions`, so the documented `anthropic-ratelimit-tokens-*` /
+ * `x-ratelimit-tokens-*` families may simply not be present here). `headers` is a plain lowercased-key record
+ * (the CLI section lowercases a real `Headers` object before calling this, since `Headers` iteration already
+ * yields lowercase names — kept a plain object here so this stays pure and fixture-testable with no DOM/undici
+ * type in the test file).
+ * @param {Record<string,string>} headers
+ * @param {string[]} prefixes - header name prefixes to keep, e.g. `['anthropic-ratelimit-', 'retry-after']`.
+ */
+export function extractRateLimitHeaders(headers, prefixes) {
+  const out = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (prefixes.some((p) => k === p || k.startsWith(p))) out[k] = v;
+  }
+  return out;
+}
+
+/** Anthropic's org-level monthly SPEND CAP resets at a fixed, computable boundary (00:00 UTC on the 1st of
+ *  the next calendar month) — see this file's own header for why that is the honest substitute for a renewal
+ *  date neither provider exposes via API. Pure given `now`. Returns whole days remaining (rounds down) plus
+ *  the boundary itself as an ISO string, so a caller can show both "how many days" and "resets exactly when". */
+export function daysUntilNextUtcMonth(now = new Date()) {
+  const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
+  const msRemaining = nextMonthStart.getTime() - now.getTime();
+  return { days: Math.floor(msRemaining / 86400000), resetsAt: nextMonthStart.toISOString() };
+}
+
+// ── formatting (pure) — style mirrors we:scripts/operations/telemetry-cli.mjs's fmtMs/fmtBytes/pct helpers ─
+
+export function fmtNum(n) {
+  if (!Number.isFinite(n)) return '—';
+  return Math.round(n).toLocaleString('en-US');
+}
+
+export function fmtUsd(n) {
+  if (!Number.isFinite(n)) return '—';
+  return `$${n.toFixed(2)}`;
+}
+
+/** Render the full two-provider summary as text, or return the same data as-is for `--json`. PURE — takes
+ *  the already-computed sums/rate-limit-header maps/secret sources, never touches fs/network itself. */
+export function renderSummary(result) {
+  const L = [];
+  L.push(`usage-report — generated ${result.generatedAt}`);
+  L.push('');
+
+  const cap = daysUntilNextUtcMonth(new Date(result.generatedAt));
+  L.push(`Anthropic org-level monthly spend cap resets ${cap.resetsAt} (${cap.days} day(s) from now, UTC calendar month — see this tool's own header for why this is the closest real "renewal window" available; neither provider exposes a true subscription/billing renewal date via API).`);
+  L.push('');
+
+  for (const provider of ['anthropic', 'openai']) {
+    const p = result[provider];
+    L.push(provider.toUpperCase());
+    if (!p.keyConfigured) {
+      L.push(`  (no admin key configured — set ${provider === 'anthropic' ? 'ANTHROPIC_ADMIN_KEY' : 'OPENAI_ADMIN_KEY'}; see README.md)`);
+      L.push('');
+      continue;
+    }
+    L.push(`  admin key source: ${p.keySource}`);
+    if (p.usageError) L.push(`  usage: ERROR — ${p.usageError}`);
+    else if (p.usage) {
+      const u = p.usage;
+      L.push(`  usage — input ${fmtNum(u.totalInputTokens)} tok, output ${fmtNum(u.totalOutputTokens)} tok`
+        + (u.totalCacheReadTokens ? `, cache-read ${fmtNum(u.totalCacheReadTokens)} tok` : '')
+        + (u.totalRequests ? `, ${fmtNum(u.totalRequests)} requests` : ''));
+      for (const [model, m] of Object.entries(u.byModel)) {
+        L.push(`    ${model.padEnd(24)} in ${fmtNum(m.inputTokens).padStart(10)}  out ${fmtNum(m.outputTokens).padStart(10)}`);
+      }
+    }
+    if (p.costError) L.push(`  cost: ERROR — ${p.costError}`);
+    else if (p.cost) L.push(`  cost — ${fmtUsd(p.cost.totalUsd)} total this window`);
+    const rl = p.rateLimitHeaders || {};
+    L.push(Object.keys(rl).length
+      ? `  rate-limit headers on this response: ${Object.entries(rl).map(([k, v]) => `${k}=${v}`).join(', ')}`
+      : '  rate-limit headers on this response: (none — expected; these are metadata GETs, not inference calls)');
+    L.push('');
+  }
+  return L.join('\n');
+}
+
+// ── CLI (impure) ────────────────────────────────────────────────────────────────────────────────────────
+
+const USAGE = 'usage: usage-report.mjs [--since=<hours>] [--json]';
+
+/** Lowercase every header name from a real `Headers` object (or a plain record) into a plain object, so the
+ *  pure `extractRateLimitHeaders` above never has to know about the `Headers` API. */
+function headersToRecord(headers) {
+  const out = {};
+  if (headers && typeof headers.forEach === 'function') { headers.forEach((v, k) => { out[k.toLowerCase()] = v; }); return out; }
+  for (const [k, v] of Object.entries(headers || {})) out[String(k).toLowerCase()] = v;
+  return out;
+}
+
+/** One provider's usage+cost fetch, composed from the injectable `fetchFn` so nothing here needs a live
+ *  network to be exercised by a test — the CLI entrypoint below is the only caller that supplies the real
+ *  global `fetch`. Returns the exact shape `renderSummary` consumes for this one provider. */
+async function fetchProviderSummary({
+  keyConfigured, keySource, usageUrl, costUrl, headers, rateLimitPrefixes, sumUsageFn, sumCostFn, fetchFn,
+}) {
+  if (!keyConfigured) return { keyConfigured: false };
+  const out = { keyConfigured: true, keySource };
+  try {
+    const res = await fetchFn(usageUrl, { headers });
+    const body = await res.json();
+    if (!res.ok) out.usageError = `HTTP ${res.status} — ${body?.error?.message || JSON.stringify(body)}`;
+    else { out.usage = sumUsageFn(body); out.rateLimitHeaders = extractRateLimitHeaders(headersToRecord(res.headers), rateLimitPrefixes); }
+  } catch (e) { out.usageError = String(e?.message || e); }
+  try {
+    const res = await fetchFn(costUrl, { headers });
+    const body = await res.json();
+    if (!res.ok) out.costError = `HTTP ${res.status} — ${body?.error?.message || JSON.stringify(body)}`;
+    else out.cost = sumCostFn(body);
+  } catch (e) { out.costError = String(e?.message || e); }
+  return out;
+}
+
+/**
+ * The argv driver, exported so a test can inject `fetchFn`/`loadSecretsFn`/`now` and assert the RENDERED
+ * output against fixture data with no real network call — mirrors `we:scripts/operations/telemetry-cli.mjs
+ * #runTelemetryCli`'s injectable shape.
+ */
+export async function runUsageReportCli(argv, {
+  loadSecretsFn = loadSecrets, fetchFn = fetch, now = () => new Date(),
+  out = (s) => process.stdout.write(s),
+} = {}) {
+  const json = argv.includes('--json');
+  const hoursFlag = argv.find((a) => a.startsWith('--since='));
+  const hours = hoursFlag ? Number(hoursFlag.slice('--since='.length)) || 24 : 24;
+  if (argv.includes('--help') || argv.includes('-h')) { out(`${USAGE}\n`); return 0; }
+
+  const secrets = loadSecretsFn();
+  const nowDate = now();
+  const startingAt = new Date(nowDate.getTime() - hours * 3600000);
+  const bucketWidth = hours <= 24 ? '1h' : '1d';
+
+  const anthropicUsageParams = buildAnthropicParams({ startingAt: startingAt.toISOString(), endingAt: nowDate.toISOString(), bucketWidth, groupBy: ['model'] });
+  const anthropicCostParams = buildAnthropicParams({ startingAt: startingAt.toISOString(), endingAt: nowDate.toISOString(), bucketWidth: '1d', groupBy: ['description'] });
+  const openaiUsageParams = buildOpenAIParams({ startTime: Math.floor(startingAt.getTime() / 1000), endTime: Math.floor(nowDate.getTime() / 1000), bucketWidth, groupBy: ['model'] });
+  const openaiCostParams = buildOpenAIParams({ startTime: Math.floor(startingAt.getTime() / 1000), endTime: Math.floor(nowDate.getTime() / 1000), bucketWidth: '1d' });
+
+  const [anthropic, openai] = await Promise.all([
+    fetchProviderSummary({
+      keyConfigured: Boolean(secrets.anthropicKey), keySource: secrets.anthropicSource,
+      usageUrl: `${ANTHROPIC_BASE}${ANTHROPIC_USAGE_PATH}?${anthropicUsageParams}`,
+      costUrl: `${ANTHROPIC_BASE}${ANTHROPIC_COST_PATH}?${anthropicCostParams}`,
+      headers: { 'x-api-key': secrets.anthropicKey, 'anthropic-version': ANTHROPIC_VERSION },
+      rateLimitPrefixes: ['anthropic-ratelimit-', 'anthropic-priority-', 'retry-after'],
+      sumUsageFn: sumAnthropicUsage, sumCostFn: sumAnthropicCost, fetchFn,
+    }),
+    fetchProviderSummary({
+      keyConfigured: Boolean(secrets.openaiKey), keySource: secrets.openaiSource,
+      usageUrl: `${OPENAI_BASE}${OPENAI_USAGE_PATH}?${openaiUsageParams}`,
+      costUrl: `${OPENAI_BASE}${OPENAI_COST_PATH}?${openaiCostParams}`,
+      headers: { authorization: `Bearer ${secrets.openaiKey}` },
+      rateLimitPrefixes: ['x-ratelimit-', 'retry-after'],
+      sumUsageFn: sumOpenAIUsage, sumCostFn: sumOpenAICost, fetchFn,
+    }),
+  ]);
+
+  const result = { generatedAt: nowDate.toISOString(), sinceHours: hours, anthropic, openai };
+  out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderSummary(result)}\n`);
+  return 0;
+}
+
+const IS_CLI = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (IS_CLI) {
+  runUsageReportCli(process.argv.slice(2)).then((code) => { process.exitCode = code; }).catch((e) => {
+    process.stderr.write(`error: ${String(e?.message || e)}\n`);
+    process.exitCode = 1;
+  });
+}
