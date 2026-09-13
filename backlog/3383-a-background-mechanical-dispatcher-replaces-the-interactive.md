@@ -2060,3 +2060,34 @@ treated as proven. Nothing here forces that call tonight — it is a "decide wit
   some of them.
 - **Lane-pool reaped a live sibling agent's lease mid-run tonight** — no data lost, but the mechanism that let a
   live lease get reaped out from under a running sibling is worth checking before trusting it unattended again.
+
+## Follow-up (2026-09-12 night, continued) — item 1 (Codex delivery-agent provider) also finished: `CODEX_PROVIDER`
+## is now real, not a stub, and pushed
+
+Item 1 above ("genuinely in progress, substantial, not done") has since landed on the branch. `e53073fef`
+("WE #3580: CODEX_PROVIDER is real — a write-capable second delivery agent") is pushed to
+`origin/lane/mechanical-dispatcher`: `CODEX_PROVIDER.spawn()` in
+`we:scripts/operations/deliver-item-wrapper.mjs`, previously an honest throwing stub, is now a real
+implementation backed by `we:scripts/operations/codex-delivery-provider.mjs` (352 lines, new). Selectable via
+`--provider=` on `we:scripts/operations/deliver-item-run.mjs`, then `DELIVERY_AGENT_PROVIDER`, then the
+unchanged default — **Claude stays the default; Codex is opt-in only.**
+
+Confirmed against a real `codex exec` invocation (codex-cli 0.153.4), not guessed, per the commit's own header:
+write access rides `-c default_permissions=locked` (never `-s workspace-write`, which was tested and rejected —
+it silently zeroes the permission deny map, and `codex exec resume` accepts no `-s` at all); a real
+`execFileSync` through the production primitive blocked ~10s and exited 0; and — the notable finding — Codex's
+own native OS-level permission profile, measured with no model in the loop, is actually STRONGER than this
+repo's Claude-side `we:scripts/guard-lane.mjs`/`we:scripts/guard-bash.mjs` hooks: a write into the primary
+checkout or a sibling lane both return `Operation not permitted` at the OS layer (`we:scripts/guard-lane.mjs`
+can only match Edit/Write tool calls and cannot stop a shell redirect, and it documents the sibling-lane case
+as an open residual), and the profile has no network at all, so `git push` is structurally impossible for it
+rather than merely denied by a hook. One documented limitation, stated in the code itself: choosing `codex`
+swaps the BUILD agent only — the wrapper's own separate converge-editor step (`runConvergeEdit`) still always
+spawns Claude.
+
+**Read this together with the reviewer-seat finding above, not separately**: the delivery-agent PROVIDER side
+is now real and technically working, opt-in-only, built ahead of `#3581`'s gate by the operator's own already-
+recorded explicit choice. But per the reviewer-judgment finding just above, `#3581`'s gate itself is not yet
+cleared. So the honest state is: **the mechanism for Codex delivery work now exists; whether to actually route
+real delivery work through it is still gated on the unresolved reviewer-judgment question** — not "Codex
+delivery work is ready to use."
