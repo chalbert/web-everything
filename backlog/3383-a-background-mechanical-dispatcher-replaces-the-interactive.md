@@ -2172,3 +2172,30 @@ rollout bar (once one exists — see blocker 4) on real work across the kinds it
 sibling interactive delivery skill) have been changed so their build step calls into the driver instead of
 driving an interactive session's own tool calls turn by turn — at which point the driver stops being a
 separate parallel system and becomes THE way this repo builds.
+
+## Operator goal, recorded for the record (2026-09-13): know this system's real build capacity, and model what new hardware would buy
+
+**This is a stated target the operator wants, not a "could do someday" idea — treat it as real backlog intent
+to revisit as the measurement foundation below matures, not something a future session should second-guess
+away.** The goal: determine the actual build/delivery capacity this system has available on current hardware,
+and model what new/different hardware would buy — specifically, how much additional build work and how many
+more concurrent lanes a given hardware upgrade would support. **This is the actual purpose behind the
+per-process resource telemetry work dated 2026-09-13** (see the host-resource metrics landed this same day,
+`e539e430e`, "telemetry: add host-resource metrics (load avg, mem, cpu count) to runner tick", plus the
+per-process telemetry work in flight alongside it under this same epic) — that work is not telemetry for its
+own sake; it exists to answer this capacity-planning question.
+
+**Future architectural direction (explicitly NOT built yet, just recorded as intent):**
+
+- Split resource capacity into two separate pools with their own budgets: the **command queue** (the
+  mechanical orchestration layer itself — conveyor/driver, drain, dispatch coordination) and the **lanes**
+  (actual build/work agent execution) — rather than treating all resource consumption as one undifferentiated
+  pool.
+- Consider using **macOS containers** (or an equivalent OS-level resource-control mechanism — sandbox-exec
+  resource limits, or a container runtime like OrbStack/Docker Desktop on macOS) to actually ENFORCE how much
+  CPU/memory each pool gets, not just measure it after the fact.
+- The per-process telemetry work (categorizing usage across conveyor/drain/dispatched-agent/vscode/chrome/
+  other, landed the same day as the host-resource metrics above) is the measurement foundation this future
+  capacity-split/enforcement work would build on — it has to exist before a capacity split or an enforcement
+  mechanism can be designed responsibly, since neither can be sized without knowing what actually consumes
+  capacity today.
