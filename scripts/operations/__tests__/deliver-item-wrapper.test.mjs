@@ -64,6 +64,7 @@ import {
   buildPrBody, writePrBody, openPr,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
   convergeRoundTouchedFiles, commitConvergeRound, commitBuildTurn, coAuthorTrailerFor,
+  prefixOwnPathMentions, sanitizeOwnLocusMentions,
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
@@ -1047,6 +1048,77 @@ describe('resumeAgentWithGateFailure prompt (#3565 — never asks the agent to c
     expect(prompt).toMatch(/Your gate failed/);
     expect(prompt).not.toMatch(/commit again/);
     expect(prompt).toMatch(/do NOT run `git commit` yourself/);
+  });
+});
+
+describe('prefixOwnPathMentions / sanitizeOwnLocusMentions (#3565 real-trial finding — the delivery agent '
+  + 'is never taught the locus-prefix convention, so its own backlog prose trips the pre-commit backstop '
+  + 'once the WRAPPER is the one committing)', () => {
+  it('prefixes a bare mention of a touched path with `we:`, leaving an already-prefixed one alone', () => {
+    const content = 'See `scripts/foo.mjs` and we:scripts/bar.mjs for details.';
+    const result = prefixOwnPathMentions(content, ['scripts/foo.mjs', 'scripts/bar.mjs']);
+    expect(result).toBe('See `we:scripts/foo.mjs` and we:scripts/bar.mjs for details.');
+  });
+
+  it('fixes every occurrence of a repeated bare mention, not just the first', () => {
+    const content = 'a.mjs then a.mjs again';
+    expect(prefixOwnPathMentions(content, ['a.mjs'])).toBe('we:a.mjs then we:a.mjs again');
+  });
+
+  it('is a no-op for a path that never appears in the content', () => {
+    const content = 'nothing path-like here';
+    expect(prefixOwnPathMentions(content, ['scripts/never-mentioned.mjs'])).toBe(content);
+  });
+
+  it('sanitizeOwnLocusMentions rewrites only backlog/reports .md files among the touched paths, excluding '
+    + 'each file from its OWN mention list, and skips non-.md touched files entirely', () => {
+    const files = {
+      '/lane/backlog/3565-x.md': 'Fixed `scripts/foo.mjs` per backlog/3565-x.md itself.',
+    };
+    const readFile = vi.fn((abs) => {
+      if (!(abs in files)) throw new Error(`ENOENT: ${abs}`);
+      return files[abs];
+    });
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    sanitizeOwnLocusMentions(
+      '/lane',
+      ['backlog/3565-x.md', 'scripts/foo.mjs'],
+      { readFile, writeFile },
+    );
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(files['/lane/backlog/3565-x.md']).toBe(
+      'Fixed `we:scripts/foo.mjs` per backlog/3565-x.md itself.',
+    );
+  });
+
+  it('sanitizeOwnLocusMentions never throws and never writes when the file has nothing to fix or cannot be read', () => {
+    const readFile = vi.fn(() => { throw new Error('ENOENT'); });
+    const writeFile = vi.fn();
+    expect(() => sanitizeOwnLocusMentions('/lane', ['backlog/999-missing.md'], { readFile, writeFile })).not.toThrow();
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('commitBuildTurn auto-fixes locus-prefix mentions before committing (#3565 real-trial finding)', () => {
+  it('rewrites a touched backlog .md file\'s bare self-mentions before writing the commit message / running git commit', () => {
+    const files = {
+      '/lane/backlog/1234-x.md': 'Touched `scripts/foo.mjs` in this change.',
+    };
+    const readFile = vi.fn((abs) => files[abs]);
+    const writeFile = vi.fn((abs, content) => { files[abs] = content; });
+    const run = vi.fn(() => '');
+    commitBuildTurn(
+      { lane: '/lane', item: '1234' },
+      {
+        run, writeFile, readFile,
+        touchedFiles: () => ['backlog/1234-x.md', 'scripts/foo.mjs'],
+      },
+    );
+    expect(files['/lane/backlog/1234-x.md']).toBe('Touched `we:scripts/foo.mjs` in this change.');
+    expect(run).toHaveBeenCalledWith(
+      'git', ['commit', '-F', '/lane/.delivery-commit-msg-build.txt', '--', 'backlog/1234-x.md', 'scripts/foo.mjs'],
+      { cwd: '/lane' },
+    );
   });
 });
 

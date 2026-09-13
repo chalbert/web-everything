@@ -298,7 +298,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   // wrapper process itself inherited.
   acquireLane({ lane, sessionSlug, scope, item, claudeSessionId });
   try {
-    spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug }));
+    // pre-existing bug found live during the #3565 real-dispatch re-verification, fixed alongside it: the
+    // claim must run with the LANE as cwd (see `claimItem`'s own docblock) or `run.mjs claim` resolves the
+    // item onto the shared primary checkout and is refused outright.
+    const claimLanePath = resolveLanePath(lane, { run });
+    spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug, lanePath: claimLanePath }));
 
     // ---- 2. Spawn the MINIMAL agent, wait for its structured report (SKETCH) -----------------------------
     // THE EXPENSIVE SPAN. This is the single longest phase in the system (capped at 60 minutes by
@@ -456,9 +460,19 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
  * but it IS a real behavioral difference from a raw `backlog.mjs claim --session=…` call and is called out
  * here rather than silently dropped.
  */
-export function claimItem({ item, sessionSlug }, { run: runFn = run } = {}) {
+export function claimItem({ item, sessionSlug, lanePath } = {}, { run: runFn = run } = {}) {
   void sessionSlug; // accepted, not forwarded — see the docblock above for why.
-  runFn('node', ['scripts/operations/run.mjs', 'claim', `--ref=${item}`, '--json']);
+  // BUG FOUND live during the #3565 real-dispatch re-verification (separate from, and pre-existing before,
+  // the #3565 sandbox/commit redesign): `run.mjs claim` resolves the backlog item's path relative to the
+  // CHILD PROCESS's own cwd. With no `cwd` at all here, that child inherited the WRAPPER's cwd (the primary
+  // checkout), so the claim resolved onto the primary tree and was refused outright — "backlog item-mutation
+  // BLOCKED ... resolves under the shared PRIMARY checkout ... There is no override." `lanePath`, when given,
+  // fixes this the same way every other lane-scoped call in this file already does (`openPr`, `commitBuildTurn`,
+  // `runVerifyOperation` all pass `{ cwd: lane }`) — optional only so every existing caller/test that predates
+  // this fix, which never had a lane path to give, keeps calling this with the exact same two-argument shape.
+  const args = ['scripts/operations/run.mjs', 'claim', `--ref=${item}`, '--json'];
+  if (lanePath) runFn('node', args, { cwd: lanePath });
+  else runFn('node', args);
 }
 
 // #3627 follow-up — both calls below are raw script calls, not routed through `run.mjs`: `release` has no
@@ -1435,12 +1449,67 @@ export function coAuthorTrailerFor(providerName) {
  * @param {{lane: string, item: string|number, provider?: DeliveryAgentProvider, phase?: 'build'|'gate-fix'}} o
  * @param {{run?: Function, writeFile?: Function, touchedFiles?: Function}} [deps]
  */
+// #3565 real-trial finding (live, 2026-09-13): the delivery agent is DELIBERATELY never taught the
+// `we:`/`fui:`/`plateau:` locus-prefix citation convention (delivery-agent-brief-v2.md's own header — "no
+// cited convention, no doctrine reference"), so its own `## Progress`/`## Done when` prose routinely quotes
+// the files it just touched by their BARE repo-relative path. Under the OLD design the agent's own `git
+// commit` hit `.githooks/pre-commit`'s `npm run lint:locus` backstop (#883/#1574) directly and could fix its
+// own text in the same turn; under this redesign the WRAPPER commits after the agent has already exited, so
+// that same rejection had nowhere to go — it just failed the whole delivery (reproduced live: `git commit`
+// exited non-zero, "2 bare code-path ref(s) ... lack a <repo>: prefix", the wrapper's own best-effort release
+// then discarded a genuinely-passing build for a trivially-fixable citation nit).
+// NARROW, MECHANICAL FIX, not a general locus-prefix auto-fixer: only the delivery's OWN other touched
+// paths, inside the delivery's OWN touched backlog/reports markdown files, get a `we:` prefixed onto any bare
+// mention — see `prefixOwnPathMentions`'s own header for why this is safe without re-implementing
+// `scanRepoLocusPrefixes`'s fuller exemption rules (fenced blocks, globs, URLs, npm specifiers).
+const LOCUS_MD_CORPUS_RE = /(?:^|\/)(?:backlog|reports)\/[^/]+\.md$/;
+
+/**
+ * PURE. Prefix every BARE mention of one of `touchedPaths` inside `content` with `we:`, leaving an
+ * ALREADY-prefixed mention (`we:<path>`, `fui:<path>`, …) untouched. Scoped to the delivery's own known,
+ * just-touched paths rather than every path-like token in the document — see {@link commitBuildTurn}'s own
+ * header for why this is the safe, narrow fix rather than a second copy of `scanRepoLocusPrefixes`.
+ */
+export function prefixOwnPathMentions(content, touchedPaths) {
+  let next = String(content ?? '');
+  for (const p of Array.isArray(touchedPaths) ? touchedPaths : []) {
+    if (typeof p !== 'string' || !p) continue;
+    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<!(?:we|fui|plateau|webeverything|frontierui|plateau-app):)${escaped}`, 'g');
+    next = next.replace(re, `we:${p}`);
+  }
+  return next;
+}
+
+/**
+ * IMPURE shell around {@link prefixOwnPathMentions}: for every touched path that is itself a
+ * `backlog/*.md`/`reports/*.md` document, rewrite it in place (only if it actually changed) so the pending
+ * commit passes the repo's locus-prefix backstop. Errors reading/writing one file are swallowed (best-effort
+ * — this is a convenience fix-up, never the reason a real build+commit fails for an unrelated fs hiccup);
+ * `git commit` below is still the real, authoritative gate.
+ */
+export function sanitizeOwnLocusMentions(lane, paths, { readFile = readFileSync, writeFile = writeFileSync } = {}) {
+  for (const p of paths) {
+    if (!LOCUS_MD_CORPUS_RE.test(p)) continue;
+    try {
+      const abs = `${lane}/${p}`;
+      const before = readFile(abs, 'utf8');
+      const after = prefixOwnPathMentions(before, paths.filter((other) => other !== p));
+      if (after !== before) writeFile(abs, after);
+    } catch { /* best-effort — see docblock */ }
+  }
+}
+
 export function commitBuildTurn(
   { lane, item, provider = CLAUDE_RESTRICTED_PROVIDER, phase = 'build' },
-  { run: runFn = run, writeFile = writeFileSync, touchedFiles = convergeRoundTouchedFiles } = {},
+  {
+    run: runFn = run, writeFile = writeFileSync, readFile = readFileSync,
+    touchedFiles = convergeRoundTouchedFiles,
+  } = {},
 ) {
   const paths = touchedFiles(lane, { run: runFn });
   if (!paths.length) return { committed: false, paths: [] };
+  sanitizeOwnLocusMentions(lane, paths, { readFile, writeFile });
   const msgFile = `${lane}/.delivery-commit-msg-${phase}.txt`;
   const subject = phase === 'gate-fix' ? `WE #${item}: gate-failure fix` : `WE #${item}: delivery build`;
   const body = phase === 'gate-fix'
