@@ -70,6 +70,7 @@ import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mj
 import { QUEUE_SCOPE_ENV, isQueueScopeEnabled, readScopedQueueIds } from '../../scripts/conveyor/queue-scope.mjs';
 import { writeLineSync } from '../../scripts/lib/write-all-sync.mjs';
 import { normNum } from '../../scripts/conveyor/queue-store.mjs';
+import { writeDriverMode, driverModeFor } from '../../scripts/conveyor/driver-mode.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -905,6 +906,42 @@ export function installShutdownHandlers({
   return { dispose };
 }
 
+/**
+ * RECORD THE LAUNCH POSTURE (epic #3383) — write `<root>/.conveyor/driver-mode.json` saying whether this
+ * runner was started RESIDENT (keep driving until stopped) or BOUNDED (`--once` / `--max-ticks=N`: run that
+ * many ticks and exit). This process is the only thing in the system that knows.
+ *
+ * THE BUG IT FIXES. `we:scripts/conveyor/driver-watchdog.mjs` answers "is the driver up?" from the singleton
+ * lease alone, and an absent lease meant, unconditionally, "crash". A runner started `--once` breaks that: it
+ * runs its tick, dispatches, exits 0 and releases its lease CLEANLY — and the watchdog then logged a crash
+ * every five minutes about a process that had done exactly what it was asked. Nothing on disk distinguished
+ * "stopped because it was told to" from "died", so it is written here, at the one point that has the flags in
+ * hand, and the watchdog reads it through the shared sidecar GRAMMAR
+ * ({@link ../../scripts/conveyor/driver-mode.mjs}) rather than importing this file — whose whole design rests
+ * on the watchdog reaching NONE of the driver's own logic.
+ *
+ * BEST-EFFORT, NEVER FATAL: a runner that refused to start because it could not write an observability sidecar
+ * would be a far worse failure than the mis-report it prevents. `writeDriverMode` returns its error instead of
+ * throwing, and the worst case is exactly the pre-#3383 behaviour — no marker ⇒ the watchdog assumes resident.
+ *
+ * Split out of `main` and exported ONLY so the flags→posture→sidecar path is unit-testable without spawning a
+ * runner (which would drive the real conveyor); it is not a caller-facing entry point.
+ *
+ * @param {object} o
+ * @param {object} o.flags - {@link parseFlags}' output.
+ * @param {number} o.maxTicks - already resolved by `main` (`--once` ⇒ 1, else `--max-ticks` or `Infinity`), so
+ *   the posture can never disagree with the ceiling the loop will actually run to.
+ * @param {string} o.root - the driver checkout, i.e. where `.conveyor/` lives.
+ */
+export function recordLaunchPosture({
+  flags = {}, maxTicks = Infinity, root, pid = process.pid,
+  write = writeDriverMode, warn = (s) => process.stderr.write(s), ...io
+} = {}) {
+  const res = write({ root, mode: driverModeFor({ once: !!flags.once, maxTicks }), maxTicks, pid, ...io });
+  if (!res.ok) warn(`conveyor runner: could not record the driver mode (${res.error}) — the watchdog will assume resident.\n`);
+  return res;
+}
+
 async function main(argv) {
   const flags = parseFlags(argv);
 
@@ -917,6 +954,10 @@ async function main(argv) {
   const json = !!flags.json;
   const intervalMs = finiteOr(flags['interval-ms'], DEFAULT_TICK_INTERVAL_MS);
   const maxTicks = flags.once ? 1 : finiteOr(flags['max-ticks'], Infinity);
+
+  // epic #3383 — see {@link recordLaunchPosture}. Runs before anything can stand the runner down, so the
+  // marker describes every launch, not only the ones that went on to hold the lease.
+  recordLaunchPosture({ flags, maxTicks, root: join(HERE, '..', '..') });
 
   // epic #3383 — applied BEFORE any effect is built, so every child this runner shells (and this process's own
   // `isQueueScopeEnabled()` reads) sees it. Announced on stderr because a scoped runner that says nothing is

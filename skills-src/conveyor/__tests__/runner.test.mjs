@@ -25,7 +25,9 @@ import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
   bookkeepingForDispatch, installShutdownHandlers, finalEventLine, SHUTDOWN_SIGNALS,
+  recordLaunchPosture,
 } from '../runner.mjs';
+import { readDriverMode, driverModePath } from '../../../scripts/conveyor/driver-mode.mjs';
 
 // Hoisted mock — `makeCliMechanicalPasses` dynamically `import('node:child_process')`s `execFileSync`
 // (§below, x5v8yy9 review finding), so the module itself must be mocked rather than the binding. Keeps every
@@ -752,5 +754,57 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
     ]);
+  });
+});
+
+// ── THE LAUNCH-POSTURE MARKER (epic #3383) ────────────────────────────────────────────────────────────────
+//
+// The watchdog reads the singleton lease to answer "is the driver up?", and an absent lease used to mean
+// "crash", full stop. A `--once` runner breaks that: it does its tick, exits 0, releases the lease cleanly —
+// and the watchdog reported a crash every 5 minutes about a process that had finished its job. `main` now
+// records which posture it was launched in, at the one point in the system that has the flags in hand.
+//
+// NOTHING IS STARTED HERE. `main` itself would drive the real conveyor, so the posture step is exported and
+// driven directly; the marker lands in a throwaway `mkdtemp`, never a real checkout.
+
+describe('recordLaunchPosture — whether this runner was SUPPOSED to keep running', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'runner-mode-')); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('`--once` records BOUNDED — the exact launch whose clean exit was being reported as a crash', () => {
+    // `maxTicks` is what `main` already resolved (`flags.once ? 1 : …`), passed in so the recorded posture can
+    // never disagree with the ceiling the loop will actually run to.
+    const res = recordLaunchPosture({ flags: { once: true }, maxTicks: 1, root: dir, pid: 4242 });
+    expect(res.ok).toBe(true);
+    expect(res.path).toBe(driverModePath(dir));
+    expect(readDriverMode(dir)).toMatchObject({ mode: 'bounded', maxTicks: 1, pid: 4242 });
+  });
+
+  it('a finite `--max-ticks=N` records BOUNDED too — it is the same "run N and leave" posture', () => {
+    recordLaunchPosture({ flags: {}, maxTicks: 5, root: dir });
+    expect(readDriverMode(dir)).toMatchObject({ mode: 'bounded', maxTicks: 5 });
+  });
+
+  it('the supervisor\'s uncapped launch records RESIDENT — and a resident driver going away is still a crash', () => {
+    recordLaunchPosture({ flags: {}, maxTicks: Infinity, root: dir });
+    expect(readDriverMode(dir)).toMatchObject({ mode: 'resident', maxTicks: null });
+  });
+
+  it('lands in the DRIVER\'s own `.conveyor/`, beside the queue the watchdog reads it with', () => {
+    expect(driverModePath(dir)).toBe(join(dir, '.conveyor', 'driver-mode.json'));
+    recordLaunchPosture({ flags: { once: true }, maxTicks: 1, root: dir });
+    expect(readDriverMode(dir)).not.toBe(null);
+  });
+
+  it('is BEST-EFFORT: an unwritable checkout warns and returns, it NEVER stops the runner starting', () => {
+    const warns = [];
+    const res = recordLaunchPosture({
+      flags: {}, maxTicks: Infinity, root: '/drv', warn: (s) => warns.push(s),
+      mkdir: () => { throw new Error('EACCES: permission denied'); },
+    });
+    expect(res.ok).toBe(false);
+    expect(warns.join('')).toContain('will assume resident');
+    // …and "assume resident" is precisely the pre-#3383 behaviour, so the failure mode is the old behaviour.
   });
 });

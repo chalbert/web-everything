@@ -29,8 +29,11 @@ import {
   itemBases, sessionMatchesItem, splitQueue, runTouchesScope, latestProgress,
   classifyDriver, decideRollback,
   defaultDriverLease, newestScopedRun, readHead, recordLastKnownGood, readLastKnownGood,
-  healDriver, runWatchdogOnce, parseFlags, lastKnownGoodPath, alertPath, logPath, WATCHDOG_REPO_ROOT,
+  healDriver, runWatchdogOnce, readWatchdogFacts, parseFlags, lastKnownGoodPath, alertPath, logPath,
+  driverModePath, WATCHDOG_REPO_ROOT,
 } from '../driver-watchdog.mjs';
+import { driverModeFor, parseDriverMode, readDriverMode, writeDriverMode, DRIVER_MODES } from '../driver-mode.mjs';
+import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
 
 const NOW = Date.parse('2026-09-12T18:00:00.000Z');
 const MIN = 60_000;
@@ -252,6 +255,122 @@ describe('classifyDriver — every way a HEALTHY driver could be mistaken for a 
     expect(v.state).toBe('down');
     expect(v.reason).toContain('/other');
   });
+});
+
+// ── (3b) `down` IS NOT A SYNONYM FOR "CRASHED" — the 2026-09-12 bug ────────────────────────────────────────
+//
+// Observed live: a driver deliberately started `--once` ran ONE tick, dispatched a real item, exited 0 and
+// released its lease cleanly (`held:false, stale:false`). `classifyDriver` collapsed that into the same verdict
+// — and the same words — as a crash, and the watchdog logged "crash" every 5 minutes about a process that had
+// done exactly what it was told. Two signals now separate the four cases below: WAS it supposed to keep running
+// (the `.conveyor/driver-mode.json` marker), and DID it die or leave (`lease.stale`, already computed and
+// previously discarded).
+
+describe('classifyDriver — a BOUNDED driver that finished is not a crash', () => {
+  /** The live shape: `--once`, one tick, clean exit, lease released. */
+  const boundedFinished = (over = {}) => stuck({
+    lease: { held: false, stale: false, heartbeatAt: null, detail: 'no runner lease at all' },
+    driverMode: { mode: 'bounded', startedAt: '2026-09-12T17:30:00.000Z', pid: 4242, maxTicks: 1 },
+    ...over,
+  });
+
+  it('THE BUG: a bounded driver that ran its tick and exited cleanly is `completed`, and is NOT called a crash', () => {
+    const v = classifyDriver(boundedFinished());
+    expect(v.state).toBe('completed');
+    expect(v.actionable).toBe(false);
+    expect(v.reason).toContain('BOUNDED');
+    expect(v.reason).toContain('FINISHING');
+    expect(v.reason).not.toContain('That is a crash');
+    // The pre-fix assertion, in the exact words it used, must not survive anywhere in this verdict.
+    expect(v.reason).not.toMatch(/is a crash\b/);
+  });
+
+  it('carries the marker through onto the verdict, so a human reading --json sees WHY it was excused', () => {
+    expect(classifyDriver(boundedFinished()).driverMode).toMatchObject({ mode: 'bounded', maxTicks: 1 });
+  });
+
+  it('names the ceiling it was given — `--max-ticks=N` reads differently from a bare `--once`', () => {
+    expect(classifyDriver(boundedFinished({ driverMode: { mode: 'bounded', maxTicks: 5 } })).reason)
+      .toContain('--max-ticks=5');
+    expect(classifyDriver(boundedFinished({ driverMode: { mode: 'bounded', maxTicks: null } })).reason)
+      .toContain('--once');
+  });
+
+  it('REGRESSION GUARD: a bounded driver that LEAKED its lease is still `down`, and still a crash', () => {
+    // Bounded does not mean "never alarm". A leaked lease past the TTL is the one POSITIVE death signal there
+    // is: a process that crashes cannot release. Being allowed to stop does not excuse dying mid-tick.
+    const v = classifyDriver(boundedFinished({
+      lease: { held: false, stale: true, detail: 'a runner lease exists but its holder crashed (heartbeat past the TTL)' },
+    }));
+    expect(v.state).toBe('down');
+    expect(v.reason).toContain('LEAKED');
+    expect(v.reason).toContain('crash');
+  });
+
+  it('REGRESSION GUARD: a RESIDENT driver that is gone is still `down` — clean release or not', () => {
+    for (const lease of [
+      { held: false, stale: true, detail: 'a runner lease exists but its holder crashed (heartbeat past the TTL)' },
+      { held: false, stale: false, detail: 'no runner lease at all' },
+    ]) {
+      const v = classifyDriver(boundedFinished({ lease, driverMode: { mode: 'resident', startedAt: '…' } }));
+      expect(v.state).toBe('down');
+      expect(v.actionable).toBe(false);
+    }
+  });
+
+  it('BACKWARD COMPAT: NO marker behaves exactly as before the fix — `down`, non-actionable, resident assumed', () => {
+    // Every driver checkout that has not yet been restarted onto the marker-writing runner is this case, and it
+    // must not move an inch. Same state, same actionability, same non-action.
+    for (const driverMode of [null, undefined]) {
+      const v = classifyDriver(boundedFinished({ driverMode }));
+      expect(v.state).toBe('down');
+      expect(v.actionable).toBe(false);
+      expect(v.reason).toContain('assumed resident');
+    }
+  });
+
+  it('BACKWARD COMPAT: an UNPARSEABLE marker is no better than no marker — it can never silence a crash', () => {
+    // `readDriverMode` hands `null` up for junk, so junk cannot be more powerful than absence. Asserted through
+    // the parser rather than by hand, so the two halves cannot drift.
+    for (const junk of ['', 'not json', '[]', '{}', '{"mode":"whatever"}', '{"mode":null}']) {
+      expect(parseDriverMode(junk)).toBe(null);
+      expect(classifyDriver(boundedFinished({ driverMode: parseDriverMode(junk) })).state).toBe('down');
+    }
+  });
+
+  it('the bounded excuse never outranks a LIVE lease or in-flight work — the earlier branches still win', () => {
+    // `completed` is reachable ONLY from the no-lease branch. A bounded driver that is still holding its lease
+    // is just a running driver, and is judged on progress like any other.
+    expect(classifyDriver(boundedFinished({ lease: { held: true, stale: false, detail: 'a live runner lease' } })).state)
+      .toBe('stale');
+    expect(classifyDriver(boundedFinished({ agents: [{ name: 'conveyor-3383', startedAt: NOW }] })).state)
+      .toBe('working');
+    expect(classifyDriver(boundedFinished({ queue: [] })).state).toBe('idle');
+  });
+
+  it('a `completed` verdict can never reach the rollback — it is not actionable, so the guard refuses', () => {
+    expect(decideRollback({ verdict: classifyDriver(boundedFinished()), lastKnownGood: { sha: GOOD }, head: { sha: HEAD_SHA, dirty: false } }))
+      .toMatchObject({ roll: false, guard: 'not-stale' });
+  });
+
+  it('THE MESSAGE FOLLOWS THE EVIDENCE: a clean release is reported as a STOP, a leaked lease as a death', () => {
+    const resident = { mode: 'resident', startedAt: '2026-09-12T17:30:00.000Z' };
+    const clean = classifyDriver(boundedFinished({ driverMode: resident }));
+    expect(clean.state).toBe('down');
+    expect(clean.reason).toContain('released cleanly');
+    expect(clean.reason).toContain('STOPPED rather than crashed');
+    expect(clean.reason).toContain('recorded as RESIDENT');
+
+    const died = classifyDriver(boundedFinished({
+      driverMode: resident,
+      lease: { held: false, stale: true, detail: 'a runner lease exists but its holder crashed (heartbeat past the TTL)' },
+    }));
+    expect(died.reason).toContain('LEAKED');
+    expect(died.reason).toContain('past the TTL');
+  });
+});
+
+describe('classifyDriver — progress, the staleness window, and the one actionable verdict', () => {
 
   it('RECENT PROGRESS is `settling`, not stale — just under the window still counts', () => {
     const v = classifyDriver(stuck({ progress: { source: 'dispatch-log', atMs: NOW - (DEFAULT_STALE_AFTER_MS - 1000) } }));
@@ -613,6 +732,165 @@ describe('parseFlags', () => {
   });
 });
 
+// ── (8b) THE LAUNCH-POSTURE MARKER, end to end ─────────────────────────────────────────────────────────────
+
+describe('driver-mode.mjs — the sidecar that says whether this driver was SUPPOSED to keep running', () => {
+  it('classifies the launch flags exactly as runner.mjs#main does — `--once` and a finite `--max-ticks` are bounded', () => {
+    // Mirrors the runner's own `flags.once ? 1 : finiteOr(flags['max-ticks'], Infinity)`. A launch with no
+    // ceiling at all is the supervisor's resident driver, and the runner's own fallback is `Infinity`.
+    expect(driverModeFor({ once: true })).toBe('bounded');
+    expect(driverModeFor({ once: true, maxTicks: 1 })).toBe('bounded');
+    expect(driverModeFor({ maxTicks: 5 })).toBe('bounded');
+    expect(driverModeFor({})).toBe('resident');
+    expect(driverModeFor({ maxTicks: Infinity })).toBe('resident');
+    expect(driverModeFor({ maxTicks: 0 })).toBe('resident');
+    expect(driverModeFor({ maxTicks: NaN })).toBe('resident');
+    expect(driverModeFor()).toBe('resident');
+  });
+
+  it('round-trips through a REAL file, and the reader agrees with the writer about the path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wd-mode-'));
+    try {
+      const { ok, path, record } = writeDriverMode({ root: dir, mode: 'bounded', maxTicks: 1, pid: 4242, now: () => NOW });
+      expect(ok).toBe(true);
+      expect(path).toBe(driverModePath(dir));           // one spelling, the writer's
+      expect(record).toMatchObject({ mode: 'bounded', maxTicks: 1, pid: 4242 });
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(record);
+      expect(readDriverMode(dir)).toEqual({ mode: 'bounded', startedAt: record.startedAt, pid: 4242, maxTicks: 1 });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a checkout that never ran a marker-writing runner reads as `null` — absence, not a guess', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wd-mode-'));
+    try { expect(readDriverMode(dir)).toBe(null); } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses a mode that is not one of the two, rather than recording a word nothing understands', () => {
+    const bad = writeDriverMode({ root: '/nope', mode: 'whenever' });
+    expect(bad).toMatchObject({ ok: false, record: null });
+    expect(bad.error).toContain('whenever');
+    expect(DRIVER_MODES).toEqual(['bounded', 'resident']);
+  });
+
+  it('is BEST-EFFORT — an unwritable checkout returns the error instead of throwing, so a runner still starts', () => {
+    const res = writeDriverMode({ root: '/drv', mode: 'resident', mkdir: () => { throw new Error('EROFS: read-only file system'); } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('EROFS');
+  });
+
+  it('writes atomically (temp + rename), so a watchdog reading mid-write never sees partial JSON', () => {
+    // Partial JSON parses to `null`, which reads as "no marker" — straight back into the bug being fixed.
+    const writes = [];
+    const renames = [];
+    writeDriverMode({
+      root: '/drv', mode: 'bounded', maxTicks: 1, pid: 7, now: () => NOW,
+      mkdir: () => {}, write: (p, s) => writes.push([p, s]), rename: (a, b) => renames.push([a, b]),
+    });
+    expect(writes[0][0]).not.toBe(driverModePath('/drv'));
+    expect(writes[0][0]).toContain('.tmp');
+    expect(renames[0]).toEqual([writes[0][0], driverModePath('/drv')]);
+  });
+});
+
+describe('readWatchdogFacts — the marker reaches the verdict', () => {
+  const facts = (readMode) => readWatchdogFacts({
+    checkout: '/drv',
+    listAgents: () => [],
+    readQueueText: () => JSON.stringify([{ num: '3383' }]),
+    leaseStatus: () => ({ held: false, stale: false, heartbeatAt: null, detail: 'no runner lease at all' }),
+    readMode,
+    stat: () => NOW - 45 * MIN,
+    scanRuns: () => null,
+    now: () => NOW,
+  });
+
+  it('reads the marker from the DRIVER\'s checkout and threads it onto the verdict', () => {
+    const seen = [];
+    const f = facts((root) => { seen.push(root); return { mode: 'bounded', startedAt: '…', pid: 1, maxTicks: 1 }; });
+    expect(seen).toEqual(['/drv']);
+    expect(classifyDriver({ ...f, driverMode: f.driverMode }).state).toBe('completed');
+  });
+
+  it('…and with no marker the SAME facts still read as `down`, the pre-fix answer', () => {
+    const f = facts(() => null);
+    expect(f.driverMode).toBe(null);
+    expect(classifyDriver({ ...f, driverMode: f.driverMode }).state).toBe('down');
+  });
+
+  it('the marker is NOT a progress signal — it is written once at launch and must never look like movement', () => {
+    // `stat` is the only thing feeding `latestProgress`; the marker path must not be among the paths statted.
+    const statted = [];
+    readWatchdogFacts({
+      checkout: '/drv', listAgents: () => [], readQueueText: () => '[]',
+      leaseStatus: () => ({ held: true }), readMode: () => ({ mode: 'bounded' }),
+      stat: (p) => { statted.push(p); return NOW; }, scanRuns: () => null, now: () => NOW,
+    });
+    expect(statted).not.toContain(driverModePath('/drv'));
+  });
+});
+
+describe('runWatchdogOnce — a finished bounded driver is logged as done and nobody is woken up', () => {
+  it('logs `completed`, heals nothing, alerts nobody', () => {
+    const seen = { logs: [], notices: [], heals: [] };
+    const result = runWatchdogOnce({
+      checkout: '/drv',
+      readFacts: () => ({
+        checkout: '/drv', nowMs: NOW, staleAfterMs: DEFAULT_STALE_AFTER_MS,
+        ...stuck({ lease: { held: false, stale: false, detail: 'no runner lease at all' } }),
+        driverMode: { mode: 'bounded', startedAt: '2026-09-12T17:30:00.000Z', pid: 4242, maxTicks: 1 },
+      }),
+      readHeadFn: () => { throw new Error('a non-actionable verdict must never read the driver\'s HEAD'); },
+      readMarker: () => ({ sha: GOOD }),
+      heal: () => { throw new Error('a completed bounded driver must never be healed'); },
+      notify: (n) => seen.notices.push(n),
+      appendLog: (p, l) => seen.logs.push([p, l]),
+      loadAlert: () => null,
+      saveAlert: () => '/drv/.conveyor/watchdog-alert.json',
+      now: () => NOW,
+    });
+    expect(result).toMatchObject({ action: 'none', rollback: null, heal: null, alerted: false });
+    expect(result.verdict.state).toBe('completed');
+    expect(seen.notices).toEqual([]);
+    expect(seen.logs[0][0]).toBe(logPath('/drv'));
+    expect(seen.logs[0][1]).toContain('watchdog[completed]');
+    // The regression in one line: the 5-minutely log line no longer claims a crash.
+    expect(seen.logs[0][1]).not.toMatch(/is a crash\b/);
+  });
+});
+
+// ── (8c) THE WATCHED SESSION KINDS agree with the dispatcher's own slugs ───────────────────────────────────
+
+describe('WATCHED_SESSION_KINDS covers every slug the dispatcher actually mints', () => {
+  it('an `investigate-<num>` session for a queued item counts as IN FLIGHT (it did not, and that was the hole)', () => {
+    // `sessionSlugFor(num, 'investigate')` is keyed on the ITEM id exactly like `conveyor-<num>`, but
+    // `investigate` was missing from the watched list, so a live investigation read as "no session at all" and
+    // let the `working` branch fall through to `down`/`settling`/`stale` with real work still out.
+    expect(sessionMatchesItem(sessionSlugFor('3383', 'investigate'), '3383')).toBe(true);
+    const v = classifyDriver(stuck({
+      agents: [{ name: 'investigate-3383', startedAt: NOW - MIN }],
+      lease: { held: false, stale: false, detail: 'no runner lease at all' },
+    }));
+    expect(v.state).toBe('working');
+    expect(v.actionable).toBe(false);
+    expect(v.reason).toContain('investigate-3383');
+  });
+
+  it('every item-keyed slug kind the dispatcher mints is watched — a new kind fails HERE, not in production', () => {
+    // `fix`/`ci-heal` are keyed on the PR number rather than the item, so they are exercised at the id they are
+    // actually given; the point is that the PREFIX is one the watchdog recognises.
+    for (const kind of ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']) {
+      const slug = sessionSlugFor('3383', kind, '3383');
+      expect(sessionMatchesItem(slug, '3383'), `${kind} ⇒ ${slug} is not watched`).toBe(true);
+    }
+  });
+
+  it('widening the list did not widen ALIASING — nothing is extracted, so nothing can collide', () => {
+    expect(sessionMatchesItem('investigate-33830', '3383')).toBe(false);
+    expect(sessionMatchesItem('ci-heal-33830', '3383')).toBe(false);
+    expect(sessionMatchesItem('my-investigate-3383', '3383')).toBe(false);
+  });
+});
+
 // ── (9) THE PURITY ASSERTION — the reason this file exists at all ──────────────────────────────────────────
 
 describe('the watchdog shares NONE of the driver\'s own decision logic', () => {
@@ -641,6 +919,7 @@ describe('the watchdog shares NONE of the driver\'s own decision logic', () => {
     // is not. (`import-graph.mjs`'s own header recommends exactly this shape.)
     expect(importGraph(ENTRY).files.map((f) => f.split('/').pop()).sort()).toEqual([
       'branch-sync.mjs',            // gitRun / notifyDesktop / decideEscalation / defaultAppendLog (#3472)
+      'driver-mode.mjs',            // the launch-posture sidecar's GRAMMAR — bounded vs resident, path+parse only
       'driver-watchdog.mjs',
       'file-locks.mjs',             // the lease TTL primitive
       'infra-blocked.mjs',          // branch-sync's backoff primitives

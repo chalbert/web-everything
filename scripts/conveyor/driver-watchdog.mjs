@@ -35,11 +35,12 @@
  * about this file rather than a promise in this comment — the same technique `restart-runner.mjs`'s suite uses
  * for its own purity claim.
  *
- * WHAT IS SHARED, and why each is safe: {@link ./queue-store.mjs}'s `parseQueue`/`normNum` (the sidecar's
- * GRAMMAR — a second, looser parser here would disagree with the writer about what is even queued, which is a
- * worse failure than the one being guarded), and {@link ./branch-sync.mjs}'s `gitRun` / `notifyDesktop` /
- * `decideEscalation` / `defaultAppendLog` (the repo's existing ESCALATE-DURABLY pattern, #3472 — re-nag dedup
- * included). Neither is dispatch logic; both are graph-asserted.
+ * WHAT IS SHARED, and why each is safe: {@link ./queue-store.mjs}'s `parseQueue`/`normNum` and
+ * {@link ./driver-mode.mjs}'s `readDriverMode` (both are sidecar GRAMMAR — a second, looser parser here would
+ * disagree with the writer about what is even recorded, which is a worse failure than the one being guarded),
+ * and {@link ./branch-sync.mjs}'s `gitRun` / `notifyDesktop` / `decideEscalation` / `defaultAppendLog` (the
+ * repo's existing ESCALATE-DURABLY pattern, #3472 — re-nag dedup included). None is dispatch logic; all are
+ * graph-asserted.
  *
  * ── THE THREE PARTS ─────────────────────────────────────────────────────────────────────────────────────────
  *
@@ -66,6 +67,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 import { parseQueue, normNum } from './queue-store.mjs';
+import { readDriverMode, driverModePath, DEFAULT_DRIVER_MODE } from './driver-mode.mjs';
 import { gitRun, notifyDesktop, decideEscalation, defaultAppendLog, DEFAULT_RENAG_MS } from './branch-sync.mjs';
 import { resolveRunnerCheckout } from './resolve-runner-checkout.mjs';
 import { runnerLeaseStatus } from '../../skills-src/conveyor/runner-lock.mjs';
@@ -88,8 +90,19 @@ export const RUN_LOOKBACK_FACTOR = 2;
 export const MAX_RUNS_SCANNED = 60;
 
 /** Session-name prefixes that count as "this driver is working on that item". Deliberately WIDE — every extra
- *  kind here can only make the watchdog MORE reluctant to act, which is the safe direction. */
-export const WATCHED_SESSION_KINDS = Object.freeze(['conveyor', 'fix', 'review', 'prepare-decision', 'prepare']);
+ *  kind here can only make the watchdog MORE reluctant to act, which is the safe direction.
+ *
+ *  KEPT IN STEP WITH THE DISPATCHER'S OWN SLUGS, and asserted against them: `dispatch-lane.mjs#sessionSlugFor`
+ *  mints `conveyor-`, `prepare-`, `prepare-decision-`, `investigate-`, `fix-` and `ci-heal-` names. The first
+ *  three were here; `investigate-<num>` was NOT, and it is keyed on the ITEM id exactly like `conveyor-<num>`,
+ *  so a live investigation of a queued item read as "no session at all" and let the `working` branch fall
+ *  through to `down`/`settling`/`stale` while real work was out. (`fix-`/`ci-heal-` are keyed on the PR number,
+ *  not the item, so they can only match when the two coincide — listed anyway, since a spurious match here
+ *  merely makes the watchdog quieter.) The agreement is asserted in the suite against `sessionSlugFor`'s own
+ *  output, so a future slug kind fails a test rather than silently re-opening the hole. */
+export const WATCHED_SESSION_KINDS = Object.freeze([
+  'conveyor', 'fix', 'ci-heal', 'review', 'investigate', 'prepare-decision', 'prepare',
+]);
 
 /** A sha must look like one before this file will `git reset --hard` to it. */
 export const SHA_RE = /^[0-9a-f]{7,40}$/i;
@@ -223,11 +236,30 @@ export function latestProgress(signals) {
  *                been running; a delivery agent may work an item for an hour without touching any of the
  *                signals below, and killing its driver mid-flight is exactly the double-dispatch damage the
  *                whole lease apparatus exists to prevent.
- *   `down`     — no LIVE lease. Nobody is driving, so nothing is silently stale; this is the plain crash case
- *                the supervisor and `restart-runner` already own. Reported loudly, never healed here — rolling
- *                a checkout back under a dead driver fixes nothing and destroys the evidence.
+ *  `completed` — no live lease, the lease was released CLEANLY, and this checkout's driver was launched
+ *                BOUNDED (`--once` / `--max-ticks=N` — recorded by {@link ./driver-mode.mjs}). It ran its
+ *                ticks and left, which is the job finishing. Never healed, never alarmed about.
+ *   `down`     — no LIVE lease, and nothing says it was supposed to stop. Nobody is driving, so nothing is
+ *                silently stale; this is the crash case the supervisor and `restart-runner` already own.
+ *                Reported loudly, never healed here — rolling a checkout back under a dead driver fixes
+ *                nothing and destroys the evidence.
  *   `settling` — eligible work, nothing in flight, but something moved within `staleAfterMs`. Healthy.
  *   `stale`    — all of the above ruled out AND nothing has moved for `staleAfterMs`. The only actionable one.
+ *
+ * ── `down` IS NOT A SYNONYM FOR "CRASHED" (the 2026-09-12 bug) ──────────────────────────────────────────────
+ *
+ * This branch used to assert *"That is a crash, not silent staleness"* for EVERY absent lease. Two different
+ * things reach it, and the evidence to tell them apart was already in hand and being thrown away:
+ *
+ *   • the holder DIED — it leaked its lease and the TTL swept it (`lease.stale === true`). A real crash.
+ *   • the holder LEFT — it released its lease on the way out (`lease.stale === false`, no lease at all). A
+ *     stop. Whether that stop was expected is what {@link ./driver-mode.mjs}'s marker answers: a BOUNDED
+ *     driver stopping is `completed`; a RESIDENT one stopping is still `down`, because it was supposed to
+ *     keep going.
+ *
+ * BACKWARD-COMPATIBLE BY CONSTRUCTION: `driverMode` is `null` for every checkout that has not yet run a runner
+ * carrying the marker, and `null` takes the RESIDENT path — same `down` state, same `actionable:false`, same
+ * non-action as before. Only the wording now follows the evidence instead of asserting past it.
  *
  * @param {object} o
  * @param {number} o.nowMs
@@ -235,18 +267,19 @@ export function latestProgress(signals) {
  * @param {Array<{num:string}>} o.queue
  * @param {boolean} o.listingReadable
  * @param {Array<object>} o.agents
- * @param {{held:boolean, stale:boolean, heartbeatAt:string|null}|null} o.lease
+ * @param {{held:boolean, stale:boolean, heartbeatAt:string|null, detail?:string}|null} o.lease
  * @param {{source:string, atMs:number}|null} o.progress
+ * @param {{mode:'bounded'|'resident', startedAt:string|null}|null} [o.driverMode] - `null` ⇒ assume resident.
  */
 export function classifyDriver({
   nowMs, staleAfterMs = DEFAULT_STALE_AFTER_MS, queue = [], listingReadable = true, agents = [],
-  lease = null, progress = null, listingError = null,
+  lease = null, progress = null, listingError = null, driverMode = null,
 } = {}) {
   const { inFlight, eligible } = splitQueue(queue, agents);
   const base = {
     eligible, inFlight, queueSize: Array.isArray(queue) ? queue.length : 0,
     progress, quietMs: progress ? Math.max(0, Number(nowMs) - progress.atMs) : null,
-    staleAfterMs, lease,
+    staleAfterMs, lease, driverMode,
   };
 
   if (!listingReadable) {
@@ -261,9 +294,25 @@ export function classifyDriver({
       reason: `${inFlight.length} queued item(s) have a live session (${inFlight.map((i) => i.session).join(', ')}) — real work is in flight` };
   }
   if (!lease || lease.held !== true) {
+    const detail = lease?.detail || 'no live runner lease';
+    // The POSITIVE death signal, and the only one: a holder that crashed cannot release, so its lease sits
+    // there until the TTL marks it stale. Anything else is an absence, and an absence is not evidence of death.
+    const leaked = lease?.stale === true;
+    const mode = driverMode?.mode || DEFAULT_DRIVER_MODE;
+    if (!leaked && mode === 'bounded') {
+      return { ...base, state: 'completed', actionable: false,
+        reason: `the driver is not running (${detail}), and this checkout's driver was started BOUNDED`
+          + `${driverMode?.maxTicks ? ` (--max-ticks=${driverMode.maxTicks})` : ' (--once)'}`
+          + `${driverMode?.startedAt ? ` at ${driverMode.startedAt}` : ''} — it ran its ticks and exited, releasing its lease `
+          + 'cleanly. That is the job FINISHING, not a crash: nothing to restart, nothing to roll back, nothing to alarm about' };
+    }
     return { ...base, state: 'down', actionable: false,
-      reason: `the driver is not running (${lease?.detail || 'no live runner lease'}). That is a crash, not silent staleness; `
-        + 'the supervisor and `run.mjs restart-runner` own it, and rolling a checkout back under a dead driver would only destroy evidence' };
+      reason: `the driver is not running (${detail}). `
+        + (leaked
+          ? 'The lease was LEAKED — its heartbeat is past the TTL, so the holder died without releasing it. That is a crash'
+          : `The lease was released cleanly, so the driver STOPPED rather than crashed — but it was ${driverMode ? 'recorded as RESIDENT' : 'not recorded as bounded (no `.conveyor/driver-mode.json`, so it is assumed resident)'}`
+            + ' and a resident driver is supposed to keep running, so something ended it')
+        + '; the supervisor and `run.mjs restart-runner` own it, and rolling a checkout back under a dead driver would only destroy evidence' };
   }
   if (!progress) {
     return { ...base, state: 'unknown', actionable: false,
@@ -342,6 +391,8 @@ export const logPath = (checkout) => join(checkout, '.conveyor', 'watchdog.log')
 export const queueSidecarPath = (checkout) => join(checkout, '.conveyor', 'queue.json');
 export const dispatchLogPath = (checkout) => join(checkout, '.conveyor', 'dispatch-log.json');
 export const runsDirPath = (checkout) => join(checkout, '.operations', 'runs');
+/** Re-exported so a caller/test has ONE spelling of the marker's location, the writer's own. */
+export { driverModePath };
 
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -449,7 +500,9 @@ export function newestScopedRun({ checkout, queueKeys, nowMs, lookbackMs, readDi
  *
  * The lease is read only for {@link classifyDriver}'s `down` check. It is NOT a progress signal and must never
  * be treated as one: a wedged driver heartbeats its lease every tick exactly like a healthy one, which is the
- * whole reason the existing guards missed this failure.
+ * whole reason the existing guards missed this failure. Neither is the driver-mode marker: it is written ONCE
+ * at launch and never touched again, so its mtime says nothing about progress — it answers only "was this
+ * driver supposed to still be running?" for that same `down` check.
  */
 export function readWatchdogFacts({
   checkout,
@@ -457,6 +510,7 @@ export function readWatchdogFacts({
   listAgents = defaultListAgents,
   readQueueText = (p) => { try { return readFileSync(p, 'utf8'); } catch { return ''; } },
   leaseStatus = defaultDriverLease,
+  readMode = readDriverMode,
   stat = mtimeMs,
   scanRuns = newestScopedRun,
   now = () => Date.now(),
@@ -494,7 +548,7 @@ export function readWatchdogFacts({
 
   return {
     checkout: root, nowMs, staleAfterMs, queue, agents, listingReadable, listingError,
-    lease: leaseStatus({ checkout: root, nowMs }), progress, run,
+    lease: leaseStatus({ checkout: root, nowMs }), progress, run, driverMode: readMode(root),
   };
 }
 
@@ -600,6 +654,7 @@ export function runWatchdogOnce({
   const verdict = classifyDriver({
     nowMs: facts.nowMs, staleAfterMs, queue: facts.queue, listingReadable: facts.listingReadable,
     listingError: facts.listingError, agents: facts.agents, lease: facts.lease, progress: facts.progress,
+    driverMode: facts.driverMode,
   });
 
   const line = (msg) => appendLog(logPath(root), `${iso(facts.nowMs)} watchdog[${verdict.state}]: ${msg}`);
