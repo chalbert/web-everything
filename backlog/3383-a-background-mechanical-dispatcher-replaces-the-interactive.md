@@ -3084,8 +3084,8 @@ Do not carry forward an assumption that it already exists.
 
 ### Two small bugs filed, PR still open — correcting a "landed" assumption
 
-`xpg5itz` ("`we:scripts/lane-pool.mjs#ensureDeps` leaks `npm ci`'s inherited stdout into an acquire's
-captured lane path") and `x5s6e69` ("`dispatchFix` leaks its acquired lane when the finding-scratch-file write
+`3657` ("`we:scripts/lane-pool.mjs#ensureDeps` leaks `npm ci`'s inherited stdout into an acquire's
+captured lane path") and `3656` ("`dispatchFix` leaks its acquired lane when the finding-scratch-file write
 throws early") — both found live while fixing `a0d328fb1` above, both filed as backlog cards, no fix attempted
 in the same PR. **`PR #2188` is confirmed `OPEN`, not merged**, as of this check (`gh pr view 2188`). Filing
 happened; landing has not.
