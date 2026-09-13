@@ -1805,6 +1805,11 @@ against.
 ## Working doctrine (2026-09-04, continued): rule 10 — the runner's normal operating mode is tracking `main`
 ## directly; a long-lived divergent branch is a temporary build tool, not the default steady state
 
+> **AMENDED 2026-09-12 — read this section together with "Working doctrine (2026-09-12): rule 10 amended"
+> below.** The operator ruled that N standing POC branches are a wanted, durable delivery mode. The
+> wind-down half of this section no longer holds; its drift/naming/short-lived-fix-lane reasoning does.
+> Kept unedited as the original record.
+
 Set the same night as rule 9 above, after a second, independent finding: `origin/lane/mechanical-dispatcher`
 itself — this epic's own prototype branch — had silently drifted 97 commits behind `origin/main`. The
 branch's own auto-sync loop (the mechanism meant to keep it current, per the `keep-prototype-branch-synced-
@@ -1883,3 +1888,547 @@ and `we:skills-src/conveyor/runner.mjs`, both with unit + real-CLI-subprocess te
 `claude agents` listing reaped cleanly post-fix; the new tests prove the retry recovers within budget, still
 fails (bounded, not silently) once the budget is exhausted, never retries an already-`No job matching` answer,
 and that the error-summary no longer truncates a real multi-line failure to a bare "Command failed" line.
+
+## Session update (2026-09-12) — mechanical-harness delegation audit across all seven dispatch launch kinds:
+## exactly ONE (`review`) is actually wired; the other six still run their own lifecycle from a brief
+
+A delegation audit of every dispatch launch kind on `origin/lane/mechanical-dispatcher`, verified against tip
+`02d9af300`. The question asked was narrow and checkable: for each launch kind, does the dispatched agent still
+run its own lifecycle commands (`lane-pool acquire`, `open-pr`, `learnings-drop`, …) out of a full prose brief,
+or has that lifecycle moved into a mechanical harness the dispatcher calls directly? This is the concrete state
+of the epic's own founding bullet — "**Subagents only edit code.** Every command they'd otherwise run themselves
+is delegated to the mechanical layer" (see "The target shape" at the top of this card).
+
+**The answer: one of seven.** `review` is fully harnessed — no agent commands in its brief, a direct wrapper call
+to `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as the default path at
+`we:scripts/operations/review-dispatch.mjs:496` and `:542`. The other six all still hand the agent a full brief
+and let it drive its own lifecycle.
+
+| Launch kind | Agent runs lifecycle commands itself? | Wrapper | `we:scripts/guard-bash.mjs` coverage | Verdict |
+|---|---|---|---|---|
+| build | Yes | `we:scripts/operations/deliver-item-wrapper.mjs` exists, **unwired** | verification-only; lifecycle denylist dead | Not integrated |
+| prepare (scope) | Yes | none | verification-only; brief bug fixed | Not integrated |
+| prepare-decision | Yes | none | verification-only; brief bug fixed | Not integrated |
+| investigation | Yes | none | verification-only; never had the bug | Not integrated |
+| fix | Yes | `we:scripts/operations/fix-dispatch-wrapper.mjs` exists, **unwired**, brief still "PROTOTYPE" | verification-only; brief bug fixed; denylist arm blocked by a two-spawner conflict | Not integrated |
+| ci-heal | Yes | none | verification-only; brief bug fixed | Not integrated |
+| review | **No** | `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as default path | N/A by construction | **Fully integrated** |
+
+**Two wrappers exist but nothing calls them.** `we:scripts/operations/deliver-item-wrapper.mjs` (for `build`) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (for `fix`) are both written and both dead code on the dispatch
+path. The `fix` one is not merely un-wired-yet: it is blocked by a real, named conflict — `WE_DISPATCH_KIND=fix`
+is stamped by **two different spawners with incompatible contracts**, so wiring one wrapper behind that single
+env value would mis-harness the other spawner's agents. That conflict has to be resolved before the wrapper can
+be turned on at all; it is not a "just flip the flag" item.
+
+**`guard-bash`'s lifecycle denylist is correctly OFF for all six, and must stay off until each one is wired.**
+The denylist is what would mechanically enforce "the agent doesn't run its own lifecycle commands." Arming it
+today, for any of the six, would deny **step 1 of that kind's own brief** — `lane-pool acquire` — and break the
+dispatch outright. So the current state is self-consistent, not an oversight: the denylist can only be armed for
+a kind *after* that kind's lifecycle has moved into a harness. `guard-bash`'s coverage for the six is
+verification-only today, which is the correct setting for an unwired kind.
+
+**Why this matters for the epic, not just as a status line.** `review` being harnessed is the existence proof
+that the target shape works — the pattern is proven, once, end to end. But the epic's founding claim is about
+*every* command an agent would otherwise run, and six of seven kinds are still the old shape. The `review`
+wrapper is therefore the template to copy, and the remaining work is concrete and enumerable rather than
+open-ended: wire `deliver-item-wrapper` for `build`; resolve the two-spawner `WE_DISPATCH_KIND=fix` conflict and
+then wire `fix-dispatch-wrapper`; author wrappers for `prepare`, `prepare-decision`, `investigation`, `ci-heal`;
+arm `guard-bash`'s lifecycle denylist per kind, each time only after that kind's wrapper is live.
+
+**Related, already filed:** `#3629` (review and fix dispatch should get the same minimal context treatment) and
+`#3627` (dispatched delivery agents should get a minimal hand-crafted brief) both sit next to this finding but
+neither tracks the wiring itself. The self-hosting question this audit immediately raised — whether the
+prototype branch can build these six remaining kinds into ITSELF, via a lane forked from the prototype rather
+than from `main`, without a PR per increment — is filed separately as its own decision card; see the
+"POC-branch delivery mode" decision under this epic.
+
+## Working doctrine (2026-09-12): rule 10 amended — a long-lived divergent branch is a DECLARED delivery
+## mode ("POC branch"), N may stand at once, and landing inside one skips review until graduation
+
+The "POC-branch delivery mode" decision above was ruled by the operator the same day it was filed, and the
+ruling amends rule 10 rather than working around it. The operator's words, verbatim:
+
+> "I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must not be
+> slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+> graduate."
+
+**Before (rule 10 as set 2026-09-04).** "The runner's steady state is tracking `main` directly; a long-lived
+divergent branch is not the default operating mode." A divergent branch was framed as a temporary build tool
+to be wound down; `#3443` was that wind-down; only one such branch was contemplated, and having it at all was
+treated as a state to exit.
+
+**After (rule 10 as amended 2026-09-12).** "A long-lived divergent branch is a DECLARED delivery mode — a
+'POC branch' — not temporary scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one."
+N POC branches may stand concurrently, each a first-class delivery target an item can name
+(`deliveryTarget:`), each graduating to `main` on its own timeline. Landing INSIDE a POC branch skips the
+review gate entirely — the item's own tests/build validation is the only gate; the full review process (a real
+PR to `main`, the escalation gate, the jury/judge panel, `review:human`) applies once, at graduation.
+
+**What was preserved, and why it is not sentiment.** The 97-commit drift incident is real evidence, but of a
+narrower claim than the original rule drew from it: the branch was undeclared, unregistered, and its sync loop
+was failing silently with nothing watching. So the amended rule keeps (a) the runner's own steady state being
+`main` — a POC branch is a *target*, never the runner's default tracking ref; (b) the short-lived
+scratch-lane-off-current-`main` pattern for fixing the delivery machinery itself
+(`#1894`/`#1895`/`#1902`/`#1903`) — "I need a POC branch" is never the answer to "I need to fix the runner";
+(c) the requirement that every POC branch NAME what it is for and who graduates it, now as a registry entry;
+(d) active per-branch drift reconciliation via `we:scripts/conveyor/branch-drift.mjs`, with a drifted branch
+still holding its own items; and (e) build no more machinery than the POC in front of you needs.
+
+**What was deleted.** The claim that divergence is inherently temporary and must be wound down, and the
+assumption of a single branch. `#3443` remains real work — but as that one branch's own graduation, not as a
+wind-down of the mode, and the runner tracking it today is not a violation of anything.
+
+**Where it lives.** `we:skills-src/mechanical-delivery-doctrine/SKILL.md`, rule 10, plus that skill's own
+`description:` line which paraphrases it — edited there first, per the skill's own stated amendment path
+("If a rule itself changes, edit it here first, then note the change on the card"), and noted here second.
+
+**Left for a follow-on, not this ruling:** the build itself — the `poc-branches` registry, the
+`deliveryTarget:` field, the per-branch land lock, and the fast-forward-with-rebase-retry lander. The decision
+card names that item and deliberately builds none of it.
+
+## Session update (2026-09-12, continued) — punch-list of what is genuinely still open after today's
+## mechanical-harness wiring, so a fresh session does not have to re-derive it
+
+Written to survive this conversation, per the operator's own instruction. Every item below was RE-VERIFIED
+against live state, not copied from an earlier draft — verified against `origin/lane/mechanical-dispatcher` tip
+`373f14af1` ("validate-and-promote, the trigger that finally arms the watchdog"), `origin/main` tip
+`b0763ceac`, and the live backlog/PR/issue trackers, all as of 2026-09-12. Where something turned out to
+already be resolved, that is stated explicitly rather than silently dropped.
+
+**What moved since the "one of seven" delegation audit earlier on this card (tip `02d9af300`).** That audit is
+now stale on two of its six "Not integrated" rows — read the table below, not that one, for current state:
+`build` (#3645) and `prepare` (#3641) both went from unwired to wired-by-default in the five commits after it
+(`c081e1650` … `373f14af1`). The registry mechanism itself (`we:scripts/operations/dispatch-provider-registry.mjs`,
+`62f4ce383`) is also new since that audit — it replaces what would otherwise have been a fifth hard-coded
+branch in `we:scripts/operations/dispatch-lane-io.mjs`.
+
+### 1. Dispatch-kind wiring — current state of all seven launch kinds
+
+Re-verified directly against `we:scripts/operations/dispatch-provider-registry.mjs` on the lane tip (it throws
+at import time if it ever drifts from `LAUNCH_KINDS`, so the table below is closer to a compile-time fact than
+a snapshot):
+
+| Kind | State | Evidence |
+|---|---|---|
+| `build` | **Wired, mechanical by default** | `DISPATCH_PROVIDER_REGISTRY.build` → `deliverItemDetachedProvider`; opt-out `WE_BUILD_DISPATCH_MODE=agent` |
+| `prepare` (scope) | **Wired, mechanical by default** | `DISPATCH_PROVIDER_REGISTRY.prepare` → `prepareScopeDetachedProvider`; opt-out `WE_PREPARE_DISPATCH_MODE=agent` |
+| `review` | **Wired** (since before today's later commits) | `we:scripts/operations/review-dispatch.mjs:496`/`:542` → `we:scripts/operations/review-dispatch-wrapper.mjs`, no agent turn in the critical path |
+| `fix` | **Still unwired — blocked, not just undone** | see item 2 below |
+| `prepare-decision` | **Still unwired** | no `we:scripts/operations/dispatch-providers/prepare-decision.mjs` exists; `#3644` (open) is the story |
+| `ci-heal` | **Still unwired** | no `we:scripts/operations/dispatch-providers/ci-heal.mjs` exists; `#3642` (open) is the story |
+| `investigation` | **Still unwired**, and no wrapper exists yet at all (unlike fix/ci-heal/prepare-decision, nobody has even prototyped one) | full-brief agent path only |
+
+**Action for a future session:** `#3640` (fix, blocked — see item 2), `#3642` (ci-heal), `#3644`
+(prepare-decision) are the three remaining stories under the umbrella `#3643`, all `status: open`, all already
+carrying `deliveryTarget: lane/mechanical-dispatcher` (set on `main` via PR #2144, landed today) — so each can
+be picked up as an ordinary POC-branch-targeted build, no further decision needed to start. `investigation`
+has no story yet; file one before building it (needs a wrapper design pass first, the way `#3627`/`#3629`
+did for build/fix/review).
+
+### 2. `fix` dispatch is blocked on a real conflict, not merely unscheduled
+
+`WE_DISPATCH_KIND=fix` is stamped by **two different spawners with two incompatible contracts**:
+`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider` (the live path, running
+`we:skills-src/conveyor/fix-agent-brief.md` v1, which runs its OWN lane acquire / gate / commit / open-pr) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (written, unwired, running
+`we:skills-src/conveyor/fix-agent-brief-v2.md` under a wrapper that owns all of that lifecycle instead). One
+env value cannot describe both contracts at once — a `dispatchKind === 'fix'` deny arm in
+`we:scripts/guard-bash.mjs` written for the wrapper's contract would deny the v1 agent's own legitimate step 1.
+This is documented in `we:scripts/guard-bash.mjs` itself (search "A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'`
+ARM IS ADDED") and in `we:scripts/operations/fix-dispatch-wrapper.mjs`'s own header.
+
+**Newly found today, same shape:** `prepare` now has the identical collision.
+`we:scripts/operations/prepare-scope-wrapper.mjs` stamps `WE_DISPATCH_KIND=prepare` for its own (wrapped)
+contract, but the pre-existing `WE_PREPARE_DISPATCH_MODE=agent` fallback path also stamps
+`WE_DISPATCH_KIND=prepare` via `we:scripts/operations/dispatch-lane-io.mjs`'s generic
+`String(request.launchKind || 'build')` stamp — same one-value/two-contracts problem, currently undocumented
+anywhere except `we:scripts/operations/prepare-scope-wrapper.mjs`'s own header. **Not yet filed as its own
+item** — worth doing before anyone tries to arm a `we:scripts/guard-bash.mjs` `'prepare'` deny arm and hits the
+same wall `'fix'` already hit.
+
+**Resolution shape, not yet decided:** either a distinct `WE_DISPATCH_KIND` value per contract (e.g.
+`fix-wrapped` vs `fix-agent`, and the equivalent for `prepare`), or a second signal alongside the kind that
+says which contract is in force. Whichever is chosen for `fix` should almost certainly be reused for `prepare`
+rather than re-litigated.
+
+### 3. `we:scripts/guard-bash.mjs`'s lifecycle denylist — confirmed still correctly scoped, and why it must stay that way
+
+Re-read directly (`we:scripts/guard-bash.mjs`, the `dispatchKind === 'delivery'` block). **Only `'delivery'` is
+armed** — the stamp `we:scripts/operations/deliver-item-wrapper.mjs` puts on the minimal build agent it
+spawns. `'prepare'` is NOT armed (see item 2 — same two-contract collision as `fix`, confirmed in
+`we:scripts/operations/prepare-scope-wrapper.mjs`'s own header: "`WE_DISPATCH_KIND: 'prepare'` … NAMED GAP, and
+a gap this item deliberately does NOT close"). `fix`, `prepare-decision`, `ci-heal`, `investigation` are all
+still verification-only (the `#3105` gate only), exactly as before. **This is self-consistent, not drift:**
+arming any of these before its own two-contract collision (if any) is resolved and its wrapper is the sole
+spawner would deny that kind's own agents their legitimate first step. Confirm this table again before arming
+anything new.
+
+### 4. Nothing re-judges whether a predicted scope is a GOOD prediction — still just flagged
+
+`we:scripts/operations/prepare-scope-wrapper.mjs` (line ~47) states this in its own header in so many words:
+"nothing here re-judges whether a WELL-FORMED prediction is a GOOD one." The wrapper checks structural
+well-formedness (did the agent touch only its own backlog file, did it write a `scope:` field at all) but
+nothing scores whether the predicted touch-set is actually close to what the item will really touch. **No
+backlog item exists for this yet** (searched; nothing found). Worth filing as its own story before `prepare`
+dispatch is trusted at volume — a silently bad prediction degrades exactly the scope-lease conflict machinery
+(`#2560`/`#2592`) that predicted scope exists to feed.
+
+### 5. `we:scripts/conveyor/driver-watchdog.mjs` has nothing scheduling it — still just a script
+
+Confirmed: no `we:package.json` script, no cron entry, no launchd plist, no GitHub Actions workflow references
+`we:scripts/conveyor/driver-watchdog.mjs` anywhere in the repo. It is invoked only by hand (`node
+we:scripts/conveyor/driver-watchdog.mjs check|heal`) or, as of `373f14af1`, indirectly by
+`we:scripts/conveyor/validate-and-promote.mjs promote` (which calls `record-good`, arming the watchdog's
+fallback, but never calls the watchdog itself). **A real decision is still owed:** cron/loop trigger on the
+driver's own host, a tick inside the runner's own mechanical passes (the watchdog's header explicitly forbids
+sharing the driver's decision logic, but running the CHECK on a timer from outside the driver process is a
+different question), or accepted as manual-only for now. Until one of those is chosen and wired, the watchdog
+protects nothing unattended.
+
+### 6. `validate-and-promote` / `record-good` / `restart-runner` — unit-tested, never live-fired end to end
+
+Confirmed by reading the test suites directly: `we:scripts/conveyor/__tests__/validate-and-promote.test.mjs` is
+pure decision-table + injected-double tests only (four described sections, no real clone, no real `npm`, no
+real `git reset`, no real `claude`). `we:scripts/operations/__tests__/restart-runner-io-real.test.mjs` is the
+one REAL-mechanism test in this group — real directory trees, a real `ps` shell-out, a real detached child
+process — but its own header states it deliberately never spawns the real supervisor or the real runner, "per
+a standing operator constraint." The `we:scripts/conveyor/validate-and-promote.mjs` CLI does have a
+live-fireable read-only `validate` verb (five checks in a throwaway clone, touches no driver) — that is the
+"one live self-test" this session ran — but nobody has yet run the `promote` verb for real: a live sha, a real
+driver checkout, a real `record-good` write, a real reset, and a real `restart-runner` landing the driver on
+new code. **That end-to-end live run is the next concrete step before trusting this pipeline**, not a code
+change — the code appears complete and is exercised in isolation, just never chained together for real.
+
+### 7. `#3646` / backlog `#3646` — filed, not fixed. Confirmed still open.
+
+`we:skills-src/conveyor/runner.mjs`'s SIGTERM/SIGINT handler cannot fire while the runner is inside a blocking
+`execFileSync` call (one of its own mechanical passes) — Node only dispatches signals on the event loop.
+`we:backlog/3646-*.md` (`status: open`) documents this and names the precedent fix (`#3404`'s move to
+`runQuietHeartbeating` for `we:scripts/conveyor/verify-dispatch.mjs`). PR #2142, which merged today, **only
+filed this card** ("backlog: file runner SIGTERM-mid-blocking-pass limitation under #3383") — it added no
+code. The actual fix (moving whichever of `we:skills-src/conveyor/runner.mjs`'s own mechanical passes still
+use a plain blocking spawn onto the heartbeating pattern) remains unbuilt.
+
+### 8. `#3647` — review-dispatch-wrapper misclassifies a successful review as `blocked-on-infra`. Confirmed still open, unfixed.
+
+`we:backlog/3647-*.md`, `status: open`. Root cause already diagnosed and written down on the card:
+`we:scripts/operations/review-loop-cli.mjs` exits non-zero when a *secondary, non-essential* logging step
+fails (a missed prevention-guard append to `~/.claude/conveyor/learnings/review-loop.jsonl`), even though the
+review itself ran to completion and succeeded (real accept verdict posted, label flipped, PR merged). The
+wrapper's `execFileSync` catch branch cannot currently tell "the review never ran" from "the review ran and
+succeeded but something secondary afterward failed," so it hardcodes `blocked-on-infra` either way. No code
+fix has landed for this — only the diagnosis and the card.
+
+### 9. PR #2113 — needs a real disposition decision, not indefinite open status
+
+Confirmed still `OPEN` against `main` (`gh pr view 2113`): "WE #3629: extract shared minimal-context
+primitives + build the mechanical review-dispatch wrapper." Its content was already merged into
+`lane/mechanical-dispatcher` via a local branch merge back on `5129bd1fd` ("Merge branch 'pr-2113' into
+lane/mechanical-dispatcher") — i.e., the review-dispatch-wrapper code this PR carries is *already living and
+running* on the prototype branch (`02d9af300` wired it as the default `review` path there), while
+`we:scripts/operations/review-dispatch-wrapper.mjs` does **not exist on `main` at all** (confirmed: `git
+ls-tree -r origin/main` has no such file). Since the 2026-09-12 POC-branch ruling, the intended path for
+prototype-branch content reaching `main` is `#3443`'s incremental small-PR graduation (that epic is `status:
+active`, already landing pieces), not a single big PR opened before that ruling existed. **Recommendation, not
+yet decided by the operator:** close #2113 as superseded by the POC-branch content plus #3443's graduation
+path, rather than leaving a stale direct-to-main PR open indefinitely alongside the now-different intended
+landing mechanism. This needs the operator's actual call, not a unilateral close.
+
+### 10. `#3639` — the changeset/"batch" decision. Confirmed still open, unratified.
+
+`we:backlog/3639-*.md`, `kind: decision`, `status: open`, no `preparedDate` set. Extensively researched on the
+card itself (7 forks, a full survey, a "continued" reassessment after the operator supplied the real
+motivating scenario) but per this repo's own rule ("never rule w/o preparedDate"), it is not yet a
+ready-to-ratify decision in the tracked sense even though the prose reads as thorough. Needs either a
+`/prepare` pass to set `preparedDate` formally, or the operator ratifying directly against the "Revised
+recommendation for Fork 7" already on the card.
+
+### 11. The bootstrap gap — named so it is not mistaken for forgotten work
+
+`main`'s own conveyor still cannot spawn delivery agents at all (`#3369`/`#3580`'s decoupling work and the
+dispatcher-on-`main` question are unrelated to and upstream of everything above). Every mechanical-harness
+wiring item in this whole session update lives on `origin/lane/mechanical-dispatcher` only. Graduating any of
+it to `main` is explicitly `#3443`'s job — already `status: active`, already landing incremental PRs (most
+recently PR #2144 today) — and is a separate, ongoing epic, not something this list calls for action on. Named
+here only so a future session does not mistake "none of this runs on `main` yet" for a gap in today's work.
+
+### Already-resolved items worth naming explicitly (so nobody re-opens them)
+
+- **PR #2142** — merged (filed `#3646`, no code fix — see item 7 above; the PR itself is done, the underlying
+  work it filed is not).
+- **The `build`/`prepare` rows of the earlier "one of seven" audit** — superseded by item 1 above; both kinds
+  wired and mechanical-by-default as of `d1c2d8ed6`/`ffbc921ab`+`49c46c3d2`.
+- **The `we:scripts/operations/dispatch-provider-registry.mjs` extraction itself (`62f4ce383`)** — done; a
+  pure refactor, all pre-existing tests pass unchanged, 21 new tests added for the registry.
+- **The driver watchdog's fallback-marker gap** — `we:scripts/conveyor/validate-and-promote.mjs` (`373f14af1`)
+  closes the "nothing ever calls `record-good`" gap the watchdog shipped with; see item 6 for what is still
+  NOT done (a live end-to-end `promote` run).
+
+## Session update (2026-09-12 night, close-out) — five in-flight threads checked against live state before the
+## operator stepped away; two done, one landed live DURING this check, two still genuinely in progress, one
+## real unattended problem found and left exactly as found
+
+Written because the operator is stepping away for the night and asked for a durable, cold-readable record of
+what five parallel threads actually reached — not a transcription of the plan going in. Every claim below was
+re-checked against a live artifact (a lane's own git state, a running process's log, `gh pr view`, `claude
+agents --json`) at write time, not carried over from memory. **State kept changing while this was being
+written** — two things landed mid-check — so timestamps are given where the gap matters instead of a single
+"as of" line for the whole section.
+
+### 1. Codex delivery-agent provider (`CODEX_PROVIDER.spawn()`) — genuinely in progress, substantial, not done
+
+Lane-21 (`3383-codex-delivery-provider`, based on `origin/lane/mechanical-dispatcher`) holds a real, actively-
+being-written implementation: `we:scripts/operations/codex-delivery-provider.mjs` (352 lines, new/untracked)
+plus edits to `we:scripts/operations/deliver-item-run.mjs` and `we:scripts/operations/deliver-item-wrapper.mjs`
+wiring a `--provider=codex|claude-restricted` selector (flag → `DELIVERY_AGENT_PROVIDER` env → default,
+mirroring `we:scripts/operations/run.mjs`'s existing judge-provider seam). **This is explicitly, and correctly
+per the operator's own call, built ahead of `#3581`'s ratified reviewer-first sequencing** — the new file's own
+header states this in so many words ("the operator explicitly chose to build this ahead of that gate — a
+deliberate, informed call, recorded here rather than left to look like an oversight"). Not an oversight; do not
+treat it as one tomorrow.
+
+All three unknowns the old stub named are answered with **live, reproduced evidence**, not assumption — this
+matches the `we:docs/agent/prototype-based-dev.md` discipline (ground the spawn seam in a real run before
+writing the port). The raw probes are on disk in this session's own scratchpad (four numbered probe transcripts
+plus a sandbox-boundary probe), not committed anywhere — worth folding into the file's own header citations if
+not already, since they're the falsifiable record behind the claims:
+- **Write capability + the right flag**: `-c default_permissions=locked -c 'permissions={locked={extends=":workspace",…}}'`,
+  never `-s workspace-write` — `-s` silently defeats the deny map (re-confirms `#3371` Probe 14f) and
+  `codex exec resume` doesn't accept `-s` at all (confirmed against real `--help`).
+- **Blocking/foreground invocation**: a real `execFileSync('codex', argv, {stdio:['ignore','pipe','pipe']})`
+  blocked 8.5s, exited 0, left the file on disk (reproduced 3×, 8.5s/12s/11s). `stdio[0]` must stay `'ignore'`,
+  never inherited/piped, or a positional-prompt-plus-open-stdin spawn hangs forever (documented trap, shared
+  with `we:scripts/lib/codex-judge-spawn.mjs`).
+- **No guard-lane/guard-bash equivalent needed**: Codex's native permission profile already enforces the same
+  two protections `we:scripts/guard-lane.mjs` / `we:scripts/guard-bash.mjs` do, at the OS layer instead.
+
+One `throw` remains in the new file (an explicit refusal path, not an unimplemented stub). **Not yet committed,
+not yet tested against `check:standards`/vitest, not yet landed anywhere.** Whoever picks this up should verify
+the file's own claims hold under the repo's test suite before trusting the header's prose.
+
+### 2. Codex reviewer-seat validation (does the verdict hold up, per `#3581`'s own bar) — set up, not concluded
+
+Lane-22 (`codex-judge-validation`, purpose `codex-judge-validation-3581`, based on `origin/lane/mechanical-
+dispatcher`) is reserved and clean — no diff, no commits. A separate scratch clone (shallow, HEAD at `main`'s
+`6223c75dd` as of ~21:53) was set up as a live-fire workbench. **No persisted verdict-quality write-up was found
+anywhere** (this lane, that scratch clone, or the learnings pool) as of this check — the actual PRs Codex's
+advisory seat would be validated against (`PR #2115`/`#2117`, "wire Codex CLI as a second JudgeProvider" / "seat
+Codex as a real, opt-in THIRD judge") are unchanged since 2026-09-10/11, both still parked (`review:changes`,
+one with a live merge conflict against `main`). **Read plainly: this thread has a workbench but no recorded
+result yet** — don't assume progress here beyond "environment ready," and don't conflate it with item 1 above
+(different lane, different purpose, no shared code between them yet).
+
+### 3. Telemetry instrumentation — DONE, committed and pushed to the prototype branch during this very check
+
+Confirmed landed: `fe2d96ac6` ("WE #3383: unified delivery telemetry — traces, spans and the four golden
+signals"), pushed straight to `origin/lane/mechanical-dispatcher` at **2026-09-12T22:17:09-04:00** — per rule
+10/rule 4, a direct prototype-branch commit needs no PR. Three new files (`we:scripts/operations/telemetry.mjs`
+pure core, `we:scripts/operations/telemetry-store.mjs` NDJSON io shell, `we:scripts/operations/telemetry-cli.mjs`
+report/trace/traces/days reader) plus instrumentation added to all six delivery wrappers
+(`we:scripts/operations/ci-heal-dispatch-wrapper.mjs`, `we:scripts/operations/deliver-item-wrapper.mjs`,
+`we:scripts/operations/fix-dispatch-wrapper.mjs`, `we:scripts/operations/minimal-context-provider.mjs`,
+`we:scripts/operations/prepare-decision-wrapper.mjs`, `we:scripts/operations/prepare-scope-wrapper.mjs`,
+`we:scripts/operations/review-dispatch-wrapper.mjs`) and `we:skills-src/conveyor/runner.mjs`'s own tick loop.
+**Verified provider-agnostic by direct inspection**: grepping `we:scripts/operations/telemetry.mjs` for
+`provider`/`codex`/`claude`/`antigravity` returns nothing that names a CLI — spans are keyed by launch kind,
+never by which CLI ran the phase. **136 tests pass** (`we:scripts/operations/__tests__/telemetry.test.mjs` 114,
+`we:scripts/operations/__tests__/telemetry-wiring.test.mjs` 22), run directly against the lane at commit time.
+This item is finished for tonight; the only thing left is graduating it to `main` under `#3443`'s normal
+incremental path, same as everything else on this branch.
+
+### 4. Decision Docket convention (full fork detail for every prepared item, not just ratified ones) — committed, not yet pushed or landed (progressed DURING this check — was uncommitted prose minutes earlier)
+
+Lane-18 (`decision-docket-doc`) went from an uncommitted working-tree diff to a real commit,
+`7ade8f652` ("docs: codify the Decision Docket convention — full fork detail for every prepared item, not a
+summary row"), while this update was being written. Adds a new `we:docs/agent/backlog-workflow.md` section
+("Publishing the Decision Docket — full fork detail for every prepared item shown, never a summary row")
+stating the rule plainly: every prepared item the Decision Docket lists gets its complete fork breakdown —
+every option, the bold default, and each non-default option's stated rejection reason — never a compact
+summary row, and this bar does **not** vary by section (a "current batch" item and a merely-listed older item
+get the same treatment; shrink the list before thinning the detail). Cross-links backlog item #3562 (the
+standing mechanical pass this binds once built) and amends #3562's own "Why" section to point back at the new
+doc anchor. **Committed, local to lane-18 only as of this check** — not pushed, no PR, not landed yet.
+
+### 5. Codex-delegation memory note — DONE, landed to `main` (landed live DURING this check)
+
+`we:agent-memory-src/delegate-work-to-codex-when-feasible.md` (indexed into `we:agent-memory-src/index-meta.md`),
+capturing the operator's 2026-09-12 framing verbatim (actively look for a point where handing real work to
+Codex becomes genuinely feasible, not just theoretically wired, and treat it as worth pursuing rather than
+waiting to be asked), is now on `main`: `PR #2151` merged at **2026-09-13T02:32:23Z** — after being only a
+local, unpushed commit in lane-20 earlier in this same check (the pattern repeated across two of tonight's
+five threads). **Lane-8 and lane-20 were both acquired under the identical purpose (`delegate-codex-memory`)**
+— lane-20 did the real work and it is now landed; lane-8 is a redundant, unused reservation from the same push
+and should simply be released.
+
+### Corrections to the operator's own settled-context list, verified rather than transcribed
+
+- **The watchdog + validate-and-promote pipeline, corrected in two ways.** First, the citation "item #3514,
+  PR #2147 merged" was **not yet true when this check started** and became true **during it**: `gh pr view 2147`
+  showed `OPEN` for most of this session, then `origin/main` advanced (`d0e16ff7b`, "drain: resolve #3514 on
+  land") and `PR #2147` showed `MERGED` at **2026-09-13T02:19:53Z** — the drain landing what the live-fire build
+  had opened. So the full chain — dispatch → build → PR → (parked, then cleared) → drain-merge — is now
+  genuinely proven for tonight's one permitted item, just later than the brief implied. Second, the pipeline's
+  own pause marker on `wev-driver-live` shows this was a deliberately narrow test, not a broad run: dispatch was
+  paused for every kind except `build` — `pausedKinds: [prepare, prepare-decision, investigate, fix, ci-heal]`,
+  reason recorded verbatim as "epic #3383 first live-fire: ONLY the build kind may dispatch (#3514)", set at
+  `2026-09-12T23:58:15Z`. The recorded last-known-good state confirms a real `validate-and-promote --full`
+  promotion ran too (`76d91cc25` → `9fe6cb932`, recorded `2026-09-13T00:03:31Z`) — the `promote` verb genuinely
+  fired for real, which an earlier section of this same card had listed as still-untested. **Third, and this is
+  new, not a correction of the brief: the driver at `wev-driver-live` is DOWN right now** — see "For tomorrow"
+  below.
+- **The bounded-vs-resident watchdog fix** — confirmed landed, directly on the prototype branch (`39b88e26f`,
+  "the watchdog stops calling a finished --once driver a crash"), no PR, per rule 4 (prototype-only fixes skip
+  ceremony). Also on the branch tonight, same pattern: `9fe6cb932` ("put the validation clone where the
+  constellation says a checkout goes").
+- **`#3649`** — confirmed accurately described: `status: open`, `kind: decision`, `preparedDate: 2026-09-12` set,
+  landed to `main` via `PR #2149` (merged). Genuinely prepared and awaiting ratification, not yet ruled.
+- **`x4vs5xl` / `PR #2150`** — confirmed: `OPEN`, "file: gh pr checkout bypasses the branch-switch guard on the
+  shared primary checkout." Filed, not fixed, exactly as stated.
+- **"Fix what you find by default" memory** — confirmed:
+  `we:agent-memory-src/prototype-fix-what-you-find-by-default.md`, landed to `main` via `PR #2148` (merged).
+  **"Codex work targets the prototype branch first"**
+  has no separately-named memory file of its own as of this check — it's consistent with the existing
+  `we:agent-memory-src/default-to-prototype-for-mechanical-fixes.md` /
+  `we:agent-memory-src/prototype-is-source-of-truth-for-mechanical-work.md` notes but was not found as its own
+  artifact; treat it as a verbal standing instruction until/unless someone writes it down separately.
+
+### A real, current, unattended problem — not in the brief, found only by reading the watchdog's own log
+
+`we:scripts/conveyor/driver-watchdog.mjs` is genuinely running right now — a shell loop (pid confirmed alive via
+`ps`) polls `wev-driver-live` every 5 minutes, logging to a local watchdog log outside the repo. Every single
+poll since **2026-09-13T00:58Z**, roughly 80 minutes straight through **02:19Z** (the last poll before this
+write-up), reports the same thing: driver state `"down"`, no runner lease held anywhere, reason recorded
+verbatim as "the driver is not running (no runner lease at all). That is a crash, not silent staleness," action
+`"none"`, `"alerted": false`. The runner lock directory is confirmed empty, matching "no lease anywhere." This is
+exactly the gap this card's own punch-list already named earlier tonight (item 5, "nothing schedules the
+watchdog" — now half-closed, since a loop IS scheduling it) plus the still-open alerting gap (`#3398`) — the
+watchdog sees the crash, correctly declines to auto-restart or roll back a checkout under a dead driver (by
+design, per its own header), but nothing pages anyone. **Left exactly as found, not restarted or investigated
+further** — restarting a driver unattended overnight is explicitly the kind of new unsupervised action the
+operator ruled out before stepping away; this is a "check first thing" item, not a "fix silently" one.
+
+### For tomorrow, explicitly
+
+All five threads above were already scoped and authorized before the operator stepped away; nothing new was
+started without one of them as the reason. Nothing here was force-cleared past a `review:human`/parked state.
+Check, in this order:
+
+1. **Restart the driver at `wev-driver-live`** (or confirm someone already has) — it has been down, unalerted,
+   since ~00:04Z, and the paused kinds (`prepare`/`prepare-decision`/`investigate`/`fix`/`ci-heal`) plus a dead
+   runner mean nothing but last night's one already-merged build (`#3514`) actually moved. Decide whether to
+   lift the pause's narrow live-fire scoping now that the one permitted item landed.
+2. **Item 1** (`lane-21`, codex-delivery-provider) — was still being actively written as of the last check;
+   confirm whether it finished, then run `check:standards` + vitest against it before trusting the header's
+   claims, then commit/PR per the normal prototype-fix-or-graduate path.
+3. **Item 2** (`lane-22` plus the separate codex-validate scratch clone) — no recorded verdict yet; this is
+   genuinely still open, not just unwritten-up.
+4. **Item 4** (`lane-18`, Decision Docket doc change) — finished commit as of this check, needs push + PR.
+5. **Item 5** (Codex-delegation memory) — already landed (`PR #2151`); just release the redundant `lane-8` /
+   `lane-20` reservations.
+6. **Stuck-vs-working check**: `claude agents --json` shows a primary-checkout interactive session sitting on
+   `"waiting for dialog open"` — a real stuck-dialog pattern seen repeatedly today, not one of tonight's five
+   threads; worth a look. Several `fix-*`/`review-*` background entries show `state: blocked` but are ~24h+ old
+   debris from unrelated earlier work, consistent with the already-documented stale-`claude agents`-bookkeeping
+   gap — not new, not urgent.
+
+## Follow-up (2026-09-12 night, after the list above) — item 2 (Codex reviewer-seat validation) reached a
+## verdict: the mechanism is clean, the JUDGMENT is not — 4 of 4 real runs came back empty, including one real miss
+
+Item 2 above was left as "workbench ready, no recorded verdict yet." It has since concluded. Everything below
+is read directly off the four persisted completion records the live-fire run itself wrote
+(`review-pr-9c12fca6…` = PR #2107, `review-pr-e64b290a…` = PR #2130, `review-pr-268cdedd…` = PR #2147,
+`review-pr-19d6b92a…` = PR #2043) and their `judge`/`judgeAdvisory` telemetry, not a paraphrase of a summary.
+
+### The live-fire run itself: plumbing proven, judgment not
+
+`--codex-advisory` ran against these 4 real, currently-open PRs, real diffs, confirmed non-degraded reads
+(`degraded: false` on every request). Every one of the four `judgeAdvisory` (Codex, simplicity lens) steps came
+back the same shape: exactly 1 turn, `stopReason: "turn.completed"`, `costUsd: 0`, **zero findings**
+(`findings: []`):
+
+| PR | wall time | reasoning tokens (output) | loaded context tokens (diff-proportional) |
+|----|-----------|---------------------------|--------------------------------------------|
+| #2043 | 7.2s | 76 | 24,625 |
+| #2147 | 9.2s | 103 | 29,101 |
+| #2130 | 11.4s | 108 | 42,651 |
+| #2107 | 12.2s | 180 | 87,103 |
+
+**4 of 4 real runs: empty.** Reasoning effort does not track diff size the way it should: from the smallest
+diff (#2043) to the largest (#2107) the loaded context grew ~3.5x but reasoning output grew only ~2.4x — the
+seat gives proportionally *less* attention as the diff gets bigger, the opposite of what a careful review would
+need.
+
+### The miss that matters: PR #2107
+
+On #2107, Codex's advisory seat's own words: "no concrete simplicity findings survived scrutiny" — a rubber
+stamp. The same diff, same run, reviewed by the Claude correctness juror, produced a `CONFIRMED`,
+`disposition: blocker`, `worseThanBase: true` finding: `commitConvergeRound`
+(`we:scripts/operations/deliver-item-wrapper.mjs`) shells `git commit -F <msgfile> -- <paths>` with no preceding
+`git add`, which throws on any round whose accepted edit adds a brand-new (untracked) file — verified against
+real git, not the test suite's mocked `run` (every existing test for this path mocks `run`, which is why it was
+never caught). Codex looked at the identical diff and found nothing.
+
+### The control probe: the seat itself is not broken
+
+A separate synthetic-diff control probe (a scratch script driving the same real request builder and provider,
+against a contrived diff with an unused dead function and redundant branches — built to be found) confirmed the
+wiring CAN produce a real, correctly-shaped finding when exercised in isolation. So this is not a broken
+integration — it is a real judgment-quality gap on dense, real-world diffs specifically.
+
+### Verdict, per `#3581`'s own bar (Codex must prove itself as reviewer before delivery work trusts it)
+
+**Mechanism: validated.** No recurrence of the earlier false-accept bug, correctly tool-free, cheap, fast.
+**Reviewer judgment: NOT validated.** Four empty accepts in a row — one of them a genuine miss on a confirmed
+blocker — is not evidence of added signal.
+
+This does **not** call into question item 1 above (the Codex delivery-agent provider build) — the operator
+already explicitly, and separately, chose to move that forward ahead of this gate; that call stands as made. It
+**does** leave open a real, unresolved question: should the advisory seat itself be trusted or adjusted (a
+harder mandate? reasoning effort/budget forced to a floor regardless of diff size?) before `#2117`'s pilot is
+treated as proven. Nothing here forces that call tonight — it is a "decide with fresh eyes" item, not a
+"blocked" one.
+
+### Two smaller residuals, for the record
+
+- **A `blocked-on-infra` labeling gap, confirmed by direct inspection.** In
+  `we:scripts/operations/review-dispatch-wrapper.mjs` (prototype branch, `origin/lane/mechanical-dispatcher`),
+  the `blocked-on-infra` classification built when `we:scripts/operations/review-loop-cli.mjs` itself crashes
+  (`classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null }`, no `label`)
+  carries no error detail into `reportDone`, while the sibling `acquireLane`-throw path a few lines above builds
+  `classified` with `label: String((e && e.message) || e).slice(0, 500)` from the same kind of caught error
+  before reporting. Worth aligning so every `blocked-on-infra` path carries its error as a `label`, not just
+  some of them.
+- **Lane-pool reaped a live sibling agent's lease mid-run tonight** — no data lost, but the mechanism that let a
+  live lease get reaped out from under a running sibling is worth checking before trusting it unattended again.
+
+## Follow-up (2026-09-12 night, continued) — item 1 (Codex delivery-agent provider) also finished: `CODEX_PROVIDER`
+## is now real, not a stub, and pushed
+
+Item 1 above ("genuinely in progress, substantial, not done") has since landed on the branch. `e53073fef`
+("WE #3580: CODEX_PROVIDER is real — a write-capable second delivery agent") is pushed to
+`origin/lane/mechanical-dispatcher`: `CODEX_PROVIDER.spawn()` in
+`we:scripts/operations/deliver-item-wrapper.mjs`, previously an honest throwing stub, is now a real
+implementation backed by `we:scripts/operations/codex-delivery-provider.mjs` (352 lines, new). Selectable via
+`--provider=` on `we:scripts/operations/deliver-item-run.mjs`, then `DELIVERY_AGENT_PROVIDER`, then the
+unchanged default — **Claude stays the default; Codex is opt-in only.**
+
+Confirmed against a real `codex exec` invocation (codex-cli 0.153.4), not guessed, per the commit's own header:
+write access rides `-c default_permissions=locked` (never `-s workspace-write`, which was tested and rejected —
+it silently zeroes the permission deny map, and `codex exec resume` accepts no `-s` at all); a real
+`execFileSync` through the production primitive blocked ~10s and exited 0; and — the notable finding — Codex's
+own native OS-level permission profile, measured with no model in the loop, is actually STRONGER than this
+repo's Claude-side `we:scripts/guard-lane.mjs`/`we:scripts/guard-bash.mjs` hooks: a write into the primary
+checkout or a sibling lane both return `Operation not permitted` at the OS layer (`we:scripts/guard-lane.mjs`
+can only match Edit/Write tool calls and cannot stop a shell redirect, and it documents the sibling-lane case
+as an open residual), and the profile has no network at all, so `git push` is structurally impossible for it
+rather than merely denied by a hook. One documented limitation, stated in the code itself: choosing `codex`
+swaps the BUILD agent only — the wrapper's own separate converge-editor step (`runConvergeEdit`) still always
+spawns Claude.
+
+**Read this together with the reviewer-seat finding above, not separately**: the delivery-agent PROVIDER side
+is now real and technically working, opt-in-only, built ahead of `#3581`'s gate by the operator's own already-
+recorded explicit choice. But per the reviewer-judgment finding just above, `#3581`'s gate itself is not yet
+cleared. So the honest state is: **the mechanism for Codex delivery work now exists; whether to actually route
+real delivery work through it is still gated on the unresolved reviewer-judgment question** — not "Codex
+delivery work is ready to use."
