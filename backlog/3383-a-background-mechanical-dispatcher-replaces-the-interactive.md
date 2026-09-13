@@ -2091,3 +2091,25 @@ recorded explicit choice. But per the reviewer-judgment finding just above, `#35
 cleared. So the honest state is: **the mechanism for Codex delivery work now exists; whether to actually route
 real delivery work through it is still gated on the unresolved reviewer-judgment question** — not "Codex
 delivery work is ready to use."
+
+## Session update (2026-09-13) — `#3649` (run-quality benchmark / auditor) fully ratified, fork-by-fork
+
+`#3649` — the run-quality auditor that scores a dispatched agent's own transcript against a versioned rubric
+(deductions off an implicit 100%) — was reviewed fork-by-fork across several sessions and is now **resolved**,
+`codifiedIn: we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary` (only Fork 5's independence
+restatement earns statute; the rest is `one-off`). All seven forks ratified as recommended: session-end
+trigger; vector-canonical record with a class-level aggregate scalar only (never a per-run headline); stamped
+`rubricVersion`, never re-normalised; a named always-actionable criteria list plus accrual, no numeric par
+band in v1; the subject-class gate (driver/conveyor subjects report-only, always, stamped at launch); the
+risk-assessment-of-the-fix axis (blacklist first); and v1 ships **recording-only**, with the router built but
+disarmed.
+
+**Open follow-up, tracked as its own card so it survives past this session:** the router ships disarmed on
+purpose. Arming it is filed as `xsptg6b` ("Arm the run-quality router once v1's rubricVersion has a complete
+run population"), parked `maturityGated` (`adoptionSignal`: one complete run population under a single
+`rubricVersion`), `blockedBy: ["3649"]`. Nothing arms automatically — the next session that finds that
+population exists is the one that un-parks it.
+
+`#3649` itself builds none of the five pieces its ruling names (reader-widening on `#3477`, the rubric, the
+scorecard store, the subject-class stamp, the router) — those are still unfiled follow-on work, distinct from
+the `xsptg6b` arm-trigger card above.

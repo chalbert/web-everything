@@ -2,9 +2,12 @@
 bornAs: x37kvib
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/", "we:skills-src/inspect-agent-health/", "we:scripts/operations/", "we:docs/agent/"]
 dateOpened: "2026-09-12"
+dateStarted: "2026-09-13"
+dateResolved: "2026-09-13"
+codifiedIn: "docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary"
 preparedDate: "2026-09-12"
 relatedTo: ["3475", "3477", "3422", "3593", "3594", "2436", "2822", "3095"]
 relatedReport: reports/2026-09-12-run-quality-benchmark-for-dispatched-agent-runs.md
@@ -189,6 +192,10 @@ forever. The fork's ruling reversed; the outcome-join above is what survives of 
 scored at all; and both branches stay distinguishable on merit (can the artifact still be read) with cost
 stripped out.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 1 (a) — score at the agent's own session end,
+on `#3477`'s existing triggers, joining the outcome later. Ratified fork-by-fork, in review across sessions;
+the item stays `active` (not `resolved`) pending the remaining six forks.
+
 # Fork 2 — What is the canonical record, and is a single comparable number ever published?
 
 **Supported by default, not forked — the vector→scalar direction.** A scalar cannot be decomposed back into a
@@ -258,6 +265,12 @@ record).
 and with both branches free to build, (a) still asserts a comparability the subjects lack, which is a merit
 difference, not a cost one.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 2 (b) — the deduction vector is the record;
+a 0–100 scalar is derived and published only as an aggregate over a declared comparability class (`model ×
+effort × dispatch-kind`), never as a per-run headline, and is `null` — never 100 — when `criteriaEvaluated` is
+zero. Ratified fork-by-fork, in review across sessions; the item stays `active` (not `resolved`) pending the
+remaining five forks.
+
 # Fork 3 — Is the rubric versioned, and what happens when a criterion is added?
 
 **Why this is a real fork — a forced invariant.** Either a historical scorecard is an immutable fact about the
@@ -306,6 +319,11 @@ folded in above: the fence became a **required `rubricVersion` on the query plus
 on its own merits.
 **Screen:** clear — a `rubricVersion` on every published scorecard is consumer-visible by construction; and the
 merit difference (does a number mean the same thing across time) survives stripping cost entirely.
+
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 3 (a) — `rubricVersion` stamped on every
+scorecard; history is never re-normalised; the aggregator takes a required `rubricVersion` so a cross-version
+mix cannot be expressed; versions carry a `supersedes`/`supersededBy` chain. Ratified fork-by-fork, in review
+across sessions; the item stays `active` (not `resolved`) pending the remaining four forks.
 
 # Fork 4 — Is 100% expected, and what makes a deduction actionable?
 
@@ -362,6 +380,12 @@ second reason that fork is load-bearing). Proposing it is then an ordinary findi
 it is a change to the rubric, so it is `batched`, never `selfClears`. No separate ceremony, no un-owned `N`.
 **Screen:** clear — actionability is observable as "did a card appear for this run"; and (a) vs (b) differ on
 whether a signal is usable at all, which is merit, not ordering.
+
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 4 (b) — a named always-actionable criteria
+list is absolute and ships in v1; everything else accrues (recording only, no numeric par band in v1); a
+threshold may only be proposed once one full `rubricVersion` has a complete run population behind it, routed
+as an ordinary (batched) finding, never a separate ceremony. Ratified fork-by-fork, in review across sessions;
+the item stays `active` (not `resolved`) pending the remaining three forks.
 
 # Fork 5 — Does the SUBJECT CLASS gate auto-apply, before risk is even consulted?
 
@@ -478,6 +502,12 @@ config dimension.
 detail; and with both branches free to build and instantly maintained, (a) still permits an unreviewed mutation
 against a live queue-holding process, which is a correctness difference, not a cost or ordering one.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 5 (b) + (ii) — a two-stage gate, subject class
+FIRST and risk SECOND: a driver/conveyor-class subject is report-only, always, regardless of risk, with
+`subjectClass` stamped at dispatch launch time and never inferred from the transcript afterward; codifies as
+a rider under `#drain-daemon-self-hosting-boundary` (`#2501`). Ratified fork-by-fork, in review across
+sessions; the item stays `active` (not `resolved`) pending the remaining two forks.
+
 # Fork 6 — Within the work-agent class, what AXIS decides "low-risk enough to auto-apply"?
 
 **Why this is a real fork — a forced invariant, so a ratify rather than a weigh.** `#3422`'s ratified axis is
@@ -580,6 +610,13 @@ its *axis* is cited as the thing **rejected**, not as authority; and the claim t
 difference with effort stripped out. The screen's `impl` flag on the earlier module-choice framing was
 **accepted**, and that half was dissolved into the default above rather than left as a fork.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 6 (b) — a risk assessment of the *proposed fix
+itself* (`assessMissingOperationConfidence`), blacklist checked first and independently of any confidence
+judgment; blacklist hit → file and hold behind the approval gate, any flagged risk criterion → file a card
+with no auto-apply, clean → auto-apply through a declared typed operation via a sibling sink (not
+`fileHiccup`). Ratified fork-by-fork, in review across sessions; the item stays `active` (not `resolved`)
+pending the last fork.
+
 # Fork 7 — Does the auto-apply half ship in v1 at all, or is v1 recording-only?
 
 **Promoted from prose by the fresh-context screen, which was right to flag it.** An earlier draft parked this as
@@ -625,6 +662,13 @@ criterion ship with no proposable fix.
 (b) vs (c) differ on whether the rubric is forced to carry fixes, which is a merit difference surviving with
 cost stripped out. *(This fork exists **because** the fresh-context screen flagged it as the biggest live choice
 on the card sitting outside any fork — it is the screen's own finding, promoted.)*
+
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 7 (b) — v1 is recording-only for every subject
+class: score every run, persist every scorecard, publish no aggregate, auto-apply nothing; the router is built
+but disarmed behind a single flag, flipped only once one complete `rubricVersion` population exists.
+
+**All seven forks are now ratified (2026-09-13).** See `## Ruling` below for the consolidated ruling,
+`codifiedIn`, and the durable router-arm follow-up.
 
 ---
 
@@ -732,6 +776,20 @@ change the card's *claim*: the "genuinely new mechanism" framing was overstated,
 replaces it.
 
 ---
+
+## Ruling (ratified 2026-09-13)
+
+All seven forks ratified by the operator (Nicolas Gilbert), fork-by-fork across sessions, each as
+recommended — see the `Operator ruling` line closing each `## Fork N` section above; consolidated
+statement below. **`codifiedIn: we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary`** —
+per Fork 5's own sub-fork, only Fork 5's independence-invariant restatement earns statute; the rest of this
+card is `one-off`. The rider is written into that anchor.
+
+**Durable follow-up — arming the router.** Fork 7 ships the router built but disarmed for v1. The trigger to
+flip it ("one complete `rubricVersion` population exists") is not left in chat: it is filed as its own
+tracked card, `xsptg6b` ("Arm the run-quality router once v1's rubricVersion has a complete run population"),
+parked `maturityGated` with a named `adoptionSignal` trigger and `blockedBy: ["3649"]`. It is JIT-numbered at
+land per this repo's convention (bornAs `xsptg6b`).
 
 ## Recommendation, in one place
 
