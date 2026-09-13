@@ -1,5 +1,5 @@
 import { configDefaults, defineConfig } from 'vitest/config';
-import { weAlias } from './vitest.shared';
+import { maxTestWorkers, weAlias } from './vitest.shared';
 
 export default defineConfig({
   // Mirror vite.config.mts so .tsx files (the shared mapping fixtures + conformance suites)
@@ -13,6 +13,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    // #x1jcikc: cap this invocation's own worker count (see vitest.shared.ts#maxTestWorkers for the sizing
+    // rationale) — otherwise the ~2000-file suite defaults to one thread per CPU core, which is how two
+    // concurrently-admitted `test:unit` runs oversubscribe a 12-core host.
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        maxThreads: maxTestWorkers,
+        minThreads: 1,
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
