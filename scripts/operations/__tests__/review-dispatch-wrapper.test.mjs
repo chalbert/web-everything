@@ -148,6 +148,54 @@ describe('dispatchReviewMechanical', () => {
     expect(opts.env.CLAUDE_CODE_SESSION_ID).toBe('fresh-actor-id');
   });
 
+  // #3383 mechanical-dispatcher Gap 2 fix — a real PR #2177 trial found NEITHER the fourth (Codex
+  // correctness-lensed) nor the fifth (Antigravity) seat had a parameter here at all, so the only way to seat
+  // either through the documented, live dispatch path was an ambient env var nothing surfaced. These assert
+  // the two new params actually reach `review-loop-cli.mjs`'s own child env, one seat later each than
+  // `CODEX_ADVISORY_ENV`'s own (unwritten-but-implied) coverage.
+  it('`correctnessAdvisory: true` sets REVIEW_PR_CODEX_CORRECTNESS_ADVISORY=1 on the review-loop-cli.mjs child env', () => {
+    const run = fakeRun();
+    dispatchReviewMechanical(
+      { pr: 1234, repo: 'chalbert/web-everything', correctnessAdvisory: true },
+      { run, newActorId: () => 'actor-1' },
+    );
+    const [, , opts] = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/operations/review-loop-cli.mjs');
+    expect(opts.env.REVIEW_PR_CODEX_CORRECTNESS_ADVISORY).toBe('1');
+  });
+
+  it('`antigravityReview: true` sets REVIEW_PR_ANTIGRAVITY_REVIEW=1 on the review-loop-cli.mjs child env', () => {
+    const run = fakeRun();
+    dispatchReviewMechanical(
+      { pr: 1234, repo: 'chalbert/web-everything', antigravityReview: true },
+      { run, newActorId: () => 'actor-1' },
+    );
+    const [, , opts] = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/operations/review-loop-cli.mjs');
+    expect(opts.env.REVIEW_PR_ANTIGRAVITY_REVIEW).toBe('1');
+  });
+
+  it('all three optional seats can be seated in the SAME dispatch, independently', () => {
+    const run = fakeRun();
+    dispatchReviewMechanical(
+      {
+        pr: 1234, repo: 'chalbert/web-everything', codexAdvisory: true, correctnessAdvisory: true,
+        antigravityReview: true,
+      },
+      { run, newActorId: () => 'actor-1' },
+    );
+    const [, , opts] = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/operations/review-loop-cli.mjs');
+    expect(opts.env.REVIEW_PR_CODEX_ADVISORY).toBe('1');
+    expect(opts.env.REVIEW_PR_CODEX_CORRECTNESS_ADVISORY).toBe('1');
+    expect(opts.env.REVIEW_PR_ANTIGRAVITY_REVIEW).toBe('1');
+  });
+
+  it('off by default — neither new env var is set when the flags are omitted', () => {
+    const run = fakeRun();
+    dispatchReviewMechanical({ pr: 1234, repo: 'chalbert/web-everything' }, { run, newActorId: () => 'actor-1' });
+    const [, , opts] = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/operations/review-loop-cli.mjs');
+    expect(opts.env.REVIEW_PR_CODEX_CORRECTNESS_ADVISORY).toBeUndefined();
+    expect(opts.env.REVIEW_PR_ANTIGRAVITY_REVIEW).toBeUndefined();
+  });
+
   it('classifies the review-loop result and reports it via completion-cli --status=done', () => {
     const run = fakeRun();
     const result = dispatchReviewMechanical({ pr: 1234, repo: 'chalbert/web-everything' }, { run, newActorId: () => 'actor-1' });

@@ -466,7 +466,10 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
     });
     // THE WHOLE POINT: the agent-spawning path is not merely de-prioritised, it is not reached at all.
     expect(agentCalls).toEqual([]);
-    expect(mechanicalCalls).toEqual([{ pr: '2122', repo: 'chalbert/web-everything', codexAdvisory: false }]);
+    expect(mechanicalCalls).toEqual([{
+      pr: '2122', repo: 'chalbert/web-everything', codexAdvisory: false, correctnessAdvisory: false,
+      antigravityReview: false,
+    }]);
     expect(res.mode).toBe('mechanical');
     expect(res.code).toBe(0);
     expect(out.join('')).toMatch(/no agent spawned/);
@@ -519,6 +522,43 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
       write: () => {},
     });
     expect(seen).toEqual([true]);
+  });
+
+  // #3383 mechanical-dispatcher Gap 2 fix — a real PR #2177 trial found NEITHER of these two flags existed
+  // anywhere on this CLI, so the fourth (Codex correctness-lensed) and fifth (Antigravity) seats could never be
+  // turned on through the documented, live dispatch path. These mirror the `--codex-advisory` test above,
+  // one seat later each.
+  it('`--correctness-advisory` is forwarded to the wrapper as the opt-in fourth seat', () => {
+    const seen = [];
+    dispatchReviewCli(['--pr=1', '--repo=o/r', '--correctness-advisory'], {
+      dispatchMechanical: (o) => { seen.push(o.correctnessAdvisory); return CLASSIFIED('auto-cleared'); },
+      dispatchAgent: () => { throw new Error('unreachable'); },
+      write: () => {},
+    });
+    expect(seen).toEqual([true]);
+  });
+
+  it('`--antigravity-review` is forwarded to the wrapper as the opt-in fifth seat', () => {
+    const seen = [];
+    dispatchReviewCli(['--pr=1', '--repo=o/r', '--antigravity-review'], {
+      dispatchMechanical: (o) => { seen.push(o.antigravityReview); return CLASSIFIED('auto-cleared'); },
+      dispatchAgent: () => { throw new Error('unreachable'); },
+      write: () => {},
+    });
+    expect(seen).toEqual([true]);
+  });
+
+  it('all three optional seats are independently toggleable in the SAME invocation', () => {
+    const seen = [];
+    dispatchReviewCli(['--pr=1', '--repo=o/r', '--codex-advisory', '--correctness-advisory', '--antigravity-review'], {
+      dispatchMechanical: (o) => {
+        seen.push({ codexAdvisory: o.codexAdvisory, correctnessAdvisory: o.correctnessAdvisory, antigravityReview: o.antigravityReview });
+        return CLASSIFIED('auto-cleared');
+      },
+      dispatchAgent: () => { throw new Error('unreachable'); },
+      write: () => {},
+    });
+    expect(seen).toEqual([{ codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true }]);
   });
 
   it('REFUSES `--judge-provider=codex` at the command line instead of crashing mid-dispatch', () => {

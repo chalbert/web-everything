@@ -720,7 +720,27 @@ export function createDefaultJudge({
       mandate: effective.mandate,
       input: effective.input,
       shape: effective.shape,
-      model: effective.model,
+      // #3383 mechanical-dispatcher Gap 2 root cause fix — THIS was `model: effective.model,` unconditionally,
+      // which for a seat that DELIBERATELY OMITS `model` (both Codex advisory seats, the Antigravity seat —
+      // see this function's own `@param o.model` docblock above for why) still wrote an explicit `model:
+      // undefined` OWN PROPERTY onto the object handed to `resolvedProvider`. `resolveJudgeProvider`'s own
+      // codex/antigravity wrappers default a missing `model` via OBJECT SPREAD ORDER (`{ model: CODEX_MODEL,
+      // ...request }`), which — unlike a destructured default parameter — does NOT skip an explicit `undefined`
+      // key: the spread OVERWRITES the default with `undefined`, so `model` reached `codexJudgeSpawn`/
+      // `antigravityJudgeSpawn` as `undefined` regardless. That silently (a) dropped the pinned `-m <model>`
+      // argv entirely (the seat ran on the provider CLI's own ambient default model, never the declared one) and
+      // (b) made EVERY advisory-seat scorecard row fail `run-scorecard-store.mjs#validateScorecard`'s `model`
+      // requirement, so `recordCodexRunScorecard`/`recordAntigravityRunScorecard` (both correctly wired and
+      // correctly CALLED) silently returned `null` every time — confirmed live: a real end-to-end review-pr run
+      // over PR #2178 threw `run-scorecard-store: refusing to append an invalid scorecard: - \`model\` is
+      // required` on all three optional seats, caught by each recorder's own never-throws catch. Conditional
+      // inclusion (mirroring `allowedTools`/`cwd` just below, which already use this exact pattern) is the fix:
+      // when `effective.model` is genuinely undefined, the key is OMITTED, not present-and-undefined, which lets
+      // each provider's OWN default apply — `resolveJudgeProvider`'s spread-order default for codex/antigravity,
+      // and `judgeSpawn`'s own `model = DEFAULT_MODEL` destructured default for `claude` (unaffected either way,
+      // since a destructured default DOES trigger on an absent key, same as it always did on an explicit
+      // `undefined` one — this change is a no-op for that path).
+      ...(effective.model !== undefined ? { model: effective.model } : {}),
       effort: effective.effort,
       budget: effective.budget,
       runId: effective.runId,

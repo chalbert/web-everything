@@ -272,6 +272,28 @@ describe('createDefaultJudge — a REQUEST-level `providerName` overrides the fa
     expect(antigravityJudgeSpawnCalls).toHaveLength(1);
   });
 
+  // #3383 mechanical-dispatcher Gap 2 root-cause regression test — THE exact shape `review-pr.mjs`'s three
+  // optional advisory seats build (`buildReviewAdvisoryJudgeRequest`/`buildReviewCorrectnessAdvisoryJudgeRequest`/
+  // `buildReviewAntigravityJudgeRequest`, none of which include a `model` key at all) and the exact factory shape
+  // `run.mjs`'s real CLI wiring builds when the operator names no `--model` override (`createDefaultJudge({})`,
+  // no `model` at all — NOT `createDefaultJudge({ model: 'opus' })`, which the two tests above already cover).
+  // Confirmed live: a real end-to-end `review-pr` run over PR #2178, before this fix, threw "run-scorecard-
+  // store: refusing to append an invalid scorecard: - `model` is required" for every one of the three optional
+  // seats — `codexJudgeSpawn`/`antigravityJudgeSpawn` were reached with `model: undefined`, not merely absent,
+  // because `createDefaultJudge` used to write `model: effective.model` as an unconditional OWN property, which
+  // survives past `resolveJudgeProvider`'s own `{ model: CODEX_MODEL, ...request }` default-via-spread (a spread
+  // does not skip an explicit `undefined` key the way a destructured default parameter does).
+  it('a request that OMITS `model` entirely (review-pr\'s real advisory-seat shape) still reaches each provider '
+    + 'with ITS OWN pinned default, never `undefined`', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    antigravityJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({}); // no factory-level `model` override either — the real CLI default
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'codex' });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'antigravity' });
+    expect(codexJudgeSpawnCalls[0].model).toBe('gpt-6-astra');
+    expect(antigravityJudgeSpawnCalls[0].model).toBe('gemini-3.1-pro');
+  });
+
   it('an injectable `resolveProvider` lets a test substitute BOTH providers without the module-mock seam', async () => {
     const seen = [];
     const resolveProvider = (name) => async (req) => { seen.push({ name, req }); return { value: { via: name } }; };
@@ -283,14 +305,24 @@ describe('createDefaultJudge — a REQUEST-level `providerName` overrides the fa
     expect(seen.map((s) => s.name)).toEqual(['claude', 'codex']);
   });
 
-  it('the operator\'s `--model` override never reaches a request whose EFFECTIVE provider is codex', async () => {
+  it('the operator\'s `--model` override never reaches a request whose EFFECTIVE provider is codex — the seat '
+    + 'falls back to codex\'s OWN pinned default (CODEX_MODEL), never `undefined` (#3383 Gap 2 root-cause fix)', async () => {
     codexJudgeSpawnCalls.length = 0;
     // The factory carries an operator `--model` override (as `run.mjs`'s CLI wiring would, for the seat(s)
     // the operator is actually steering) — a request pinned to codex must never receive it.
     const judgeFn = createDefaultJudge({ model: 'opus' });
     await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'codex' });
     expect(codexJudgeSpawnCalls).toHaveLength(1);
-    expect(codexJudgeSpawnCalls[0].model).toBeUndefined();
+    // FIXED (#3383 Gap 2 root cause, confirmed live against PR #2178): this used to assert `.toBeUndefined()`,
+    // which was the BUG's own signature, not the intended contract — `createDefaultJudge` wrote an explicit
+    // `model: undefined` OWN property onto the object handed to `resolveJudgeProvider('codex')`'s wrapper,
+    // whose own `{ model: CODEX_MODEL, ...request }` spread does not skip an explicit `undefined` key, so the
+    // seat's pinned default was silently overwritten with `undefined` — which then made every advisory-seat
+    // scorecard row fail `run-scorecard-store.mjs`'s `model` requirement, never recording. The real invariant
+    // this test is actually for is narrower: the operator's Claude override ('opus') must not leak onto a
+    // codex-pinned request — codex's OWN default model is exactly what SHOULD reach it instead.
+    expect(codexJudgeSpawnCalls[0].model).toBe('gpt-6-astra');
+    expect(codexJudgeSpawnCalls[0].model).not.toBe('opus');
   });
 
   it('…while an ordinary claude-provider request still gets the operator\'s `--model` override, unchanged', async () => {
@@ -301,12 +333,15 @@ describe('createDefaultJudge — a REQUEST-level `providerName` overrides the fa
     expect(claudeJudgeSpawnCalls[0].model).toBe('opus');
   });
 
-  // #3383 — same exclusion, for the fifth seat's provider.
-  it('the operator\'s `--model` override never reaches a request whose EFFECTIVE provider is antigravity', async () => {
+  // #3383 — same exclusion, for the fifth seat's provider. Same fix as the codex test above: the seat's OWN
+  // pinned default (ANTIGRAVITY_MODEL) is the correct outcome, not `undefined`.
+  it('the operator\'s `--model` override never reaches a request whose EFFECTIVE provider is antigravity — the '
+    + 'seat falls back to its OWN pinned default (ANTIGRAVITY_MODEL), never `undefined` (#3383 Gap 2 fix)', async () => {
     antigravityJudgeSpawnCalls.length = 0;
     const judgeFn = createDefaultJudge({ model: 'opus' });
     await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'antigravity' });
     expect(antigravityJudgeSpawnCalls).toHaveLength(1);
-    expect(antigravityJudgeSpawnCalls[0].model).toBeUndefined();
+    expect(antigravityJudgeSpawnCalls[0].model).toBe('gemini-3.1-pro');
+    expect(antigravityJudgeSpawnCalls[0].model).not.toBe('opus');
   });
 });

@@ -141,6 +141,9 @@ import { tmpdir, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './judge-spawn.mjs';
+// #3383 mechanical-dispatcher Gap 1 fix — see the call site below, right after `transcriptFile` is known.
+// Mirrors `codex-judge-spawn.mjs`'s own import of `recordCodexRunScorecard` verbatim.
+import { recordAntigravityRunScorecard } from '../conveyor/run-quality-record.mjs';
 
 /** The CLI this provider runs as. Named once, exactly like `judge-spawn.mjs`'s `JUDGE_CLI` and
  *  `codex-judge-spawn.mjs`'s `CODEX_CLI`. */
@@ -516,6 +519,9 @@ export function persistAntigravityJudgeTranscript({
  *   {@link resolveAntigravityJudgeTranscriptDir}'s real, durable default.
  * @param {Function} [opts.persistTranscript] - injectable for tests; defaults to the real
  *   {@link persistAntigravityJudgeTranscript}.
+ * @param {Function} [opts.recordScorecard] - #3383 Gap 1 fix; injectable for tests, defaults to the real
+ *   {@link recordAntigravityRunScorecard}. Mirrors `codex-judge-spawn.mjs#codexJudgeSpawn`'s own
+ *   `recordScorecard` seam exactly.
  * @returns {Promise<{value: object, sessionId: string, costUsd: number, durationMs: number, wallMs: number,
  *                    numTurns: number, stopReason: string, usage: object, loadedContextTokens: number,
  *                    timedOut: boolean, argv: string[], transcriptFile: string|null}>} `transcriptFile` is the
@@ -545,6 +551,8 @@ export async function antigravityJudgeSpawn({
   // `persistAntigravityJudgeTranscript`'s own header.
   transcriptDir = resolveAntigravityJudgeTranscriptDir(env),
   persistTranscript = persistAntigravityJudgeTranscript,
+  // #3383 mechanical-dispatcher Gap 1 fix — see the call site below, right after `transcriptFile` is known.
+  recordScorecard = recordAntigravityRunScorecard,
 } = {}) {
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('antigravity-judge-spawn: `mandate` must be a non-empty string');
@@ -629,6 +637,17 @@ export async function antigravityJudgeSpawn({
   // here can never turn a completed judge call into a failed one.
   const judgeSessionId = extractAntigravityJudgeSessionId(result.stdout);
   const transcriptFile = persistTranscript({ stdout: result.stdout, sessionId: judgeSessionId, dir: transcriptDir });
+  // #3383 mechanical-dispatcher Gap 1 fix — score + record THIS run's own scorecard, off the persisted
+  // transcript FILE this function already just wrote (see `run-quality-record.mjs`'s own header for why this
+  // seat scores a file path rather than raw stdout, unlike its Codex sibling). Placed BEFORE the timeout/parse
+  // branches below (which may go on to THROW, e.g. `AntigravityToolDeniedError`) so a hung, denied, or
+  // unparseable run is recorded too — exactly the run most worth capturing. Best-effort, never throws
+  // (`recordAntigravityRunScorecard`'s own header) — a recording failure can never turn an otherwise-completed
+  // judge call into a failed one.
+  recordScorecard({
+    transcriptFile, dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review',
+    provider: 'antigravity', model, effort,
+  });
 
   if (result.timedOut) {
     let outcome = null;

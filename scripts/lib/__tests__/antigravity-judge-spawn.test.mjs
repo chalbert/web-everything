@@ -7,12 +7,21 @@
  * same machine, same `agy` 1.2.1) — each `describe`/`it` title names which.
  */
 
-import { describe, it, expect } from 'vitest';
+import {
+  describe, it, expect, vi,
+} from 'vitest';
 import {
   existsSync, readFileSync, mkdtempSync, rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// #3383 mechanical-dispatcher Gap 1 fix — `antigravityJudgeSpawn` now calls `recordAntigravityRunScorecard`
+// (real default: `run-quality-record.mjs`), which appends to the REAL, on-disk `run-scorecards.json`.
+// Mocked at the MODULE level, once, so every OTHER test in this file (there are dozens, and none of them
+// inject a `recordScorecard` override) never touches the real store — the dedicated `recordAntigravityRun
+// Scorecard` coverage lives in `run-quality-record.test.mjs`, not here. Mirrors `codex-judge-spawn.test.mjs`'s
+// own identical module-level mock verbatim.
+vi.mock('../../conveyor/run-quality-record.mjs', () => ({ recordAntigravityRunScorecard: vi.fn(() => null) }));
 import {
   ANTIGRAVITY_CLI,
   ANTIGRAVITY_EFFORT_MAP,
@@ -387,6 +396,26 @@ describe('antigravityJudgeSpawn — exercised over an injected spawn (real temp 
     expect(r.timedOut).toBe(false);
     expect(typeof r.wallMs).toBe('number');
     expect(r.argv).toEqual(expect.arrayContaining(['--input-format', 'stream-json', '--disable-slash-commands']));
+  });
+
+  // #3383 mechanical-dispatcher Gap 1 fix — THE regression test: a real judge call must score + record its
+  // own run, off the persisted TRANSCRIPT FILE (never raw stdout — that is the one difference from the Codex
+  // sibling's own regression test). `recordScorecard` is overridden here (the module-level mock above covers
+  // every OTHER test in this file); this is the one test that actually asserts the call happens.
+  it('scores + records this run via recordScorecard, off the persisted transcript file, stamped as advisory-review', async () => {
+    const { fn } = fakeSpawn({ stdout: resultJsonl(OK_RESULT) });
+    let seen = null;
+    const spy = (o) => { seen = o; return null; };
+    const r = await antigravityJudgeSpawn({
+      mandate: 'm', input: 'i', shape: SHAPE, model: 'gemini-3.1-pro', effort: 'low', spawnFn: fn, recordScorecard: spy,
+    });
+    expect(seen).toMatchObject({
+      dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review', provider: 'antigravity',
+      model: 'gemini-3.1-pro', effort: 'low',
+    });
+    // the SAME transcriptFile this run's own return value reports — never raw stdout.
+    expect(seen.transcriptFile).toBe(r.transcriptFile);
+    expect(typeof seen.transcriptFile).toBe('string');
   });
 
   it('the silent-tool-denial failure (#3633 probe 7) surfaces as a rejection, never a clean empty answer', async () => {

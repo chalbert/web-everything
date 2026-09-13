@@ -118,6 +118,27 @@ export const BLOCKED_ON_INFRA = 'blocked-on-infra';
 export const CODEX_ADVISORY_ENV = 'REVIEW_PR_CODEX_ADVISORY';
 
 /**
+ * #3383 mechanical-dispatcher Gap 2 fix — THE FOURTH SEAT'S OWN TOGGLE, added for the identical reason
+ * {@link CODEX_ADVISORY_ENV} was named explicitly rather than left as an ambient-only env var: a real live
+ * trial (PR #2177) found this wrapper — THE live mechanical dispatch path `review-dispatch.mjs` runs by
+ * default — forwarded `...process.env` to its child either way, but exposed NO flag and NO parameter for this
+ * seat, so the only way to seat it through the documented CLI was to already know an env var nothing surfaced.
+ * That is exactly the "undocumented and unrepeatable" shape `CODEX_ADVISORY_ENV`'s own docblock names as the
+ * defect `--codex-advisory` was added to close — closed here identically for the fourth seat. Matches
+ * `review-pr.mjs#CORRECTNESS_ADVISORY_ENV_VAR` verbatim (not re-imported, for the same reason this file
+ * declares `CODEX_ADVISORY_ENV` itself rather than importing `review-pr.mjs#CODEX_ADVISORY_ENV_VAR` — this
+ * wrapper is impure and `review-pr.mjs` is not a leaf it otherwise needs).
+ */
+export const CORRECTNESS_ADVISORY_ENV = 'REVIEW_PR_CODEX_CORRECTNESS_ADVISORY';
+
+/**
+ * #3383 mechanical-dispatcher Gap 2 fix — THE FIFTH SEAT'S OWN TOGGLE, same reasoning as
+ * {@link CORRECTNESS_ADVISORY_ENV} above, one seat later. Matches `review-pr.mjs#ANTIGRAVITY_REVIEW_ENV_VAR`
+ * verbatim.
+ */
+export const ANTIGRAVITY_REVIEW_ENV = 'REVIEW_PR_ANTIGRAVITY_REVIEW';
+
+/**
  * SHAPE one dispatch request. PURE — mirrors `we:scripts/operations/review-dispatch.mjs#planReviewDispatch`
  * (the SAME validation, deliberately not re-derived differently), so the two never silently diverge on what a
  * valid `--pr`/`--repo` looks like even though this file does not import that one (it is impure — importing it
@@ -216,13 +237,18 @@ function reportDone({ sessionSlug, classified }, { run: runFn = run } = {}) {
  * trail), run `review-loop-cli.mjs` exactly once, classify + report its structured verdict, release the lane,
  * return. NO Claude spawn anywhere in this function.
  *
- * @param {{pr: number|string, repo: string, codexAdvisory?: boolean}} o - `codexAdvisory` (#xu2pp2m) seats the
- *   OPT-IN tool-free Codex panelist for this review, via {@link CODEX_ADVISORY_ENV} on the child's env. Off by
- *   default, exactly as `review-pr` itself is.
+ * @param {{pr: number|string, repo: string, codexAdvisory?: boolean, correctnessAdvisory?: boolean,
+ *   antigravityReview?: boolean}} o - `codexAdvisory` (#xu2pp2m) seats the OPT-IN tool-free Codex panelist for
+ *   this review, via {@link CODEX_ADVISORY_ENV} on the child's env. `correctnessAdvisory` (#3383 Gap 2 fix)
+ *   seats the fourth (Codex correctness-lensed) seat via {@link CORRECTNESS_ADVISORY_ENV}, and
+ *   `antigravityReview` (#3383 Gap 2 fix) seats the fifth (Antigravity) seat via {@link ANTIGRAVITY_REVIEW_ENV}
+ *   — all three independently opt-in, off by default, exactly as `review-pr` itself declares them.
  * @param {{run?: Function, newActorId?: () => string, waitMs?: number}} [io]
  * @returns {{pr: number, repo: string, sessionSlug: string, lanePath: string, classified: object, raw: object}}
  */
-export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {}, { run: runFn = run, newActorId = randomUUID, waitMs = REVIEW_LOOP_ACQUIRE_WAIT_MS } = {}) {
+export function dispatchReviewMechanical({
+  pr, repo, codexAdvisory = false, correctnessAdvisory = false, antigravityReview = false,
+} = {}, { run: runFn = run, newActorId = randomUUID, waitMs = REVIEW_LOOP_ACQUIRE_WAIT_MS } = {}) {
   const planned = planReviewDispatchWrapper({ pr, repo });
 
   // #3383 — this wrapper is addressed by PR, not by item, so its trace keys on `p<pr>`. A scoring pass joins
@@ -292,7 +318,12 @@ export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {
   // The `review.loop` span — the whole judging round (two independently-spawned jurors inside
   // `review-loop-cli.mjs`), and this wrapper's single expensive phase. Durable, so a process killed mid-review
   // shows up as `abandoned` rather than as nothing at all.
-  const loopSpan = root.child('review.loop', { attributes: { pr: planned.pr, codexAdvisory: !!codexAdvisory } });
+  const loopSpan = root.child('review.loop', {
+    attributes: {
+      pr: planned.pr, codexAdvisory: !!codexAdvisory, correctnessAdvisory: !!correctnessAdvisory,
+      antigravityReview: !!antigravityReview,
+    },
+  });
   try {
     const out = runFn('node', [
       'scripts/operations/review-loop-cli.mjs', `--pr=${planned.pr}`, `--repo=${planned.repo}`,
@@ -308,6 +339,13 @@ export function dispatchReviewMechanical({ pr, repo, codexAdvisory = false } = {
         // CLI now names it; an ambient env var still works as the fallback (`|| process.env[...]`), matching
         // how `--cwd`/`JUDGE_LANE_CWD` and `--provider`/`JUDGE_PROVIDER` already behave.
         ...(codexAdvisory ? { [CODEX_ADVISORY_ENV]: '1' } : {}),
+        // #3383 mechanical-dispatcher Gap 2 fix — the FOURTH and FIFTH seats' own toggles, named explicitly for
+        // the identical reason `CODEX_ADVISORY_ENV` above was: a real PR #2177 trial found neither had a flag
+        // OR a parameter anywhere on this wrapper or `review-dispatch.mjs`'s own CLI, so a real dispatch through
+        // the documented entry point could never turn either on — the ambient-env fallback below still applies
+        // (matching the third seat's own behaviour) but is no longer the ONLY way in.
+        ...(correctnessAdvisory ? { [CORRECTNESS_ADVISORY_ENV]: '1' } : {}),
+        ...(antigravityReview ? { [ANTIGRAVITY_REVIEW_ENV]: '1' } : {}),
       },
     });
     raw = JSON.parse(out);
@@ -342,6 +380,10 @@ if (IS_CLI) {
       repo: flag('repo'),
       // #xu2pp2m — a bare `--codex-advisory` (no `=`), with the ambient env var as the fallback.
       codexAdvisory: argv.includes('--codex-advisory') || process.env[CODEX_ADVISORY_ENV] === '1',
+      // #3383 mechanical-dispatcher Gap 2 fix — same bare-flag-with-ambient-fallback shape, one seat later
+      // each, closing the "no flag exists at all" hole a real PR #2177 trial found.
+      correctnessAdvisory: argv.includes('--correctness-advisory') || process.env[CORRECTNESS_ADVISORY_ENV] === '1',
+      antigravityReview: argv.includes('--antigravity-review') || process.env[ANTIGRAVITY_REVIEW_ENV] === '1',
     });
     writeAllSync(1, `${JSON.stringify(result, null, 2)}\n`);
   } catch (e) {

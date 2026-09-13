@@ -560,6 +560,13 @@ export function dispatchReviewCli(argv = [], {
       pr: flag('pr'),
       repo: flag('repo'),
       codexAdvisory: argv.includes('--codex-advisory'),
+      // #3383 mechanical-dispatcher Gap 2 fix — the fourth (Codex correctness-lensed) and fifth (Antigravity)
+      // seats' own flags, one seat later each than `--codex-advisory` above. A real PR #2177 trial found
+      // NEITHER had a flag anywhere on this CLI — the only way to seat either was an ambient env var nothing
+      // here surfaced, which is exactly the "undocumented and unrepeatable" defect `--codex-advisory` itself
+      // was added to close (see this file's own `CODEX_JUDGE_PROVIDER_REFUSAL` docblock for that history).
+      correctnessAdvisory: argv.includes('--correctness-advisory'),
+      antigravityReview: argv.includes('--antigravity-review'),
     });
     const { outcome, verdict, loopOutcome, runId } = result.classified ?? {};
     // #xu2pp2m — `blocked-on-infra` IS A NON-ZERO EXIT, and that is the one deliberate sharpening of this
