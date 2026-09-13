@@ -31,3 +31,24 @@ falls on, ask; don't guess toward silence.
 lane+PR flow, and (for anything landing outside the prototype branch) the normal review flow all
 still apply. "No need to ask" is about not pausing for a go-ahead on the DECISION to fix something,
 not about skipping verification of the fix itself.
+
+**Reinforcement (2026-09-13): a plain bug still got presented as a checklist item.** A subagent
+found and reported a clear, unambiguous bug — a broken file-path resolution causing a real `EPERM`
+failure. Not a design fork. Not risky or consequential. Just a plain mechanical defect. The
+orchestrating session relayed it to the operator as a "Decide whether to file this..." checklist
+item, awaiting a decision. The operator corrected it directly: **"Yes to file as per our standing
+instruction to fix or file all found bugs, I should not have to review this."**
+
+**The rule this adds:** when relaying a subagent's findings back to the operator, sort them first —
+
+- **Genuine judgment calls belong as explicit decisions.** Design forks, anything risky or
+  consequential (per the exception above), or anything where reasonable people could land in
+  different places — surface these as open questions, with options and a recommendation.
+- **Plain, unambiguous bugs never belong on that list.** A wrong path, a missing test, an
+  off-by-one, a broken resolution causing a crash — anything with no real judgment attached, where
+  the operator's answer is obviously "yes, fix/file it" — just fix it or file it directly. Don't
+  put it in front of the operator as a pending checklist item awaiting sign-off.
+
+**The test:** if you can already predict the operator would say "obviously yes" to a checklist
+item, don't ask — just do it. Presenting an obvious-yes as a decision isn't caution, it's a tax on
+the operator's attention that the standing instruction already ruled out.
