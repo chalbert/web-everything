@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import {
   DISPATCH_KINDS, DURABLE_SPAN_NAMES, ERROR_OUTCOMES, MAX_ATTRIBUTE_KEYS, MAX_LINE_BYTES, MAX_VALUE_LENGTH,
-  METRIC_NAMES, OK_OUTCOMES, SPAN_NAMES, SPAN_STATUS, TELEMETRY_SCHEMA_VERSION,
+  METRIC_NAMES, METRIC_UNITS, OK_OUTCOMES, SPAN_NAMES, SPAN_STATUS, TELEMETRY_SCHEMA_VERSION,
   classifyOutcomeStatus, deriveTraceId, durationMs, goldenSignals, groupByTrace, newMetric, newSpanEnd,
   newSpanStart, normItemKey, normalizeAttributes, parseTelemetryLine, parseTelemetryLines, percentile,
   serializeTelemetryEvent, truncateValue, validateTelemetryEvent,
@@ -25,7 +25,7 @@ import {
   setActiveRecorder, spanAround, spanAroundAsync, telemetryDir, telemetryEnabled,
 } from '../telemetry-store.mjs';
 import {
-  daysInWindow, eventTime, fmtMs, renderReport, renderTrace, renderTraces, runTelemetryCli, withinWindow,
+  daysInWindow, eventTime, fmtBytes, fmtMs, renderReport, renderTrace, renderTraces, runTelemetryCli, withinWindow,
 } from '../telemetry-cli.mjs';
 
 /** A deterministic clock: each read advances by `stepMs`, so a span's duration is exactly predictable. */
@@ -870,6 +870,47 @@ describe('the read CLI', () => {
     expect(fmtMs(null)).toBe('—');
   });
 
+  // #3383 follow-on — `host.mem.*` renders human-sized rather than as a raw byte count that would dwarf every
+  // other line in the report; the JSON path still carries the raw integer untouched.
+  it('fmtBytes scales from bytes to terabytes', () => {
+    expect(fmtBytes(512)).toBe('512B');
+    expect(fmtBytes(4 * 1024 * 1024)).toBe('4.0MB');
+    expect(fmtBytes(1.2 * 1024 * 1024 * 1024)).toBe('1.2GB');
+    expect(fmtBytes(null)).toBe('—');
+  });
+
+  it('report breaks host samples into their OWN section, formatted human-sized, not raw byte counts', () => {
+    const { store, now } = loaded();
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.cpu.load1', kind: 'runner', value: 2.5, unit: 'count',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+    })}\n`, '2026-09-12');
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.cpu.count', kind: 'runner', value: 8, unit: 'count',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+    })}\n`, '2026-09-12');
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.mem.free_bytes', kind: 'runner', value: 2 * 1024 * 1024 * 1024,
+      unit: 'bytes', timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
+    })}\n`, '2026-09-12');
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('HOST — is the machine itself the constraint?');
+    expect(text).toContain('host.cpu.load1');
+    expect(text).toContain('of 8 cores');
+    expect(text).toContain('host.mem.free_bytes');
+    expect(text).toContain('2.0GB');
+    // The generic SATURATION section must NOT also print the host gauges (no double-reporting).
+    const saturationBlock = text.slice(text.indexOf('SATURATION'), text.indexOf('HOST —'));
+    expect(saturationBlock).not.toContain('host.cpu.load1');
+  });
+
+  it('report says so plainly when no host samples landed in the window', () => {
+    let text = '';
+    runTelemetryCli(['report'], { store: createMemoryTelemetryStore(), out: (s) => { text += s; } });
+    expect(text).toContain('no host samples recorded in this window');
+  });
+
   it('renderTrace says so plainly when a trace has no spans', () => {
     expect(renderTrace('i9999', [])).toContain('no spans recorded');
   });
@@ -899,6 +940,21 @@ describe('METRIC_NAMES / DISPATCH_KINDS cover what the system actually has', () 
     expect(METRIC_NAMES.some((n) => n.startsWith('heavy.admission.'))).toBe(true);
     expect(METRIC_NAMES).toContain('dispatch.denied');
     expect(METRIC_NAMES).toContain('dispatch.admitted');
+  });
+
+  // #3383 follow-on — the HOST-RESOURCE half of the capacity-planning question: is the machine itself, not the
+  // queue/lane logic, the actual delivery constraint.
+  it('covers host CPU load, core count, and memory — the capacity-planning terms', () => {
+    for (const n of [
+      'host.cpu.load1', 'host.cpu.load5', 'host.cpu.load15', 'host.cpu.count',
+      'host.mem.free_bytes', 'host.mem.total_bytes',
+    ]) {
+      expect(METRIC_NAMES).toContain(n);
+    }
+  });
+
+  it('the `bytes` unit exists so a byte-valued gauge never has to lie and call itself a `count`', () => {
+    expect(METRIC_UNITS).toContain('bytes');
   });
 });
 

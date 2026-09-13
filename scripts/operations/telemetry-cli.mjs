@@ -68,6 +68,17 @@ export function fmtMs(ms) {
 
 const pct = (r) => `${(Number(r) * 100).toFixed(1)}%`;
 
+/** Human byte size — `512B` / `4.0MB` / `1.2GB`. Same rendering-only role as `fmtMs`: the JSON output carries
+ *  raw bytes (`host.mem.free_bytes`/`total_bytes`, #3383) so a consumer never has to parse this back out. */
+export function fmtBytes(n) {
+  if (!Number.isFinite(n)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = Number(n);
+  let i = 0;
+  while (Math.abs(v) >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${i === 0 ? v : v.toFixed(1)}${units[i]}`;
+}
+
 /** Render the golden signals as text. PURE (returns a string), so a test asserts the rendering without stdout. */
 export function renderReport(signals, { hours }) {
   const L = [];
@@ -115,8 +126,30 @@ export function renderReport(signals, { hours }) {
     L.push(`      ↳ ${reason}: ${n}`);
   }
   for (const [name, g] of Object.entries(signals.saturation.gauges)) {
-    if (name === 'dispatch.admitted' || name === 'dispatch.denied') continue;
+    if (name === 'dispatch.admitted' || name === 'dispatch.denied' || name.startsWith('host.')) continue;
     L.push(`    ${name.padEnd(26)} last ${g.last}  max ${g.max}  mean ${Number(g.mean).toFixed(1)}  (n=${g.samples})`);
+  }
+  L.push('');
+
+  // #3383 follow-on — HOST resource samples, broken out of the generic SATURATION gauges above into their own
+  // section: the whole reason they were added is the capacity-planning question ("is the HOST, not the queue
+  // or lane logic, the actual delivery constraint"), and that reads far more directly as its own labeled block
+  // than interleaved among lane-pool/admission gauges. `host.cpu.count` is folded into the load lines rather
+  // than printed as its own gauge — a constant core count next to a load average is the number a reader
+  // actually wants (load1 vs cores), not a fourth line to cross-reference by hand.
+  const hostGauges = Object.entries(signals.saturation.gauges).filter(([name]) => name.startsWith('host.'));
+  L.push('HOST — is the machine itself the constraint?');
+  if (!hostGauges.length) {
+    L.push('    (no host samples recorded in this window)');
+  } else {
+    const cpuCountGauge = signals.saturation.gauges['host.cpu.count'];
+    const cores = cpuCountGauge ? cpuCountGauge.last : null;
+    for (const [name, g] of hostGauges) {
+      if (name === 'host.cpu.count') continue;
+      const fmt = (v) => (g.unit === 'bytes' ? fmtBytes(v) : Number(v).toFixed(2));
+      const suffix = name.startsWith('host.cpu.load') && Number.isFinite(cores) ? ` (of ${cores} cores)` : '';
+      L.push(`    ${name.padEnd(26)} last ${fmt(g.last)}  max ${fmt(g.max)}  mean ${fmt(g.mean)}${suffix}  (n=${g.samples})`);
+    }
   }
   L.push('');
 

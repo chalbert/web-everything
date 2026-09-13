@@ -167,10 +167,28 @@ export const METRIC_NAMES = Object.freeze([
   'dispatch.inflight', 'dispatch.admitted', 'dispatch.denied',
   // queue (traffic)
   'queue.depth', 'queue.ready',
+  // ── HOST RESOURCE (the capacity-planning half, #3383 follow-on) ──
+  // Sampled by the runner's tick loop ALONGSIDE the saturation metrics above, at the same cadence and the same
+  // timestamp — the whole point is answering "was the HOST the constraint, not the queue/lane logic" by
+  // correlating these against `dispatch.*`/`lane.pool.*`/`queue.*` at the same points in time, never read in
+  // isolation. `os.loadavg()`/`os.freemem()`/`os.totalmem()`/`os.cpus()` only — no subprocess (`sysctl`/
+  // `vm_stat`), matching this file's own no-subprocess discipline (see `telemetry-store.mjs`'s purity header);
+  // swap usage has no cross-platform in-process API in Node and is therefore NOT captured — see
+  // `runner.mjs#readHostSample`'s docblock for the tradeoff, stated rather than silently dropped.
+  'host.cpu.load1', 'host.cpu.load5', 'host.cpu.load15',
+  // recorded alongside every sample (not once), so load-vs-cores is computable without a separate lookup —
+  // trivially cheap (`os.cpus().length`) and a machine's core count could theoretically change (a VM resize)
+  // between samples, which a once-only stamp would miss.
+  'host.cpu.count',
+  // RAW bytes, not a pre-computed ratio: free/total is one division away in any later analysis, but a ratio
+  // alone could never recover the total — raw is strictly more information for the same two numbers.
+  'host.mem.free_bytes', 'host.mem.total_bytes',
 ]);
 
-/** Metric units — kept tiny and explicit so a renderer never has to guess whether 1200 is ms or a count. */
-export const METRIC_UNITS = Object.freeze(['count', 'ms', 'ratio']);
+/** Metric units — kept tiny and explicit so a renderer never has to guess whether 1200 is ms or a count.
+ *  `bytes` (#3383) is for `host.mem.*` — distinct from `count` so a renderer can choose human-sized formatting
+ *  (`1.2GB`) without needing to special-case a metric name to know it holds a byte quantity. */
+export const METRIC_UNITS = Object.freeze(['count', 'ms', 'ratio', 'bytes']);
 
 /**
  * THE CROSS-WRAPPER FAILURE VOCABULARY — the one place that says which of the six wrappers' own outcome words

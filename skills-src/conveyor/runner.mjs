@@ -61,6 +61,7 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadavg, freemem, totalmem, cpus } from 'node:os';
 import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -819,12 +820,83 @@ export function tickMetrics(surface) {
 }
 
 /**
- * #3383 — IO. Record this tick as one `runner.tick` span plus {@link tickMetrics}' samples. Wrapped whole in a
- * try/catch on top of the recorder's own never-throw contract — belt and braces, because this runs inside the
- * RESIDENT driver, where the discipline is the watchdog's: an observability bug must never be able to stop
- * the conveyor. The tick span is zero-width by construction (the surface is already computed by the time
- * `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the same
- * trace, not to time the tick.
+ * #3383 follow-on — PURE. Derive this tick's HOST-RESOURCE telemetry samples from an already-read OS snapshot,
+ * mirroring {@link tickMetrics} exactly: no `os.*` call of its own, so it is unit-testable against a plain
+ * object with no real host in play.
+ *
+ * WHY THESE SAMPLES EXIST, AND WHY THEY ARE RECORDED HERE RATHER THAN ANYWHERE ELSE. The saturation metrics
+ * above answer "is the QUEUE or LANE POOL the constraint"; nothing in the system today records whether the
+ * HOST itself — CPU, memory — is the actual ceiling as more concurrent dispatch capacity gets added. Recording
+ * these in the SAME `emitTickMetrics` call, at the SAME cadence and the SAME `tick` attribute as the dispatch
+ * metrics, is what makes them ANSWER that question later: a scoring pass can join "how loaded was the machine"
+ * against "how much dispatch throughput was happening" at the same points in time, rather than reading host
+ * load in isolation (which would say nothing about whether it was actually binding on delivery).
+ *
+ * WHAT THIS DOES NOT CAPTURE, STATED PLAINLY (see the file's own `readHostSample` for the swap tradeoff):
+ *   • SWAP USAGE — no cross-platform in-process Node API exists for it; see {@link readHostSample}.
+ *   • DISK I/O, NETWORK — no `node:os` accessor exists for either; adding them would mean shelling out
+ *     (`iostat`/`nettop`/`/proc/...`), which this file's own no-subprocess discipline (mirrored from
+ *     `telemetry-store.mjs`) argues against for a per-tick sample.
+ *   • PER-PROCESS / PER-CONTAINER breakdown — `os.loadavg()`/`os.freemem()` are whole-HOST aggregates; they
+ *     cannot attribute load to any one dispatch, lane, or agent turn. See the file header's #3383 discussion of
+ *     the harder per-agent-turn case (child `process.cpuUsage()`), deliberately left for later.
+ *
+ * @param {{loadavg?: number[], freeBytes?: number, totalBytes?: number, cpuCount?: number}} [sample]
+ * @returns {Array<{name: string, value: number, unit: string, attributes: object}>}
+ */
+export function hostMetrics(sample) {
+  const s = sample || {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const la = Array.isArray(s.loadavg) ? s.loadavg : [];
+  const [l1, l5, l15] = la;
+  return [
+    { name: 'host.cpu.load1', value: n(l1), unit: 'count', attributes: {} },
+    { name: 'host.cpu.load5', value: n(l5), unit: 'count', attributes: {} },
+    { name: 'host.cpu.load15', value: n(l15), unit: 'count', attributes: {} },
+    // Recorded EVERY tick alongside the load averages, not once — see METRIC_NAMES' own comment in
+    // telemetry.mjs for why (cheap, and a later analysis should never need a second lookup to compute
+    // load-vs-cores).
+    { name: 'host.cpu.count', value: n(s.cpuCount), unit: 'count', attributes: {} },
+    // RAW bytes, not a ratio — see telemetry.mjs's own comment: a ratio alone cannot recover the total.
+    { name: 'host.mem.free_bytes', value: n(s.freeBytes), unit: 'bytes', attributes: {} },
+    { name: 'host.mem.total_bytes', value: n(s.totalBytes), unit: 'bytes', attributes: {} },
+  ];
+}
+
+/**
+ * IO EDGE — the one place this feature touches `node:os` directly, kept to exactly this so {@link hostMetrics}
+ * above stays pure. Never throws: a read failure (no known real one, but this runs inside the RESIDENT driver,
+ * where the watchdog's discipline applies — an observability read must never be able to stop the conveyor)
+ * degrades to a zeroed sample rather than taking a tick down.
+ *
+ * SWAP USAGE IS DELIBERATELY NOT SAMPLED — the tradeoff, stated rather than silently skipped. Node's `os`
+ * module has no swap accessor on any platform; the only way to get it is shelling out (macOS: `sysctl
+ * vm.swapusage` / `vm_stat`; Linux: parsing `/proc/meminfo`'s `SwapTotal`/`SwapFree`, itself not portable to
+ * macOS). `telemetry-store.mjs`'s own purity discipline forbids a subprocess in the recorder's hot path for
+ * exactly this reason (cost + a new failure mode on every sample), and this sampling point runs on the SAME
+ * ~120s cadence as every other tick metric — spawning a process every tick for one more gauge was judged not
+ * worth it against `os.loadavg()`'s CPU pressure signal already covering the same "is the host saturated"
+ * question the swap number would answer indirectly. Revisit if a later capacity-planning pass finds load
+ * average alone insufficient to explain an observed slowdown.
+ * @returns {{loadavg: number[], freeBytes: number, totalBytes: number, cpuCount: number}}
+ */
+export function readHostSample() {
+  try {
+    return { loadavg: loadavg(), freeBytes: freemem(), totalBytes: totalmem(), cpuCount: cpus().length };
+  } catch {
+    return { loadavg: [0, 0, 0], freeBytes: 0, totalBytes: 0, cpuCount: 0 };
+  }
+}
+
+/**
+ * #3383 — IO. Record this tick as one `runner.tick` span plus {@link tickMetrics}' and {@link hostMetrics}'
+ * samples — the dispatch/queue saturation signals and the host-resource signals, side by side, at the SAME
+ * `tick` attribute (see {@link hostMetrics}'s own docblock for why that co-location is the whole point). Wrapped
+ * whole in a try/catch on top of the recorder's own never-throw contract — belt and braces, because this runs
+ * inside the RESIDENT driver, where the discipline is the watchdog's: an observability bug must never be able
+ * to stop the conveyor. The tick span is zero-width by construction (the surface is already computed by the
+ * time `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the
+ * same trace, not to time the tick.
  */
 function emitTickMetrics(recorder, surface, ctx) {
   try {
@@ -832,6 +904,9 @@ function emitTickMetrics(recorder, surface, ctx) {
       attributes: { tick: ctx && ctx.tick, statusLine: (surface && surface.statusLine) || null },
     });
     for (const m of tickMetrics(surface)) {
+      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
+    }
+    for (const m of hostMetrics(readHostSample())) {
       recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
     }
     span.ok();
