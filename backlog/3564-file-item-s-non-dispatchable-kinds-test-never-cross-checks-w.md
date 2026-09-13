@@ -2,9 +2,10 @@
 bornAs: x1t5emx
 kind: task
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-07"
 dateStarted: "2026-09-13"
+dateResolved: "2026-09-13"
 tags: []
 scope:
   - we:scripts/conveyor/
