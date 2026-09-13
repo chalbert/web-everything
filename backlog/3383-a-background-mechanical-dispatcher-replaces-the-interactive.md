@@ -2985,9 +2985,9 @@ duplicate (not conflicting) effort with the peer session, not a second real conf
 
 **Three provider-evaluation items filed for later work, all via one PR (`PR #2179`, confirmed `OPEN`,
 unmerged as of this check):**
-- `x8hzy1m` — probe Cursor as an additional dispatch provider.
-- `xhprieg` — probe Grok (top-tier subscription) as a bulk high-volume dispatch provider.
-- `xldrls6` — probe open-weight PAYG models (DeepSeek, Qwen) as a bulk high-volume dispatch provider.
+- `3660` — probe Cursor as an additional dispatch provider.
+- `3661` — probe Grok (top-tier subscription) as a bulk high-volume dispatch provider.
+- `3662` — probe open-weight PAYG models (DeepSeek, Qwen) as a bulk high-volume dispatch provider.
 
 **Stray-session/orphaned-watcher hygiene**: the behavioral memory fix landed —
 `we:agent-memory-src/no-stray-sessions-or-orphaned-watchers.md`, `PR #2174`, confirmed `MERGED`. A follow-on
