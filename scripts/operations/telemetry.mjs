@@ -167,6 +167,18 @@ export const METRIC_NAMES = Object.freeze([
   'dispatch.inflight', 'dispatch.admitted', 'dispatch.denied',
   // queue (traffic)
   'queue.depth', 'queue.ready',
+  // ── SELF-TRACKED TOKEN USAGE (epic #3383, usage-ledger follow-up) ──
+  // Recorded per real dispatch, tagged `provider` (today only `codex` — Claude's own usage is covered
+  // instead by the OFFICIAL OpenTelemetry export Claude Code itself can emit
+  // (`claude_code.token.usage`/`claude_code.cost.usage`), ingested separately by
+  // `scripts/operations/claude-otel-collector.mjs`; these four exist so the ledger has a comparable
+  // per-dispatch signal for the ONE provider with no such official export) and `model` in their
+  // `attributes`. Four separate low-cardinality names (never one name with a `tokenType` attribute) so a
+  // plain sum-by-name rollup needs no attribute filter to answer "how many input tokens" — this file's own
+  // "low-cardinality name, high-cardinality detail in attributes" rule taken one step further: even the
+  // "which token type" axis stays a NAME here because the ledger's very first operation on this data is
+  // "sum this one axis," not a group-by.
+  'dispatch.tokens.input', 'dispatch.tokens.output', 'dispatch.tokens.cache_read', 'dispatch.tokens.cache_write',
   // ── HOST RESOURCE (the capacity-planning half, #3383 follow-on) ──
   // Sampled by the runner's tick loop ALONGSIDE the saturation metrics above, at the same cadence and the same
   // timestamp — the whole point is answering "was the HOST the constraint, not the queue/lane logic" by

@@ -110,6 +110,9 @@ import { pathToFileURL } from 'node:url';
 import {
   usageReportSecretEnvPath, USAGE_REPORT_KEYCHAIN_SERVICE, USAGE_REPORT_KEYCHAIN_ACCOUNTS,
 } from '../lib/usage-report-secret-paths.mjs';
+import { rateFor, usdFromTokens } from '../backlog/cost-rates.mjs';
+import { createFileOtelStore } from '../operations/claude-otel-collector.mjs';
+import { createFileTelemetryStore } from '../operations/telemetry-store.mjs';
 
 // ── endpoints — hard-coded literals, deliberately not composed from a generic base+path helper ───────────
 export const ANTHROPIC_BASE = 'https://api.anthropic.com';
@@ -442,6 +445,217 @@ export function describeWeeklyRenewal(renewalConfig, now = new Date()) {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+// SELF-TRACKED USAGE LEDGER (epic #3383) — "how much have WE used this cycle," answered from what THIS
+// system's own dispatched agents and this operator's own Claude Code sessions actually consumed, reconciled
+// against the renewal windows above. This is a SELF-TRACKED ESTIMATE, explicitly labeled as such everywhere
+// it is rendered (see `renderLedgerSummary`) — never confused with the Admin-API path above, which stays in
+// this file unchanged for OpenAI or for if the operator's Anthropic account situation changes.
+//
+// TWO SOURCES, DIFFERENT PROVENANCE, NEVER MERGED SILENTLY:
+//   - ANTHROPIC (Claude): Claude Code's own OFFICIAL OpenTelemetry export (`claude_code.token.usage` /
+//     `claude_code.cost.usage`), ingested by `scripts/operations/claude-otel-collector.mjs` into its own
+//     day-rotated store. This is REAL harness-reported data covering EVERY Claude Code process on this
+//     machine once `~/.claude/settings.json`'s `env` block is wired — the interactive orchestrating session
+//     included, not just this repo's own dispatched agents — which is why it supersedes the earlier plan (see
+//     that file's own header) to reconstruct Claude usage from a dispatched agent's own stdout: that path
+//     could only ever have covered agents THIS repo spawns.
+//   - OPENAI (Codex): no equivalent official export exists, so this reads this repo's OWN self-tracked
+//     `dispatch.tokens.*` telemetry metrics (`scripts/operations/telemetry-store.mjs#recordTokenUsage`),
+//     recorded per real Codex dispatch from that CLI's own `--json` stdout (`codex-delivery-provider.mjs`).
+//     This ONLY covers Codex turns this repo's own wrappers spawn — there is no interactive-session
+//     equivalent to reconcile against, since this repo has no interactive Codex orchestrator.
+//
+// DOLLAR CONVERSION: Claude's own `claude_code.cost.usage` sum IS the primary dollar figure — it is the
+// provider's own SDK computing cost from the exact rates it billed, not a re-derivation. `cost-rates.mjs`'s
+// table (reused, never duplicated — the operator's own instruction) is applied ADDITIONALLY to the same
+// token counts as a cross-check line, so a reader can see the two agree (or flag it if a rate table goes
+// stale). For Codex, `cost-rates.mjs` has no OpenAI-model rows by design (it is documented as "THE CANONICAL
+// CLAUDE usage-equivalent rate table") — `rateFor` returns `null` for a Codex model id, and this ledger
+// reports that side's dollar estimate as `null` ("not available"), never a silent `0` that would read as "no
+// cost" — the same honesty convention `codex-judge-spawn.mjs#parseCodexJudgeOutcome` already uses for Codex's
+// own missing cost figure ("no USD figure exists anywhere in Codex's output... reported as 0, never
+// estimated" — here surfaced as `null` rather than `0` specifically so a renderer can tell "zero dollars"
+// from "no rate table row exists to compute one").
+//
+// PURE / IMPURE SPLIT, same convention as the rest of this file: every function below takes an already-read
+// array of store RECORDS (plain objects) and a window — no fs, no network, no clock except what is passed
+// in. The CLI section further down does the actual file reads.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * The PREVIOUS occurrence, at or before `now`, of a weekly renewal described the same way
+ * {@link nextWeeklyRenewalUtc} takes its config — "how long ago did the current usage cycle start." Mirrors
+ * that function's own DST-safe construction exactly (same `advance`/`zonedWallClockToUtc` primitives, walking
+ * the zone-local calendar date backward instead of forward) rather than subtracting a fixed
+ * `7 * 24 * 3600 * 1000` ms from `nextWeeklyRenewalUtc`'s own result — a fixed-ms subtraction lands on the
+ * WRONG wall-clock hour whenever a DST transition falls between the two occurrences (the zone's UTC offset
+ * differs by exactly one hour on either side), which is exactly the failure mode this file's own DST
+ * machinery exists to avoid elsewhere.
+ * @param {Date} now
+ * @param {{dayOfWeek: string, time: string, timezone: string}} config
+ * @returns {Date}
+ */
+export function previousWeeklyRenewalUtc(now, { dayOfWeek, time, timezone }) {
+  const targetDow = WEEKDAYS.indexOf(dayOfWeek);
+  if (targetDow < 0) throw new Error(`previousWeeklyRenewalUtc: dayOfWeek "${dayOfWeek}" is not a weekday name`);
+  const [hour, minute] = String(time).split(':').map(Number);
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const nowDow = WEEKDAYS.indexOf(parts.weekday);
+  const y = Number(parts.year); const m = Number(parts.month); const d = Number(parts.day);
+
+  const advance = (days) => {
+    const rolled = new Date(Date.UTC(y, m - 1, d + days));
+    return zonedWallClockToUtc(rolled.getUTCFullYear(), rolled.getUTCMonth() + 1, rolled.getUTCDate(), hour, minute, timezone);
+  };
+
+  const daysSinceTarget = (nowDow - targetDow + 7) % 7;
+  let target = advance(-daysSinceTarget);
+  if (target.getTime() > now.getTime()) target = advance(-daysSinceTarget - 7); // today's own occurrence hasn't happened yet
+  return target;
+}
+
+/**
+ * Sum a window of already-read `claude-otel-collector.mjs` store records into per-model token/cost totals.
+ * PURE — `events` is the plain array `createFileOtelStore().readAll()` (or its memory twin) returns; this
+ * never touches fs itself. `sinceIso`/`untilIso` bound on each record's own `receivedAt` (half-open:
+ * `since <= receivedAt < until`).
+ * @param {Array<object>} events
+ * @param {{sinceIso: string, untilIso: string}} window
+ * @returns {{totalsByType: Record<string, number>, totalUsd: number, byModel: Record<string, {input:number, output:number, cacheRead:number, cacheCreation:number, usd:number, estimatedUsd:number}>}}
+ */
+export function sumClaudeOtelUsage(events, { sinceIso, untilIso }) {
+  const since = Date.parse(sinceIso);
+  const until = Date.parse(untilIso);
+  const totalsByType = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+  let totalUsd = 0;
+  const byModel = {};
+  const ensure = (model) => (byModel[model] ||= { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, usd: 0, estimatedUsd: 0 });
+
+  for (const e of Array.isArray(events) ? events : []) {
+    const t = Date.parse(e?.receivedAt);
+    if (!Number.isFinite(t) || t < since || t >= until) continue;
+    const model = (e?.attributes && e.attributes.model) || '(unknown)';
+    if (e?.name === 'claude_code.token.usage') {
+      const type = e?.attributes && e.attributes.type;
+      const value = Number(e.value) || 0;
+      if (type === 'input' || type === 'output' || type === 'cacheRead' || type === 'cacheCreation') {
+        totalsByType[type] += value;
+        ensure(model)[type] += value;
+      }
+    } else if (e?.name === 'claude_code.cost.usage') {
+      const value = Number(e.value) || 0;
+      totalUsd += value;
+      ensure(model).usd += value;
+    }
+  }
+  for (const [model, m] of Object.entries(byModel)) {
+    m.estimatedUsd = usdFromTokens({ in: m.input, cw: m.cacheCreation, cr: m.cacheRead, out: m.output }, model);
+  }
+  return { totalsByType, totalUsd, byModel };
+}
+
+/**
+ * Sum a window of already-read `telemetry-store.mjs` events into per-model token totals for ONE provider tag
+ * (default `'codex'` — see this section's own header for why Claude does not use this path). PURE — `events`
+ * is `createFileTelemetryStore().readAll()`'s plain array (or its memory twin); filters to
+ * `event === 'metric'`, `name` one of the four `dispatch.tokens.*` names, and `attributes.provider === provider`.
+ * @param {Array<object>} events
+ * @param {{sinceIso: string, untilIso: string, provider?: string}} window
+ * @returns {{totalsByType: Record<string, number>, byModel: Record<string, {input:number, output:number, cacheRead:number, cacheWrite:number, estimatedUsd: (number|null)}>}}
+ */
+export function sumProviderTokenTelemetry(events, { sinceIso, untilIso, provider = 'codex' }) {
+  const since = Date.parse(sinceIso);
+  const until = Date.parse(untilIso);
+  const NAME_TO_TYPE = {
+    'dispatch.tokens.input': 'input',
+    'dispatch.tokens.output': 'output',
+    'dispatch.tokens.cache_read': 'cacheRead',
+    'dispatch.tokens.cache_write': 'cacheWrite',
+  };
+  const totalsByType = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const byModel = {};
+  const ensure = (model) => (byModel[model] ||= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimatedUsd: null });
+
+  for (const e of Array.isArray(events) ? events : []) {
+    if (e?.event !== 'metric') continue;
+    const type = NAME_TO_TYPE[e?.name];
+    if (!type) continue;
+    if ((e?.attributes && e.attributes.provider) !== provider) continue;
+    const ts = Date.parse(e?.timestamp);
+    if (!Number.isFinite(ts) || ts < since || ts >= until) continue;
+    const model = (e?.attributes && e.attributes.model) || '(unknown)';
+    const value = Number(e.value) || 0;
+    totalsByType[type] += value;
+    ensure(model)[type] += value;
+  }
+  for (const [model, m] of Object.entries(byModel)) {
+    // `rateFor` returns `null` for a model `cost-rates.mjs` has no row for (every Codex/OpenAI model, by
+    // design — see this section's header) — `estimatedUsd` stays `null` ("not available"), never a silent
+    // `0` that would read as "this cost nothing."
+    m.estimatedUsd = rateFor(model) ? usdFromTokens({ in: m.input, cw: m.cacheWrite, cr: m.cacheRead, out: m.output }, model) : null;
+  }
+  return { totalsByType, byModel };
+}
+
+/**
+ * Assemble the full two-provider ledger for the CURRENT cycle (since each provider's own last renewal
+ * boundary, through `now`). PURE given already-read event arrays for both sources.
+ * @param {{now: Date, claudeOtelEvents: Array<object>, codexTelemetryEvents: Array<object>}} o
+ * @returns {object}
+ */
+export function buildUsageLedger({ now, claudeOtelEvents = [], codexTelemetryEvents = [] }) {
+  const anthropicWindowStart = previousWeeklyRenewalUtc(now, ANTHROPIC_RENEWAL);
+  const openaiWindowStart = previousWeeklyRenewalUtc(now, OPENAI_RENEWAL);
+  const nowIso = now.toISOString();
+  return {
+    generatedAt: nowIso,
+    anthropic: {
+      windowStart: anthropicWindowStart.toISOString(),
+      windowEnd: nowIso,
+      usage: sumClaudeOtelUsage(claudeOtelEvents, { sinceIso: anthropicWindowStart.toISOString(), untilIso: nowIso }),
+    },
+    openai: {
+      windowStart: openaiWindowStart.toISOString(),
+      windowEnd: nowIso,
+      usage: sumProviderTokenTelemetry(codexTelemetryEvents, { sinceIso: openaiWindowStart.toISOString(), untilIso: nowIso, provider: 'codex' }),
+    },
+  };
+}
+
+/** Render the ledger as text (or return it as-is for `--json`) — every line is labeled a SELF-TRACKED
+ *  ESTIMATE, never phrased as an official provider figure, per this section's own header. */
+export function renderLedgerSummary(ledger) {
+  const L = [];
+  L.push(`usage-ledger (self-tracked estimate of what THIS system consumed — generated ${ledger.generatedAt})`);
+  L.push('NOT an official provider-reported figure. See usage-report.mjs\'s own header for the Admin-API path this supplements.');
+  L.push('');
+
+  L.push(`ANTHROPIC (Claude) — since ${ledger.anthropic.windowStart} (this cycle's renewal boundary)`);
+  L.push('  source: Claude Code\'s own OpenTelemetry export (claude_code.token.usage / claude_code.cost.usage), via claude-otel-collector.mjs');
+  const au = ledger.anthropic.usage;
+  L.push(`  tokens — input ${fmtNum(au.totalsByType.input)}, output ${fmtNum(au.totalsByType.output)}, cache-read ${fmtNum(au.totalsByType.cacheRead)}, cache-creation ${fmtNum(au.totalsByType.cacheCreation)}`);
+  L.push(`  cost — ${fmtUsd(au.totalUsd)} (Claude Code's own reported cost)`);
+  for (const [model, m] of Object.entries(au.byModel)) {
+    L.push(`    ${model.padEnd(28)} in ${fmtNum(m.input).padStart(9)}  out ${fmtNum(m.output).padStart(9)}  cost ${fmtUsd(m.usd).padStart(9)}  (cost-rates.mjs cross-check: ${fmtUsd(m.estimatedUsd)})`);
+  }
+  L.push('');
+
+  L.push(`OPENAI (Codex) — since ${ledger.openai.windowStart} (this cycle's renewal boundary)`);
+  L.push('  source: this repo\'s own dispatch.tokens.* telemetry, recorded per Codex dispatch (build/fix/ci-heal only — no interactive Codex orchestrator to reconcile)');
+  const ou = ledger.openai.usage;
+  L.push(`  tokens — input ${fmtNum(ou.totalsByType.input)}, output ${fmtNum(ou.totalsByType.output)}, cache-read ${fmtNum(ou.totalsByType.cacheRead)}, cache-write ${fmtNum(ou.totalsByType.cacheWrite)}`);
+  for (const [model, m] of Object.entries(ou.byModel)) {
+    L.push(`    ${model.padEnd(28)} in ${fmtNum(m.input).padStart(9)}  out ${fmtNum(m.output).padStart(9)}  cost ${m.estimatedUsd == null ? 'not available (no cost-rates.mjs row for this model)' : fmtUsd(m.estimatedUsd)}`);
+  }
+  if (!Object.keys(ou.byModel).length) L.push('  (no Codex dispatches recorded this cycle)');
+  L.push('');
+  return L.join('\n');
+}
+
 // ── formatting (pure) — style mirrors we:scripts/operations/telemetry-cli.mjs's fmtMs/fmtBytes/pct helpers ─
 
 export function fmtNum(n) {
@@ -507,7 +721,7 @@ export function renderSummary(result) {
 
 // ── CLI (impure) ────────────────────────────────────────────────────────────────────────────────────────
 
-const USAGE = 'usage: usage-report.mjs [--since=<hours>] [--json]';
+const USAGE = 'usage: usage-report.mjs [--since=<hours>] [--json] | --ledger [--json]';
 
 /** Lowercase every header name from a real `Headers` object (or a plain record) into a plain object, so the
  *  pure `extractRateLimitHeaders` above never has to know about the `Headers` API. */
@@ -554,6 +768,20 @@ export async function runUsageReportCli(argv, {
   const hoursFlag = argv.find((a) => a.startsWith('--since='));
   const hours = hoursFlag ? Number(hoursFlag.slice('--since='.length)) || 24 : 24;
   if (argv.includes('--help') || argv.includes('-h')) { out(`${USAGE}\n`); return 0; }
+
+  // ── --ledger mode (epic #3383) — the SELF-TRACKED usage ledger, entirely local: no Admin API call, no
+  // secrets, no network. Reads the two local stores this file's own header describes and renders/returns the
+  // ledger this section builds. Separate branch, not folded into the network path above, because the two
+  // answer genuinely different questions ("what does the provider's own billing say" vs "what did THIS
+  // system itself observe") and must never be composed into one number.
+  if (argv.includes('--ledger')) {
+    const nowDate = now();
+    const claudeOtelEvents = createFileOtelStore().readAll();
+    const codexTelemetryEvents = createFileTelemetryStore().readAll();
+    const ledger = buildUsageLedger({ now: nowDate, claudeOtelEvents, codexTelemetryEvents });
+    out(json ? `${JSON.stringify(ledger, null, 2)}\n` : `${renderLedgerSummary(ledger)}\n`);
+    return 0;
+  }
 
   const secrets = loadSecretsFn();
   const nowDate = now();

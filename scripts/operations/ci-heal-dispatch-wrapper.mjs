@@ -120,7 +120,7 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 // builds (`buildCiHealAgentEnv`, which carries `reason` alongside everything `buildFixAgentEnv` already does).
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
-  defaultDeliveryDenyPaths, assertDenyPathsUsable,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
 } from './codex-delivery-provider.mjs';
 
 /** The lane-pool `--purpose` this wrapper's acquire carries — the SAME string
@@ -455,6 +455,8 @@ const CI_HEAL_CODEX_PROVIDER = {
       persistFailure('ci-heal-spawn-failures', sessionSlug, e, { resumeSessionId });
       throw e;
     }
+    // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
+    recordCodexTurnUsage(stdout);
     if (!resumeThreadId) {
       const threadId = parseCodexThreadId(stdout);
       if (threadId) writeThreadId(sessionSlug, threadId);

@@ -20,7 +20,7 @@ import { dispatchReviewMechanical, BLOCKED_ON_INFRA } from '../review-dispatch-w
 import { classifyPrepareResult as classifyScopeResult } from '../prepare-scope-wrapper.mjs';
 import { classifyPrepareResult as classifyDecisionResult } from '../prepare-decision-wrapper.mjs';
 import {
-  createMemoryTelemetryStore, createTelemetryRecorder, setActiveRecorder, activeRecorder,
+  createMemoryTelemetryStore, createTelemetryRecorder, setActiveRecorder, activeRecorder, recordTokenUsage,
 } from '../telemetry-store.mjs';
 
 function clock(startIso = '2026-09-12T10:00:00.000Z', stepMs = 1000) {
@@ -295,5 +295,35 @@ describe('the prepare wrappers` result→outcome mapping', () => {
     expect(classifyScopeResult('something nobody anticipated')).toBeNull();
     expect(classifyDecisionResult(undefined)).toBeNull();
     expect(classifyDecisionResult(null)).toBeNull();
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('recordTokenUsage (#3383 usage-ledger follow-up) — the Codex self-tracked token metrics', () => {
+  it('emits all four dispatch.tokens.* metrics, tagged provider/model, against the ACTIVE recorder', () => {
+    const { store, spans } = installed();
+    void spans; // this helper only filters span.end — read metrics directly below.
+    recordTokenUsage({ provider: 'codex', model: 'gpt-6-astra', tokensIn: 10, tokensOut: 20, tokensCacheRead: 5, tokensCacheWrite: 1 });
+    const metrics = store.readAll().events.filter((e) => e.event === 'metric');
+    expect(metrics).toHaveLength(4);
+    const byName = Object.fromEntries(metrics.map((m) => [m.name, m.value]));
+    expect(byName).toEqual({
+      'dispatch.tokens.input': 10, 'dispatch.tokens.output': 20,
+      'dispatch.tokens.cache_read': 5, 'dispatch.tokens.cache_write': 1,
+    });
+    for (const m of metrics) expect(m.attributes).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
+  });
+
+  it('is a total no-op — never throws — with no active recorder installed', () => {
+    setActiveRecorder(null);
+    expect(() => recordTokenUsage({ provider: 'codex', model: 'x', tokensIn: 1 })).not.toThrow();
+    expect(activeRecorder().enabled).toBe(false);
+  });
+
+  it('never throws even when every field is omitted', () => {
+    installed();
+    expect(() => recordTokenUsage()).not.toThrow();
+    expect(() => recordTokenUsage({})).not.toThrow();
   });
 });
