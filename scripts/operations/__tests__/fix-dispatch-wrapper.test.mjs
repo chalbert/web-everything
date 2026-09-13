@@ -696,6 +696,12 @@ describe('FIX_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Codex sp
     readThreadId: vi.fn(() => null),
     writeThreadId: vi.fn(),
     denyPaths: ['/tmp/primary/**'],
+    // #3383 mechanical-dispatcher Bug 1 fix — real `stageFixReportCliIntoLane` touches the filesystem; every
+    // unit test here injects a fake so no test in this suite ever depends on real disk state.
+    stageReportCli: vi.fn(() => '/tmp/fix-lane-9/.operations/codex-fix-report-cli/scripts/operations/fix-report-cli.mjs'),
+    // #3383 mechanical-dispatcher Bug 2 fix — real `recordCodexRunScorecard` touches disk (the tracked
+    // `run-scorecards.json`); every test here injects a fake so none of them mutate it as a side effect.
+    recordScorecard: vi.fn(),
     ...over,
   });
 
@@ -722,10 +728,33 @@ describe('FIX_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Codex sp
     });
   });
 
+  // #3383 mechanical-dispatcher Bug 1 fix — THE regression test for the sandbox-vs-report-path collision:
+  // Codex's own sandbox denies read on the entire primary checkout (`defaultDeliveryDenyPaths`), so the bare
+  // `FIX_REPORT_CLI_PATH` constant every Claude fix provider gets is unreachable here BY CONSTRUCTION. This
+  // provider must call `stageReportCli` WITH the lane path and hand the STAGED result down as
+  // `FIX_REPORT_CLI_PATH` instead — never the bare primary-checkout constant.
+  it('stages the report CLI into the lane and stamps FIX_REPORT_CLI_PATH with the STAGED path, never the bare primary-checkout constant', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.stageReportCli).toHaveBeenCalledWith(LANE_PATH);
+    expect(o.spawnAgent.mock.calls[0][1].env.FIX_REPORT_CLI_PATH)
+      .toBe('/tmp/fix-lane-9/.operations/codex-fix-report-cli/scripts/operations/fix-report-cli.mjs');
+  });
+
   it('blocks on the fix/delivery-shared budget, never dispatch-lane-io\'s 60s fire-and-forget one', async () => {
     const o = io();
     await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(FIX_AGENT_SPAWN_TIMEOUT_MS);
+  });
+
+  // #3383 mechanical-dispatcher Bug 2 fix — THE regression test: a real fix dispatch must score + record its
+  // own run, stamped `dispatchKind: 'fix'`.
+  it('scores + records this run via recordScorecard, stamped as the fix kind/role', async () => {
+    const o = io();
+    await FIX_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.recordScorecard).toHaveBeenCalledWith(expect.objectContaining({
+      stdout: THREAD_EVENT, dispatchKind: 'fix', role: 'delivery', provider: 'codex', item: '3629', handle: 'fix-2108',
+    }));
   });
 
   // #3383 mechanical-dispatcher fix — the #3476 regression test: `resolveReportsDir` must be called WITH the

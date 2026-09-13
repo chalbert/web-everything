@@ -128,7 +128,11 @@ import {
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
   defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
+  CODEX_DELIVERY_MODEL, CODEX_DELIVERY_EFFORT,
 } from './codex-delivery-provider.mjs';
+// #3383 mechanical-dispatcher Bug 2 fix — THE missing run-quality recording call: `appendScorecard`
+// (`run-scorecard-store.mjs`) had zero real callers before this; see `run-quality-record.mjs`'s own header.
+import { recordCodexRunScorecard } from '../conveyor/run-quality-record.mjs';
 // RE-EXPORTED so every existing caller/test that imports these names from THIS file (their pre-extraction
 // home) keeps working unchanged — the extraction moved WHERE they are defined, never what imports them.
 export {
@@ -838,6 +842,7 @@ const CODEX_PROVIDER = {
       writeThreadId = writeCodexThreadId,
       denyPaths = null,
       recordCpu = recordChildResourceUsage,
+      recordScorecard = recordCodexRunScorecard,
     } = {},
   ) {
     // Identical resolution order to the Claude provider — the SAME single source of truth for the lane path
@@ -889,6 +894,13 @@ const CODEX_PROVIDER = {
     }
     // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
     recordCodexTurnUsage(stdout);
+    // #3383 mechanical-dispatcher Bug 2 fix — score + record THIS run's own scorecard; see
+    // `fix-dispatch-wrapper.mjs#FIX_CODEX_PROVIDER`'s own equivalent call for the full root-cause account.
+    // Best-effort, never throws (`recordCodexRunScorecard`'s own header).
+    recordScorecard({
+      stdout, dispatchKind: 'build', role: 'delivery', provider: 'codex', model: CODEX_DELIVERY_MODEL,
+      effort: CODEX_DELIVERY_EFFORT, item, handle: sessionSlug,
+    });
     // Record the thread id on a FRESH spawn only — a resume re-announces the same id, so re-writing it is
     // noise. Best-effort by construction (`writeCodexThreadId` never throws): losing the crumb costs the
     // ability to resume, which the guard above then reports loudly, and must never fail a build that worked.

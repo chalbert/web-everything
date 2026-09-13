@@ -88,6 +88,10 @@ import { tmpdir, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './judge-spawn.mjs';
+// #3383 mechanical-dispatcher Bug 2 fix — THE missing run-quality recording call for the advisory-review
+// judge seat: `appendScorecard` (`we:scripts/conveyor/run-scorecard-store.mjs`) had zero real callers before
+// this; see `run-quality-record.mjs`'s own header for the full composition this reuses.
+import { recordCodexRunScorecard } from '../conveyor/run-quality-record.mjs';
 
 /**
  * #xqa9ttq — THE OPENAI-STRICT SCHEMA TRANSFORM, proved live against a real `codex exec` spawn in `#3371`
@@ -580,6 +584,8 @@ export async function codexJudgeSpawn({
   // location) but default to the real durable write — see `persistCodexJudgeTranscript`'s own header.
   transcriptDir = resolveCodexJudgeTranscriptDir(env),
   persistTranscript = persistCodexJudgeTranscript,
+  // #3383 mechanical-dispatcher Bug 2 fix — see the call site below, right after `wallMs` is known.
+  recordScorecard = recordCodexRunScorecard,
 } = {}) {
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('codex-judge-spawn: `mandate` must be a non-empty string');
@@ -669,6 +675,16 @@ export async function codexJudgeSpawn({
   // failed one.
   const judgeThreadId = extractCodexJudgeThreadId(result.stdout);
   const transcriptFile = persistTranscript({ stdout: result.stdout, threadId: judgeThreadId, dir: transcriptDir });
+  // #3383 mechanical-dispatcher Bug 2 fix — score + record THIS run's own scorecard, off the RAW stdout this
+  // function already captured (never off `transcriptFile` — scoring needs no disk round-trip, and must not
+  // depend on the write above having succeeded). Placed BEFORE the timeout/parse branches below (which may go
+  // on to THROW a `JudgeTimeoutError`) so a hung or unparseable run is recorded too — exactly the run most
+  // worth capturing. Best-effort, never throws (`recordCodexRunScorecard`'s own header) — a recording failure
+  // can never turn an otherwise-completed judge call into a failed one.
+  recordScorecard({
+    stdout: result.stdout, dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review',
+    provider: 'codex', model, effort,
+  });
 
   if (result.timedOut) {
     let outcome = null;

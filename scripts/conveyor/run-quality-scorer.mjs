@@ -255,4 +255,106 @@ export function scoreCodexJudgeTranscriptFile(file, io = {}) {
   return scoreRecords(readCodexJudgeTranscriptRecords(file, io));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// mechanical-dispatcher (#3383) Bug 2 — THE SECOND, INDEPENDENT ADAPTER below (`summarizeCodexJsonStreamRecord`
+// / `scoreCodexJsonStreamStdout`) solves an OVERLAPPING problem — scoring a real Codex run's own `--json`
+// stdout stream — by a DIFFERENT route than `mapCodexJudgeEventsToRecords`/`scoreCodexJudgeTranscriptFile`
+// just above: this one scores the STDOUT BYTES A CALLER ALREADY HOLDS IN MEMORY directly, with no disk
+// round-trip, so it needs neither a persisted transcript file nor `codex-judge-spawn.mjs`'s
+// `--ephemeral`-driven `persistCodexJudgeTranscript` write at all. It is used uniformly across every real
+// call site this dispatcher wires — `build`/`fix`/`ci-heal`'s Codex providers (none of which is `--ephemeral`
+// and none of which had a persisted-transcript mechanism before this) AND the advisory-review judge seat
+// (`codex-judge-spawn.mjs#codexJudgeSpawn` calls it directly off `result.stdout`, right alongside — not
+// instead of — that seat's own `persistCodexJudgeTranscript` call, which still runs unchanged for whatever
+// else reads a durable transcript file off disk later). The two adapters' own mapping logic is genuinely
+// close in shape (both translate `item.completed`/`command_execution`/`agent_message` into the same
+// `tool_call`/`tool_output`/`message` vocabulary `scoreRecords` expects) — left as two functions rather than
+// unified here because they were authored independently in the same session window and unifying them is a
+// real, low-risk follow-up, not a landed correctness concern (both are unit-tested against real captured
+// `codex exec --json` output and agree on every case exercised).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Bounded, dependency-free truncate — mirrors `codex-transcript.mjs#truncate`'s own shape (this module keeps
+ *  no import on that skill's file; the two are independent one-line utilities, not a shared dependency). */
+function truncate(str, max) {
+  const s = typeof str === 'string' ? str : JSON.stringify(str ?? '');
+  return s.length > max ? `${s.slice(0, max)}… [+${s.length - max} chars truncated]` : s;
+}
+
+/**
+ * mechanical-dispatcher (#3383) Bug 2 — THE SECOND ADAPTER this module's own header anticipates ("a future
+ * widening... is a second, separate adapter feeding the SAME scorer core, not a rewrite of it"). Normalizes
+ * ONE raw line of a REAL `codex exec --json` run's OWN CAPTURED STDOUT — a genuinely different wire shape
+ * from the ROLLOUT FILE `summarizeRecord` (above) reads. Confirmed live (2026-09-13, codex-cli 0.153.4, a
+ * real `codex exec --json` probe): the CLI's stdout protocol uses `item.started`/`item.completed` envelopes
+ * around an `item` object (`{type:'command_execution', command, aggregated_output, exit_code}` for a shell
+ * call, `{type:'agent_message', text}` for model text) and `thread.started`/`turn.started`/`turn.completed`
+ * bookkeeping events — see `codex-delivery-provider.mjs#parseCodexThreadId`/`parseCodexTurnTokenUsage`, which
+ * already scan this exact shape for their own two fields. The ROLLOUT file's own shape (`{timestamp, payload:
+ * {type:'custom_tool_call'|'message'|…}}`, `session_meta`/`event_msg`/`response_item` wrappers) is unrelated
+ * and NOT what this function reads.
+ *
+ * WHY THIS ADAPTER EXISTS AT ALL, RATHER THAN JUST RESOLVING THE ROLLOUT FILE. Every real call site this
+ * dispatcher wires (`fix`/`ci-heal`/`build`'s Codex providers, and the advisory-review judge seat) already
+ * CAPTURES this exact stdout stream in memory as part of its own existing spawn primitive
+ * (`codex-delivery-provider.mjs#defaultSpawnCodexAgent`, `codex-judge-spawn.mjs#codexJudgeSpawn`) — scoring it
+ * directly needs no disk read, no thread-id → rollout-file lookup, and no exposure to a rollout file being
+ * reaped or (for the judge seat specifically) never written at all (`--ephemeral` suppresses it entirely; see
+ * `codex-judge-spawn.mjs`'s own header). {@link scoreCodexTranscriptFile} remains the adapter for a caller that
+ * only has a rollout PATH (e.g. a future `#3477` SessionEnd-triggered reader) — this one is for a caller that
+ * already holds the STDOUT BYTES.
+ *
+ * Maps onto the SAME `{kind, ...}` vocabulary `summarizeRecord` produces (`tool_call`/`tool_output`/`message`),
+ * so {@link scoreRecords}'s existing hunters (all written against that vocabulary) need no changes at all to
+ * score either transcript shape. An item type this rubric's hunters do not look for (anything but
+ * `command_execution`/`agent_message`) maps to a harmless, ignored `item:<type>` bucket rather than being
+ * dropped or mis-typed as one of the three hunted kinds.
+ *
+ * @param {string} raw - one line of the captured stdout.
+ * @param {number} [fieldMax] - per-field truncation cap, same default as `codex-transcript.mjs`'s own CLI.
+ * @returns {object} `summarizeRecord`-shaped.
+ */
+export function summarizeCodexJsonStreamRecord(raw, fieldMax = 400) {
+  let o;
+  try { o = JSON.parse(raw); } catch { return { kind: 'unparseable', text: truncate(raw, fieldMax) }; }
+  if (o.type === 'item.started' || o.type === 'item.completed') {
+    const item = o.item || {};
+    if (item.type === 'command_execution') {
+      if (o.type === 'item.started') {
+        return { kind: 'tool_call', callId: item.id ?? null, name: 'command_execution', input: truncate(item.command ?? '', fieldMax) };
+      }
+      const code = typeof item.exit_code === 'number' ? item.exit_code : null;
+      return {
+        kind: 'tool_output', callId: item.id ?? null, exitCode: code, isError: code != null && code !== 0,
+        text: truncate(item.aggregated_output ?? '', fieldMax),
+      };
+    }
+    if (item.type === 'agent_message') {
+      // Only the COMPLETED message carries final text; `item.started` for an agent_message has none yet.
+      if (o.type === 'item.started') return { kind: `item:${item.type}` };
+      return { kind: 'message', role: 'assistant', text: truncate(item.text ?? '', fieldMax) };
+    }
+    return { kind: `item:${item.type || 'unknown'}` };
+  }
+  if (o.type === 'turn.completed' || o.type === 'turn.failed') return { kind: 'turn_complete' };
+  if (o.type === 'turn.started') return { kind: 'turn_started' };
+  if (o.type === 'thread.started') return { kind: 'thread_started' };
+  return { kind: typeof o.type === 'string' ? o.type : 'unknown' };
+}
+
+/**
+ * mechanical-dispatcher (#3383) Bug 2 — score a REAL Codex run directly off the raw `--json` stdout its own
+ * caller already captured in memory (see {@link summarizeCodexJsonStreamRecord}'s own docblock for why this
+ * is the RIGHT reader for this dispatcher's four real call sites, and how it differs from
+ * {@link scoreCodexTranscriptFile}). PURE — splits on `\n`, drops blank lines, adapts each line, scores.
+ *
+ * @param {string} stdout - the full captured `--json` stream.
+ * @param {{fieldMax?: number}} [o]
+ * @returns {{rubricVersion: string, criteriaEvaluated: number, deductions: object[], score: number|null}}
+ */
+export function scoreCodexJsonStreamStdout(stdout, { fieldMax = 400 } = {}) {
+  const lines = String(stdout ?? '').split('\n').filter((l) => l.trim());
+  return scoreRecords(lines.map((l) => summarizeCodexJsonStreamRecord(l, fieldMax)));
+}
+
 export { RUBRIC_VERSION };

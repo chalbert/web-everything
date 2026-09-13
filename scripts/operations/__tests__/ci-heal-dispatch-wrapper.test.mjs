@@ -632,6 +632,12 @@ describe('CI_HEAL_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Code
     readThreadId: vi.fn(() => null),
     writeThreadId: vi.fn(),
     denyPaths: ['/tmp/primary/**'],
+    // #3383 mechanical-dispatcher Bug 1 fix — real `stageFixReportCliIntoLane` touches the filesystem; every
+    // unit test here injects a fake so no test in this suite ever depends on real disk state.
+    stageReportCli: vi.fn(() => '/tmp/ci-heal-lane-9/.operations/codex-fix-report-cli/scripts/operations/fix-report-cli.mjs'),
+    // #3383 mechanical-dispatcher Bug 2 fix — real `recordCodexRunScorecard` touches disk (the tracked
+    // `run-scorecards.json`); every test here injects a fake so none of them mutate it as a side effect.
+    recordScorecard: vi.fn(),
     ...over,
   });
 
@@ -668,6 +674,27 @@ describe('CI_HEAL_CODEX_PROVIDER.spawn (#3383 — reusing the live-verified Code
     const o = io();
     await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.resolveReportsDir).toHaveBeenCalledWith(LANE_PATH);
+  });
+
+  // #3383 mechanical-dispatcher Bug 2 fix — THE regression test: a real ci-heal dispatch must score + record
+  // its own run, stamped `dispatchKind: 'ci-heal'`.
+  it('scores + records this run via recordScorecard, stamped as the ci-heal kind/role', async () => {
+    const o = io();
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.recordScorecard).toHaveBeenCalledWith(expect.objectContaining({
+      stdout: THREAD_EVENT, dispatchKind: 'ci-heal', role: 'delivery', provider: 'codex', item: '2638', handle: 'ci-heal-743',
+    }));
+  });
+
+  // #3383 mechanical-dispatcher Bug 1 fix — THE regression test, mirroring `fix-dispatch-wrapper.test.mjs`'s
+  // own equivalent: `ci-heal` reuses `buildFixAgentEnv` (via `buildCiHealAgentEnv`), so it needs the SAME
+  // staged-report-CLI treatment `fix` does — never the bare primary-checkout constant.
+  it('stages the report CLI into the lane and stamps FIX_REPORT_CLI_PATH with the STAGED path, never the bare primary-checkout constant', async () => {
+    const o = io();
+    await CI_HEAL_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.stageReportCli).toHaveBeenCalledWith(LANE_PATH);
+    expect(o.spawnAgent.mock.calls[0][1].env.FIX_REPORT_CLI_PATH)
+      .toBe('/tmp/ci-heal-lane-9/.operations/codex-fix-report-cli/scripts/operations/fix-report-cli.mjs');
   });
 
   it('blocks on the fix/delivery-shared budget', async () => {

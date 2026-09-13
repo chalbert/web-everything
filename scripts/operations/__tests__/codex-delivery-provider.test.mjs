@@ -20,14 +20,18 @@
  *   - the `filesystem` deny map was honoured in the same run.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync,
+} from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   CODEX_CLI, CODEX_DELIVERY_MODEL, CODEX_DELIVERY_EFFORT, CODEX_DELIVERY_EFFORT_LEVELS,
   CODEX_THREAD_DIR_NAME, buildCodexDeliveryArgv, parseCodexThreadId, assertDenyPathsUsable,
   defaultDeliveryDenyPaths, defaultSpawnCodexAgent, codexThreadIdPath, readCodexThreadId, writeCodexThreadId,
+  FIX_REPORT_CLI_REL_FILES, CODEX_FIX_REPORT_CLI_STAGING_SUBDIR, stageFixReportCliIntoLane,
 } from '../codex-delivery-provider.mjs';
 import { usageReportSecretDir } from '../../lib/usage-report-secret-paths.mjs';
 import { parseCodexTurnTokenUsage, recordCodexTurnUsage } from '../codex-delivery-provider.mjs';
@@ -210,6 +214,81 @@ describe('assertDenyPathsUsable / defaultDeliveryDenyPaths', () => {
 
   it('refuses a missing lane path', () => {
     expect(() => assertDenyPathsUsable(DENY, '')).toThrow(/`lanePath`/);
+  });
+});
+
+// #3383 mechanical-dispatcher Bug 1 — `stageFixReportCliIntoLane` is THE FIX for the sandbox-vs-report-path
+// collision (see its own docblock): copy `fix-report-cli.mjs`'s dependency closure into the agent's lane,
+// preserving each file's repo-relative path so its existing relative imports resolve unchanged. Real fs
+// (mirrors the sidecar suite above's own real-temp-dir convention), because the whole point is that the
+// COPIED files are genuinely importable afterward, which a mocked fs cannot prove.
+describe('stageFixReportCliIntoLane (#3383 mechanical-dispatcher Bug 1)', () => {
+  it('copies every file in the dependency closure into the lane, preserving each repo-relative path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'we-codex-fix-cli-root-'));
+    const lane = mkdtempSync(join(tmpdir(), 'we-codex-fix-cli-lane-'));
+    try {
+      const contents = {};
+      for (const rel of FIX_REPORT_CLI_REL_FILES) contents[rel] = readFileSync(join(process.cwd(), rel), 'utf8');
+      const readFile = (p) => {
+        const rel = FIX_REPORT_CLI_REL_FILES.find((r) => p === join(root, r));
+        if (!rel) throw new Error(`unexpected read: ${p}`);
+        return contents[rel];
+      };
+      const staged = stageFixReportCliIntoLane(lane, { repoRoot: root, readFile });
+      expect(staged).toBe(join(lane, CODEX_FIX_REPORT_CLI_STAGING_SUBDIR, 'scripts/operations/fix-report-cli.mjs'));
+      for (const rel of FIX_REPORT_CLI_REL_FILES) {
+        const dest = join(lane, CODEX_FIX_REPORT_CLI_STAGING_SUBDIR, rel);
+        expect(existsSync(dest)).toBe(true);
+        expect(readFileSync(dest, 'utf8')).toBe(contents[rel]);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(lane, { recursive: true, force: true });
+    }
+  });
+
+  // Confirms the copy PRESERVES each file's relative import path well enough to ACTUALLY LOAD as a real Node
+  // ESM module graph — a genuine, freshly-spawned `node` process doing a plain dynamic `import()`, not
+  // vitest's own module loader (vite's dev-server loader refuses to load a module from outside its configured
+  // project root at all — a sandboxing limit of the TEST runner, not of the staged file itself; a real `codex
+  // exec` process loads it as a plain Node ESM file with no such restriction). An unresolved relative import
+  // (`./fix-report-store.mjs`, `./fix-report-record.mjs`, `../lib/write-all-sync.mjs`) throws
+  // `ERR_MODULE_NOT_FOUND` and this process exits non-zero; success prints the two exported function names.
+  it('the staged copy is genuinely loadable — every relative import resolves inside the lane', () => {
+    const shadowRoot = mkdtempSync(join(tmpdir(), 'we-codex-fix-cli-shadow-'));
+    const lane = mkdtempSync(join(tmpdir(), 'we-codex-fix-cli-import-'));
+    try {
+      for (const rel of FIX_REPORT_CLI_REL_FILES) {
+        const dest = join(shadowRoot, rel);
+        mkdirSync(dirname(dest), { recursive: true });
+        writeFileSync(dest, readFileSync(join(process.cwd(), rel), 'utf8'));
+      }
+      const staged = stageFixReportCliIntoLane(lane, { repoRoot: shadowRoot });
+      const script = `import(${JSON.stringify(`file://${staged}`)}).then(`
+        + 'm => { console.log(typeof m.runReport, typeof m.runShow); process.exit(0); }, '
+        + '(e) => { console.error(e); process.exit(1); });';
+      const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+      expect(out.trim()).toBe('function function');
+    } finally {
+      rmSync(shadowRoot, { recursive: true, force: true });
+      rmSync(lane, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a missing lane path', () => {
+    expect(() => stageFixReportCliIntoLane('')).toThrow(/`lanePath`/);
+  });
+
+  it('is idempotent — re-staging the same lane just overwrites, never throws', () => {
+    const lane = mkdtempSync(join(tmpdir(), 'we-codex-fix-cli-idem-'));
+    const readFile = () => 'content';
+    try {
+      const first = stageFixReportCliIntoLane(lane, { repoRoot: '/fake/root', readFile });
+      const second = stageFixReportCliIntoLane(lane, { repoRoot: '/fake/root', readFile });
+      expect(first).toBe(second);
+    } finally {
+      rmSync(lane, { recursive: true, force: true });
+    }
   });
 });
 

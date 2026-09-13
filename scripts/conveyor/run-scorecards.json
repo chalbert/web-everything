@@ -40,6 +40,31 @@
       "criteriaEvaluated": 0,
       "deductions": [],
       "score": null
+    },
+    {
+      "v": 1,
+      "outcome": null,
+      "scoredAt": "2026-09-13T21:55:10.616Z",
+      "rubricVersion": "2026-09-13.1",
+      "criteriaEvaluated": 5,
+      "deductions": [
+        {
+          "criterion": "command-churn",
+          "weight": 0,
+          "count": 4,
+          "evidence": "evidence withheld -- failed the append-time scrub -- 1 scrub reason total",
+          "evidenceDenied": true
+        }
+      ],
+      "score": 100,
+      "item": null,
+      "handle": "fix-2032",
+      "subjectClass": "work-agent",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "dispatchKind": "fix",
+      "probationStatus": "probation"
     }
   ]
 }

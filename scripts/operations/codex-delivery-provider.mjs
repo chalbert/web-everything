@@ -123,6 +123,7 @@
  * clock — so the argv, which IS the contract with the CLI, is assertable by a test with no subprocess at all.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 import { buildNativeDenyCodexArgs } from '../lib/isolation-provider.mjs';
@@ -220,6 +221,88 @@ export function assertDenyPathsUsable(denyPaths, lanePath) {
     }
   }
   return denyPaths;
+}
+
+/**
+ * The repo-relative path of `fix-report-cli.mjs` and its own complete (small, pure) dependency closure — every
+ * file it, or a file it imports, needs at runtime. Order does not matter to {@link stageFixReportCliIntoLane};
+ * it is listed here in import order purely for a human reader.
+ */
+export const FIX_REPORT_CLI_REL_FILES = Object.freeze([
+  'scripts/operations/fix-report-cli.mjs',
+  'scripts/operations/fix-report-store.mjs',
+  'scripts/operations/fix-report-record.mjs',
+  'scripts/lib/write-all-sync.mjs',
+]);
+
+/** Repo-relative staging root, INSIDE the agent's own lane — a sibling of `.operations/fix-reports/` etc.,
+ *  same gitignored `.operations/` family (never committed, never read by anything but this dispatch). */
+export const CODEX_FIX_REPORT_CLI_STAGING_SUBDIR = '.operations/codex-fix-report-cli';
+
+/**
+ * THE FIX for mechanical-dispatcher (#3383) Bug 1 — a Codex fix/ci-heal dispatch was BLOCKED BY CONSTRUCTION,
+ * on every real trial, before the agent could report even a `started` check-in. Root cause, confirmed live
+ * (real PR #2115, then reproduced deterministically): `fix-dispatch-wrapper.mjs#FIX_REPORT_CLI_PATH` resolves
+ * to an ABSOLUTE path inside the PRIMARY checkout (`${REPO_ROOT}/scripts/operations/fix-report-cli.mjs`) — by
+ * design, because the target PR's own lane, reconstituted from its pre-merge `headRefName`, structurally lacks
+ * that file until this branch merges (see that constant's own docblock). But {@link defaultDeliveryDenyPaths}
+ * denies the Codex sandbox READ access to the ENTIRE primary checkout root (`${REPO_ROOT}/**`) — ALSO by
+ * design, to stop a delivery/repair agent reading another session's uncommitted work (this file's own header,
+ * UNKNOWN 3). Those two by-design choices collide: the one file every Codex fix/ci-heal agent must invoke to
+ * report ANY outcome is a path the same provider denies itself the right to read. Deterministic, not
+ * `#2115`-specific — every dispatch hits it.
+ *
+ * THE FIX SHAPE, and why this one over the alternative (widening the deny-list): copy the CLI's own
+ * dependency closure ({@link FIX_REPORT_CLI_REL_FILES}) into the agent's OWN lane, preserving each file's path
+ * RELATIVE TO THE REPO ROOT exactly (`scripts/operations/fix-report-store.mjs`, `scripts/lib/
+ * write-all-sync.mjs`, …) so their existing relative `import`s resolve completely unchanged — nothing about
+ * the copied files' own source is rewritten, so there is exactly one copy of this logic to ever audit or
+ * drift. The lane is inside `:workspace` — the one location every Codex sandbox profile this provider builds
+ * always grants read+write on, the same as the agent's own repair edits — so a path under it is reachable BY
+ * CONSTRUCTION, the same way `defaultDeliveryDenyPaths` made the primary checkout UNREACHABLE by construction.
+ * Narrowing the deny-list instead (letting Codex read exactly this one primary-checkout file) was rejected: it
+ * would need the deny-list to special-case one path inside the very root it exists to seal off, on every
+ * future primary-checkout file a wrapper might someday hand down the same way — a widening, recurring risk to
+ * the read-isolation guarantee, for a problem this copy fully solves without touching the deny-list at all.
+ *
+ * Runs on EVERY Codex fix/ci-heal spawn (fresh or resume) — cheap (four small pure files with no dependencies
+ * of their own beyond `node:fs`/`node:path`/`node:url`) and idempotent (plain overwrite), so re-staging on a
+ * resume costs nothing and self-heals a lane whose staged copy was somehow removed mid-dispatch.
+ *
+ * UNLIKE this module's telemetry helpers, this THROWS on failure rather than swallowing it: a failed copy
+ * reproduces the EXACT defect this function exists to fix, one layer later, and a caller that let that pass
+ * silently would ship the same bug back under a different, more confusing error (a Codex agent unable to
+ * explain why its own report command is missing, instead of a wrapper that fails loud before ever spawning).
+ *
+ * @param {string} lanePath - the resolved, absolute lane clone the Codex agent will run in.
+ * @param {object} [io]
+ * @param {string} [io.repoRoot] - defaults to {@link REPO_ROOT} (mirrors every other function in this module).
+ * @param {(path: string) => string} [io.readFile] - injectable `readFileSync(path, 'utf8')`, for tests.
+ * @param {(path: string) => void} [io.ensureDir] - injectable `mkdirSync(path, {recursive: true})`, for tests.
+ * @param {(path: string, data: string) => void} [io.writeFile] - injectable `writeFileSync`, for tests.
+ * @returns {string} the absolute, staged path to the copied `fix-report-cli.mjs` — the new
+ *   `FIX_REPORT_CLI_PATH` for this one dispatch, reachable from inside the Codex sandbox.
+ */
+export function stageFixReportCliIntoLane(lanePath, {
+  repoRoot = REPO_ROOT,
+  readFile = (p) => readFileSync(p, 'utf8'),
+  ensureDir = (p) => mkdirSync(p, { recursive: true }),
+  writeFile = (p, data) => writeFileSync(p, data),
+} = {}) {
+  if (typeof lanePath !== 'string' || !lanePath.trim()) {
+    throw new TypeError('codex-delivery-provider: `lanePath` must be a non-empty absolute path');
+  }
+  const root = String(repoRoot).replace(/\/+$/, '');
+  const lane = lanePath.replace(/\/+$/, '');
+  const stagingRoot = join(lane, CODEX_FIX_REPORT_CLI_STAGING_SUBDIR);
+  let stagedCliPath = null;
+  for (const relPath of FIX_REPORT_CLI_REL_FILES) {
+    const dest = join(stagingRoot, relPath);
+    ensureDir(dirname(dest));
+    writeFile(dest, readFile(join(root, relPath)));
+    if (relPath === 'scripts/operations/fix-report-cli.mjs') stagedCliPath = dest;
+  }
+  return stagedCliPath;
 }
 
 /**

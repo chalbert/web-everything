@@ -124,10 +124,17 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 // these is already live-verified against `codex exec` (see that file's own header for the evidence trail), and
 // none of it is delivery-specific — only the ENV a spawned agent gets and the reports dir it reads back from
 // are, which `FIX_CODEX_PROVIDER` below supplies via `buildFixAgentEnv`/`resolveFixReportsDir`, unchanged.
+// `stageFixReportCliIntoLane` (#3383 mechanical-dispatcher Bug 1) is the fix for the sandbox-vs-report-path
+// collision documented at that function's own docblock — see `FIX_CODEX_PROVIDER.spawn`, below, for where it
+// is called and why only the Codex provider needs it.
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
-  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage, stageFixReportCliIntoLane,
+  CODEX_DELIVERY_MODEL, CODEX_DELIVERY_EFFORT,
 } from './codex-delivery-provider.mjs';
+// #3383 mechanical-dispatcher Bug 2 fix — THE missing run-quality recording call. `appendScorecard`
+// (`run-scorecard-store.mjs`) had zero real callers before this; see `run-quality-record.mjs`'s own header.
+import { recordCodexRunScorecard } from '../conveyor/run-quality-record.mjs';
 
 /**
  * ABSOLUTE path to THIS CHECKOUT's own `fix-report-cli.mjs` (bug #xu2pp2m/1, confirmed live on real PR #2027,
@@ -301,8 +308,17 @@ export const FIX_AGENT_SPAWN_TIMEOUT_MS = DELIVERY_AGENT_SPAWN_TIMEOUT_MS;
  *  `tryReadFixReport` call reads back. `FIX_REPORT_CLI_PATH` (bug #xu2pp2m/1 — see that constant's own
  *  docblock) is the ABSOLUTE path to THIS checkout's `fix-report-cli.mjs`, handed down because the target PR's
  *  own lane clone — reset to its `headRefName`, based on ordinary `main` — does not contain that file at all
- *  pre-merge; a lane-relative invocation is structurally unreachable. */
-export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }) {
+ *  pre-merge; a lane-relative invocation is structurally unreachable.
+ *
+ *  `reportCliPath` (#3383 mechanical-dispatcher Bug 1) — defaults to the primary-checkout constant above,
+ *  unchanged for the Claude provider (its hook-based `--restricted` sandbox has no OS-level read-deny, so the
+ *  primary-checkout path was never actually unreachable for it — see `codex-delivery-provider.mjs`'s own
+ *  header, UNKNOWN 3). `FIX_CODEX_PROVIDER`/`CI_HEAL_CODEX_PROVIDER` override it with a LANE-LOCAL staged copy
+ *  (`stageFixReportCliIntoLane`) instead, because Codex's own sandbox denies read on the entire primary
+ *  checkout and the bare constant is unreachable there by construction. */
+export function buildFixAgentEnv({
+  sessionSlug, pr, item, lanePath, reportsDir, reportCliPath = FIX_REPORT_CLI_PATH,
+}) {
   return {
     // `repair`, NOT `fix` (#3640 — the two-spawner collision, resolved). This stamp used to carry the LAUNCH
     // kind, which is also what `dispatch-lane-io.mjs#defaultClaudeProvider` stamps on the FULL-BRIEF fix agent
@@ -319,7 +335,7 @@ export function buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }
     FIX_ITEM: item ?? '',
     LANE: lanePath,
     OPERATION_FIX_REPORTS_DIR: reportsDir,
-    FIX_REPORT_CLI_PATH,
+    FIX_REPORT_CLI_PATH: reportCliPath,
   };
 }
 
@@ -385,11 +401,22 @@ const FIX_CODEX_PROVIDER = {
       writeThreadId = writeCodexThreadId,
       denyPaths = null,
       recordCpu = recordChildResourceUsage,
+      stageReportCli = stageFixReportCliIntoLane,
+      recordScorecard = recordCodexRunScorecard,
     } = {},
   ) {
     // #3383 mechanical-dispatcher fix — same lane-aware resolution as `FIX_AGENT_PROVIDER` above.
     const reportsDir = resolveReportsDir(lanePath);
-    const fixEnv = buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir });
+    // #3383 mechanical-dispatcher Bug 1 fix — stage `fix-report-cli.mjs`'s own dependency closure into THIS
+    // lane and hand the agent the STAGED path instead of the bare primary-checkout constant every other
+    // provider uses: Codex's own sandbox denies read on the entire primary checkout (`defaultDeliveryDenyPaths`,
+    // below), so that constant is unreachable BY CONSTRUCTION under this one provider — never under Claude's
+    // hook-based sandbox, which has no OS-level read-deny at all. See `stageFixReportCliIntoLane`'s own
+    // docblock for the full collision this fixes.
+    const reportCliPath = stageReportCli(lanePath);
+    const fixEnv = buildFixAgentEnv({
+      sessionSlug, pr, item, lanePath, reportsDir, reportCliPath,
+    });
     const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
     // Same resume contract as `CODEX_PROVIDER`: Codex mints its own thread id, so `resumeSessionId` (the
     // CLAUDE-side UUID every provider is handed) is only the SIGNAL that this is a resume; the real id comes
@@ -417,6 +444,13 @@ const FIX_CODEX_PROVIDER = {
     }
     // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
     recordCodexTurnUsage(stdout);
+    // #3383 mechanical-dispatcher Bug 2 fix — score + record THIS run's own scorecard. Best-effort
+    // (`recordCodexRunScorecard` never throws — see its own header): a recording failure must never turn a
+    // fix that otherwise ran into a reported failure.
+    recordScorecard({
+      stdout, dispatchKind: 'fix', role: 'delivery', provider: 'codex', model: CODEX_DELIVERY_MODEL,
+      effort: CODEX_DELIVERY_EFFORT, item, handle: sessionSlug,
+    });
     if (!resumeThreadId) {
       const threadId = parseCodexThreadId(stdout);
       if (threadId) writeThreadId(sessionSlug, threadId);

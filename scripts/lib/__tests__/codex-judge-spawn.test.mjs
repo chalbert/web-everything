@@ -6,10 +6,22 @@
  * one, so a reader does not have to cross-reference the probe record to see what a given test is pinning.
  */
 
-import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  describe, it, expect, vi,
+} from 'vitest';
+import {
+  existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// #3383 mechanical-dispatcher Bug 2 fix — `codexJudgeSpawn` now calls `recordCodexRunScorecard` (real default:
+// `../conveyor/run-quality-record.mjs`) after every real spawn. That real default's own real default, in
+// turn, appends to the tracked `we:scripts/conveyor/run-scorecards.json` — exactly the kind of disk side
+// effect this suite (and every other suite that exercises `codexJudgeSpawn` without naming its own
+// `recordScorecard` override) must never touch. Mocked at the MODULE level, once, rather than threading a
+// `recordScorecard: vi.fn()` override into every one of this file's many direct `codexJudgeSpawn({...})`
+// calls — the dedicated `recordCodexRunScorecard` coverage lives in `run-quality-record.test.mjs`, not here.
+vi.mock('../../conveyor/run-quality-record.mjs', () => ({ recordCodexRunScorecard: vi.fn(() => null) }));
 import {
   CODEX_CLI,
   CODEX_EFFORT_MAP,
@@ -378,6 +390,24 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
     expect(r.timedOut).toBe(false);
     expect(typeof r.wallMs).toBe('number');
     expect(r.argv).toEqual(expect.arrayContaining(['exec', '--json']));
+  });
+
+  // #3383 mechanical-dispatcher Bug 2 fix — THE regression test: a real judge call must score + record its
+  // own run. `recordScorecard` is overridden here (module-level mock covers every OTHER test in this file);
+  // this is the one test that actually asserts the call happens, with the right stamped fields.
+  it('scores + records this run via recordScorecard, stamped as the advisory-review role/kind', async () => {
+    const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+    const recordScorecard = () => null;
+    let seen = null;
+    const spy = (o) => { seen = o; return recordScorecard(o); };
+    await codexJudgeSpawn({
+      mandate: 'm', input: 'i', shape: SHAPE, model: 'gpt-6-astra', effort: 'medium', spawnFn: fn, recordScorecard: spy,
+    });
+    expect(seen).toMatchObject({
+      dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review', provider: 'codex',
+      model: 'gpt-6-astra', effort: 'medium',
+    });
+    expect(seen.stdout).toBe(okJsonl);
   });
 
   it('refuses a tool-bearing request before ever spawning', async () => {

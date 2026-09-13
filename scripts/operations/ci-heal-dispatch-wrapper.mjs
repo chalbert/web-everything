@@ -120,8 +120,12 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 // builds (`buildCiHealAgentEnv`, which carries `reason` alongside everything `buildFixAgentEnv` already does).
 import {
   buildCodexDeliveryArgv, defaultSpawnCodexAgent, parseCodexThreadId, readCodexThreadId, writeCodexThreadId,
-  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage,
+  defaultDeliveryDenyPaths, assertDenyPathsUsable, recordCodexTurnUsage, stageFixReportCliIntoLane,
+  CODEX_DELIVERY_MODEL, CODEX_DELIVERY_EFFORT,
 } from './codex-delivery-provider.mjs';
+// #3383 mechanical-dispatcher Bug 2 fix — THE missing run-quality recording call; see
+// `fix-dispatch-wrapper.mjs`'s own equivalent import for the full root-cause account.
+import { recordCodexRunScorecard } from '../conveyor/run-quality-record.mjs';
 
 /** The lane-pool `--purpose` this wrapper's acquire carries — the SAME string
  *  `we:skills-src/conveyor/fix-agent-ci-brief.md` step 1 already used, so a lane's purpose field keeps meaning
@@ -379,10 +383,19 @@ export const ensureCiHealHooksSettingsFile = createHooksSettingsWriter(
  *  THE `FIX_*` NAMES ARE KEPT ON PURPOSE, not renamed to `CI_HEAL_*`. The report channel this brief uses IS
  *  the fix-report CLI (see {@link runCiHealAgentToCompletion}), so its env var names are that CLI's own and
  *  the brief's one reporting command comes out byte-identical to the fixer's. The same trade
- *  `prepare-scope-wrapper.mjs#buildPrepareAgentEnv` documents for reusing `$DELIVERY_SESSION`. */
-export function buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir, reason }) {
+ *  `prepare-scope-wrapper.mjs#buildPrepareAgentEnv` documents for reusing `$DELIVERY_SESSION`.
+ *
+ *  `reportCliPath` (#3383 mechanical-dispatcher Bug 1) — forwarded verbatim to `buildFixAgentEnv`; see that
+ *  function's own docblock. `CI_HEAL_CODEX_PROVIDER` below overrides it with a lane-staged copy, same as
+ *  `FIX_CODEX_PROVIDER` does; `CI_HEAL_AGENT_PROVIDER` (Claude) leaves it undefined and gets the primary-
+ *  checkout default, same as the Claude fix provider. */
+export function buildCiHealAgentEnv({
+  sessionSlug, pr, item, lanePath, reportsDir, reason, reportCliPath,
+}) {
   return {
-    ...buildFixAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir }),
+    ...buildFixAgentEnv({
+      sessionSlug, pr, item, lanePath, reportsDir, reportCliPath,
+    }),
     CI_HEAL_REASON: reason ?? '',
   };
 }
@@ -439,10 +452,19 @@ const CI_HEAL_CODEX_PROVIDER = {
       writeThreadId = writeCodexThreadId,
       denyPaths = null,
       recordCpu = recordChildResourceUsage,
+      stageReportCli = stageFixReportCliIntoLane,
+      recordScorecard = recordCodexRunScorecard,
     } = {},
   ) {
     // #3383 mechanical-dispatcher fix — same lane-aware resolution as `CI_HEAL_AGENT_PROVIDER` above.
-    const env = buildCiHealAgentEnv({ sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(lanePath), reason });
+    // #3383 mechanical-dispatcher Bug 1 fix — same staged-report-CLI fix as `FIX_CODEX_PROVIDER` (see
+    // `stageFixReportCliIntoLane`'s own docblock, `codex-delivery-provider.mjs`): the bare primary-checkout
+    // `FIX_REPORT_CLI_PATH` is unreachable under Codex's sandbox read-deny, so a lane-local staged copy is
+    // handed down instead.
+    const reportCliPath = stageReportCli(lanePath);
+    const env = buildCiHealAgentEnv({
+      sessionSlug, pr, item, lanePath, reportsDir: resolveReportsDir(lanePath), reason, reportCliPath,
+    });
     const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
     const resumeThreadId = resumeSessionId ? readThreadId(sessionSlug) : null;
     if (resumeSessionId && !resumeThreadId) {
@@ -466,6 +488,13 @@ const CI_HEAL_CODEX_PROVIDER = {
     }
     // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
     recordCodexTurnUsage(stdout);
+    // #3383 mechanical-dispatcher Bug 2 fix — score + record THIS run's own scorecard; see
+    // `fix-dispatch-wrapper.mjs`'s own equivalent call for the full root-cause account. Best-effort, never
+    // throws (`recordCodexRunScorecard`'s own header).
+    recordScorecard({
+      stdout, dispatchKind: 'ci-heal', role: 'delivery', provider: 'codex', model: CODEX_DELIVERY_MODEL,
+      effort: CODEX_DELIVERY_EFFORT, item, handle: sessionSlug,
+    });
     if (!resumeThreadId) {
       const threadId = parseCodexThreadId(stdout);
       if (threadId) writeThreadId(sessionSlug, threadId);

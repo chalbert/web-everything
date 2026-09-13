@@ -197,6 +197,9 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
     readThreadId: vi.fn(() => null),
     writeThreadId: vi.fn(),
     denyPaths: ['/tmp/primary/**'],
+    // #3383 mechanical-dispatcher Bug 2 fix — real `recordCodexRunScorecard` touches disk (the tracked
+    // `run-scorecards.json`); every test here injects a fake so none of them mutate it as a side effect.
+    recordScorecard: vi.fn(),
     ...over,
   });
 
@@ -240,6 +243,16 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
     await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
     expect(o.spawnAgent.mock.calls[0][1].timeout).toBe(DELIVERY_AGENT_SPAWN_TIMEOUT_MS);
     expect(DELIVERY_AGENT_SPAWN_TIMEOUT_MS).not.toBe(SPAWN_TIMEOUT_MS);
+  });
+
+  // #3383 mechanical-dispatcher Bug 2 fix — THE regression test: a real build dispatch must score + record
+  // its own run, stamped `dispatchKind: 'build'`.
+  it('scores + records this run via recordScorecard, stamped as the build kind/role', async () => {
+    const o = io();
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+    expect(o.recordScorecard).toHaveBeenCalledWith(expect.objectContaining({
+      stdout: THREAD_EVENT, dispatchKind: 'build', role: 'delivery', provider: 'codex', item: '3580', handle: 'sess-9',
+    }));
   });
 
   it('records the thread id Codex minted, keyed by sessionSlug, on a FRESH spawn', async () => {

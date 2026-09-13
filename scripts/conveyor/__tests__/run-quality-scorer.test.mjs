@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   scoreRecords, scoreCodexTranscriptFile, mapCodexJudgeEventsToRecords,
   readCodexJudgeTranscriptRecords, scoreCodexJudgeTranscriptFile,
+  summarizeCodexJsonStreamRecord, scoreCodexJsonStreamStdout,
 } from '../run-quality-scorer.mjs';
 import { RUBRIC_VERSION, EVALUABLE_CRITERIA } from '../run-quality-rubric.mjs';
 
@@ -255,5 +256,80 @@ describe('readCodexJudgeTranscriptRecords / scoreCodexJudgeTranscriptFile — TH
     const out = scoreCodexJudgeTranscriptFile('/fake/dirty.jsonl', { readFile: () => dirtyStream });
     expect(out.score).toBeLessThan(100);
     expect(out.deductions.find((d) => d.criterion === 'blacklisted-operation')).toBeTruthy();
+  });
+});
+
+// #3383 mechanical-dispatcher Bug 2 — the stdout-shape adapter. `REAL_CODEX_JSON_STDOUT` below is a VERBATIM
+// capture of a real `codex exec --json` run (codex-cli 0.153.4, 2026-09-13: `codex exec --json
+// --skip-git-repo-check -m gpt-6-astra -c model_reasoning_effort=low -c approval_policy=never -s read-only
+// "Run \`ls\` in the current directory and then just say done."`), not a hand-typed fixture — this is exactly
+// the shape `codex-delivery-provider.mjs#defaultSpawnCodexAgent` and `codex-judge-spawn.mjs#codexJudgeSpawn`
+// already capture as `stdout` from their own real spawns.
+const REAL_CODEX_JSON_STDOUT = [
+  '{"type":"thread.started","thread_id":"01a09caf-885b-7170-a88e-8d79c23468f3"}',
+  '{"type":"turn.started"}',
+  '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run `ls` in the current directory."}}',
+  '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}',
+  '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc ls","aggregated_output":"README.md\\n","exit_code":0,"status":"completed"}}',
+  '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"done"}}',
+  '{"type":"turn.completed","usage":{"input_tokens":31033,"cached_input_tokens":27520,"cache_write_input_tokens":0,"output_tokens":49,"reasoning_output_tokens":0}}',
+].join('\n');
+
+describe('summarizeCodexJsonStreamRecord (#3383 — real `codex exec --json` stdout, a different shape from the rollout file)', () => {
+  it('normalizes a real command_execution item.started into a tool_call', () => {
+    const line = '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"ls -la","aggregated_output":"","exit_code":null,"status":"in_progress"}}';
+    expect(summarizeCodexJsonStreamRecord(line)).toEqual({ kind: 'tool_call', callId: 'item_1', name: 'command_execution', input: 'ls -la' });
+  });
+
+  it('normalizes a real command_execution item.completed into a tool_output, with exit code', () => {
+    const line = '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls -la","aggregated_output":"README.md\\n","exit_code":0,"status":"completed"}}';
+    expect(summarizeCodexJsonStreamRecord(line)).toEqual({ kind: 'tool_output', callId: 'item_1', exitCode: 0, isError: false, text: 'README.md\n' });
+  });
+
+  it('a non-zero exit code is a failure', () => {
+    const line = '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"false","aggregated_output":"","exit_code":1,"status":"completed"}}';
+    expect(summarizeCodexJsonStreamRecord(line).isError).toBe(true);
+  });
+
+  it('normalizes a completed agent_message into a message', () => {
+    const line = '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"done"}}';
+    expect(summarizeCodexJsonStreamRecord(line)).toEqual({ kind: 'message', role: 'assistant', text: 'done' });
+  });
+
+  it('bookkeeping events map to harmless, ignored kinds', () => {
+    expect(summarizeCodexJsonStreamRecord('{"type":"thread.started","thread_id":"x"}').kind).toBe('thread_started');
+    expect(summarizeCodexJsonStreamRecord('{"type":"turn.started"}').kind).toBe('turn_started');
+    expect(summarizeCodexJsonStreamRecord('{"type":"turn.completed","usage":{}}').kind).toBe('turn_complete');
+  });
+
+  it('an unparseable line degrades to `unparseable`, never throws', () => {
+    expect(summarizeCodexJsonStreamRecord('not json').kind).toBe('unparseable');
+  });
+});
+
+describe('scoreCodexJsonStreamStdout (#3383 — scores directly off REAL captured stdout, no rollout file needed)', () => {
+  it('scores a real clean run at 100 with an empty deduction vector (besides command-churn)', () => {
+    const out = scoreCodexJsonStreamStdout(REAL_CODEX_JSON_STDOUT);
+    expect(out.rubricVersion).toBe(RUBRIC_VERSION);
+    expect(out.score).toBe(100);
+    expect(out.deductions.filter((d) => d.criterion !== 'command-churn')).toEqual([]);
+    expect(out.criteriaEvaluated).toBeGreaterThan(0);
+  });
+
+  it('a blacklisted command in a real-shaped stream is caught the same way it is in the rollout shape', () => {
+    const stdout = [
+      '{"type":"thread.started","thread_id":"t1"}',
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"git reset --hard origin/main","aggregated_output":"","exit_code":null,"status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"git reset --hard origin/main","aggregated_output":"","exit_code":0,"status":"completed"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join('\n');
+    const out = scoreCodexJsonStreamStdout(stdout);
+    expect(out.deductions.find((d) => d.criterion === 'blacklisted-operation')).toBeTruthy();
+    expect(out.score).toBeLessThan(100);
+  });
+
+  it('empty stdout scores null, never 100 — never 100 on an empty read', () => {
+    expect(scoreCodexJsonStreamStdout('').score).toBeNull();
+    expect(scoreCodexJsonStreamStdout('').criteriaEvaluated).toBe(0);
   });
 });
