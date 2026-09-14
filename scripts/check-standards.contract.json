@@ -80,9 +80,9 @@
       "description": "The build…Mandate parameters exempt from the #2438 fence (#2967b) — CLOSED vocabularies, never caller free text: a validated lens name, round numbers, an isolation mode, the structural nouns a subject adapter supplies, and the boolean that turns the fence on. Adding a name here EXEMPTS a parameter from the gate, so it is a definition-of-green loosening and lives only in this file."
     },
     "backlogKinds": {
-      "value": ["story", "epic", "task", "decision", "feature"],
+      "value": ["story", "epic", "task", "decision", "feature", "investigation"],
       "impl": "BACKLOG_KINDS",
-      "description": "The allowed values for a backlog item's `kind` field (#466/#487/#2691). A kind outside this set is a hard ERROR. Adding a value widens what the gate accepts as a valid backlog item shape."
+      "description": "The allowed values for a backlog item's `kind` field (#466/#487/#2691/#3567). A kind outside this set is a hard ERROR. Adding a value widens what the gate accepts as a valid backlog item shape."
     },
     "backlogStatuses": {
       "value": ["open", "active", "preparing", "parked", "resolved"],
