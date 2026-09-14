@@ -56,7 +56,7 @@ export function parseModuleId(id) {
 }
 
 /**
- * Strip `//` line comments and `/* *​/` block comments so a commented-out `import` never registers as a
+ * Strip `//` line comments and `slash-star block` block comments so a commented-out `import` never registers as a
  * real edge. Intentionally simple (no template-literal / regex-literal awareness) — import statements
  * live at module top-level in this codebase, well clear of the edge cases, and a deterministic
  * over-strip is safer for a classifier than a missed edge.

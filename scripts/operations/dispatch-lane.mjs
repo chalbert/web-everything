@@ -106,6 +106,11 @@ export const DEFAULT_EXPECTED_WITHIN_MINUTES = 90;
  */
 export const BRIEF_PLACEHOLDERS = Object.freeze([
   'ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'PR_NUM', 'LANE_REF', 'REASON', 'ATTEMPT_TAG',
+  // #3637 — WHICH BRANCH this dispatch forks from and lands on. `main` for every ordinary item (so the filled
+  // brief is byte-identical to the pre-#3637 literal it replaced); a registered POC branch when the item's
+  // `deliveryTarget:` names one. It had to be REGISTERED here, not just typed into the brief: `fillBrief`
+  // strictly refuses an unknown placeholder, which is exactly the blocker #3637's survey named (#2 of five).
+  'DELIVERY_BASE',
 ]);
 
 /**
@@ -134,12 +139,26 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   // ATTEMPT_TAG (#3110) is BUILD-ONLY — only `delivery-agent-brief.md` folds it into the retry branch name;
   // neither prepare brief nor either fix/ci-heal brief references it, so neither kind validates or substitutes
   // it (an unlisted name is merely reported as unknown if a brief happens to carry it — see `fillBrief`).
-  build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG'],
+  // DELIVERY_BASE (#3637) is BUILD-ONLY, for the same reason ATTEMPT_TAG is: only `delivery-agent-brief.md`
+  // forks a lane and lands a result, so only that brief references the target branch. A `fix`/`ci-heal`
+  // dispatch reconstitutes onto an EXISTING PR/ref whose base is already fixed, and neither prepare brief
+  // lands anything at all.
+  build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG', 'DELIVERY_BASE'],
   prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON'],
 });
+
+/** #3637 — the delivery target this dispatch forks from and lands on, as the brief's `{{DELIVERY_BASE}}`.
+ *  `main` unless the item declares a REGISTERED POC branch. PURE, and deliberately trusting: the REGISTRY
+ *  LOOKUP (and the refusal for an undeclared branch) happens in the io shell's `findItem`
+ *  (`we:scripts/operations/dispatch-lane-io.mjs`), which is the only side allowed to read a file — this
+ *  declaration module is asserted to reach NOTHING that can act, `node:` specifiers included. */
+const deliveryBaseFor = (item) => {
+  const v = typeof item?.deliveryBase === 'string' ? item.deliveryBase.trim() : '';
+  return v || 'main';
+};
 
 /**
  * THE FIVE AGENT KINDS THIS OPERATION CAN START (#3165 named three, #3332 the remaining two), in the order the
@@ -895,6 +914,9 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       SESSION_SLUG: sessionSlug,
       SCOPE: scope.join(','),
       ATTEMPT_TAG: attempt,
+      // #3637 — `main` unless the item declares a registered POC branch. Resolved here (the pure side) so the
+      // run record freezes the branch this dispatch was actually aimed at, exactly as it freezes the brief.
+      DELIVERY_BASE: deliveryBaseFor(item),
     };
   // FILLED HERE, not in the sink. The prompt is a pure function of the item and the core's assignment, so it
   // belongs on the pure side — and freezing it into the effect payload means the run record says exactly what

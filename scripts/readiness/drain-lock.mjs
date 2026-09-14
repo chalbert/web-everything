@@ -122,16 +122,18 @@ export function sleepSyncMs(ms) {
  * Try to acquire the numbering mutex ONCE for `owner`. Thin over file-locks `reserve` (which atomically wins
  * the dir, or reclaims a stale/dead holder via the TTL). Returns `{ ok, reason, heldBy }`.
  */
-export function tryAcquireNumberingLock(lockRoot, owner, { pid = process.pid, leaseMinutes = NUMBERING_LEASE_MINUTES, nowMs = Date.now() } = {}) {
+export function tryAcquireNumberingLock(lockRoot, owner, { pid = process.pid, leaseMinutes = NUMBERING_LEASE_MINUTES, nowMs = Date.now(), lockPath = NUMBERING_LOCK_PATH } = {}) {
   ensureRoot(lockRoot);
-  return reserve(lockRoot, NUMBERING_LOCK_PATH, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
+  return reserve(lockRoot, lockPath, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
 }
 
 /** Release the numbering mutex, but ONLY if `owner` still holds it (never stomp a reclaimer who seized it
- *  mid-section — the file-locks fencing invariant). Idempotent. */
-export function releaseNumberingLockIfOwned(lockRoot, owner) {
-  const cur = readLockEntry(lockRoot, NUMBERING_LOCK_PATH);
-  if (cur && cur.owner === owner) { releaseLockDir(lockRoot, NUMBERING_LOCK_PATH); return true; }
+ *  mid-section — the file-locks fencing invariant). Idempotent. `lockPath` selects WHICH short-lived write
+ *  mutex to release — it defaults to the numbering section's own key, and #3637's per-POC-branch land lock
+ *  ({@link pocLandLockPathFor}) passes its own so the two never alias. */
+export function releaseNumberingLockIfOwned(lockRoot, owner, lockPath = NUMBERING_LOCK_PATH) {
+  const cur = readLockEntry(lockRoot, lockPath);
+  if (cur && cur.owner === owner) { releaseLockDir(lockRoot, lockPath); return true; }
   return false;
 }
 
@@ -157,19 +159,28 @@ export function withNumberingLock(fn, {
   pollMs = 250,
   now = Date.now,
   sleep = sleepSyncMs,
+  lockPath = NUMBERING_LOCK_PATH,
+  runUnlockedOnContention = true,
 } = {}) {
   ensureRoot(lockRoot);
   const deadline = now() + waitMs;
-  let acq = tryAcquireNumberingLock(lockRoot, owner, { pid, leaseMinutes, nowMs: now() });
+  let acq = tryAcquireNumberingLock(lockRoot, owner, { pid, leaseMinutes, nowMs: now(), lockPath });
   while (!acq.ok && now() < deadline) {
     sleep(pollMs);
-    acq = tryAcquireNumberingLock(lockRoot, owner, { pid, leaseMinutes, nowMs: now() });
+    acq = tryAcquireNumberingLock(lockRoot, owner, { pid, leaseMinutes, nowMs: now(), lockPath });
   }
   const held = acq.ok;
+  // #3637 — a caller whose critical section must NEVER run unserialized (the POC fast-lander's push) opts out
+  // of the never-hang fallback: it gets `ran:false` and decides for itself, rather than silently doing the
+  // write the lock exists to serialize. The numbering/land callers keep the original degrade-to-lock-free
+  // behaviour (`runUnlockedOnContention: true`), so nothing about #2288/#2683 changes.
+  if (!held && !runUnlockedOnContention) {
+    return { result: undefined, ran: false, held: false, contended: true, heldBy: acq.heldBy ?? null, reason: acq.reason };
+  }
   try {
-    return { result: fn(), held, contended: !held, heldBy: acq.heldBy ?? null, reason: acq.reason };
+    return { result: fn(), ran: true, held, contended: !held, heldBy: acq.heldBy ?? null, reason: acq.reason };
   } finally {
-    if (held) releaseNumberingLockIfOwned(lockRoot, owner);
+    if (held) releaseNumberingLockIfOwned(lockRoot, owner, lockPath);
   }
 }
 
@@ -186,6 +197,66 @@ export function withNumberingLock(fn, {
  */
 export function withLandWriteLock(fn, opts = {}) {
   return withNumberingLock(fn, { owner: makeOwner('land'), ...opts });
+}
+
+// ── (1b) #3637 — the PER-POC-BRANCH land lock ────────────────────────────────────
+
+/** The sentinel prefix the per-POC-branch land lock keys its lock dirs by. Distinct from both
+ *  {@link NUMBERING_LOCK_PATH} and {@link DRAIN_LEASE_PATH}, so a POC landing never contends with a drain's
+ *  write-to-main mutex (they write to DIFFERENT refs — serializing them against each other would be a pure
+ *  latency tax with no invariant behind it). */
+export const POC_LAND_LOCK_PATH = '<poc-land:branch-write>';
+
+/** A POC landing is a fetch + a rebase + a verify + a push. The verify is the long pole (it runs the item's
+ *  own tests), so this TTL is deliberately longer than the numbering section's 5 minutes — long enough that a
+ *  genuinely-live lander is never reclaimed out from under its own push, short enough that a crashed one frees
+ *  the branch within a coffee break. */
+export const POC_LAND_LEASE_MINUTES = 20;
+
+/**
+ * #3637 — the lock-dir key for ONE POC branch's write lock, keyed by BOTH the repo and the branch.
+ *
+ * Per-branch, not global, on purpose (the ruling's own words): two landers targeting DIFFERENT POC branches
+ * write to different refs and must never block each other, while two targeting the SAME branch must serialize
+ * or they race the exact way `we:scripts/conveyor/branch-sync.mjs`'s header documents its predecessor failing.
+ * `repoKey` is folded in for the same reason {@link drainLeasePathFor} folds it in (#3440): two constellation
+ * repos may both carry a branch called `lane/foo`, and they are not the same ref. PURE.
+ * @param {string} branch - the POC branch, WITHOUT a remote prefix (`lane/mechanical-dispatcher`).
+ * @param {string|null} [repoKey] - `localRepoSlug()`'s `org/repo`, or null for the legacy repo-less key.
+ * @returns {string}
+ */
+export function pocLandLockPathFor(branch, repoKey = null) {
+  const name = String(branch ?? '').trim().replace(/^origin\//, '');
+  if (!name) throw new Error('drain-lock: pocLandLockPathFor needs a branch name');
+  return `${POC_LAND_LOCK_PATH}::${repoKey || 'unkeyed'}::${name}`;
+}
+
+/**
+ * #3637 — run `fn` (ONE POC branch's fetch/rebase/verify/push cycle) inside that branch's own write lock, so
+ * concurrent landers targeting the same POC branch serialize instead of racing the ref.
+ *
+ * THE ONE CONTRACT DIFFERENCE FROM {@link withLandWriteLock}, and it is deliberate: this does NOT degrade to
+ * running `fn` unlocked when a live holder blocks past the budget. `withNumberingLock`'s never-hang fallback is
+ * right for numbering (the #2318 duplicate-NNN tripwire is the backstop, and wedging a land is worse than a
+ * rare unserialized one). It is wrong here: an unserialized push to a shared ref is the entire failure mode
+ * this lock exists to prevent, and there is no downstream tripwire that would catch it. A blocked lander gets
+ * `ran:false` and reports a clear "another lander holds <branch>" refusal — `poc-land` surfaces that rather
+ * than pushing anyway.
+ *
+ * @param {Function} fn
+ * @param {{branch: string, repoKey?: string|null}} o - plus any {@link withNumberingLock} option.
+ * @returns {{ result: any, ran: boolean, held: boolean, contended: boolean, heldBy: string|null, reason: string }}
+ */
+export function withPocLandLock(fn, { branch, repoKey = null, ...opts } = {}) {
+  const lockPath = pocLandLockPathFor(branch, repoKey);
+  return withNumberingLock(fn, {
+    owner: makeOwner('poc-land'),
+    leaseMinutes: POC_LAND_LEASE_MINUTES,
+    waitMs: POC_LAND_LEASE_MINUTES * 60_000,
+    ...opts,
+    lockPath,
+    runUnlockedOnContention: false,
+  });
 }
 
 // ── (2) whole-process drain lease ────────────────────────────────────────────────

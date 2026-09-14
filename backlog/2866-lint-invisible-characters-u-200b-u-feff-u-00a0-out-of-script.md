@@ -3,12 +3,15 @@ bornAs: xt4mi76
 kind: story
 size: 2
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateStarted: "2026-09-14"
+dateResolved: "2026-09-14"
 scope:
   - we:scripts/check-standards.mjs
   - we:scripts/check-standards-rules.mjs
 tags: [check-standards, gate, hygiene, footgun]
+deliveryAgent: codex
 ---
 
 # Lint invisible characters (U+200B, U+FEFF, U+00A0) out of scripts and docs source
@@ -59,3 +62,20 @@ judgment call.
   message naming the character and its offset.
 - A `check:standards` rule catches the same class as a backstop, and the existing tree passes it (or its
   exceptions are enumerated).
+
+## Progress
+
+- Sanity read: the warning defect remains and neither a write hook nor a backstop covers this class.
+- Policy: reject all three literal characters in scripts/docs, including Markdown prose. Use visible
+  Unicode escapes for intentional examples; no typographic NBSP exception.
+- Edge cases: leading/interior BOM, repeated hits, astral characters before a hit, first/all Edit
+  replacements, deletion of an existing hit, literal replacement dollar tokens, normalized paths,
+  out-of-scope files, and binary assets. Offsets are zero-based UTF-16 code units.
+- Implemented the shared detector, configured PreToolUse(Edit|Write) hook, and hard-error standards
+  backstop with per-file descriptors. The filesystem backstop scans UTF-8 text, including extensionless
+  files; binary assets and symlinks are excluded. There are no content exceptions.
+- Removed all five existing U+200B occurrences across four scripts, including both warning templates.
+  Reworded block-comment examples instead of creating accidental comment terminators.
+- Validation: 10 focused tests pass (configured hook subprocesses, direct-write filesystem backstop,
+  and current corpus), plus all 7 standards contract conformance tests. Syntax checks pass for all four
+  cleaned scripts. No gate or git commands run; edits remain for the wrapper to commit.

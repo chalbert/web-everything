@@ -38,11 +38,14 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { mkdirSync, writeFileSync, renameSync, appendFileSync } from 'node:fs';
 import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
+import { runGhSync } from '../../scripts/lib/gh-throttle.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+import { localDateString } from '../../scripts/lib/local-date.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -93,6 +96,16 @@ export function tickSurface(out) {
       ciHeals: Array.isArray(d.spawnCiHeals) ? d.spawnCiHeals : [],
     },
     armWatchers: Array.isArray(d.armWatchers) ? d.armWatchers : [],
+    // 2026-09-14 (#3521/lane-2 incident) — the tick core's SELF-DIAGNOSED stall list (see `advanceHeldStall` /
+    // `tick-core.mjs`): items held on the exact same reason for `stallTicks` consecutive ticks. Projected
+    // through verbatim so both the human-readable `emit` text and the durable external status file (below)
+    // carry it — a driver that is stuck now says so itself, instead of a human having to notice the absence
+    // of progress across many raw ticks the way this incident required.
+    stalled: Array.isArray(d.stalled) ? d.stalled : [],
+    // 2026-09-14 (#3521 decision-trace v1) — the tick core's plain-language "why" for its OWN dispatch/skip/
+    // stall decisions this tick (see `buildDecisionTrace` / `tick-core.mjs`). Projected through so the durable
+    // trace sidecar (below) can log it without re-deriving anything.
+    decisionTrace: Array.isArray(d.decisionTrace) ? d.decisionTrace : [],
   };
 }
 
@@ -327,9 +340,13 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
           // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
           // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
           // do, so the common empty-plan tick never pays for an extra `gh` call.
+          // Throttled (#3621) — `we:scripts/lib/gh-throttle.mjs#runGhSync`, a byte-for-byte transparent
+          // `execFileSync('gh', args, opts)` replacement gated through the shared `gh`-call concurrency
+          // semaphore with rate-limit backoff. This is the runner's own direct `gh` call (not a script it
+          // shells), paid only when review work is actually owed this tick.
           const repoSlug = typeof repo === 'string' && repo
             ? repo
-            : execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+            : runGhSync(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
               encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
             }).trim();
           for (const d of reviewsOwed) {
@@ -405,10 +422,81 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
   };
 }
 
+/** The durable EXTERNAL status file's filename, under `.conveyor/` in the driven checkout — the same
+ *  session-local, gitignored sidecar convention every other `.conveyor/*.json` state file in this repo uses
+ *  (`queue.json`, `dispatch-pause.json`, …). See {@link writeDriverStatus}. */
+export const DRIVER_STATUS_FILENAME = 'driver-status.json';
+
+/**
+ * Write the tick's surface to a durable file OUTSIDE the runner's own stdout, so "is the driver stuck?" is
+ * answerable from a SEPARATE process (a human, another agent, `scripts/conveyor/driver-status.mjs`) without
+ * grepping `runner.log` or waiting on a notification (2026-09-14, #3521/lane-2 incident — the driver ran for
+ * 85+ minutes with its only record of the stall sitting in a log nobody was polling). Overwritten every tick;
+ * atomic (temp file + rename) so a concurrent reader never observes a half-written file. Best-effort — a write
+ * failure (e.g. a read-only checkout) is swallowed: the status file is a CONVENIENCE, never something the tick
+ * loop itself depends on to keep running.
+ * @param {string} path  the resolved `.conveyor/driver-status.json` path.
+ * @param {{tick:number}} ctx
+ * @param {object} surface  this tick's {@link tickSurface} projection.
+ */
+export function writeDriverStatus(path, ctx, surface) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const body = JSON.stringify(
+      {
+        tick: ctx.tick,
+        at: new Date().toISOString(),
+        statusLine: surface.statusLine || '',
+        stalled: Array.isArray(surface.stalled) ? surface.stalled : [],
+        dispatch: surface.dispatch,
+      },
+      null,
+      2,
+    ) + '\n';
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, body);
+    renameSync(tmp, path);
+  } catch (e) {
+    process.stderr.write(`⚠ driver-status write failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+  }
+}
+
+/**
+ * Append this tick's plain-language decision trace (see `buildDecisionTrace` / `tick-core.mjs`) to a durable,
+ * DAY-SHARDED JSONL sidecar — `<traceDir>/<YYYY-MM-DD>.jsonl`, ONE line per trace entry, mirroring the existing
+ * `.operations/telemetry/<date>.jsonl` day-sharding convention already in this repo so the trace's own growth is
+ * naturally bounded to a day's worth of ticks per file instead of one ever-growing log. A DELIBERATELY SEPARATE
+ * sidecar rather than piggybacking on `.operations/telemetry/` (2026-09-14): that store has an active
+ * test-pollution/fragmentation fix in flight elsewhere at the time this was built, so writing into it here would
+ * risk colliding with that in-progress change; once it lands, folding this trace into the shared store is the
+ * natural next step (this file's whole schema is a flat, appendable line — nothing here depends on a private
+ * format). Best-effort, same as {@link writeDriverStatus} — a write failure never gates the tick.
+ * @param {string} traceDir  the resolved `.conveyor/decision-trace/` directory.
+ * @param {{tick:number}} ctx
+ * @param {Array<object>} entries  this tick's `surface.decisionTrace`.
+ */
+export function appendDecisionTrace(traceDir, ctx, entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  try {
+    mkdirSync(traceDir, { recursive: true });
+    const at = new Date();
+    // #2747 — the day-shard is the OPERATOR's calendar day (`localDateString`), not the runtime's UTC day.
+    const day = localDateString(at);
+    const lines = entries.map((e) => JSON.stringify({ tick: ctx.tick, at: at.toISOString(), ...e })).join('\n') + '\n';
+    appendFileSync(join(traceDir, `${day}.jsonl`), lines);
+  } catch (e) {
+    process.stderr.write(`⚠ decision-trace write failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+  }
+}
+
 /** Build the real `emit` effect: print the tick's status line + notes, and the dispatch/watch decisions the
- *  judgment layer executes (the runner spends no model context, so it surfaces them — #2701 clause 3). */
-function makeCliEmit({ json = false } = {}) {
+ *  judgment layer executes (the runner spends no model context, so it surfaces them — #2701 clause 3). Also
+ *  writes the durable external status file every tick (see {@link writeDriverStatus}) and appends the tick's
+ *  decision trace (see {@link appendDecisionTrace}), both regardless of `json`. */
+function makeCliEmit({ json = false, statusPath = null, traceDir = null } = {}) {
   return (surface, ctx) => {
+    if (statusPath) writeDriverStatus(statusPath, ctx, surface);
+    if (traceDir) appendDecisionTrace(traceDir, ctx, surface.decisionTrace);
     if (json) { process.stdout.write(JSON.stringify({ tick: ctx.tick, ...surface }) + '\n'); return; }
     const { dispatch } = surface;
     const counts = `${dispatch.builds.length} build · ${dispatch.prepareScope.length + dispatch.prepareDecision.length} prepare · ${dispatch.fixes.length} fix · ${dispatch.ciHeals.length} heal · ${surface.armWatchers.length} watch`;
@@ -476,6 +564,12 @@ async function main(argv) {
   // Runner lives in skills-src/conveyor/; the tick core + the deterministic passes live in scripts/.
   const SCRIPTS_DIR = join(HERE, '..', '..', 'scripts');
   const TICK_CORE = join(SCRIPTS_DIR, 'conveyor', 'tick-core.mjs');
+  // The checked-out repo root this runner is driving — resolved by SCRIPT LOCATION (never CWD), the same
+  // convention `queue-scope.mjs` documents for its own sidecar, so a child process's own cwd can never point
+  // the status file / trace dir at a different checkout than the one actually running.
+  const REPO_ROOT = join(HERE, '..', '..');
+  const STATUS_PATH = join(REPO_ROOT, '.conveyor', DRIVER_STATUS_FILENAME);
+  const TRACE_DIR = join(REPO_ROOT, '.conveyor', 'decision-trace');
 
   const repo = typeof flags.repo === 'string' ? flags.repo : null;
   const json = !!flags.json;
@@ -485,7 +579,7 @@ async function main(argv) {
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = () => ({
     tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
-    emit: makeCliEmit({ json }),
+    emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
     mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     intervalMs,

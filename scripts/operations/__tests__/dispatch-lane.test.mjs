@@ -31,6 +31,7 @@ import { createRegistry } from '../registry.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
 import {
   BRIEF_PLACEHOLDERS,
+  BRIEF_VALUE_RE,
   BRIEF_REQUIRED_BY_KIND,
   BRIEF_TOKEN_RE,
   DEFAULT_EXPECTED_WITHIN_MINUTES,
@@ -79,6 +80,8 @@ import {
   // #xu2krte — resume-or-fresh dispatch.
   parseBackgroundedId,
   resumeSucceeded,
+  // #3637 — the POC delivery target.
+  resolveDeliveryBase,
 } from '../dispatch-lane-io.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -431,7 +434,7 @@ describe('the lane comes from the tick core or nowhere', () => {
 // ── 3. the brief is FILLED, and a half-filled one never leaves the building ─────────────────────────────────
 
 describe('filling the delivery brief', () => {
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b' };
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b', DELIVERY_BASE: 'main' };
 
   it('substitutes all five placeholders and leaves the prose alone', () => {
     const { prompt, unknownTokens } = fillBrief(BRIEF, VALUES);
@@ -1499,6 +1502,8 @@ describe('the tick reader', () => {
   it('resolves the item\'s spec path, repo-qualified scope and open blockers from the canonical loader', () => {
     expect(readTick({ num: '3037', ...bindings }).item).toEqual({
       num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: [],
+      // #3637 — an item with no `deliveryTarget:` resolves to the default target, `main`.
+      deliveryTarget: null, deliveryBase: 'main',
     });
   });
 
@@ -1640,9 +1645,11 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     return { run: outcome.run, spawned };
   }
 
-  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. */
+  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. Passes
+   *  the KIND'S OWN required set (not `fillBrief`'s build-shaped default), so a name only one kind's brief
+   *  carries — `DELIVERY_BASE` since #3637 — is never demanded of a kind that has no such token. */
   function expectedPrompt(kind, values) {
-    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values).prompt;
+    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values, BRIEF_REQUIRED_BY_KIND[kind]).prompt;
   }
 
   // ── criterion 1 ──────────────────────────────────────────────────────────────────────────────────────────
@@ -1705,7 +1712,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
-        SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/',
+        SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',
       }),
     ]);
     expect(run.findings.read.scope).toEqual(['we:scripts/operations/']);
@@ -2260,7 +2267,7 @@ describe('#3110 — attemptTagFor: the pure retry-letter mapping', () => {
 });
 
 describe('#3110 — fillBrief tolerates a blank OPTIONAL placeholder (ATTEMPT_TAG), everything else unchanged', () => {
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x' };
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x', DELIVERY_BASE: 'main' };
 
   it('ATTEMPT_TAG never supplied at all does not throw, even though it is now in the build required set', () => {
     // BRIEF (the synthetic fixture above) never references {{ATTEMPT_TAG}} at all, so this only proves the
@@ -2318,6 +2325,7 @@ describe('#3110 — a fresh build dispatch\'s attempt tag rides its session slug
   it('the REAL delivery-agent brief folds ATTEMPT_TAG into the branch name exactly where step 8 shows', () => {
     const VALUES = {
       ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: '8', SESSION_SLUG: 'conveyor-3037b', SCOPE: 'we:scripts/',
+      DELIVERY_BASE: 'main',
     };
     const firstAttempt = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: '' }, BRIEF_REQUIRED_BY_KIND.build);
     expect(firstAttempt.prompt).toContain('lane/3037-<slug>');
@@ -2521,5 +2529,44 @@ describe('readTick — `openBlockers` reaches the read end to end, from `loadIte
     const v = shapeDispatchRead(out, { num: '3398' });
     expect(v.dispatching).toBe(false);
     expect(v.holdReason).toContain('3443');
+  });
+});
+
+
+// ── #3637 — the POC delivery target rides the brief as {{DELIVERY_BASE}} ────────────────────────────────────
+
+describe('#3637 — deliveryTarget resolves to the brief\'s {{DELIVERY_BASE}}', () => {
+  const REG = { version: 1, branches: [{ branch: 'lane/demo', purpose: 'p', owner: 'o', dateOpened: '2026-09-12', target: 'main', scope: [], graduationItem: null }] };
+
+  it('DELIVERY_BASE is a registered placeholder, required for BUILD only', () => {
+    expect(BRIEF_PLACEHOLDERS).toContain('DELIVERY_BASE');
+    expect(BRIEF_REQUIRED_BY_KIND.build).toContain('DELIVERY_BASE');
+    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+      expect(BRIEF_REQUIRED_BY_KIND[kind]).not.toContain('DELIVERY_BASE');
+    }
+  });
+
+  it('THE REAL BRIEF carries the token — the literal `--base=main` is gone from both the acquire and the open-pr', () => {
+    const brief = readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8');
+    expect(brief).toMatch(/\{\{DELIVERY_BASE\}\}/);
+    expect(brief).not.toMatch(/--base=main\b/);
+  });
+
+  it('an item with NO deliveryTarget resolves to main — today\'s behaviour, byte-identical', () => {
+    expect(resolveDeliveryBase(null, '3037', REG)).toBe('main');
+    expect(resolveDeliveryBase('main', '3037', REG)).toBe('main');
+  });
+
+  it('a REGISTERED POC branch resolves to that branch, either spelling', () => {
+    expect(resolveDeliveryBase('lane/demo', '3037', REG)).toBe('lane/demo');
+    expect(resolveDeliveryBase('origin/lane/demo', '3037', REG)).toBe('lane/demo');
+  });
+
+  it('an UNREGISTERED branch REFUSES the dispatch rather than forking a lane from a ref that may not exist', () => {
+    expect(() => resolveDeliveryBase('lane/never-declared', '3037', REG)).toThrow(/not a registered POC branch/);
+  });
+
+  it('a resolved POC branch survives BRIEF_VALUE_RE — it is pasted unquoted into a shell command', () => {
+    expect(BRIEF_VALUE_RE.test('lane/mechanical-dispatcher')).toBe(true);
   });
 });

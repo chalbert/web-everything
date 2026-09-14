@@ -1,0 +1,299 @@
+<title>Decision Docket</title>
+<!--
+  TEMPLATE — skills-src/decision-docket/template.html (see SKILL.md alongside this file)
+
+  This is the ONE reusable shell for the Decision Docket artifact. Fill the {{PLACEHOLDER}}
+  markers and the REPEAT-marker blocks below from live data (see SKILL.md "Pulling the data").
+  Do not restyle it per refresh — a docket that looks different from the last one is exactly
+  the inconsistency this template exists to end. If a genuinely new section is needed, add a
+  class in the same visual language (reuse the tokens below) rather than inventing new colors.
+
+  THE ONE RULE THIS TEMPLATE EXISTS TO ENFORCE (docs/agent/backlog-workflow.md#decision-docket):
+  EVERY prepared item this docket lists gets a full ".dcard" fork breakdown — every "## Fork N",
+  every option (a)/(b)/(c), the reason each non-default option was rejected, and the bold default
+  — rendered with .forkhd / .opt / .oc / .ov below. The summary table (".tw table") is for
+  ranking/context ONLY (unblocks, age, prepared/not). It is never a substitute for the fork
+  breakdown, and no section may show only the table for an item that has a fork breakdown
+  elsewhere expected of it. If the docket can't afford full detail for every prepared item it
+  lists, the fix is to list fewer items — never to thin the detail on the ones that stay.
+-->
+<style>
+  :root{
+    --paper:#EFF0F3;--surface:#FAFAFC;--sunk:#E3E5EA;--ink:#15171B;--ink-2:#4C525E;
+    --ink-3:#828A97;--rule:#CFD3DB;--rule-2:#E1E4EA;--accent:#5A3A6B;--accent-soft:#E7DEEC;
+    --fresh:#3C6B87;--fresh-bg:#DCE8EF;--wait:#8A6110;--wait-bg:#F2E7CE;--stale:#8C3A2E;--stale-bg:#F3DED9;
+    --ratified:#1E5C46;--ratified-bg:#DAEAE3;--new:#2C5F6B;--new-bg:#DCE7E7;
+  }
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+    --paper:#0E1013;--surface:#171A1F;--sunk:#1E222A;--ink:#E6E8EC;--ink-2:#A4ABB7;
+    --ink-3:#767E8B;--rule:#2B303A;--rule-2:#232830;--accent:#B99AD0;--accent-soft:#2A1F33;
+    --fresh:#79B4D4;--fresh-bg:#142935;--wait:#D6A93F;--wait-bg:#33280D;--stale:#E08272;--stale-bg:#37201B;
+    --ratified:#5FBE99;--ratified-bg:#11332680;--new:#7FB8C6;--new-bg:#1B2C2E;
+  }}
+  :root[data-theme="dark"]{
+    --paper:#0E1013;--surface:#171A1F;--sunk:#1E222A;--ink:#E6E8EC;--ink-2:#A4ABB7;
+    --ink-3:#767E8B;--rule:#2B303A;--rule-2:#232830;--accent:#B99AD0;--accent-soft:#2A1F33;
+    --fresh:#79B4D4;--fresh-bg:#142935;--wait:#D6A93F;--wait-bg:#33280D;--stale:#E08272;--stale-bg:#37201B;
+    --ratified:#5FBE99;--ratified-bg:#113326;--new:#7FB8C6;--new-bg:#1B2C2E;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);
+    font-family:Barlow,"Helvetica Neue",Arial,sans-serif;font-size:16px;line-height:1.55;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1020px;margin:0 auto;padding:0 24px 80px}
+  .mono{font-family:"Roboto Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+
+  header.mast{padding:52px 0 24px;border-bottom:2px solid var(--ink);margin-bottom:30px}
+  .kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:clamp(38px,6.5vw,62px);line-height:1;letter-spacing:-.025em;font-weight:700;margin:0 0 14px}
+  .lede{font-size:19px;color:var(--ink-2);margin:0;max-width:62ch}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .stats{display:grid;gap:12px;margin:28px 0 0;grid-template-columns:repeat(2,1fr)}
+  @media(min-width:640px){.stats{grid-template-columns:repeat(4,1fr)}}
+  .stat{background:var(--surface);border:1px solid var(--rule);border-radius:5px;padding:14px 16px}
+  .stat .v{font-family:"Roboto Mono",monospace;font-size:29px;font-weight:500;line-height:1;
+    letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .stat .k{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+    font-weight:600;margin-top:7px}
+  .stat.a .v{color:var(--accent)}
+  .stat.s .v{color:var(--stale)}
+  .stat.n .v{color:var(--new)}
+
+  h2{font-size:11px;letter-spacing:.15em;text-transform:uppercase;font-weight:700;color:var(--ink-3);margin:0 0 7px}
+  section{margin-top:46px}
+  section>h3{font-size:clamp(22px,3vw,28px);line-height:1.15;letter-spacing:-.015em;font-weight:600;
+    margin:0 0 14px;text-wrap:balance}
+  p{margin:0 0 14px;max-width:74ch}
+  code{font-family:"Roboto Mono",monospace;font-size:.86em;background:var(--sunk);padding:.1em .35em;border-radius:3px}
+  strong{font-weight:600}
+
+  .callout{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);
+    border-radius:0 5px 5px 0;padding:18px 22px;margin:20px 0}
+  .callout p:last-child{margin-bottom:0}
+  .callout.warn{border-left-color:var(--stale)}
+  .callout.newc{border-left-color:var(--new)}
+
+  /* age distribution strip */
+  .strip{display:flex;height:34px;border-radius:4px;overflow:hidden;border:1px solid var(--rule);margin:16px 0 8px}
+  .strip div{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;
+    font-family:"Roboto Mono",monospace;color:#fff}
+  .strip .f{background:var(--fresh)}.strip .w{background:var(--wait)}.strip .s{background:var(--stale)}
+  .striplegend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--ink-3)}
+  .striplegend b{color:var(--ink-2);font-weight:600}
+
+  /* the compact ranking/context table — NEVER a substitute for the .dcard fork breakdown below */
+  .tw{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--surface);margin:18px 0}
+  table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:640px}
+  th{text-align:left;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;
+    color:var(--ink-3);padding:10px 13px;border-bottom:1px solid var(--rule);background:var(--sunk);white-space:nowrap}
+  td{padding:9px 13px;border-bottom:1px solid var(--rule-2);vertical-align:middle;color:var(--ink-2)}
+  tr:last-child td{border-bottom:0}
+  td.n,th.n{text-align:right;white-space:nowrap}
+  td.ti{color:var(--ink);font-weight:500;line-height:1.35}
+  th.ti{text-align:left}
+  /* NOTE: no age-based "stale" row-title coloring here on purpose — red already carries the "needs prep"
+     pill's meaning on this page, and reusing it for "waiting 61+ days" too overloaded one color with two
+     unrelated signals. The per-row age BAR (.bar i below) still encodes age by color; only the row TEXT lost
+     it. */
+  tbody tr.new td.ti{color:var(--new)}
+  .agec{width:150px;white-space:nowrap}
+  .bar{display:inline-block;width:74px;height:7px;background:var(--sunk);border-radius:4px;
+    overflow:hidden;vertical-align:middle;margin-right:9px}
+  .bar i{display:block;height:100%;background:var(--fresh)}
+  tr.waiting .bar i{background:var(--wait)}
+  tr.stale .bar i{background:var(--stale)}
+  tr.new .bar i{background:var(--new)}
+  .age{font-size:12.5px;color:var(--ink-3)}
+  .pill{font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;
+    padding:2px 6px;border-radius:3px;margin-left:6px;white-space:nowrap;
+    font-family:Barlow,sans-serif;color:var(--ratified);background:var(--ratified-bg)}
+  .pill.batchp{color:var(--accent);background:var(--accent-soft)}
+  .pill.prepd{color:var(--fresh);background:var(--fresh-bg)}
+  .pill.warnp{color:var(--stale);background:var(--stale-bg)}
+  .pill.newp{color:var(--new);background:var(--new-bg)}
+
+  /* ── the fork-breakdown card — THE point of this artifact ───────────────────── */
+  .batch{display:grid;gap:16px;margin:20px 0 0}
+  .dcard{background:var(--surface);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+  .dcard > .hd{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;padding:14px 20px;
+    border-bottom:1px solid var(--rule-2);background:var(--sunk)}
+  .dcard .num{font-family:"Roboto Mono",monospace;font-size:14px;font-weight:500;color:var(--accent)}
+  .dcard .nm{font-size:17px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+  .dcard .meta{margin-left:auto;font-family:"Roboto Mono",monospace;font-size:11.5px;color:var(--ink-3);
+    font-variant-numeric:tabular-nums;display:flex;gap:10px;align-items:center}
+  .dcard .bd{padding:16px 20px}
+  .dcard .bd>p{margin:0 0 11px;font-size:15px;max-width:none}
+  .dcard .bd>p:last-child{margin-bottom:0}
+
+  /* one .forkhd + its .opt grid per "## Fork N" in the source item — repeat the whole
+     .forkhd + .opts block once per fork, in source order */
+  .forkhd{display:flex;align-items:baseline;gap:10px;margin:22px 0 4px;font-size:16.5px;font-weight:600;
+    color:var(--ink)}
+  .dcard .bd>.forkhd:first-of-type{margin-top:4px}
+  .forktag{font-family:"Roboto Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:4px}
+  .forkq{font-size:14.5px;color:var(--ink-2);margin:0 0 4px;max-width:none}
+  .forkwhy{font-size:13px;color:var(--ink-3);margin:0 0 12px;max-width:none;font-style:italic}
+
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 8px}
+  .opts.three{grid-template-columns:1fr 1fr 1fr}
+  .opts.one{grid-template-columns:1fr}
+  @media(max-width:640px){.opts,.opts.three{grid-template-columns:1fr}}
+  .opt{border:1px solid var(--rule);border-radius:5px;padding:11px 14px}
+  .opt-lbl{font-family:"Roboto Mono",monospace;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+  .opt-bd{font-size:14px;line-height:1.5;color:var(--ink-2)}
+  .opt-bd code{background:var(--sunk)}
+  /* .oc = option, chosen (the bold recommended default) */
+  .oc{background:var(--accent-soft);border-color:transparent}
+  .oc .opt-lbl{color:var(--accent)}
+  .oc .opt-bd{color:var(--ink)}
+  /* .ov = option, void (rejected — its rejection reason is mandatory content, never omitted) */
+  .ov{background:var(--stale-bg);border-color:transparent}
+  .ov .opt-lbl{color:var(--stale)}
+  /* an open (not-yet-defaulted) option on a genuinely un-prepared fork shown for transparency */
+  .oo{background:var(--sunk);border-color:transparent}
+  .oo .opt-lbl{color:var(--ink-3)}
+
+  .attack{font-family:"Roboto Mono",monospace;font-size:12px;color:var(--ink-3);margin:2px 0 0}
+  .attack b{color:var(--ink-2);font-weight:600}
+  .attack.clear b{color:var(--fresh)}
+  .attack.flagged b{color:var(--wait)}
+  .attack.refuted b{color:var(--stale)}
+
+  .thecall{border-top:1px solid var(--rule-2);padding:12px 20px;background:var(--sunk);
+    font-size:14px;font-weight:600;color:var(--ink)}
+  .thecall span{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);
+    font-weight:700;display:block;margin-bottom:3px}
+
+  footer{margin-top:60px;padding-top:18px;border-top:2px solid var(--ink);font-size:13.5px;color:var(--ink-3)}
+  footer p{margin-bottom:8px}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* Defensive — the Artifact viewer supplies this reset itself, but the same generated HTML is also
+     openable directly as a plain file (local checks, screenshots), so the filter toggles below must not
+     depend on that host-supplied rule to actually hide anything. */
+  [hidden]{display:none!important}
+
+  /* jump-link from a summary-table row to its full .dcard breakdown further down the page */
+  td.ti a{color:inherit;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:2px}
+  td.ti a:hover{text-decoration-color:var(--accent)}
+
+  /* the filter toolbar — same visual language as .callout/.tw, not a new component family */
+  .filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;margin:24px 0 0;padding:14px 18px;
+    background:var(--surface);border:1px solid var(--rule);border-radius:6px}
+  .filtergroup{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+  .filtergroup .flabel{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;
+    color:var(--ink-3);margin-right:1px}
+  .fbtn{font:inherit;font-size:12.5px;font-weight:600;line-height:1;padding:6px 11px;border-radius:99px;
+    border:1px solid var(--rule);background:var(--paper);color:var(--ink-2);cursor:pointer}
+  .fbtn:hover{border-color:var(--ink-3);color:var(--ink)}
+  .fbtn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .filtercount{font-size:12px;color:var(--ink-3);margin-left:auto;font-family:"Roboto Mono",monospace;
+    font-variant-numeric:tabular-nums}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap">
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="kicker">Session docket · web-everything · {{DATE_BUILT}}{{#IF_UPDATED}} (updated {{DATE_UPDATED}}){{/IF_UPDATED}}</p>
+  <h1>Decision Docket</h1>
+  <p class="lede">Every open decision on the board, ranked by what it unblocks and how long it has waited. <b>{{READY_COUNT}} are already prepared and sitting on a ratification you have not given.</b> {{HEADLINE_SENTENCE}}</p>
+  <div class="stats">
+    <div class="stat a"><div class="v">{{READY_COUNT}}</div><div class="k">Ready to ratify</div></div>
+    <div class="stat"><div class="v">{{NEEDS_PREP_COUNT}}</div><div class="k">Need preparation</div></div>
+    <div class="stat s"><div class="v">{{STALE_COUNT}}</div><div class="k">Waiting 61+ days</div></div>
+    <div class="stat n"><div class="v">{{NEW_COUNT}}</div><div class="k">Added since last docket</div></div>
+  </div>
+</header>
+
+<!-- OPTIONAL: an "Update — <date>" section, only when this is a refresh of a prior docket rather
+     than a first build. Say what changed since last time in plain terms — a new item filed,
+     a ruling landed, a stamp corrected — never silently re-render the whole thing with no note. -->
+
+<section>
+  <h2>The docket — ranked by leverage, then age</h2>
+  <h3>Prepared and not-yet-prepared, one table for context and ranking ONLY</h3>
+  <p><code>unblocks</code> is how many items name this decision as a blocker. <code>to&nbsp;ready</code> is how many of those would become immediately agent-ready once it is ruled. <strong>This table never substitutes for the fork breakdown below</strong> — it exists so a reader can see the whole board and the ranking at a glance before going card by card.</p>
+  <div class="tw"><table>
+    <thead><tr><th>ID</th><th class="ti">Decision</th><th class="n">Unblocks</th><th class="n">To ready</th><th>Waiting</th></tr></thead>
+    <tbody>
+      <!-- REPEAT one <tr> per item in selection.tierB, sorted by leverageScore desc.
+           tr class: "fresh" (<=30d), "waiting" (31-60d), "stale" (61d+), "new" (added since last docket).
+           Pills (optional, append after the title): .pill.prepd "prepared" / .pill (bare) "ratified"
+           / .pill.warnp "held" or "stamp unbacked?" / .pill.batchp "in batch" / .pill.newp "new". -->
+      <tr class="{{AGE_CLASS}}">
+        <td class="n mono">#{{NUM}}</td>
+        <td class="ti">{{TITLE}} <span class="pill {{PILL_CLASS}}">{{PILL_TEXT}}</span></td>
+        <td class="n mono">{{DIRECT_UNBLOCKS}}</td>
+        <td class="n mono">{{UNBLOCKS_TO_READY}}</td>
+        <td class="agec"><span class="bar"><i style="width:{{AGE_PCT}}%"></i></span><span class="mono age">{{AGE_DAYS}}d</span></td>
+      </tr>
+      <!-- /REPEAT -->
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Prepared — full fork detail</h2>
+  <h3>Every prepared item, in full — nothing here is a summary</h3>
+  <p>Each card below renders the item's own <code>## Fork N</code> sections verbatim: every option, the reason each rejected option was rejected, and the bold recommended default — <strong>never</strong> compressed to a title and a row. A rejection you cannot see is a rejection you cannot overrule.</p>
+
+  <div class="batch">
+    <!-- REPEAT one .dcard per prepared item (selection.tierB entries with prepared:true, PLUS
+         any item whose PR hasn't merged yet — see SKILL.md "Items not yet in check:readiness").
+         EVERY prepared item gets one of these. Do not thin this to "the current batch" only. -->
+    <div class="dcard">
+      <div class="hd">
+        <span class="num">#{{NUM}}</span><span class="nm">{{TITLE}}</span>
+        <span class="meta">prepared {{PREPARED_DATE}} · unblocks {{DIRECT_UNBLOCKS}} · waiting {{AGE_DAYS}}d</span>
+      </div>
+      <div class="bd">
+        <p>{{DIGEST_PARAGRAPH}}</p>
+
+        <!-- REPEAT the block below once per "## Fork N" in the item body, in source order -->
+        <div class="forkhd"><span class="forktag">FORK {{FORK_N}}</span> {{FORK_CRUX}}</div>
+        <p class="forkwhy">{{FORK_EXISTENCE_JUSTIFICATION}}</p>
+        <p class="forkq">{{FORK_QUESTION_OR_AXIS_SUMMARY}}</p>
+        <div class="opts{{OPTS_WIDTH_CLASS}}">
+          <!-- REPEAT one .opt per option (a)/(b)/(c)… -->
+          <div class="opt oc">
+            <div class="opt-lbl">✓ Default — {{OPTION_LABEL}}</div>
+            <div class="opt-bd">{{OPTION_BODY}}</div>
+          </div>
+          <div class="opt ov">
+            <div class="opt-lbl">✕ Rejected — {{OPTION_LABEL}}</div>
+            <div class="opt-bd">{{OPTION_BODY_WITH_REJECTION_REASON}}</div>
+          </div>
+          <!-- /REPEAT options -->
+        </div>
+        <p class="attack {{ATTACK_CLASS}}"><b>Skeptic:</b> {{SKEPTIC_LINE}} &nbsp;·&nbsp; <b>Screen:</b> {{SCREEN_LINE}}</p>
+        <!-- /REPEAT forks -->
+
+      </div>
+      <div class="thecall"><span>{{CALL_LABEL}}</span>{{CALL_BODY}}</div>
+    </div>
+    <!-- /REPEAT prepared items -->
+  </div>
+</section>
+
+<!-- OPTIONAL sections, same visual language, add only when there is real content:
+     - "Held back" (.tw table): items removed from a ratification batch and why (see the callout
+       pattern above for a one-off note, or a table like the docket table for several).
+     - "Ratified this session" (.callout, border-left-color:var(--ratified)): what was ruled + where
+       it landed (PR numbers).
+     - "Not yet prepared" (.tw table, no age bar needed): items with no forks yet — /prepare closes
+       this gap, never present these as ready. -->
+
+<footer>
+  <p>{{PROVENANCE_LINE}}</p>
+  <p>Ratify with <code>/next decision</code>. Prepare with <code>/prepare &lt;id&gt;</code>.</p>
+</footer>
+
+</div>
+
+</body></html>

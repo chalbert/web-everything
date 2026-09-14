@@ -57,6 +57,8 @@ const execFileAsync = promisify(execFile);
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
+// #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
+import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
@@ -597,11 +599,12 @@ export function defaultLoadItems(root) {
  *  hold — but this function used to narrow the record down to `num`/`slug`/`specPath`/`scope` and drop it,
  *  which is why the manual `--num=<N>` path had no `blockedBy` awareness at all: the data was computed, never
  *  read here. See `shapeDispatchRead`'s blocked-item refusal, which is what actually reads this field. */
-export function findItem(key, loadItems) {
+export function findItem(key, loadItems, pocRegistry = null) {
   let items = [];
   try { items = loadItems() || []; } catch { return null; }
   const it = (Array.isArray(items) ? items : []).find((x) => normNum(x?.num) === key);
   if (!it || !it.slug) return null;
+  const rawTarget = typeof it.deliveryTarget === 'string' && it.deliveryTarget.trim() ? it.deliveryTarget.trim() : null;
   return {
     num: String(it.num),
     slug: String(it.slug),
@@ -610,7 +613,30 @@ export function findItem(key, loadItems) {
     scope: Array.isArray(it.scope) ? it.scope.map(String) : [],
     // The still-open `blockedBy` targets (#3462), or `[]` when every edge resolved or the item names none.
     openBlockers: Array.isArray(it.openBlockers) ? it.openBlockers.map(String) : [],
+    // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
+    // loader spreads unknown frontmatter through (`...data`), so this arrives with no loader change; it is
+    // narrowed here for the same reason `openBlockers` is — a field that is computed but never carried through
+    // this function is a field the dispatch path cannot see.
+    //
+    // RESOLVED AND VALIDATED HERE, in the io shell, not in the declaration. `we:scripts/operations/
+    // dispatch-lane.mjs` is asserted (by its own suite) to reach nothing that can act — no `node:` specifier
+    // anywhere in its import graph — and the registry lives in a file, so the read belongs on this side. The
+    // declaration only reads the resolved `deliveryBase` string.
+    deliveryTarget: rawTarget || null,
+    deliveryBase: resolveDeliveryBase(rawTarget, it.num, pocRegistry),
   };
+}
+
+/** #3637 — the delivery target for one item, validated against the POC-branch registry. An UNREGISTERED
+ *  branch THROWS: doctrine rule 10(c) says a POC branch must be DECLARED, and a dispatch aimed at an
+ *  undeclared ref would fork a lane from a ref that may not exist and then have nowhere to land it. The same
+ *  predicate runs as a LINT at filing time (`we:scripts/check-backlog-item.mjs`), so the normal way to satisfy
+ *  this is never to reach it with a bad value. `registry` is injected for tests. */
+export function resolveDeliveryBase(target, num, registry) {
+  const reg = registry ?? readPocRegistry();
+  const verdict = validateDeliveryTarget(reg, target);
+  if (!verdict.ok) throw new Error(`dispatch-lane.read: #${num} — ${verdict.error}`);
+  return verdict.target;
 }
 
 /** `readTick` bound to one root — the shape the declaration wants. */

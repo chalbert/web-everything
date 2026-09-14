@@ -12,6 +12,7 @@ scope:
   - "plateau-app:scripts/record-design-snapshot.mjs"
   - "plateau-app:public/design-snapshots/index.json"
   - "plateau-app:tests/visual/README.md"
+deliveryAgent: codex
 ---
 
 # Capture dated design snapshots per feature — feed the design-increment filmstrip

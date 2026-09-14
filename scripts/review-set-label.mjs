@@ -53,7 +53,6 @@
  * `we:scripts/lib/review-escalation.mjs` (`REVIEW_LABELS`, `hasReviewLabel`) — it never re-hardcodes the
  * label strings.
  */
-import { execFileSync } from 'node:child_process';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -85,6 +84,21 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 import { computeNetDiffText } from './merge-ai-prs.mjs';
 import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// #3631 slice — the LAST bare `execFileSync` in this file's own gh-adjacent write path. This exec closure is
+// `computeNetDiffText`'s injected exec, and today it is only ever invoked with `cmd==='git'` (a fetch/diff/
+// merge-base against `origin`, never a `gh` call — the label reads/writes above already route through
+// `createGhProvider()`'s own throttled default, wired earlier under #3621). It was still a hand-rolled, fully
+// generic `(cmd, args, opts) => execFileSync(cmd, args, opts)` passthrough with NO throttle/backoff awareness at
+// all, unlike every other subprocess seam in this file. `execFileSyncThrottled` is the EXACT byte-for-byte
+// transparent drop-in for that shape (`we:scripts/lib/gh-throttle.mjs` — the same function
+// `we:scripts/conveyor/ci-queue-watch.mjs#defaultListRuns` already defaults to): it special-cases `file==='gh'`
+// through the semaphore+backoff wrapper and falls straight through to a real `execFileSync(file, args, opts)`
+// for anything else, so swapping it in here changes NOTHING about today's git-only behaviour while closing the
+// gap for good — a future caller of `computeNetDiffText` that ever threads a `gh` call through this same
+// closure (or a copy-paste of it elsewhere) inherits the throttle for free instead of re-introducing the bare
+// call. See `we:backlog/3631-migrate-remaining-gh-cli-call-sites-to-the-gh-throttle-wrapp.md` for the tracked
+// item this is one slice of.
+import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
 import { classifyPrLiveness, inertPrMessage } from './lib/pr-liveness.mjs';
@@ -751,7 +765,9 @@ export function runReviewLabelCli({
     try {
       // `exec` MUST be execFileSync-shaped — `(cmd, argsArray, opts)`. Passing a shell-exec here is the exact
       // caller bug #2952 exists to make diagnosable: it throws a TypeError inside the try and degrades to an
-      // unscored basis, which here silently costs the fingerprint.
+      // unscored basis, which here silently costs the fingerprint. `execFileSyncThrottled` (#3631 slice) keeps
+      // that exact shape and exact throw/return contract for the `cmd==='git'` calls this closure actually makes
+      // — see the import site's header for why it is wired here anyway.
       //
       // NO EXPLICIT `cwd` HERE: THIS READS THE PROCESS'S OWN CWD, AND EVERY CALLER MUST GUARANTEE THAT IS THE
       // NAMED REPO'S CHECKOUT (PR #1087 review note 2; #3202). The original reasoning was that the CLI is
@@ -768,7 +784,7 @@ export function runReviewLabelCli({
       // `cwd` on this one call would not be enough — the `--body-file` allowlist is rooted at `process.cwd()`
       // too, so the process's location is the contract, not any single read's.
       const net = computeNetDiffText({
-        exec: (cmd, args, opts) => execFileSync(cmd, args, opts),
+        exec: execFileSyncThrottled,
         rev: headRefName,
         fetchExtraRefs: headRefName ? [headRefName] : [],
       });

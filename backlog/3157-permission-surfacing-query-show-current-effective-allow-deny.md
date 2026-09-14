@@ -6,6 +6,7 @@ status: open
 relatedTo: ["3149", "3153"]
 dateOpened: "2026-08-17"
 tags: [operations, permissions, observability]
+deliveryAgent: codex
 ---
 
 # Permission-surfacing query: show current effective allow/deny state on demand

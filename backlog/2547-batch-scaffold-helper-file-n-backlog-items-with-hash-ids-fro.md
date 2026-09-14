@@ -9,6 +9,7 @@ scope:
   - we:scripts/backlog.mjs
 dateOpened: "2026-07-18"
 tags: []
+deliveryAgent: codex
 ---
 
 # Batch-scaffold helper — file N backlog items with hash ids from one spec

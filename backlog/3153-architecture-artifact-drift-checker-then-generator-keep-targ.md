@@ -6,6 +6,7 @@ status: open
 parent: "3029"
 dateOpened: "2026-08-17"
 tags: [operations, epic-3029, documentation, observability]
+deliveryAgent: codex
 ---
 
 # Architecture-artifact drift checker, then generator: keep target-architecture docs code-visible

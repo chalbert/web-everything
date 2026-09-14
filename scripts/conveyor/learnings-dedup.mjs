@@ -94,6 +94,10 @@ export function dedup(entries, { threshold = DEFAULT_THRESHOLD } = {}) {
     // an ordinary friction entry, defeating the whole point of "propose a fix". Surface it explicitly, ONLY
     // when at least one member is a blocking hiccup — an ordinary cluster's shape is unchanged.
     const blockingMembers = c.members.filter((m) => m.blocking === true);
+    // #3016 — the same rule for GROUNDING: a member's quoted turn + transcript pointer (and the harvest's
+    // verification verdict, when the caller attached one) must reach the red-team, or verification happened for
+    // nothing. One evidence row per grounded member; an ungrounded cluster's shape is unchanged.
+    const groundedMembers = c.members.filter((m) => typeof m.quotedTurn === 'string');
     return {
       kind: rep.kind,
       area: rep.area,
@@ -107,9 +111,21 @@ export function dedup(entries, { threshold = DEFAULT_THRESHOLD } = {}) {
       // because "three different sessions hit this" is real recurrence evidence and "one session said it
       // three times" is not.
       sessions: [...new Set(c.members.map((m) => m.session).filter(Boolean))],
+      // Distinct UTC DAYS the members were observed on (#3016) — the harvest's second corroboration axis, a
+      // ranking input only. Empty when no member carries a `ts`.
+      days: [...new Set(c.members.map((m) => (typeof m.ts === 'string' ? m.ts.slice(0, 10) : null)).filter(Boolean))].sort(),
       ...(blockingMembers.length ? {
         blocking: true,
         proposedFixes: [...new Set(blockingMembers.map((m) => m.proposedFix).filter(Boolean))],
+      } : {}),
+      ...(groundedMembers.length ? {
+        evidence: groundedMembers.map((m) => ({
+          session: m.session ?? null,
+          ts: m.ts ?? null,
+          transcript: m.transcript,
+          quotedTurn: m.quotedTurn,
+          ...(m.grounding ? { grounding: m.grounding } : {}),
+        })),
       } : {}),
       _first: c.first,
     };

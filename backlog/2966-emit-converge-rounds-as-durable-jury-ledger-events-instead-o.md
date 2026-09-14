@@ -5,6 +5,7 @@ size: 2
 status: open
 dateOpened: "2026-08-06"
 tags: []
+deliveryAgent: codex
 ---
 
 # Emit /converge rounds as durable jury-ledger events instead of a private temp trail

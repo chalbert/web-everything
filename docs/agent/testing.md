@@ -38,6 +38,35 @@ applies to every "does it work / why is it broken" moment, not just to written t
   run the 11ty build, so render-layer bugs stay green-invisible — smoke template changes with a real
   build/probe too.
 
+### Nested CLI isolation probes
+
+Establish an ordinary child CLI baseline before attributing failure to isolation. In #3371 Probe 10,
+`codex exec` failed at app-server initialization and even Seatbelt's allow-all `true` control failed
+at `sandbox_apply`; neither result tested doctrine exclusion. Parent-shell edits do not prove child
+agent tools work. Deleting a tracked doctrine file also leaves it recoverable via `git show HEAD:AGENTS.md`,
+which the same probe observed: distinguish automatic context exclusion from enforced read denial.
+See [the commands and output](../../backlog/3371-probe-one-alternate-provider-against-the-judge-contract.md#probe-10--tool-bearing-doctrine-isolation-attempted-2026-09-10).
+
+The dispatching session subsequently supplied successful unsandboxed baseline/deletion/tool-bearing
+runs ([Probe 11](../../backlog/3371-probe-one-alternate-provider-against-the-judge-contract.md#probe-11--dispatching-sessions-unsandboxed-deletion-proof-2026-09-10)).
+Attribute that evidence to its actual observer; do not repeat nested probes already blocked by Seatbelt
+or describe supplied observations as locally reproduced. Root AGENTS.md deletion before child startup
+prevents its automatic loading in that setup; it does not erase Git history or other instruction sources.
+The `we:scripts/lib/isolation-provider.mjs` preparation port owns a disposable clone, not a process sandbox.
+Await preparation before launch, preserve exclusive ownership until the child exits, collect results,
+then await cleanup in `finally`. Injected-exec tests verify preparation mechanics, not model context.
+
+**Correction — Probe 9's "no override flag" conclusion was wrong (#3371 Probe 12, 2026-09-11).** A real
+Codex config override, `-c project_doc_max_bytes=0`, suppresses the CLI's automatic doctrine-file
+injection, live-verified in both `-s read-only` and `-s workspace-write` (tool-bearing) modes, with real
+tool use still working. It is weaker than deletion — the file stays on disk and a deliberate `cat
+AGENTS.md` still recovers it, also live-verified — so `we:scripts/lib/isolation-provider.mjs` gained
+`createConfigOverrideIsolationProvider` as a second backend alongside the deletion one, not a replacement.
+Lesson for future nested-CLI probes: a probe that finds no override flag by trying one or two candidate
+flags (`--ignore-user-config`, a bare `-C`) has not shown none exists — check the CLI's full `-c
+key=value` config surface (`codex exec --help`, or grep the installed binary's embedded config schema)
+before concluding a capability is absent.
+
 ### Hard rule — every verification must be agent-runnable; if it needs a real runtime, the harness is a dependency
 
 A verification item is only *real* if an agent can **reproduce its proof mechanically** — run a

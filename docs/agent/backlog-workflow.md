@@ -58,6 +58,7 @@ size: 3                            # Fibonacci points — ONLY on stories + unst
 parent: "049"                      # optional — NNN of the epic this rolls under (quote it: leading zeros)
 blockedBy: ["079", "092"]          # optional — NNN(s) this item can't start until they're resolved (quote: leading zeros)
 scope: ["src/backlog-view/", "docs/agent/"]   # optional — predicted touch-set (repo-relative path prefixes) a probe agent writes; the conveyor dispatcher reads it to hold overlapping items apart
+deliveryTarget: lane/mechanical-dispatcher   # optional — WHICH BRANCH this item lands on (#3637); absent/`main` = the normal PR-to-main path
 dateOpened: "YYYY-MM-DD"          # quote it — keeps it a string, not a parsed date
 dateResolved: "YYYY-MM-DD"        # required once status: resolved — the burndown plots this
 tags: [tag-a, tag-b]
@@ -73,6 +74,30 @@ The first paragraph is the summary shown on the index card. The rest of the
 body is the detail-page content. Keep the *deep* thinking in a report and link
 to it via `relatedReport`, rather than pasting a whole report in here.
 ```
+
+### `deliveryTarget:` — landing on a POC branch instead of `main` (#3637) {#delivery-target}
+
+Almost every item leaves this field off, and that is the normal path: the item is built in a lane forked from
+`main`, opens a PR against `main`, and lands through the drain with the full review process. Setting
+`deliveryTarget: <branch>` changes exactly one thing — **where the work lands** — and one consequence:
+
+- The lane is forked from that branch (`lane-pool.mjs acquire --base=<branch>`), not from `main`.
+- **There is no PR and no review pass of any shape.** No judge panel, no `converge` run, no escalation label.
+  The item's own tests/build (`verify-lane`) is the only gate. That is the whole point of the mode — the
+  operator's ruling on `#3637`: a landing into a POC branch must not pay a per-landing review tax, because
+  real review happens once, at graduation.
+- Landing runs `node scripts/operations/poc-land.mjs --branch=<branch>`, which takes that branch's own write
+  lock, fast-forwards when it can, and otherwise rebases onto the fresh tip, re-runs the tests and retries —
+  bounded at 3 attempts. It never forces.
+
+**The branch must be DECLARED.** `check:standards` (and the scoped `check:item`) reject a `deliveryTarget:`
+that is not in `we:scripts/lib/poc-branches.json`, and the dispatcher refuses the launch for the same reason.
+A POC branch's registry entry names what it is for, who graduates it, its graduation target and its scope —
+doctrine rule 10(c) in `we:skills-src/mechanical-delivery-doctrine/SKILL.md`. Register the branch first, then
+point items at it.
+
+**Graduating a POC branch to `main` is untouched by all of this** — that goes through the full existing
+process, undiluted, as its own item.
 
 **Repo-locus on code-path references.** Every code-path reference in the body (and in reports) must carry a
 `<repo>:` prefix so its constellation repo is unambiguous in chat / raw markdown: in-repo paths keep a
@@ -541,6 +566,41 @@ An item with all forks stated this way — each carrying options, a bold default
 
 Example offer line: *`jsx-directive-sugar` — add the deferred `<For>/<Show>/<Resource>` layer ([live](http://localhost:3000/backlog/070-jsx-directive-sugar/) · [md](backlog/070-jsx-directive-sugar.md))*.
 
+### Publishing the Decision Docket — full fork detail for every prepared item shown, never a summary row {#decision-docket}
+
+The **Decision Docket** — the "prepared to decide" surface of the shared **Decision Board** artifact
+([backlog/3562](/backlog/3562-a-standing-mechanical-pass-keeps-the-5-highest-leverage-open/),
+[backlog/3277](/backlog/3277-declare-an-operation-that-publishes-and-refreshes-a-decision/),
+[backlog/x7wehz2](/backlog/x7wehz2-a-permanent-decision-ledger-artifact-backed-by-the-db-capabi/)) —
+lists the highest-leverage prepared decisions ranked by `check:readiness --select --json` /
+`suggest-next --tier=B --json` (same leverage heuristic as everywhere else in this doc). Until the
+standing `decision-docket-watch` mechanical pass (#3562) ships and owns the refresh, a session builds or
+refreshes this page **by hand** — and this is the one, standing convention for doing so, not a preference
+to reinvent per session:
+
+> **Every prepared item the docket lists gets its full fork breakdown — every option, not just the
+> default, with the reason each rejected option was rejected, stated on merit. A rejection you cannot see
+> is a rejection you cannot overrule.**
+
+Concretely: for **each** prepared decision the docket shows, render the complete *prepared-fork shape*
+(above) straight from the item — every `## Fork N`'s options `(a)`/`(b)`/`(c)`…, the bold recommended
+default, and the *stated rejection reason* for every non-default option — not a compact summary row
+(ID / title / unblocks-count / age). A summary row forces the decider to open the item's own file to
+actually rule on it, which defeats the docket's whole purpose: a decider must be able to rule from the
+page alone, with nothing hidden behind another click.
+
+**This bar does not vary by section or by how the item got there.** It is tempting to give full detail
+only to the items a session is actively ratifying that turn (a "Current batch" / ratified section) or the
+ones it just finished preparing (a "Prep run this session" section), and fall back to a thinner summary
+row for every other prepared item merely *listed* on the docket. Resist that split: an item's *presence*
+on the docket — not the session's proximity to it or when it was prepared — is what earns the full
+breakdown. If a docket build genuinely can't afford full detail for every item it would otherwise list,
+the fix is to **list fewer items** (shrink the ranked window, e.g. via
+`WE_DECISION_DOCKET_TARGET_COUNT` once #3562 ships), never to thin the detail on the ones that stay.
+
+This same rule binds whoever eventually builds #3562's automated pass — it is not a hand-session-only
+convention that the mechanical version is free to relax.
+
 ### When nothing is agent-ready — surface the one highest-leverage blocker
 
 If *Gather* + tiering leaves **no Tier-A item** (the ready pool is empty — everything left is Tier B/C, blocked, or needs a design call), **do not** return a long menu of open decisions. Instead pick **exactly one** item — the one whose resolution unblocks the most downstream work — and put it to the user as the single thing they need to decide. This is the **only** time selection recommends a non-Tier-A item, and it still returns just one.
@@ -660,6 +720,62 @@ distinguish from a right one without independently re-deriving it — which defe
 **Watch for:** this stays a convention, not a lookup table. A task's true shape can diverge from its `size`
 or `kind` the same way the model table warns about (a `story·3` can still hide a real design call) — route
 on what the brief actually asks the spawn to *do*, never on a field alone.
+
+### Codex model routing — pin the model, differentiate on effort {#codex-model-routing}
+
+Ratified by [#3635](/backlog/3635-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher/)
+(operator, 2026-09-11), on 89 logged `codex exec` runs across 8 selectable models (backlog `#3635`'s own
+evidence). Three rules, deliberately different in shape from the Claude-side table above:
+
+1. **Every real Codex CLI invocation names its model explicitly**, the same "never inherit, never
+   default-cheap" discipline `agent-memory-src/always-set-subagent-model-explicitly.md` requires for a
+   Claude `Agent()` spawn — Codex's own implicit default silently resolves to the top rung today and nothing
+   records that choice. `scripts/codex-direct-task.mjs#CODEX_MODEL` pins `gpt-6-astra`, threaded via `-m` into
+   every constructed argv (`buildCodexDirectTaskArgv` defaults to it — there is no way to omit `-m`).
+2. **The three-rung Haiku/Sonnet/Opus vocabulary survives, but it selects EFFORT, not model.** The evidence
+   refuses a model-based ladder (three of four probes scored identically across six of seven current-generation
+   models; the one real split was by model *generation*, not tier). Effort is the only axis on which *any*
+   movement was observed — but **the movement was mixed, and it is not a claim that more effort is better.**
+   All three rows of the card's effort table, n=4 per raised-effort cell, one probe shape:
+
+   | run | correct | what it shows |
+   |---|---|---|
+   | `gpt-5.5` default (`medium`) → `high` | 4/8 → **4/4** | a real rescue — on a *previous-generation* model |
+   | `gpt-5.3-codex-spark` default → `high` | 7/8 → **3/4** | **more effort scored WORSE** — effort is not monotonic |
+   | `gpt-6-astra` default (`medium`) → `low` | 8/8 → **4/4** | on the model actually pinned, the ladder is a **no-op** |
+
+   So: cite the ladder as **an explicit, recorded routing choice** (rule 1's principle applied to the second
+   axis) and as a cost/latency dial — never as "high effort is measurably more correct here". On `gpt-6-astra`,
+   the model every call site actually runs, no probe has yet distinguished `low` from `medium`. The rungs are
+   kept so the vocabulary survives for when real per-shape evidence exists, not because today's data separates
+   them. All three pin the SAME `CODEX_MODEL` and differ only on Codex's own `model_reasoning_effort` (real
+   values, confirmed via a live `-c model_reasoning_effort=<level>` run — not Claude's low/medium/high names
+   applied by assumption): `scripts/codex-direct-task.mjs#CODEX_TIER_EFFORT` =
+   `{ haiku: 'low', sonnet: 'medium', opus: 'high' }`, resolved via `resolveCodexEffort({ tier, effort })` (an
+   explicit `effort` always outranks a named `tier`; both throw on an unknown value).
+
+   **The rungs stop at `high`; the effort *vocabulary* does not.** `gpt-6-astra`'s catalogue entry
+   (`~/.codex/models_cache.json`, `supported_reasoning_levels`) offers `low·medium·high·xhigh·max·ultra`, and
+   all six are reachable through an explicit `effort` — `scripts/codex-direct-task.mjs#CODEX_EFFORT_MAP` is an
+   **identity**, not a clamp (an earlier copy folded `xhigh`/`max` down to `high` and rejected `ultra`
+   outright, silently discarding a caller's explicit choice; `xhigh`, `max` and `ultra` were each re-confirmed
+   live against `gpt-6-astra` before that was removed). No rung maps onto them because no probe exercised them
+   — reaching above `high` is a deliberate per-call decision, never something a named rung does for you. Note
+   the level set is a property of the **model**: a `--model` override may not offer all six (`gpt-5.5` lists
+   only `low·medium·high·xhigh`).
+3. **The quota-consumption signal is surfaced, not thrown away.** No USD figure exists anywhere in Codex's
+   output, but a real `rate_limits` block (`used_percent`/`window_minutes`/`resets_at`/`plan_type`) is
+   persisted in a non-`--ephemeral` run's rollout file as a `token_count` event. The ratified shape for a
+   caller with no resume use case (mirrors the fire-and-forget judge role): write the rollout normally, read
+   the one record, then delete the rollout file (`collectAndClearRolloutQuota`) — same net cleanliness
+   `--ephemeral` gives, but the signal gets read first. A caller that genuinely needs `codex exec resume
+   <thread-id>` (`scripts/codex-direct-task.mjs`'s own documented reason for not passing `--ephemeral` by
+   default) reads the same signal WITHOUT deleting (`readRolloutQuota`) — deleting the rollout there would
+   silently remove the resume feature the non-ephemeral default exists for.
+
+**RE-DERIVE, don't assume, when either axis changes**: a harder probe finding a real capability split (model
+axis), a task shape effort does not rescue (effort axis), or a Codex CLI upgrade re-ranking its catalogue —
+this table's whole premise is measured evidence with a short shelf life, not a permanent mapping.
 
 ## Running a batch — chain several small items, stop on a solid condition
 
