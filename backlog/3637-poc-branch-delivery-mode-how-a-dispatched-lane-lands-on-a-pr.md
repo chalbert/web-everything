@@ -419,7 +419,7 @@ fast-forward-with-rebase-retry lander, the ancestry completion axis, the five bl
 
 ---
 
-_Numbering note (2026-09-13 merge):_ this item, `bornAs: x7ppgg6`, was JIT-numbered independently on two
+_Numbering note (2026-09-13 merge):_ this item, `bornAs: 3637`, was JIT-numbered independently on two
 branches before they diverged — `#3637` on `origin/main`, `#3656` on `lane/mechanical-dispatcher` — surfacing
 as a byte-identical duplicate `bornAs` twin at the `lane/mechanical-dispatcher` ↔ `origin/main` merge (epic
 `#3383`). Since every other reference to this decision across the repo (`we:docs/agent/backlog-workflow.md`,

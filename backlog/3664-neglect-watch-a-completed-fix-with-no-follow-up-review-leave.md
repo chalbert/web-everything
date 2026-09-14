@@ -1,4 +1,5 @@
 ---
+bornAs: x30inwx
 kind: story
 size: 3
 parent: "3549"
