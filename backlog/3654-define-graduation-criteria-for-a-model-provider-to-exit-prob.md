@@ -2,9 +2,11 @@
 bornAs: xeagmug
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:backlog/"]
 dateOpened: "2026-09-13"
+dateResolved: "2026-09-13"
+codifiedIn: "docs/agent/platform-decisions.md#model-probation-graduation-criteria"
 preparedDate: "2026-09-13"
 relatedTo: ["3649", "3651", "2182"]
 relatedReport: reports/2026-09-12-run-quality-benchmark-for-dispatched-agent-runs.md
@@ -120,6 +122,11 @@ undefined judgment call. With both fixes folded in, the underlying forced-invari
 plumbing); a genuine merit difference survives free-and-instant-maintenance (selection-bias-proof vs.
 not), confirmed by a fresh-context screen.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 1 (b) — a minimum trial count N *and*
+at least one genuinely informative trial (a confirmed miss or a documented cross-reviewer
+disagreement), never count alone; the exact N is not fixed here, deferred to a follow-on ordinary
+finding once real trial-count data exists per role. All four forks approved together, no amendments.
+
 ## Fork 2 — What specifically gets measured?
 
 **Why this is a real fork.** Probation's own stated purpose (PR #2182) is proving a role fit to be
@@ -177,6 +184,11 @@ explicitly so a future reader doesn't conflate them.
 illustrative snippet marked non-binding); a genuine merit difference (dilution blind-spot vs. not)
 survives free-and-instant-maintenance, confirmed by a fresh-context screen.
 
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 2 (b) — success rate is a floor, and a
+confirmed calibration miss is an independent veto on promotion regardless of accept rate; a blended
+composite score is not used as the gate itself, though an informational trend metric alongside the
+veto is not foreclosed. All four forks approved together, no amendments.
+
 ## Fork 3 — Per-role or one global bar?
 
 **Why this is a real fork.** `NEVER_BLOCKING_ROLES` is a structural fact about *blocking authority*
@@ -216,6 +228,11 @@ the other.
 **Screen:** clear — not an implementation detail (an observable proportionality principle, bar vs.
 authority granted); with both branches free to build, the risk-proportionality argument is a genuine
 correctness/safety merit difference, confirmed by a fresh-context screen.
+
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 3 (b) — the bar scales with the role's
+eventual authority (`advisory-review` lightest, `delivery` moderate, a future gating role strictest,
+its own N deferred until that role is built), never one uniform number for every role. All four forks
+approved together, no amendments.
 
 ## Fork 4 — Per-provider/risk-class or uniform criteria?
 
@@ -257,6 +274,42 @@ which PR #2182 directly forecloses and which has no equivalent structural ground
 **Screen:** clear — not an implementation detail (an observable policy: one floor or a
 reputation-discounted one); with both branches free to build, "no identity buys an easier bar on
 reputation" is a genuine correctness/fairness merit difference, confirmed by a fresh-context screen.
+
+**Operator ruling (2026-09-13): APPROVED as recommended.** Fork 4 (a) — one uniform floor for every
+`{provider, model}` identity; no identity clears an easier bar on reputation. A project may still
+configure a stricter bar per identity as an optional config choice, never a looser one. All four forks
+approved together, no amendments.
+
+**All four forks are now ratified (2026-09-13).** See `## Ruling` below for the consolidated statement
+and `codifiedIn`.
+
+## Ruling (ratified 2026-09-13)
+
+All four forks approved by the operator (Nicolas Gilbert) as prepared, in one pass, no amendments
+requested — see the `Operator ruling` line closing each `## Fork N` section above; consolidated
+statement below. **`codifiedIn:
+we:docs/agent/platform-decisions.md#model-probation-graduation-criteria`** — this card's ruling is the
+statute itself (the shape of the graduation bar), so, unlike `#3649`, the full ruling earns statute,
+not a narrow rider.
+
+1. **Fork 1 (b)** — minimum trial count **N** *and* at least one informative trial (a confirmed miss or
+   a documented cross-reviewer disagreement); count alone never suffices. Exact N deferred.
+2. **Fork 2 (b)** — success rate is a floor; a confirmed calibration miss is an independent veto,
+   regardless of accept rate. A composite/aggregate number, if published, is informational only, never
+   the gate.
+3. **Fork 3 (b)** — the bar scales with the role's eventual authority: `advisory-review` lightest,
+   `delivery` moderate, a future gating role strictest (not yet built). One uniform bar for every role
+   is rejected.
+4. **Fork 4 (a)** — one uniform floor for every `{provider, model}` identity; no identity buys an
+   easier bar on reputation. A project may tighten, never loosen, per identity as an optional config
+   choice.
+
+**No concrete numeric N is fixed by this ruling** (per Forks 1–3) — consistent with `#3649` Fork 4's
+own deferred-N posture: an ungrounded number is a guess dressed as a bar. A specific N per role is
+proposed later as an ordinary (batched) finding, once a real trial-count distribution exists, never a
+separate ceremony. No graduation-check function is written and no threshold is wired into
+`we:model-probation.mjs` by this ruling — this card rules on the shape of the bar only; wiring it is
+separately-scoped future work.
 
 ## Done when
 
