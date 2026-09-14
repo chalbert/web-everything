@@ -6,6 +6,7 @@ parent: "2612"
 status: open
 dateOpened: "2026-08-02"
 tags: []
+crossRef: { url: /backlog/xacfdat-narrow-the-human-authorize-gate-in-clear-stuck-session-for-o/, label: "related — xacfdat narrows clear-stuck-session.mjs's human gate for one exact dead-session signature; this item is the general stuck background-wait subagent detect/auto-clear backstop (broader scope, different tool)" }
 ---
 
 # Subagent-stall harness backstop — detect + auto-clear a stuck background-wait subagent (the reap/detect + regression AC #2833 deferred)
