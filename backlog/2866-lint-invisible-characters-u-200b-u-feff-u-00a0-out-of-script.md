@@ -3,9 +3,10 @@ bornAs: xt4mi76
 kind: story
 size: 2
 parent: "2527"
-status: active
+status: resolved
 dateOpened: "2026-08-02"
 dateStarted: "2026-09-14"
+dateResolved: "2026-09-14"
 scope:
   - we:scripts/check-standards.mjs
   - we:scripts/check-standards-rules.mjs
