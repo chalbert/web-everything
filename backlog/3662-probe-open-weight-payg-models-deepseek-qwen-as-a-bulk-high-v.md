@@ -3,13 +3,29 @@ bornAs: xldrls6
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
+dateResolved: "2026-09-13"
+graduatedTo: none
 tags: []
 ---
 
 # Probe open-weight PAYG models (DeepSeek, Qwen) as a bulk/high-volume dispatch executor
+
+> **DUPLICATE OF #3665 — resolved as such, not because the work happened twice.** Both cards carry
+> `bornAs: xldrls6`. #3665 is the real item — it carries the documentation-grounded PREP research pass
+> landed via PR #2194 (preparedDate 2026-09-13), which this bare copy never received.
+>
+> This copy exists because PR #2194 branched to prepare `x8hzy1m`/`xhprieg`/`xldrls6` before sibling PR
+> #2179 (which minted this card as `#3662`) had merged, working directly on its own hash-named copies of
+> those three cards rather than waiting on the merge. When #2194 landed, the drain — doing exactly its
+> job — JIT-numbered its own copy of the same hash fresh, as `#3665`, independently of `#3662` already
+> having claimed that identity. `check:standards`' `duplicateBornAs` rule (#3244/#3650 precedent) caught
+> the resulting twin.
+>
+> Kept rather than deleted, per the backlog's own rule that a file is an audit trail. Nothing selects it
+> now.
 
 Operator's own hypothesis, to be TESTED not assumed: pay-as-you-go API access to open-weight "minimal"-tier models (DeepSeek, Qwen, and other similarly-priced/smaller models) might handle SOME class of dispatch task in this system well enough to reduce load on the top agents (Claude, Codex) with no quality impact -- not a general "replace everything" proposal. This item sits alongside the sibling Grok probe (#3661) and Cursor probe (#3660) filed the same session under this same epic, and is explicitly NOT independent of the Grok item: Grok's own card frames a top-tier subscription as a candidate bulk/high-volume executor for simple, low-judgment dispatch tasks. Open-weight PAYG models are a candidate for that SAME role -- either REPLACING Grok's proposed bulk-executor slot or ADDING TO it as a second/cheaper option alongside it. Whoever prepares this item later must compare candidates against each other for that shared task-executor role, not evaluate each in isolation. Same hard prerequisite as the sibling probes, mirroring #3371's own finding for Codex verbatim (a real headless/scriptable agentic mode with tool use is required for a genuine delivery-agent provider; a bare chat/completion API is not enough): first determine whether any of these open-weight models even offer a usable interface for this system's dispatch pipeline -- most are API-only (chat/completion endpoints), not agentic-CLI-with-tools like Codex/Claude Code, so likely candidates are narrower, lower-judgment tasks: simple classification, formatting/lint-style fixes, generating a commit message from structured data, drafting a PR description from a diff summary -- NOT full delivery-agent work requiring tool use and judgment, unless research shows otherwise. Genuinely open, not pre-decided. The "no impact" bar is explicit: any candidate task needs a real quality comparison against the current agent doing that task today, not just cost savings, before being trusted -- same discipline used for Codex validation (#3371). Filing only, per the operator's explicit ask -- do NOT build or research deeply now.
 
