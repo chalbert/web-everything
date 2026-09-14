@@ -2997,3 +2997,44 @@ here:**
    script. Generalizing image-build automation beyond this one case is unstarted.
 5. The same `lane/mechanical-dispatcher` reconciliation risk `#2206`'s report named is unchanged by this
    slice — still an accepted, known risk, not resolved here.
+
+## Session update (2026-09-14, later still) — three forward-looking capacity requirements recorded on `#3621`; live-tested whether `test:unit`'s worker pool respects a container's `--cpus` allocation
+
+Tracked here as a progress note, same convention as the two container-POC entries directly above — see
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md`'s own 2026-09-14 (later
+still) amendment for the full technical writeup; condensed here.
+
+**Why now.** The operator gave real forward-looking direction on the next phase of this work — reserved
+capacity for heavy-command containers separate from lane capacity, per-command internal-parallelism
+correctness inside whatever container allocation a command actually gets, and a resource-aware (not flat)
+admission cap — and asked for it to be recorded precisely, not designed or built yet, plus one concrete,
+checkable-now piece tested for real.
+
+**Three requirements recorded on `#3621`, not designed here:**
+1. A heavy-command container needs its own reserved CPU/memory budget, kept separate from
+   `we:scripts/lib/lane-concurrency.mjs`'s lane cap — two pools, not one shared budget. Neither `#2206` nor
+   `#2211` built this; both ran a single container ad hoc.
+2. A heavy command (`vitest`/`test:unit`, `we:scripts/verify-lane.mjs`) must size its own internal
+   worker/thread pool to fit the container it actually runs in, not assume the host's full core count. Tested
+   live tonight (below) rather than assumed.
+3. `we:scripts/readiness/heavy-admission.mjs`'s cap (currently a flat `DEFAULT_ADMISSION_CAP = 2`, its own
+   header calling it "an EQUAL-COST NAMED SET") should become resource-aware per command — `vitest` plausibly
+   costing more than `check:standards`. Cited as concrete, dated evidence, not hypothetical: a real live bug
+   found and separately being fixed this same session — the cap's slot reentrancy keys ownership by lane PATH
+   STRING, not process identity, so two genuinely different processes verifying the same lane back-to-back
+   (the conveyor's auto-verify plus a manual re-verify) both read as "one slot," meaning real concurrent load
+   was 3 processes while the gate reported a healthy 2/2.
+
+**The one immediately-checkable piece — tested for real, using `#2211`'s already-built container
+infrastructure (a fresh lane, `lane-20`, acquired specifically for this test).** `container run --cpus 2` gives
+a guest where `os.cpus().length` reports **3** (a confirmed off-by-one, N+1, consistent across `--cpus 1`→2 and
+`--cpus 4`→5) but `os.availableParallelism()` correctly reports **2**. THIS repo's own `test:unit` config
+(`we:vitest.shared.ts#maxTestWorkers`) does not call either API — it is a **hardcoded literal `4`**, already
+tuned (by an existing, unrelated `#x1jcikc` fix) for the HOST's 12-core budget under a 3-concurrent-invocation
+burst assumption, with zero awareness of whatever container it might run inside. Ran the real 35-file/441-test
+`we:blocks/__tests__` subset inside an actual `--cpus 2 --memory 2g` container via `node
+we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run …` — passed
+35/35 files, 441/441 tests, proving the pipeline works — but confirms `test:unit` would request up to 4 worker
+threads against a container that only has 2 real cores, a genuine 2x oversubscription of that container's own
+allocation. Diagnosed, not fixed, per the operator's own instruction — recorded as a confirmed instance of
+requirement 2 above, left as real follow-up scope once requirement 1's capacity reservation is designed.
