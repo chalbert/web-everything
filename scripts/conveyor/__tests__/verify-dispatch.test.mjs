@@ -9,11 +9,11 @@
  *   asserts the full request → dispatch → green round trip a delivery agent would actually rely on.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawnSync, spawn as spawnProcess, execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { laneNeedsVerifyDispatch } from '../verify-dispatch.mjs';
+import { laneNeedsVerifyDispatch, spawnGateBounded, GATE_STARTED_MARKER } from '../verify-dispatch.mjs';
 
 describe('laneNeedsVerifyDispatch — the pure dispatch decision', () => {
   it('dispatches a running marker for the lane\'s own current HEAD', () => {
@@ -177,4 +177,93 @@ describe('verify-dispatch CLI — the hard wall-clock ceiling (epic #3383, live 
     const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
     expect(JSON.parse(after.out).status).toBe('green');
   });
+});
+
+// ── Skeptic-review fix (2026-09-14, epic #3383): GATE time only, not queue-plus-gate ───────────────────────
+// The first cut of the ceiling above measured wall-clock from SPAWN, which silently includes whatever time
+// `verify-lane.mjs` spends waiting on `heavy-admission.mjs`'s own capacity semaphore (up to its own 20-minute
+// fail-open) BEFORE the real gate even starts. A healthy run that legitimately queues and then runs a normal
+// (or contention-slowed) gate could total more than the 30-minute ceiling and get killed anyway — exactly the
+// "hung vs merely-queued" distinction the ceiling exists to draw, defeated by its own design. These tests
+// reproduce that incoherence directly against {@link spawnGateBounded} (deterministic, no real timing flake)
+// and then prove it against the REAL `verify-lane.mjs` + `heavy-admission.mjs` integration (genuine slot
+// contention, not a fixture) — confirming the marker line `verify-lane.mjs` now emits is the one
+// `verify-dispatch.mjs` actually watches for.
+
+function writeFixtureGate(dir, { queueDelayMs, gateDurationMs, exitCode = 0 }) {
+  const p = join(dir, `fixture-gate-${Math.random().toString(36).slice(2)}.mjs`);
+  writeFileSync(
+    p,
+    [
+      `setTimeout(() => {`,
+      `  process.stderr.write(${JSON.stringify(GATE_STARTED_MARKER)} + '\\n');`,
+      `  setTimeout(() => process.exit(${exitCode}), ${gateDurationMs});`,
+      `}, ${queueDelayMs});`,
+    ].join('\n'),
+    'utf8',
+  );
+  return p;
+}
+
+describe('spawnGateBounded — gate-only timing (Skeptic-review fix, epic #3383)', () => {
+  it('does NOT kill a run whose QUEUE phase is long but whose GATE phase is short (the exact incoherence)', async () => {
+    // Total wall-clock (queue 800ms + gate 100ms = 900ms) exceeds gateCeilingMs (500ms) — the OLD single
+    // spawn-to-exit ceiling would have killed this. The gate ceiling here applies ONLY after the marker, and
+    // the real gate-only time (100ms) is comfortably inside it, so this must resolve, not reject.
+    const script = writeFixtureGate(base, { queueDelayMs: 800, gateDurationMs: 100 });
+    await expect(spawnGateBounded([script], { queueCeilingMs: 5000, gateCeilingMs: 500 })).resolves.toBeTruthy();
+  });
+
+  it('still kills a run whose GATE phase itself hangs past gateCeilingMs (the original protection, preserved)', async () => {
+    const script = writeFixtureGate(base, { queueDelayMs: 50, gateDurationMs: 5000 });
+    await expect(spawnGateBounded([script], { queueCeilingMs: 5000, gateCeilingMs: 300 })).rejects.toMatchObject({ timedOutPhase: 'gate' });
+  });
+
+  it('kills a run that never reaches the gate at all — a hang BEFORE the marker ever appears', async () => {
+    const script = writeFixtureGate(base, { queueDelayMs: 5000, gateDurationMs: 100 });
+    await expect(spawnGateBounded([script], { queueCeilingMs: 300, gateCeilingMs: 5000 })).rejects.toMatchObject({ timedOutPhase: 'queue' });
+  });
+});
+
+describe('verify-dispatch CLI — real admission-queue contention does not trip the gate ceiling (integration)', () => {
+  // A REAL holder occupies the (capped-to-1) heavy-admission slot for `HOLD_MS` using the actual production
+  // `heavy-admission.mjs run` CLI — not a bespoke fixture — so `verify-lane.mjs`'s own `acquireSlotBlocking`
+  // call genuinely queues behind it, exactly as it would in production contention.
+  const HOLD_MS = 2000;
+
+  it('a lane queued behind real admission contention, then a fast gate, is NOT killed by the gate-only ceiling', async () => {
+    const cli = resolve(process.cwd(), 'scripts/readiness/heavy-admission.mjs');
+    const admissionEnv = { ...process.env, LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION_CAP: '1' };
+    const holder = spawnProcess('node', [cli, 'run', '--owner=test-holder', `--repo=${poolRoot}`, '--', 'sleep', '2'], {
+      env: admissionEnv,
+      stdio: 'ignore',
+    });
+    // Give the holder a moment to actually win the slot before dispatch starts racing it.
+    await new Promise((res) => setTimeout(res, 200));
+
+    const req = runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir);
+    expect(req.code).toBe(0);
+
+    const started = Date.now();
+    const r = runDispatch(['--json'], {
+      LANE_POOL_ROOT: poolRoot,
+      WE_HEAVY_ADMISSION_CAP: '1',
+      WE_HEAVY_ADMISSION_TIMEOUT_MS: '10000', // must actually WAIT for the holder, never fail open, in this test
+      // The gate-only ceiling is smaller than (queue wait + gate), which is exactly what would have tripped
+      // the OLD single spawn-to-exit ceiling — proving THIS run survives because only gate time counts.
+      VERIFY_DISPATCH_TIMEOUT_MS: '1500',
+    });
+    const elapsedMs = Date.now() - started;
+
+    const body = JSON.parse(r.out);
+    expect(body.failures).toEqual([]);
+    expect(body.dispatched[0]).toMatchObject({ pool: 'flagtest', lane: 1 });
+    // Proof real queuing happened, not a lucky fast path: total elapsed must have actually included the wait.
+    expect(elapsedMs).toBeGreaterThanOrEqual(HOLD_MS - 300);
+
+    const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
+    expect(JSON.parse(after.out).status).toBe('green');
+
+    await new Promise((res) => holder.on('exit', res));
+  }, 15000);
 });
