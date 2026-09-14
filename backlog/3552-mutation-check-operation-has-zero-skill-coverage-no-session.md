@@ -6,6 +6,7 @@ parent: "3029"
 status: open
 dateOpened: "2026-09-06"
 tags: []
+deliveryAgent: codex
 ---
 
 # mutation-check operation has zero skill coverage — no session is told it exists
