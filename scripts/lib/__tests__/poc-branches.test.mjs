@@ -101,6 +101,10 @@ describe('resolveAutoSyncEnabled — #3383 the per-branch/global auto-sync knob'
   it('a null entry (unknown branch) with no env default is OFF', () => {
     expect(resolveAutoSyncEnabled(null, {})).toBe(false);
   });
+  it('a null entry (unknown branch) is OFF even when the global env default would opt an undecided REGISTERED branch in — #2239 review finding: the global opt-in must never upgrade "no such branch" into a real sync attempt', () => {
+    expect(resolveAutoSyncEnabled(null, { [AUTO_SYNC_ENV_VAR]: '1' })).toBe(false);
+    expect(resolveAutoSyncEnabled(undefined, { [AUTO_SYNC_ENV_VAR]: '1' })).toBe(false);
+  });
 });
 
 describe('normalizeRegistry — tolerant read, one bad entry never takes the whole registry offline', () => {
@@ -248,5 +252,12 @@ describe('autoSync round-trips through write/read, and stays absent when never s
     writeRegistry({ registry: normalizeRegistry({ branches: [ENTRY] }), path });
     expect(readFileSync(path, 'utf8')).not.toMatch(/autoSync/);
     expect(readRegistry({ path }).branches[0].autoSync).toBeUndefined();
+  });
+  it('a branch that explicitly OPTS OUT (autoSync:false) keeps `false` — never collapsed to absent — through write/read, and stays OFF even under a global opt-in env default (#2239 review finding)', () => {
+    writeRegistry({ registry: normalizeRegistry({ branches: [{ ...ENTRY, autoSync: false }] }), path });
+    const entry = readRegistry({ path }).branches[0];
+    expect(entry.autoSync).toBe(false); // NOT undefined — an explicit opt-out must survive persistence
+    expect(readFileSync(path, 'utf8')).toMatch(/"autoSync":\s*false/);
+    expect(resolveAutoSyncEnabled(entry, { [AUTO_SYNC_ENV_VAR]: '1' })).toBe(false);
   });
 });
