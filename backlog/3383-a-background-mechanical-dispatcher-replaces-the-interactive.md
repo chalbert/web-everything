@@ -3101,3 +3101,32 @@ we:scripts/readiness/heavy-admission.mjs run --container --container-node-module
 threads against a container that only has 2 real cores, a genuine 2x oversubscription of that container's own
 allocation. Diagnosed, not fixed, per the operator's own instruction — recorded as a confirmed instance of
 requirement 2 above, left as real follow-up scope once requirement 1's capacity reservation is designed.
+
+## Session update (2026-09-14, continued) — `#3673` (what clears a triggered calibration veto) ratified, all four forks
+
+`#3673` — "Define what clears a triggered calibration veto so a role can graduate," filed and prepared
+earlier this session (`PR #2228`, `preparedDate: "2026-09-14"`) — was ratified by the operator (Nicolas
+Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**, `codifiedIn:
+we:docs/agent/platform-decisions.md#calibration-veto-clearing` — the same "full ruling earns statute"
+posture `#3654` took, since this card's ruling *is* the shape of veto clearing, not a narrow rider under
+an existing anchor.
+
+Ratified, as recommended: **(1)** a documented root-cause finding, naming which
+`we:scripts/lib/jury-core.mjs#deriveFindingDisposition` sub-answer diverged and why, is a mandatory
+precondition before any post-miss trial counts toward clearing — trial volume alone never suffices; **(2)**
+once eligible, a fixed minimum trial count plus at least one trial specifically targeting a case similar in
+kind to the trigger (severity-ambiguous, a deliberately constructed test scenario permitted when a real one
+is scarce) — N dissimilar clean trials never suffice; **(3)** decay alone (elapsed trials or elapsed time,
+with no clean/relevant requirement) never clears the veto by itself — a cooling-off window may narrow which
+trials count, never substitute for the affirmative evidence clauses 1–2 require; **(4)** a human override is
+available only as a documented, reasoned factual reclassification of the trigger event, narrowly scoped to
+identity/evidentiary errors — never a re-answer of the severity judgment itself, and never a blanket
+trust/confidence grant.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3654`/`#3649`'s own deferred-N
+precedent — a specific N is deferred to a follow-on ordinary (batched) finding once real post-clearing trial
+data exists, never a separate ceremony. No `calibrationMiss` field is added to `we:model-probation.json` and
+no clearing-check function is wired here — this card rules on the shape of clearing only. The live PR #2107
+veto on Codex's `advisory-review` role is **not** cleared by this ruling itself: clearing it still needs
+either clause 1's root-cause finding followed by clause 2's similarity-matched trials, or clause 4's narrow
+reclassification override on its own facts.

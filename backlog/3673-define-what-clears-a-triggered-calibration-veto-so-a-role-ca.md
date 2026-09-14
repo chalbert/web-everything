@@ -2,9 +2,12 @@
 bornAs: xgurgc1
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:docs/agent/platform-decisions.md", "we:backlog/"]
 dateOpened: "2026-09-14"
+dateStarted: "2026-09-14"
+dateResolved: "2026-09-14"
+codifiedIn: "docs/agent/platform-decisions.md#calibration-veto-clearing"
 preparedDate: "2026-09-14"
 relatedTo: ["3654", "3675"]
 relatedReport: reports/2026-09-14-calibration-veto-clearing-grounding.md
@@ -130,6 +133,11 @@ recommendation (root-cause-first, tied to the veto's actual mechanism) survived.
 internal plumbing (fresh-context agent, #2091 two-confusion screen); a genuine merit difference (diagnosis
 vs. ungrounded volume) survives the free-and-instant-maintenance test.
 
+**Operator ruling (2026-09-14): APPROVED as recommended.** Fork 1 (b) — a documented root-cause finding
+naming which `deriveFindingDisposition` sub-answer diverged (or the equivalent diagnostic for a future
+non-jury-core mechanism) is a mandatory precondition before any post-miss trial counts toward clearing;
+trial volume alone never suffices. All four forks approved together, no amendments.
+
 ## Fork 2 — Once eligible, what trial evidence clears it: a fixed count, or a fixed count plus at least one similar-case trial?
 
 **Why this is a real fork.** Exactly #3654 Fork 1's own logic, applied to clearing instead of initial
@@ -163,6 +171,11 @@ permitting a deliberately constructed test scenario to satisfy the similar-case 
 selection-bias/evidentiary-soundness merit difference survives free-and-instant-maintenance (fresh-context
 agent, #2091).
 
+**Operator ruling (2026-09-14): APPROVED as recommended.** Fork 2 (b) — a fixed minimum trial count N
+plus at least one trial specifically targeting a case similar in kind to the trigger (severity-ambiguous,
+a deliberately constructed test scenario permitted when a real one is scarce); N clean trials of any kind
+never suffices on its own. Exact N not fixed here. All four forks approved together, no amendments.
+
 ## Fork 3 — Can a pure time/attempt-based cooling-off decay clear the veto on its own, with no new evidence?
 
 **Why this is a real fork.** #3654 Fork 2 (ratified) rules a confirmed calibration miss is an "INDEPENDENT
@@ -189,6 +202,11 @@ quantitatively) — so the citation, while imprecise, is not an overreach. No am
 **Screen:** clear — a genuine externally-observable contract question (does elapsed time alone trigger a
 status change), not plumbing; an epistemic merit difference (absence of new negative signal vs. presence
 of positive evidence) survives free-and-instant-maintenance (fresh-context agent, #2091).
+
+**Operator ruling (2026-09-14): APPROVED as recommended.** Fork 3 (b) — decay alone (elapsed trials or
+elapsed time, with no clean/relevant requirement) never clears the veto by itself; a cooling-off window
+may narrow which trials are eligible to count but never substitutes for the affirmative clean-trial
+evidence Forks 1–2 require. All four forks approved together, no amendments.
 
 ## Fork 4 — Is a human override an independent clearing path, bypassing Forks 1–2's evidentiary bar?
 
@@ -245,6 +263,13 @@ principle. Fixed by adding the same hedge to Fork 4(b)'s exclusion clause above.
 prioritization) cleared on first pass: "trust the model now" vs. "the record was factually wrong" is a
 genuine evidentiary/governance distinction, not a convenience call.
 
+**Operator ruling (2026-09-14): APPROVED as recommended.** Fork 4 (b) — a human override is available
+only as a documented, reasoned factual reclassification of the trigger event, narrowly scoped to
+identity/evidentiary errors (the cited finding fails independent verification, the "same bug" framing
+does not actually hold, or a bookkeeping error in how the trigger was recorded) — never a re-answer of
+`introduced`/`worseThanBase`/`parallelizable` (or the equivalent severity sub-judgments for a future
+non-jury-core mechanism) on confidence or trust alone. All four forks approved together, no amendments.
+
 ## What this means for the live PR #2107 veto, concretely (the "Grounded" criterion below)
 
 This card does not itself clear or re-litigate the #2107 veto. Under the ruling above: Fork 1 requires a
@@ -257,6 +282,43 @@ one path that could clear the #2107 veto without first running fresh, similarity
 independent verification, or the "same bug" framing doesn't actually hold), never on a re-judgment of
 whether the bug was really blocker-vs-carve-out, and not on the strength of the tooling-asymmetry finding
 alone.
+
+**All four forks are now ratified (2026-09-14).** See `## Ruling` below for the consolidated statement
+and `codifiedIn`.
+
+## Ruling (ratified 2026-09-14)
+
+All four forks approved by the operator (Nicolas Gilbert) as prepared, in one pass, no amendments
+requested — see the `Operator ruling` line closing each `## Fork N` section above; consolidated statement
+below. **`codifiedIn: we:docs/agent/platform-decisions.md#calibration-veto-clearing`** — this card's
+ruling is the statute itself (the shape of veto clearing), the same posture `#3654` took for the
+graduation bar it extends.
+
+1. **Fork 1 (b)** — a documented root-cause finding, naming which `deriveFindingDisposition` sub-answer
+   diverged and why (or the equivalent diagnostic for a future non-jury-core review mechanism), is a
+   mandatory precondition before any post-miss trial counts toward clearing. Trial volume alone never
+   suffices.
+2. **Fork 2 (b)** — once eligible, clearing requires a fixed minimum trial count **N** *and* at least one
+   trial specifically targeting a case similar in kind to the trigger (a severity-ambiguous,
+   borderline-blocker-vs-carve-out case); a deliberately constructed test scenario satisfies this when a
+   naturally-occurring one is scarce. N clean trials regardless of similarity never suffices. Exact N
+   deferred.
+3. **Fork 3 (b)** — decay alone (elapsed trials or elapsed time, with no clean/relevant requirement) never
+   clears the veto by itself. A cooling-off/decay window may narrow which trials are eligible to count, but
+   never substitutes for the affirmative clean-trial evidence Forks 1–2 require.
+4. **Fork 4 (b)** — a human override is available only as a documented, reasoned factual reclassification
+   of the trigger event, narrowly scoped to identity/evidentiary errors (failed independent verification,
+   the "same bug" framing not actually holding, or a bookkeeping error) — never as a re-answer of the
+   severity judgment itself, and never a blanket trust/confidence grant.
+
+**No concrete numeric N is fixed by this ruling** (per Forks 1–2) — consistent with `#3654`/`#3649`'s own
+deferred-N posture: an ungrounded number is a guess dressed as a bar. A specific N is proposed later as an
+ordinary (batched) finding, once a real post-clearing trial population exists, never a separate ceremony.
+No `calibrationMiss` field is added to `we:model-probation.json` and no clearing-check function is wired
+by this ruling — this card rules on the shape of clearing only; wiring it is separately-scoped future
+work. The live PR #2107 veto on Codex's `advisory-review` role is **not** cleared by this ruling itself —
+see "What this means for the live PR #2107 veto, concretely" above for the path (Fork 1's root-cause
+precondition first, or Fork 4(b)'s narrow reclassification override) a future session would need to take.
 
 ## Done when
 
