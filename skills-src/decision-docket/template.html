@@ -1,10 +1,9 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
 <title>Decision Docket</title>
 <!--
   TEMPLATE — skills-src/decision-docket/template.html (see SKILL.md alongside this file)
 
   This is the ONE reusable shell for the Decision Docket artifact. Fill the {{PLACEHOLDER}}
-  markers and the <!-- REPEAT --> blocks from live data (see SKILL.md "Pulling the data").
+  markers and the REPEAT-marker blocks below from live data (see SKILL.md "Pulling the data").
   Do not restyle it per refresh — a docket that looks different from the last one is exactly
   the inconsistency this template exists to end. If a genuinely new section is needed, add a
   class in the same visual language (reuse the tokens below) rather than inventing new colors.
@@ -94,7 +93,10 @@
   td.n,th.n{text-align:right;white-space:nowrap}
   td.ti{color:var(--ink);font-weight:500;line-height:1.35}
   th.ti{text-align:left}
-  tbody tr.stale td.ti{color:var(--stale)}
+  /* NOTE: no age-based "stale" row-title coloring here on purpose — red already carries the "needs prep"
+     pill's meaning on this page, and reusing it for "waiting 61+ days" too overloaded one color with two
+     unrelated signals. The per-row age BAR (.bar i below) still encodes age by color; only the row TEXT lost
+     it. */
   tbody tr.new td.ti{color:var(--new)}
   .agec{width:150px;white-space:nowrap}
   .bar{display:inline-block;width:74px;height:7px;background:var(--sunk);border-radius:4px;
@@ -104,7 +106,6 @@
   tr.stale .bar i{background:var(--stale)}
   tr.new .bar i{background:var(--new)}
   .age{font-size:12.5px;color:var(--ink-3)}
-  tr.stale .age{color:var(--stale);font-weight:500}
   .pill{font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;
     padding:2px 6px;border-radius:3px;margin-left:6px;white-space:nowrap;
     font-family:Barlow,sans-serif;color:var(--ratified);background:var(--ratified-bg)}
@@ -170,6 +171,28 @@
   footer{margin-top:60px;padding-top:18px;border-top:2px solid var(--ink);font-size:13.5px;color:var(--ink-3)}
   footer p{margin-bottom:8px}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* Defensive — the Artifact viewer supplies this reset itself, but the same generated HTML is also
+     openable directly as a plain file (local checks, screenshots), so the filter toggles below must not
+     depend on that host-supplied rule to actually hide anything. */
+  [hidden]{display:none!important}
+
+  /* jump-link from a summary-table row to its full .dcard breakdown further down the page */
+  td.ti a{color:inherit;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:2px}
+  td.ti a:hover{text-decoration-color:var(--accent)}
+
+  /* the filter toolbar — same visual language as .callout/.tw, not a new component family */
+  .filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;margin:24px 0 0;padding:14px 18px;
+    background:var(--surface);border:1px solid var(--rule);border-radius:6px}
+  .filtergroup{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+  .filtergroup .flabel{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;
+    color:var(--ink-3);margin-right:1px}
+  .fbtn{font:inherit;font-size:12.5px;font-weight:600;line-height:1;padding:6px 11px;border-radius:99px;
+    border:1px solid var(--rule);background:var(--paper);color:var(--ink-2);cursor:pointer}
+  .fbtn:hover{border-color:var(--ink-3);color:var(--ink)}
+  .fbtn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .filtercount{font-size:12px;color:var(--ink-3);margin-left:auto;font-family:"Roboto Mono",monospace;
+    font-variant-numeric:tabular-nums}
 </style>
 
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap">
