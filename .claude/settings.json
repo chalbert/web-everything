@@ -59,6 +59,10 @@
           },
           {
             "type": "command",
+            "command": "node scripts/lint-invisible-characters.mjs"
+          },
+          {
+            "type": "command",
             "command": "node scripts/check-memory.mjs --pre"
           },
           {
