@@ -3,15 +3,24 @@ bornAs: xldrls6
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
+dateResolved: "2026-09-13"
+graduatedTo: none
 preparedDate: "2026-09-13"
-relatedTo: ["3581", "3513", "3371", "3663", "3664"]
+relatedTo: ["3581", "3513", "3371", "3663", "3664", "xjo6uux"]
 tags: []
 ---
 
 # Probe open-weight PAYG models (DeepSeek, Qwen) as a bulk/high-volume dispatch executor
+
+> **Resolved as a completed PREP-only pass, per the operator's explicit "filing/prep only" instruction
+> (PR #2194).** The prerequisite is answered for both DeepSeek and Qwen with a written verdict. What is
+> NOT done — by this card's own Done-when items 3-4 and PR #2194's own unchecked test-plan line — is the
+> live quality-trial and schema-fidelity probe. That work is carried forward to a fresh successor item,
+> `#xjo6uux`, rather than left half-tracked on this card, so this PREP deliverable can close cleanly.
+> `graduatedTo: none` because no new standard entity was spawned — the successor is a plain backlog item.
 
 Operator's own hypothesis, to be TESTED not assumed: pay-as-you-go API access to open-weight "minimal"-tier models (DeepSeek, Qwen, and other similarly-priced/smaller models) might handle SOME class of dispatch task in this system well enough to reduce load on the top agents (Claude, Codex) with no quality impact -- not a general "replace everything" proposal. This item sits alongside the sibling Grok probe (#3664) and Cursor probe (#3663) filed the same session under this same epic, and is explicitly NOT independent of the Grok item: Grok's own card frames a top-tier subscription as a candidate bulk/high-volume executor for simple, low-judgment dispatch tasks. Open-weight PAYG models are a candidate for that SAME role -- either REPLACING Grok's proposed bulk-executor slot or ADDING TO it as a second/cheaper option alongside it. Whoever prepares this item later must compare candidates against each other for that shared task-executor role, not evaluate each in isolation. Same hard prerequisite as the sibling probes, mirroring #3371's own finding for Codex verbatim (a real headless/scriptable agentic mode with tool use is required for a genuine delivery-agent provider; a bare chat/completion API is not enough): first determine whether any of these open-weight models even offer a usable interface for this system's dispatch pipeline -- most are API-only (chat/completion endpoints), not agentic-CLI-with-tools like Codex/Claude Code, so likely candidates are narrower, lower-judgment tasks: simple classification, formatting/lint-style fixes, generating a commit message from structured data, drafting a PR description from a diff summary -- NOT full delivery-agent work requiring tool use and judgment, unless research shows otherwise. Genuinely open, not pre-decided. The "no impact" bar is explicit: any candidate task needs a real quality comparison against the current agent doing that task today, not just cost savings, before being trusted -- same discipline used for Codex validation (#3371). Filing only, per the operator's explicit ask -- do NOT build or research deeply now.
 

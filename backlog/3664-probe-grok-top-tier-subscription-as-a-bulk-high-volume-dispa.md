@@ -3,15 +3,24 @@ bornAs: xhprieg
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
+dateResolved: "2026-09-13"
+graduatedTo: none
 preparedDate: "2026-09-13"
-relatedTo: ["3581", "3513", "3371", "3663", "3665"]
+relatedTo: ["3581", "3513", "3371", "3663", "3665", "xe0ftzc"]
 tags: []
 ---
 
 # Probe Grok (top-tier subscription) as a bulk/high-volume dispatch executor
+
+> **Resolved as a completed PREP-only pass, per the operator's explicit "filing/prep only" instruction
+> (PR #2194).** The prerequisite is answered and a written verdict recommends probing base SuperGrok
+> first. What is NOT done — by this card's own Done-when item 3 and PR #2194's own unchecked test-plan
+> line — is the live-fire install/spawn/break probe. That work is carried forward to a fresh successor
+> item, `#xe0ftzc`, rather than left half-tracked on this card, so this PREP deliverable can close cleanly.
+> `graduatedTo: none` because no new standard entity was spawned — the successor is a plain backlog item.
 
 Operator's own hypothesis, to be TESTED not assumed: a high-tier ('top') Grok subscription may offer very high usage limits, but the model/tooling is probably not suitable for all dispatch operations -- worth evaluating specifically as a bulk/high-volume executor for simpler, lower-judgment tasks, not as a general-purpose delivery or review agent replacement. Same hard prerequisite as the sibling Cursor probe filed this session, mirroring #3371's own finding for Codex verbatim (a real headless/scriptable agentic CLI mode is required for a genuine delivery-agent provider; a chat/completion API is not enough): first determine whether Grok (or xAI's tooling around it) even offers a comparable scriptable CLI/agentic mode suitable for this system's dispatch pipeline, or only a chat API -- if the latter, that alone answers the evaluation. Genuinely open, not pre-decided in favor of adoption. If the prerequisite IS met, mirror #3371's probe method: install/authenticate against the actual top-tier subscription (not an API key -- the whole point is subscription-included high-volume usage), spawn it headless with a schema-constrained ask, break it on purpose (an unsatisfiable schema, a huge/slow request, a quota-exhausted case), and compare its parsing discipline to we:scripts/lib/judge-spawn.mjs's fail-loud approach -- then write a verdict on whether it is genuinely usable as a bulk executor for simple/low-judgment tasks specifically (per the operator's own hypothesis), not a general delivery/review agent, per #3581's risk-tiered framing of dispatch surfaces. Filing only, per the operator's explicit ask -- do NOT build or research deeply now.
 
