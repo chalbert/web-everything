@@ -14,10 +14,10 @@ tags: []
 # Probe open-weight PAYG models (DeepSeek, Qwen) as a bulk/high-volume dispatch executor
 
 > **DUPLICATE OF #3665 — resolved as such, not because the work happened twice.** Both cards carry
-> `bornAs: xldrls6`. #3665 is the real item — it carries the documentation-grounded PREP research pass
+> `bornAs: 3665`. #3665 is the real item — it carries the documentation-grounded PREP research pass
 > landed via PR #2194 (preparedDate 2026-09-13), which this bare copy never received.
 >
-> This copy exists because PR #2194 branched to prepare `x8hzy1m`/`xhprieg`/`xldrls6` before sibling PR
+> This copy exists because PR #2194 branched to prepare `3663`/`3664`/`3665` before sibling PR
 > #2179 (which minted this card as `#3662`) had merged, working directly on its own hash-named copies of
 > those three cards rather than waiting on the merge. When #2194 landed, the drain — doing exactly its
 > job — JIT-numbered its own copy of the same hash fresh, as `#3665`, independently of `#3662` already

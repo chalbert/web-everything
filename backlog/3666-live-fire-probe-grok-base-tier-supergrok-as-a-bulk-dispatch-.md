@@ -1,11 +1,12 @@
 ---
+bornAs: xe0ftzc
 kind: story
 size: 5
 parent: "3383"
 status: open
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
-relatedTo: ["3663", "3664", "3665", "xucqrc6", "xjo6uux", "3371", "3581", "3513"]
+relatedTo: ["3663", "3664", "3665", "3668", "3667", "3371", "3581", "3513"]
 tags: []
 ---
 
@@ -13,7 +14,7 @@ tags: []
 
 `#3664`'s PREP pass (PR #2194) already confirmed xAI's "Grok Build" is a genuine headless agentic CLI, and
 recommended probing base SuperGrok (~$30/mo) first, not Heavy (~$300/mo). It also found Grok and the
-sibling open-weight-PAYG candidate (`#3665`/`#xjo6uux`) ADD UP rather than compete. What it could NOT do —
+sibling open-weight-PAYG candidate (`#3665`/`#3667`) ADD UP rather than compete. What it could NOT do —
 by its own explicit statement — is the live-fire install/spawn/break probe `#3371` ran for Codex. This item
 carries that forward so `#3664` can stay a clean, resolved PREP record.
 
@@ -38,7 +39,7 @@ carries that forward so `#3664` can stay a clean, resolved PREP record.
    staging).
 4. **Write the final verdict**, per `#3581`'s risk-tiered framing and gated on `#3513`'s trigger having
    fired — confirming or amending `#3664`'s provisional verdict, and restating explicitly whether the
-   add-up relationship with `#xjo6uux` (open-weight PAYG) still holds once live numbers are in.
+   add-up relationship with `#3667` (open-weight PAYG) still holds once live numbers are in.
 5. **Nothing is wired into the dispatcher.** This item produces evidence and a verdict, not running code.
 
 ## Deliberately NOT in scope
@@ -46,7 +47,7 @@ carries that forward so `#3664` can stay a clean, resolved PREP record.
 - **Wiring Grok into `we:scripts/operations/dispatch-lane-io.mjs` or any provider-port surface.** Later
   work, gated on this item's own verdict.
 - **Re-litigating the subscription-seat vs. bare-API-key scope boundary `#3664` already drew** — this item
-  stays on the subscription-seat path; any bare-API-key evaluation belongs with `#xjo6uux`'s scope, per
+  stays on the subscription-seat path; any bare-API-key evaluation belongs with `#3667`'s scope, per
   `#3664`'s own note.
 - **Re-deciding whether a second/third provider should exist at all** — `#3513` already ruled that.
 
@@ -54,7 +55,7 @@ carries that forward so `#3664` can stay a clean, resolved PREP record.
 
 Filed under epic `#3383`, split out of `#3664`'s own Done-when items when `#3664` was resolved as a
 completed PREP-only pass (documentation research + verdict, per PR #2194) — the live-fire probe was its own
-explicitly-unchecked follow-on, not performed by that pass. Sibling successor items: `#xucqrc6` (Cursor),
-`#xjo6uux` (open-weight PAYG) — the required cross-comparison with the latter carries forward from `#3664`'s
+explicitly-unchecked follow-on, not performed by that pass. Sibling successor items: `#3668` (Cursor),
+`#3667` (open-weight PAYG) — the required cross-comparison with the latter carries forward from `#3664`'s
 own "Grok and open-weight PAYG add up" finding. Mirrors `#3371`'s probe method and `#3581`'s risk-tiered
 surface framing.

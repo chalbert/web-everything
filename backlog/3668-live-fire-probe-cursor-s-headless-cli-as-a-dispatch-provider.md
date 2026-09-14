@@ -1,11 +1,12 @@
 ---
+bornAs: xucqrc6
 kind: story
 size: 5
 parent: "3383"
 status: open
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
-relatedTo: ["3663", "3664", "3665", "xe0ftzc", "xjo6uux", "3371", "3581", "3513"]
+relatedTo: ["3663", "3664", "3665", "3666", "3667", "3371", "3581", "3513"]
 tags: []
 ---
 
@@ -51,5 +52,5 @@ clean, resolved PREP record.
 
 Filed under epic `#3383`, split out of `#3663`'s own Done-when item 3 when `#3663` was resolved as a
 completed PREP-only pass (documentation research + verdict, per PR #2194) — the live-fire probe was its own
-explicitly-unchecked follow-on, not performed by that pass. Sibling successor items: `#xe0ftzc` (Grok),
-`#xjo6uux` (open-weight PAYG). Mirrors `#3371`'s probe method and `#3581`'s risk-tiered surface framing.
+explicitly-unchecked follow-on, not performed by that pass. Sibling successor items: `#3666` (Grok),
+`#3667` (open-weight PAYG). Mirrors `#3371`'s probe method and `#3581`'s risk-tiered surface framing.

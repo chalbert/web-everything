@@ -9,7 +9,7 @@ dateOpened: "2026-09-13"
 dateResolved: "2026-09-13"
 graduatedTo: none
 preparedDate: "2026-09-13"
-relatedTo: ["3581", "3513", "3371", "3664", "3665", "xucqrc6"]
+relatedTo: ["3581", "3513", "3371", "3664", "3665", "3668"]
 tags: []
 ---
 
@@ -19,7 +19,7 @@ tags: []
 > (PR #2194).** The prerequisite is answered and both forks below are ratified with a written verdict.
 > What is NOT done — by this card's own Done-when item 3 and PR #2194's own unchecked test-plan line —
 > is the live-fire install/spawn/break probe. That work is carried forward to a fresh successor item,
-> `#xucqrc6`, rather than left half-tracked on this card, so this PREP deliverable can close cleanly.
+> `#3668`, rather than left half-tracked on this card, so this PREP deliverable can close cleanly.
 > `graduatedTo: none` because no new standard entity was spawned — the successor is a plain backlog item.
 
 Operator wants to know Cursor's likely strengths/weaknesses relative to the already-integrated we:scripts/operations/dispatch-lane-io.mjs providers (Claude Code, and Codex CLI per #3581/#3371's precedent) and, specifically, what CLASS of dispatch task suits it best -- not an assumption that it fits everywhere. Hard prerequisite, mirroring #3371's own finding for Codex verbatim (a real headless/scriptable agentic CLI mode is required for a genuine delivery-agent provider; a chat/completion API is not enough): first determine whether Cursor even offers a comparable headless/scriptable agent CLI mode at all, since it is primarily known as an IDE -- if it does not, that alone answers the evaluation and the item resolves on that finding rather than forcing a capability comparison. Genuinely open, not pre-decided in favor of adoption. If the prerequisite IS met, mirror #3371's probe method: install/authenticate against a real subscription, spawn it headless with a schema-constrained ask, break it on purpose (an unsatisfiable schema, a huge/slow request, a quota-exhausted case), and compare its parsing discipline to we:scripts/lib/judge-spawn.mjs's fail-loud approach -- then write a verdict on which task CLASS (build/delivery-agent vs. independent review/fix-dispatch vs. neither) it is actually suited for, per #3581's own risk-tiered framing of dispatch surfaces. Filing only, per the operator's explicit ask -- do NOT build or research deeply now.

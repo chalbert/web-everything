@@ -1,11 +1,12 @@
 ---
+bornAs: xjo6uux
 kind: story
 size: 5
 parent: "3383"
 status: open
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
-relatedTo: ["3663", "3664", "3665", "xucqrc6", "xe0ftzc", "3371", "3581", "3513"]
+relatedTo: ["3663", "3664", "3665", "3668", "3666", "3371", "3581", "3513"]
 tags: []
 ---
 
@@ -14,7 +15,7 @@ tags: []
 `#3665`'s PREP pass (PR #2194) confirmed both named models clear the prerequisite: **Qwen** via an official
 agentic CLI; **DeepSeek** via a third-party CLI **and** a cheaper path (its API accepts the Anthropic
 Messages format, so this repo's already-validated `claude` wrapper could redirect to it, pending a
-fidelity probe). It also found this class and the sibling Grok seat (`#3664`/`#xe0ftzc`) ADD UP rather
+fidelity probe). It also found this class and the sibling Grok seat (`#3664`/`#3666`) ADD UP rather
 than compete. What it could NOT do — by its own statement — is the live quality-trial and schema-fidelity
 probe `#3371` ran for Codex. This item carries that forward so `#3665` can stay a clean, resolved record.
 
@@ -35,7 +36,7 @@ probe `#3371` ran for Codex. This item carries that forward so `#3665` can stay 
    path is probed — `#3371`'s probes 5/6/8 are the template.
 5. **Write the final verdict**, naming per candidate task class one of: adopt, reject, or needs a larger
    trial — per `#3581`'s risk-tiered framing, restating explicitly whether the add-up relationship with
-   `#xe0ftzc` (Grok) still holds once live numbers are in, confirming or amending `#3665`'s provisional
+   `#3666` (Grok) still holds once live numbers are in, confirming or amending `#3665`'s provisional
    verdict.
 6. **Nothing is wired into the dispatcher.** This item produces evidence and a verdict, not running code.
 
@@ -53,6 +54,6 @@ probe `#3371` ran for Codex. This item carries that forward so `#3665` can stay 
 Filed under epic `#3383`, split out of `#3665`'s own Done-when items when `#3665` was resolved as a
 completed PREP-only pass (documentation research + verdict, per PR #2194) — the live-fire probe and quality
 trial were their own explicitly-unchecked follow-on, not performed by that pass. Sibling successor items:
-`#xucqrc6` (Cursor), `#xe0ftzc` (Grok) — the required cross-comparison with the latter carries forward from
+`#3668` (Cursor), `#3666` (Grok) — the required cross-comparison with the latter carries forward from
 `#3665`'s own "Grok and open-weight PAYG add up" finding. Mirrors `#3371`'s probe method and `#3581`'s
 risk-tiered surface framing.
