@@ -4,6 +4,7 @@ status: open
 scope: ["we:scripts/operations/clear-stuck-session.mjs"]
 dateOpened: "2026-09-14"
 tags: []
+crossRef: { url: /backlog/2881-subagent-stall-harness-backstop-detect-auto-clear-a-stuck-ba/, label: "related — #2881 is the general stuck background-wait subagent detect/auto-clear backstop; this item narrows one specific tool's (clear-stuck-session.mjs) human gate for one exact dead-session signature" }
 ---
 
 # Narrow the human authorize gate in clear-stuck-session for one deterministic dead-session signature?
