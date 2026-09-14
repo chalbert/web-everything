@@ -571,7 +571,7 @@ Example offer line: *`jsx-directive-sugar` — add the deferred `<For>/<Show>/<R
 The **Decision Docket** — the "prepared to decide" surface of the shared **Decision Board** artifact
 ([backlog/3562](/backlog/3562-a-standing-mechanical-pass-keeps-the-5-highest-leverage-open/),
 [backlog/3277](/backlog/3277-declare-an-operation-that-publishes-and-refreshes-a-decision/),
-[backlog/x7wehz2](/backlog/x7wehz2-a-permanent-decision-ledger-artifact-backed-by-the-db-capabi/)) —
+[backlog/3685](/backlog/3685-a-permanent-decision-ledger-artifact-backed-by-the-db-capabi/)) —
 lists the highest-leverage prepared decisions ranked by `check:readiness --select --json` /
 `suggest-next --tier=B --json` (same leverage heuristic as everywhere else in this doc). Until the
 standing `decision-docket-watch` mechanical pass (#3562) ships and owns the refresh, a session builds or
