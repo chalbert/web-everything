@@ -2997,3 +2997,66 @@ here:**
    script. Generalizing image-build automation beyond this one case is unstarted.
 5. The same `lane/mechanical-dispatcher` reconciliation risk `#2206`'s report named is unchanged by this
    slice — still an accepted, known risk, not resolved here.
+
+### Design note (2026-09-14) — should heavy git operations share `we:heavy-admission.mjs`'s pool with vitest/check:standards? No current call site warrants wiring it; open forward-looking question only
+
+Follow-up to tonight's runaway `git grep` incident (a one-off pathological command, already killed — see
+above). The operator's architectural point, independent of that specific incident: `we:scripts/readiness/heavy-admission.mjs`'s
+shared semaphore (cap 2, `run` CLI mode) already gates `check:standards`/`verify-lane`/`test:unit`. If a
+genuinely heavy git operation (full-repo `gc`/`repack`/`fsck`, a multi-remote `fetch --all`, a `merge-tree`/
+rebase loop across many commits) ever runs un-gated, it stacks CPU load against those same capped operations
+uncoordinated, because git currently has no presence in the pool at all.
+
+**Checked every git call site in `we:scripts/` (excluding `__tests__`) for anything at that weight class.**
+None found:
+- No `git gc`, no `fetch --all`, no full-repo `fsck` anywhere in `we:scripts/`.
+- Every `fetch` call site (`we:scripts/lane-drain.mjs`, `we:scripts/lane-resume.mjs`, `we:scripts/lane-pool.mjs`,
+  `we:scripts/backlog.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/pr-land.mjs`,
+  `we:scripts/conveyor/branch-sync.mjs`, `we:scripts/conveyor/branch-drift.mjs`,
+  `we:scripts/conveyor/validate-and-promote.mjs`, etc.) fetches a single ref/branch with `--quiet`/`--prune` —
+  narrow and cheap, not a multi-remote full fetch.
+- `git merge-tree --write-tree` appears in `we:scripts/lane-pool.mjs`, `we:scripts/prune-landed-lanes.mjs`,
+  `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/rebase-drop-content.mjs`, `we:scripts/lib/rebase-drop-manifest.mjs`,
+  `we:scripts/lib/git-run.mjs`, `we:scripts/conveyor/branch-drift.mjs`, and
+  `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (the last one *describes* the plumbing but doesn't call
+  it). Every real call site does exactly ONE `merge-tree` between two refs (`base` vs one lane/PR ref) —
+  working-tree-free by design, deliberately chosen (per these files' own comments) *because* it's cheap
+  compared to a real checkout+merge. `we:scripts/prune-landed-lanes.mjs` and `we:scripts/merge-ai-prs.mjs`
+  each call it once per candidate branch/PR in a loop, but that's N cheap single-ref probes, not one big
+  multi-commit rebase/merge — not the weight class the operator named.
+- `git rebase` appears in `we:scripts/operations/poc-land.mjs` and `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`
+  — a normal single-branch rebase onto a fresh tip, not a loop across many commits.
+- `we:scripts/conveyor/branch-sync.mjs` (named explicitly in this investigation's brief) fetches one ref and
+  probes with `merge-tree` before ever attempting a real merge — same cheap pattern, not heavy.
+- `we:scripts/lib/isolation-provider.mjs`'s `repack -a -d -f` (confirmed earlier tonight) runs only against a
+  `--depth 1 --no-hardlinks` **shallow** clone built by its own `buildHistorySurgeryCloneArgv` for the
+  history-surgery path — and per its own doc comment, **production wiring is still deliberately deferred to
+  `#3630`**; today it is exercised only by `we:scripts/lib/__tests__/isolation-provider.test.mjs`. Not a live
+  call site at all right now, so doubly not a concern.
+
+**Recommendation:** nothing to wire in today. Every real git call site currently in `we:scripts/` is either
+narrow-scope (single ref) or a single working-tree-free probe explicitly designed to be cheap — none reaches
+the "full-repo gc/repack/fsck, multi-remote fetch, or a rebase/merge loop across many commits" weight class
+the operator described. `git status`/`git diff`-class calls (the overwhelming majority of call sites: dozens
+of `rev-parse`, `show`, `ls-tree`, `log`, `status --porcelain`, etc.) should stay ungated regardless — gating
+those would slow dispatch-critical paths for no CPU-contention benefit. This stays a genuinely open,
+forward-looking design question rather than a build: **if/when** a real heavy git operation lands in
+`we:scripts/` (a full `gc`, a `fetch --all`, a many-commit rebase/merge loop), it should be wrapped through
+`node we:scripts/readiness/heavy-admission.mjs run -- <command>` — the same one-line opt-in pattern the `run`
+CLI mode already offers on `we:heavy-admission.mjs` — rather than inventing a second limiter. No new item
+filed for this; there is nothing to schedule yet, only a rule to apply the next time such a call site is
+actually written.
+
+**A separate, harder limit, worth stating plainly rather than leaving implicit: `we:heavy-admission.mjs`
+cannot catch an ad hoc/interactive git command no matter how many scripted call sites get wired into it.**
+The module is a purely COOPERATIVE, opt-in semaphore — a caller must itself invoke `we:heavy-admission.mjs
+run -- <command>` (or `acquire`/`release`) to participate; there is no OS-level enforcement and nothing
+forces an arbitrary command through it. `we:heavy-admission.mjs`'s own header says this outright about
+`we:guard-bash.mjs`'s adjacent PreToolUse deny: it "only reaches a MECHANICALLY-DISPATCHED agent (one with
+`WE_DISPATCH_KIND` set)" — a `/workflow`/`/batch` parallel lane, or the operator's own interactive session,
+carries no such env var and is unaffected. The identical limit applies here: tonight's runaway `git grep`
+across 12k+ revisions was typed directly by an agent outside any script, so wiring every scripted git call
+site into the pool — even a maximally thorough one — would still not have caught it, and would not catch the
+next one either. "Add git to the shared queue" can only ever cap *scripted* call sites that opt in; it is
+not, and cannot become without a different mechanism (e.g. a PreToolUse-style interception of raw `git`
+invocations), a general governor over every heavy git command any agent might type.
