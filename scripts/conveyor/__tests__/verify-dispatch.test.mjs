@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { laneNeedsVerifyDispatch } from '../verify-dispatch.mjs';
@@ -122,5 +122,59 @@ describe('verify-dispatch CLI — the request → dispatch → green round trip 
 
     const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
     expect(JSON.parse(after.out).status).toBe('red');
+  });
+});
+
+describe('verify-dispatch CLI — the hard wall-clock ceiling (epic #3383, live incident 2026-09-14)', () => {
+  // A real hang, simulated: the gate sleeps far longer than the test-scoped ceiling, then touches a marker
+  // file — the marker file existing later is proof the CHAIN kept running (an orphan), not just that the one
+  // pid `execFileSync`'s own `timeout` option signals directly.
+  it('kills a gate that outruns VERIFY_DISPATCH_TIMEOUT_MS — including the tree beneath it, not just the pid dispatch spawned', () => {
+    const proofFile = join(base, 'still-running.proof');
+    const req = runVerifyLane(['request', `--repo=${laneDir}`, `--gate=sleep 3 && touch ${proofFile}`, '--json'], laneDir);
+    expect(req.code).toBe(0);
+
+    const started = Date.now();
+    const r = runDispatch(['--json'], { LANE_POOL_ROOT: poolRoot, VERIFY_DISPATCH_TIMEOUT_MS: '300' });
+    const elapsedMs = Date.now() - started;
+
+    // The dispatch call itself returns promptly (near the 300ms ceiling), never waiting out the 3s sleep —
+    // this is the actual driver-unblocking behavior: the tick moves on instead of hanging.
+    expect(elapsedMs).toBeLessThan(2500);
+
+    const body = JSON.parse(r.out);
+    expect(body.dispatched).toEqual([]);
+    expect(body.failures).toHaveLength(1);
+    expect(body.failures[0]).toMatchObject({ pool: 'flagtest', lane: 1, timedOut: true });
+
+    // The killed run never got to write a terminal record — this IS the existing stranded-marker recovery
+    // shape (a prior runner process dying mid-run), reused deliberately rather than inventing something new.
+    const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
+    expect(JSON.parse(after.out).status).toBe('running');
+
+    // Proof the WHOLE tree died, not just the immediate `verify-lane.mjs` pid: wait past the original 3s
+    // sleep the gate was running and confirm the `touch` after it never ran. A naive single-pid SIGTERM would
+    // leave the shell → sleep → touch chain orphaned and it WOULD still create this file around the 3s mark.
+    return new Promise((res) => {
+      setTimeout(() => {
+        expect(existsSync(proofFile)).toBe(false);
+        res();
+      }, 3500 - elapsedMs > 0 ? 3500 - elapsedMs : 100);
+    });
+  });
+
+  it('a run that finishes within the ceiling is never touched by it', () => {
+    const req = runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir);
+    expect(req.code).toBe(0);
+
+    // A generous ceiling relative to the fast `true` gate — this is the "must not kill a legitimately slow
+    // but healthy run" guarantee, exercised at the opposite extreme (a near-instant one).
+    const r = runDispatch(['--json'], { LANE_POOL_ROOT: poolRoot, VERIFY_DISPATCH_TIMEOUT_MS: '5000' });
+    const body = JSON.parse(r.out);
+    expect(body.failures).toEqual([]);
+    expect(body.dispatched[0]).toMatchObject({ pool: 'flagtest', lane: 1 });
+
+    const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
+    expect(JSON.parse(after.out).status).toBe('green');
   });
 });
