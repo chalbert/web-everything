@@ -244,6 +244,14 @@ if (admission.timedOut) {
 }
 
 // 3. Run the gate in the FOREGROUND, blocking until it exits (inherited stdio — the agent sees the output live).
+// #3383 (Skeptic review, 2026-09-14) — an UNCONDITIONAL marker, unlike the two admission log lines above
+// (which only print when there is something to report: a real wait, or a fail-open). This one always fires,
+// the instant before the gate itself starts, so a caller watching this process's stderr in real time
+// (`verify-dispatch.mjs`'s wall-clock ceiling) has ONE reliable signal for "queuing is over, real gate work
+// begins now" — including the common no-contention case (`admission.waitedMs === 0`), where neither line above
+// prints anything and a caller would otherwise have no way to tell "just started" from "already deep in the
+// gate". Never remove or reword this line without updating `verify-dispatch.mjs`'s own `GATE_STARTED_MARKER`.
+process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
 try {
   execSync(GATE, { cwd: REPO, stdio: 'inherit' });
