@@ -2780,3 +2780,34 @@ happened; landing has not.
   no merge attempted and no commits toward it — and the PIDs recorded on their leases are no longer running.
   This reads as a stale or abandoned start, not active in-progress work; confirm before assuming it is being
   handled.
+
+## Operator note, recorded for the record (2026-09-13): value confirmed in #3621's container-based resource isolation, but active work is explicitly deferred until judge/provider integration graduates
+
+**The statement, in the operator's own terms:** containers will likely be useful for resource management, but
+it is a larger piece of work, so it should wait until the current judge/provider integration work
+(Codex/Antigravity/model-probation) graduates — i.e. defer per `#3621`'s own already-researched recommended
+sequencing. **This is not a ratification** and does not stamp a `preparedDate` — `#3621` stays `open`/
+unprepared, per this repo's "never take an unprepared decision" doctrine. This entry only records stated
+operator intent/sequencing so it is not lost, the same discipline this tracker has used for every other
+operator statement recorded above tonight.
+
+**This confirms #3621's own most recent amendment rather than adding a new judgment on top of it.** `#3621`'s
+2026-09-11 "LIVE test" amendment already concluded, in its own "Recommended sequencing" section: "the
+operator's stated preference — wait until Codex and Gemini are hooked up — is well supported by the evidence,
+because the Codex work gains nothing from waiting for containers. If anything starts in parallel sooner, it
+should be the heavy-command container pool, not per-lane containers." Tonight's operator statement restates
+and confirms that same sequencing rather than introducing a different one.
+
+**Ties to `#3654`'s graduation criteria.** The "judge/provider integration work" this defers behind is this
+same epic's model-probation system (`we:scripts/lib/model-probation.mjs`) plus its two new advisory seats
+(Codex correctness, Antigravity) — see the session updates above. `#3654` ("Define graduation criteria for a
+model/provider to exit probation status") has had all four of its forks ratified per `PR #2195` — confirmed
+`OPEN`, **not yet merged to `main`** as of this check; do not assume it has landed. Once that PR merges and
+the probation system has real graduation criteria to operate against, active work on `#3621` becomes in-scope
+again per this sequencing.
+
+**If anything on this axis starts before graduation, it should be the heavy-command container pool, not
+per-lane containers** — `#3621`'s own distinction, restated here because it is the one piece of the container
+idea this deferral does not cover: it needs no auth/billing change, answers `#3621`'s founding incident
+(`#3594`'s busy-spin) directly, and would produce the throughput measurement data the core-split amendment
+still lacks.
