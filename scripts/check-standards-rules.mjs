@@ -20,6 +20,24 @@ import { scrubPublish } from './lib/secret-scrub.mjs';
 // lint validate that field with the ONE function the dispatcher also uses (never a second copy of the rule).
 import { validateDeliveryTarget } from './lib/poc-branches.mjs';
 
+/** #2866: literal invisible characters are forbidden even in Markdown prose and fixtures.
+ * Use visible Unicode escapes to document/test them. Offsets use zero-based UTF-16 code units.
+ * Callers supply repository-relative, normalized paths; binary assets are not source text.
+ */
+export function scanInvisibleCharacters(docs) {
+  const names = { '\u200b': 'U+200B (zero-width space)', '\ufeff': 'U+FEFF (BOM / zero-width no-break space)',
+    '\u00a0': 'U+00A0 (non-breaking space)' };
+  return docs.flatMap(({ file, content }) => {
+    if (!/^(scripts|docs)\//.test(file)) return [];
+    return [...content.matchAll(/[\u200b\ufeff\u00a0]/g)].map((hit) => ({
+      message: `${file}: forbidden ${names[hit[0]]} at offset ${hit.index} (zero-based UTF-16); ` +
+        'remove it, use an ordinary space, or write a visible Unicode escape (#2866).',
+      descriptor: { kind: 'invisible-character', fix: 'model', file, offset: hit.index,
+        line: content.slice(0, hit.index).split('\n').length },
+    }));
+  });
+}
+
 // ── Definition-of-green THRESHOLD registry (#2786) ─────────────────────────────────────────────
 // check-standards.conformance.test.mjs proves no definition-of-green knob escapes
 // check-standards.contract.json. The suite's two knob classes use two different discovery

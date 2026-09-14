@@ -5,17 +5,19 @@
  *   from MANY session files pool together; recurrence across DISTINCT sessions outranks one session repeating
  *   itself; one malformed line never costs the rest of the pool; the SCHEMA is re-validated (the content
  *   scrub moved to the publish seam in #3015, so a secret is no longer dropped here); an empty
- *   pool is a clean no-op; the `minSessions` floor DEFERS one-offs (leaves them in the pool) rather than
- *   discarding them; and archiving is an explicit, collision-safe acknowledgement — never a side effect of
- *   reading.
+ *   pool is a clean no-op; there is NO recurrence floor (#3016 — every cluster is a candidate, one-offs sort
+ *   lower); each note's quoted turn is VERIFIED against its harness transcript, which is what admits a note
+ *   to memory; and archiving is an explicit, collision-safe acknowledgement — never a side effect of reading.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   resolvePoolDir, poolFiles, readPool, ageStats, harvest, harvestPool, poolStatus, archivePool, ARCHIVE_DIR,
-  partitionGated,
+  partitionGated, EVIDENCE_EXCERPT_CHARS,
 } from '../conveyor/learnings-harvest.mjs';
 import { poolDir as dropPoolDir, resolveDropboxPath } from '../conveyor/learnings-drop.mjs';
 import { approveEntry, approvalsPath } from '../conveyor/hiccup-approve.mjs';
@@ -136,17 +138,27 @@ describe('harvest — recurrence is the ranking signal', () => {
     expect(candidates[1].sessions).toBe(1);
   });
 
-  it('the minSessions floor DEFERS one-offs rather than discarding them', () => {
+  it('there is NO recurrence floor — a one-session cluster is returned, it just sorts lower (#3016)', () => {
+    // This test used to pin `minSessions: 2` filtering the one-off out into `stats.belowFloor`. The floor is
+    // deleted (ratified #2978 Fork 2): a count is emitter-written and authenticates nothing, and a floor hides
+    // exactly the one-off operator directive memory most needs. Passing the old option changes nothing.
     const entries = [
       { kind: 'friction', area: 'gating', summary: 'the lane gate reruns the full suite for docs only diffs', suggestion: 'scope it', session: 's1' },
       { kind: 'friction', area: 'gating', summary: 'the lane gate reruns the full suite on docs only diffs', suggestion: 'scope it', session: 's2' },
       { kind: 'improvement', area: 'naming', summary: 'a one off idea nobody else hit', suggestion: 'maybe', session: 's1' },
     ];
     const { candidates, stats } = harvest(entries, { minSessions: 2 });
-    expect(candidates).toHaveLength(1);
-    expect(candidates[0].kind).toBe('friction');
-    expect(stats.belowFloor).toBe(1);   // counted, still in the pool — the next harvest sees it again
-    expect(stats.minSessions).toBe(2);
+    expect(candidates.map((c) => [c.kind, c.sessions])).toEqual([['friction', 2], ['improvement', 1]]);
+    expect(stats).not.toHaveProperty('belowFloor');
+    expect(stats).not.toHaveProperty('minSessions');
+  });
+
+  it('distinct DAYS break a sessions tie before raw count does', () => {
+    const at = (session, ts) => ({ kind: 'friction', area: 'gating', summary: 'the lane gate reruns the full suite for docs only diffs', suggestion: 'scope it', session, ts });
+    const sameDay = [1, 2, 3].map(() => ({ kind: 'doc-gap', area: 'docs', summary: 'the memory doc omits the sub index budget rule', suggestion: 'document it', session: 's9', ts: '2026-08-01T01:00:00.000Z' }));
+    const twoDays = [at('s1', '2026-08-01T01:00:00.000Z'), at('s1', '2026-08-03T01:00:00.000Z')];
+    const { candidates } = harvest([...sameDay, ...twoDays]);
+    expect(candidates.map((c) => [c.kind, c.sessions, c.days, c.count])).toEqual([['friction', 1, 2, 2], ['doc-gap', 1, 1, 3]]);
   });
 
   it('collapses near-dupes across sessions into one candidate carrying both suggestions', () => {
@@ -333,5 +345,89 @@ describe('the #3421 gate — a blocking, approval-pending entry is held OUT of c
 
   it('the approvals store lives inside the SAME resolved pool dir, not the machine-fixed default', () => {
     expect(approvalsPath({ dir })).toBe(join(dir, 'approvals.json'));
+  });
+});
+
+describe('grounding verification — what admits a note to memory (#3016, ratified #2978 Fork 1)', () => {
+  let transcripts;
+  beforeEach(() => { transcripts = mkdtempSync(join(tmpdir(), 'we-harvest-transcripts-')); });
+  afterEach(() => { rmSync(transcripts, { recursive: true, force: true }); });
+
+  const QUOTE = 'never rerun the full suite for a docs only change again';
+  const writeTranscript = (name, text) => {
+    const p = join(transcripts, name);
+    writeFileSync(p, JSON.stringify({ type: 'user', uuid: 'turn-1', message: { role: 'user', content: text } }) + '\n');
+    return p;
+  };
+  const grounded = (summary, quotedTurn, transcript, ts = '2026-08-01T00:00:00.000Z') =>
+    JSON.stringify({ kind: 'friction', area: 'lane gating', summary, suggestion: 'scope the gate', quotedTurn, transcript, ts });
+
+  it('harvestPool verifies each note against its transcript and reports it per candidate and per run', () => {
+    const real = writeTranscript('s1.jsonl', `ok — ${QUOTE}, it costs minutes`);
+    const lying = writeTranscript('s2.jsonl', 'we talked about something unrelated');
+    session('sess-a', grounded('lane gate reruns full suite for docs only diffs', QUOTE, real));
+    session('sess-b', grounded('the lane gate reruns the full suite even for docs only diffs', QUOTE, lying));
+    session('sess-c', e('doc-gap', 'memory docs', 'the memory doc omits the sub index budget rule'));
+
+    const { candidates, stats } = harvestPool({ dir, transcriptRoot: transcripts });
+    const gate = candidates.find((c) => c.kind === 'friction');
+    expect(gate.grounding).toEqual({ verified: 1, failed: 1, ungrounded: 0 });
+    expect(gate.evidence.map((r) => [r.session, r.grounding.status, r.grounding.reason ?? r.grounding.role]))
+      .toEqual([['sess-a', 'verified', 'human'], ['sess-b', 'failed', 'quote-not-found']]);
+    expect(gate.evidence[0].grounding.turn).toBe('turn-1');
+    // The ungrounded cluster is still a candidate — grounding decides memory admission, never candidacy.
+    const docs = candidates.find((c) => c.kind === 'doc-gap');
+    expect(docs.grounding).toEqual({ verified: 0, failed: 0, ungrounded: 1 });
+    expect(docs).not.toHaveProperty('evidence');
+    expect(stats.verification).toEqual({ verified: 1, failed: 1, ungrounded: 1 });
+  });
+
+  it('a pointer outside the transcript root fails even when the quote is really in that file', () => {
+    const forgedDir = mkdtempSync(join(tmpdir(), 'we-forged-'));
+    try {
+      const forged = join(forgedDir, 'forged.jsonl');
+      writeFileSync(forged, JSON.stringify({ type: 'user', message: { content: QUOTE } }) + '\n');
+      session('sess-a', grounded('lane gate reruns full suite for docs only diffs', QUOTE, forged));
+      const { candidates } = harvestPool({ dir, transcriptRoot: transcripts });
+      expect(candidates[0].evidence[0].grounding).toEqual({ status: 'failed', reason: 'outside-transcript-root' });
+    } finally {
+      rmSync(forgedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('the pool stores the whole quote; the candidate carries an excerpt within the context budget', () => {
+    const long = `${QUOTE} ${'and here is a great deal more context from the same turn '.repeat(40)}`;
+    const p = writeTranscript('s1.jsonl', long);
+    session('sess-a', grounded('lane gate reruns full suite for docs only diffs', long, p));
+    const { candidates } = harvestPool({ dir, transcriptRoot: transcripts });
+    const row = candidates[0].evidence[0];
+    expect(row.grounding.status).toBe('verified');
+    expect(row.truncated).toBe(true);
+    expect(row.quoteChars).toBe(long.trim().length);
+    expect(row.quotedTurn.length).toBe(EVIDENCE_EXCERPT_CHARS + 1);   // excerpt + the ellipsis
+    expect(row.transcript).toBe(p);                                    // the full turn is one open away
+  });
+
+  it('a quoted note that was never verified is NOT verified (pure harvest, fail-safe)', () => {
+    const { candidates, stats } = harvest([{ kind: 'friction', area: 'a', summary: 'the gate reruns everything', suggestion: 's', quotedTurn: QUOTE, transcript: '/x.jsonl' }]);
+    expect(candidates[0].evidence[0].grounding).toEqual({ status: 'failed', reason: 'not-verified' });
+    expect(stats.verification).toEqual({ verified: 0, failed: 1, ungrounded: 0 });
+  });
+
+  it('the CLI refuses the deleted --min-sessions flag instead of silently ignoring it', () => {
+    const cli = join(dirname(fileURLToPath(import.meta.url)), '..', 'conveyor', 'learnings-harvest.mjs');
+    const r = spawnSync(process.execPath, [cli, `--dir=${dir}`, '--min-sessions=2'], { encoding: 'utf8' });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/--min-sessions was removed/);
+  });
+
+  it('the CLI prints each note\'s grounding verdict (real call path)', () => {
+    const real = writeTranscript('s1.jsonl', QUOTE);
+    session('sess-a', grounded('lane gate reruns full suite for docs only diffs', QUOTE, real));
+    const cli = join(dirname(fileURLToPath(import.meta.url)), '..', 'conveyor', 'learnings-harvest.mjs');
+    const r = spawnSync(process.execPath, [cli, `--dir=${dir}`], { encoding: 'utf8', env: { ...process.env, LEARNINGS_TRANSCRIPT_ROOT: transcripts } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/grounding 1 verified \/ 0 failed \/ 0 ungrounded/);
+    expect(r.stdout).toMatch(/grounding ✓ verified \(human turn turn-1\)/);
   });
 });

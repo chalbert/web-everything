@@ -6,6 +6,7 @@ parent: "3029"
 status: open
 dateOpened: "2026-08-21"
 tags: []
+deliveryAgent: codex
 ---
 
 # The credential-less open-pr fallback silently drops the park label

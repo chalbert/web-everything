@@ -44,7 +44,7 @@ export function flattenFlatConfigRules(exported) {
   return { rules };
 }
 
-/** Parse a JSON or JSONC-ish config file (strips `//` and `/* *​/` comments — oxlintrc allows them). */
+/** Parse a JSON or JSONC-ish config file (strips `//` and `slash-star block` comments — oxlintrc allows them). */
 function parseJsonConfig(text) {
   const stripped = text
     .replace(/\/\*[\s\S]*?\*\//g, '')

@@ -408,6 +408,61 @@ The 2026-09-08 git-manager idea (Idea 1 of the amendment above) is **not built**
 we:scripts/lib/gh-throttle.mjs exists and nothing under we:scripts/, we:docs/ or we:backlog/ references a
 git-manager or gh-throttle. It remains open as written.
 
+## Amendment (2026-09-14) — the heavy-command-pool container POC, started and given a real first working slice
+
+Same discipline as every amendment above: this one DOES change something — it records real code, not just
+research — but changes no `status` and resolves no fork; this item's own two remaining forks (Docker
+Desktop/OrbStack as a simpler mature alternative; the platform-neutral-abstraction question) are still open.
+Tracked as a progress note on `we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md`
+(see that item's own 2026-09-14 session update for the full account) rather than as a new formal backlog item
+— per the operator's own explicit direction, and confirmed against this repo's actual convention: landing a
+PR here does not require a fresh item number when the change legitimately references an existing one
+(precedent: `PR #2131` landed real code referencing `#3631` by number alone).
+
+**Why now, despite this item's own per-lane-container deferral still standing as written.** The
+2026-09-11 amendment above already drew the exact distinction this slice depends on: per-lane containers stay
+deferred on a real, unresolved auth/billing question (OAuth/keychain → metered `ANTHROPIC_API_KEY`); the
+heavy-command-pool slice needs none of that (`check:standards`/`test:unit` need no credentials at all) and was
+this item's OWN amendment's explicit recommendation for what should start first if anything did. Nothing about
+that recommendation has changed — this is that recommendation acted on, not a reopening of the per-lane
+question.
+
+**A real first working slice landed, `check:standards` only — see `#3383`'s session update for the full
+build/evidence writeup (`we:scripts/lib/container-exec.mjs`, `we:scripts/lib/container-exec/Containerfile`,
+and a new `run` CLI mode on `we:scripts/readiness/heavy-admission.mjs`).** Headline results, condensed here
+because they bear directly on open questions THIS item's own body left unresolved:
+
+- **The CPU cap reproduces this item's own 2026-09-11 busy-spin containment result on a second, independent
+  build**: 8 unbounded spinners inside a `--cpus 2 --memory 2g` container held host CPU at ~190-205%
+  throughout the run, versus ~800% unconstrained on this same 12-core host. Corroborates, does not merely
+  repeat, the earlier finding.
+- **A real fidelity proof for a HEAVY COMMAND specifically** (the earlier amendment proved the isolation
+  provider's own unit suite in-container; this proves an actual heavy command in the closed named set
+  `we:scripts/readiness/heavy-admission.mjs` gates): `check:standards` produced an identical error count and
+  identical error messages run inside the container vs. the host, back-to-back against the same repo state.
+- **A cheaper path than this item's own measured `npm ci`-in-container approach, for commands with a pure-JS
+  dependency closure**: `check:standards`'s only two npm dependencies (`gray-matter`, `markdown-it`) carry no
+  native binding, so the container mounts the lane's own HOST-BUILT (darwin) `node_modules` read-only rather
+  than baking a separate linux-arm64 tree. This is real, but narrow — it does NOT extend to `test:unit`
+  (vitest/esbuild/rollup carry native darwin bindings in this lane's tree), where this item's own
+  `MODULE_NOT_FOUND` finding almost certainly still applies and the baked-linux-tree approach already measured
+  above remains the needed path.
+- **A previously-unnamed friction point, found and closed while building this**: a lane clone's
+  `.git/objects/info/alternates` records an ABSOLUTE host path to the primary checkout (how `--reference`
+  object sharing works) — a container that mounts only the lane itself cannot resolve it, so `git merge-base
+  origin/main HEAD` and similar calls fail inside the guest. Fixed by mounting the primary checkout read-only
+  at its own identical absolute path alongside the lane's read-write mount. Worth recording here since any
+  future container work touching a lane clone (per-lane containers included) will hit the same thing.
+
+**Still explicitly open, not resolved by this slice:** whether `--container` should ever become the DEFAULT
+execution path for `check:standards` (not done here — opt-in only, via a new `--container` flag/
+`WE_HEAVY_ADMISSION_CONTAINER=1`); `test:unit`/Playwright coverage (unstarted); the `frontierui`/`plateau-app`
+sibling-checkout mount gap (a named, understood scope limitation, not yet closed); image-build automation (a
+human/agent runs `container build` by hand today); and a real, accepted risk that this landed on `main` while
+a fuller version of the same general-purpose `run`-CLI idea already exists, unmerged, on the separate
+`lane/mechanical-dispatcher` integration branch — reconciling the two is deferred to whoever lands that
+branch's eventual merge.
+
 ### This amendment does NOT stamp `preparedDate`, deliberately
 
 It closes real questions (is the tool usable; does the cap work; what does a lane cost; does the Codex
@@ -423,6 +478,390 @@ Codex work gains nothing from waiting for containers. If anything starts in para
 the **heavy-command container pool**, not per-lane containers: it is the cheap half, needs no auth or
 billing change, answers this item's founding incident directly, and would produce the throughput
 measurement the prior amendment's core-split premise still lacks.
+
+## Amendment (2026-09-13) — correction: the 2026-09-11 amendment's "requires API-key billing" claim is FALSE, tested live tonight
+
+Same discipline as the four amendments above — a factual correction to prior research, not a decision:
+ratifies nothing, changes no status, stamps no `preparedDate`, and does not change the operator's
+already-recorded sequencing (containers stay deferred until Codex/Gemini are hooked up, per the
+2026-09-11 amendment's "Recommended sequencing" above — this only corrects a technical claim that will
+matter whenever that work eventually resumes).
+
+**The claim being corrected.** The 2026-09-11 amendment's "Auth: confirmed, and it is a billing
+decision, not a config flag" section states the container route "requires switching to API-key auth,
+which is a different *billing model* (metered API credits vs. the subscription the CLI uses)." Tested
+live tonight, real Apple `container` CLI, not desk research: **this is false, or at minimum stated far
+too pessimistically.** Subscription auth (Claude Max plan, Codex ChatGPT subscription) works fine from
+inside a container. No API-key billing switch is required.
+
+**Evidence, already verified tonight — not to be re-tested:**
+- **Claude Code CLI** has a plain-file credential fallback, mode 0600, at:
+  ```
+  ~/.claude/.credentials.json
+  ```
+  used on Linux/when Keychain is unavailable, plus an official headless path: `claude setup-token` mints
+  a one-year OAuth token settable via `CLAUDE_CODE_OAUTH_TOKEN`. Verified live in a real `container run`
+  (Apple container CLI 1.3.1, `node:20` image): the CLI made a real authenticated round-trip to
+  Anthropic's servers from inside the container, zero Keychain involved.
+- **Codex CLI**'s credential file is *always* plain (never Keychain, on any platform), at:
+  ```
+  ~/.codex/auth.json
+  ```
+  holding `{auth_mode, tokens: {access_token, refresh_token, ...}}`. Verified live the same way — real
+  calls to chatgpt.com's backend from inside a container. Also found: `codex login
+  --with-access-token` (headless bearer-token injection) and a `chatgpt_base_url`/`model_providers`
+  config override — both official, supported mechanisms.
+- **Antigravity** is Keychain-only; no plain-file fallback was found. This one gap is real, but matters
+  less: Antigravity isn't run headlessly by the conveyor today anyway.
+
+**Best design identified, for whenever this work resumes:** a host-side auth proxy — the real credential
+stays outside the container on the host, and the container points at it via the officially-supported
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` env vars (Claude) and the `chatgpt_base_url` override
+(Codex). The container never holds the real secret at all. This also sidesteps a footgun found tonight:
+a raw copied Codex credential file can have its refresh token rotated *inside* the container, causing a
+split-brain with the host session — a proxy avoids that because the container never holds a token that
+can itself be refreshed and diverge. A lower-effort interim step, if a quick unblock is ever needed
+before the proxy is built: inject `CLAUDE_CODE_OAUTH_TOKEN` directly, or use `codex login
+--with-access-token` directly — no proxy required, at the cost of the token living in the container.
+
+**A third option, tested and ruled out:** scoping a credential file's visibility to a single process
+rather than the whole container. This does not exist as an Apple `container` CLI primitive — mounts are
+whole-container, whole-lifetime only, with no per-process visibility control. Not worth pursuing further
+since the host-side proxy is strictly better anyway (never exposes the secret to the container at all,
+process-scoped or not).
+
+**Net correction to this item's own record:** the 2026-09-11 amendment's "Two real costs this item's
+desk research missed" section and its auth paragraph should now be read alongside this one — the
+dependency-tree cost and the ~3.6x mount I/O penalty measured that night both still stand untouched by
+tonight's testing, but the auth/billing cost does not: it was the single biggest asymmetry that amendment
+named between the per-lane-container and heavy-command-only halves, and it turns out not to be a real
+cost at all, just an under-researched one. This does not revive per-lane containers as an active proposal
+— the operator's sequencing call above still holds — it only means that when the decision is eventually
+made, the auth/billing line item should be crossed off the tradeoff list rather than carried forward as a
+blocker.
+
+## Amendment (2026-09-14) — LIVE test: a container DOES fully contain Antigravity's write tools, git-hook write-escape ruled out, and the auth gap is confirmed real
+
+Same discipline as the amendments above — evidence addendum only, ratifying nothing, changing no status,
+resolving no fork. Commissioned by a different operator question than the 2026-09-11 amendment's Codex
+question: given `#3633`'s own finding that Antigravity's `--sandbox` flag confines only its shell while its 57
+in-process tools (its native file-write tool among them) walk around it entirely — the reason
+`we:scripts/lib/antigravity-judge-spawn.mjs` seats it tool-FREE today — could the SAME `container` boundary
+this item already proved for Codex's git-history problem also close Antigravity's write-safety gap, regardless
+of its own internal sandbox being broken? Tested live tonight, not reasoned about.
+
+**Setup, mirroring this item's own established pattern:** a real, disposable `container run --rm --cpus 2
+--memory 2g`, exactly ONE host directory bind-mounted read-write (`-v <mount>:/workspace:rw`), nothing else —
+no full repo, no host credentials. A first discovery worth recording on its own: Antigravity IS distributed as
+a genuine Linux-native binary, not only the macOS Homebrew cask (`Mach-O 64-bit arm64`) this repo's other
+records reference:
+
+```
+$ curl -sI https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.1-.../linux-arm/cli_linux_arm64.tar.gz
+   HTTP/2 200
+$ file antigravity   (after download + extract)
+   ELF 64-bit LSB pie executable, ARM aarch64, dynamically linked, interpreter /lib/ld-linux-aarch64.so.1
+$ container run --rm -v <mount>:/workspace node:20 /workspace/bin/antigravity --version
+   1.2.1   (exit 0)
+```
+
+So "run Antigravity inside a container" is not blocked by an architecture mismatch, contrary to what the macOS
+cask alone would suggest.
+
+**The filesystem boundary test, run as root inside the guest (the container's default uid).** Every write
+attempted outside the single declared mount — a guest-local `/etc` write, a `..`-above-the-mount write, a
+fabricated host-shaped absolute path built fresh inside the guest, and (below) a malicious git hook — either
+failed outright or landed ONLY in the guest's own ephemeral disk (wiped on `--rm`). Verified independently from
+the real host after each run: a sibling secret file, deliberately never mounted, was byte-identical throughout,
+and none of the guest-side canary paths exist anywhere on the real host:
+
+```
+guest: echo pwned > /etc/canary-write-test        → "WROTE to /etc"      (guest-local /etc, not the host's)
+guest: echo pwned > /workspace/../escape-test.txt → "WROTE above mount"  (resolves to guest /, not host)
+guest: mkdir -p /Users/<home> && echo pwned > .../canary-write-test.txt → "WROTE" (fresh path inside the guest)
+host:  ls /Users/<home>/canary-write-test.txt     → No such file or directory   ← never reached the real host
+host:  ls <the never-mounted sibling secret dir>  → not visible to the guest at all
+guest: df -h                                       → only /workspace is the real virtiofs bind mount;
+                                                       everything else is the guest's own isolated /dev/vdb disk
+```
+
+This holds regardless of which mechanism performs the write, because the boundary is enforced BENEATH the
+process/syscall layer (VM-level), not by any per-tool or per-CLI permission check — the same structural reason
+this item's 2026-09-11 amendment already gave for why a container contains a busy-spin loop that no admission
+control or scanner can. The Antigravity binary itself carries no setuid/setgid bit and (so far as the minimal
+test image's tooling could show) no special file capability — an ordinary unprivileged process, no different
+from any other guest command tested.
+
+**The specific write-relevance question this amendment was asked to answer: is the git-history leak (this
+item's own 2026-09-11 finding, "a container does not close the doctrine-file leak") ALSO a write-escape route,
+not just a read one?** Built the same deletion-clone signature this item's own prior amendment uses (a real
+commit containing the doctrine file, then a plain working-tree delete — not `git rm` — leaving an UNCOMMITTED
+` D` signpost so `HEAD` still holds the file), mounted it as the container's one read-write directory, and
+reproduced the read leak first — `git show HEAD:<the doctrine file>`, run from inside the container, recovered
+the full canary text, identical to this item's existing finding, now confirmed specifically inside Antigravity's
+own execution environment (the Linux binary, not a bare `git` client). Then planted a `.git/hooks/post-commit`
+hook designed to write outside the mount on every commit, and triggered it with a real `git commit` inside the
+container:
+
+```
+$ git commit -q -m "trigger hook"
+HOOK-FIRED: attempting to write outside the mount from a git hook
+.git/hooks/post-commit: cannot create /Users/<home>/hook-write-test.txt: Directory nonexistent
+hook ran with uid: 0
+guest: cat /outside-via-hook.txt   → "hook-pwned"        (the hook's OWN write, inside the guest)
+host:  ls  /outside-via-hook.txt   → No such file or directory   ← never reached the real host
+```
+
+**The hook DID fire** — git hooks execute with full process privilege, confirmed running as the same uid as
+everything else in the guest — but its writes were subject to the identical VM boundary as any other write: one
+landed only in the guest's own ephemeral filesystem (absent from the real host afterward), the other failed
+outright because the target path does not exist in the guest at all. **Answer: no — git plumbing and hooks carry
+no additional escape privilege beyond an ordinary process write.** The git-history problem is confirmed to be
+purely a READ-side concern (recovering content that already lives inside the mount); there is no distinct
+write-escape route through git internals that the general filesystem boundary above does not already cover.
+
+**Network and auth (the sidecar/IPC question).** The real Antigravity backend domains — `antigravity.google`,
+`gweb-jetski.appspot.com` (the `jetski` service named in `#3633`'s own stderr text), `accounts.google.com` — are
+reachable over ordinary outbound HTTPS from inside the container with zero special network configuration; the
+default `container run` networking already provides this, matching this item's existing
+`api.anthropic.com`/`api.github.com` finding. No hole beyond standard outbound internet access is needed.
+Separately: Antigravity's host-side auth lives in the macOS Keychain (confirmed via `security dump-keychain`:
+service `gemini`, account `antigravity`), not a plain credential file under its own state directory — checked
+directly, nothing token-shaped sits there. A Linux container guest has no Keychain, so an unauthenticated
+headless run inside the container failed immediately and cleanly (`Error: authentication required. Run
+'antigravity' to log in, then retry.`, `status: "ERROR"`) rather than silently inheriting or proxying host
+credentials through any hidden channel. **No evidence of a sidecar/IPC route bridging host credentials or host
+filesystem access into the guest was found** — the auth boundary held exactly as the filesystem boundary did.
+This mirrors this item's own already-recorded Claude-Code-Keychain-auth finding (and the 2026-09-13 amendment's
+host-side auth-proxy design immediately above), now confirmed for Antigravity specifically: a real deployment
+still needs the same kind of auth-bridging mechanism (a host-side proxy, or a directly-injected token) before a
+containerized Antigravity seat could run authenticated turns at all — real, separate engineering work, not a
+reason to doubt the containment finding itself.
+
+**One honest gap in this test, stated plainly rather than glossed over.** A live, fully-authenticated
+Antigravity turn actually invoking its own native file-write tool end-to-end was NOT run, because doing so would
+have required extracting the operator's real Keychain-stored Google credential into the throwaway container —
+explicitly avoided per this session's "don't touch real credentials" constraint. What was run instead — raw
+guest-context writes, and a fired git hook attempting the identical escape, both under the exact root-uid
+unprivileged execution context Antigravity's own binary runs under, with that binary independently confirmed to
+carry no elevated capability — is offered as strong, generalizing evidence rather than identical evidence. A
+future test with a scoped, disposable Antigravity credential (not the operator's primary one) could close this
+specific gap and should be preferred over further reasoning-only extrapolation if this ever gates a real
+delivery-seat decision.
+
+**Verdict, and the correction this adds to this item's own record.** A container DOES fully contain
+Antigravity's write tools at the OS/filesystem level — every write attempted outside the single declared mount
+failed to reach the host, regardless of the mechanism (raw syscall, git hook, and by direct generalization its
+own native file-write tool and the other 56 in-process tools, none of which carry any elevated privilege). This
+closes, at the deployment layer, the exact gap `#3633` found in Antigravity's own `--sandbox` flag (confines the
+shell, not the in-process tools) — the reason `we:scripts/lib/antigravity-judge-spawn.mjs` seats it tool-free
+today. The one caveat already on record here — the git-history leak — is now confirmed to be read-only in
+nature; it is not a route past the write boundary. **Net: once container infrastructure exists for this item's
+other reasons, a write-capable Antigravity delivery seat becomes safe to build on top of it, gated only on (a)
+solving the Keychain-auth bridging problem above and (b) the one real gap this test could not close (a
+genuinely live, authenticated native-tool write call) — not on the container boundary itself, which held in
+every test run.**
+
+## Amendment (2026-09-13) — operator confirms the recommended sequencing: defer until judge/provider integration graduates
+
+Same discipline as the four amendments above — an operator-intent addendum only, ratifying nothing, changing
+no status, resolving no fork, and **not stamping `preparedDate`**. This item stays `open`/unprepared.
+
+The operator confirmed tonight that containers will likely be useful for resource management, but it is a
+larger piece of work, so it should wait until the current judge/provider integration work (Codex/Antigravity/
+model-probation, tracked on we:#3383) graduates. This is the same conclusion the 2026-09-11 amendment above
+already reached in its own "Recommended sequencing" section — restated and confirmed here, not a new
+judgment. If anything on this axis starts before that graduation, it should be the heavy-command container
+pool named in that section, not per-lane containers. Recorded in full on the epic tracker,
+we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md (operator note, 2026-09-13).
+
+## Amendment (2026-09-14, later the same day) — the heavy-command-pool container POC extended: `test:unit` (vitest) now proven too
+
+Same discipline as every amendment above: this records real code and real evidence, changes no `status`,
+resolves no fork, and stamps no `preparedDate`. Tracked as a progress note on
+`we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md` (see that item's own
+2026-09-14 session update, second entry) rather than a new formal item, same convention as the amendment
+directly above this one.
+
+**What this closes from the prior amendment's own "still explicitly open" list.** That amendment named
+`test:unit`/Playwright coverage as unstarted, the `frontierui`/`plateau-app` sibling-mount gap as open, and
+image-build automation as manual-only. This slice closes the first two for `test:unit` specifically (not
+Playwright — still unstarted) and adds real automation for the third:
+
+- **The predicted blocker was real and confirmed empirically, not just inferred**: mounting the lane's own
+  host-built (darwin) `node_modules` straight into the container — the shortcut that worked for
+  `check:standards`'s pure-JS dependency closure — fails for `test:unit` exactly as predicted. `npx vitest run`
+  inside a container with only the host `node_modules` mounted throws `Failed to resolve import
+  "@frontierui/plugs/..."` and, separately, esbuild's own native binding never resolves (only
+  `@esbuild/darwin-arm64` exists in the host tree; the guest needs `@esbuild/linux-arm64`).
+- **The fix, measured**: bake a real LINUX-built `node_modules` via `npm ci` inside `node:22-alpine`
+  (`we:scripts/lib/container-exec/Containerfile.test-unit-deps` — no compiler toolchain needed; every native
+  optionalDependency in this lockfile — esbuild, rollup, swc, lightningcss, sharp, `@parcel/watcher` — ships a
+  prebuilt `linux-arm64`/`linux-arm64-musl` binary; `npm ci` completes in ~15-20s), seed a named `container
+  volume` from the result, then mount that volume at `<cwd>/node_modules` OVER the checkout's own rw mount — a
+  more-specific-path mount genuinely shadows the parent bind mount for just that subtree (proven directly: a
+  host-side stub `we:node_modules/marker.json` placed under the checkout mount is completely unreachable inside
+  the guest once the volume is mounted on top, and a write the guest makes into the shadowed path never
+  reaches the host — see `we:scripts/lib/container-exec.mjs`'s own "test:unit slice" header section and its
+  test suite's real integration proof for the exact mechanism).
+- **The second predicted gap, also confirmed and closed**: `we:vitest.config.ts` resolves `@frontierui/plugs`/
+  `@frontierui/webtheme` to the sibling `frontierui` checkout (`we:vitest.shared.ts`'s
+  `resolve(repoRoot, '../frontierui/...')`) — mounting that sibling directory read-only at its own identical
+  host path (`we:scripts/lib/container-exec.mjs#frontieruiSiblingRoot`) fixes it. `plateau-app` was
+  deliberately NOT mounted — it is a `we:vite.config.mts`/dev-server-only reference, never part of `test:unit`'s
+  own import graph (confirmed by running the proof WITHOUT a plateau-app mount and getting a clean pass).
+- **Real evidence, measured on this machine**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on
+  the host and inside the container (via `node we:scripts/readiness/heavy-admission.mjs run --container
+  --container-node-modules -- npx vitest run we:blocks/__tests__`) produced IDENTICAL pass counts both times.
+  The full suite (447 files / 12007 tests, ~9m48s on the host) was NOT re-run inside the container for this
+  proof — a representative subset was used instead, matching this task's own explicit allowance, since the
+  full run's wall-clock cost does not belong in a first-proof loop. The busy-spin CPU-cap containment result
+  was independently reproduced a THIRD time under this exact node_modules-volume + sibling-mount
+  configuration: 8 unbounded spinners held to ~191-204% aggregate host CPU inside a `--cpus 2` container vs.
+  ~800% unconstrained on the host (8 separate `node -e` processes, each pinned at ~100%).
+- **Image-build automation, partially closed**: `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new)
+  builds the deps image, creates/seeds the named volume, stamps a lockfile-hash marker so a re-run is a cheap
+  no-op when the lockfile hasn't changed, and reports `status` (image/volume presence + staleness) for a
+  preflight. This is real automation for the ONE image this slice needs — it does not generalize to
+  `check:standards`'s own image (still built by hand per the prior amendment) or to any future image, so "no
+  image-build automation exists yet" is now only PARTIALLY true.
+
+**Still explicitly open, not resolved by this slice:** Playwright coverage (unstarted — a different, likely
+harder shape again, since it needs a real browser inside the guest, not just a Linux dependency tree);
+`--container`/`--container-node-modules` are not wired as any default anywhere; the full `test:unit` suite was
+not run side-by-side in the container (representative-subset evidence only, as stated above); `check:standards`'s
+own image-build step is still manual; and the same `lane/mechanical-dispatcher` reconciliation risk the prior
+amendment named is unchanged by this slice.
+
+## Amendment (2026-09-14, later still) — three forward-looking requirements for the NEXT phase of this work, plus a live test of one of them
+
+Same discipline as every amendment above — a requirements/evidence addendum only, ratifying nothing, changing
+no status, resolving no fork, and deliberately NOT designing the full solution (that is real scoping work for
+later, per the operator's own explicit instruction). Captured now, precisely, so nothing said tonight gets lost
+to conversation. Triggered by the operator's own direct statement: *"we will need to use a container for the
+heavy command soon. Have capacity reserved for it separate from lane capacity. Commands like vitest and
+verify lane must use the correct parallelism to not overflow allocation and the cap 2 should be aware of what
+each heavy command usage is."* That statement breaks cleanly into three distinct requirements, none of which
+either `#2206` or `#2211` (the two container POC slices landed earlier tonight, see the two amendments directly
+above) actually built — both proved CONTAINMENT works (a command runs correctly inside a capped container,
+producing identical results), not CAPACITY PARTITIONING, INTERNAL-PARALLELISM CORRECTNESS, or an
+INTELLIGENT ADMISSION POLICY. Checked before writing this in: grepped `we:scripts/` for any existing
+implementation of a separate heavy-command resource pool, a container-aware worker-count derivation, or a
+per-command-weighted admission cap — none exists; each of the three below is genuinely open ground, not a
+rediscovery.
+
+### Requirement 1 — reserved capacity for heavy-command containers, kept SEPARATE from lane capacity (two pools, not one shared budget)
+
+A heavy-command container needs its own CPU/memory budget that does not compete with, or get counted against,
+`we:scripts/lib/lane-concurrency.mjs`'s lane-concurrency cap (`DEFAULT_MAX_CONCURRENT_LANES = 8`, env-overridable
+via `WE_MAX_CONCURRENT_LANES`). Today those are already two DIFFERENT counters
+(`we:scripts/lib/lane-concurrency.mjs`'s lane cap vs. `we:scripts/readiness/heavy-admission.mjs`'s `DEFAULT_ADMISSION_CAP = 2`
+heavy-command cap) — but neither is backed by an actual reserved slice of host CPU/memory; both are purely
+COOPERATIVE counting semaphores drawing from the same undivided host resource pool. This is exactly the
+"low-cpu lane containers + a separate heavy-command core pool" idea this item's own 2026-09-08 amendment
+already floated in the abstract (see above) — this requirement makes it concrete and names it as a real,
+needed piece of work rather than a still-open idea: whatever eventually runs heavy commands in containers needs
+a resource reservation (e.g. a fixed CPU/memory slice carved out up front, or a hard ceiling enforced
+independently of how many lanes happen to be open) that a burst of lane-orchestration activity cannot eat into,
+and vice versa. Neither `#2206` nor `#2211` touched this — both ran a SINGLE container ad hoc, on demand, with
+no notion of a standing reserved pool at all.
+
+### Requirement 2 — a heavy command must configure its OWN internal parallelism to fit the container it actually runs in, not autodetect (or assume) the host's full core count
+
+A command like `vitest` (`test:unit`) or `we:scripts/verify-lane.mjs`, when run inside a `container run --cpus
+N` instance, must size its own worker/thread pool to fit within N — never oversubscribe its OWN container
+allocation. This needs to be verified/fixed PER COMMAND, not assumed to already hold repo-wide.
+
+**Live-tested tonight, on this machine, per the operator's own request for a real answer rather than an
+assumption** — using `#2211`'s already-built container infrastructure directly (a fresh lane, `lane-20`,
+acquired via `we:scripts/lane-pool.mjs` specifically for this test; the node_modules volume/image were already
+built and fresh on this host):
+
+- **Does Node itself see a container's real CPU allocation?** Mixed, and worth recording precisely rather than
+  as a single yes/no. `container run --cpus 2 --memory 2g node:22-alpine node -e "os.cpus().length"` → **3**
+  (an off-by-one, N+1 — matching this item's own 2026-09-11 amendment's earlier finding, now reconfirmed with
+  `--cpus 1` → 2 and `--cpus 4` → 5, a consistent pattern, not a one-off fluke). But `os.availableParallelism()`
+  — the newer, cgroup-aware Node API — correctly reported **2** for `--cpus 2`. So a command that reads the
+  older `os.cpus().length` API gets a systematically wrong (inflated by one) view of its container's real
+  allocation; one that reads `os.availableParallelism()` gets the correct, cgroup-limited number. Which API a
+  given command's dependency chain actually calls is exactly the kind of thing that has to be checked per
+  command, not assumed.
+- **Does THIS repo's `test:unit` (vitest) actually use either API to size its pool?** No — and this is the
+  more important finding. `we:vitest.shared.ts#maxTestWorkers` is a **hardcoded literal constant, `= 4`**, wired
+  into `we:vitest.config.ts`/`we:vitest.maas-conformance.config.ts`'s `poolOptions.threads.maxThreads` and
+  `we:vitest.integration.config.ts`'s `poolOptions.forks.maxForks`. It calls neither `os.cpus()` nor
+  `os.availableParallelism()` at all — confirmed by reading the constant's own definition and every call site.
+  It was deliberately sized (per that constant's own `#3650` comment, already in the repo, unrelated to this
+  amendment) for the HOST's 12-core budget under a documented worst-case assumption of **3 concurrent `vitest`
+  invocations** racing past `we:scripts/readiness/heavy-admission.mjs`'s admission cap during its fail-open timeout window (3×4=12,
+  "fully subscribed but never oversubscribed" — on the HOST). **That sizing has nothing to do with, and does
+  not adapt to, any container it might later run inside.** Ran the real 35-file/441-test `we:blocks/__tests__`
+  subset (the same subset `#2211` proved fidelity with) inside a real `--cpus 2 --memory 2g` container via the
+  actual wrapper — `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules --
+  npx vitest run --config we:vitest.config.ts we:blocks/__tests__` — and it passed 35/35 files, 441/441 tests,
+  confirming the pipeline itself works end to end. But the config value governing its worker count is still the
+  same literal `4`, regardless of the `--cpus 2` the container was actually given.
+- **The confirmed, specific instance of this requirement, stated plainly:** `test:unit`, run inside a `--cpus 2`
+  container exactly the way a future heavy-command-pool default would run it, will request up to **4** worker
+  threads against a container that only has **2** real cores — a genuine 2x oversubscription of the
+  container's own allocation, distinct from (and not fixed by) the host-level oversubscription
+  `maxTestWorkers = 4` was originally built to prevent. This is NOT the naive failure mode this requirement's
+  own framing worried about going in (blind `os.cpus().length` autodetection of the HOST'S full core count) —
+  that specific shape is already avoided by the existing hardcoded constant. It is a related but different
+  gap: a fixed value tuned for one resource budget (the host, under a specific concurrent-invocation
+  assumption) silently carried into a different, smaller, actual resource budget (one container's `--cpus N`)
+  with no mechanism connecting the two. Diagnosed here, not fixed — per the operator's own instruction, fixing
+  vitest's config to read its container's real allocation (e.g. via `os.availableParallelism()`, or an
+  explicit `--cpus`-derived env var the wrapper could pass in) is real scope, better sequenced as its own
+  follow-up once Requirement 1's capacity reservation is designed — a worker-count fix sized against an
+  UNRESERVED container allocation would just be guessing at a moving target.
+- **Not yet checked, flagged rather than assumed:** `we:scripts/verify-lane.mjs` itself and `check:standards`'s
+  own internal parallelism (if any) were not tested this way tonight — only `test:unit`/vitest was, since it is
+  the one with a real, already-discovered worker-pool config to inspect. Whoever picks this requirement up
+  should check each named heavy command individually, not generalize from vitest's result alone.
+
+### Requirement 3 — the admission cap should become resource-aware per command, not a flat cap-of-2 treating every heavy command as equal
+
+`we:scripts/readiness/heavy-admission.mjs`'s own header is explicit that v1 is "an EQUAL-COST NAMED SET — every
+heavy command consumes exactly one slot, none is weighted differently." The operator's direction tonight is
+that this should change: the cap should know what each specific heavy command actually needs (e.g. `vitest`
+plausibly needing more CPU/memory budget than `check:standards`'s pure-JS static analysis pass) rather than
+treating every admitted command as an interchangeable unit. This is a real evolution of the semaphore model —
+weighted/typed slots, or a per-command resource-cost table the admission logic consults — not a small tweak to
+the existing flat-count code.
+
+**This is not purely theoretical — a live instance of the SAME underlying "admission control does not actually
+see what is really happening" gap was found and is being fixed separately tonight, worth citing here as
+concrete, dated evidence rather than a hypothetical.** Confirmed 2026-09-14: `we:scripts/readiness/heavy-admission.mjs`'s slot
+reentrancy is keyed by LANE PATH STRING, not process identity — so two genuinely different processes legitimately
+verifying the same lane back-to-back (the conveyor's own auto-verify, then a manual re-verify after a new
+commit landed) both get treated as "one slot" under that owner key, meaning real concurrent load on this host
+was 3 processes while the gate reported a healthy 2/2. A fix for that specific reentrancy bug is separately in
+flight this same session (not yet landed as of this note) — flagged here only as evidence that a cap-of-2
+which cannot see what is really holding its slots is already producing real, measurable blind spots today, not
+as a claim that fixing it resolves this requirement. Requirement 3 is the larger, forward-looking shape:
+even a cap that correctly counts HOW MANY processes hold a slot still treats every one of them as costing the
+same, which this requirement says should not remain true.
+
+**Cross-reference, not merged into this requirement:** this item's own 2026-09-13 "Operator goal, recorded for
+the record: make the lane-concurrency admission cap resource-aware instead of a flat count" entry (above, under
+`we:scripts/lib/lane-concurrency.mjs`) is a SIBLING goal, not a duplicate — that one is about the LANE-COUNT cap
+(how many lanes may be open at once) becoming resource-aware using accumulated `host.process.*` telemetry;
+this requirement is about the HEAVY-COMMAND admission cap (how many heavy commands may run at once) becoming
+aware of each named command's own resource footprint. Both point at the same underlying shift — flat counts
+are a crude stopgap, real capacity should be measured/weighted, not counted — but they are two different caps
+on two different resources, and should likely be designed together rather than one blocking the other, per
+whoever eventually scopes this.
+
+### Explicitly not decided or built by this amendment
+
+None of the three requirements above is designed in any technical detail here, deliberately, per the
+operator's own instruction that this needs proper scoping later rather than being designed or built now. Left
+open: how a reserved heavy-command pool would actually be carved out of host resources (Requirement 1); how
+each per-command worker-pool fix would read its container's real allocation, and whether that is env-var-based,
+API-based, or something else (Requirement 2); and what shape a weighted/typed admission cap takes — a static
+per-command cost table, measured telemetry, or something else (Requirement 3). This amendment does not stamp
+`preparedDate` — it is a requirements capture, not a readiness claim.
 
 ## Done when
 
