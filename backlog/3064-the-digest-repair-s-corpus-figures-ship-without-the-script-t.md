@@ -10,6 +10,7 @@ scope:
   - we:scripts/measure-contribution-digest.mjs
   - we:backlog/3054-the-acceptance-coverage-digest-re-parks-a-cleared-pr-whose-c.md
   - we:backlog/3046-a-stale-acceptance-re-park-fires-on-an-unchanged-contributio.md
+deliveryAgent: codex
 ---
 
 # The digest repair's corpus figures ship without the script that produced them

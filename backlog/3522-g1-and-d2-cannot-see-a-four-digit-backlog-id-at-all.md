@@ -6,6 +6,7 @@ status: open
 scope: ["we:scripts/audit-backlog-health.mjs"]
 dateOpened: "2026-09-06"
 tags: [backlog, audit, gates, health, refs]
+deliveryAgent: codex
 ---
 
 # G1 and D2 cannot see a four-digit backlog id at all
