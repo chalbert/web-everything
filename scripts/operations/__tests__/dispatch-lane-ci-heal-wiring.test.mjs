@@ -49,6 +49,11 @@ import {
 } from '../ci-heal-run.mjs';
 import { planCiHealDispatchWrapper, CI_HEAL_AGENT_PROVIDERS } from '../ci-heal-dispatch-wrapper.mjs';
 
+/** A non-lane-shaped root (mirrors `./dispatch-lane.test.mjs`'s own `PRIMARY`) — `createDispatchSinks`'s
+ *  default `root` is the REAL `REPO_ROOT`, and this whole suite must run correctly from an actual lane
+ *  checkout (whose directory is named `lane-<N>`), which `assertNotALaneCheckout` would otherwise refuse. */
+const PRIMARY = '/primary/webeverything';
+
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits for a `ci-heal` launch, trimmed to what a
  *  provider reads. `pr`/`reason` have ridden the payload since #3332 and the port since #3640. */
 const ciHealPayload = (over = {}) => ({
@@ -91,6 +96,7 @@ describe('#3642 — the ci-heal dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached(9102);
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider`, NO per-kind scalar: the sink resolves the mode itself from an environment with nothing
       // in it and installs its own router over the table.
       modes: dispatchModesFromEnv({}),
@@ -125,6 +131,7 @@ describe('#3642 — the ci-heal dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({ WE_CI_HEAL_DISPATCH_MODE: 'agent' }),
       registry: registryWithSpawn(spawnDetached),
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
@@ -153,6 +160,7 @@ describe('#3642 — the ci-heal dispatch is MECHANICAL by default', () => {
     }
     // …and the sibling repair kind in particular still routes mechanically under that same env.
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes,
       registry: Object.freeze({
         ...DISPATCH_PROVIDER_REGISTRY,
@@ -260,6 +268,7 @@ describe('#3642 — PR-keyed, reason-carrying: build\'s assumptions do NOT carry
   it('the sink forwards `reason` onto the port request — the field this kind alone needs', async () => {
     const seen = [];
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({}),
       registry: Object.freeze({
         ...DISPATCH_PROVIDER_REGISTRY,
@@ -277,6 +286,7 @@ describe('#3642 — PR-keyed, reason-carrying: build\'s assumptions do NOT carry
   it('and `reason` survives the WHOLE default path, sink → port → provider → argv', async () => {
     const { fn: spawnDetached, calls } = recordingSpawnDetached();
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({}),
       registry: registryWithSpawn(spawnDetached),
       spawnAgent: () => { throw new Error('the agent path must not be reached'); },

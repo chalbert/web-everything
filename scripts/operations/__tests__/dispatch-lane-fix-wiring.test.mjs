@@ -49,6 +49,11 @@ import {
 } from '../fix-run.mjs';
 import { planFixDispatchWrapper, FIX_AGENT_PROVIDERS } from '../fix-dispatch-wrapper.mjs';
 
+/** A non-lane-shaped root (mirrors `./dispatch-lane.test.mjs`'s own `PRIMARY`) — `createDispatchSinks`'s
+ *  default `root` is the REAL `REPO_ROOT`, and this whole suite must run correctly from an actual lane
+ *  checkout (whose directory is named `lane-<N>`), which `assertNotALaneCheckout` would otherwise refuse. */
+const PRIMARY = '/primary/webeverything';
+
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits for a `fix` launch, trimmed to what a
  *  provider reads. `pr`/`reason` have ridden the payload since #3332; #3640 forwards them onto the port. */
 const fixPayload = (over = {}) => ({
@@ -91,6 +96,7 @@ describe('#3640 — the fix dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached(9002);
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider`, NO per-kind scalar: the sink resolves the mode itself from an environment with nothing
       // in it and installs its own router over the table.
       modes: dispatchModesFromEnv({}),
@@ -125,6 +131,7 @@ describe('#3640 — the fix dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({ WE_FIX_DISPATCH_MODE: 'agent' }),
       registry: registryWithSpawn(spawnDetached),
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
@@ -153,6 +160,7 @@ describe('#3640 — the fix dispatch is MECHANICAL by default', () => {
       if (kind !== 'fix') expect(mode, kind).toBe(defaults[kind]);
     }
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes,
       registry: Object.freeze({
         ...DISPATCH_PROVIDER_REGISTRY,
@@ -265,6 +273,7 @@ describe('#3640 — PR-keyed, not item-keyed: build\'s assumptions do NOT carry 
   it('the sink forwards `pr` (and `reason`) onto the port request — without it the provider has nothing', async () => {
     const seen = [];
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({}),
       registry: Object.freeze({
         ...DISPATCH_PROVIDER_REGISTRY,

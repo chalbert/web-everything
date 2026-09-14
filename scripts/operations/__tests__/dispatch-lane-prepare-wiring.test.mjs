@@ -57,6 +57,11 @@ import { DISPATCH_EFFECT, LIVENESS_SOURCES } from '../dispatch-lane.mjs';
 import { PREPARE_SCOPE_RUN_SCRIPT, prepareScopeDetachedProvider } from '../dispatch-providers/prepare.mjs';
 import { parsePrepareScopeRunArgv, runPrepareScopeCli } from '../prepare-scope-run.mjs';
 
+/** A non-lane-shaped root (mirrors `./dispatch-lane.test.mjs`'s own `PRIMARY`) — `createDispatchSinks`'s
+ *  default `root` is the REAL `REPO_ROOT`, and this whole suite must run correctly from an actual lane
+ *  checkout (whose directory is named `lane-<N>`), which `assertNotALaneCheckout` would otherwise refuse. */
+const PRIMARY = '/primary/webeverything';
+
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits for a PREPARE, trimmed to what a provider
  *  reads. Note the two prepare-specific facts: the session slug grammar is `prepare-<num>` (never
  *  `conveyor-<num>`), and the lane scope is the item's OWN backlog file — not its `scope:` frontmatter, which
@@ -89,7 +94,7 @@ describe('#3641 — the prepare dispatch is MECHANICAL by default', () => {
     // NO `provider` injected and NO env var set — this is the REAL, uninjected default path, which is the only
     // thing that proves the wiring rather than the wrapper's existence. `node:child_process` is mocked at the
     // module boundary above, so the "real" path still starts nothing.
-    const sinks = createDispatchSinks();
+    const sinks = createDispatchSinks({ root: PRIMARY });
 
     const result = await sinks[DISPATCH_EFFECT](preparePayload());
 
@@ -108,7 +113,7 @@ describe('#3641 — the prepare dispatch is MECHANICAL by default', () => {
   it('`WE_PREPARE_DISPATCH_MODE=agent` restores the pre-#3641 `claude --bg` spawn with the old brief', async () => {
     vi.stubEnv('WE_PREPARE_DISPATCH_MODE', 'agent');
     try {
-      const sinks = createDispatchSinks();
+      const sinks = createDispatchSinks({ root: PRIMARY });
       const result = await sinks[DISPATCH_EFFECT](preparePayload());
       expect(spawned).toEqual([]);
       expect(execFileSyncCalls).toHaveLength(1);

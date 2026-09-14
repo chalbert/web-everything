@@ -39,6 +39,11 @@ import { prepareDecisionDetachedProvider } from '../dispatch-providers/prepare-d
 import { BUILD_DISPATCH_MODE_ENV, createDispatchSinks, routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT, LAUNCH_KINDS } from '../dispatch-lane.mjs';
 
+/** A non-lane-shaped root (mirrors `./dispatch-lane.test.mjs`'s own `PRIMARY`) — `createDispatchSinks`'s
+ *  default `root` is the REAL `REPO_ROOT`, and this whole suite must run correctly from an actual lane
+ *  checkout (whose directory is named `lane-<N>`), which `assertNotALaneCheckout` would otherwise refuse. */
+const PRIMARY = '/primary/webeverything';
+
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits, trimmed to what a provider reads. */
 const buildPayload = (over = {}) => ({
   num: '3645',
@@ -268,6 +273,7 @@ describe('THE DEFAULT PATH — the registry is LIVE, not merely present', () => 
     });
 
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider` and NO `buildMode` — the sink resolves the mode itself, from an environment with nothing
       // in it, and installs its own router over the table.
       modes: dispatchModesFromEnv({}),

@@ -47,6 +47,11 @@ import {
 import { DISPATCH_EFFECT, LIVENESS_SOURCES } from '../dispatch-lane.mjs';
 import { parsePrepareDecisionRunArgv, runPrepareDecisionCli } from '../prepare-decision-run.mjs';
 
+/** A non-lane-shaped root (mirrors `./dispatch-lane.test.mjs`'s own `PRIMARY`) — `createDispatchSinks`'s
+ *  default `root` is the REAL `REPO_ROOT`, and this whole suite must run correctly from an actual lane
+ *  checkout (whose directory is named `lane-<N>`), which `assertNotALaneCheckout` would otherwise refuse. */
+const PRIMARY = '/primary/webeverything';
+
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step emits for this kind, trimmed to what a provider
  *  reads. `sessionSlug` is `sessionSlugFor`'s own `prepare-decision-<num>` shape. */
 const preparePayload = (over = {}) => ({
@@ -88,6 +93,7 @@ describe('#3644 — a prepare-decision dispatch is MECHANICAL by default', () =>
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
 
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider`, NO `modes` override for this kind beyond what an EMPTY environment resolves to — the
       // sink reads the table itself and installs its own router over it.
       modes: dispatchModesFromEnv({}),
@@ -127,6 +133,7 @@ describe('#3644 — a prepare-decision dispatch is MECHANICAL by default', () =>
     const env = { WE_PREPARE_DECISION_DISPATCH_MODE: 'agent' };
 
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv(env),
       registry: registryWithRecordedSpawn(spawnDetached),
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },

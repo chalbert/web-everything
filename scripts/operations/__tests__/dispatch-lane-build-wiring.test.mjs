@@ -48,6 +48,11 @@ import { DISPATCH_EFFECT, LAUNCH_KINDS, LIVENESS_SOURCES } from '../dispatch-lan
 import { parseDeliverItemRunArgv, runDeliverItemCli, selectDeliveryAgentProvider } from '../deliver-item-run.mjs';
 import { DELIVERY_AGENT_PROVIDERS } from '../deliver-item-wrapper.mjs';
 
+/** A non-lane-shaped root (mirrors `./dispatch-lane.test.mjs`'s own `PRIMARY`) — `createDispatchSinks`'s
+ *  default `root` is the REAL `REPO_ROOT`, and this whole suite must run correctly from an actual lane
+ *  checkout (whose directory is named `lane-<N>`), which `assertNotALaneCheckout` would otherwise refuse. */
+const PRIMARY = '/primary/webeverything';
+
 /** The effect payload `dispatch-lane.mjs`'s `dispatch` step actually emits, trimmed to what a provider reads. */
 const buildPayload = (over = {}) => ({
   num: '3645',
@@ -75,6 +80,7 @@ describe('#3645 — the build dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached(9001);
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // THE OLD PATH, fully wired and fully able to answer — so a failure here is "it was not called",
       // never "it could not have been called".
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
@@ -104,6 +110,7 @@ describe('#3645 — the build dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       buildMode: 'agent',
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
       provider: (request) => routeDispatchProvider(request, {
