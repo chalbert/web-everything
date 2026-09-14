@@ -2,10 +2,11 @@
 bornAs: x7w2z4u
 kind: task
 parent: "3029"
-status: active
+status: resolved
 scope: ["we:scripts/operations/explore-io.mjs", "we:scripts/operations/wake.mjs"]
 dateOpened: "2026-08-17"
 dateStarted: "2026-09-14"
+dateResolved: "2026-09-14"
 tags: [operations, epic-3029, housekeeping]
 relatedTo: ["3150"]
 ---
