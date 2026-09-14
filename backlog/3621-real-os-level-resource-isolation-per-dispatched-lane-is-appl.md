@@ -607,6 +607,19 @@ solving the Keychain-auth bridging problem above and (b) the one real gap this t
 genuinely live, authenticated native-tool write call) — not on the container boundary itself, which held in
 every test run.**
 
+## Amendment (2026-09-13) — operator confirms the recommended sequencing: defer until judge/provider integration graduates
+
+Same discipline as the four amendments above — an operator-intent addendum only, ratifying nothing, changing
+no status, resolving no fork, and **not stamping `preparedDate`**. This item stays `open`/unprepared.
+
+The operator confirmed tonight that containers will likely be useful for resource management, but it is a
+larger piece of work, so it should wait until the current judge/provider integration work (Codex/Antigravity/
+model-probation, tracked on we:#3383) graduates. This is the same conclusion the 2026-09-11 amendment above
+already reached in its own "Recommended sequencing" section — restated and confirmed here, not a new
+judgment. If anything on this axis starts before that graduation, it should be the heavy-command container
+pool named in that section, not per-lane containers. Recorded in full on the epic tracker,
+we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md (operator note, 2026-09-13).
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
