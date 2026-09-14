@@ -113,6 +113,62 @@ describe('renderDocketHtml', () => {
     expect(html).toContain('--accent:#5A3A6B');
     expect(html).toContain('.dcard{background:var(--surface)');
   });
+
+  it('never leaks template.html\'s own editor-facing instructional comment into the rendered page', () => {
+    // Regression test for the leaked-comment bug: template.html's top-of-file documentation comment quoted a
+    // LITERAL "<!-- REPEAT -->" as part of its own prose (documenting a marker used elsewhere in the file) —
+    // under real HTML parsing a comment ends at the FIRST "-->" it contains, so that literal example closed
+    // the comment early and everything after it (through the real closing "-->" many lines later) was never
+    // actually inside a comment at all — it rendered as literal, visible page text, above the real "Decision
+    // Docket" title. Assert none of that documentation text, nor any raw comment delimiter, survives.
+    const html = renderDocketHtml(sampleData(), TEMPLATE, { now: new Date('2026-09-13') });
+    expect(html).not.toContain('THE ONE RULE THIS TEMPLATE EXISTS TO ENFORCE');
+    expect(html).not.toContain('Fill the {{PLACEHOLDER}}');
+    expect(html).not.toContain('<!--');
+    expect(html).not.toContain('-->');
+    // the real title is the first visible heading-shaped content, not stray prose above it
+    expect(html.indexOf('<h1>Decision Docket</h1>')).toBeGreaterThan(-1);
+  });
+
+  it('strips a well-formed instructional HTML comment out of ANY template shell before rendering, not just the current file', () => {
+    const customTemplate = '<title>X</title>\n<!-- Instructions for editors: do not restyle this file. -->\n'
+      + '<style>.dcard{color:red}</style>\n<div class="wrap">';
+    const html = renderDocketHtml(sampleData(), customTemplate, { now: new Date('2026-09-13') });
+    expect(html).not.toContain('Instructions for editors');
+    expect(html).toContain('.dcard{color:red}'); // real, non-comment shell content is preserved verbatim
+  });
+
+  it('gives every prepared item\'s .dcard a stable id and links the summary table row to it', () => {
+    const html = renderDocketHtml(sampleData(), TEMPLATE, { now: new Date('2026-09-13') });
+    expect(html).toContain('id="item-64"');
+    expect(html).toContain('href="#item-64"');
+  });
+
+  it('does not link an un-prepared row to a fragment that has no .dcard to land on', () => {
+    const data = sampleData();
+    data.items.push({
+      num: '99', title: 'Cold item', prepared: false, preparedDate: null,
+      leverageScore: 1, directUnblocks: 0, transitiveUnblocks: 0, unblocksToReady: 0, ageInDays: 1,
+      digest: [], forks: [], doneWhen: [], parseOk: true, warnings: [],
+    });
+    const html = renderDocketHtml(data, TEMPLATE, { now: new Date('2026-09-13') });
+    expect(html).not.toContain('href="#item-99"');
+    expect(html).not.toContain('id="item-99"');
+  });
+
+  it('renders the filter toolbar with the data attributes its own inline script filters on', () => {
+    const html = renderDocketHtml(sampleData(), TEMPLATE, { now: new Date('2026-09-13') });
+    expect(html).toContain('class="filters"');
+    expect(html).toMatch(/data-status="ready"/);
+    expect(html).toMatch(/data-age="fresh"/);
+    expect(html).toMatch(/data-detail="full"/);
+  });
+
+  it('carries no age-based "stale" row text-coloring rule (dropped — it overloaded the same red used for "needs prep")', () => {
+    const html = renderDocketHtml(sampleData(), TEMPLATE, { now: new Date('2026-09-13') });
+    expect(html).not.toMatch(/tr\.stale[^{]*td\.ti\{color/);
+    expect(html).not.toMatch(/tr\.stale\s+\.age\{color/);
+  });
 });
 
 describe('mdInline', () => {

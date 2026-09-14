@@ -145,6 +145,95 @@ Screen: clear.`;
     expect(fork.skeptic).toMatch(/^SURVIVES-WITH-AMENDMENT/);
     expect(fork.screen).toMatch(/^clear/);
   });
+
+  it('recognizes the "[bold default]" bracket marker (119+ instances across the corpus) as a default, and its closing "**" no longer misreads as an unclosed bold pair', () => {
+    // Real shape (backlog/2249 Fork 1): the bold span covers the whole "(label) title" and closes right at
+    // the inline marker, with unbolded prose after — not the canonical trailing "← **RECOMMENDED**".
+    const section = `Why.
+
+- **(a) flat-minimal baseline — the family's core character. [bold default]** The merit that survives.
+- **(b) rich-dimensional marks — depth as the baseline.** The restrained treatment is attractive.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(true);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[0].body).not.toMatch(/bold default/i);
+    // no explicit "Rejected" marker on (b) at all — it's implicit from (a) already being the stated default,
+    // the common legacy convention (backlog/2249, backlog/2938, …): never left as merely "open"/undecided.
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+  });
+
+  it('recognizes "(default)"/"(rejected …)"/"(dominated)" trailing parentheticals as markers', () => {
+    const section = `Why.
+
+- **(a) Keep the module in one place (rejected — status quo).** Rests on prior art.
+- **(b) Vendor the built artifact (dominated).** Strictly worse than (c) on every axis.
+- **(c) Relocate the runtime (default).** The only branch that clears every constraint.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options.map((o) => o.kind)).toEqual([OPTION_KINDS.REJECTED, OPTION_KINDS.REJECTED, OPTION_KINDS.DEFAULT]);
+  });
+
+  it('recognizes a standalone "**Default: (x).**" paragraph after the option bullets (69+ instances) and keeps it visible as a note', () => {
+    const section = `Why.
+
+- **(a) Repo-wide freeze.** The load-bearing set only.
+- **(b) Keep the narrower scope.** Less disruption elsewhere.
+
+**Default: (a).** The re-derived data strengthens the original case.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+    expect(fork.notes.some((n) => /re-derived data strengthens/.test(n.text))).toBe(true);
+  });
+
+  it('accepts a backtick-wrapped or parenthetical-aside Skeptic/Screen label, not just a plain or bold one', () => {
+    const section = `Why.
+
+- **(a)** One. **Rejected**: no.
+- **(b)** Two. [default]
+
+\`Skeptic:\` **SURVIVES-WITH-AMENDMENT.** A throwaway sub-agent ran the four-axis prompt.
+*Screen (separate fresh-context agent, no exposure to this session's authoring):* **clear.** Both questions held.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.skeptic).toMatch(/^\*\*SURVIVES-WITH-AMENDMENT/);
+    expect(fork.screen).toMatch(/^\*\*clear/);
+  });
+
+  it('does not misread a bare lowercase "rejected" used as ordinary prose (not a marker) as marking the option rejected', () => {
+    // Real false positive found in backlog/2096 Fork 2: "…one typed, named error per rejected input…" inside
+    // the option that is actually the fork's DEFAULT.
+    const section = `Why.
+
+- **(a) House-adapted register [bold default]** — a fixed skeleton with one typed, named error per rejected input.
+- **(b) Full clone.** Rejected: too heavyweight for this register.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+  });
+
+  it('does not misread a negated "not recommended" inside a rejected option\'s own prose as a default marker', () => {
+    const section = `Why.
+
+- **(a) The chosen approach [bold default]** — clears every constraint.
+- **(b) A coherent counter, not recommended.** Attractive but loses on merit.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+  });
 });
 
 describe('parseDecisionBody', () => {

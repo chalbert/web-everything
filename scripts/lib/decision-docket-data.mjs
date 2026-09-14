@@ -95,15 +95,61 @@ function splitSections(bodyAfterTitle) {
   return sections.map((s) => ({ heading: s.heading, text: s.text.join('\n') }));
 }
 
+// A "Rejected"/"REJECTED" marker appears across the corpus in every emphasis wrapping an author happened to
+// reach for — bold ("**Rejected:**"), italic ("*Rejected:*"), underscore-italic ("_Rejected:_"), or bare
+// ("Rejected:" / "REJECTED") — 220+ instances of the colon-terminated form alone (only 19 are the older
+// "**Rejected**"-only shape this used to require). Matching only the bold-no-colon form under-detected the
+// overwhelming majority of real rejected options. Case-SENSITIVE on the word itself ("Rejected"/"REJECTED",
+// never bare lowercase "rejected") — real content routinely uses the plain lowercase word mid-sentence with
+// no marker intent at all ("one typed, named error per rejected input", backlog/2096 Fork 2's option (a),
+// which is in fact the DEFAULT) and a case-insensitive match misread that as the option's own rejection.
+const REJECTED_MARKER_RE = /(?:\*\*|\*|_)?\b(?:Rejected|REJECTED)\b:?(?:\*\*|\*|_)?/;
+// A DEFAULT marker likewise shows up as the canonical trailing "← **RECOMMENDED**", a bare "RECOMMENDED"
+// substring, or a bracketed inline marker — "[bold default]" (the most common legacy spelling, 119
+// instances), "[default]", or "[recommended default]" — used by items that bold the option's own
+// label+title and mark it default inline rather than appending a trailing arrow-marker.
+const DEFAULT_BRACKET_RE = /\[\s*(?:bold\s+)?(?:recommended\s+)?default\s*\]/i;
+// A same-shaped trailing PARENTHETICAL — "(default)" — right after the option's own bolded title, rather than
+// square brackets. Round parens are only trusted as a marker here (case-insensitively) because they're
+// wrapped tightly around the marker word itself, not a bare substring search over the whole option — the
+// bare-word searches above (Rejected/RECOMMENDED) are exactly what had to stay narrow to avoid mid-prose
+// false positives; a parenthetical this specific carries far less of that risk.
+const DEFAULT_PAREN_RE = /\(\s*(?:bold\s+)?(?:recommended\s+)?default\s*\)/i;
+// Likewise a trailing parenthetical rejection marker — "(rejected …)", "(dominated)" — the latter a distinct
+// but equally common rejection-flavored word for an option strictly worse than another live option (a
+// game-theory framing several items use interchangeably with "Rejected").
+const REJECTED_PAREN_RE = /\(\s*(?:rejected|dominated)\b[^)]{0,80}\)/i;
+
+/**
+ * True when `text` contains a genuine positive "recommended" default marker — but NOT when the only mention
+ * is explicitly negated ("not recommended", "isn't recommended now") the way a REJECTED option's own prose
+ * routinely states its exclusion (e.g. "*Coherent counter, not recommended.*"). Strips negated mentions
+ * before testing so a negation-only text correctly reports false, while a text that ALSO carries a real
+ * positive marker elsewhere still reports true.
+ */
+function hasPositiveRecommendedMarker(text) {
+  const stripped = text.replace(/\b(?:not|n't)\s+recommended\b/gi, '');
+  return /RECOMMENDED/i.test(stripped);
+}
+
 function buildOption(label, flatText) {
-  const isRejected = /\*\*Rejected\*\*/i.test(flatText);
-  const isDefault = /RECOMMENDED/i.test(flatText) && !isRejected;
+  const isRejected = REJECTED_MARKER_RE.test(flatText) || REJECTED_PAREN_RE.test(flatText);
+  const isDefault = !isRejected
+    && (hasPositiveRecommendedMarker(flatText) || DEFAULT_BRACKET_RE.test(flatText) || DEFAULT_PAREN_RE.test(flatText));
   const kind = isRejected ? OPTION_KINDS.REJECTED : isDefault ? OPTION_KINDS.DEFAULT : OPTION_KINDS.OPEN;
-  // Strip the "← **RECOMMENDED**" marker from the displayed body (it's redundant with `kind`); keep everything
-  // else verbatim, INCLUDING any punctuation right after it and the stated rejection reason — dropping the
-  // rejection reason is exactly the omission the docket's own hard rule (docs/agent/backlog-workflow.md
-  // #decision-docket) forbids, and dropping the trailing period would glue two sentences together.
-  const body = flatText.replace(/\s*←\s*\*\*RECOMMENDED\*\*/i, '').trim();
+  // Strip the recognized default markers from the displayed body (redundant with `kind`, shown instead via the
+  // ✓/✕ badge) — keep everything else verbatim, INCLUDING any punctuation right after it and the stated
+  // rejection reason: dropping the rejection reason is exactly the omission the docket's own hard rule
+  // (docs/agent/backlog-workflow.md#decision-docket) forbids, and dropping the trailing period would glue two
+  // sentences together. The bracket-marker variant is stripped in two passes — first the form immediately
+  // followed by a stray closing "**" (the "title **[bold default]**" convention closes its bold span right at
+  // the marker), then the bare bracket alone — so a trailing "**" from the FIRST pass never survives into the
+  // final body only to be counted as an orphaned bold delimiter downstream.
+  const body = flatText
+    .replace(/\s*←\s*\*\*RECOMMENDED\*\*/i, '')
+    .replace(/\s*\[\s*(?:bold\s+)?(?:recommended\s+)?default\s*\]\s*\*\*/i, '**')
+    .replace(/\s*\[\s*(?:bold\s+)?(?:recommended\s+)?default\s*\]/i, '')
+    .trim();
   return { label: `(${label})`, kind, body };
 }
 
@@ -125,10 +171,11 @@ export function parseForkSection(n, headingRest, sectionText) {
 
   // Find the first paragraph that STARTS with a lettered-option bullet: "- **(x)** …".
   // The canonical shape (docs/agent/backlog-workflow.md#decision-docket) is "- **(a)** text …", bold closed
-  // right after the label. Some older items (pre-dating that convention hardening) instead open the bold at
-  // the label and don't close it until partway into the option's own text — accept both: the closing `**` is
-  // optional.
-  const optionLineRe = /^-\s*\*\*\(([a-z])\)(?:\*\*)?\s*(.*)$/i;
+  // right after the label. Many older items (pre-dating that convention hardening) instead bold the option's
+  // own short label+title and don't close the span until partway into the option's own text (e.g.
+  // "- **(a) short title.** unbolded prose…") — accept both: the closing `**` right after the label is
+  // optional (captured so the caller can tell which shape matched — see the reconstruction below).
+  const optionLineRe = /^-\s*\*\*\(([a-z])\)(\*\*)?\s*(.*)$/i;
   let optionsStart = -1;
   for (let i = 0; i < paras.length; i += 1) {
     if (optionLineRe.test(paras[i].split('\n')[0])) { optionsStart = i; break; }
@@ -161,7 +208,11 @@ export function parseForkSection(n, headingRest, sectionText) {
       if (m) {
         flush();
         currentLabel = m[1].toLowerCase();
-        currentBuf = [m[2]];
+        // If the label's bold span was NOT closed immediately ("- **(a) title…" with no "**" right after the
+        // letter), the "**" is still open going into the captured rest-of-line — re-add it so the eventual
+        // closing "**" further into the option's own prose (the "…title.**" convention) pairs back up
+        // correctly instead of reading as one stray, unmatched delimiter (see buildOption's bold-count check).
+        currentBuf = [(m[2] ? '' : '**') + m[3]];
       } else {
         currentBuf.push(line);
       }
@@ -173,11 +224,29 @@ export function parseForkSection(n, headingRest, sectionText) {
   // Remaining paragraphs: Skeptic / Screen lines, plus any real leftover context (notes) in between — kept
   // verbatim rather than dropped, since dropping real item content is its own kind of fabrication-by-omission.
   const rest = paras.slice(cursor);
-  // Bold ("**Skeptic:**") is the canonical current form; a few older items wrote the plain label with no
-  // bold — accept both rather than mis-flagging real content as missing.
-  const skepticRe = /^(?:\*\*)?Skeptic:(?:\*\*)?\s*/i;
-  const screenRe = /^(?:\*\*)?Screen:(?:\*\*)?\s*/i;
-  const screenInlineRe = /(?:\*\*)?Screen:(?:\*\*)?\s*/i; // unanchored — used to find/split Screen: WITHIN a joined paragraph
+
+  // A very common legacy default-marking convention (69+ instances across the corpus) states the default in
+  // its OWN standalone paragraph after the option bullets — "**Default: (a).** <reasoning…>" — rather than
+  // marking the option bullet itself ("← **RECOMMENDED**" / "[bold default]"). Cross-reference it against the
+  // lettered options built above; the paragraph stays in `notes` too (via the loop below) since it usually
+  // carries real supporting reasoning, not just the letter.
+  const defaultDeclRe = /\*{0,2}Default:\*{0,2}\s*\(([a-z])\)/i;
+  for (const p of rest) {
+    const dm = defaultDeclRe.exec(joinSoft(p));
+    if (!dm) continue;
+    const opt = options.find((o) => o.label === `(${dm[1].toLowerCase()})`);
+    if (opt && opt.kind !== OPTION_KINDS.REJECTED) opt.kind = OPTION_KINDS.DEFAULT;
+  }
+
+  // Bold ("**Skeptic:**") is the canonical current form. Older items wrote the plain label with no emphasis,
+  // wrapped it in a single backtick ("`Skeptic:`") or italics ("*Skeptic:*"/"_Skeptic:_"), or padded it with a
+  // parenthetical aside before the colon ("*Skeptic (dedicated fresh sub-agent, four axes…):*") — accept all
+  // of these rather than mis-flagging real content as missing: `[^:\n]*` absorbs any such aside, and matches
+  // zero characters for the plain "Skeptic:" case, so this stays backward-compatible.
+  const EMPH = '(?:\\*\\*|\\*|_|`)?';
+  const skepticRe = new RegExp(`^${EMPH}Skeptic\\b[^:\\n]*:${EMPH}\\s*`, 'i');
+  const screenRe = new RegExp(`^${EMPH}Screen\\b[^:\\n]*:${EMPH}\\s*`, 'i');
+  const screenInlineRe = new RegExp(`${EMPH}Screen\\b[^:\\n]*:${EMPH}\\s*`, 'i'); // unanchored — find/split Screen: WITHIN a joined paragraph
   let skeptic = null;
   let screen = null;
   const notes = [];
@@ -208,6 +277,19 @@ export function parseForkSection(n, headingRest, sectionText) {
   }
 
   const hasDefault = options.some((o) => o.kind === OPTION_KINDS.DEFAULT);
+  // parseForkSection is only ever called for a `prepared: true` item (buildDecisionRecord gates it on
+  // `base.prepared`) — and a prepared fork, by the docket's own definition, has already picked a default AND
+  // stated why every alternative was excluded. Many legacy items rely entirely on that surrounding prose (no
+  // literal "Rejected"/"REJECTED" marker on the non-default bullet at all — see e.g. backlog/2249's Fork 1,
+  // backlog/2938's Fork 1(a)) rather than fabricating a marker that was never written. Once a default IS
+  // identified, every other option in the SAME fork is — by construction, not by guess — the rejected
+  // alternative; relabeling it OPEN (which SKILL.md reserves for a genuinely un-prepared fork shown for
+  // transparency) would misrepresent it as still undecided.
+  if (hasDefault) {
+    for (const o of options) {
+      if (o.kind === OPTION_KINDS.OPEN) o.kind = OPTION_KINDS.REJECTED;
+    }
+  }
   const warnings = [];
   if (!hasDefault && options.length) warnings.push(`Fork ${n}: no option marked RECOMMENDED — default could not be identified.`);
   if (!skeptic) warnings.push(`Fork ${n}: no "Skeptic:" verdict line found.`);

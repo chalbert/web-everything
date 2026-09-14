@@ -53,12 +53,22 @@ function humanDate(d) {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
-/** Slice `template.html`'s own head+style shell (everything before `<div class="wrap">`) out verbatim. */
+/**
+ * Slice `template.html`'s own head+style shell (everything before `<div class="wrap">`) out verbatim, EXCEPT
+ * for its own `<!-- -->` HTML comments — template.html carries a large instructional comment aimed at whoever
+ * edits the template next (never at whoever views the rendered page), and it must never reach the generated
+ * output. A well-formed HTML comment renders as nothing in a spec-compliant browser regardless of position, so
+ * this isn't the ONLY thing standing between that comment and a viewer — but this generator has exactly one
+ * legitimate reason to touch the raw file text at all (author-facing template comments), so it strips every
+ * comment here unconditionally rather than relying on some downstream consumer's parsing quirks to keep them
+ * inert. Non-greedy so multiple separate comments in the shell are each stripped individually, not merged into
+ * one span from the first `<!--` to the last `-->`.
+ */
 function extractShell(templateHtml) {
   const marker = '<div class="wrap">';
   const idx = templateHtml.indexOf(marker);
   if (idx === -1) throw new Error('decision-docket template.html: could not find the <div class="wrap"> marker — has the template shape changed?');
-  return templateHtml.slice(0, idx);
+  return templateHtml.slice(0, idx).replace(/<!--[\s\S]*?-->/g, '');
 }
 
 function renderOption(opt) {
@@ -125,6 +135,12 @@ function renderDoneWhen(doneWhen) {
   return mdInline(doneWhen[0]);
 }
 
+/** The item's id, safe to use as an HTML `id`/fragment target (`#item-<num>`) — nums are plain digits today,
+ * but escape defensively rather than assume that never changes. */
+function anchorId(item) {
+  return `item-${escapeHtml(item.num)}`;
+}
+
 function renderCard(item) {
   const forksHtml = item.forks.map(renderFork).join('\n');
   const digestHtml = item.digest.length
@@ -133,8 +149,12 @@ function renderCard(item) {
   const topWarning = item.parseOk
     ? ''
     : `<p><strong>Parse incomplete</strong> — ${escapeHtml((item.warnings || []).join(' ') || 'this item\'s forks did not match the documented prepared-fork shape.')} Ratify from <code>backlog/${escapeHtml(item.num)}-*.md</code> directly until this is fixed.</p>`;
+  // Every card here IS a prepared item with full fork detail by construction (only `prepared` items reach
+  // `renderCard` at all — see renderDocketHtml below), so `data-status`/`data-detail` are fixed; only the age
+  // bucket varies per item. These mirror the summary table's own filter attributes so the SAME toolbar filters
+  // both the ranking table and this full-detail section together.
   return `
-    <div class="dcard">
+    <div class="dcard" id="${anchorId(item)}" data-status="ready" data-detail="full" data-age="${ageClass(item.ageInDays)}">
       <div class="hd">
         <span class="num">#${escapeHtml(item.num)}</span><span class="nm">${mdInline(item.title)}</span>
         <span class="meta">prepared ${escapeHtml(item.preparedDate || '—')} · unblocks ${item.directUnblocks} · waiting ${item.ageInDays}d</span>
@@ -154,9 +174,14 @@ function renderTableRow(item) {
     ? '<span class="pill prepd">prepared</span>'
     : '<span class="pill warnp">needs prep</span>';
   const agePct = Math.min(100, Math.round((item.ageInDays / 90) * 100));
-  return `      <tr class="${cls}">
+  // Only a PREPARED item has a `.dcard` further down the page to jump to — an un-prepared item's row stays
+  // plain text rather than link to a fragment that doesn't exist.
+  const titleHtml = item.prepared
+    ? `<a href="#${anchorId(item)}">${mdInline(item.title)}</a>`
+    : mdInline(item.title);
+  return `      <tr class="${cls}" data-status="${item.prepared ? 'ready' : 'prep'}" data-detail="${item.prepared ? 'full' : 'table'}" data-age="${cls}">
         <td class="n mono">#${escapeHtml(item.num)}</td>
-        <td class="ti">${mdInline(item.title)} ${pill}</td>
+        <td class="ti">${titleHtml} ${pill}</td>
         <td class="n mono">${item.directUnblocks}</td>
         <td class="n mono">${item.unblocksToReady}</td>
         <td class="agec"><span class="bar"><i style="width:${agePct}%"></i></span><span class="mono age">${item.ageInDays}d</span></td>
@@ -205,6 +230,29 @@ export function renderDocketHtml(data, templateHtml, { now = new Date() } = {}) 
   </div>
 </header>
 
+<div class="filters" role="group" aria-label="Filter the docket">
+  <div class="filtergroup">
+    <span class="flabel">Status</span>
+    <button type="button" class="fbtn active" data-group="status" data-value="all">All</button>
+    <button type="button" class="fbtn" data-group="status" data-value="ready">Ready to ratify</button>
+    <button type="button" class="fbtn" data-group="status" data-value="prep">Needs prep</button>
+  </div>
+  <div class="filtergroup">
+    <span class="flabel">Age</span>
+    <button type="button" class="fbtn active" data-group="age" data-value="all">All</button>
+    <button type="button" class="fbtn" data-group="age" data-value="fresh">Fresh ≤30d</button>
+    <button type="button" class="fbtn" data-group="age" data-value="waiting">Waiting 31–60d</button>
+    <button type="button" class="fbtn" data-group="age" data-value="stale">Stale 61d+</button>
+  </div>
+  <div class="filtergroup">
+    <span class="flabel">Detail</span>
+    <button type="button" class="fbtn active" data-group="detail" data-value="all">All</button>
+    <button type="button" class="fbtn" data-group="detail" data-value="full">Full fork breakdown</button>
+    <button type="button" class="fbtn" data-group="detail" data-value="table">Table only</button>
+  </div>
+  <span class="filtercount" id="docket-filter-count"></span>
+</div>
+
 <section>
   <h2>The docket — ranked by leverage</h2>
   <h3>Prepared and not-yet-prepared, one table for context and ranking ONLY</h3>
@@ -245,6 +293,46 @@ ${upstreamRows}
 
 </div>
 
-</body></html>
+<script>
+(function () {
+  "use strict";
+  // Client-side only — this is a static published page over a few dozen items, not thousands, so a plain
+  // linear filter pass on every click is plenty fast and needs no library.
+  var state = { status: 'all', age: 'all', detail: 'all' };
+  var targets = null;
+  function getTargets() {
+    if (!targets) targets = Array.prototype.slice.call(document.querySelectorAll('[data-status]'));
+    return targets;
+  }
+  function apply() {
+    var shown = 0;
+    var all = getTargets();
+    for (var i = 0; i < all.length; i += 1) {
+      var el = all[i];
+      var match =
+        (state.status === 'all' || el.getAttribute('data-status') === state.status) &&
+        (state.age === 'all' || el.getAttribute('data-age') === state.age) &&
+        (state.detail === 'all' || el.getAttribute('data-detail') === state.detail);
+      el.hidden = !match;
+      if (match) shown += 1;
+    }
+    var countEl = document.getElementById('docket-filter-count');
+    if (countEl) countEl.textContent = shown + ' / ' + all.length + ' shown';
+  }
+  var buttons = document.querySelectorAll('.fbtn');
+  for (var j = 0; j < buttons.length; j += 1) {
+    buttons[j].addEventListener('click', function (ev) {
+      var btn = ev.currentTarget;
+      var group = btn.getAttribute('data-group');
+      var value = btn.getAttribute('data-value');
+      state[group] = value;
+      var siblings = document.querySelectorAll('.fbtn[data-group="' + group + '"]');
+      for (var k = 0; k < siblings.length; k += 1) siblings[k].classList.toggle('active', siblings[k] === btn);
+      apply();
+    });
+  }
+  apply();
+})();
+</script>
 `;
 }
