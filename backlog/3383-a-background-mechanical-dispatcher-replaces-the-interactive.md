@@ -2920,3 +2920,80 @@ never what any one of them can do to the host once admitted.
    Containerfile) — a real gap if this is ever wired into an unattended dispatch path.
 5. This work landing on `main` while the fuller `run`-mode implementation lives unmerged on
    `lane/mechanical-dispatcher` is a known, accepted duplication risk (see above) — not resolved by this PR.
+
+## Session update (2026-09-14, later the same day) — heavy-command-pool container POC extended to `test:unit`
+
+Same tracking convention as the session update directly above: a progress note, not a new formal item, per
+the operator's own standing direction and this repo's PR-landing precedent (`we:scripts/pr-land.mjs` only
+refuses an empty PR description — #2324). First checked whether the prior PR (`#2206`,
+`lane/3621-heavy-command-pool-container-poc`) had merged before starting: it had not (`gh pr view 2206` — open,
+mergeable), so this slice was built as a lane clone based directly on that PR's own branch, reusing its
+`we:scripts/lib/container-exec.mjs`/`Containerfile` infrastructure rather than duplicating it.
+
+**Why `test:unit` next.** `#2206`'s own report named it explicitly: `test:unit`/Playwright aren't
+containerized, and unlike `check:standards`'s pure-JS dependency closure, `test:unit` (vitest) needed the
+baked-Linux-tree approach because of native/compiled deps. Confirmed before writing any code: scanned
+`we:package-lock.json` for every optionalDependency with a `darwin-arm64`/native shape — esbuild, rollup, swc,
+lightningcss, sharp, `@parcel/watcher`, `node-gyp-build-optional-packages` all appear, and the host's own
+`we:node_modules/@esbuild/` directory holds only `darwin-arm64`, confirming vitest's own transform pipeline
+(esbuild, reached via vite) cannot resolve inside a Linux guest mounting that host tree straight in.
+
+**What was built — see `#3621`'s own 2026-09-14 (later) amendment for the full technical writeup; condensed
+here:**
+
+- `we:scripts/lib/container-exec/Containerfile.test-unit-deps` (new) — bakes a Linux `node_modules` via `npm
+  ci` inside plain `node:22-alpine` (no build toolchain needed — every native dep ships a prebuilt Linux
+  binary for this lockfile).
+- `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new) — builds that image, creates/seeds a named
+  `container volume` from its `/app/node_modules`, and stamps a lockfile-hash marker so a re-run with an
+  unchanged lockfile is a cheap no-op; a `status` mode reports image/volume presence and staleness for a
+  preflight.
+- `we:scripts/lib/container-exec.mjs` — gained `nodeModulesVolume` support on `buildContainerRunArgs`/
+  `execContainerized` (mounts a named volume at `<cwd>/node_modules`, shadowing the checkout's own rw mount for
+  that one subtree only — proven empirically that a more-specific mount wins the shadow and that writes to it
+  never touch the host) plus `frontieruiSiblingRoot`, which auto-mounts the `frontierui` sibling checkout
+  read-only when `nodeModulesVolume` is requested (closing the sibling-mount gap named in `#2206`'s report, for
+  `test:unit`'s own import graph specifically — `plateau-app` is a `vite.config.mts`/dev-server-only reference,
+  confirmed not part of `test:unit`'s closure, so deliberately not mounted).
+- `we:scripts/readiness/heavy-admission.mjs` — the `run` CLI gained a `--container-node-modules` flag (or
+  `WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES=1`), layered on top of the existing `--container` flag, with the
+  same fail-loud-with-actionable-message preflight `#2206` already established for a missing image, mirrored
+  for a missing/stale node_modules volume.
+
+**Real evidence, measured on this machine:**
+
+- **Fidelity**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on the host and inside the
+  container produced IDENTICAL pass counts (35/35 files, 441/441 tests) both times — via the actual wrapper,
+  `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run
+  we:blocks/__tests__`. The FULL suite (447 files / 12007 tests, ~9m48s wall-clock on the host, measured this
+  session) was not re-run inside the container — a representative subset was used instead, per this task's own
+  explicit allowance for a first proof.
+- **Cap enforcement, reproduced a third time**: 8 unbounded busy-spin `node -e` processes inside a `--cpus 2
+  --memory 2g` container held the host-side `com.apple.Virtualization.VirtualMachine` process at ~191-204% CPU
+  (sampled twice during a live 15s run), versus ~800% (8 processes each pinned near 100%) running the identical
+  workload unconstrained on the host — same containment result `#2206` measured for `check:standards`, now
+  reproduced under this slice's own node_modules-volume + sibling-mount configuration.
+- **Failure modes confirmed, not just predicted**: running `test:unit` in-container WITHOUT the node_modules
+  volume reproduces the exact `MODULE_NOT_FOUND`-shaped failure `#3621` predicted (here surfacing as an esbuild
+  transform error plus an unresolved `@frontierui/plugs/...` import) — confirming the shortcut genuinely does
+  not extend from `check:standards` to `test:unit` without this slice's own fix.
+- Unit tests added/extended: new cases in `we:scripts/lib/__tests__/container-exec.test.mjs` (the
+  `nodeModulesVolume`/`frontieruiSiblingRoot` pure logic, plus REAL self-skipping integration tests proving the
+  mount-shadow property against an actual container) and a new
+  `we:scripts/lib/container-exec/__tests__/build-test-unit-deps.test.mjs` for the build script's pure helpers.
+  `node we:scripts/check-standards.mjs` passes clean (0 errors) against this change.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Playwright is still not containerized — a different, likely harder shape again (needs a real browser inside
+   the guest, not just a Linux dependency tree), genuinely unstarted.
+2. The full `test:unit` suite (447 files / 12007 tests) was not run side-by-side in the container — only a
+   representative subset, per this task's stated allowance. A future pass should measure the full-suite
+   wall-clock cost inside the container (the mount I/O penalty `#3621`'s own research flagged may matter more
+   at that scale).
+3. Neither `--container` nor `--container-node-modules` is wired as a DEFAULT anywhere — every existing
+   heavy-command call site still runs on the host exactly as before.
+4. `check:standards`'s own image is still built by hand; only the `test:unit` deps image has a build/seed
+   script. Generalizing image-build automation beyond this one case is unstarted.
+5. The same `lane/mechanical-dispatcher` reconciliation risk `#2206`'s report named is unchanged by this
+   slice — still an accepted, known risk, not resolved here.
