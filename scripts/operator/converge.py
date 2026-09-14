@@ -12,6 +12,11 @@ the next session that needs it does not have to rebuild it from a transcript, an
 can graduate into real, tested, reviewed code over time rather than staying scratchpad-only forever.
 See `#3321`'s children for the concrete follow-ons this session filed while using it.
 
+SUPERSEDED (#3383): its `heal_ci` logic HAS since been ported and wired into real, tested, mechanized
+code — `we:scripts/conveyor/tick-core.mjs`'s `planCiHealSpawns` + `we:scripts/operations/dispatch-lane.mjs`'s
+`ci-heal` launch kind, driven by `we:skills-src/conveyor/runner.mjs`'s loop. Nothing live calls this script
+any more (verified by grepping for callers repo-wide). Kept only as the historical prototype record.
+
 One supervisor thread per PR. Each round it spawns a headless `claude -p` FIX agent, waits for it, then a
 headless REVIEWER, and reads the label to decide whether to go again. The calling session only reads this
 script's stdout.

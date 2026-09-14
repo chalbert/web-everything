@@ -12,7 +12,10 @@ import {
   dispatchPlan, selectClearedRows, clearedNotReady,
   // #3457/#3460 — the age-gated already-done ground-truth enrichment (Fork 2(b)).
   isStaleEnoughForGroundTruth, ALREADY_DONE_AGE_GATE_MS,
+  // epic #3383 — the kind-scoped dispatch-pause and its narrowed operator gloss.
+  dispatchPausedHint, DISPATCH_PAUSED_HINT,
 } from '../dispatch-plan.mjs';
+import { PAUSABLE_KINDS } from '../dispatch-pause.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
 
 describe('dispatchPlan — happy path: disjoint items fill free lanes in rank order', () => {
@@ -453,6 +456,56 @@ describe('dispatchPlan — a cleared kind:decision is HELD "needs-decision", nev
   });
 });
 
+describe('dispatchPlan — a cleared kind:investigation is HELD "needs-investigation", never built (#3567)', () => {
+  // An investigation is NOT build work either — it is a single dispatched investigator (investigate ->
+  // synthesize -> report), never a two-phase prepare/present lifecycle the way a decision is. Like a decision,
+  // it must not fall through to the scope gate (it carries no build touch-set) and must never land in launch.
+  it('holds a scope-less investigation "needs-investigation" even in a fully-idle pool with free lanes', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'investigation' }],
+      leases: [],
+      freeLanes: [2, 3],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-investigation' }]);
+  });
+
+  it('holds an investigation "needs-investigation" even when it somehow carries a scope', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'investigation', scope: ['src/a/'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-investigation' }]);
+  });
+
+  it('blocked takes precedence over needs-investigation', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'investigation', openBlockers: ['9'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'blocked' }]);
+  });
+
+  it('needs-investigation holds the investigation while a disjoint story on the same tick still launches — never into spawnBuilds\' backing list', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'investigation' },
+        { num: 2, kind: 'story', scope: ['src/b/'] },
+      ],
+      leases: [],
+      freeLanes: [7],
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 7 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-investigation' }]);
+    // #1 never appears anywhere in `launch` — the list `decisions.spawnBuilds` is built from — regardless of
+    // how many free lanes were available.
+    expect(plan.launch.some((l) => l.num === 1)).toBe(false);
+  });
+});
+
 describe('dispatchPlan — the UNSCOPED AUTO-PREPARE hold (#2613, ruled 2026-07-22)', () => {
   // An unscoped item is "assume-overlaps-everything" and is NEVER launched to build — not even alone into an idle
   // pool. It is ALWAYS held `unshaped-no-scope` so the /conveyor skill auto-prepares its scope upstream; once that
@@ -772,5 +825,83 @@ describe('dispatchPlan — manual dispatch-pause (#3609): a deliberate operator 
       dispatchPaused: true,
     });
     expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+  });
+});
+
+describe('dispatchPlan — KIND-SCOPED dispatch-pause (epic #3383): `build` is the only kind this core decides', () => {
+  const oneReadyItem = { queue: [{ num: 1, scope: ['a/'] }], leases: [], freeLanes: [10] };
+
+  it('BACKWARD COMPAT: `dispatchPaused: true` with NO kinds still holds the build (old-format marker / boolean-only caller)', () => {
+    for (const kinds of [undefined, null, []]) {
+      const plan = dispatchPlan({ ...oneReadyItem, dispatchPaused: true, dispatchPausedKinds: kinds });
+      expect(plan.launch).toEqual([]);
+      expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+    }
+  });
+
+  it('a scope NAMING build holds it, exactly as a blanket pause would', () => {
+    const plan = dispatchPlan({
+      ...oneReadyItem,
+      dispatchPaused: true,
+      dispatchPausedKinds: ['build', 'prepare', 'prepare-decision', 'investigate'],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+  });
+
+  it('a scope that does NOT name build lets the build launch — the whole point: fix/ci-heal held, new items flowing', () => {
+    const plan = dispatchPlan({ ...oneReadyItem, dispatchPaused: true, dispatchPausedKinds: ['fix', 'ci-heal'] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('a scope of ONLY the prepare-family kinds leaves builds launching (those are tick-core.mjs\'s spawns, not this core\'s)', () => {
+    const plan = dispatchPlan({
+      ...oneReadyItem,
+      dispatchPaused: true,
+      dispatchPausedKinds: ['prepare', 'prepare-decision', 'investigate'],
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+  });
+
+  it('kinds WITHOUT `dispatchPaused` hold nothing — the scope never arms the pause by itself', () => {
+    const plan = dispatchPlan({ ...oneReadyItem, dispatchPaused: false, dispatchPausedKinds: ['build'] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+  });
+
+  it('a typo\'d kind holds nothing — the marker fails OPEN (the CLI is where a typo is refused)', () => {
+    const plan = dispatchPlan({ ...oneReadyItem, dispatchPaused: true, dispatchPausedKinds: ['buidl'] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+  });
+
+  it('a build-scoped pause still never relabels an item held for a MORE SPECIFIC reason', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'epic' }, { num: 2, scope: ['w/'] }],
+      leases: [],
+      freeLanes: [10],
+      dispatchPaused: true,
+      dispatchPausedKinds: ['build'],
+    });
+    expect(plan.held).toEqual([
+      { num: 1, reason: 'needs-slice' },
+      { num: 2, reason: 'dispatch-paused' },
+    ]);
+  });
+});
+
+describe('dispatchPausedHint — the operator gloss narrows to a scoped pause (epic #3383)', () => {
+  it('a BLANKET pause keeps the exact wording it always had', () => {
+    expect(dispatchPausedHint(null)).toBe(DISPATCH_PAUSED_HINT);
+    expect(dispatchPausedHint()).toBe(DISPATCH_PAUSED_HINT);
+    expect(dispatchPausedHint([])).toBe(DISPATCH_PAUSED_HINT);
+  });
+  it('a scope naming EVERY kind reads as blanket too', () => {
+    expect(dispatchPausedHint([...PAUSABLE_KINDS])).toBe(DISPATCH_PAUSED_HINT);
+  });
+  it('a SCOPED pause names the held kinds instead of claiming dispatch is paused outright', () => {
+    const hint = dispatchPausedHint(['build', 'prepare', 'prepare-decision', 'investigate']);
+    expect(hint).toContain('build, prepare, prepare-decision, investigate');
+    expect(hint).toContain('dispatch-pause.mjs clear');
+    expect(hint).not.toBe(DISPATCH_PAUSED_HINT);
   });
 });

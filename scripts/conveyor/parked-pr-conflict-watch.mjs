@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * @file scripts/conveyor/parked-pr-conflict-watch.mjs
- * @description The PARKED-PR CONFLICT WATCH (`#xw0odtv`) — a standing, mechanical pass that catches an open,
- *   review-parked PR (`review:human` / `review:pending` / an uncleared `review:changes`) drifting into a REAL
- *   merge conflict against `main` while nobody is actively looking at it, and makes that impossible to miss.
+ * @description The PARKED-PR CONFLICT WATCH (`#xw0odtv`) — a standing, mechanical pass that catches an open PR
+ *   — review-parked (`review:human` / `review:pending` / an uncleared `review:changes`), OR ALREADY
+ *   `review:accepted` (`#3383` extension, PR #2156) — drifting into a REAL merge conflict against `main` while
+ *   nobody is actively looking at it, and makes that impossible to miss.
  *
  * WHY THIS EXISTS. Live incident, WE PR #1920: opened parked under `review:human` (a gate-self/statute edit —
  * the conflict-of-interest label), `main` advanced 16 merge commits including one other #2412 sub-slice
@@ -20,14 +21,26 @@
  * for the full reconstruction (merge-base, the overlapping #1911 commit, the backlog search ruling out a
  * duplicate).
  *
+ * `#3383` COVERAGE-GAP EXTENSION (PR #2156, `lane/mechanical-dispatcher`) — an ALREADY `review:accepted` PR was
+ * PROVABLY out of scope for both this file (deliberately narrower than the drain's own hold check — see
+ * {@link isParkedConflictTarget}) AND the drain's rebase-repair (`we:scripts/merge-ai-prs.mjs
+ * #isRebaseDropCandidate` requires the `test` check green first, but a real conflict can block CI from running
+ * at all — a chicken-and-egg dead end confirmed live: `review:accepted`, `CONFLICTING`, zero check runs ever
+ * recorded). {@link isParkedConflictTarget} now ALSO fires on an accepted-but-conflicting PR; the fresh-conflict
+ * bounce this triggers strips the stale `review:accepted` (`review-set-label.mjs#decideSetLabel`'s `changes`
+ * branch always removes it), so a conflict is never silently carried through on an acceptance its own base
+ * invalidated — the PR re-enters ordinary review + CI once repaired, same as any other bounce.
+ *
  * ALERT-ONLY WAS THE ORIGINAL DESIGN; `#xu2krte` (ratified 2026-09-06,
  * `docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted`) NARROWED THAT, NOT REVERSED IT.
  * A real content conflict has no single mechanically-correct resolution for a deterministic SCRIPT: resolving it
  * means choosing which side's edit wins in the overlapping region, exactly the judgment #2824's own design
  * already refuses to automate for this same CONFLICTING/DIRTY case. That reasoning does not extend to
  * dispatching a real AGENT at the same conflict, though — the agent's output still lands through the identical
- * independent-review gate this file's own alert protects (`review:human`/`review:pending`/`review:changes` is
- * never touched by a fix agent, conflict or otherwise). So on a FRESH conflict this pass now does TWO things,
+ * independent-review gate this file's own alert protects (a fix agent only ever REACHES the gate via the
+ * `review:changes` bounce below — it never writes `review:accepted` itself, whether the PR arrived here
+ * uncleared or, per the `#3383` extension above, previously accepted). So on a FRESH conflict this pass now does
+ * TWO things,
  * not one: it still applies the informative label + one-time alert (below, unchanged), AND it hands the PR to
  * the SAME bounce+fix-dispatch pipeline `we:scripts/conveyor/reconcile-fix-dispatch.mjs` already runs for an
  * ordinary reviewer finding — via `we:scripts/conveyor/reconcile-finding.mjs` ({@link postConflictFinding}) —
@@ -62,9 +75,10 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
-import { hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
+import { hasUnclearedReviewLabel, hasReviewLabel, REVIEW_LABELS, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
@@ -95,13 +109,35 @@ export const PR_LIST_LIMIT = 200;
  * healable) from this one (parked for human judgment, a real content conflict). `allowPending: false` so a
  * plain `review:pending` park counts too, not just `review:human` — matching the task's own framing of "a
  * slow human/review step", not only the conflict-of-interest gate.
+ *
+ * #3383/#xw0odtv COVERAGE-GAP EXTENSION — an ALREADY `review:accepted` PR ALSO counts, not just an uncleared
+ * hold. Live incident: WE PR #2156, base `lane/mechanical-dispatcher` — `review:accepted`, `mergeable:
+ * CONFLICTING` (its base moved), zero check runs ever recorded. That PR was invisible to BOTH mechanical
+ * recovery paths at once: this watch (previously scoped only to an UNCLEARED hold, deliberately excluding
+ * `review:accepted` — see `hasUnclearedReviewLabel`'s own `accepted` short-circuit), and the drain's own
+ * rebase-repair (`we:scripts/merge-ai-prs.mjs#isRebaseDropCandidate`, which requires the `test` check to
+ * already be green — but a real conflict can block CI from running AT ALL, so it can never go green, and
+ * `isRebaseDropCandidate` never fires either). Neither mechanism could ever reach that state — a PR stuck
+ * for good with no path back to a human or a fix.
+ *
+ * Catching `review:accepted + CONFLICTING` here is SAFE, not a silent-merge risk: `newlyDetected` still routes
+ * through the SAME two pipelines as any other fresh conflict ({@link watchParkedPrConflicts}) —
+ * {@link defaultPostConflictStandDown} for a statute-tier file, or (the common case)
+ * {@link defaultPostConflictFinding}, which bounces the PR to `review:changes` via
+ * `we:scripts/conveyor/reconcile-finding.mjs`. That bounce's own `decideSetLabel({ to: 'changes' })`
+ * (`we:scripts/review-set-label.mjs`) UNCONDITIONALLY strips a stale `review:accepted` as part of the swap — so
+ * the acceptance this conflict invalidated (the base moved out from under it) is never left standing, and the
+ * repaired PR re-enters the ordinary independent-review + CI gate exactly like any other bounce. Nothing here
+ * ever merges a conflict; it only makes an otherwise-invisible one visible and gets it back to a state where
+ * CI can run and review can happen again.
  * @param {{mergeable?:string, labels?:Array}} pr
  * @returns {boolean}
  */
 export function isParkedConflictTarget(pr) {
   const mergeable = String(pr?.mergeable || '').toUpperCase();
   if (mergeable !== 'CONFLICTING') return false;
-  return hasUnclearedReviewLabel(pr?.labels, { allowPending: false });
+  if (hasUnclearedReviewLabel(pr?.labels, { allowPending: false })) return true;
+  return hasReviewLabel(pr?.labels, REVIEW_LABELS.accepted);
 }
 
 /**
@@ -299,15 +335,20 @@ export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) 
  * fix-dispatch pipeline picks up) or {@link defaultPostConflictStandDown} ({@link isStatuteTierConflict} —
  * straight to a human, no dispatch attempt). Best-effort like every other write here: a failure is reported on
  * the entry, never thrown, and never stops the sweep from checking the rest of the PRs.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, listPrFiles?:Function}} [o]
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF: with no marker and no env override
+ * `scopePrsToQueue` is the IDENTITY function and this sweep stays repo-wide, exactly as it has always been. A
+ * checkout the operator scoped to its own `.conveyor/queue.json` narrows the candidate list here, at the ONE
+ * point the whole-repo listing enters the pass, so every downstream decision (label, comment, finding,
+ * stand-down) is scoped by construction rather than by remembering to re-filter at each write site.
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, listPrFiles?:Function, queueScope?:object}} [o]
  * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
 export function watchParkedPrConflicts({
   repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false,
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
-  listPrFiles = defaultListPrFiles,
+  listPrFiles = defaultListPrFiles, queueScope = {},
 } = {}) {
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-conflict-watch', ...queueScope });
   const results = [];
   // xoh8fkw — resolved LAZILY, only once, only when a real write is about to happen (the common empty-sweep tick
   // never pays for the extra `gh repo view` call). `defaultListParkedPrs` above works fine with a null `repo`

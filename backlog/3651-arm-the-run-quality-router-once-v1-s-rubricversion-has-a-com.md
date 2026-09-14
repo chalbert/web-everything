@@ -6,7 +6,6 @@ status: parked
 parkedReason: maturityGated
 maturityTrigger: "adoptionSignal: one complete run population recorded under a single rubricVersion (#3649 Fork 3's well-defined population set)"
 parkedDate: "2026-09-13"
-blockedBy: ["3649"]
 scope: ["we:scripts/conveyor/run-quality-route.mjs"]
 dateOpened: "2026-09-13"
 tags: [conveyor, run-quality, maturity-gated]
@@ -21,6 +20,17 @@ Held `maturityGated`, not `blockedBy` alone: `#3649` gates *whether* the router 
 under one `rubricVersion`, which cannot exist until the scorer/router/store from `#3649` are themselves built
 and running for a while. Un-park when that population exists; propose the numeric accrual threshold at the
 same time, per Fork 4, as an ordinary finding — no separate ceremony.
+
+**Update (2026-09-13, epic #3383):** the v1 mechanism now exists — `we:scripts/conveyor/run-quality-rubric.mjs`
+(rubricVersion `2026-09-13.1`), `we:scripts/conveyor/run-quality-scorer.mjs`,
+`we:scripts/conveyor/run-scorecard-store.mjs` (`we:scripts/conveyor/run-scorecards.json`), the subject-class
+stamp (`we:scripts/conveyor/run-quality-subject-class.mjs`), and the disarmed router
+(`we:scripts/conveyor/run-quality-route.mjs`, `RUN_QUALITY_ROUTER_ARMED = false`). Proven against two REAL
+Codex runs (a `fix`-shaped `we:scripts/codex-direct-task.mjs` dispatch and an `advisory-review`
+`we:scripts/lib/codex-judge-spawn.mjs` call) — both scored and stored under `rubricVersion: '2026-09-13.1'`.
+`blockedBy: ["3649"]` is cleared here (the decision itself is resolved); this card's own `maturityTrigger` — a
+complete run population under one `rubricVersion` — has NOT fired and should not be considered satisfied by
+these two proof rows alone.
 
 ## Done when
 

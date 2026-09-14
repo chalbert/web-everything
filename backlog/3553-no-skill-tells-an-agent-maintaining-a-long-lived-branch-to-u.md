@@ -2,6 +2,7 @@
 bornAs: x6uepit
 kind: story
 size: 2
+tier: pinned
 parent: "3383"
 status: open
 dateOpened: "2026-09-06"

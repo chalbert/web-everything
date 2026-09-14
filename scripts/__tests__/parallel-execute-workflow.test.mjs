@@ -137,3 +137,29 @@ describe('parallel-execute workflow — #2478/#2216 Finalize label reconcile', (
     expect(SRC).toMatch(/Held for review/);              // logged
   });
 });
+
+describe('parallel-execute workflow — #3383 LANE FULL-SUITE GATE routes through heavy-admission', () => {
+  it('runs check:standards and npm test -- run THROUGH the heavy-admission run wrapper, not raw', () => {
+    // The #3383 finding: every parallel lane ran these heavy commands directly, contending unbounded for host
+    // CPU. `heavy-admission.mjs run` is the general-purpose capacity-semaphore wrapper (#3461/#3456) — the lane
+    // gate must invoke the commands THROUGH it, never as a bare `npm run check:standards` / `npm test -- run`.
+    expect(SRC).toMatch(/node scripts\/readiness\/heavy-admission\.mjs run --owner=\${weDir} --lane=\${weNum} -- npm run check:standards/);
+    expect(SRC).toMatch(/node scripts\/readiness\/heavy-admission\.mjs run --owner=\${weDir} --lane=\${weNum} -- npm test -- run/);
+    // the raw (unwrapped) invocations must be gone from step 4's OWN instructions (the ITEM_RESULT_SCHEMA
+    // `gate` field description elsewhere in the file still narrates the pair in prose — scope this to step 4).
+    const gateBlock = SRC.slice(SRC.indexOf('4. LANE FULL-SUITE GATE'), SRC.indexOf('5. RESOLVE'));
+    expect(gateBlock).not.toMatch(/`\s*npm run check:standards`\s*\(whole-repo/);
+    expect(gateBlock).not.toMatch(/^\s*`npm test -- run`\s*\(vitest RUN mode/m);
+  });
+
+  it('explains why this is NOT verify-lane.mjs (sha-keyed marker staleness), so the wrapper choice is documented', () => {
+    expect(SRC).toMatch(/HEAVY-ADMISSION WRAPPER/);
+    expect(SRC).toMatch(/sha-keyed[\s\S]{0,40}\.git\/\.lane-verify[\s\S]{0,40}stale/);
+  });
+
+  it('never bare `npm test` in the gate step (watch mode hangs the lane, #2327) — still enforced through the wrapper', () => {
+    const gateBlock = SRC.slice(SRC.indexOf('4. LANE FULL-SUITE GATE'), SRC.indexOf('5. RESOLVE'));
+    expect(gateBlock).toMatch(/npm test -- run/);
+    expect(gateBlock).not.toMatch(/-- npm test`/); // never wraps a bare `npm test` (no ` -- run` tail)
+  });
+});

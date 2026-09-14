@@ -1335,6 +1335,19 @@ export function buildPanelFindings(lensFindings = {}) {
  *     real mandatory defect still outranks a missing guard — the fix comes first). The per-lens `prevention-outstanding`
  *     scan is KEPT as a belt-and-suspenders fallback for callers that pass a verdict but no findings (a mandatory
  *     lens whose whole verdict IS prevention-outstanding still surfaces). Either path → `prevention-outstanding`.
+ *   - #xu2pp2m — `degradedBasis` → `needs-human` FOR EVERY NON-BLOCKING OUTCOME. Checked AFTER needs-human and
+ *     changes (a real blocking finding is still the more actionable answer, and a bounce costs nothing), and
+ *     BEFORE `prevention-outstanding`/`accept` — the two the UNATTENDED loop CLEARS mechanically
+ *     (`we:scripts/lib/review-loop-policy.mjs` auto-answers `accept` for both on the agent-addressed
+ *     `review:pending` tier). The input means "the material this panel judged could not be resolved"; a panel
+ *     that found nothing wrong with material it could not see has told us nothing, and reducing that to
+ *     `accept` is exactly what let PR #2122 merge on a review of a ZERO-BYTE diff (2026-09-12).
+ *     MEASURED ON THAT SAME RUN, and it is why this keys on the INPUT rather than on the ANSWERS: the
+ *     tool-free Codex seat reported honestly that "the missing net diff prevents a substantive review of the
+ *     changes" — an ABSTENTION — and because an abstention carries no findings, `deriveVerdict` turned it into
+ *     an accept vote. That is the tool-free-panel risk #3158 reasoned about, now measured. Recognising
+ *     abstention PROSE is not something a pure reducer can do; recognising that the material was unreadable is
+ *     deterministic, so the guard lives on that fact instead.
  *   - every MANDATORY lens verdict is `accept` AND nothing owes a guard → `accept` (the "unanimous accept lands"
  *     spec line — an advisory lens's ordinary outstanding findings are surfaced, never blocking).
  *
@@ -1346,11 +1359,13 @@ export function buildPanelFindings(lensFindings = {}) {
  * @verdicts-total — every `VERDICTS` member is handled explicitly (needs-human, changes, prevention-outstanding,
  *   accept); the `check:standards` verdict-totality gate enforces it, so a new enum member can't be dropped here.
  * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'|'prevention-outstanding'>, humanRequired?: boolean,
- *   conflict?: boolean, mandatoryLenses?: string[], findings: Array<object>}} o - `findings` (REQUIRED) is the WHOLE
- *   panel's list (`buildPanelFindings(lensFindings)`); the prevention scan reads it, immune to per-lens verdict flattening.
+ *   conflict?: boolean, degradedBasis?: boolean, mandatoryLenses?: string[], findings: Array<object>}} o -
+ *   `findings` (REQUIRED) is the WHOLE panel's list (`buildPanelFindings(lensFindings)`); the prevention scan
+ *   reads it, immune to per-lens verdict flattening. `degradedBasis` (#xu2pp2m) defaults to `false`, so every
+ *   pre-existing caller is byte-stable.
  * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
-export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings, bar = PREVENTION_IMPACT_BAR } = {}) {
+export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, degradedBasis = false, mandatoryLenses = MANDATORY_LENSES, findings, bar = PREVENTION_IMPACT_BAR } = {}) {
   if (findings === undefined) {
     throw new Error('derivePanelVerdict: `findings` is required — pass buildPanelFindings(lensFindings) (or an explicit [] to assert none). A defaulted [] silently reinstates the #2823 advisory-prevention leak on the drain path.');
   }
@@ -1368,6 +1383,12 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
   }
   if (mandatoryVerdicts.some((v) => v === VERDICTS.NEEDS_HUMAN)) return VERDICTS.NEEDS_HUMAN;
   if (mandatoryVerdicts.some((v) => v === VERDICTS.CHANGES)) return VERDICTS.CHANGES;
+  // #xu2pp2m — THE MATERIAL ITSELF WAS UNREADABLE. Nothing blocking was found, but nothing blocking COULD have
+  // been found, so the only honest non-blocking answer left is "a human has to look". Positioned here and not
+  // beside `humanRequired` above on purpose: a mandatory lens that DID find a blocker still gets to say so (a
+  // bounce is more actionable than a park, and it costs nothing), while both of the outcomes that mechanically
+  // CLEAR a PR are taken off the table. See this function's own docblock for the PR #2122 measurement.
+  if (degradedBasis) return VERDICTS.NEEDS_HUMAN;
   // #2823 round-2 finding 4 — derive "the panel owes a guard" from the FINDINGS, not the per-lens verdicts (the
   // structural fix). A RESOLVED finding whose named prevention is neither captured nor filed owes a guard, whatever
   // its lens's single verdict flattened to (an advisory lens with a co-resident unresolved finding would flatten to

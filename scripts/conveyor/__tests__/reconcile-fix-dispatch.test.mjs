@@ -9,10 +9,11 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  dispatchFix, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
+  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
+import { DISPATCHED_AGENT_SYSTEM_PROMPT_FILE } from '../../operations/dispatch-lane-io.mjs';
 import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
 
 // A `checkStaleness` stub that never touches git — every test below injects one.
@@ -36,7 +37,7 @@ describe('planFixesFromReconcile', () => {
     const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
-      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
+      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: false, body: null, headRefOid: null,
     }]);
   });
@@ -48,7 +49,7 @@ describe('planFixesFromReconcile', () => {
     }];
     const { planned } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(planned).toEqual([{
-      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
+      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: true, body: 'a PR body', headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
@@ -60,9 +61,9 @@ describe('planFixesFromReconcile', () => {
     expect(refusals).toEqual([{ pr: 42, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
   });
 
-  it('refuses `no-scope` for an item the loader cannot resolve, or one with an empty scope', () => {
+  it('refuses `no-scope` for an item the loader cannot resolve, or one with an empty scope, when the fallback ALSO finds nothing', () => {
     const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
-    const { planned, refusals } = planFixesFromReconcile(entries, () => null, () => []);
+    const { planned, refusals } = planFixesFromReconcile(entries, () => null, () => [], () => []);
     expect(planned).toEqual([]);
     expect(refusals).toEqual([{ pr: 99, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
   });
@@ -71,6 +72,91 @@ describe('planFixesFromReconcile', () => {
     const { planned, refusals } = planFixesFromReconcile([{ kind: 'review', prNumber: 1, headRefName: 'lane/1-x' }], findItemStub, () => []);
     expect(planned).toEqual([]);
     expect(refusals).toEqual([]);
+  });
+
+  // #3634 — real root-cause fixtures: two PRs (#2210, #2220 on `lane/mechanical-dispatcher`) reported as
+  // silently refused by reconcile-fix-dispatch despite clearly needing a fix. Both were independently
+  // re-verified live on 2026-09-14 (see the function's own docblock for the full evidence) and turned out to be
+  // TWO GENUINELY DIFFERENT shapes, not one shared regex bug:
+  describe('#3634 — PR #2220-shaped: item number resolves to an epic with no scope of its own', () => {
+    const epic3383 = { num: '3383', slug: 'a-background-mechanical-dispatcher-replaces-the-interactive', specPath: 'backlog/3383-x.md', scope: [] };
+    const findEpicStub = (key) => (key === '3383' ? epic3383 : null);
+
+    it('falls back to the PR\'s own changed files (we:-prefixed) instead of refusing `no-scope`', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity', labels: ['review:changes', 'checking', 'merge-status:conflicting'] }];
+      const calls = [];
+      const resolveFallbackScope = (pr, itemNum) => {
+        calls.push({ pr, itemNum });
+        return ['we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs'];
+      };
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], resolveFallbackScope);
+      expect(refusals).toEqual([]);
+      expect(calls).toEqual([{ pr: 2220, itemNum: '3383' }]);
+      expect(planned).toEqual([{
+        itemNum: '3383', pr: 2220, laneRef: 'lane/3383-host-process-granularity',
+        scope: ['we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs'],
+        scopeSource: 'pr-diff', isConflict: true, body: null, headRefOid: null,
+      }]);
+    });
+
+    it('still refuses `no-scope` when the epic has no scope AND the PR-diff fallback also comes back empty', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => []);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+
+    it('never even calls the fallback when the item already carries a real scope (no wasted IO)', () => {
+      const calls = [];
+      const entries = [{ kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass' }];
+      planFixesFromReconcile(entries, findItemStub, () => [], () => { calls.push(1); return ['we:should/not/be/used.mjs']; });
+      expect(calls).toEqual([]);
+    });
+
+    it('isolates a THROWING fallback to a `no-scope` refusal, not a crash of the whole pass', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => { throw new Error('gh unreachable'); });
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+  });
+
+  describe('#3634 — PR #2210-shaped: a `lane/file-<PR-reviewed>-...` branch — CONFIRMED NOT the same bug, must stay refused', () => {
+    it('still refuses `no-item-num` for `lane/file-2206-review-findings` — the trailing number is the REVIEWED PR, not an item this PR delivers, and backlog item #2206 is a real, unrelated card', () => {
+      const entries = [{ kind: 'fix', prNumber: 2210, headRefName: 'lane/file-2206-review-findings', labels: ['review:changes', 'checking', 'merge-status:conflicting'] }];
+      // Even a findItemFn/fallback that WOULD happily resolve "2206" must never be consulted — proof the
+      // no-item-num refusal fires before any lookup, so it can never be fooled into a wrong attribution.
+      const findCalls = [];
+      const findItemSpy = (key) => { findCalls.push(key); return null; };
+      const { planned, refusals } = planFixesFromReconcile(entries, findItemSpy, () => [], () => ['we:should/not/be/used.mjs']);
+      expect(findCalls).toEqual([]);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2210, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
+    });
+  });
+});
+
+describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
+  it('reduces `gh pr diff <pr> --name-only` to a `we:`-prefixed path list', () => {
+    const calls = [];
+    const exec = (file, argv, opts) => {
+      calls.push({ file, argv, cwd: opts?.cwd });
+      return 'scripts/operations/host-process-sample.mjs\nscripts/operations/telemetry.mjs\n';
+    };
+    expect(fetchPrDiffScope(2220, { exec, root: '/repo' })).toEqual([
+      'we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs',
+    ]);
+    expect(calls).toEqual([{ file: 'gh', argv: ['pr', 'diff', '2220', '--name-only'], cwd: '/repo' }]);
+  });
+
+  it('drops blank lines (a trailing newline must not become an empty `we:` path)', () => {
+    const exec = () => 'one/file.mjs\n\n\n';
+    expect(fetchPrDiffScope(1, { exec, root: '/repo' })).toEqual(['we:one/file.mjs']);
+  });
+
+  it('fails soft to `[]` on any `gh` failure — never throws the whole pass over one bad read', () => {
+    const exec = () => { throw new Error('gh: PR not found'); };
+    expect(fetchPrDiffScope(404, { exec, root: '/repo' })).toEqual([]);
   });
 });
 
@@ -109,9 +195,18 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(calls).toHaveLength(1);
     expect(calls[0].opts).toEqual({ cwd: '/repo' });
     expect(calls[0].argv).toEqual([
+      // #3331 — `--session-id` IS still emitted, and the id it carries is NOT the dispatch's identity.
+      // `claude --bg` discards the flag and assigns its own id (which `dispatchFix` now reads back off
+      // stdout as `agentId`); `buildAgentArgv` keeps passing it anyway because it costs nothing and a
+      // future CLI may honour it — see `buildAgentArgv`'s own docblock in
+      // `we:scripts/operations/dispatch-lane-io.mjs`. This branch's provider-port design (#3331's remedy
+      // here) fixes the REPORTED id, not the argv.
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'fix-1764',
+      // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
+      // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
+      '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       '# fix brief for 1764 (item 3438)\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --lane=9 --session=fix-1764 '
       + '--scope=we:scripts/conveyor/reconcile-fix-dispatch.mjs --base=lane/3438-wire-reconcile-pass\n'
@@ -400,8 +495,8 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       checkStaleness: FRESH,
     });
     expect(dispatched).toEqual([
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, isConflict: false, body: null, headRefOid: null, lane: 2 },
-      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, isConflict: false, body: null, headRefOid: null, lane: 9 },
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
+      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);
@@ -593,5 +688,71 @@ describe('buildResumePrompt — #xu2krte Fork 1', () => {
     const prompt = buildResumePrompt({ pr: 1, itemNum: '1' });
     expect(prompt).not.toContain('undefined');
     expect(prompt).not.toContain('null');
+  });
+});
+
+// ── #3331 — a fresh fix dispatch reports the id `claude --bg` assigned, not the minted one ────────────────────
+
+describe('#3331 — dispatchFix reads its handle back off stdout', () => {
+  /** Verbatim the first line CLI 2.1.269 prints on stdout for a `--bg` spawn. */
+  const BANNER = (id) => `backgrounded · ${id} · fix-1764\n  claude agents             list sessions\n`;
+
+  const dispatch = (spawnAgent) => dispatchFix(
+    { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:scripts/conveyor/reconcile-fix-dispatch.mjs'], lane: 9 },
+    {
+      root: '/repo',
+      readBrief: () => '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}})\n'
+        + 'acquire: node scripts/lane-pool.mjs acquire --lane={{LANE}} --session={{SESSION_SLUG}} '
+        + '--scope={{SCOPE}} --base={{LANE_REF}}',
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent,
+    },
+  );
+
+  it('returns `agentId` from the banner — the minted uuid addresses no session', () => {
+    // Same defect, same blast radius as the review side: `buildAgentArgv` used to pass `--session-id` and
+    // `claude --bg` used to ignore it, so the id this pass printed could never be found by `claude
+    // agents`/`logs`/`stop`, and `stampLiveness` read every fix dispatch as gone.
+    const result = dispatch(() => BANNER('9356543a'));
+    expect(result.agentId).toBe('9356543a');
+    expect(result.sessionId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('and `agentId: null` when the banner cannot be read, rather than a handle that will not be found', () => {
+    expect(dispatch(() => '').agentId).toBeNull();
+  });
+});
+
+// ── #3606 — the fix agent must be TOLD its brief is real, or it self-aborts ───────────────────────────────────
+
+describe('#3606 — dispatchFix always passes the dispatched-agent system prompt', () => {
+  it('emits --append-system-prompt-file, ahead of any extraArgs and the prompt', () => {
+    // THE DEFECT THIS PINS, live-confirmed 3/3 on 2026-09-11. `fix-agent-brief.md` opens with "**This is a
+    // TEMPLATE, not a runnable skill.**" and keeps `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` in its own explanatory
+    // prose (legitimately unsubstituted — `fillBrief` reports them as non-fatal unknown tokens by design), so a
+    // CORRECTLY filled brief still reads as an unfilled template. `fix-2127`, `fix-2130` and `fix-2003` each
+    // received a fully substituted 16.5 KB brief naming their real PR and each replied "I don't see an actual
+    // task or question in your message — just the fix-agent brief template (#2630) itself", doing no work.
+    //
+    // This was the ONE dispatch path missing the remedy: `createDispatchSinks` has always passed this file, and
+    // `review-dispatch.mjs` passes its review-side twin (#xy8di3v), but this function passed nothing.
+    const calls = [];
+    dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-x', scope: ['we:scripts/conveyor/reconcile-fix-dispatch.mjs'], lane: 9 },
+      {
+        root: '/repo',
+        readBrief: () => '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}}) lane {{LANE}} {{SESSION_SLUG}} {{SCOPE}} {{LANE_REF}}',
+        mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+        spawnAgent: (argv) => { calls.push(argv); return ''; },
+        extraArgs: ['--model', 'sonnet'],
+      },
+    );
+    const argv = calls[0];
+    const at = argv.indexOf('--append-system-prompt-file');
+    expect(at).toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe(DISPATCHED_AGENT_SYSTEM_PROMPT_FILE);
+    // Order matters the same way it does for every other dispatch: identity, then operator flags, then prompt.
+    expect(at).toBeLessThan(argv.indexOf('--model'));
+    expect(argv[argv.length - 1]).toContain('fix brief for 1764');
   });
 });

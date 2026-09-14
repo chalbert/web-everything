@@ -107,7 +107,11 @@ export function newRunRecord({ id, op, input = {} } = {}) {
  * `usage` is handled separately (it is an object of counters, not a scalar).
  */
 const TELEMETRY_NUMBERS = Object.freeze(['costUsd', 'durationMs', 'wallMs', 'numTurns', 'loadedContextTokens']);
-const TELEMETRY_STRINGS = Object.freeze(['sessionId', 'stopReason', 'lens', 'model', 'effort']);
+// `transcriptFile` (added alongside the Codex judge transcript-persistence fix) is a durable LOCAL PATH, never
+// transcript content — the whitelist discipline this comment block already documents is what makes that safe
+// to add here rather than a reason to bypass it: a path string is bounded and small like every other member of
+// this list, unlike the unbounded JSONL it points at, which never reaches this whitelist or this record.
+const TELEMETRY_STRINGS = Object.freeze(['sessionId', 'stopReason', 'lens', 'model', 'effort', 'transcriptFile']);
 /**
  * THE FLAGS, recorded only when TRUE. A `timedOut: false` on every row is noise; the fact being recorded is
  * the exception, and its absence is the ordinary case (#3203). Without it a juror that hit the wall and a

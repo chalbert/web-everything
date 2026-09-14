@@ -13,6 +13,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    // #3383 bugfix: default delivery-telemetry OFF for the whole run (`WE_TELEMETRY=0`) so wrapper tests
+    // that invoke the real dispatch wrappers don't append fixture spans to the shared
+    // `.operations/telemetry/*.jsonl` log — see `vitest.setup.ts`'s own header for the full story.
+    setupFiles: ['./vitest.setup.ts'],
     // #x1jcikc: cap this invocation's own worker count (see vitest.shared.ts#maxTestWorkers for the sizing
     // rationale) — otherwise the ~2000-file suite defaults to one thread per CPU core, which is how two
     // concurrently-admitted `test:unit` runs oversubscribe a 12-core host.

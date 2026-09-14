@@ -1,5 +1,31 @@
 # Conveyor CI-heal fix-agent brief (template) — rebase + repair a green-at-open PR gone RED / BEHIND, NEVER touch the review gate (#2666)
 
+> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#3642`, epic `#3383`).** A `ci-heal` dispatch no
+> longer spawns an agent with this brief. It starts
+> [we:scripts/operations/ci-heal-run.mjs](../../scripts/operations/ci-heal-run.mjs) — a detached, per-dispatch
+> process running
+> [we:scripts/operations/ci-heal-dispatch-wrapper.mjs](../../scripts/operations/ci-heal-dispatch-wrapper.mjs) —
+> which does the mechanical steps below ITSELF and spawns a MINIMAL agent
+> ([we:skills-src/conveyor/ci-heal-agent-brief-v2.md](ci-heal-agent-brief-v2.md)) for the one thing that is
+> actually judgment: read what the failing check says, make the smallest change that turns it green, report a
+> four-value outcome. You are reading THIS brief because somebody set `WE_CI_HEAL_DISPATCH_MODE=agent`.
+> Everything below still applies to you, unchanged.
+>
+> **What the wrapper now owns on the default path:** the `gh pr view` / `gh pr checks` / `gh run view
+> --log-failed` reads (the diagnosis reaches the agent as a plain file in its lane, never as a `gh` command the
+> agent runs); the lane acquire — reset to the PR's own pushed ref via `lane-pool acquire --base=` — and the
+> release; **the rebase onto `origin/main` (§2), including the decision to escalate rather than hand over a
+> half-rebased lane**; the gate (§4), run in the wrapper's own process with exactly one resume-and-retry handed
+> back to the agent; **one converge pass on the heal, which REPLACES §5's agent-spawned adversarial
+> self-review** — and which the wrapper SKIPS when the agent reports no files touched, keeping §5's own "a
+> trivial rebase-only heal may skip the subagent" proportionality; the `--force-with-lease` re-push to the PR's
+> existing `lane/*` ref (§6); the durable CI-heal comment (§7, `ci-heal-mark.mjs`); and the learnings drop (§8),
+> forwarded from the agent's own report. **The never-touch-the-review-label rule (§7, §9, Guardrails) is
+> unchanged and is now ENFORCED BY CONSTRUCTION:** the wrapper does not import `rearm-review.mjs` at all.
+> **What the agent still does directly:** read the diagnosis, judge whether the red check is a CI/rebase break
+> it can repair, a diff that is genuinely wrong and needs a design call, or a real conflict; apply the repair;
+> commit; report.
+
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2613) instantiates it when a
 > conveyor-launched PR that was **green at open** later goes **red on a required check** or **BEHIND + parked** —
 > a CI regression, NOT a `review:changes` bounce. It fills the `{{PLACEHOLDERS}}` below and passes the result as
@@ -103,9 +129,22 @@ as "closes"/"fixes" the item itself — it heals CI on an already-open PR, it do
 
 ### 4. Run the gate GREEN (the item's own locus gate)
 
+**You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
+well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
+auto-backgrounded by the tool itself, and you stall with no error. This is not just guidance — a
+`PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`, #3105) **DENIES** a dispatched agent from running the
+verification set (`verify-lane` / `run.mjs verify` / `check:standards` / `test:unit`) directly, in any form.
+The runner's own long-lived process (unbound by your turn's window) runs the gate for you. Request it, then
+poll across turns:
+
 ```bash
-npm run check:standards          # (or the item's locus gate — LOCI[item.locus] in check-standards-rules.mjs)
+node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
+# … on a LATER turn (the runner picks it up on its own tick, ~120s cadence) …
+node scripts/verify-lane.mjs check --json          # poll until status settles; `running` is NOT a failure — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 ```
+
+Only `green` clears you to proceed. (`verify-lane` runs the item's own locus gate —
+`LOCI[item.locus]` in `check-standards-rules.mjs` — you never name it yourself.)
 
 A red gate is a hard stop: do **not** re-push, and report `#{{ITEM_NUM}} → ci-heal gate-red`.
 

@@ -49,9 +49,45 @@ import { applyPendingEffects, inFlightEntries } from './effect-executor.mjs';
 import { totalJudgeSpend, withStepFinish, withStepStart } from './run-record.mjs';
 import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
+// #xqa9ttq — `requireAllProperties` comes from `codex-judge-spawn.mjs`, NOT `../lib/jury-core.mjs`, and that
+// is deliberate: `jury-core.mjs` imports `review-escalation.mjs`, which needs the `markdown-it` npm package,
+// and this file is imported at module-load time by lightweight CLI entry points (`we:scripts/backlog.mjs`
+// among them) that the repo's own ephemeral-clone test harness runs from a tree with NO `node_modules` at all
+// (`we:scripts/__tests__/number-stranded-locus.test.mjs` and friends, #2273/#2274). An earlier draft imported
+// `requireAllProperties` from `jury-core.mjs` here and broke all three of those tests with
+// `ERR_MODULE_NOT_FOUND: markdown-it` — a real, live-caught regression, not a hypothetical one; see
+// `codex-judge-spawn.mjs`'s own header for the full account. Do not re-introduce that edge.
+import { codexJudgeSpawn, requireAllProperties } from '../lib/codex-judge-spawn.mjs';
+// #3383 probation — the ratified Codex model pin (`#x8wbivt`), a leaf constant with no jury/markdown-it edge
+// (same safety property `codex-judge-spawn.mjs`'s own header discusses for this file). Needed so the
+// advisory judge seat's `{provider, model}` identity is a STAMPABLE fact rather than whatever `codex exec`
+// resolves implicitly — the same hole `#3635` (unmerged, `lane/3635-pin-codex-model-every-call-site`) names
+// for this exact call site. Fixed minimally HERE (default only, an explicit `request.model` still wins)
+// rather than pulled in wholesale from that branch, since our need is narrowly "the identity this probation
+// registry keys on must be real", not the fuller multi-call-site consolidation #3635 owns.
+import { CODEX_MODEL } from '../codex-direct-task.mjs';
+// #3383 — THE FIFTH SEAT'S PROVIDER (Google's Antigravity CLI, `agy`), mirroring the Codex import immediately
+// above: a leaf constant with no jury/markdown-it edge, imported so `resolveJudgeProvider`'s `'antigravity'`
+// branch pins a REAL `{provider, model}` identity (`ANTIGRAVITY_MODEL`) rather than whatever `agy` resolves as
+// its own undocumented default (#3633 probe 9: the default model's effort tier is not even exposed). See
+// `antigravity-judge-spawn.mjs`'s own header for why this module is a safe, tool-free leaf import — it is
+// already the standalone primitive proven live against the real CLI (`63102bde8`), just not wired until now.
+import { antigravityJudgeSpawn, ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
 
 /** Flags the adapter owns. A declaration may not name an input field that collides with one. */
-export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model']);
+export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model', 'provider']);
+
+/**
+ * #xqa9ttq — the named `JudgeProvider` implementations `--provider` may select. `'claude'` (the existing
+ * `judgeSpawn`) is the default everywhere this is omitted — this card is ADDITIVE, never a default flip.
+ * A single source of truth so the CLI parse, `createDefaultJudge`'s resolution, and any future caller agree
+ * on the exact same spelling set — the same reason `EFFORT_LEVELS` is one exported array rather than a string
+ * re-typed at each call site.
+ *
+ * #3383 — `'antigravity'` ADDED here, mirroring exactly how `'codex'` was added: additive, never reordering
+ * the existing two names and never changing the default (still `'claude'`).
+ */
+export const JUDGE_PROVIDER_NAMES = Object.freeze(['claude', 'codex', 'antigravity']);
 
 /**
  * The control flags that mean something ONLY to a declaration with a `judge` step — the JUROR flags.
@@ -93,7 +129,7 @@ export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 
  * checkout, which is not a lane). A misdirected value therefore fails loudly on either side, which is why the
  * ambiguity stays a documentation matter and not a correctness one (PR review r2 withdrew the rename on this).
  */
-export const JUROR_FLAGS = Object.freeze(['cwd', 'model']);
+export const JUROR_FLAGS = Object.freeze(['cwd', 'model', 'provider']);
 
 /**
  * The control flags that only mean something to a declaration that can SUSPEND — a run that cannot stop cannot
@@ -173,6 +209,10 @@ export const JUROR_FLAG_HELP = Object.freeze([
   '  --model=<alias>   override the juror model the declaration asks for (e.g. `sonnet`, `opus`). Omit to use',
   '                    the declared one. This is a control flag, not run input: it is never recorded as input',
   '                    and never reaches the mandate.',
+  `  --provider=<name> which JudgeProvider implementation runs the juror — one of ${JUDGE_PROVIDER_NAMES.join('|')}.`,
+  '                    Omit for the default (`claude`, today\'s `judgeSpawn`) — this is OPT-IN, never automatic',
+  '                    (#xqa9ttq). `codex` seats a Codex CLI juror; it is TOOL-FREE ONLY today, so combining it',
+  '                    with a declaration that requests a tool-bearing juror is refused, not silently degraded.',
 ]);
 
 /**
@@ -278,6 +318,41 @@ export function hasJsonFlag(argv = []) {
 }
 
 /**
+ * WHAT `--cwd` ON THIS ARGV NAMES, or `null`. The EXACT sibling of {@link hasJsonFlag} above — same "usable
+ * before a declaration exists" reason, same deliberate narrowness (it answers one question and refuses
+ * nothing; `parseOperationArgv` still owns rejection).
+ *
+ * WHY IT HAD TO EXIST (live-caught 2026-09-12 against PR #2122, which merged ON the defect). `--cwd` reached
+ * ONLY the judge factory (`we:scripts/operations/run.mjs#createCliJudgeFactory`, via `parsed.control.cwd`),
+ * never the READER — `OPERATIONS[review-pr]` built `createReviewPrReader()` with no arguments, so the diff was
+ * always taken from `REPO_ROOT` whatever lane the caller named. In a single-branch lane clone with no
+ * remote-tracking ref for the PR's head branch that resolved to `degraded: true, degradedReason:
+ * 'ref-unresolved'` and a ZERO-LENGTH diff, and every seat "reviewed" nothing. The reader is built inside
+ * `resolveOperation`, which runs BEFORE `parseOperationArgv` (it is what supplies the declaration that parse
+ * needs), so the value has to be read off raw argv here exactly as `--json` is.
+ *
+ * BOTH SPELLINGS, `--cwd <value>` included: `parseOperationArgv` accepts the space-separated form for control
+ * flags, so a reader that only understood `--cwd=<value>` would silently fall back to `REPO_ROOT` for the very
+ * invocation shape that DID name a lane.
+ *
+ * @param {string[]} [argv]
+ * @returns {string|null}
+ */
+export function cwdFlagValue(argv = []) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (typeof token !== 'string' || !token.startsWith('--')) continue;
+    const eq = token.indexOf('=');
+    const name = eq === -1 ? token.slice(2) : token.slice(2, eq);
+    if (name !== 'cwd') continue;
+    const value = eq === -1 ? argv[i + 1] : token.slice(eq + 1);
+    if (typeof value !== 'string' || !value.trim() || value.startsWith('--')) return null;
+    return value.trim();
+  }
+  return null;
+}
+
+/**
  * PARSE argv against a declaration. PURE — no process, no env. Unknown flags are REFUSED (the declaration is
  * the whole surface, and `validateInput` already fails closed in both directions; this makes the message
  * arrive before a run exists).
@@ -296,7 +371,9 @@ export function parseOperationArgv(declaration, argv = []) {
   // `confirm` holds the CONFIRM-TIME inputs. They are declared inputs, so they are NOT control flags and are
   // deliberately not siblings of `resume`/`answer` here — but they arrive on the resume call rather than the
   // opening one, so they cannot travel in `input` either, which is what `--resume` refuses.
-  const control = { help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '', confirm: {} };
+  const control = {
+    help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '', provider: '', confirm: {},
+  };
 
   for (const token of argv) {
     if (!token.startsWith('--')) { errors.push(`unexpected positional argument ${JSON.stringify(token)} — every input is a --flag`); continue; }
@@ -325,10 +402,10 @@ export function parseOperationArgv(declaration, argv = []) {
     // supplied" would name a cause the operator can see they DID supply.
     if (JUROR_FLAGS.includes(name)) {
       if (!judged) {
+        const purpose = name === 'cwd' ? 'point at a lane' : name === 'provider' ? 'pick an implementation for' : 'pick a model for';
         errors.push(
           `--${name} needs a \`judge\` step, and \`${declaration.name}\` declares none `
-          + `(${declaration.steps.map((s) => s.step.kind).join(' → ')}) — there is no juror to `
-          + `${name === 'cwd' ? 'point at a lane' : 'pick a model for'}.`,
+          + `(${declaration.steps.map((s) => s.step.kind).join(' → ')}) — there is no juror to ${purpose}.`,
         );
         continue;
       }
@@ -343,6 +420,13 @@ export function parseOperationArgv(declaration, argv = []) {
       // TOKEN the operator typed instead of a request the adapter assembled.
       if (value.trim().startsWith('-')) {
         errors.push(`--${name}=${JSON.stringify(value)} looks like a flag, not a value — refusing it before it reaches the juror's argv (#3028)`);
+        continue;
+      }
+      // #xqa9ttq — `--provider` is a closed enum, unlike `--cwd`/`--model`'s free-form values: an unrecognised
+      // name is refused HERE, at the parse seam, rather than reaching `createDefaultJudge`'s own resolution
+      // and failing with a message that never mentions the command line the operator actually typed.
+      if (name === 'provider' && !JUDGE_PROVIDER_NAMES.includes(value.trim())) {
+        errors.push(`--provider must be one of ${JUDGE_PROVIDER_NAMES.join('|')}, got ${JSON.stringify(value.trim())}`);
         continue;
       }
       control[name] = value.trim();
@@ -509,6 +593,47 @@ export function unwrapJudgeOutcome(returned) {
  */
 
 /**
+ * #xqa9ttq — RESOLVE A NAMED `JudgeProvider`. The only place a provider NAME (a string an operator can type
+ * on a command line) becomes a provider FUNCTION. `'claude'` is `judgeSpawn`, unchanged and untransformed —
+ * this card must not alter what a Claude-backed juror is asked for. `'codex'` wraps `codexJudgeSpawn` with
+ * the ONE thing `#3371`'s probe found mandatory before any real shape survives the trip: every judge shape in
+ * this repo uses OPTIONAL properties, and OpenAI's strict structured-output dialect 400s on that (probe 3) —
+ * so the request's `shape` is run through `requireAllProperties` (`we:scripts/lib/codex-judge-spawn.mjs`) HERE,
+ * at the provider boundary, never inside `codexJudgeSpawn` itself (its own header explains why: so its unit tests can
+ * exercise the untransformed contract, and so a caller with an already-strict schema is not silently
+ * double-transformed) and never by mutating the shared shape constants (`REVIEW_JUDGE_SHAPE` and friends stay
+ * exactly as they are for the Claude path, which is the other half of the same probe-3 finding).
+ *
+ * @param {string} name - one of `JUDGE_PROVIDER_NAMES`.
+ * @returns {JudgeProvider}
+ */
+export function resolveJudgeProvider(name) {
+  if (name === 'codex') {
+    // `model: CODEX_MODEL` is a DEFAULT, spread first — a request that already names its own `model` (an
+    // operator override) still wins, exactly like every other override in this file.
+    return (request) => codexJudgeSpawn({ model: CODEX_MODEL, ...request, shape: requireAllProperties(request.shape) });
+  }
+  // #3383 — `'antigravity'` wraps `antigravityJudgeSpawn` the same way, `model: ANTIGRAVITY_MODEL` spread
+  // first so an operator/request override still wins. NO schema transform — unlike Codex, `agy` accepts this
+  // repo's OPTIONAL-property shapes untransformed (`antigravity-judge-spawn.mjs`'s own header, item 3), so
+  // there is nothing analogous to `requireAllProperties` to run here.
+  if (name === 'antigravity') {
+    return (request) => antigravityJudgeSpawn({ model: ANTIGRAVITY_MODEL, ...request });
+  }
+  if (name === 'claude' || name == null) return judgeSpawn;
+  throw new Error(`operations: unknown judge provider ${JSON.stringify(name)} — one of ${JUDGE_PROVIDER_NAMES.join('|')}`);
+}
+
+/**
+ * #3383 — THE TOOL-FREE PROVIDER NAMES: both `'codex'` and `'antigravity'` are structurally tool-free seats
+ * (see each module's own header for why), so both share the SAME two guards below — the model-merge exclusion
+ * and the tool-bearing refusal — rather than duplicating an `effectiveProviderName === 'codex'` check per
+ * provider as they are added. A single named list so a THIRD tool-free provider, if one is ever added, extends
+ * both guards by editing one array rather than two `if` conditions.
+ */
+export const TOOL_FREE_JUDGE_PROVIDER_NAMES = Object.freeze(['codex', 'antigravity']);
+
+/**
  * The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}.
  *
  * IT RETURNS WHAT THE SPAWN COST, not only what the juror said. `judgeSpawn` reports `costUsd`, `sessionId`,
@@ -520,26 +645,102 @@ export function unwrapJudgeOutcome(returned) {
  *
  * @param {object} [o]
  * @param {JudgeProvider} [o.provider] - the provider port implementation, injected for tests. Defaults to
- *   `judgeSpawn`, today's only implementation.
+ *   `resolveProvider(providerName)`, so an operator who supplies `providerName` alone (the normal command
+ *   line case) never has to also know what function that name resolves to.
+ * @param {string|null} [o.providerName] - #xqa9ttq/#3383 — `'claude'` (default), `'codex'`, or `'antigravity'`,
+ *   one of `JUDGE_PROVIDER_NAMES`. IGNORED once `provider` is explicitly supplied — that is what keeps every
+ *   existing test that injects a stub `provider` untouched by this card. IGNORED, per call, whenever THAT
+ *   call's own `request.providerName` is set — see the per-request override note below.
  * @param {string|null} [o.cwd] - the lane the juror runs in. Passed only when set, so a tool-free juror is
  *   unaffected and a tool-bearing one hits `assertLaneCwd`'s refusal when nobody supplied a lane (#3151).
  * @param {string|null} [o.model] - an operator override for the model the DECLARATION asked for. Absent by
- *   default: the declared literal is the norm, and an override is a deliberate command-line act.
+ *   default: the declared literal is the norm, and an override is a deliberate command-line act. Never merged
+ *   onto a request whose EFFECTIVE provider (request-level or factory-level) is tool-free
+ *   ({@link TOOL_FREE_JUDGE_PROVIDER_NAMES}) — see below.
+ * @param {(name: string) => JudgeProvider} [o.resolveProvider] - #xqa9ttq — how a per-request `providerName`
+ *   (and, absent one, the factory's own `providerName`) becomes a provider FUNCTION. Defaults to the real
+ *   {@link resolveJudgeProvider}; injectable so a test can substitute BOTH providers at once without touching
+ *   the `codex-judge-spawn.mjs` module boundary — the seam `judge-provider-selection.test.mjs` already uses at
+ *   the `resolveJudgeProvider` layer, extended here to the per-request path.
  */
-export function createDefaultJudge({ provider = judgeSpawn, cwd, model } = {}) {
+export function createDefaultJudge({
+  provider, providerName = 'claude', cwd, model, resolveProvider = resolveJudgeProvider,
+} = {}) {
   return async (request) => {
+    // #xqa9ttq — A REQUEST MAY PIN ITS OWN PROVIDER (`request.providerName`), overriding this factory's. This
+    // is what lets ONE run seat a tool-free Codex juror (`review-pr`'s opt-in `judgeAdvisory` seat) while its
+    // OTHER judge steps stay on the factory's own provider (`claude` by default, or whatever `--provider`
+    // chose) — a single `--provider` for the WHOLE run cannot do this: `review-pr`'s two existing seats set
+    // `allowedTools` unconditionally, and Codex structurally refuses a tool-bearing request (the guard below),
+    // so `--provider=codex` against a real run fails at the first tool-bearing seat — confirmed live against a
+    // real run before this seam existed.
+    if (request?.providerName !== undefined && !JUDGE_PROVIDER_NAMES.includes(request.providerName)) {
+      throw new Error(
+        `operations: unknown judge provider ${JSON.stringify(request.providerName)} on a judge request — one of `
+        + `${JUDGE_PROVIDER_NAMES.join('|')}`,
+      );
+    }
+    const effectiveProviderName = request?.providerName ?? providerName;
     // THE OVERRIDE IS MERGED BEFORE THE GUARD RUNS, NEVER AFTER (#3151). `assertSafeJudgeRequest` is what stops
     // a flag-shaped `model` reaching argv, so asserting the declaration's request and then substituting the
     // operator's value would check one string and spawn another — the guard would be decorative. The CLI
     // adapter's parse refuses a `-`-leading value too; this is the seam that binds every caller of this
     // factory, including one that builds it by hand.
-    const effective = model ? { ...request, model } : request;
+    //
+    // #xqa9ttq/#3383 — NEVER MERGED ONTO AN EFFECTIVELY TOOL-FREE REQUEST (`codex` OR `antigravity`). `model`
+    // here is a Claude model name (the declaration's `JUDGE_MODEL` literal, or whatever the operator typed for
+    // the seat(s) they are steering with `--model`); a request whose effective provider is tool-free (via
+    // `request.providerName` or this factory's own) would otherwise carry that Claude model name onto the
+    // other CLI's own model flag verbatim.
+    const effective = (model && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName)) ? { ...request, model } : request;
     assertSafeJudgeRequest(effective);
-    const outcome = await provider({
+    // #xqa9ttq/#3383 — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside each provider's own spawn module. A
+    // caller that injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the
+    // one place that catches "tool-free provider + tool-bearing request" regardless of HOW that provider got
+    // here — the same belt-and-braces reasoning `assertNoForbiddenArgv`'s "reachable through judgeSpawn too"
+    // note already uses. Reads `effectiveProviderName` (request-level override included), not the factory's
+    // own `providerName` alone — otherwise a factory defaulted to `claude` with a request pinned to a tool-free
+    // provider would sail past this.
+    if (TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName) && effective.allowedTools) {
+      throw new Error(
+        `operations: refusing \`--provider=${effectiveProviderName}\` with a TOOL-BEARING judge request — the `
+        + `${effectiveProviderName} provider is seated as a TOOL-FREE panelist only (#3581/#3383). Use the `
+        + 'default `claude` provider for a tool-bearing role.',
+      );
+    }
+    // #xqa9ttq — RESOLUTION ORDER. A REQUEST-level `providerName` always resolves via `resolveProvider` (the
+    // real one by default) — it names a concrete provider the request itself insists on, so an unrelated
+    // `provider` stub injected at the FACTORY level (there for a DIFFERENT seat's test) must not silently
+    // intercept it. Absent a request-level override, behaviour is BYTE-IDENTICAL to before this card: the
+    // factory's own injected `provider` wins over its own `providerName`.
+    const resolvedProvider = request?.providerName !== undefined
+      ? resolveProvider(request.providerName)
+      : (provider ?? resolveProvider(providerName));
+    const outcome = await resolvedProvider({
       mandate: effective.mandate,
       input: effective.input,
       shape: effective.shape,
-      model: effective.model,
+      // #3383 mechanical-dispatcher Gap 2 root cause fix — THIS was `model: effective.model,` unconditionally,
+      // which for a seat that DELIBERATELY OMITS `model` (both Codex advisory seats, the Antigravity seat —
+      // see this function's own `@param o.model` docblock above for why) still wrote an explicit `model:
+      // undefined` OWN PROPERTY onto the object handed to `resolvedProvider`. `resolveJudgeProvider`'s own
+      // codex/antigravity wrappers default a missing `model` via OBJECT SPREAD ORDER (`{ model: CODEX_MODEL,
+      // ...request }`), which — unlike a destructured default parameter — does NOT skip an explicit `undefined`
+      // key: the spread OVERWRITES the default with `undefined`, so `model` reached `codexJudgeSpawn`/
+      // `antigravityJudgeSpawn` as `undefined` regardless. That silently (a) dropped the pinned `-m <model>`
+      // argv entirely (the seat ran on the provider CLI's own ambient default model, never the declared one) and
+      // (b) made EVERY advisory-seat scorecard row fail `run-scorecard-store.mjs#validateScorecard`'s `model`
+      // requirement, so `recordCodexRunScorecard`/`recordAntigravityRunScorecard` (both correctly wired and
+      // correctly CALLED) silently returned `null` every time — confirmed live: a real end-to-end review-pr run
+      // over PR #2178 threw `run-scorecard-store: refusing to append an invalid scorecard: - \`model\` is
+      // required` on all three optional seats, caught by each recorder's own never-throws catch. Conditional
+      // inclusion (mirroring `allowedTools`/`cwd` just below, which already use this exact pattern) is the fix:
+      // when `effective.model` is genuinely undefined, the key is OMITTED, not present-and-undefined, which lets
+      // each provider's OWN default apply — `resolveJudgeProvider`'s spread-order default for codex/antigravity,
+      // and `judgeSpawn`'s own `model = DEFAULT_MODEL` destructured default for `claude` (unaffected either way,
+      // since a destructured default DOES trigger on an absent key, same as it always did on an explicit
+      // `undefined` one — this change is a no-op for that path).
+      ...(effective.model !== undefined ? { model: effective.model } : {}),
       effort: effective.effort,
       budget: effective.budget,
       runId: effective.runId,
@@ -558,6 +759,13 @@ export function createDefaultJudge({ provider = judgeSpawn, cwd, model } = {}) {
       sessionId: outcome.sessionId,
       loadedContextTokens: outcome.loadedContextTokens,
       usage: outcome.usage,
+      // THE JUDGE TRANSCRIPT FIX — `codexJudgeSpawn` (`we:scripts/lib/codex-judge-spawn.mjs`) and
+      // `antigravityJudgeSpawn` (`we:scripts/lib/antigravity-judge-spawn.mjs`, #3383's mirror of the same
+      // fix) both return this; `judgeSpawn`'s (Claude's) outcome carries no such field, so
+      // `outcome.transcriptFile` is `undefined` for that provider and `normalizeJudgeTelemetry`'s string
+      // whitelist silently drops it — no per-provider branch needed here for all three to coexist. A PATH
+      // ONLY, never transcript content, per that whitelist's own discipline.
+      transcriptFile: outcome.transcriptFile,
       // #3203 — the juror hit the WALL and its answer was recovered from the killed process. Recorded so the
       // row says which happened: a bound being hit and a crash used to be indistinguishable here, and a
       // recovered review is worth knowing about even though it is a real verdict.
@@ -754,7 +962,7 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
  * @param {object} o.store
  * @param {Record<string, Function>} o.sinks
  * @param {Function} [o.judge] - a ready-made judge. Used as-is; the juror flags cannot reach it.
- * @param {(o: {cwd: (string|null), model: (string|null)}) => Function} [o.makeJudge] - a judge FACTORY, taking
+ * @param {(o: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} [o.makeJudge] - a judge FACTORY, taking
  *   the parsed juror flags. Preferred over `judge` for a real command line: `--cwd`/`--model` are parsed HERE,
  *   so a caller that pre-builds its judge has no way to honour them (#3151). Falls back to `judge` when absent,
  *   which is why every existing test that injects a canned judge is untouched.
@@ -774,7 +982,7 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
   // used to do) is what made the juror's lane an environment-only input: there was no later seam at which a
   // `--cwd` could have been honoured, so the flag could not have existed (#3151).
   const activeJudge = typeof makeJudge === 'function'
-    ? makeJudge({ cwd: parsed.control.cwd || null, model: parsed.control.model || null })
+    ? makeJudge({ cwd: parsed.control.cwd || null, model: parsed.control.model || null, provider: parsed.control.provider || null })
     : judge;
 
   let run;

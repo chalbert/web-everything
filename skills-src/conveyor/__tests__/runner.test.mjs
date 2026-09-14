@@ -15,26 +15,53 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
 import { readLockEntry } from '../../../scripts/readiness/file-locks.mjs';
 import {
   RUNNER_LEASE_PATH,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned, runnerLeaseStatus,
 } from '../runner-lock.mjs';
+import { METRIC_NAMES, METRIC_UNITS } from '../../../scripts/operations/telemetry.mjs';
 import {
-  carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
+  carryForward, shouldStop, tickSurface, tickMetrics, hostMetrics, readHostSample,
+  runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
+  bookkeepingForDispatch, installShutdownHandlers, finalEventLine, SHUTDOWN_SIGNALS,
+  recordLaunchPosture,
   writeDriverStatus, appendDecisionTrace, DRIVER_STATUS_FILENAME,
 } from '../runner.mjs';
+import { readDriverMode, driverModePath } from '../../../scripts/conveyor/driver-mode.mjs';
 import { localDateString } from '../../../scripts/lib/local-date.mjs';
 
 // Hoisted mock — `makeCliMechanicalPasses` dynamically `import('node:child_process')`s `execFileSync`
 // (§below, x5v8yy9 review finding), so the module itself must be mocked rather than the binding. Keeps every
 // other real export (via `importOriginal`) — several modules this test file pulls in transitively (e.g.
 // `scripts/lib/output-mix.mjs`) import `node:child_process` themselves and need its real shape.
+// #xu2pp2m — `spawn` IS MOCKED TOO, because the review-dispatch call moved onto it. `review-dispatch.mjs` is
+// now a BLOCKING mechanical review rather than a fork-and-return `claude --bg` spawn, so the runner runs it
+// through `runQuietHeartbeating` — which must use `spawn`, since `execFileSync` blocks the event loop and no
+// heartbeat timer could fire during a multi-minute pass. A test mocking only `execFileSync` therefore stopped
+// seeing the dispatch at all.
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, execFileSync: vi.fn() };
+  return { ...actual, execFileSync: vi.fn(), spawn: vi.fn() };
 });
+
+/**
+ * A `spawn` stand-in for the heartbeating passes: records the argv into the SAME list the `execFileSync`
+ * router uses (so assertions read one list), then resolves with `exitCodeFor(joinedArgs)`. Shaped the way
+ * `runQuietHeartbeating` actually consumes a child — `.stderr.on('data')`, `.on('error')`, `.on('exit')`.
+ */
+function makeSpawnRouter(calls, exitCodeFor = () => 0) {
+  return (cmd, args) => {
+    calls.push([cmd, ...args]);
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    // Asynchronously, so the caller has attached its listeners before the exit lands.
+    setImmediate(() => child.emit('exit', exitCodeFor(args.join(' '))));
+    return child;
+  };
+}
 
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
 const MIN = 60_000;
@@ -109,6 +136,50 @@ describe('carryForward — threads the core nextState UNCHANGED (never re-derive
   });
 });
 
+describe('bookkeepingForDispatch (#3416) — strips ONLY the target item\'s own guard, nothing else', () => {
+  it('removes the target item\'s own entry from every guard list', () => {
+    const nextState = {
+      tick: 2,
+      buildGuards: [{ num: '3412', lane: 1, spawnedTick: 0 }, { num: '99', lane: 5, spawnedTick: 0 }],
+      prepareGuards: [{ num: '3412', kind: 'prepare', lane: 1, spawnedTick: 0 }],
+      fixGuards: [{ num: '3412', lane: 2, spawnedTick: 0 }],
+      ciHealGuards: [{ num: '3412', lane: 3, spawnedTick: 0 }],
+      watched: [{ pr: 9 }],
+    };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '3412' });
+    // THE REGRESSION THIS GUARDS: before the fix, dispatch-lane's own nested tick-core read would see this
+    // exact entry already live for the item it is about to dispatch, and refuse — "suppressed by the
+    // in-flight build guard" — against a guard the SAME tick just planned, never a real spawn.
+    expect(bookkeeping.buildGuards).toEqual([{ num: '99', lane: 5, spawnedTick: 0 }]);
+    expect(bookkeeping.prepareGuards).toEqual([]);
+    expect(bookkeeping.fixGuards).toEqual([]);
+    expect(bookkeeping.ciHealGuards).toEqual([]);
+  });
+  it('leaves every OTHER item\'s guard untouched — a genuinely in-flight item still suppresses', () => {
+    const nextState = {
+      buildGuards: [{ num: '10', lane: 1, spawnedTick: 0 }, { num: '20', lane: 2, spawnedTick: 0 }],
+    };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '10' });
+    expect(bookkeeping.buildGuards).toEqual([{ num: '20', lane: 2, spawnedTick: 0 }]);
+  });
+  it('normalizes the num the same way the guard lists themselves are normalized (string vs number)', () => {
+    const nextState = { buildGuards: [{ num: 3412, lane: 1, spawnedTick: 0 }] };
+    expect(bookkeepingForDispatch(nextState, { num: '3412' }).buildGuards).toEqual([]);
+  });
+  it('tolerates a missing guard list on either side — no throw, nothing invented', () => {
+    expect(bookkeepingForDispatch({ tick: 1 }, { num: '3412' })).toEqual({
+      tick: 1, buildGuards: undefined, prepareGuards: undefined, fixGuards: undefined, ciHealGuards: undefined,
+    });
+  });
+  it('leaves every other field on nextState (tick, watched, fixAttempts, …) exactly as it was', () => {
+    const nextState = { tick: 5, watched: [{ pr: 1 }], fixAttempts: { 7: 2 }, buildGuards: [{ num: '3412', lane: 1 }] };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '3412' });
+    expect(bookkeeping.tick).toBe(5);
+    expect(bookkeeping.watched).toBe(nextState.watched);
+    expect(bookkeeping.fixAttempts).toBe(nextState.fixAttempts);
+  });
+});
+
 describe('shouldStop — the two mechanical stop conditions, both from the core', () => {
   it('stops on the core idle-stop', () => {
     expect(shouldStop({ decisions: { idleStop: true } }, { tick: 0, maxTicks: Infinity })).toEqual({ stop: true, reason: 'idle-stop' });
@@ -126,6 +197,7 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   it('projects status, notes, every dispatch kind, and watchers', () => {
     const out = { decisions: {
       statusLine: 'conveyor · 2 building',
+      counts: { building: 2, preparing: 1, fixing: 1, healing: 1, queued: 3, parked: 0, verdict: 'ok' },
       notes: [{ kind: 'build-ttl', text: '⚠ re-dispatching' }],
       spawnBuilds: [{ num: 1, lane: 1 }], spawnPrepareScope: [{ num: 2, lane: 2 }],
       spawnPrepareDecision: [{ num: 3, lane: 3 }], spawnFixes: [{ pr: 9 }], spawnCiHeals: [{ pr: 10 }],
@@ -135,6 +207,8 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
     } };
     const s = tickSurface(out);
     expect(s.statusLine).toBe('conveyor · 2 building');
+    // #3398 — the structured tallies pass through verbatim, for the supervisor's alerting to read.
+    expect(s.counts).toEqual({ building: 2, preparing: 1, fixing: 1, healing: 1, queued: 3, parked: 0, verdict: 'ok' });
     expect(s.notes).toHaveLength(1);
     expect(s.dispatch).toEqual({
       builds: [{ num: 1, lane: 1 }], prepareScope: [{ num: 2, lane: 2 }],
@@ -149,9 +223,22 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   it('is total on a bare tick output (all empties, never throws)', () => {
     const s = tickSurface({});
     expect(s).toEqual({
-      statusLine: '', notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] },
+      statusLine: '', counts: null, notes: [], suppressedBuilds: [],
+      dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] },
       armWatchers: [], stalled: [], decisionTrace: [],
     });
+  });
+
+  // #3383 — the projection's own describe-block promises it "drops nothing", and until now it dropped
+  // `suppressedBuilds`: the record of which planned builds were REFUSED and why. That is the runner's primary
+  // saturation signal (`capToConcurrency` computes it against `WE_MAX_CONCURRENT_LANES` every tick), and
+  // `tickMetrics` reads it straight off the surface — so it has to survive the projection.
+  it('projects suppressedBuilds — the DENIAL half of the dispatch decision', () => {
+    const s = tickSurface({ decisions: {
+      spawnBuilds: [{ num: 1, lane: 1 }],
+      suppressedBuilds: [{ num: 7, lane: 4, by: 'capacity-cap' }, { num: 8, lane: 5, by: 'build-guard' }],
+    } });
+    expect(s.suppressedBuilds).toEqual([{ num: 7, lane: 4, by: 'capacity-cap' }, { num: 8, lane: 5, by: 'build-guard' }]);
   });
 });
 
@@ -295,8 +382,102 @@ describe('runLoop — the runner control flow over injected effects', () => {
     expect(res.stoppedReason).toBe('idle-stop');  // the throw was swallowed; the tick still completed
   });
 
+  it('#3404 — threads its OWN heartbeat effect into mechanicalPasses, so a pass that outlasts the lease TTL can extend it mid-pass', async () => {
+    // Fails today (before #3404): `mechanicalPasses` was called with no `heartbeat` in its ctx at all, so a
+    // real long-running pass (the #3105 verify-dispatch pass) had no way to heartbeat until AFTER it returned
+    // — exactly the stale-lease-mid-run window #2453 already fixed for the plateau-app drain daemon.
+    let calls = 0;
+    const res = await runLoop({
+      tickOnce: () => ({ decisions: { idleStop: true }, nextState: {} }),
+      // Simulate a slow pass (like `runQuietHeartbeating`'s real interval) calling the heartbeat it was HANDED
+      // several times while it "runs", not merely receiving one bracketing call from the loop itself.
+      mechanicalPasses: async ({ heartbeat }) => {
+        expect(typeof heartbeat).toBe('function');
+        heartbeat(); heartbeat(); heartbeat(); // 3 mid-pass heartbeats simulating 3 elapsed intervals
+      },
+      heartbeat: () => { calls++; return true; },
+      sleep: () => {},
+    });
+    // The mechanicalPasses fake called the SAME heartbeat effect the loop itself uses after the tick — so all
+    // calls land on the one counter; asserting 3+ (not exactly 1) is what pins "mid-pass", not just "bracketed".
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(res.stoppedReason).toBe('idle-stop');
+  });
+
   it('requires a tickOnce effect', async () => {
     await expect(runLoop({})).rejects.toThrow(/tickOnce/);
+  });
+});
+
+// ── (2b) dispatchPass (#3383) — the runner carries the DISPATCH PASS's nextState forward, not the raw tick's ─
+
+describe('runLoop — dispatchPass (#3383): carries the dispatch pass\'s nextState forward, fails soft', () => {
+  it('the NEXT tick sees the dispatch pass\'s nextState, not the raw tick\'s own', async () => {
+    // Tick 0's own raw nextState says `{ tick: 1, from: 'raw' }`; a fake dispatchPass (standing in for
+    // `dispatch-lane`'s nested tick-core read actually recording the new guard) returns a DIFFERENT one. The
+    // second `tickOnce` call must receive the dispatch pass's copy, per the file header's #3383 rationale.
+    const seenPayloads = [];
+    const res = await runLoop({
+      tickOnce: (payload) => {
+        seenPayloads.push(payload);
+        return seenPayloads.length === 1
+          ? { decisions: { idleStop: false }, nextState: { tick: 1, from: 'raw' } }
+          : { decisions: { idleStop: true }, nextState: { tick: 2, from: 'raw' } };
+      },
+      dispatchPass: async () => ({ nextState: { tick: 1, from: 'dispatch-pass' } }),
+      sleep: () => {},
+      maxTicks: 2,
+    });
+    expect(res.ticks).toBe(2);
+    expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'dispatch-pass' });
+  });
+
+  it('the DEFAULT dispatchPass (omitted) is an identity pass-through — legacy behaviour is preserved', async () => {
+    // No override supplied: the next tick's payload must carry the SAME nextState the tick itself produced.
+    const seenPayloads = [];
+    const res = await runLoop({
+      tickOnce: (payload) => {
+        seenPayloads.push(payload);
+        return seenPayloads.length === 1
+          ? { decisions: { idleStop: false }, nextState: { tick: 1, from: 'raw' } }
+          : { decisions: { idleStop: true }, nextState: { tick: 2, from: 'raw' } };
+      },
+      sleep: () => {},
+      maxTicks: 2,
+    });
+    expect(res.ticks).toBe(2);
+    expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'raw' });
+  });
+
+  it('a THROWING dispatchPass fails soft — the loop keeps going and falls back to the raw tick nextState', async () => {
+    const seenPayloads = [];
+    const res = await runLoop({
+      tickOnce: (payload) => {
+        seenPayloads.push(payload);
+        return seenPayloads.length === 1
+          ? { decisions: { idleStop: false }, nextState: { tick: 1, from: 'raw' } }
+          : { decisions: { idleStop: true }, nextState: { tick: 2, from: 'raw' } };
+      },
+      dispatchPass: async () => { throw new Error('dispatch-lane exploded'); },
+      sleep: () => {},
+      maxTicks: 2,
+    });
+    // The loop never crashed and completed both ticks; the second tick's payload falls back to tick 0's own
+    // raw nextState (the pre-throw default set before `dispatchPass` is awaited).
+    expect(res.ticks).toBe(2);
+    expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'raw' });
+  });
+
+  it('xpshzms (#3571) — calls mechanicalPasses BEFORE dispatchPass every tick, so a long dispatch backlog can never starve the monitoring sweeps of a turn', async () => {
+    const calls = [];
+    const res = await runLoop({
+      tickOnce: () => ({ decisions: { idleStop: true }, nextState: {} }),
+      mechanicalPasses: async () => { calls.push('mechanicalPasses'); },
+      dispatchPass: async () => { calls.push('dispatchPass'); return { nextState: {} }; },
+      sleep: () => {},
+    });
+    expect(calls).toEqual(['mechanicalPasses', 'dispatchPass']);
+    expect(res.stoppedReason).toBe('idle-stop');
   });
 });
 
@@ -338,6 +519,149 @@ describe('driveConveyor — acquire → drive → ALWAYS release (no leaked sing
 
   it('requires a buildEffects factory', async () => {
     await expect(driveConveyor({ lockRoot: root, owner: 'A' })).rejects.toThrow(/buildEffects/);
+  });
+});
+
+// ── (3b) installShutdownHandlers / finalEventLine — the SHUTDOWN CONTRACT, unit half ───────────────────────
+//
+//  The LIVE half (a real child, a real SIGTERM, the real supervisor stdout parser) is
+//  `./runner-shutdown-live.test.mjs`; this half pins the DECISIONS that file cannot see from outside a
+//  process — which signals are hooked, that the handler is re-entrant-safe, that a throwing release still
+//  lets the process die, and the exact bytes of the final event line.
+
+describe('installShutdownHandlers — release the singleton lease on SIGTERM/SIGINT, then die by that signal', () => {
+  /** A fake signal table, so no test ever registers a real handler on the vitest worker itself. */
+  const fakeSignals = () => {
+    const reg = new Map();
+    return {
+      reg,
+      on: (sig, fn) => { reg.set(sig, [...(reg.get(sig) || []), fn]); },
+      off: (sig, fn) => { reg.set(sig, (reg.get(sig) || []).filter((f) => f !== fn)); },
+      fire: (sig) => { for (const fn of [...(reg.get(sig) || [])]) fn(); },
+    };
+  };
+
+  it('hooks BOTH SIGTERM and SIGINT (the supervisor sends the first; Ctrl-C sends the second)', () => {
+    const s = fakeSignals();
+    installShutdownHandlers({ lockRoot: '/lock', owner: 'A', release: () => true, on: s.on, off: s.off, raise: () => {}, log: () => {} });
+    expect([...s.reg.keys()].sort()).toEqual(['SIGINT', 'SIGTERM']);
+    expect(SHUTDOWN_SIGNALS).toEqual(['SIGTERM', 'SIGINT']);
+  });
+
+  it('releases the lease for the EXACT (lockRoot, owner) it was installed with, then re-raises the SAME signal', () => {
+    const s = fakeSignals();
+    const released = [];
+    const raised = [];
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'OWNER-X', release: (r, o) => { released.push([r, o]); return true; },
+      on: s.on, off: s.off, raise: (sig) => raised.push(sig), log: () => {},
+    });
+    s.fire('SIGTERM');
+    expect(released).toEqual([['/lock', 'OWNER-X']]);
+    // Re-raise, NOT process.exit(0): `classifyExit` short-circuits on `signal` before it reads the code, so an
+    // exit-0 here would silently reclassify every killed runner as a CLEAN exit.
+    expect(raised).toEqual(['SIGTERM']);
+  });
+
+  it('REMOVES its handler BEFORE re-raising, so the re-raise hits Node\'s default disposition (no signal loop)', () => {
+    const s = fakeSignals();
+    let stillRegisteredAtRaise = null;
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'A', release: () => true, on: s.on, off: s.off, log: () => {},
+      raise: () => { stillRegisteredAtRaise = (s.reg.get('SIGTERM') || []).length; },
+    });
+    s.fire('SIGTERM');
+    expect(stillRegisteredAtRaise).toBe(0);              // deregistered BEFORE the raise, not after
+    expect((s.reg.get('SIGINT') || []).length).toBe(0);  // the sibling signal is unhooked too
+  });
+
+  it('is re-entrant-safe — a second signal mid-shutdown never double-releases or re-raises', () => {
+    const s = fakeSignals();
+    let releases = 0; const raised = [];
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'A', release: () => { releases += 1; return true; },
+      on: s.on, off: s.off, raise: (sig) => raised.push(sig), log: () => {},
+    });
+    const fn = s.reg.get('SIGTERM')[0];
+    fn(); fn();                        // the second arrives while the first is still unwinding
+    expect(releases).toBe(1);
+    expect(raised).toEqual(['SIGTERM']);
+  });
+
+  it('STILL DIES when the release throws — a broken lock file must never wedge a shutdown', () => {
+    const s = fakeSignals();
+    const raised = [];
+    installShutdownHandlers({
+      lockRoot: '/lock', owner: 'A', release: () => { throw new Error('EACCES'); },
+      on: s.on, off: s.off, raise: (sig) => raised.push(sig), log: () => {},
+    });
+    expect(() => s.fire('SIGTERM')).not.toThrow();
+    expect(raised).toEqual(['SIGTERM']);  // the TTL backstops the lease; the exit is not negotiable
+  });
+
+  it('says which happened — "released" vs "not held" (a signal arriving before the lease was acquired)', () => {
+    const s = fakeSignals();
+    const lines = [];
+    installShutdownHandlers({ lockRoot: '/l', owner: 'A', release: () => false, on: s.on, off: s.off, raise: () => {}, log: (x) => lines.push(x) });
+    s.fire('SIGINT');
+    expect(lines.join('')).toMatch(/SIGINT — singleton lease not held/);
+  });
+
+  it('releases a REAL lease in a REAL temp lock root through the DEFAULT release (not just an injected stub)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'runner-sig-'));
+    try {
+      acquireRunnerLease(root, 'HOLDER', { leaseMinutes: 15 });
+      expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe('HOLDER');
+      const s = fakeSignals();
+      installShutdownHandlers({ lockRoot: root, owner: 'HOLDER', on: s.on, off: s.off, raise: () => {}, log: () => {} });
+      s.fire('SIGTERM');                                          // production `releaseRunnerLeaseIfOwned`
+      expect(readLockEntry(root, RUNNER_LEASE_PATH)).toBeNull();
+    } finally { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } }
+  });
+
+  it('NEVER stomps a lease another owner reclaimed after a stale window (the fencing invariant)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'runner-sig-fence-'));
+    try {
+      acquireRunnerLease(root, 'RECLAIMER', { leaseMinutes: 15 });
+      const s = fakeSignals();
+      installShutdownHandlers({ lockRoot: root, owner: 'STALE-ME', on: s.on, off: s.off, raise: () => {}, log: () => {} });
+      s.fire('SIGTERM');
+      expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe('RECLAIMER'); // untouched
+    } finally { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } }
+  });
+
+  it('dispose() unhooks everything — no handler survives to fire after a caller tears it down', () => {
+    const s = fakeSignals();
+    let releases = 0;
+    const { dispose } = installShutdownHandlers({
+      lockRoot: '/l', owner: 'A', release: () => { releases += 1; return true; },
+      on: s.on, off: s.off, raise: () => {}, log: () => {},
+    });
+    dispose();
+    s.fire('SIGTERM'); s.fire('SIGINT');
+    expect(releases).toBe(0);
+  });
+});
+
+describe('finalEventLine — the exact bytes supervisor.mjs parses (the field is stoppedReason, NOT reason)', () => {
+  it('a started run emits {event:"stopped", stoppedReason, ticks}', () => {
+    expect(JSON.parse(finalEventLine({ started: true, stoppedReason: 'idle-stop', ticks: 7 })))
+      .toEqual({ event: 'stopped', stoppedReason: 'idle-stop', ticks: 7 });
+  });
+
+  it('a stand-down emits {event:"stood-down", heldBy} — the supervisor maps THAT to "stand-down" itself', () => {
+    expect(JSON.parse(finalEventLine({ started: false, heldBy: 'Mac:9:conveyor-runner' })))
+      .toEqual({ event: 'stood-down', heldBy: 'Mac:9:conveyor-runner' });
+  });
+
+  it('is ONE line of parseable JSON with no embedded newline (the supervisor reads it line-by-line)', () => {
+    const line = finalEventLine({ started: true, stoppedReason: 'max-ticks', ticks: 1 });
+    expect(line).not.toContain('\n');
+    expect(() => JSON.parse(line)).not.toThrow();
+  });
+
+  it('degrades rather than throws on a missing outcome (it runs on the way out; it must not crash there)', () => {
+    expect(JSON.parse(finalEventLine(undefined))).toEqual({ event: 'stood-down', heldBy: null });
   });
 });
 
@@ -393,22 +717,25 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
         const joined = args.join(' ');
         if (joined.includes('reconcile-pass.mjs')) return JSON.stringify(plan);
         if (cmd === 'gh' && args.includes('repo') && args.includes('view')) return 'owner/repo';
-        if (joined.includes('review-dispatch.mjs')) {
-          if (dispatchThrows) throw new Error('review-dispatch.mjs: assertMainNotStale tripped');
-          return '';
-        }
         return ''; // every other best-effort pass (infra-blocked, lease-reaper, review-round-tag, review-status-tag, ...)
       }),
+      // #xu2pp2m — the dispatch is a SPAWN now, and its EXIT CODE is the signal: a non-zero exit means
+      // `blocked-on-infra` (the review loop could not run), which is exactly what must not advance the round
+      // label. `dispatchThrows` keeps its original meaning — "this dispatch produced no review".
+      spawn: vi.fn(makeSpawnRouter(calls, (joined) => (
+        dispatchThrows && joined.includes('review-dispatch.mjs') ? 1 : 0
+      ))),
     };
   }
 
   it('SKIPS review-round-tag.mjs for a PR whose review-dispatch.mjs call threw', async () => {
-    const { execFileSync, calls } = makeExecFileSyncRouter({
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
       dispatchThrows: true,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
@@ -420,12 +747,13 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
   });
 
   it('DOES run review-round-tag.mjs when the dispatch actually succeeds', async () => {
-    const { execFileSync, calls } = makeExecFileSyncRouter({
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
       dispatchThrows: false,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 2 }], refusals: [] },
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
@@ -436,18 +764,52 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
   });
 
   it('still runs the informative review-status-tag.mjs sweep even when the dispatch above it failed', async () => {
-    const { execFileSync, calls } = makeExecFileSyncRouter({
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
       dispatchThrows: true,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
 
     const statusTagCalls = calls.filter((c) => c.join(' ').includes('review-status-tag.mjs'));
     expect(statusTagCalls).toHaveLength(1); // reviewsOwed still feeds selectStatusCandidates regardless
+  });
+
+  // #xu2pp2m — THE BLOCK NO LONGER REPORTS ITSELF FAILED WHEN IT SUCCEEDED.
+  //
+  // A duplicated copy of the two loops above (merge artifact `c014ef4`) sat outside
+  // `for (const d of reviewsOwed)` and still referenced `d`, whose scope ends with that loop — so reaching it
+  // ALWAYS threw `ReferenceError: d is not defined`. The work itself had already been done by then, so
+  // nothing went unlabelled; what broke was the LOG. Every tick with reviews owed ended in
+  // `⚠ mechanical pass review-reconcile dispatch failed (non-fatal): d is not defined`, a permanent false
+  // positive sitting exactly where an operator looks for a real dispatch failure.
+  it('does NOT log a review-reconcile failure on a tick where the dispatch actually SUCCEEDED', async () => {
+    const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
+      dispatchThrows: false,
+      plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
+
+    const stderr = [];
+    const write = process.stderr.write;
+    process.stderr.write = (chunk) => { stderr.push(String(chunk)); return true; };
+    try {
+      await makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' })({ out: {} });
+    } finally {
+      process.stderr.write = write;
+    }
+
+    // The work DID happen (so this is not vacuously green on a block that never ran)…
+    expect(calls.filter((c) => c.join(' ').includes('review-round-tag.mjs'))).toHaveLength(1);
+    // …and it did not announce a failure while doing it.
+    expect(stderr.join('')).not.toMatch(/review-reconcile dispatch failed/);
+    expect(stderr.join('')).not.toMatch(/is not defined/);
   });
 });
 
@@ -461,7 +823,7 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
 //        its own wiring silently regressing. ─────────────────────────────────────────────────────────────
 
 describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes, in order, every tick', () => {
-  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through', async () => {
+  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through (except lane-pool-health-watch.mjs, whose OWN --repo means a checkout path, not this GH slug — #3383 live incident)', async () => {
     const calls = [];
     const execFileSync = vi.fn((cmd, args) => {
       calls.push([cmd, ...args]);
@@ -471,6 +833,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
+    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
@@ -480,6 +843,8 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     // assertion goes red, which is the whole point (a `grep` for the added line, this PR's own backlog card
     // cited as its only prior check, catches none of that).
     expect(calls.map((c) => c.join(' '))).toEqual([
+      'node /scripts/conveyor/main-ref-sync.mjs', // epic #3383 — no --repo: takes --repo-dir=, a filesystem path, not this GH slug
+      'node /scripts/conveyor/poc-branch-sync.mjs', // epic #3383 — same reasoning: no --repo, takes --repo-dir=
       'node /scripts/conveyor/infra-blocked.mjs retry --repo=owner/repo',
       'node /scripts/conveyor/lease-reaper.mjs --repo=owner/repo',
       'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',
@@ -487,10 +852,194 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/branch-drift.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=owner/repo',
-      'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=owner/repo',
+      'node /scripts/conveyor/lane-pool-health-watch.mjs',
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
     ]);
+  });
+});
+
+// ── THE LAUNCH-POSTURE MARKER (epic #3383) ────────────────────────────────────────────────────────────────
+//
+// The watchdog reads the singleton lease to answer "is the driver up?", and an absent lease used to mean
+// "crash", full stop. A `--once` runner breaks that: it does its tick, exits 0, releases the lease cleanly —
+// and the watchdog reported a crash every 5 minutes about a process that had finished its job. `main` now
+// records which posture it was launched in, at the one point in the system that has the flags in hand.
+//
+// NOTHING IS STARTED HERE. `main` itself would drive the real conveyor, so the posture step is exported and
+// driven directly; the marker lands in a throwaway `mkdtemp`, never a real checkout.
+
+describe('recordLaunchPosture — whether this runner was SUPPOSED to keep running', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'runner-mode-')); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('`--once` records BOUNDED — the exact launch whose clean exit was being reported as a crash', () => {
+    // `maxTicks` is what `main` already resolved (`flags.once ? 1 : …`), passed in so the recorded posture can
+    // never disagree with the ceiling the loop will actually run to.
+    const res = recordLaunchPosture({ flags: { once: true }, maxTicks: 1, root: dir, pid: 4242 });
+    expect(res.ok).toBe(true);
+    expect(res.path).toBe(driverModePath(dir));
+    expect(readDriverMode(dir)).toMatchObject({ mode: 'bounded', maxTicks: 1, pid: 4242 });
+  });
+
+  it('a finite `--max-ticks=N` records BOUNDED too — it is the same "run N and leave" posture', () => {
+    recordLaunchPosture({ flags: {}, maxTicks: 5, root: dir });
+    expect(readDriverMode(dir)).toMatchObject({ mode: 'bounded', maxTicks: 5 });
+  });
+
+  it('the supervisor\'s uncapped launch records RESIDENT — and a resident driver going away is still a crash', () => {
+    recordLaunchPosture({ flags: {}, maxTicks: Infinity, root: dir });
+    expect(readDriverMode(dir)).toMatchObject({ mode: 'resident', maxTicks: null });
+  });
+
+  it('lands in the DRIVER\'s own `.conveyor/`, beside the queue the watchdog reads it with', () => {
+    expect(driverModePath(dir)).toBe(join(dir, '.conveyor', 'driver-mode.json'));
+    recordLaunchPosture({ flags: { once: true }, maxTicks: 1, root: dir });
+    expect(readDriverMode(dir)).not.toBe(null);
+  });
+
+  it('is BEST-EFFORT: an unwritable checkout warns and returns, it NEVER stops the runner starting', () => {
+    const warns = [];
+    const res = recordLaunchPosture({
+      flags: {}, maxTicks: Infinity, root: '/drv', warn: (s) => warns.push(s),
+      mkdir: () => { throw new Error('EACCES: permission denied'); },
+    });
+    expect(res.ok).toBe(false);
+    expect(warns.join('')).toContain('will assume resident');
+    // …and "assume resident" is precisely the pre-#3383 behaviour, so the failure mode is the old behaviour.
+  });
+});
+
+// #3383 — the SATURATION half of the four golden signals. `tickMetrics` is pure over the surface, so every
+// rule below is asserted against a plain object with no clock, no disk, and no running conveyor.
+describe('tickMetrics — the saturation signals the runner computes every tick and used to discard', () => {
+  const surface = (decisions) => tickSurface({ decisions });
+
+  it('counts admitted dispatches across EVERY kind, with the per-kind split as attributes', () => {
+    const m = tickMetrics(surface({
+      spawnBuilds: [{ num: 1 }, { num: 2 }], spawnPrepareScope: [{ num: 3 }],
+      spawnPrepareDecision: [], spawnFixes: [{ pr: 9 }], spawnCiHeals: [],
+    }));
+    const admitted = m.find((x) => x.name === 'dispatch.admitted');
+    expect(admitted.value).toBe(4);
+    expect(admitted.attributes).toMatchObject({ builds: 2, prepareScope: 1, prepareDecision: 0, fixes: 1, ciHeals: 0 });
+  });
+
+  it('emits ONE dispatch.denied sample PER REASON — a count without the why is not actionable', () => {
+    const m = tickMetrics(surface({
+      suppressedBuilds: [
+        { num: 7, by: 'capacity-cap' }, { num: 8, by: 'capacity-cap' }, { num: 9, by: 'build-guard' },
+      ],
+    }));
+    const denied = m.filter((x) => x.name === 'dispatch.denied');
+    expect(denied).toHaveLength(2);
+    expect(denied.find((d) => d.attributes.reason === 'capacity-cap').value).toBe(2);
+    expect(denied.find((d) => d.attributes.reason === 'build-guard').value).toBe(1);
+  });
+
+  it('emits a ZERO denial sample when nothing was refused — a rate needs a denominator', () => {
+    // Without the zero, a reader cannot tell "the cap was never hit" from "the runner was not running".
+    const denied = tickMetrics(surface({})).filter((x) => x.name === 'dispatch.denied');
+    expect(denied).toHaveLength(1);
+    expect(denied[0]).toMatchObject({ value: 0, attributes: { reason: 'none' } });
+  });
+
+  it('classifies a suppression with no `by` rather than dropping it', () => {
+    const m = tickMetrics(surface({ suppressedBuilds: [{ num: 7 }] }));
+    expect(m.find((x) => x.name === 'dispatch.denied').attributes.reason).toBe('unclassified');
+  });
+
+  it('counts lanes withheld by the concurrent-lane cap, from the notes the tick already emits', () => {
+    const m = tickMetrics(surface({ notes: [
+      { kind: 'capacity-cap', lane: 4 }, { kind: 'capacity-cap', lane: 5 }, { kind: 'build-ttl' },
+    ] }));
+    expect(m.find((x) => x.name === 'lane.pool.leased').value).toBe(2);
+  });
+
+  it('counts heavy-command semaphore waiters — a signal that lived for one tick and then vanished', () => {
+    const m = tickMetrics(surface({ notes: [
+      { kind: 'waiting-for-capacity', num: 1 }, { kind: 'waiting-for-capacity', num: 2 },
+    ] }));
+    expect(m.find((x) => x.name === 'heavy.admission.waiting').value).toBe(2);
+  });
+
+  it('reads the traffic terms straight off the structured counts', () => {
+    const m = tickMetrics(surface({
+      counts: { building: 2, preparing: 1, fixing: 1, healing: 0, queued: 7, parked: 2, verdict: 'ok' },
+    }));
+    expect(m.find((x) => x.name === 'queue.depth').value).toBe(7);
+    expect(m.find((x) => x.name === 'dispatch.inflight').value).toBe(4);
+  });
+
+  it('every sample carries a name from the closed METRIC_NAMES vocabulary and a valid unit', () => {
+    const m = tickMetrics(surface({ suppressedBuilds: [{ by: 'capacity-cap' }], notes: [{ kind: 'capacity-cap' }] }));
+    for (const x of m) {
+      expect(METRIC_NAMES).toContain(x.name);
+      expect(METRIC_UNITS).toContain(x.unit);
+      expect(Number.isFinite(x.value)).toBe(true);
+    }
+  });
+
+  it('is TOTAL on a bare or junk surface — the tick loop must never be taken down by its own telemetry', () => {
+    for (const junk of [undefined, null, {}, { counts: 'nope', notes: 'nope', dispatch: null, suppressedBuilds: 5 }]) {
+      expect(() => tickMetrics(junk)).not.toThrow();
+      const m = tickMetrics(junk);
+      expect(m.every((x) => Number.isFinite(x.value))).toBe(true);
+    }
+  });
+});
+
+// #3383 follow-on — the HOST-RESOURCE half of the capacity-planning question this epic exists to eventually
+// answer: as concurrent dispatch capacity grows, does the HOST (not the queue/lane logic) become the actual
+// constraint. `hostMetrics` is pure over an already-read OS snapshot, exactly like `tickMetrics` is pure over
+// the surface — no real `os.*` call in this describe block.
+describe('hostMetrics — the host-resource samples recorded alongside every tick\'s dispatch metrics', () => {
+  it('reports the three load averages, the core count, and raw memory bytes', () => {
+    const m = hostMetrics({ loadavg: [1.5, 2.25, 3.0], freeBytes: 4_000_000_000, totalBytes: 16_000_000_000, cpuCount: 8 });
+    expect(m.find((x) => x.name === 'host.cpu.load1').value).toBe(1.5);
+    expect(m.find((x) => x.name === 'host.cpu.load5').value).toBe(2.25);
+    expect(m.find((x) => x.name === 'host.cpu.load15').value).toBe(3.0);
+    expect(m.find((x) => x.name === 'host.cpu.count').value).toBe(8);
+    expect(m.find((x) => x.name === 'host.mem.free_bytes').value).toBe(4_000_000_000);
+    expect(m.find((x) => x.name === 'host.mem.total_bytes').value).toBe(16_000_000_000);
+  });
+
+  it('every sample carries a name from the closed METRIC_NAMES vocabulary and a valid unit', () => {
+    const m = hostMetrics({ loadavg: [1, 1, 1], freeBytes: 1, totalBytes: 2, cpuCount: 4 });
+    for (const x of m) {
+      expect(METRIC_NAMES).toContain(x.name);
+      expect(METRIC_UNITS).toContain(x.unit);
+      expect(Number.isFinite(x.value)).toBe(true);
+    }
+    // Memory is raw BYTES, not a pre-computed ratio — recoverable to a ratio later, but a ratio alone could
+    // never recover the total.
+    expect(m.find((x) => x.name === 'host.mem.free_bytes').unit).toBe('bytes');
+    expect(m.find((x) => x.name === 'host.mem.total_bytes').unit).toBe('bytes');
+  });
+
+  it('is TOTAL on a bare or junk sample — an observability read must never take a tick down', () => {
+    for (const junk of [undefined, null, {}, { loadavg: 'nope', freeBytes: 'nope', cpuCount: null }]) {
+      expect(() => hostMetrics(junk)).not.toThrow();
+      const m = hostMetrics(junk);
+      expect(m.every((x) => Number.isFinite(x.value))).toBe(true);
+    }
+  });
+});
+
+describe('readHostSample — the one IO edge that touches node:os, kept to exactly that', () => {
+  it('reads a real, sane snapshot off the actual host', () => {
+    const s = readHostSample();
+    expect(Array.isArray(s.loadavg)).toBe(true);
+    expect(s.loadavg).toHaveLength(3);
+    expect(s.loadavg.every((n) => Number.isFinite(n) && n >= 0)).toBe(true);
+    expect(Number.isFinite(s.freeBytes)).toBe(true);
+    expect(Number.isFinite(s.totalBytes)).toBe(true);
+    expect(s.totalBytes).toBeGreaterThan(0);
+    expect(Number.isInteger(s.cpuCount)).toBe(true);
+    expect(s.cpuCount).toBeGreaterThan(0);
+    // hostMetrics must accept this real shape with no coercion surprises.
+    expect(() => hostMetrics(s)).not.toThrow();
   });
 });

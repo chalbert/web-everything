@@ -52,7 +52,7 @@ that lands PRs is now strictly weaker at exactly the class of finding the probe 
 ## Progress
 
 1. **Ruling recorded** — panel seats stay tool-free by design (`we:scripts/lib/judge-panel.mjs`, header
-   block "RULING (#3158 / 3158)"): threading `allowedTools` + a per-seat lane `cwd` through `judgePanel`
+   block "RULING (#3158 / x27e4xs)"): threading `allowedTools` + a per-seat lane `cwd` through `judgePanel`
    means N seats need N lane clones, and nothing in the repo provisions or bills for that today. The
    mutation probe stays with whichever transport can actually run it, not with every panel seat by default.
 2. **Mandate no longer instructs the impossible** — `MUTATION_PROBE_RULE` and `buildMandate`'s isolation

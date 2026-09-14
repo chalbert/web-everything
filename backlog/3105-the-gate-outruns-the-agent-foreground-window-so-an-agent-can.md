@@ -5,6 +5,9 @@ size: 5
 parent: "2753"
 status: open
 dateOpened: "2026-08-14"
+costTokens: "in:602 cw:698475 cr:92349009 out:240514"
+costUsd: 59.18
+costSessions: 1
 tags: [conveyor, session-free, delivery, agent, gate, footgun]
 scope:
   - we:skills-src/conveyor/delivery-agent-brief.md

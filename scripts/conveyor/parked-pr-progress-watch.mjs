@@ -58,6 +58,7 @@ import { randomUUID } from 'node:crypto';
 import { REVIEW_LABELS, REVIEW_HOLD_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -122,18 +123,44 @@ export function isParkedCandidate(pr) {
 }
 
 /**
- * Has an independent `review-<pr>` or `fix-<pr>` named agent session EVER appeared for this PR, in the FULL
- * (`--all`) `claude agents` listing? Pure — matched by NAME alone, the same session-name grammar
+ * Has an independent `review-<pr>` or `fix-<pr>` named agent session appeared for this PR, in the FULL (`--all`)
+ * `claude agents` listing? Pure — matched by NAME alone, the same session-name grammar
  * `we:scripts/conveyor/session-reaper.mjs` and `we:scripts/conveyor/review-status-tag.mjs` already use, but over
- * every row regardless of `state` (a finished `done` row still proves a review was once dispatched — this is
- * "ever", not "right now").
- * @param {{pr:number|string, agents?:Array<{name?:string}>}} o
+ * every row regardless of `state` (a finished `done` row still proves a review was once dispatched).
+ *
+ * `sinceMs` (real incident, PR #2035, 2026-09-14) — SCOPES the search to the PR's CURRENT park period, not its
+ * entire lifetime. Before this parameter existed, "ever" meant literally ever: a PR reviewed/fixed once, then
+ * later RE-PARKED (a fix landed, `review:changes` flipped back to `review:pending`, and the PR sat waiting for
+ * a fresh review) could never be flagged neglected again — the stale historical session satisfied "ever
+ * dispatched" forever, no matter how many days the NEW park period ran with nothing touching it. Live evidence:
+ * PR #2035's blocking finding was repaired and it re-entered `review:pending` at 2026-09-13T20:13:51Z; nothing
+ * re-reviewed it until 2026-09-14T15:43:57Z — 19.7h later — and the OLD `review-2035`/`fix-2035` sessions from
+ * 2026-09-07 would have silently suppressed this pass for that entire window under the un-scoped rule. The same
+ * shape recurs structurally across the live queue: every PR sitting `review:changes`/`review:pending` for days
+ * (#2027, #2047, #2108, #2117, #2130, …) already had SOME review/fix session dispatched at some earlier point
+ * in its life, so the un-scoped predicate could never fire for any of them regardless of how long the CURRENT
+ * hold persisted.
+ *
+ * `sinceMs` omitted/non-finite ⇒ the original UNSCOPED "ever" behavior — every existing caller that predates
+ * this parameter keeps its exact prior meaning. A matching row with an unreadable/missing `startedAt` still
+ * counts as satisfying "dispatched since" even when `sinceMs` IS given — same fail-SAFE bias this whole pass
+ * already applies elsewhere (never spam a finding from ambiguous ground truth; see the file header and
+ * `isNeglectedPr`'s own `hours === null` branch): a session we cannot date might be the very one that answers
+ * this park period, so treating it as unknown timing must never manufacture a false "neglected" verdict.
+ * @param {{pr:number|string, agents?:Array<{name?:string, startedAt?:number|string}>, sinceMs?:number|null}} o
  * @returns {boolean}
  */
-export function everDispatchedReviewOrFix({ pr, agents = [] } = {}) {
+export function everDispatchedReviewOrFix({ pr, agents = [], sinceMs = null } = {}) {
   const reviewName = `review-${pr}`;
   const fixName = `fix-${pr}`;
-  return (Array.isArray(agents) ? agents : []).some((a) => a?.name === reviewName || a?.name === fixName);
+  const rows = (Array.isArray(agents) ? agents : []).filter((a) => a?.name === reviewName || a?.name === fixName);
+  if (!rows.length) return false; // never dispatched at all, at any time — unaffected by sinceMs
+  if (!Number.isFinite(sinceMs)) return true; // no time anchor given — the original unscoped "ever" behavior
+  return rows.some((a) => {
+    const startedMs = Number(a?.startedAt);
+    if (!Number.isFinite(startedMs)) return true; // unreadable timing — fail safe, never falsely flag
+    return startedMs >= sinceMs;
+  });
 }
 
 /**
@@ -181,23 +208,33 @@ export function labeledAtFor(events, labelName) {
 /**
  * THE WHOLE DECISION, covering the four ratified branches `we:3550`'s own task list names (already-
  * `review:changes` → false, dedup, checked first; parked but not long enough → false regardless of review
- * history; parked long enough AND never reviewed → true; parked long enough but a review/fix session was found
- * in the full agents history → false) plus the not-parked-at-all case, also false. Pure — every input already
- * resolved by the caller. `hours`, when the caller has already computed it (see {@link watchNeglectedPrs}),
- * is used verbatim instead of re-deriving it from `labelEvents`/`now` — the two must never disagree.
- * @param {{pr:number|string, labels?:Array, agents?:Array<{name?:string}>, labelEvents?:Array,
- *   now?:number|Date, thresholdHours?:number, hours?:number|null}} o
+ * history; parked long enough AND never reviewed (in the CURRENT park period, see below) → true; parked long
+ * enough but a review/fix session was found → false) plus the not-parked-at-all case, also false. Pure — every
+ * input already resolved by the caller. `hours`, when the caller has already computed it (see
+ * {@link watchNeglectedPrs}), is used verbatim instead of re-deriving it from `labelEvents`/`now` — the two
+ * must never disagree.
+ *
+ * `labeledAt` (PR #2035 fix) — the SAME start-of-park marker `hours` is/would be derived from, threaded through
+ * separately so {@link everDispatchedReviewOrFix} can scope its own search to "since this park period began"
+ * instead of the PR's entire history — see that function's own docblock for the real incident this closes.
+ * Omitted (the default) ⇒ re-derived from `labelEvents` exactly like `hours` already is when not overridden, so
+ * every pre-existing caller that never knew this parameter existed keeps its exact prior behavior.
+ * @param {{pr:number|string, labels?:Array, agents?:Array<{name?:string, startedAt?:number|string}>,
+ *   labelEvents?:Array, now?:number|Date, thresholdHours?:number, hours?:number|null,
+ *   labeledAt?:string|number|Date|null}} o
  * @returns {boolean}
  */
 export function isNeglectedPr({
   pr, labels = [], agents = [], labelEvents = [], now = Date.now(),
-  thresholdHours = DEFAULT_NEGLECT_THRESHOLD_HOURS, hours,
+  thresholdHours = DEFAULT_NEGLECT_THRESHOLD_HOURS, hours, labeledAt,
 } = {}) {
   if (!isParkedCandidate({ labels })) return false; // covers both the dedup skip and "not parked at all"
   const holdLabel = currentHoldLabel(labels);
-  const h = hours === undefined ? parkedHours(labeledAtFor(labelEvents, holdLabel), now) : hours;
+  const at = labeledAt === undefined ? labeledAtFor(labelEvents, holdLabel) : labeledAt;
+  const h = hours === undefined ? parkedHours(at, now) : hours;
   if (h === null || h < thresholdHours) return false;
-  return !everDispatchedReviewOrFix({ pr, agents });
+  const sinceMs = at === null || at === undefined ? null : (at instanceof Date ? at.getTime() : new Date(at).getTime());
+  return !everDispatchedReviewOrFix({ pr, agents, sinceMs: Number.isFinite(sinceMs) ? sinceMs : null });
 }
 
 /**
@@ -304,17 +341,22 @@ export function defaultPostFinding({
  * neglect ({@link isNeglectedPr}), and posts a finding for each neglected PR. Never throws on a per-PR read/
  * write failure — one bad `gh`/`reconcile-finding.mjs` call must not stop the sweep from checking the rest
  * (mirrors both sibling watches' own best-effort contract).
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF ⇒ `scopePrsToQueue` is the IDENTITY
+ * function and this sweep stays repo-wide. Applied BEFORE `isParkedCandidate` so a scoped checkout never pays
+ * the per-candidate `gh api` label-timeline fetch for a PR it has no business judging in the first place.
  * @param {{repo?:string|null, now?:number, thresholdHours?:number, env?:NodeJS.ProcessEnv, listPrs?:Function,
- *   listAgents?:Function, listLabelEvents?:Function, postFinding?:Function, dryRun?:boolean}} [o]
+ *   listAgents?:Function, listLabelEvents?:Function, postFinding?:Function, dryRun?:boolean,
+ *   queueScope?:object}} [o]
  * @returns {Array<{pr:number, holdLabel:string, parkedHours:number|null, neglected:boolean, posted:boolean, error?:string}>}
  */
 export function watchNeglectedPrs({
   repo = null, now = Date.now(), thresholdHours, env = process.env,
   listPrs = defaultListParkedPrs, listAgents = defaultListAllAgents,
   listLabelEvents = defaultListLabelEvents, postFinding = defaultPostFinding, dryRun = false,
+  queueScope = {},
 } = {}) {
   const threshold = thresholdHours ?? neglectThresholdHours(env);
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-progress-watch', ...queueScope });
   const candidates = prs.filter(isParkedCandidate);
   const results = [];
   if (!candidates.length) return results;
@@ -339,10 +381,14 @@ export function watchNeglectedPrs({
       results.push({ pr: pr.number, holdLabel, parkedHours: null, neglected: false, posted: false, error: String((e && e.message) || e).split('\n')[0] });
       continue;
     }
-    // Computed ONCE here and handed to `isNeglectedPr` (via its `hours` override) rather than recomputed
-    // internally — the two must never disagree about the same fact.
-    const hours = parkedHours(labeledAtFor(events, holdLabel), now);
-    const neglected = isNeglectedPr({ pr: pr.number, labels: pr.labels, agents, hours, thresholdHours: threshold });
+    // Computed ONCE here and handed to `isNeglectedPr` (via its `hours`/`labeledAt` overrides) rather than
+    // recomputed internally — the two must never disagree about the same fact. `labeledAt` is what scopes
+    // `everDispatchedReviewOrFix`'s search to THIS park period (PR #2035 fix, see that function's docblock) —
+    // without threading it through here, the production sweep would silently keep the old un-scoped "ever"
+    // behavior no matter what the pure core supports.
+    const labeledAt = labeledAtFor(events, holdLabel);
+    const hours = parkedHours(labeledAt, now);
+    const neglected = isNeglectedPr({ pr: pr.number, labels: pr.labels, agents, hours, labeledAt, thresholdHours: threshold });
     if (!neglected) continue;
     const entry = { pr: pr.number, holdLabel, parkedHours: hours, neglected: true, posted: false };
     if (dryRun) { results.push(entry); continue; }

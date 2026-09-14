@@ -26,42 +26,35 @@
  * lanes each still contend for host CPU exactly as a directly-run `npm run test:unit` always has (#3372
  * already shrinks the common case); this file changes WHO runs the gate, not how expensive it is.
  *
- * A HARD WALL-CLOCK CEILING, NOT JUST A DOCUMENTED ONE (epic #3383, live incident 2026-09-14). The gate's
- * documented normal range is 150-350s; before this, nothing here bounded it — a single genuinely-stuck (or
- * merely starved, under heavy concurrent-lane contention) gate blocked EVERY lane's dispatch indefinitely,
- * because this pass is synchronous and one request is handled to completion before the next is even looked
- * at. `VERIFY_DISPATCH_TIMEOUT_MS` (default 30 minutes — several multiples of the documented ceiling, chosen
- * generously so a legitimately slow run under contention is never killed for being merely slow — the live
- * incident's own gate finished on its own at ~19-20 minutes under heavy contention, which is why the cap is
- * NOT tucked in near the 15-20 minute range) bounds that wait. On timeout the WHOLE process tree is killed,
- * not just the immediate child: `verify-lane.mjs` itself `execSync`s the gate command through a shell, so the
- * actual test runner is a grandchild that would never see a signal sent only to its parent — spawning the
- * dispatch with `detached: true` puts that whole tree in one process group up front, so the timeout handler
- * can kill the group as a unit. The tick then moves on, counting the lane as a dispatch failure. NO NEW
- * RECOVERY PATH WAS NEEDED: a killed run leaves the marker `running`/stranded, which is already the exact
- * shape `verify-lane.mjs`'s own marker-guard recovers from — the next tick just re-runs it, same as a
- * human-killed run always has.
- *
- * TWO SEPARATE CEILINGS, NOT ONE (Skeptic-review fix, 2026-09-14, same epic). The FIRST cut of the ceiling
- * above measured wall-clock time from the moment this file SPAWNS `verify-lane.mjs` — which is BEFORE that
- * child even tries to acquire its own `heavy-admission.mjs` capacity slot, not after. `heavy-admission.mjs`'s
- * `DEFAULT_TIMEOUT_MS` lets a spawned verify legitimately spend up to ~20 minutes just WAITING for a free
- * admission slot before its actual gate work starts — real queuing, not a hang. A single 30-minute ceiling
- * measured from spawn therefore conflates "queued 20 minutes then ran a normal 5-minute gate" (25 min total,
- * healthy) with "queued 20 minutes then ran a genuinely-stuck gate" (also healthy-looking until it blows past
- * 30) — and worse, a HEALTHY run that queues 20 minutes and then hits the very contention this ceiling was
- * built to survive (the live incident's own ~19-20 minute gate) totals ~40 minutes and gets killed anyway,
- * defeating the ceiling's own stated purpose of distinguishing hung from merely-queued. The fix: measure GATE
- * time only. `verify-lane.mjs` now writes an UNCONDITIONAL marker line to its own stderr
- * ({@link GATE_STARTED_MARKER}) the instant before it runs the real gate command — after admission, win or
- * fail-open, every time. This file watches the child's stderr as it streams (a `spawn`, not the old blocking
- * `execFileSync`) and runs TWO SEPARATE timers, never stacked: `QUEUE_PHASE_CEILING_MS` from spawn until the
- * marker appears — a safety net barely above `heavy-admission.mjs`'s own 20-minute fail-open, since that
- * timeout already bounds a HEALTHY wait; this one only fires on a hang BEFORE admission is even reached, or a
- * dropped marker write — and `VERIFY_DISPATCH_TIMEOUT_MS` (unchanged, 30 minutes, same generous multiple of
- * the documented 150-350s range) from the marker until the gate itself finishes. Seeing the marker CANCELS
- * the queue timer and starts a fresh gate timer — it does not extend or add to the queue one. On EITHER
- * timeout the whole process-group kill above still applies unchanged.
+ * A HARD WALL-CLOCK CEILING, GATE TIME ONLY (epic #3383, live incident + same-night Skeptic-review fix,
+ * 2026-09-14). The gate's documented normal range is 150-350s; before this, nothing here bounded it — a single
+ * genuinely-stuck (or merely starved, under heavy concurrent-lane contention) gate blocked EVERY lane's
+ * dispatch indefinitely, because this pass is synchronous and one request is handled to completion before the
+ * next is even looked at. A first cut of this fix (landed same-night on `main` as PR #2232, then found flawed
+ * by a Skeptic review before it ever reached this branch) measured a single ceiling from SPAWN — which is
+ * BEFORE `verify-lane.mjs` even tries to acquire its own `heavy-admission.mjs` capacity slot, not after.
+ * `heavy-admission.mjs`'s `DEFAULT_TIMEOUT_MS` lets a spawned verify legitimately spend up to ~20 minutes just
+ * WAITING for a free admission slot before its actual gate work starts — real queuing, not a hang. A single
+ * ceiling measured from spawn conflates "queued 20 minutes then ran a normal gate" (healthy) with "genuinely
+ * stuck" — and a HEALTHY run that queues and then hits ordinary contention (the live incident's own ~19-20
+ * minute gate) could total more than a flat 30-minute ceiling and get killed anyway, defeating the ceiling's
+ * own purpose. The fix landed here directly: measure GATE time only. `verify-lane.mjs` writes an
+ * UNCONDITIONAL marker line to its own stderr ({@link GATE_STARTED_MARKER}) the instant before it runs the
+ * real gate command — after admission, win or fail-open, every time. This file watches the child's stderr as
+ * it streams (a `spawn`, not a blocking `execFileSync`) and runs TWO SEPARATE timers, never stacked:
+ * `QUEUE_PHASE_CEILING_MS` from spawn until the marker appears — a safety net barely above
+ * `heavy-admission.mjs`'s own 20-minute fail-open, since that timeout already bounds a HEALTHY wait; this one
+ * only fires on a hang BEFORE admission is even reached, or a dropped marker write — and
+ * `VERIFY_DISPATCH_TIMEOUT_MS` (30 minutes, several multiples of the documented 150-350s range, generous so a
+ * legitimately slow GATE under contention is never killed for being merely slow) from the marker until the
+ * gate itself finishes. Seeing the marker CANCELS the queue timer and starts a fresh gate timer — it does not
+ * extend or add to the queue one. On EITHER timeout the WHOLE process tree is killed, not just the immediate
+ * child: `verify-lane.mjs` itself `execSync`s the gate command through a shell, so the actual test runner is a
+ * grandchild that would never see a signal sent only to its parent — spawning with `detached: true` puts that
+ * whole tree in one process group up front, so the timeout handler kills the group as a unit. The tick then
+ * moves on, counting the lane as a dispatch failure. NO NEW RECOVERY PATH WAS NEEDED: a killed run leaves the
+ * marker `running`/stranded, which is already the exact shape `verify-lane.mjs`'s own marker-guard recovers
+ * from — the next tick just re-runs it, same as a human-killed run always has.
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors lease-reaper.mjs): {@link laneNeedsVerifyDispatch} is pure (no fs/git);
  * the IO shell (`main()`) owns the POOL_ROOT walk, marker reads, the `git rev-parse HEAD` per lane, and the
@@ -74,6 +67,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readVerifyMarker } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { branchMatchesQueueIds, isQueueScopeEnabled, readScopedQueueIds } from './queue-scope.mjs';
 import { resolveTimeoutMs as resolveAdmissionTimeoutMs } from '../readiness/heavy-admission.mjs';
 
 /** Several multiples of the gate's documented 150-350s normal range — generous on purpose (see file header):
@@ -126,6 +120,30 @@ const QUEUE_PHASE_CEILING_MS =
 export function laneNeedsVerifyDispatch(marker, headSha) {
   if (!marker || marker.corrupt || !headSha) return false;
   return marker.status === 'running' && marker.sha === headSha;
+}
+
+/**
+ * Is this lane in scope for THIS checkout? Pure, and the ONE place this pass's own cross-instance leak is
+ * closed (epic #3383).
+ *
+ * A DIFFERENT LEAK AXIS FROM THE PR PASSES, WORTH STATING PLAINLY. The three `gh pr list` watches and
+ * `reconcile-pass.mjs` leak across the whole REPOSITORY. This pass never touches `gh` at all — it walks the
+ * HOST-WIDE lane pool (`LANE_POOL_ROOT`, default `~/workspace/.lanes`), so a deliberately-scoped scratch
+ * instance would happily run a full `verify-lane.mjs` gate for a lane belonging to a completely different
+ * conveyor instance on the same machine. Same class of "an isolated instance is not actually isolated" bug,
+ * reached through the filesystem rather than through GitHub.
+ *
+ * DEFAULT OFF, exactly like the PR passes: `enabled: false` ⇒ `true` for every lane, i.e. today's behavior to
+ * the byte. Scoped ⇒ the lane's own branch must name a queued item. A lane with NO readable branch (a detached
+ * HEAD, an unreadable checkout) is OUT of scope when scoping is on — the safe direction here, since the whole
+ * point of a scoped instance is to touch only what it can positively identify as its own.
+ * @param {string|null} branch the lane's current branch (`git -C <laneDir> rev-parse --abbrev-ref HEAD`)
+ * @param {{enabled?:boolean, ids?:string[]}} [scope]
+ * @returns {boolean}
+ */
+export function laneInQueueScope(branch, { enabled = false, ids = [] } = {}) {
+  if (!enabled) return true;
+  return branchMatchesQueueIds(branch, ids);
 }
 
 // ── IO SHELL (runs only as a CLI) ───────────────────────────────────────────────────────────────────────────
@@ -183,13 +201,12 @@ function parseFlags(argv) {
 
 /**
  * Run `node <args…>` (the `verify-lane.mjs` spawn), bounded by TWO SEPARATE wall-clock ceilings instead of
- * one blanket one (the fix this exports — see the file header's "TWO SEPARATE CEILINGS" section):
- * `queueCeilingMs` covers everything BEFORE the child logs {@link GATE_STARTED_MARKER} to its own stderr;
- * `gateCeilingMs` covers everything AFTER. Whichever ceiling is ACTIVE is whichever phase the child is really
- * in — seeing the marker CANCELS the queue-phase timer and starts a FRESH gate-phase one; it never stacks or
- * extends them. `detached: true` mirrors the old `execFileSync` behavior exactly: the whole spawned tree gets
- * its own process group so a timeout kill reaches `verify-lane.mjs` → its own `execSync`'d shell → the real
- * test runner as a unit, never orphaning the grandchild (the same failure mode the original ceiling PR fixed).
+ * one blanket one (see the file header's ceiling section): `queueCeilingMs` covers everything BEFORE the
+ * child logs {@link GATE_STARTED_MARKER} to its own stderr; `gateCeilingMs` covers everything AFTER.
+ * Whichever ceiling is ACTIVE is whichever phase the child is really in — seeing the marker CANCELS the
+ * queue-phase timer and starts a FRESH gate-phase one; it never stacks or extends them. `detached: true` puts
+ * the whole spawned tree in its own process group so a timeout kill reaches `verify-lane.mjs` → its own
+ * `execSync`'d shell → the real test runner as a unit, never orphaning the grandchild.
  * @param {string[]} args        argv for `node` (the target script path first, mirrors `execFileSync`'s usage)
  * @param {{queueCeilingMs:number, gateCeilingMs:number}} ceilings
  * @returns {Promise<{pid:number}>} resolves on a clean (possibly non-zero, non-timeout) exit
@@ -225,8 +242,7 @@ export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs }) {
         timer = setTimeout(onTimeout('gate'), gateCeilingMs);
       }
     });
-    // Drain stdout so a full pipe buffer can never back-pressure/stall the child — this file never reads it
-    // (mirrors the old `execFileSync` call site, which discarded it too).
+    // Drain stdout so a full pipe buffer can never back-pressure/stall the child — this file never reads it.
     child.stdout.on('data', () => {});
 
     child.on('error', (err) => {
@@ -260,6 +276,14 @@ async function main(argv) {
   const dryRun = !!flags['dry-run'];
   const dispatched = [];
   const failures = [];
+  // epic #3383 — read ONCE per run, never per lane. Both reads are cheap, but the marker/queue pair must be a
+  // single consistent snapshot for the whole sweep rather than re-read mid-walk.
+  const scopeEnabled = isQueueScopeEnabled();
+  const scopeIds = scopeEnabled ? readScopedQueueIds() : [];
+  const skippedOutOfScope = [];
+  if (scopeEnabled) {
+    log(`⊂ queue-scoped: verify-dispatch will run the gate only for lanes on ${scopeIds.length ? scopeIds.join(', ') : '(nothing — the queue is empty)'}`);
+  }
 
   for (const pool of poolsToScan()) {
     const poolDir = join(POOL_ROOT, pool);
@@ -268,6 +292,16 @@ async function main(argv) {
       const headSha = tryGit(['rev-parse', 'HEAD'], dir);
       const marker = markerFor(dir);
       if (!laneNeedsVerifyDispatch(marker, headSha)) continue;
+      // Read the branch ONLY for a lane that already wants a gate run — the common "nothing pending" lane
+      // never pays for the extra `git` call, and an unscoped run never pays for it at all.
+      if (scopeEnabled) {
+        const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
+        if (!laneInQueueScope(branch, { enabled: true, ids: scopeIds })) {
+          log(`  ⊂ skipping ${pool}/lane-${lane} (${branch || 'no branch'}) — not in this checkout's queue scope`);
+          skippedOutOfScope.push({ pool, lane, branch });
+          continue;
+        }
+      }
 
       if (dryRun) {
         log(`  would dispatch verify for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} (suites: ${marker.suites || 'default'})`);
@@ -287,10 +321,16 @@ async function main(argv) {
         // a marker write (a spawn error, an unexpected non-{0,2} exit) counts as one, and is logged, never
         // fatal to the rest of this pass — one bad lane must not block dispatching the others.
         const status = Number.isFinite(e && e.status) ? e.status : null;
-        // A timeout kill reports a SIGNAL, never a status — that combination only happens here when OUR OWN
-        // ceiling fired (verify-lane.mjs has no signal handling of its own to race it). `timedOutPhase` says
-        // which of the two ceilings it was.
-        const timedOut = status === null && !!(e && e.signal);
+        // Trust `e.timedOutPhase` directly — it is `spawnGateBounded`'s OWN authoritative record of whether
+        // ONE OF OUR TWO TIMERS actually fired, set only inside its own `onTimeout` handler. A prior version
+        // of this check re-derived "timed out" from the exit shape alone (`status === null && signal present`)
+        // — but that shape is NOT unique to our own kill: an external actor (an operator's `kill -9`, an OS
+        // OOM-kill, a host restart) killing the spawned `verify-lane.mjs` process produces the exact same
+        // `status:null, signal:<sig>` pair, and the re-derived check would then misattribute that external
+        // kill as "exceeded the queue/gate ceiling" — misleading during exactly the incident investigation
+        // this ceiling exists to support (found in review, epic #3383). Functionally harmless either way (the
+        // lane lands in `failures` and gets retried next tick regardless), but the LABEL must be accurate.
+        const timedOut = !!(e && e.timedOutPhase);
         if (timedOut) {
           const phase = e.timedOutPhase || 'gate';
           const ceilingMs = phase === 'queue' ? QUEUE_PHASE_CEILING_MS : VERIFY_DISPATCH_TIMEOUT_MS;
@@ -307,7 +347,9 @@ async function main(argv) {
   }
 
   if (flags.json) {
-    writeAllSync(1, JSON.stringify({ dryRun, dispatched, failures }, null, 2) + '\n');
+    // `skippedOutOfScope` is ADDITIVE — the two keys every existing consumer reads are unchanged, and an
+    // unscoped run reports it as `[]`, so the JSON contract is a superset of what it always was.
+    writeAllSync(1, JSON.stringify({ dryRun, dispatched, failures, skippedOutOfScope }, null, 2) + '\n');
   } else if (dispatched.length === 0 && failures.length === 0) {
     log('verify-dispatch: nothing pending.');
   }

@@ -2,6 +2,7 @@
 bornAs: xveqvbr
 kind: story
 size: 2
+tier: pinned
 parent: "3029"
 status: resolved
 dateOpened: "2026-09-06"

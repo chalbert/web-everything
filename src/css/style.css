@@ -2012,7 +2012,8 @@ we-tag[set="tier"],
 .fui-tag[data-cat-set="kind"],
 .fui-tag[data-cat-set="tier"] { text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
 
-/* kind vocabulary — feature (teal) · story (blue) · epic (violet) · decision (indigo) · task (slate). */
+/* kind vocabulary — feature (teal) · story (blue) · epic (violet) · decision (indigo) · task (slate) ·
+   investigation (amber, #3567). */
 we-tag[set="kind"][value="feature"],
 .fui-tag[data-cat-set="kind"][data-cat-value="feature"]     { background:#ccfbf1; color:#0f766e; --cat-bg:#ccfbf1; --cat-color:#0f766e; --cat-shape:9999px; }
 we-tag[set="kind"][value="story"],
@@ -2023,6 +2024,8 @@ we-tag[set="kind"][value="decision"],
 .fui-tag[data-cat-set="kind"][data-cat-value="decision"]    { background:#e0e7ff; color:#3730a3; --cat-bg:#e0e7ff; --cat-color:#3730a3; --cat-shape:9999px; }
 we-tag[set="kind"][value="task"],
 .fui-tag[data-cat-set="kind"][data-cat-value="task"]        { background:#f1f5f9; color:#475569; --cat-bg:#f1f5f9; --cat-color:#475569; --cat-shape:9999px; }
+we-tag[set="kind"][value="investigation"],
+.fui-tag[data-cat-set="kind"][data-cat-value="investigation"] { background:#fef3c7; color:#92400e; --cat-bg:#fef3c7; --cat-color:#92400e; --cat-shape:9999px; }
 
 /* tier vocabulary — A (green) · B (amber) · C (slate); matches the agent-readiness palette. */
 we-tag[set="tier"][value="A"],

@@ -13,13 +13,13 @@
  * IT DECLARES OVER THE TICK CORE; IT DOES NOT RE-DERIVE IT. The conveyor's dispatch policy — the in-flight
  * build guard, the lane exclusion, the scope-lease arbitration, the TTLs, the union re-dispatch gate — is
  * `we:scripts/conveyor/tick-core.mjs#planTick`, which is pure and tested. This operation CONSUMES that core's
- * five launch lists — `decisions.spawnBuilds`, `decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`
- * (#3165), and `decisions.spawnFixes`, `decisions.spawnCiHeals` (#3332) — and refuses to invent a launch of
- * its own:
+ * six launch lists — `decisions.spawnBuilds`, `decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`
+ * (#3165), `decisions.spawnInvestigations` (#3567), and `decisions.spawnFixes`, `decisions.spawnCiHeals`
+ * (#3332) — and refuses to invent a launch of its own:
  *
  *   - ONE DISPATCH PER CALL, never a batch. `--num=<N>` resolves THAT item's kind and starts THAT item's
  *     agent. The tick already decides multiplicity; a loop here would be a second scheduler in front of it.
- *   - the KIND is never an input either. It is whichever of the five lists the core put this num in, and
+ *   - the KIND is never an input either. It is whichever of the six lists the core put this num in, and
  *     it selects the brief, the session slug and the lane scope together — see `shapeDispatchRead`.
  *
  *   - the LANE is never an input. A caller cannot ask for a lane; it dispatches the lane the core assigned, or
@@ -146,6 +146,9 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG', 'DELIVERY_BASE'],
   prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
+  // `investigate` (#3567) fills the SAME five names as the two prepare kinds — it targets an ITEM (not an
+  // existing PR), same as `prepare`/`prepare-decision`, so it has no `PR_NUM`/`LANE_REF` to give either.
+  investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON'],
 });
@@ -161,24 +164,119 @@ const deliveryBaseFor = (item) => {
 };
 
 /**
- * THE FIVE AGENT KINDS THIS OPERATION CAN START (#3165 named three, #3332 the remaining two), in the order the
+ * THE SIX AGENT KINDS THIS OPERATION CAN START (#3165 named three, #3332 two more, #3567 the sixth), in the order the
  * shell resolves them.
  *
- * `planTick` returns FIVE launch lists — `spawnBuilds`, `spawnPrepareScope`, `spawnPrepareDecision`,
- * `spawnFixes`, `spawnCiHeals` — and until #3165 the operation launched only the first, and until #3332 the
- * last two were planned every tick and reached NO route at all: `briefPath` threw for any kind it did not
- * know, so a `fix`/`ci-heal` launch could not even be attempted, let alone dispatched. This list is the whole
- * connection, for all five.
+ * `planTick` returns SIX launch lists — `spawnBuilds`, `spawnPrepareScope`, `spawnPrepareDecision`,
+ * `spawnInvestigations`, `spawnFixes`, `spawnCiHeals` — and until #3165 the operation launched only the first,
+ * until #3332 two more reached a route, and until #3567 `spawnInvestigations` did too; before each of those, a
+ * launch of that kind was planned every tick and reached NO route at all: `briefPath` threw for any kind it
+ * did not know, so it could not even be attempted, let alone dispatched. This list is the whole connection,
+ * for all six.
  *
- * ONE ITEM IS IN AT MOST ONE LIST for the first three — an unscoped held item never reaches `spawnBuilds`, and
- * a decision is never an unshaped build — so the order below is a tie-break that no real tick exercises for
- * those, not a precedence rule. `fix` and `ci-heal` are keyed on a PR rather than an item (#3332's own
+ * ONE ITEM IS IN AT MOST ONE LIST for the first four — an unscoped held item never reaches `spawnBuilds`, a
+ * decision is never an unshaped build, and an investigation is never either — so the order below is a
+ * tie-break that no real tick exercises for those, not a precedence rule. `fix` and `ci-heal` are keyed on a PR rather than an item (#3332's own
  * `sessionSlugFor` docblock explains why), so in principle a bounced item mid-build could show up in a fix or
  * CI-heal list for an OLDER PR while a new one is elsewhere — the shell's `LAUNCH_LISTS` order still applies
  * first-match-wins, and is stated as data for the same reason: two files agreeing on the order by coincidence
  * is how they stop agreeing.
  */
-export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'fix', 'ci-heal']);
+export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+
+/**
+ * THE SECOND AXIS `WE_DISPATCH_KIND` CARRIES, named here because it was previously only implicit (#3640).
+ *
+ * ── THE COLLISION THIS RESOLVES ─────────────────────────────────────────────────────────────────────────────
+ *
+ * `WE_DISPATCH_KIND` is stamped on a spawned agent's env by THREE different spawners, and until this item they
+ * did not agree on what the value MEANS:
+ *
+ *   1. {@link ./dispatch-lane-io.mjs#defaultClaudeProvider} stamps `request.launchKind` — `build`, `fix`,
+ *      `ci-heal`, … — onto the full-brief `claude --bg` agent. That agent IS the whole dispatch: its brief
+ *      (`we:skills-src/conveyor/fix-agent-brief.md` and friends) tells it to run its OWN lifecycle —
+ *      `lane-pool.mjs acquire`, `gh pr view`, `verify-lane request`/`check`, `rearm-review.mjs`.
+ *   2. `we:scripts/operations/deliver-item-wrapper.mjs#buildDeliveryAgentEnv` stamps `delivery` — which is NOT
+ *      a launch kind — onto the RESTRICTED, minimal agent a wrapper spawns inside a `build` dispatch. That
+ *      agent runs none of the above; the wrapper does all of it, outside the agent's turn.
+ *   3. `we:scripts/operations/fix-dispatch-wrapper.mjs` used to stamp `fix` — a LAUNCH kind — onto its own
+ *      restricted minimal agent, i.e. shape 2's contract carrying shape 1's value.
+ *
+ * `we:scripts/guard-bash.mjs`'s wrapper-owned deny table keys on exactly this value, and its own note called
+ * the collision out as "a real ambiguity to settle before any `'fix'` arm is added": a `dispatchKind === 'fix'`
+ * arm would deny the AGENT-path fixer (shape 1) its own documented first step, and NOT adding one leaves the
+ * WRAPPER-path fixer (shape 3) unguarded. One value, two incompatible contracts.
+ *
+ * ── THE RESOLUTION: THE VALUE SPACE ALREADY HAD TWO HALVES, AND `delivery` IS THE PRECEDENT ─────────────────
+ *
+ * A value in {@link LAUNCH_KINDS} means "this agent is the whole dispatch and runs its own lifecycle". A value
+ * in this list means "this agent is a RESTRICTED WORKER inside a wrapper that owns the lifecycle". #3627
+ * already made that split when it chose `delivery` rather than `build` for the wrapper-spawned build agent; it
+ * was simply never written down, so the fix wrapper reached for its launch kind instead. This constant names
+ * the second half and {@link assertDispatchKindAxesDisjoint} makes the split machine-checked rather than a
+ * convention two files happen to share.
+ *
+ * `repair` covers BOTH PR-keyed repair kinds (`fix` #3640 and `ci-heal` #3642), deliberately: the two share a
+ * wrapper shape (`BRIEF_REQUIRED_BY_KIND` already groups them), and what the guard table asserts is the
+ * WRAPPER's ownership of the lifecycle, which is identical for both. A second value would have to justify a
+ * second deny table saying the same thing.
+ *
+ * NOT A LAUNCH KIND, AND NEVER DISPATCHABLE. Nothing routes on these; `dispatch-lane` refuses a `launchKind`
+ * outside `LAUNCH_KINDS` exactly as before.
+ *
+ * ── THE ONE KNOWN CASE THAT WAS STILL ON THE WRONG SIDE — CLOSED (#3642) ────────────────────────────────────
+ *
+ * This section used to read as a NAMED GAP: `we:scripts/operations/prepare-scope-wrapper.mjs` (#3641) stamped
+ * `WE_DISPATCH_KIND: 'prepare'` — a LAUNCH kind — on the restricted agent IT spawns, which is this exact
+ * defect one path over. It was LATENT, not live (no `prepare` deny arm existed, so nothing misfired), and
+ * #3640 deliberately left it alone because a guard row whose ownership claims nobody had verified
+ * command-by-command would have been the stale note that whole item was about. #3642 did that verification
+ * — against `prepare-scope-wrapper.mjs` itself and against BOTH prepare briefs — and closed it. The stamp is
+ * now {@link SCOPE_AUTHORING_AGENT_KIND}, and `we:scripts/guard-bash.mjs` carries the matching arm.
+ *
+ * WHY `scope-authoring` RATHER THAN JOINING `delivery` OR `repair`, and why a fourth value is not sprawl.
+ * These values are not a taxonomy of wrappers; each one is the KEY of a deny table whose every message makes
+ * a concrete ownership claim, and a message that is false for one member is the defect this axis exists to
+ * prevent. `delivery`'s own table says "the wrapper claims the item before you are spawned" and "opening the
+ * PR is the wrapper's job, driven by a park decision" — the first is FALSE of a prepare-scope arc (it never
+ * claims anything; a prepare only authors `scope:`). `repair`'s says "you repair an EXISTING PR" — also
+ * false. #3644 had already reached the same conclusion for its own arc and minted `decision-authoring`; this
+ * follows that precedent rather than inventing a second convention, and both are now ON this list rather
+ * than beside it, so {@link assertDispatchKindAxesDisjoint} actually covers them.
+ */
+export const DELIVERY_AGENT_KIND = 'delivery';
+export const REPAIR_AGENT_KIND = 'repair';
+/** #3644's own wrapper-agent kind — `we:scripts/operations/prepare-decision-wrapper.mjs`'s restricted agent.
+ *  Named here (rather than only as a literal in that file) so the disjointness check below covers it. */
+export const DECISION_AUTHORING_AGENT_KIND = 'decision-authoring';
+/** #3642's correction of #3641 — `we:scripts/operations/prepare-scope-wrapper.mjs`'s restricted agent, which
+ *  used to carry the LAUNCH kind `prepare`. See the docblock above for why it is its own value. */
+export const SCOPE_AUTHORING_AGENT_KIND = 'scope-authoring';
+export const WRAPPER_AGENT_KINDS = Object.freeze([
+  DELIVERY_AGENT_KIND, REPAIR_AGENT_KIND, DECISION_AUTHORING_AGENT_KIND, SCOPE_AUTHORING_AGENT_KIND,
+]);
+
+/**
+ * THE INVARIANT THE RESOLUTION RESTS ON — the two axes {@link WRAPPER_AGENT_KINDS} and {@link LAUNCH_KINDS}
+ * split must never overlap. Checked at module LOAD, for the same reason
+ * {@link ./dispatch-provider-registry.mjs}'s own key check is: a wrapper-agent kind that is ALSO a launch kind
+ * silently re-creates the exact collision #3640 resolved — the guard table would start firing on an agent-path
+ * agent that legitimately runs its own lifecycle — and nothing at dispatch time would notice.
+ */
+export function assertDispatchKindAxesDisjoint(launchKinds = LAUNCH_KINDS, wrapperKinds = WRAPPER_AGENT_KINDS) {
+  const overlap = wrapperKinds.filter((k) => launchKinds.includes(k));
+  if (overlap.length) {
+    throw new TypeError(
+      `dispatch-lane: ${JSON.stringify(overlap)} is both a LAUNCH kind and a WRAPPER-AGENT kind. `
+      + '`WE_DISPATCH_KIND` carries one value for two different questions — which dispatch this is, and which '
+      + 'kind of agent was spawned — and they are told apart ONLY by which list the value is in. An overlap '
+      + 're-creates the #3640 collision: `we:scripts/guard-bash.mjs`\'s wrapper-owned deny table would fire on '
+      + 'an agent-path agent whose own brief requires the very commands it denies.',
+    );
+  }
+  return true;
+}
+assertDispatchKindAxesDisjoint();
 
 /**
  * How long an in-flight dispatch record whose agent's LIVENESS CANNOT BE ESTABLISHED keeps holding its item
@@ -343,6 +441,7 @@ export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '') {
   const id = `${String(num).trim()}${attempt}`;
   if (kind === 'prepare-decision') return `prepare-decision-${id}`;
   if (kind === 'prepare') return `prepare-${id}`;
+  if (kind === 'investigate') return `investigate-${id}`;
   if (kind === 'fix') return `fix-${String(pr ?? num).trim()}`;
   if (kind === 'ci-heal') return `ci-heal-${String(pr ?? num).trim()}`;
   return `conveyor-${id}`;
@@ -586,7 +685,11 @@ export function dispatchStillHolds(entry, at, {
  * The answers `stampLiveness` may give about where an in-flight record's liveness came from. Anything else
  * (including an absent field) reads as `unknown`, which is the honest word for a reader that did not say.
  */
-export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'unreadable', 'not-needed']);
+// `wrapper-pid` (#3645) is the STRONG answer for a mechanical build dispatch: every in-flight record for the
+// item is a detached `deliver-item-run.mjs` process, and the kernel — not a `claude agents` listing — said
+// whether it is alive. It belongs beside `claude-agents` rather than under `unknown` precisely because it is a
+// read that SUCCEEDED; `dispatchStillHolds` keys on `live`, not on which reader produced it.
+export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'wrapper-pid', 'unreadable', 'not-needed']);
 
 /** A launch/suppression row from the tick core, or null. Shape-checked, never trusted blind. */
 function shapeRow(row, what) {
@@ -834,8 +937,8 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       holdReason: suppressed
         ? `suppressed by the in-flight build guard (${suppressed.by === 'lane' ? `lane ${suppressed.lane} is held` : 'an agent is already in flight for this item'})`
         : 'the tick core did not clear this item for dispatch — it is not in `decisions.spawnBuilds`, '
-          + '`decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`, `decisions.spawnFixes` or '
-          + '`decisions.spawnCiHeals`',
+          + '`decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`, `decisions.spawnInvestigations`, '
+          + '`decisions.spawnFixes` or `decisions.spawnCiHeals`',
     };
   }
 

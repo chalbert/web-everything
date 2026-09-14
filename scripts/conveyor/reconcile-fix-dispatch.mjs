@@ -61,7 +61,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
-  defaultSpawnAgent, findItem, normalizeHandle, parseBackgroundedId, resumeSucceeded, REPO_ROOT,
+  defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
+  resumeSucceeded, REPO_ROOT,
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
@@ -93,26 +94,45 @@ export function defaultConfirmWait(ms) {
 }
 
 /**
- * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planFixesFromReconcile — PURE. Narrow `reconcile-pass.mjs`'s
- * `kind:'fix'` dispatch entries down to the ones this file can actually act on, and NAME why each one it drops
- * cannot be (mirroring `reconcile-core.mjs`'s own REFUSAL_KINDS discipline: a refusal a reader cannot audit is
- * exactly the defect this whole chain exists to remove).
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planFixesFromReconcile — PURE (the one impurity is calling the
+ * INJECTED `resolveFallbackScope`, exactly the same idiom `findItemFn` already uses — a real caller hands in a
+ * function that does IO, a test hands in a stub, and this function itself still touches no `fs`/`gh`/`git`
+ * directly). Narrow `reconcile-pass.mjs`'s `kind:'fix'` dispatch entries down to the ones this file can actually
+ * act on, and NAME why each one it drops cannot be (mirroring `reconcile-core.mjs`'s own REFUSAL_KINDS
+ * discipline: a refusal a reader cannot audit is exactly the defect this whole chain exists to remove).
  *
  * TWO THINGS CAN MAKE AN OTHERWISE-OWED FIX UNDISPATCHABLE, BOTH NAMED:
  *   `no-item-num` — the PR's head ref carries no conveyor item number (`laneRefItemNum` returns `null` — not
  *     every open PR is a `lane/<NUM>-<slug>` branch; a hand-opened or externally-branched PR is not). Without an
- *     item number there is no `{{ITEM_NUM}}`, no scope lookup, and no honest `WE #<n>:` commit prefix for the
- *     fix-agent-brief to use — undispatchable, not a bug to route around.
+ *     item number there is no `{{ITEM_NUM}}` and no honest `WE #<n>:` commit prefix for the fix-agent-brief to
+ *     use — undispatchable, not a bug to route around. `#3634` — checked live against every `no-item-num` PR on
+ *     `lane/mechanical-dispatcher` on 2026-09-14 (`#2210`, `lane/file-2206-review-findings`; `#2212`,
+ *     `lane/agent-capability-parity-principle`; `#2170`, `lane/stuck-session-op-docs`): NONE of these numbers,
+ *     even where one is present (`file-2206`), names the item this PR actually delivers — `2206` there is the
+ *     REVIEWED PR's number, not an item this PR builds, and backlog item `#2206` is a real, unrelated card
+ *     (`sanctioned-pack-phase-cli-retype...`). Extracting it and stamping `WE #2206:` on this PR's fix commits
+ *     would be an honest-looking but WRONG attribution — worse than the refusal it replaces. There is no
+ *     general, safe derivation of `{{ITEM_NUM}}` for this population; it stays a hard refusal.
  *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (deleted item, or one
- *     scaffolded with no `scope:` frontmatter). Mirrors `dispatch-lane.mjs`'s OWN scope-refusal
- *     (`itemScope.length` check) for exactly the same reason: a fix agent with no declared scope has no fence.
+ *     scaffolded with no `scope:` frontmatter — measured live #3634: EVERY currently-open `kind:'fix'` entry
+ *     whose item number resolves hits this, epics included, e.g. `#2220` on `lane/3383-host-process-granularity`
+ *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own). Unlike
+ *     `no-item-num`, THIS one has a safe fallback: {@link resolveFallbackScope}, called with `(pr, itemNum)`,
+ *     may return the PR's OWN already-changed files (`we:`-prefixed) as the fence instead. This is never a
+ *     LOOSER fence than a declared `scope:` would have been — a fix agent can only touch what this PR already
+ *     touches — so it is safe exactly where a declared scope is unknown. Only when the fallback ALSO comes back
+ *     empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN scope-refusal (`itemScope.length`
+ *     check) for exactly the same reason: a fix agent with no fence at all is undispatchable.
  * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
  * @param {Function} loadItems
- * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
+ * @param {(pr:number, itemNum:string)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
+ *   caller with nothing better to offer degrades to the pre-#3634 behaviour byte-for-byte); the real binding is
+ *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default.
+ * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
-export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
+export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => []) {
   const planned = [];
   const refusals = [];
   for (const entry of Array.isArray(dispatchEntries) ? dispatchEntries : []) {
@@ -125,8 +145,21 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
       continue;
     }
     const item = findItemFn(itemNum, loadItems);
-    if (!item || !item.scope.length) {
-      refusals.push({ pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope — refusing to dispatch a fix agent with no fence` });
+    let scope = item && Array.isArray(item.scope) ? item.scope : [];
+    let scopeSource = 'item';
+    if (!scope.length) {
+      // `#3634` — no declared scope (missing item, or one — an epic, typically — with none of its own). Try the
+      // PR's own already-changed files before refusing outright; see this function's own docblock for why that
+      // fallback is always safe (never a looser fence than a declared scope would have been).
+      let fallback = [];
+      try { fallback = resolveFallbackScope(pr, itemNum) || []; } catch { fallback = []; }
+      if (Array.isArray(fallback) && fallback.length) {
+        scope = fallback;
+        scopeSource = 'pr-diff';
+      }
+    }
+    if (!scope.length) {
+      refusals.push({ pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope, and the PR's own changed-file fallback found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
       continue;
     }
     // #xu2krte Fork 1 — a `fix` dispatch caused by the parked-PR conflict watch still carries the
@@ -136,13 +169,39 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
-      itemNum, pr, laneRef: headRefName, scope: item.scope, isConflict, body: entry.body ?? null,
+      itemNum, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
     });
   }
   return { planned, refusals };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchPrDiffScope — `#3634`'s real fallback-scope reader: ONE
+ * `gh pr diff <pr> --name-only` call, reduced to the `we:`-prefixed path list {@link planFixesFromReconcile}'s
+ * `resolveFallbackScope` wants (the SAME repo-qualified form the canonical loader already produces for a
+ * declared `scope:` — see `dispatch-lane-io.mjs#findItem`'s own comment). Best-effort: any `gh` failure (no
+ * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
+ * as it did before this fallback existed, never throws the whole pass over one bad read.
+ * @param {number} pr
+ * @param {{exec?:Function, root?:string}} [o]
+ * @returns {string[]}
+ */
+export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT } = {}) {
+  try {
+    const out = exec('gh', ['pr', 'diff', String(pr), '--name-only'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
+    });
+    return String(out || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((p) => `we:${p}`);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -389,6 +448,23 @@ export function tryResumeFix(planned, {
  * file's own copies. Requires `planned.lane` — the caller ({@link runReconcileFixDispatch}) only calls this
  * AFTER popping one from the free-lane pool, which by construction only happens once {@link tryResumeFix} (when
  * relevant) has already reported `resumed: false` — see that function's own `#xazl9u3` docblock for why.
+ *
+ * IT PASSES THE DISPATCHED-AGENT SYSTEM PROMPT (#3606/#xqyyoje/#xy8di3v), AND UNTIL 2026-09-11 IT DID NOT —
+ * the one dispatch path in the repo that was missing it. `createDispatchSinks` has always passed
+ * `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (so the tick-core-driven fix dispatch was covered) and
+ * `review-dispatch.mjs` passes its own review-side twin (#xy8di3v). THIS function passed none, so a fix agent
+ * dispatched by the reconcile pass met `fix-agent-brief.md` with nothing telling it the brief was real.
+ *
+ * The brief opens with *"**This is a TEMPLATE, not a runnable skill.**"* and keeps `{{PLACEHOLDERS}}` /
+ * `{{LIKE_THIS}}` in its own explanatory prose (both legitimately unsubstituted — `fillBrief` reports them as
+ * non-fatal unknown tokens by design), so a genuinely, correctly filled brief still READS as an unfilled
+ * template. LIVE-CONFIRMED 3/3 on 2026-09-11: `fix-2127`, `fix-2130` and `fix-2003` each received a fully
+ * substituted 16.5 KB brief naming their real PR — and each self-aborted with *"I don't see an actual task or
+ * question in your message — just the fix-agent brief template (#2630) itself"*, doing no work at all. That is
+ * exactly the #3606 failure `review-1998/2024/2027` hit on the review side, recurring on the one path the
+ * remedy had never been wired into. The delivery-side file is the right one here (not the review twin): a fix
+ * agent IS a `dispatch-lane`-shaped delivery agent — it acquires a lane, works an item, pushes to a PR.
+ *
  * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
  * @param {object} [o]
  * @param {object|null} [o.resumeAttempt] - carried forward from a prior {@link tryResumeFix} call for this same
@@ -415,10 +491,21 @@ export function dispatchFix(planned, {
     SCOPE: planned.scope.join(','),
   }, BRIEF_REQUIRED_BY_KIND.fix);
   const sessionId = String(mintSessionId());
-  const argv = buildAgentArgv({ sessionId, payload: { prompt, sessionSlug }, extraArgs });
-  spawnAgent(argv, { cwd: root });
+  const argv = buildAgentArgv({
+    sessionId,
+    payload: { prompt, sessionSlug },
+    // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
+    // unfilled template and self-aborts (3/3 live).
+    systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+    extraArgs,
+  });
+  // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
+  // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
+  // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
+  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
   return {
-    sessionId, sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
+    sessionId, agentId: parseBackgroundedId(stdout),
+    sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
     resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
   };
 }
@@ -441,6 +528,9 @@ export function dispatchFix(planned, {
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.
  * @param {Function} [o.tryResume] - injectable, defaults to the real {@link tryResumeFix}.
+ * @param {Function} [o.resolveFallbackScope] - injectable, defaults to the real {@link fetchPrDiffScope} (one
+ *   `gh pr diff --name-only` per entry that reaches it — see {@link planFixesFromReconcile}'s own docblock for
+ *   why this is only ever called once a declared `scope:` has already come back empty, never unconditionally).
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
  */
 export function runReconcileFixDispatch({
@@ -452,11 +542,12 @@ export function runReconcileFixDispatch({
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
+  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root }),
   checkStaleness,
 } = {}) {
   assertMainNotStale(root, checkStaleness);
   const reconciled = reconcile({ repo });
-  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems);
+  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope);
 
   const lanes = [...pickFreeLanes()];
   const dispatched = [];
@@ -525,7 +616,10 @@ if (IS_CLI) {
     const lines = [`reconcile-fix-dispatch — ${result.dispatched.length} dispatched, ${result.refusals.length} refusal(s)`];
     for (const d of result.dispatched) {
       const laneInfo = d.resumed ? 'no lane (resumed)' : `lane-${d.lane}`;
-      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — session ${d.sessionId} (${d.sessionSlug}), ${laneInfo}`);
+      // #3331 — report the ADDRESSABLE id (`claude logs/stop` take it) when we have one; a resume reports the
+      // session it continued, and an unparseable spawn falls back to the slug, which `claude agents` carries.
+      const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
+      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
     }
     for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');

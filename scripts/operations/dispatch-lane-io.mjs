@@ -18,7 +18,7 @@
  *     the plan and the core all key on;
  *   - the item's slug and repo-qualified `scope:` come from the canonical backlog loader (`we:src/_data/backlog.js`),
  *     the same source `dispatch-plan.mjs` enriches its queue rows from;
- *   - the brief is whichever of the FIVE authored mandates the launch's KIND names — the delivery brief for
+ *   - the brief is whichever of the SIX authored mandates the launch's KIND names — the delivery brief for
  *     a build, `prepare-scope-agent-brief.md` / `prepare-decision-agent-brief.md` for a prepare (#3165), and
  *     `fix-agent-brief.md` / `fix-agent-ci-brief.md` for a fix / ci-heal repair (#3332) —
  *     read as text and filled by the declaration.
@@ -43,6 +43,14 @@
 // telling the truth about the CONTENTION — 6 queued items name this file, and they do serialize on it. The
 // answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
+//
+// STILL HONOURED AFTER THE #3645 PROVIDER EXTRACTION, which moved code OUT of this file and so deserves an
+// explicit word here rather than leaving the next reader to assume the marker was overridden. The three halves
+// the ruling is about — the tick READER, the SINK, the OBSERVER — are all still here, together, sharing the
+// sink's handle contract. What moved to `./detached-dispatch.mjs`, `./dispatch-providers/build.mjs` and
+// `./dispatch-provider-registry.mjs` is the PER-KIND mechanical provider machinery that #3645 ADDED to this
+// file afterwards; it was never one of the three, and four sibling lanes each about to edit the same `if`
+// inside it is why it moved. See `THE MECHANICAL DISPATCH SEAM` banner further down for the full argument.
 
 import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -54,6 +62,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
@@ -62,6 +71,16 @@ import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
+// #3645, generalised — the detached primitives and the per-kind provider table. ONE-WAY: this file imports
+// them, neither of them imports this file. See the `THE MECHANICAL DISPATCH SEAM` banner below for why the
+// per-kind bodies live there and why that is not a split of this file's `@cohesive:` triple.
+import { defaultIsPidAlive, deliveryDispatchLogPath, detachedHandlePid } from './detached-dispatch.mjs';
+import {
+  DISPATCH_PROVIDER_REGISTRY,
+  dispatchModeFor,
+  dispatchModesFromEnv,
+  dispatchProviderEntry,
+} from './dispatch-provider-registry.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -73,12 +92,13 @@ export function tickCli(root = REPO_ROOT) {
 }
 // THE AGENT-BRIEF TEMPLATE the declaration fills, PER KIND (#3165 wired the first three, #3332 the last two).
 //
-// All five briefs were authored well before any of them but the delivery brief was reachable: `briefPath` took
+// All briefs were authored well before any of them but the delivery brief was reachable: `briefPath` took
 // no kind at all until #3165, so `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md`
 // (18 KB) sat unrouted while the planner kept surfacing prepares nobody could dispatch — and even after #3165
 // added a kind argument, `fix-agent-brief.md` and `fix-agent-ci-brief.md` stayed unrouted for the SAME reason,
 // because #3165 was a three-kind card (`'build' | 'prepare' | 'prepare-decision'`) and never claimed the other
-// two. This map is the whole connection, now for all five.
+// two, and #3567 added `investigate` (`investigation-agent-brief.md`). This map is the whole connection,
+// now for all six.
 //
 // ONE FILE PER KIND, declared as data rather than as a string built from the kind: a computed name silently
 // resolves to a path that does not exist, and `readText` would then fail with `ENOENT` on a filename instead
@@ -87,6 +107,8 @@ const BRIEF_BY_KIND = Object.freeze({
   build: 'delivery-agent-brief.md',
   prepare: 'prepare-scope-agent-brief.md',
   'prepare-decision': 'prepare-decision-agent-brief.md',
+  // #3567 — the investigation dispatch's own brief, parallel to the two prepare briefs above.
+  investigate: 'investigation-agent-brief.md',
   fix: 'fix-agent-brief.md',
   'ci-heal': 'fix-agent-ci-brief.md',
 });
@@ -97,7 +119,7 @@ const BRIEF_BY_KIND = Object.freeze({
 // lane and a wrong PR.
 /**
  * @param {string} [root]
- * @param {'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
+ * @param {'build'|'prepare'|'prepare-decision'|'investigate'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
  *   pre-#3165 caller resolves the same path it always did.
  * @returns {string}
  */
@@ -163,7 +185,7 @@ export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
  * @param {(num: string) => {done: boolean, pr: object|null, checked: boolean}} [o.checkAlreadyDone] -
  *   injectable ALREADY-DONE ground-truth reader (#3457/#3460). Defaults to {@link defaultCheckAlreadyDone}.
  *   Called ONLY when the core actually cleared this item for SOME launch — see the call site below for why.
- * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null), alreadyDone: {done: boolean, pr: object|null, checked: boolean}}}
+ * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'investigate'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null), alreadyDone: {done: boolean, pr: object|null, checked: boolean}}}
  */
 export function readTick({
   num,
@@ -175,6 +197,8 @@ export function readTick({
   loadItems = () => defaultLoadItems(root),
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
   listAgents = () => defaultListAgents({ exec }),
+  // #3645 — see {@link isDispatchHandleLive}: a mechanical build's handle is a pid, not a `claude` session id.
+  isPidAlive = defaultIsPidAlive,
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
@@ -214,7 +238,7 @@ export function readTick({
   const item = findItem(key, loadItems);
   const nextState = tick && typeof tick.nextState === 'object' ? tick.nextState : null;
   // THE SELECTION happens here, with the tick's own normalizer — see the declaration's header for why it is
-  // not in the pure half. FIVE LISTS, not one (#3165 wired the first three; #3332 the last two): `planTick`
+  // not in the pure half. SIX LISTS, not one (#3165 wired the first three; #3332 two more; #3567 the sixth): `planTick`
   // plans builds, both prepare kinds, AND fix/CI-heal repairs, and launching only a subset is why
   // `dispatch-lane --num=<an item planned for one of the unwired kinds>` did nothing at all while the
   // operator's status line kept promising it would.
@@ -226,6 +250,7 @@ export function readTick({
     ['build', decisions.spawnBuilds],
     ['prepare', decisions.spawnPrepareScope],
     ['prepare-decision', decisions.spawnPrepareDecision],
+    ['investigate', decisions.spawnInvestigations],
     ['fix', decisions.spawnFixes],
     ['ci-heal', decisions.spawnCiHeals],
   ];
@@ -261,7 +286,7 @@ export function readTick({
 
   // THE PR's HEAD REF (`{{LANE_REF}}`), resolved ONLY when this launch is a `fix`/`ci-heal` AND actually carries
   // a `pr` (#3332). LAZY for the same cost-avoidance reason {@link inFlightDispatchesFor}'s own docblock states
-  // for itself: a build/prepare dispatch — four launches out of five — pays no extra `gh pr view` subprocess for
+  // for itself: a build/prepare/investigate dispatch — four launches out of six — pays no extra `gh pr view` subprocess for
   // a lookup it will never use, and this read sits synchronously inside a waker pass that promises to stay
   // fail-soft and fast per run.
   const laneRef = (launchKind === 'fix' || launchKind === 'ci-heal') && launch?.pr != null
@@ -300,7 +325,7 @@ export function readTick({
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
     // carrying the live/gone/unknown answer {@link stampLiveness} got for its handle.
-    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents })),
+    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents, isPidAlive })),
     // WHEN THIS READ WAS TAKEN. The declaration ages the double-dispatch guard out (`dispatchStillHolds`) and
     // is pure, so the clock has to arrive as DATA rather than be read there. Omitted or unparseable → nothing
     // ages out and every in-flight record holds, which is the fail-closed direction.
@@ -420,6 +445,30 @@ export function listedSessionIds(sessions) {
 }
 
 /**
+ * IS `handle` ONE OF THE SESSIONS IN THIS LISTING — by PREFIX, not equality.
+ *
+ * #3331's probe proved `claude --bg` ignores `--session-id` (three runs, three mismatches, the CLI's own
+ * stderr warning), so the handle a dispatch carries from now on is never the minted UUID — it is the SHORT id
+ * {@link parseBackgroundedHandle} reads off the CLI's own `--bg` confirmation, which is a hex PREFIX of the
+ * full `sessionId` this listing reports (measured against CLI 2.1.246: `1ae0905c` ↔
+ * `1ae0905c-314c-4f73-a7c4-3973a9005e82`). Equality would never match a short handle against a full id, so
+ * every reader that used to do `listedSessionIds(sessions).has(normalizeHandle(handle))` switches to this.
+ *
+ * STILL CORRECT FOR A FULL HANDLE, deliberately. A full 36-char id is a (trivial) prefix of itself, so this is
+ * a superset of the old comparison, not a replacement with different behaviour on the case it used to handle —
+ * forward-compatible if a future CLI ever starts honouring `--session-id`.
+ *
+ * @param {unknown} handle
+ * @param {unknown[]} sessions
+ * @returns {boolean}
+ */
+export function isHandleListed(handle, sessions) {
+  const h = normalizeHandle(handle);
+  if (!h) return false;
+  return (Array.isArray(sessions) ? sessions : []).some((s) => normalizeHandle(s?.sessionId).startsWith(h));
+}
+
+/**
  * ASK `claude agents --json` WHETHER EACH IN-FLIGHT DISPATCH IS STILL ALIVE, and stamp the answer onto its row.
  *
  * WHY THE GUARD NEEDS THIS AT ALL (PR #1211 round 2, G1). The double-dispatch guard used to release a record
@@ -446,10 +495,23 @@ export function listedSessionIds(sessions) {
  * @param {{listAgents?: () => object[]}} [o]
  * @returns {{runs: object[], unreadable: number, livenessSource: 'claude-agents'|'unreadable'|'not-needed'}}
  */
-export function stampLiveness(inFlight, { listAgents } = {}) {
+export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidAlive } = {}) {
   const rows = Array.isArray(inFlight?.runs) ? inFlight.runs : [];
   const unreadable = Number(inFlight?.unreadable) > 0 ? Number(inFlight.unreadable) : 0;
   if (!rows.length) return { runs: [], unreadable, livenessSource: 'not-needed' };
+
+  // #3645 — A MECHANICAL BUILD'S HANDLE IS A PID, AND THE KERNEL ANSWERS IT. When EVERY row in flight is one of
+  // those, no `claude agents` listing is needed at all — and asking for one would mean an unreadable/absent
+  // `claude` degraded a pid probe that cannot fail into `livenessSource: 'unreadable'`, i.e. the strong answer
+  // reported as the weak one. Same reason the listing is skipped for zero rows above: do not shell `claude` to
+  // ask about handles it has never heard of.
+  if (rows.every((r) => !r.handle || detachedHandlePid(r.handle) !== null)) {
+    return {
+      runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, [], { isPidAlive }) : null })),
+      unreadable,
+      livenessSource: 'wrapper-pid',
+    };
+  }
 
   let sessions = null;
   try {
@@ -475,7 +537,12 @@ export function stampLiveness(inFlight, { listAgents } = {}) {
     return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
   }
   return {
-    runs: rows.map((r) => ({ ...r, live: r.handle ? listed.has(normalizeHandle(r.handle)) : null })),
+    // PREFIX match (#3331), not `listed.has(...)` — `listed` above is still the full-id Set, kept only for the
+    // shape guard; `r.handle` is the short id `parseBackgroundedHandle` stored at dispatch time, and equality
+    // against a full `sessionId` would never match it. See {@link isHandleListed}.
+    // #3645 — through {@link isDispatchHandleLive}, so a MIXED set (an agent-path dispatch and a mechanical one
+    // in flight at once) answers each row with the right question. A `pid:` row never consults `sessions`.
+    runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, sessions, { isPidAlive }) : null })),
     unreadable,
     livenessSource: 'claude-agents',
   };
@@ -800,21 +867,168 @@ export function isPreSpawnRefusal(error) {
   return PRE_SPAWN_REFUSALS.includes(code);
 }
 
+// ================================================================================================
+// #3645 — THE MECHANICAL DISPATCH SEAM. A `build` dispatch no longer hands a `claude --bg` agent the whole
+// 500-line `we:skills-src/conveyor/delivery-agent-brief.md` and trusts it to run its own lifecycle: it starts
+// `we:scripts/operations/deliver-item-run.mjs`, which runs
+// `we:scripts/operations/deliver-item-wrapper.mjs#deliverItem` — acquire → claim → spawn a MINIMAL build agent
+// → gate (one retry) → converge → park decision → open PR → drop learning — mechanically.
+//
+// WHAT USED TO SIT HERE, AND WHERE IT WENT. #3645 wrote the whole of that — the detached primitives, the
+// `build` provider itself, the env knob, the router's `if (kind === 'build')` — inline, in this file. Four
+// sibling kinds are now being wired by four separate lanes (`prepare` #3641, `prepare-decision` #3644, `fix`
+// #3640, `ci-heal` #3642, under `we:backlog/3643-*.md`), and every one of them would have added another arm to
+// that branch and another env read to `createDispatchSinks` — five lanes colliding on the same twenty lines.
+// So the PER-KIND bodies moved out and a registry took their place:
+//
+//   * `we:scripts/operations/detached-dispatch.mjs` — the primitives EVERY detached provider needs (the
+//     `pid:<n>` handle shape, the kernel liveness probe, the detached spawn, the log path). Imported FROM here;
+//     it never imports this file back.
+//   * `we:scripts/operations/dispatch-providers/build.mjs` — the `build` provider, the template a sibling kind
+//     copies.
+//   * `we:scripts/operations/dispatch-provider-registry.mjs` — the table. Adding a kind is adding a ROW; see
+//     {@link routeDispatchProvider}, which now has no per-kind knowledge whatsoever.
+//
+// THIS IS NOT A SPLIT OF THE `@cohesive:` TRIPLE AT THE TOP OF THIS FILE, and the marker's ruling is not being
+// ignored. That ruling is about the READER / SINK / OBSERVER — one operation's io boundary, one effect
+// contract, one handle contract, three halves that must stay together. All three are still here, unchanged and
+// still sharing the sink's handle docblock. What left is the per-kind PROVIDER machinery #3645 ADDED to this
+// file afterwards, which was never one of the three; `isDispatchHandleLive` below is the deliberate proof of
+// the distinction — it stays, because it composes a moved primitive (`detachedHandlePid`) with an io-shell read
+// (`isHandleListed`, the `claude agents` listing), and that composition is io-boundary business.
+// ================================================================================================
+
+// ── BACK-COMPAT RE-EXPORTS ──────────────────────────────────────────────────────────────────────────────────
+// Every symbol this file exported before the extraction is still exported from it, so no existing importer —
+// the dispatch test suite included — has to move. NEW CODE SHOULD IMPORT FROM THE REAL HOMES NAMED ABOVE:
+// detached primitives from `./detached-dispatch.mjs`, the `build` provider from `./dispatch-providers/build.mjs`,
+// and anything mode- or kind-related from `./dispatch-provider-registry.mjs`.
+export {
+  DETACHED_HANDLE_PREFIX,
+  defaultIsPidAlive,
+  defaultSpawnDetached,
+  deliveryDispatchLogPath,
+  detachedHandlePid,
+} from './detached-dispatch.mjs';
+export { DELIVER_ITEM_RUN_SCRIPT, deliverItemDetachedProvider } from './dispatch-providers/build.mjs';
+
+/**
+ * BACK-COMPAT — the `build` kind's opt-out env var. It is DECLARED in the registry now (`modeEnv` on the
+ * `build` entry) and that is the copy everything acts on; this one exists only so pre-registry importers keep
+ * resolving.
+ *
+ * WHY IT IS RE-STATED AS A LITERAL RATHER THAN READ OFF THE ENTRY, which would be the obvious way to stop the
+ * two drifting: `we:scripts/conveyor/lease-reaper.mjs` imports this file and this file (through the registry
+ * and the `build` provider) imports it back — a module cycle that predates the registry. In a cycle, a
+ * MODULE-LOAD-TIME call across the seam (`dispatchProviderEntry('build').modeEnv`) reads a binding that may not
+ * be initialised yet, and it fails only for whichever import order happens to enter the cycle first — the worst
+ * kind of breakage to own. A literal is evaluated by nobody. The no-drift guarantee is bought back by a test
+ * instead (`./__tests__/dispatch-provider-registry.test.mjs` asserts the two are equal), which is where a
+ * static fact belongs. {@link buildDispatchModeFromEnv} below is a CALL-time read and so has no such problem.
+ */
+export const BUILD_DISPATCH_MODE_ENV = 'WE_BUILD_DISPATCH_MODE';
+
+/**
+ * BACK-COMPAT — `build`'s mode, as a thin alias over the registry. Identical behaviour to #3645's own function
+ * (default `mechanical`, accepts `agent`, throws on anything else naming the var); the reasoning it used to
+ * carry now lives on {@link ./dispatch-provider-registry.mjs#dispatchModeFor}, generalised to every kind.
+ * New code wanting EVERY kind's mode should call `dispatchModesFromEnv` instead.
+ * @returns {'mechanical'|'agent'}
+ */
+export function buildDispatchModeFromEnv(env = process.env) {
+  // Read through the back-compat CONSTANT rather than `entry.modeEnv`, so this alias keeps answering about the
+  // variable its existing callers named — which is the whole job of a back-compat alias — even if the `build`
+  // entry is ever re-keyed to a different one. The two are equal today, and a test holds them equal.
+  return dispatchModeFor({ ...dispatchProviderEntry('build'), modeEnv: BUILD_DISPATCH_MODE_ENV }, env);
+}
+
+/**
+ * THE ONE LIVENESS QUESTION, for BOTH handle shapes — a `claude --bg` short id (asked of the agent listing, as
+ * before) and a `#3645` detached-wrapper `pid:<n>` (asked of the kernel). Every reader that used to call
+ * {@link isHandleListed} directly calls this instead, so the two readers cannot drift.
+ *
+ * @param {unknown} handle
+ * @param {unknown[]} sessions - a `claude agents --json` listing; IGNORED for a `pid:` handle.
+ * @param {{isPidAlive?: (pid: number) => boolean}} [io]
+ * @returns {boolean}
+ */
+export function isDispatchHandleLive(handle, sessions, { isPidAlive = defaultIsPidAlive } = {}) {
+  const pid = detachedHandlePid(handle);
+  if (pid !== null) return Boolean(isPidAlive(pid));
+  return isHandleListed(handle, sessions);
+}
+
+/**
+ * THE ROUTER (`#3645`) — the default `provider` {@link createDispatchSinks} installs. It has NO per-kind
+ * knowledge any more: it asks {@link ./dispatch-provider-registry.mjs#dispatchProviderEntry} whether this
+ * launch kind has a mechanical provider and dispatches to it unless the operator opted THAT KIND out. A kind
+ * with no entry falls through to the agent path — the unchanged `claude --bg` spawn from that kind's own
+ * brief, whose first steps (`lane-pool acquire`, `verify-lane`, `gh pr view`, `run.mjs open-pr`) the agent
+ * itself runs (see `we:scripts/guard-bash.mjs`'s own note on exactly that, and `we:backlog/3643-*.md` for the
+ * sibling wiring stories).
+ *
+ * WHY THE BRANCH WENT AWAY. #3645 wrote this as `if (kind === 'build' && buildMode !== 'agent')`. Four sibling
+ * lanes are wiring four more kinds; four more arms on that one `if`, each from a different lane, is four
+ * conflicts on twenty lines. With the registry, "add a kind" is "add a row" and this function is never edited
+ * again. Behaviour is IDENTICAL today: the table holds exactly `build`, so `build` goes mechanical and the
+ * other five go to the agent, which is what the line above did.
+ *
+ * `modes` IS DATA, NOT AN ENVIRONMENT READ. It arrives already resolved from
+ * {@link ./dispatch-provider-registry.mjs#dispatchModesFromEnv}, read ONCE at sink-construction time — see
+ * {@link createDispatchSinks}. A kind missing from `modes` takes its registered provider; only the literal
+ * string `agent` diverts a registered kind.
+ *
+ * @param {object} request - the `#3579` port request.
+ * @param {object} [io]
+ * @param {Record<string, 'mechanical'|'agent'>} [io.modes] - kind → mode, resolved once at construction.
+ * @param {Record<string, object>} [io.registry] - the provider table; injectable so a test can hand in its own.
+ * @param {Function} [io.agent] - the fallback provider: the unchanged `claude --bg` path.
+ * @param {'mechanical'|'agent'} [io.buildMode] - BACK-COMPAT (#3645's parameter): `modes.build` as a scalar.
+ * @param {Function} [io.mechanical] - BACK-COMPAT (#3645's parameter): overrides the `build` entry's provider.
+ */
+export function routeDispatchProvider(request, {
+  modes = {},
+  registry = DISPATCH_PROVIDER_REGISTRY,
+  agent,
+  // BACK-COMPAT with #3645's own call shape, kept rather than deleted because the tests that pin #3645's
+  // behaviour inject through it: `mechanical` is how they reach `deliverItemDetachedProvider`'s `spawnDetached`
+  // seam, which is what keeps a routing test from starting a real detached process. New callers pass `modes`
+  // (and `registry`, if they must) and never these two.
+  buildMode,
+  mechanical,
+} = {}) {
+  const kind = String(request?.launchKind || 'build');
+  const entry = dispatchProviderEntry(kind, registry);
+  const mode = modes?.[kind] ?? (kind === 'build' ? buildMode : undefined);
+  if (entry && mode !== 'agent') {
+    return (kind === 'build' && typeof mechanical === 'function' ? mechanical : entry.provider)(request);
+  }
+  return agent(request);
+}
+
 /**
  * THE SINK — the one thing in this repo that starts a delivery agent.
  *
- * THE HANDLE IS MINTED, NOT DISCOVERED, and that is the load-bearing detail. The #3030 spike established that
- * `sessionId` is the durable handle and `pid` must never be one (the OS reuses it), and read the id back out of
- * `claude agents --json`. Reading it back needs a before/after diff of the live session list and races every
- * other session that starts in the same instant. `claude --session-id <uuid>` removes the race outright: the
- * dispatcher CHOOSES the id, so the handle is known before the agent exists and cannot be attributed to the
- * wrong session. (The spike did not have this; it is the one place its account was narrower than the CLI.)
+ * THE HANDLE IS READ FROM THE CLI'S OWN CONFIRMATION, NOT MINTED — corrected by #3331. This docblock used to
+ * claim `claude --session-id <uuid>` "removes the race outright" by letting the dispatcher choose the id
+ * before the agent exists. #3331's probe disproved that against the real CLI: THREE runs, THREE mismatches
+ * between the id passed and the id `claude agents --json` reported back, and the CLI's own stderr warns
+ * `--bg manages the session id; ignoring --session-id`. The #3030 spike's "read it back and race every other
+ * session starting in the same instant" problem was real — but the CLI already solves it, for free, in the
+ * SAME stdout {@link defaultSpawnAgent} already captures: a `--bg` confirmation prints
+ * `backgrounded · <shortId> · <name>`, where `<shortId>` is a hex PREFIX of the real `sessionId` (measured:
+ * `1ae0905c` ↔ `1ae0905c-314c-4f73-a7c4-3973a9005e82`). {@link parseBackgroundedHandle} reads it SYNCHRONOUSLY
+ * off the spawn's own return value — no polling, no before/after diff, no race with a concurrent dispatch,
+ * because the id comes from the one process that assigned it. `mintSessionId` and `--session-id` in the argv
+ * are kept (harmless — the CLI just ignores the flag) so a future CLI that starts honouring it costs nothing
+ * to benefit from, but neither is load-bearing for identity any more.
  *
- * WHAT IS STILL NOT COVERED, stated rather than papered over: a sink killed between `claude --bg` returning and
- * this function returning loses the handle, and the executor then refuses the entry on replay (it is
- * `in-flight` with a null handle — `inFlightEntries().unknown`). That window is a few milliseconds wide and the
- * failure is VISIBLE and closable with `resolveInFlight`, which is the whole reason #3073 wrote `in-flight`
- * before the sink rather than after.
+ * WHAT IS STILL NOT COVERED, stated rather than papered over: a sink killed between `claude --bg` returning
+ * and this function returning loses the handle, same as before, and so does a `--bg` that returns 0 but prints
+ * a confirmation this parser cannot read (a future CLI output change). Both throw here rather than return, and
+ * the executor then refuses the entry on replay (it is `in-flight` with a null handle —
+ * `inFlightEntries().unknown`). That window is VISIBLE and closable with `resolveInFlight`, which is the whole
+ * reason #3073 wrote `in-flight` before the sink rather than after.
  *
  * NO PERMISSION FLAGS ARE BAKED IN — but the knob is REACHABLE. `extraArgs` (model, effort, permission mode)
  * defaults to empty, because a dispatcher that hard-coded `--dangerously-skip-permissions` would silently widen
@@ -823,12 +1037,13 @@ export function isPreSpawnRefusal(error) {
  * parameter only a test can reach.
  *
  * PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI. `./__tests__/dispatch-spawn-live.test.mjs` starts a
- * `claude` executable — a fake first on `PATH` that parses options the way a commander-style CLI does — and
- * asserts this argv is ACCEPTED, that `--bg` returns instead of blocking, and that the session id pinned here
- * is the id `defaultListAgents` later reports back. What is still NOT proven: no dispatch has been fired end
- * to end, and the REAL CLI's response to this argv remains unasserted. A background session's permission mode
- * and the isolation default are the two things a first live run has to settle; #xaibmeu, which routes the
- * conveyor through this operation, is where that happens.
+ * `claude` executable — a fake first on `PATH` that parses options the way a commander-style CLI does, and
+ * (post-#3331) mints its own id and prints the same confirmation shape the real CLI does — and asserts this
+ * argv is ACCEPTED, that `--bg` returns instead of blocking, and that the handle {@link parseBackgroundedHandle}
+ * recovers from the confirmation is a real prefix of the id `defaultListAgents` later reports back. What is
+ * still NOT proven: no dispatch has been fired end to end against the REAL CLI. A background session's
+ * permission mode and the isolation default are the two things a first live run has to settle; #xaibmeu, which
+ * routes the conveyor through this operation, is where that happens.
  *
  * ── THE PROVIDER PORT (#3579) ───────────────────────────────────────────────────────────────────────────────
  *
@@ -836,7 +1051,7 @@ export function isPreSpawnRefusal(error) {
  * this item (#3579) names, mirroring #3370's judge-seam extraction. Its shape is deliberately independent of
  * any one CLI:
  *
- *   request:  {sessionId, cwd, prompt, sessionSlug, num, extraArgs, systemPromptFile}
+ *   request:  {sessionId, cwd, prompt, sessionSlug, num, launchKind, extraArgs, systemPromptFile}
  *             — a session/item identity, the FILLED brief text, and an expected-duration hint (read by the
  *             caller from `payload.expectedWithinMinutes`, not part of the request itself).
  *   returns:  a durable handle string (or a Promise of one) usable for LATER liveness polling — never a raw
@@ -844,10 +1059,12 @@ export function isPreSpawnRefusal(error) {
  *
  * `defaultClaudeProvider` is ONE implementation of this port, not the port itself: it composes
  * {@link buildAgentArgv} (Claude's argv construction) with the injected `spawnAgent` (the CLI-shaped seam that
- * already existed) and answers with `sessionId` as the handle — Claude's own liveness reads (`stampLiveness`
- * et al.) already poll by that same minted id, so {@link parseBackgroundedId}'s stdout parsing plays no part in
- * producing THIS handle; it stays exactly where it was, serving the resume-detection path
- * (`resumeSucceeded`) that reads a live spawn's own printed id.
+ * already existed) and answers with the handle the spawn's OWN confirmation carried
+ * ({@link parseBackgroundedHandle}) — never the minted `sessionId`, which #3331 proved `claude --bg` ignores.
+ * Keeping that read inside the provider is what makes it Claude-specific rather than part of the port: another
+ * CLI answers the same request with whatever durable handle IT can later be polled by.
+ * {@link parseBackgroundedId} / {@link resumeSucceeded} are a separate pair and stay exactly where they were,
+ * serving the resume-detection path (`#xu2krte`) rather than this one.
  *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
@@ -856,25 +1073,64 @@ export function isPreSpawnRefusal(error) {
  *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT `spawnAgent` goes through. See
  *   {@link readTick} for why this is a second seam and not the same one.
+ * @param {Record<string, 'mechanical'|'agent'>} [o.modes] - every registered kind's dispatch mode, read from
+ *   the environment ONCE at construction ({@link ./dispatch-provider-registry.mjs#dispatchModesFromEnv}).
+ * @param {'mechanical'|'agent'} [o.buildMode] - BACK-COMPAT (#3645): `modes.build`, as a scalar.
+ * @param {Record<string, object>} [o.registry] - the per-kind provider table; injectable so the DEFAULT path
+ *   can be exercised without a real process being started.
  * @param {(request: object) => (string|Promise<string>)} [o.provider] - the PORT (see above). Defaults to
- *   {@link defaultClaudeProvider} closed over `spawnAgent`.
+ *   {@link routeDispatchProvider} over `registry`/`modes`, falling back to {@link defaultClaudeProvider}
+ *   closed over `spawnAgent` for any kind with no mechanical provider.
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
+ * @param {(root: string) => void} [o.freshenCheckout] - mechanical-dispatcher #3383 Part 2 follow-up. Runs
+ *   BEFORE `provider(request)`, best-effort. Defaults to a no-op; `run.mjs`'s own registration passes
+ *   `../delivery-agent-marker.mjs#defaultFreshenPrimaryCheckout`.
  * @returns {Record<string, Function>} effect type → `async (payload, ctx) => result`.
  */
 export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
-  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
+  // #3645 — EVERY REGISTERED KIND'S MODE is read from the environment ONCE, here, at sink-construction time
+  // rather than per dispatch, so one tick cannot straddle two modes. A test injects the map directly (or an
+  // `env` object through `dispatchModesFromEnv`) and never touches `process.env`. Generalised from the single
+  // `buildMode` scalar #3645 read: the reason is unchanged, it now just covers every kind in the table.
+  modes = dispatchModesFromEnv(),
+  // BACK-COMPAT — #3645's own `buildMode` scalar, which twelve existing dispatch tests pass to name the agent
+  // path they are testing. When given it overrides `modes.build` and nothing else. New callers pass `modes`.
+  buildMode,
+  // #3645 — the provider table itself, injectable for the same reason `spawnAgent` is: the DEFAULT path
+  // (registry → `deliverItemDetachedProvider` → a real detached `node`) is otherwise the one path no test can
+  // exercise without starting a process, and an untestable default is a default that rots.
+  registry = DISPATCH_PROVIDER_REGISTRY,
+  // #3645 — THE DEFAULT PROVIDER IS THE ROUTER, not `defaultClaudeProvider`. A launch kind with a row in the
+  // registry runs that row's provider (today: `build` → the deliver-item wrapper, in its own detached
+  // process); every other kind — and any registered kind opted out through its own `modeEnv` — still takes the
+  // unchanged `claude --bg` path below. A caller supplying its own `provider` bypasses the routing entirely,
+  // exactly as before.
+  provider = (request) => routeDispatchProvider(request, {
+    modes: buildMode ? { ...modes, build: buildMode } : modes,
+    registry,
+    agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
+  }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
+  // mechanical-dispatcher #3383 Part 2 follow-up — BEST-EFFORT freshen of `root` BEFORE `provider(request)`
+  // runs, so a mechanical provider's own `deliveryAgent:` marker read (`../delivery-agent-marker.mjs`) sees
+  // whatever has already landed on `root`'s tracked branch, not a stale on-disk snapshot. Defaults to a NO-OP:
+  // every existing caller and test that does not name this parameter must stay byte-identical — see
+  // `delivery-agent-marker.mjs#defaultFreshenPrimaryCheckout`'s own docblock for why a git-shelling default
+  // here would be unsafe, and why `run.mjs`'s own `dispatch-lane` registration is the one place that passes
+  // the real function in.
+  freshenCheckout = () => {},
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
+      freshenCheckout(root);
       const sessionId = String(mintSessionId());
       let handle;
       try {
@@ -884,6 +1140,25 @@ export function createDispatchSinks({
           prompt: payload?.prompt,
           sessionSlug: payload?.sessionSlug,
           num: payload?.num,
+          // #3105 — which KIND of mechanical dispatch this is (build / fix / ci-heal). Part of the port's
+          // request rather than a Claude detail: every provider needs to tell the agent it starts what it was
+          // started FOR. `defaultClaudeProvider` carries it across as the `WE_DISPATCH_KIND` env var.
+          launchKind: payload?.launchKind,
+          // #3645 — THE LANE AND ITS SCOPE, already on the effect payload (`dispatch-lane.mjs`'s `dispatch`
+          // step) and until now read only by the brief's own fill. The mechanical build provider needs them as
+          // DATA, because it is the wrapper — not an agent reading a brief — that runs `lane-pool acquire`.
+          // Part of the port's request rather than a wrapper detail: "which lane, under what scope" is
+          // CLI-independent, exactly like `launchKind`.
+          lane: payload?.lane,
+          scope: payload?.scope,
+          // #3640 — THE PR A REPAIR DISPATCH REPAIRS, and (CI-heal only) WHY. Already on the effect payload
+          // since #3332 and until now read only by the brief's own fill; a PR-KEYED mechanical provider needs
+          // them as DATA, because it is the wrapper — not an agent reading a brief — that runs `gh pr view`.
+          // Part of the port's request for the same reason `lane`/`scope` are: "which PR, and why" is
+          // CLI-independent. `null` for build/prepare/prepare-decision/investigate, which never have one.
+          // `reason` is forwarded here rather than by #3642 so that lane adds a ROW and nothing else.
+          pr: payload?.pr,
+          reason: payload?.reason,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
         });
@@ -905,6 +1180,10 @@ export function createDispatchSinks({
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
       return inFlight({
+        // #3331: NEVER the minted `sessionId` for Claude — `defaultClaudeProvider` reads the real handle off
+        // the spawn's own confirmation and REFUSES (throws, landing the entry `in-flight` with a null handle)
+        // when it cannot. The `sessionId` fallback below is reachable only for a NON-Claude `provider` that
+        // chooses to key liveness on the id it was handed.
         handle: handle != null ? String(handle) : sessionId,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });
@@ -915,10 +1194,19 @@ export function createDispatchSinks({
 /**
  * THE DEFAULT provider port implementation (#3579) — Claude's own. Translates the port's CLI-independent
  * request into {@link buildAgentArgv}'s payload shape, hands the resulting argv to `spawnAgent`, and answers
- * with the pre-minted `sessionId` as the durable handle (matching the pre-#3579 behaviour exactly: the sink
- * never trusted stdout for the handle, only the id it minted itself).
+ * with the handle the spawn ITSELF printed back.
  *
- * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
+ * NOT the pre-minted `sessionId` (#3331). `claude --bg` ignores `--session-id` and mints its own — three runs,
+ * three mismatches, plus the CLI's own stderr warning — so the id this function was handed is what was ASKED
+ * for, never what the CLI used. {@link parseBackgroundedHandle} reads the real one off the confirmation line.
+ *
+ * A spawn that returned 0 but printed nothing parseable THROWS rather than falling back to the minted id: that
+ * is the SAME indeterminate shape as a thrown spawn (something may be running, its identity is unknown), and
+ * the sink's own catch already lands exactly that outcome — the entry stays `in-flight` with a NULL handle,
+ * `inFlightEntries` reports it under `unknown`, and the replay guard refuses to double-dispatch it. Returning
+ * a handle known to be wrong would instead key every later liveness read on a session that does not exist.
+ *
+ * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, launchKind?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
  * @param {{spawnAgent?: Function}} [io]
  * @returns {string}
  */
@@ -929,8 +1217,23 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     extraArgs: request.extraArgs,
     systemPromptFile: request.systemPromptFile,
   });
-  spawnAgent(argv, { cwd: request.cwd });
-  return request.sessionId;
+  // #3105 — mark this session as a MECHANICALLY DISPATCHED delivery/fix/ci-heal agent, via env (inherited
+  // by the whole `claude --bg` process tree). `scripts/guard-bash.mjs` reads it to deny a dispatched
+  // session from ever running the verification set (verify-lane/check:standards/test:unit) directly — it
+  // must `request` + poll `check` instead, so the gate's own long runtime is never the agent's own Bash
+  // call's problem. An interactive operator session (this var unset) is completely unaffected.
+  const stdout = spawnAgent(argv, {
+    cwd: request.cwd,
+    env: { ...process.env, WE_DISPATCH_KIND: String(request.launchKind || 'build') },
+  });
+  const handle = parseBackgroundedHandle(stdout);
+  if (!handle) {
+    throw new Error(
+      'claude --bg started an agent but its confirmation output carried no parseable session handle — '
+      + `whether it is the agent this dispatch expects cannot be told: ${JSON.stringify(String(stdout ?? '').slice(0, 200))}`,
+    );
+  }
+  return handle;
 }
 
 /**
@@ -949,6 +1252,36 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
   });
 }
 
+/**
+ * #3383 follow-up (the harder, per-agent-CPU half) — the ASYNC counterpart to {@link defaultSpawnAgent}, built
+ * for a dispatch wrapper's own full-turn BLOCKING agent spawn (`CLAUDE_RESTRICTED_PROVIDER.spawn` and its four
+ * siblings across `deliver-item-wrapper.mjs`/`fix-dispatch-wrapper.mjs`/`ci-heal-dispatch-wrapper.mjs`/
+ * `prepare-scope-wrapper.mjs`/`prepare-decision-wrapper.mjs`), NOT for `defaultClaudeProvider`'s fire-and-forget
+ * `--bg` dispatch just above (which stays on `defaultSpawnAgent`/`execFileSync` — it returns almost instantly
+ * once the CLI backgrounds the session, so an async child-rusage read has nothing to offer there).
+ *
+ * WHY THIS EXISTS: `execFileSync` is a SYNCHRONOUS call that blocks the whole event loop for the entire agent
+ * turn, forces the sync exec family's own internal buffering, and gives no way to react to partial output —
+ * real, independent problems worth fixing on their own. It was ALSO once assumed to be the fix for a second,
+ * separate problem: `telemetry-store.mjs#cpuUsageDeltaMs`'s own header documents that a wrapper's
+ * `process.cpuUsage()` sample measures the WRAPPER, never the spawned agent. That second problem is NOT fixed
+ * by this conversion — `scripts/lib/spawn-to-completion.mjs`'s own header documents, with verification against
+ * real Node, that `ChildProcess` has no `resourceUsage()` method at all; a per-child real-CPU reading was never
+ * actually available here. This function still inherits `spawnToCompletion`'s full execFileSync-equivalence
+ * contract (stdout/stderr capture, exit-code/signal/timeout/maxBuffer handling) unchanged, and `resourceUsage`
+ * stays in its return shape only as a forward-compatible, always-`null`-today field.
+ *
+ * @param {string[]} argv
+ * @param {object} [opts]
+ * @param {{spawnFn?: Function}} [io] - injected ONLY so a test can assert the spawn without a real `claude`.
+ * @returns {Promise<{stdout: string, stderr: string, resourceUsage: object|null}>}
+ */
+export function spawnAgentToCompletion(argv, opts = {}, io = {}) {
+  return spawnToCompletion('claude', argv, {
+    encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
+  }, io);
+}
+
 /** The dispatched agent's own standing identity, appended as a system prompt (#xqyyoje) — see the file's own
  *  header for why it is kept separate from the per-item prompt, not folded into `delivery-agent-brief.md`. */
 export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'conveyor', 'dispatched-agent-system-prompt.md');
@@ -957,8 +1290,10 @@ export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(im
  * The `claude` argv for one dispatch. PURE and exported, because the argv IS the contract with the CLI and a
  * test that asserts it is the only thing standing between a flag rename and a silent non-dispatch.
  *
- * `--bg` starts the session and returns immediately; `--session-id` pins the handle; `-n` names the session so
- * `claude agents` is legible to an operator watching the pool.
+ * `--bg` starts the session and returns immediately; `--session-id` is passed but PROVEN IGNORED by the real
+ * CLI on a `--bg` spawn (#3331) — kept anyway because it costs nothing and a future CLI may honour it; `-n`
+ * names the session so `claude agents` is legible to an operator watching the pool. The handle the dispatcher
+ * actually keys on comes from neither flag — see {@link parseBackgroundedHandle}.
  *
  * `--append-system-prompt-file` (#xqyyoje), when `systemPromptFile` is given, adds the dispatched agent's
  * standing identity ahead of `extraArgs` and the prompt — a real CLI flag (`claude --help`), unused before this,
@@ -1001,6 +1336,37 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
     ...extraArgs.map(String),
     prompt,
   ];
+}
+
+/**
+ * THE SESSION HANDLE `claude --bg` PRINTS IN ITS OWN CONFIRMATION — the #3331 remedy, and the only source
+ * {@link defaultClaudeProvider} trusts for a dispatch's identity now.
+ *
+ * THE SHAPE, measured against CLI 2.1.246, not invented: a `--bg` spawn's stdout begins with a line reading
+ * `backgrounded · <shortId> · <name>` (the middle dot is U+00B7), where `<shortId>` is a lower-case hex string
+ * — 8 characters on every run observed — that is a genuine PREFIX of the full `sessionId` `claude agents
+ * --json` reports back for that same session (`1ae0905c` ↔ `1ae0905c-314c-4f73-a7c4-3973a9005e82`). This line
+ * is on STDOUT specifically; the `--session-id ignored` warning that precedes it in a terminal is on stderr
+ * and never reaches this parser, which is why {@link defaultSpawnAgent}'s plain `execFileSync` capture is
+ * enough — no stream-merging needed.
+ *
+ * WHY A PREFIX AND NOT THE FULL ID. The full id is never printed synchronously — only `claude agents --json`
+ * carries it, and reading that back races a concurrent dispatch (the exact problem `--session-id` was
+ * supposed to solve and does not). The short id has no such race: it is emitted by the one process that
+ * assigned it, before this function returns. {@link isHandleListed} is the matching half — a prefix check,
+ * because equality would never find a short handle inside a listing of full ids.
+ *
+ * RETURNS null ON ANYTHING ELSE, deliberately never a best-effort guess. A CLI output change that breaks this
+ * regex must surface as "no handle could be read" (the sink turns that into a throw, landing the entry
+ * `in-flight` with a null handle, exactly like a killed sink) rather than silently keying a dispatch on a
+ * fragment of the wrong line.
+ *
+ * @param {string} stdout - what {@link defaultSpawnAgent} (or an injected `spawnAgent`) returned for a `--bg` call.
+ * @returns {string|null}
+ */
+export function parseBackgroundedHandle(stdout) {
+  const m = /backgrounded\s*·\s*([0-9a-f]{6,})\s*·/i.exec(String(stdout ?? ''));
+  return m ? m[1].toLowerCase() : null;
 }
 
 /**
@@ -1156,6 +1522,9 @@ export function createDispatchObservers({
   exec = execFileSync,
   listAgents = () => defaultListAgents({ exec }),
   listPrs = () => defaultListPrs({ exec }),
+  // #3645 — the liveness probe for a DETACHED delivery-wrapper handle (`pid:<n>`). Injectable for the same
+  // reason `listAgents`/`listPrs` are: the whole axis must be testable with no real process to signal.
+  isPidAlive = defaultIsPidAlive,
   now = () => new Date(),
 } = {}) {
   // `undefined` is the not-yet-read sentinel, NOT `null`: a reader that returns `null` (or anything else the
@@ -1209,6 +1578,28 @@ export function createDispatchObservers({
 
       // ── AXIS 2: LIVENESS. Unchanged — it is what answers while no PR exists yet, which is every dispatch
       //    for most of its life, and the dominant case until real dispatch lands.
+      //
+      // #3645 — A MECHANICAL BUILD IS ANSWERED BY THE KERNEL, BEFORE ANY `claude agents` CALL. The delivery
+      // wrapper runs in its own detached process and was never a `--bg` session, so it is not in that listing
+      // and never will be; asking anyway would read "gone" for a delivery that is an hour into its build. The
+      // grace-window and `unresolved` branches below are shared verbatim — only the liveness QUESTION differs,
+      // not what is done with its answer.
+      const detachedPid = detachedHandlePid(handle);
+      if (detachedPid !== null) {
+        if (isPidAlive(detachedPid)) return { status: 'running', result: null };
+        const startedDetached = entry?.startedAt ? Date.parse(entry.startedAt) : NaN;
+        if (!Number.isNaN(startedDetached) && now().getTime() - startedDetached < LISTING_GRACE_MS) {
+          return { status: 'running', result: null };
+        }
+        return {
+          status: 'unresolved',
+          error: `the delivery wrapper process ${handle} has exited, which reports liveness and not outcome, and no `
+            + 'MERGED PR for this item can be attributed to this dispatch — whether the build finished cleanly cannot '
+            + `be told from here. Read its log (\`${deliveryDispatchLogPath(entry?.payload?.sessionSlug ?? '')}\`) and `
+            + 'its delivery report, then close the entry out.',
+        };
+      }
+
       if (listed === undefined) listed = listAgents();
       const sessions = listed;
       if (!Array.isArray(sessions)) {
@@ -1227,7 +1618,10 @@ export function createDispatchObservers({
           + 'not understood, which is not evidence that any session ended',
         );
       }
-      const live = listedIds.has(normalizeHandle(handle));
+      // PREFIX match (#3331), not `listedIds.has(...)` — `handle` is the short id {@link parseBackgroundedHandle}
+      // read off the dispatch's own confirmation, and `listedIds` (above) is full ids kept for the shape guard
+      // only. See {@link isHandleListed}.
+      const live = isHandleListed(handle, sessions);
       if (live) return { status: 'running', result: null };
 
       // NOT-YET-LISTED IS NOT GONE. `--bg` returns before the session is necessarily visible, so a poll inside

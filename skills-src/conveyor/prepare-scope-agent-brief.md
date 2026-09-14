@@ -1,5 +1,31 @@
 # Conveyor prepare-scope agent brief (template) — author ONE item's `scope:`, stop at ready-to-merge (#2613)
 
+> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#3641`, epic `#3383`).** A `prepare` dispatch no
+> longer spawns an agent with this brief. It starts
+> [we:scripts/operations/prepare-scope-run.mjs](../../scripts/operations/prepare-scope-run.mjs) — a detached,
+> per-dispatch process running
+> [we:scripts/operations/prepare-scope-wrapper.mjs](../../scripts/operations/prepare-scope-wrapper.mjs) — which
+> does the mechanical steps below ITSELF and spawns a MINIMAL agent
+> ([we:skills-src/conveyor/prepare-scope-agent-brief-v2.md](prepare-scope-agent-brief-v2.md)) for the one thing
+> that is actually judgment: predict the item's touch-set and write its `scope:`. You are reading THIS brief
+> because somebody set `WE_PREPARE_DISPATCH_MODE=agent`. Everything below still applies to you, unchanged.
+>
+> **What the wrapper now owns on the default path:** the lane acquire (step 1); the gate, run synchronously in
+> the wrapper's own process with exactly one resume-and-retry handed back to the agent (step 4); the
+> "edit exactly one file" guardrail, now checked against the real working tree before anything is committed; the
+> commit and the PR, opened through the same `run.mjs open-pr --mode=label-on-green` (step 6); the escalation
+> cases, decided by reading the agent's reported outcome (Escalations); and the learnings drop, forwarded from
+> that same report (step 7).
+> **What the agent still does directly:** read the spec and the code it implies, predict the touch-set, write
+> `scope:` into that one file, report.
+>
+> **Step 5 — the agent's own adversarial review subagent — is DROPPED on the default path, not moved.** An agent
+> spawning its own reviewer inside its own dispatched turn is the anti-pattern `#3627` removed from the build
+> agent and `#3629` ratified removing from the fix agent. What replaces it here is two mechanical checks the
+> wrapper runs: the single-file guardrail above, and the gate itself (which is what actually rejects a malformed
+> or empty `scope:`). What is deliberately NOT replaced, and is named rather than papered over: nothing
+> re-judges whether a WELL-FORMED prediction is a GOOD one. See the wrapper's own header for that gap.
+>
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2613) instantiates it — filling the
 > `{{PLACEHOLDERS}}` below — and passes the result as the prompt for **one background prepare-scope agent** it
 > spawns per `unshaped-no-scope` item (a cleared item the dispatcher is holding because it has no predicted
@@ -97,14 +123,27 @@ scope:
 
 ### 4. Run the gate GREEN
 
-The scope shape is enforced by `check:standards` (array of non-empty strings; empty/`[]` is an error). Run it in
-the item's own locus (a WE item is `check:standards`; a cross-locus item runs `LOCI[item.locus]`'s gate):
+The scope shape is enforced by `check:standards` (array of non-empty strings; empty/`[]` is an error), run in
+the item's own locus (a WE item is `check:standards`; a cross-locus item runs `LOCI[item.locus]`'s gate).
+
+**You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
+well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
+auto-backgrounded by the tool itself, and you stall with no error. This is not just guidance — a
+`PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`, #3105) **DENIES** a dispatched agent from running the
+verification set (`verify-lane` / `run.mjs verify` / `check:standards` / `test:unit`) directly, in any form.
+The runner's own long-lived process (unbound by your turn's window) runs the gate for you. Request it, then
+poll across turns:
 
 ```bash
-npm run check:standards
+node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
+# … on a LATER turn (the runner picks it up on its own tick, ~120s cadence) …
+node scripts/verify-lane.mjs check --json          # poll until status settles; `running` is NOT a failure — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 ```
 
-A red gate is a hard stop — fix your frontmatter (usually a bad YAML shape or an empty array) until it is green.
+Only `green` clears you to proceed.
+
+A red gate is a hard stop — fix your frontmatter (usually a bad YAML shape or an empty array) and re-request
+until it is green.
 
 ### 5. Review your own scope prediction — spawn an adversarial review subagent (converge BEFORE the PR)
 

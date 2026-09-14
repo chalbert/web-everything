@@ -15,6 +15,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { DISPATCH_PROVIDER_REGISTRY } from '../dispatch-provider-registry.mjs';
+
 import {
   BRIEF_PLACEHOLDERS,
   BRIEF_TOKEN_RE,
@@ -49,6 +51,10 @@ function spyExec(out = '[]') {
   const exec = (file, argv, opts) => { calls.push({ file, argv, opts }); return out; };
   return { exec, calls };
 }
+
+/** Every REGISTERED mechanical kind, forced onto the AGENT path — derived from the table rather than listed,
+ *  so a sibling wiring lane (#3641/#3642/#3644) adding a row never has to edit a test that is not about it. */
+const AGENT_MODES = Object.fromEntries(Object.keys(DISPATCH_PROVIDER_REGISTRY).map((k) => [k, 'agent']));
 
 describe('the default subprocess calls are BOUNDED — every one of them', () => {
   it('the tick read is bounded, and it is the only network-bound call in the module', () => {
@@ -279,12 +285,37 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
   });
 
   it('the sink goes through `defaultSpawnAgent`, timeout and all', async () => {
-    const { exec, calls } = spyExec('');
-    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
-    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go', expectedWithinMinutes: 90 });
+    // #3331: stdout has to carry a real `backgrounded · <id> · <name>` line — the sink now reads the handle
+    // from it (the CLI ignores `--session-id`), and an empty stdout would make this dispatch indeterminate.
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · conveyor-3037\n');
+    // #3645 — `buildMode: 'agent'` names the path under test: `defaultSpawnAgent`/`defaultClaudeProvider` are
+    // the AGENT path's defaults, and a `build` payload now takes the mechanical one unless it is asked for.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    const result = await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go', expectedWithinMinutes: 90 });
     expect(calls[0].file).toBe('claude');
     expect(calls[0].argv.slice(0, 3)).toEqual(['--bg', '--session-id', 'sess-z9']);
     expect(calls[0].opts).toMatchObject({ timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL' });
+    expect(result.handle).toBe('a9a9a9a9');
+  });
+
+  it('#3105 — stamps WE_DISPATCH_KIND=<launchKind> onto the spawned agent\'s env, so guard-bash can deny it running the gate directly', async () => {
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · fix-3037\n');
+    // #3640 — `modes: AGENT_MODES` names the path under test. `buildMode` alone no longer suffices: `fix` is a
+    // REGISTERED kind now too, so a `fix` payload takes its own mechanical provider unless asked otherwise, and
+    // what this test is about is what `defaultClaudeProvider` stamps on the AGENT path. Derived from the table
+    // so a sibling wiring lane adding a row never has to come back and edit this line.
+    const sinks = createDispatchSinks({ modes: AGENT_MODES, root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'fix-3037', prompt: '# go', launchKind: 'fix' });
+    expect(calls[0].opts.env).toMatchObject({ WE_DISPATCH_KIND: 'fix' });
+  });
+
+  it('#3105 — defaults WE_DISPATCH_KIND to "build" when the payload names no launchKind', async () => {
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · conveyor-3037\n');
+    // #3645 — `buildMode: 'agent'` names the path under test: `defaultSpawnAgent`/`defaultClaudeProvider` are
+    // the AGENT path's defaults, and a `build` payload now takes the mechanical one unless it is asked for.
+    const sinks = createDispatchSinks({ buildMode: 'agent', root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go' });
+    expect(calls[0].opts.env).toMatchObject({ WE_DISPATCH_KIND: 'build' });
   });
 
   it('the observer goes through `defaultListAgents` — same argv, still no `--all`', async () => {

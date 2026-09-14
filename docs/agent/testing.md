@@ -163,6 +163,21 @@ npm run test:integration            # E2E (Playwright)
 npx vitest run --coverage           # coverage report
 ```
 
+**Running concurrently with other lanes/sessions on this host?** (a parallel `/workflow` batch, several
+dispatched lanes, or any other context where more than one of these heavy commands may run at the same
+time) — route the command through the admission wrapper instead of calling it raw:
+```bash
+node scripts/readiness/heavy-admission.mjs run --owner=<lane-or-checkout-path> --lane=<N> -- npm run check:standards
+node scripts/readiness/heavy-admission.mjs run --owner=<lane-or-checkout-path> --lane=<N> -- npm test -- run
+```
+This slots the command into the SAME host-wide capacity semaphore `verify-lane.mjs`'s own gate execution
+already uses (#3461/#3456) — so concurrent lanes never oversubscribe the host's CPU (the #3383 contention
+finding). It fails OPEN on a queuing timeout (runs the command unslotted rather than refusing), so a stuck
+semaphore never strands an otherwise-healthy caller. **This is scoped to concurrent/batch contention, not a
+blanket rule** — a single interactive session running one test file directly (`npx vitest run
+path/to/file.test.ts`, or `npm test` while nothing else heavy is running on the host) needs no wrapper at
+all; reach for it when you know or expect other heavy commands are running alongside yours.
+
 ## Developing & manually testing in a lane
 
 Every edit — including an ad-hoc "just fix this one thing" — happens in an **isolated lane clone**, never the main checkout (#2123; the writer model in [platform-decisions.md#pr-flow-rollout-mechanism](platform-decisions.md#pr-flow-rollout-mechanism)). The lane trigger is *making an edit*, not *running a command*. The main checkout stays the human's — its dev server on `:3000`/`:8080` is theirs; don't build or serve into it.

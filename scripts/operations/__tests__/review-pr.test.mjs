@@ -18,7 +18,7 @@
  * are recorders, and the store is in memory.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import { advance, advanceWhileRunning, projectReads, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
@@ -60,6 +60,30 @@ import {
   // #3540 — the shared record-decision core and the record-verdict vocabulary mapping.
   planRecordDecision,
   confirmAnswerFor,
+  // #xqa9ttq — the opt-in third (Codex, advisory) seat.
+  ADVISORY_JUDGE_LENS,
+  ADVISORY_JUDGE_SEAT,
+  buildReviewAdvisoryJudgeRequest,
+  codexAdvisoryFromEnv,
+  CODEX_ADVISORY_ENV_VAR,
+  defaultCodexAdvisoryProbationCheck,
+  // #x8n4crp — the opt-in FOURTH (Codex, correctness-advisory) seat.
+  CORRECTNESS_ADVISORY_LENS,
+  CORRECTNESS_ADVISORY_SEAT,
+  CORRECTNESS_ADVISORY_EFFORT,
+  buildReviewCorrectnessAdvisoryJudgeRequest,
+  buildReviewCorrectnessAdvisoryMandate,
+  correctnessAdvisoryFromEnv,
+  CORRECTNESS_ADVISORY_ENV_VAR,
+  // #3383 — the opt-in FIFTH (Antigravity, review) seat.
+  ANTIGRAVITY_REVIEW_LENS,
+  ANTIGRAVITY_REVIEW_SEAT,
+  ANTIGRAVITY_REVIEW_EFFORT,
+  buildReviewAntigravityJudgeRequest,
+  buildReviewAntigravityMandate,
+  antigravityReviewFromEnv,
+  ANTIGRAVITY_REVIEW_ENV_VAR,
+  defaultAntigravityReviewProbationCheck,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -83,6 +107,13 @@ function stubReader({
   // proceeds — so adding the guard changes nothing for a suite that is about something else. The
   // independence tests are the only ones that override them.
   body = 'the PR description', clearerId = undefined, createdAt = '',
+  // #xu2pp2m — WHAT A DEGRADED READ ACTUALLY CAME BACK WITH. This used to be hard-wired to `''` for every
+  // `netScored: false` case, which quietly conflated the TWO shapes a degrade can take: "the basis could not
+  // be pinned, but here IS a diff" (limp on and say so — the case the `ref-unresolved` tests below are
+  // actually about) and "the basis could not be pinned AND there is nothing at all" (`unrun`, refused since
+  // #xu2pp2m, because PR #2122 merged on a clean accept over exactly that). Defaulted to real diff text so
+  // the existing degrade tests keep testing the case they were written for; the empty-diff tests pass `''`.
+  degradedDiffText = '--- a/x\n+++ b/x\n+a line the degraded read still saw\n',
 } = {}) {
   return ({ pr, repo }) => ({
     state,
@@ -105,13 +136,23 @@ function stubReader({
     net: netScored
       ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
       : { paths: [], base: null, rev: null, scored: false, reason: netReason },
-    diff: netScored ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true } : { text: '', scored: false, reason: netReason },
+    diff: netScored
+      ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true }
+      : { text: degradedDiffText, scored: false, reason: netReason },
   });
 }
 
-/** A registry holding one freshly-built declaration over a stub reader. */
-function registryFor(readerOptions) {
-  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions) });
+/**
+ * A registry holding one freshly-built declaration over a stub reader.
+ * @param {object} readerOptions - forwarded to `stubReader`.
+ * @param {{codexAdvisory?: boolean, correctnessAdvisory?: boolean, antigravityReview?: boolean}} [opOptions] -
+ *   #xqa9ttq/#x8n4crp/#3383 — forwarded to `reviewPrOperation`. All three default to `false` so every EXISTING
+ *   caller of this helper keeps building today's two-seat declaration unchanged.
+ */
+function registryFor(readerOptions, { codexAdvisory = false, correctnessAdvisory = false, antigravityReview = false } = {}) {
+  const declaration = reviewPrOperation({
+    readPr: stubReader(readerOptions), codexAdvisory, correctnessAdvisory, antigravityReview,
+  });
   const registry = createRegistry();
   registry.register(declaration);
   return { declaration, registry };
@@ -763,6 +804,67 @@ describe('#xlw02hw the advise step posts an advisory note on review:human, befor
     expect(advisory).toContain('ADVISORY REVIEW, NOT A RECORDED VERDICT');
     expect(advisory).toMatch(/still needs the human ceremony/);
     expect(recorded).not.toContain('ADVISORY REVIEW');
+  });
+});
+
+// ── mechanical-dispatcher lane: `review:awaiting-advisory` FLIPS ATOMICALLY WITH THE ADVISORY NOTE ────────
+describe('mechanical-dispatcher: `advise` also clears review:awaiting-advisory, atomically with the note', () => {
+  it('declares AWAITING_ADVISORY_CLEAR as a SECOND effect when the PR still carries the label', async () => {
+    const { registry } = registryFor({ labels: ['review:human', 'review:awaiting-advisory'] });
+    const store = createMemoryRunStore();
+    const posted = [];
+    const cleared = [];
+    const sinks = {
+      [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; },
+      [REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]: async (payload) => { cleared.push(payload); return { cleared: true }; },
+    };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-clear-1', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+    expect(posted).toHaveLength(1);
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]).toEqual({ repo: BASE_INPUT.repo, pr: BASE_INPUT.pr });
+    // ORDER MATTERS: the clear is effect index 1, strictly after the note at index 0, on the SAME `advise` step.
+    const adviseEffects = out.run.effects.filter((e) => e.step === 'advise');
+    expect(adviseEffects.map((e) => e.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE, REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]);
+    expect(adviseEffects.every((e) => e.status === 'applied')).toBe(true);
+  });
+
+  it('declares NO clear effect when the PR never carried (or already lost) review:awaiting-advisory', async () => {
+    // A PR opened before this label existed, or one some other path already cleared — no spurious remove call.
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-clear-2', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+    const adviseEffects = out.run.effects.filter((e) => e.step === 'advise');
+    expect(adviseEffects.map((e) => e.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE]);
+  });
+
+  it('a failed advisory-note post HALTS before the clear ever applies — the label cannot be gamed off', async () => {
+    const { registry } = registryFor({ labels: ['review:human', 'review:awaiting-advisory'] });
+    const store = createMemoryRunStore();
+    const cleared = [];
+    const sinks = {
+      [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => { throw new Error('gh pr comment: network blip'); },
+      [REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]: async (payload) => { cleared.push(payload); return { cleared: true }; },
+    };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-clear-3', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    // The clear sink is NEVER called — the executor halts at the first effect that does not land.
+    expect(cleared).toEqual([]);
+    expect(out.stopped).toBe('effect-halted');
+    const adviseEffects = out.run.effects.filter((e) => e.step === 'advise');
+    expect(adviseEffects.find((e) => e.type === REVIEW_EFFECTS.ADVISORY_NOTE).status).not.toBe('applied');
+    const clearEntry = adviseEffects.find((e) => e.type === REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR);
+    expect(clearEntry.status).not.toBe('applied');
   });
 });
 
@@ -2526,5 +2628,766 @@ describe('#3335 the write-up states what was EARNED beside what SAT', () => {
     expect(body).toContain('did NOT run and are not reported as unjudged');
     const absent = PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l));
     expect(body).toContain(`The other ${absent.length} panel lens(es) (${absent.join(', ')})`);
+  });
+});
+
+// ── #xqa9ttq — THE OPT-IN THIRD SEAT: A TOOL-FREE CODEX JUROR ON AN ADVISORY LENS ────────────────────────────
+describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
+  describe('codexAdvisoryFromEnv', () => {
+    it('is false for any EXPLICITLY SET env value other than the literal string "1" — never depends on probation once the caller has opted out on purpose', () => {
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: 'true' }, { isOnProbation: () => true })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' }, { isOnProbation: () => true })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '' }, { isOnProbation: () => true })).toBe(false);
+    });
+
+    it('is true for the exact literal "1", regardless of probation status', () => {
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(true);
+    });
+
+    // #3383 — the probation default. UNSET is the only case that reads the registry at all, and even then
+    // only through the injected `isOnProbation`, so this suite never touches the real on-disk registry.
+    it('when the env var is UNSET, defaults to the injected probation check', () => {
+      expect(codexAdvisoryFromEnv({}, { isOnProbation: () => true })).toBe(true);
+      expect(codexAdvisoryFromEnv({}, { isOnProbation: () => false })).toBe(false);
+    });
+
+    it('when the env var is UNSET and no override is injected, calls the REAL default probation check', () => {
+      // Not stubbed — proves the real wiring reaches `defaultCodexAdvisoryProbationCheck` (and therefore the
+      // real on-disk registry) rather than only ever being exercised through an injected stub.
+      expect(codexAdvisoryFromEnv({})).toBe(defaultCodexAdvisoryProbationCheck());
+    });
+
+    it('an explicit "1" or "0" NEVER even calls the probation check — a caller can always force the seat either way', () => {
+      const isOnProbation = vi.fn(() => true);
+      codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation });
+      codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' }, { isOnProbation });
+      expect(isOnProbation).not.toHaveBeenCalled();
+    });
+  });
+
+  // #3383 — STRUCTURAL PROOF that flipping this seat on by default (via probation) cannot make it mandatory
+  // or grant it veto power over a merge, however its own verdict comes back.
+  describe('#3383 — the probation-driven default can never gate a merge', () => {
+    it('judgeAdvisory / ADVISORY_JUDGE_LENS is drawn from ADVISORY_LENSES, never MANDATORY_LENSES', () => {
+      expect(MANDATORY_LENSES).not.toContain(ADVISORY_JUDGE_LENS);
+      expect(ADVISORY_LENSES).toContain(ADVISORY_JUDGE_LENS);
+    });
+
+    it('ADVISORY_JUDGE_SEAT is absent from JUDGE_SEATS/JUDGE_STEPS — decideLensFloor never even sees it unless a caller explicitly appends it', () => {
+      expect(JUDGE_SEATS.some((s) => s.step === ADVISORY_JUDGE_SEAT.step)).toBe(false);
+      expect(JUDGE_STEPS).not.toContain(ADVISORY_JUDGE_SEAT.step);
+    });
+
+    it('seating the advisory seat (as reviewPrOperation does when codexAdvisory is true) never changes seatsFloor — the floor is computed off MANDATORY_LENSES alone', () => {
+      const withoutAdvisory = decideLensFloor({ lens: 'simplicity' });
+      const withAdvisory = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT] });
+      expect(withAdvisory.seatsFloor).toBe(withoutAdvisory.seatsFloor);
+      expect(withAdvisory.mandatorySeated).toEqual(withoutAdvisory.mandatorySeated);
+      // The seat DOES show up as an additionally-seated ADVISORY lens — it runs, it is just never counted
+      // toward the floor.
+      expect(withAdvisory.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
+    });
+
+    it('a REJECT verdict from the advisory seat alone (with the mandatory floor otherwise clean) is exactly what "advisory" means — it cannot be the reason `humanRequired` flips on its own account', () => {
+      // This is a statement about the SHAPE of the guarantee (seatsFloor/mandatorySeated are computed off
+      // MANDATORY_LENSES only, proven above) rather than a re-run of `derivePanelVerdict`'s own suite — that
+      // reduction is `we:scripts/lib/jury-core.mjs`'s own, already-tested logic and is not re-derived here.
+      const floor = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT] });
+      expect(floor.mandatorySeated).not.toContain(ADVISORY_JUDGE_LENS);
+    });
+
+    // #x8n4crp's fourth seat gets its probation default from the SAME wiring (`correctnessAdvisoryFromEnv`
+    // now mirrors `codexAdvisoryFromEnv`'s default exactly) — the identical structural guarantee applies,
+    // proven the same way plus its own stronger isolation (CORRECTNESS_ADVISORY_LENS is outside
+    // ADVISORY_LENSES/PANEL_LENSES entirely, not just outside MANDATORY_LENSES — see that seat's own
+    // "core safety property" describe block above).
+    it('seating BOTH probation-defaulted seats at once still never changes seatsFloor', () => {
+      const withoutEither = decideLensFloor({ lens: 'simplicity' });
+      const withBoth = decideLensFloor({ lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT, CORRECTNESS_ADVISORY_SEAT] });
+      expect(withBoth.seatsFloor).toBe(withoutEither.seatsFloor);
+      expect(withBoth.mandatorySeated).toEqual(withoutEither.mandatorySeated);
+      expect(withBoth.mandatorySeated).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+  });
+
+  describe('buildReviewAdvisoryJudgeRequest', () => {
+    it('carries no allowedTools, no model, and pins providerName to codex', () => {
+      const request = buildReviewAdvisoryJudgeRequest({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' },
+      });
+      expect(request.allowedTools).toBeUndefined();
+      expect(request.model).toBeUndefined();
+      expect(request.providerName).toBe('codex');
+      expect(request.lens).toBe(ADVISORY_JUDGE_LENS);
+      expect(ADVISORY_JUDGE_LENS).toBe(ADVISORY_LENSES[0]);
+    });
+
+    it('the mandate carries the same diff/description the two existing seats get (#2336 context isolation)', () => {
+      const read = { netChangedFiles: NET_PATHS, title: 'the PR title' };
+      const advisory = buildReviewAdvisoryJudgeRequest({ read });
+      const correctness = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+      expect(advisory.input).toBe(correctness.input);
+    });
+  });
+
+  it('is NOT declared by default — the default declaration is byte-identical to before this card', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(judgeSteps).not.toContain('judgeAdvisory');
+    // The module-level roster is untouched — every OTHER test in this file keeps reading exactly this.
+    expect(JUDGE_SEATS).toHaveLength(2);
+  });
+
+  it('when opted in, declares a THIRD judge step, in order, after judgeSecurity and before reduce', () => {
+    const { declaration } = registryFor({}, { codexAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    const advisoryStep = declaration.steps.find((s) => s.name === 'judgeAdvisory');
+    expect(advisoryStep.step.kind).toBe('judge');
+    // It is isolated exactly like `judgeSecurity`: it reads neither sibling juror's findings.
+    expect(advisoryStep.step.reads).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('the seated request is tool-free and pinned to codex, on ADVISORY_JUDGE_LENS', () => {
+    const { registry } = registryFor({}, { codexAdvisory: true });
+    const { requests } = atConfirm({
+      registry, input: BASE_INPUT, id: 'run-codex-request',
+      answers: { [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeAdvisory: CLEAN_ANSWER },
+    });
+    const request = requests.judgeAdvisory;
+    expect(request.lens).toBe(ADVISORY_JUDGE_LENS);
+    expect(request.providerName).toBe('codex');
+    expect(request.allowedTools).toBeUndefined();
+    expect(request.model).toBeUndefined();
+    // The two EXISTING seats are UNTOUCHED — still tool-bearing, still no `providerName` (they use whatever
+    // provider the RUN's own `--provider`/factory default is).
+    expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[0]].providerName).toBeUndefined();
+    expect(requests[JUDGE_STEPS[1]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[1]].providerName).toBeUndefined();
+  });
+
+  it('the registration-time roster check still holds for the 3-seat build (no drift, no throw)', () => {
+    // `reviewPrOperation({ codexAdvisory: true })` not throwing at registration IS the assertion: the roster
+    // check at the bottom of that function throws if the declared `judge` steps ever stop matching the local
+    // `seats` array this card added. A regression here would fail EVERY test in this describe block, but this
+    // one names the property directly.
+    expect(() => registryFor({}, { codexAdvisory: true })).not.toThrow();
+  });
+
+  describe('THE CORE PROPERTY: an advisory-lens Codex finding cannot flip the verdict to `changes` on its own', () => {
+    it('mandatory lenses accept, the advisory seat reports a blocker — the panel verdict is still `accept`', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-cannot-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          // The Codex seat reports a BLOCKER-shaped finding — exactly the shape that flips a MANDATORY lens's
+          // own per-lens verdict to `changes` (see `reduceWith` above). Seated on an advisory lens, it must not
+          // be able to do the same to the PANEL verdict.
+          judgeAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      // The per-lens verdict is honestly `changes` — the finding is not hidden or downgraded.
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('changes');
+      // …but the PANEL verdict, reduced only over `mandatoryLenses`, is still `accept`.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
+      // The finding still SURFACES — advisory means "informs", not "invisible". `buildPanelFindings` tags a
+      // finding's LENS into `category` (`${lens}/${category}`, or bare `lens` with none) — see `jury-core.mjs`.
+      expect(run.verdict.findings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+    });
+
+    it('a MANDATORY lens reporting the identical blocker DOES flip the verdict — proving the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-mandatory-does-block',
+        answers: {
+          [JUDGE_STEPS[0]]: BLOCKING_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('changes');
+    });
+
+    it('`decideLensFloor` over a 3-seat roster: the advisory seat is counted as advisory, never mandatory', () => {
+      const seats = Object.freeze([...JUDGE_SEATS, ADVISORY_JUDGE_SEAT]);
+      const floor = decideLensFloor({ lens: DEFAULT_LENS, seats });
+      expect(floor.seated).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
+      expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+      expect(floor.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
+      expect(floor.seatsFloor).toBe(true);
+    });
+  });
+});
+
+// ── #x8n4crp — THE OPT-IN FOURTH SEAT: A CORRECTNESS-FLAVOURED CODEX JUROR, DISTINCT FROM MANDATORY_LENSES ────
+describe('#x8n4crp — the opt-in Codex correctness-advisory seat (judgeCorrectnessAdvisory)', () => {
+  describe('correctnessAdvisoryFromEnv', () => {
+    it('is false for any EXPLICITLY SET env value other than the literal string "1" — never depends on probation once the caller has opted out on purpose', () => {
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: 'true' }, { isOnProbation: () => true })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '0' }, { isOnProbation: () => true })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '' }, { isOnProbation: () => true })).toBe(false);
+    });
+
+    it('is true for the exact literal "1", regardless of probation status', () => {
+      expect(correctnessAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(true);
+    });
+
+    // #3383 — the probation default, mirroring codexAdvisoryFromEnv's own.
+    it('when the env var is UNSET, defaults to the injected probation check', () => {
+      expect(correctnessAdvisoryFromEnv({}, { isOnProbation: () => true })).toBe(true);
+      expect(correctnessAdvisoryFromEnv({}, { isOnProbation: () => false })).toBe(false);
+    });
+
+    it('when the env var is UNSET and no override is injected, calls the REAL default probation check', () => {
+      expect(correctnessAdvisoryFromEnv({})).toBe(defaultCodexAdvisoryProbationCheck());
+    });
+
+    it('is a SEPARATE env var from the third seat\'s own — flipping one does not seat the other', () => {
+      expect(CORRECTNESS_ADVISORY_ENV_VAR).not.toBe(CODEX_ADVISORY_ENV_VAR);
+      // #3383 — the OTHER seat's own env var is still unset in each call below, so each falls through to
+      // its own probation default; pin it false to isolate the property this test actually asserts (env
+      // independence), not today's live probation status.
+      expect(codexAdvisoryFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+    });
+  });
+
+  describe('CORRECTNESS_ADVISORY_LENS: the core safety property', () => {
+    it('is NOT the literal "correctness", and is not a member of MANDATORY_LENSES', () => {
+      expect(CORRECTNESS_ADVISORY_LENS).not.toBe(DEFAULT_LENS);
+      expect(CORRECTNESS_ADVISORY_LENS).not.toBe('correctness');
+      expect(MANDATORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+
+    it('is also not a member of the shared ADVISORY_LENSES/PANEL_LENSES set (scoped to this file only)', () => {
+      expect(ADVISORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      expect(PANEL_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+  });
+
+  describe('buildReviewCorrectnessAdvisoryJudgeRequest', () => {
+    it('carries no allowedTools, no model, pins providerName to codex, and uses its OWN (medium) effort', () => {
+      const request = buildReviewCorrectnessAdvisoryJudgeRequest({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' },
+      });
+      expect(request.allowedTools).toBeUndefined();
+      expect(request.model).toBeUndefined();
+      expect(request.providerName).toBe('codex');
+      expect(request.lens).toBe(CORRECTNESS_ADVISORY_LENS);
+      expect(request.effort).toBe(CORRECTNESS_ADVISORY_EFFORT);
+      expect(request.effort).toBe('medium');
+    });
+
+    it('the mandate\'s topic word is the real DEFAULT_LENS ("correctness"), not the bookkeeping lens', () => {
+      const mandate = buildReviewCorrectnessAdvisoryMandate({ read: { netChangedFiles: NET_PATHS, title: 'a PR' } });
+      expect(mandate).toContain(`mandate: ${DEFAULT_LENS}.`);
+      expect(mandate).not.toContain(CORRECTNESS_ADVISORY_LENS);
+    });
+
+    it('folds in an `aim` hypothesis exactly like the panel mandate does, fenced', () => {
+      const mandate = buildReviewCorrectnessAdvisoryMandate({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' }, aim: 'the guard is inverted',
+      });
+      expect(mandate).toContain('WHERE THE CALLER THINKS THE DEFECT IS');
+      expect(mandate).toContain('the guard is inverted');
+    });
+  });
+
+  it('is NOT declared by default — the default declaration is byte-identical to before this card', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(judgeSteps).not.toContain('judgeCorrectnessAdvisory');
+  });
+
+  it('can be seated WITHOUT the third seat — the two opt-in seats are independent', () => {
+    const { declaration } = registryFor({}, { correctnessAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeCorrectnessAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    expect(names).not.toContain('judgeAdvisory');
+  });
+
+  it('when BOTH opt-in seats are on, declares them in order — third seat before fourth', () => {
+    const { declaration } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual([
+      'read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'judgeCorrectnessAdvisory',
+      'reduce', 'advise', 'confirm', 'stageVerdict', 'record',
+    ]);
+    const step = declaration.steps.find((s) => s.name === 'judgeCorrectnessAdvisory');
+    expect(step.step.kind).toBe('judge');
+    // Isolated exactly like every other seat: it reads none of the sibling jurors' findings.
+    expect(step.step.reads).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('the seated request is pinned to codex, tool-free, on CORRECTNESS_ADVISORY_LENS, at its OWN effort', () => {
+    const { registry } = registryFor({}, { correctnessAdvisory: true });
+    const { requests } = atConfirm({
+      registry, input: BASE_INPUT, id: 'run-correctness-advisory-request',
+      answers: {
+        [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeCorrectnessAdvisory: CLEAN_ANSWER,
+      },
+    });
+    const request = requests.judgeCorrectnessAdvisory;
+    expect(request.lens).toBe(CORRECTNESS_ADVISORY_LENS);
+    expect(request.providerName).toBe('codex');
+    expect(request.allowedTools).toBeUndefined();
+    expect(request.model).toBeUndefined();
+    expect(request.effort).toBe('medium');
+    // The two MANDATORY seats are UNTOUCHED — still tool-bearing, still `JUDGE_EFFORT` ('high').
+    expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[0]].effort).toBe('high');
+  });
+
+  it('the registration-time roster check still holds for the 3-seat (fourth-only) build (no drift, no throw)', () => {
+    expect(() => registryFor({}, { correctnessAdvisory: true })).not.toThrow();
+  });
+
+  it('the registration-time roster check still holds for the 4-seat build (no drift, no throw)', () => {
+    expect(() => registryFor({}, { codexAdvisory: true, correctnessAdvisory: true })).not.toThrow();
+  });
+
+  describe('THE CORE PROPERTY: a `changes` finding from this seat NEVER reaches the MANDATORY_LENSES bucket', () => {
+    it('mandatory lenses accept, the correctness-advisory seat reports a blocker — the panel verdict is still `accept`', () => {
+      const { registry } = registryFor({}, { correctnessAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-correctness-advisory-cannot-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          // The Codex seat reports a BLOCKER-shaped finding — exactly the shape that flips a MANDATORY lens's
+          // own per-lens verdict to `changes`. Seated on this seat's own (non-mandatory) lens, it must not be
+          // able to do the same to the PANEL verdict — the whole reason this seat's lens is disjoint from
+          // `MANDATORY_LENSES` rather than the literal `'correctness'`.
+          judgeCorrectnessAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      // The per-lens verdict is honestly `changes` — the finding is not hidden or downgraded.
+      expect(run.verdict.lensVerdicts[CORRECTNESS_ADVISORY_LENS]).toBe('changes');
+      // …but the PANEL verdict, reduced only over `mandatoryLenses`, is still `accept` — proof this seat's
+      // finding never merged into the MANDATORY_LENSES bucket the mandatory `correctness` seat owns.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, CORRECTNESS_ADVISORY_LENS]);
+      // The finding still SURFACES — advisory means "informs", not "invisible".
+      expect(run.verdict.findings.some((f) => f.category === CORRECTNESS_ADVISORY_LENS)).toBe(true);
+      // And it renders distinguishably from the mandatory `correctness` seat's own row — never bare `correctness`.
+      expect(run.verdict.lensProviders[CORRECTNESS_ADVISORY_LENS]).toBe('codex, advisory');
+    });
+
+    it('the MANDATORY correctness seat reporting the identical blocker DOES flip the verdict — the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { correctnessAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-correctness-advisory-mandatory-does-block',
+        answers: {
+          [JUDGE_STEPS[0]]: BLOCKING_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeCorrectnessAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('changes');
+    });
+
+    it('`decideLensFloor` over the 3-seat (fourth-only) roster: the seat is counted as advisory, never mandatory', () => {
+      const seats = Object.freeze([...JUDGE_SEATS, CORRECTNESS_ADVISORY_SEAT]);
+      const floor = decideLensFloor({ lens: DEFAULT_LENS, seats });
+      expect(floor.seated).toEqual([DEFAULT_LENS, SECURITY_LENS, CORRECTNESS_ADVISORY_LENS]);
+      // `mandatorySeated` NEVER carries this seat's lens — the core safety property.
+      expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+      expect(floor.mandatorySeated).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      // `advisorySeated` is derived from the SHARED `ADVISORY_LENSES` (`we:scripts/lib/jury-core.mjs`), which
+      // this seat's bookkeeping lens is deliberately NOT a member of (see `CORRECTNESS_ADVISORY_LENS`'s own
+      // docblock) — so it does not appear there either. What matters is the disjunction from `mandatorySeated`
+      // above, not membership in a shared vocabulary this seat was built to stay OUT of.
+      expect(floor.advisorySeated).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      expect(floor.seatsFloor).toBe(true);
+    });
+  });
+
+  describe('COEXISTENCE: both the third (simplicity) and fourth (correctness-advisory) seats run without collision', () => {
+    it('both seats run in the SAME 4-seat build, each keeping its own lens, provider label, and verdict', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-both-codex-seats-coexist',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+          judgeCorrectnessAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS, CORRECTNESS_ADVISORY_LENS]);
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('accept');
+      expect(run.verdict.lensVerdicts[CORRECTNESS_ADVISORY_LENS]).toBe('changes');
+      // Neither seat's lens ever equals the other's, and neither equals a MANDATORY_LENSES entry.
+      expect(ADVISORY_JUDGE_LENS).not.toBe(CORRECTNESS_ADVISORY_LENS);
+      expect(MANDATORY_LENSES).not.toContain(ADVISORY_JUDGE_LENS);
+      expect(MANDATORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      // A `changes` vote from the fourth seat still cannot flip a panel whose mandatory lenses both accepted.
+      expect(run.verdict.verdict).toBe('accept');
+      // Both are labelled as non-Claude, and distinguishably from one another.
+      expect(run.verdict.lensProviders[ADVISORY_JUDGE_LENS]).toBe('codex');
+      expect(run.verdict.lensProviders[CORRECTNESS_ADVISORY_LENS]).toBe('codex, advisory');
+    });
+  });
+});
+
+// ── #3383 — THE OPT-IN FIFTH SEAT: A TOOL-FREE ANTIGRAVITY JUROR, DISTINCT FROM MANDATORY_LENSES ──────────────
+describe('#3383 — the opt-in Antigravity review seat (judgeAntigravityReview)', () => {
+  describe('antigravityReviewFromEnv', () => {
+    it('is false for any EXPLICITLY SET env value other than the literal string "1" — never depends on probation once the caller has opted out on purpose', () => {
+      expect(antigravityReviewFromEnv({ [ANTIGRAVITY_REVIEW_ENV_VAR]: 'true' }, { isOnProbation: () => true })).toBe(false);
+      expect(antigravityReviewFromEnv({ [ANTIGRAVITY_REVIEW_ENV_VAR]: '0' }, { isOnProbation: () => true })).toBe(false);
+      expect(antigravityReviewFromEnv({ [ANTIGRAVITY_REVIEW_ENV_VAR]: '' }, { isOnProbation: () => true })).toBe(false);
+    });
+
+    it('is true for the exact literal "1", regardless of probation status', () => {
+      expect(antigravityReviewFromEnv({ [ANTIGRAVITY_REVIEW_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(true);
+    });
+
+    // #3383 — the probation default, mirroring both Codex seats' own.
+    it('when the env var is UNSET, defaults to the injected probation check', () => {
+      expect(antigravityReviewFromEnv({}, { isOnProbation: () => true })).toBe(true);
+      expect(antigravityReviewFromEnv({}, { isOnProbation: () => false })).toBe(false);
+    });
+
+    it('when the env var is UNSET and no override is injected, calls the REAL default probation check', () => {
+      expect(antigravityReviewFromEnv({})).toBe(defaultAntigravityReviewProbationCheck());
+    });
+
+    it('the real default probation check reads the ANTIGRAVITY identity, and today\'s registry declares it on probation', () => {
+      // #3383's own `model-probation.json` entry — a DIFFERENT identity from either Codex seat's own, proving
+      // this seat's probation default is not silently reading the Codex identity by mistake.
+      expect(defaultAntigravityReviewProbationCheck()).toBe(true);
+    });
+
+    it('is a SEPARATE env var from BOTH Codex seats\' own — flipping one does not seat another', () => {
+      expect(ANTIGRAVITY_REVIEW_ENV_VAR).not.toBe(CODEX_ADVISORY_ENV_VAR);
+      expect(ANTIGRAVITY_REVIEW_ENV_VAR).not.toBe(CORRECTNESS_ADVISORY_ENV_VAR);
+      // #3383 — the OTHER seats' own env vars are still unset in each call below, so each falls through to its
+      // own probation default; pin it false to isolate the property this test actually asserts (env
+      // independence), not today's live probation status.
+      expect(codexAdvisoryFromEnv({ [ANTIGRAVITY_REVIEW_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+      expect(correctnessAdvisoryFromEnv({ [ANTIGRAVITY_REVIEW_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+      expect(antigravityReviewFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+      expect(antigravityReviewFromEnv({ [CORRECTNESS_ADVISORY_ENV_VAR]: '1' }, { isOnProbation: () => false })).toBe(false);
+    });
+  });
+
+  describe('ANTIGRAVITY_REVIEW_LENS: the core safety property', () => {
+    it('is NOT the literal "correctness", not "codex-correctness", and is not a member of MANDATORY_LENSES', () => {
+      expect(ANTIGRAVITY_REVIEW_LENS).not.toBe(DEFAULT_LENS);
+      expect(ANTIGRAVITY_REVIEW_LENS).not.toBe('correctness');
+      expect(ANTIGRAVITY_REVIEW_LENS).not.toBe(CORRECTNESS_ADVISORY_LENS);
+      expect(MANDATORY_LENSES).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+    });
+
+    it('is also not a member of the shared ADVISORY_LENSES/PANEL_LENSES set (scoped to this file only)', () => {
+      expect(ADVISORY_LENSES).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+      expect(PANEL_LENSES).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+    });
+  });
+
+  describe('buildReviewAntigravityJudgeRequest', () => {
+    it('carries no allowedTools, no model, pins providerName to antigravity, and uses its OWN (low) effort', () => {
+      const request = buildReviewAntigravityJudgeRequest({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' },
+      });
+      expect(request.allowedTools).toBeUndefined();
+      expect(request.model).toBeUndefined();
+      expect(request.providerName).toBe('antigravity');
+      expect(request.lens).toBe(ANTIGRAVITY_REVIEW_LENS);
+      expect(request.effort).toBe(ANTIGRAVITY_REVIEW_EFFORT);
+      expect(request.effort).toBe('low');
+    });
+
+    it('the mandate\'s topic word is the real DEFAULT_LENS ("correctness"), not the bookkeeping lens', () => {
+      const mandate = buildReviewAntigravityMandate({ read: { netChangedFiles: NET_PATHS, title: 'a PR' } });
+      expect(mandate).toContain(`mandate: ${DEFAULT_LENS}.`);
+      expect(mandate).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+    });
+
+    it('folds in an `aim` hypothesis exactly like the panel mandate does, fenced', () => {
+      const mandate = buildReviewAntigravityMandate({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' }, aim: 'the guard is inverted',
+      });
+      expect(mandate).toContain('WHERE THE CALLER THINKS THE DEFECT IS');
+      expect(mandate).toContain('the guard is inverted');
+    });
+
+    it('tells the juror plainly it has no tools at all (stronger isolation than the read-only-shell Codex seats)', () => {
+      const mandate = buildReviewAntigravityMandate({ read: { netChangedFiles: NET_PATHS, title: 'a PR' } });
+      expect(mandate).toMatch(/NO TOOLS AT ALL/);
+    });
+  });
+
+  it('is NOT declared by default — the default declaration is byte-identical to before this card', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(judgeSteps).not.toContain('judgeAntigravityReview');
+  });
+
+  it('can be seated WITHOUT either Codex seat — all three opt-in seats are independent', () => {
+    const { declaration } = registryFor({}, { antigravityReview: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAntigravityReview', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    expect(names).not.toContain('judgeAdvisory');
+    expect(names).not.toContain('judgeCorrectnessAdvisory');
+  });
+
+  it('when ALL THREE opt-in seats are on, declares them in order — third, then fourth, then fifth', () => {
+    const { declaration } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual([
+      'read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'judgeCorrectnessAdvisory', 'judgeAntigravityReview',
+      'reduce', 'advise', 'confirm', 'stageVerdict', 'record',
+    ]);
+    const step = declaration.steps.find((s) => s.name === 'judgeAntigravityReview');
+    expect(step.step.kind).toBe('judge');
+    // Isolated exactly like every other seat: it reads none of the sibling jurors' findings.
+    expect(step.step.reads).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('the seated request is pinned to antigravity, tool-free, on ANTIGRAVITY_REVIEW_LENS, at its OWN effort', () => {
+    const { registry } = registryFor({}, { antigravityReview: true });
+    const { requests } = atConfirm({
+      registry, input: BASE_INPUT, id: 'run-antigravity-review-request',
+      answers: {
+        [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeAntigravityReview: CLEAN_ANSWER,
+      },
+    });
+    const request = requests.judgeAntigravityReview;
+    expect(request.lens).toBe(ANTIGRAVITY_REVIEW_LENS);
+    expect(request.providerName).toBe('antigravity');
+    expect(request.allowedTools).toBeUndefined();
+    expect(request.model).toBeUndefined();
+    expect(request.effort).toBe('low');
+    // The two MANDATORY seats are UNTOUCHED — still tool-bearing, still `JUDGE_EFFORT` ('high').
+    expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[0]].effort).toBe('high');
+  });
+
+  it('the registration-time roster check still holds for the 3-seat (fifth-only) build (no drift, no throw)', () => {
+    expect(() => registryFor({}, { antigravityReview: true })).not.toThrow();
+  });
+
+  it('the registration-time roster check still holds for the 5-seat (all opt-in) build (no drift, no throw)', () => {
+    expect(() => registryFor({}, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true })).not.toThrow();
+  });
+
+  describe('THE CORE PROPERTY: a `changes` finding from this seat NEVER reaches the MANDATORY_LENSES bucket', () => {
+    it('mandatory lenses accept, the antigravity seat reports a blocker — the panel verdict is still `accept`', () => {
+      const { registry } = registryFor({}, { antigravityReview: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-antigravity-review-cannot-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          // The Antigravity seat reports a BLOCKER-shaped finding — exactly the shape that flips a MANDATORY
+          // lens's own per-lens verdict to `changes`. Seated on this seat's own (non-mandatory) lens, it must
+          // not be able to do the same to the PANEL verdict — the whole reason this seat's lens is disjoint
+          // from `MANDATORY_LENSES` rather than the literal `'correctness'`.
+          judgeAntigravityReview: BLOCKING_ANSWER,
+        },
+      });
+      // The per-lens verdict is honestly `changes` — the finding is not hidden or downgraded.
+      expect(run.verdict.lensVerdicts[ANTIGRAVITY_REVIEW_LENS]).toBe('changes');
+      // …but the PANEL verdict, reduced only over `mandatoryLenses`, is still `accept` — proof this seat's
+      // finding never merged into the MANDATORY_LENSES bucket the mandatory `correctness` seat owns.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ANTIGRAVITY_REVIEW_LENS]);
+      // The finding still SURFACES — advisory means "informs", not "invisible".
+      expect(run.verdict.findings.some((f) => f.category === ANTIGRAVITY_REVIEW_LENS)).toBe(true);
+      // And it renders distinguishably from any Codex seat's own row.
+      expect(run.verdict.lensProviders[ANTIGRAVITY_REVIEW_LENS]).toBe('antigravity, advisory');
+    });
+
+    it('the MANDATORY correctness seat reporting the identical blocker DOES flip the verdict — the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { antigravityReview: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-antigravity-review-mandatory-does-block',
+        answers: {
+          [JUDGE_STEPS[0]]: BLOCKING_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAntigravityReview: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('changes');
+    });
+
+    it('`decideLensFloor` over the 3-seat (fifth-only) roster: the seat is counted as advisory, never mandatory', () => {
+      const seats = Object.freeze([...JUDGE_SEATS, ANTIGRAVITY_REVIEW_SEAT]);
+      const floor = decideLensFloor({ lens: DEFAULT_LENS, seats });
+      expect(floor.seated).toEqual([DEFAULT_LENS, SECURITY_LENS, ANTIGRAVITY_REVIEW_LENS]);
+      // `mandatorySeated` NEVER carries this seat's lens — the core safety property.
+      expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+      expect(floor.mandatorySeated).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+      expect(floor.advisorySeated).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+      expect(floor.seatsFloor).toBe(true);
+    });
+
+    it('seating all three opt-in seats at once still never changes seatsFloor', () => {
+      const withoutAny = decideLensFloor({ lens: 'simplicity' });
+      const withAllThree = decideLensFloor({
+        lens: 'simplicity', seats: [...JUDGE_SEATS, ADVISORY_JUDGE_SEAT, CORRECTNESS_ADVISORY_SEAT, ANTIGRAVITY_REVIEW_SEAT],
+      });
+      expect(withAllThree.seatsFloor).toBe(withoutAny.seatsFloor);
+      expect(withAllThree.mandatorySeated).toEqual(withoutAny.mandatorySeated);
+      expect(withAllThree.mandatorySeated).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+    });
+  });
+
+  describe('COEXISTENCE: this seat and BOTH Codex seats run together without collision', () => {
+    it('all three seats run in the SAME 5-seat build, each keeping its own lens, provider label, and verdict', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-all-three-optin-seats-coexist',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+          judgeCorrectnessAdvisory: CLEAN_ANSWER,
+          // Only the fifth seat reports a blocker here — proving IT specifically cannot flip the panel,
+          // alongside two clean Codex opt-in seats.
+          judgeAntigravityReview: BLOCKING_ANSWER,
+        },
+      });
+      expect(run.verdict.lenses).toEqual([
+        DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS, CORRECTNESS_ADVISORY_LENS, ANTIGRAVITY_REVIEW_LENS,
+      ]);
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('accept');
+      expect(run.verdict.lensVerdicts[CORRECTNESS_ADVISORY_LENS]).toBe('accept');
+      expect(run.verdict.lensVerdicts[ANTIGRAVITY_REVIEW_LENS]).toBe('changes');
+      // No two of the three optional seats' lenses ever collide with one another or with a MANDATORY one.
+      expect(new Set([ADVISORY_JUDGE_LENS, CORRECTNESS_ADVISORY_LENS, ANTIGRAVITY_REVIEW_LENS]).size).toBe(3);
+      expect(MANDATORY_LENSES).not.toContain(ADVISORY_JUDGE_LENS);
+      expect(MANDATORY_LENSES).not.toContain(CORRECTNESS_ADVISORY_LENS);
+      expect(MANDATORY_LENSES).not.toContain(ANTIGRAVITY_REVIEW_LENS);
+      // A `changes` vote from the fifth seat alone still cannot flip a panel whose mandatory lenses both accepted.
+      expect(run.verdict.verdict).toBe('accept');
+      // All three are labelled distinguishably from one another and from a mandatory seat's own row.
+      expect(run.verdict.lensProviders[ADVISORY_JUDGE_LENS]).toBe('codex');
+      expect(run.verdict.lensProviders[CORRECTNESS_ADVISORY_LENS]).toBe('codex, advisory');
+      expect(run.verdict.lensProviders[ANTIGRAVITY_REVIEW_LENS]).toBe('antigravity, advisory');
+    });
+
+    it('a blocker from EACH of the three optional seats at once still never flips a panel whose mandatory lenses accept', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-all-three-optin-seats-all-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: BLOCKING_ANSWER,
+          judgeCorrectnessAdvisory: BLOCKING_ANSWER,
+          judgeAntigravityReview: BLOCKING_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('accept');
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE PR #2122 FALSE ACCEPT, REPRODUCED AND CLOSED.
+//
+// WHAT ACTUALLY HAPPENED (2026-09-12, live, and the PR MERGED on it). A mechanical review ran in a
+// single-branch lane clone with no remote-tracking ref for the PR's head branch. The read came back
+// `degraded: true, degradedReason: 'ref-unresolved'` with a ZERO-BYTE diff; all three seats were handed
+// `_(the net diff could not be resolved …)_` as their entire material; nothing refused; and the panel reduced
+// to a clean `accept` over 560 lines of script + test that no juror had read. The tool-free Codex seat even
+// said so out loud — "the missing net diff prevents a substantive review of the changes" — and that honest
+// ABSTENTION, carrying no findings, counted as an accept vote.
+//
+// TWO INDEPENDENT GUARDS, because either alone leaves a hole:
+//   • `read` REFUSES a degrade that produced nothing — the exact measured shape, caught before a juror is paid.
+//   • `reduce` cannot return a CLEARABLE verdict on any degraded basis — the residual shape, where the degrade
+//     yielded something but not the net basis the mandate called ground truth.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — a review can no longer clear a PR on material it could not read', () => {
+  it('REFUSES at `read` when a degraded basis produced an EMPTY diff — before any juror is spawned', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved', degradedDiffText: '' });
+    expect(() => advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-empty-degraded', input: BASE_INPUT, registry }), { registry },
+    )).toThrow(/DEGRADED[\s\S]*EMPTY/);
+  });
+
+  it('the refusal names the CHECKOUT as the fix, because that is what it almost always is', () => {
+    const { registry } = registryFor({ netScored: false, netReason: 'ref-unresolved', degradedDiffText: '' });
+    expect(() => advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-empty-degraded-msg', input: BASE_INPUT, registry }), { registry },
+    )).toThrow(/--cwd/);
+  });
+
+  it('an EMPTY diff on a SCORED basis is NOT refused — a genuine no-op PR is an honest read', () => {
+    // The conjunction is what makes the refusal precise. Narrowing it to "degraded" alone, or to "empty"
+    // alone, would either miss the measured case or reject a legitimate one.
+    const { registry } = registryFor({});
+    const reader = stubReader({});
+    const raw = reader({ pr: 1234, repo: 'chalbert/web-everything' });
+    const shaped = shapeReadFinding(
+      { ...raw, diff: { text: '', scored: true } },
+      { pr: 1234, repo: 'chalbert/web-everything' },
+    );
+    expect(shaped.degraded).toBe(false);
+    expect(registry).toBeTruthy();
+  });
+
+  it('a UNANIMOUS clean panel on a DEGRADED basis reduces to `needs-human`, never `accept`', () => {
+    // THE REGRESSION, stated as the before/after it is: with `degradedBasis` removed from the `reduce` call
+    // this run returns `accept` — the exact verdict PR #2122 merged on — and a `review:pending` PR carrying it
+    // is auto-cleared MECHANICALLY by `reviewLoopAutoConfirm`. `needs-human` is the one non-blocking verdict
+    // that parks instead.
+    const { run } = driveFixture({
+      correctness: CLEAN_ANSWER,
+      security: CLEAN_ANSWER,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.lensVerdicts[DEFAULT_LENS]).toBe('accept');
+    expect(run.verdict.lensVerdicts[SECURITY_LENS]).toBe('accept');
+    expect(run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('an ABSTAINING tool-free seat is not counted as an accept vote — the #3158 risk, as measured', () => {
+    // The Codex seat's real words from the live run. It has a summary (so the #x0p5k2q silent-juror refusal
+    // does not fire) and no findings (so `deriveVerdict` reads it as clean). Nothing in a PURE reducer can
+    // recognise that prose as an abstention — which is exactly why the guard keys on the INPUT being
+    // unreadable instead, and why this run parks rather than clearing.
+    const ABSTENTION = {
+      summary: 'the missing net diff prevents a substantive review of the changes',
+      findings: [],
+    };
+    const { run } = driveFixture({
+      correctness: CLEAN_ANSWER,
+      security: ABSTENTION,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(run.verdict.summary).toContain('prevents a substantive review');
+  });
+
+  it('a degraded basis still lets a REAL blocker bounce — the downgrade takes only the clearable outcomes', () => {
+    // Deliberately NOT "degrade ⇒ always needs-human": a bounce is more actionable than a park and costs
+    // nothing, so a mandatory seat that DID find something keeps its say. This is the pre-existing
+    // `ref-unresolved` behaviour, asserted here so the new arm cannot quietly swallow it.
+    const { run } = driveFixture({
+      correctness: BLOCKING_ANSWER,
+      reader: { netScored: false, netReason: 'ref-unresolved' },
+    });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.verdict).toBe(VERDICTS.CHANGES);
+  });
+
+  it('an UNDEGRADED clean panel is untouched — the guard costs an ordinary review nothing', () => {
+    const { run } = driveFixture({ correctness: CLEAN_ANSWER, security: CLEAN_ANSWER });
+    expect(run.findings.read.degraded).toBe(false);
+    expect(run.verdict.verdict).toBe(VERDICTS.ACCEPT);
   });
 });

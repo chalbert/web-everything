@@ -13,6 +13,26 @@
  * always be acquired freely." The heavy command itself queues on this semaphore right before it actually runs
  * — see `verify-lane.mjs`'s `execSync(GATE, …)` call site for the wired example.
  *
+ * A GENERAL-PURPOSE `run` CLI MODE (#3383 finding) — the ONLY caller wired into this semaphore before this mode
+ * existed was `verify-lane.mjs` itself. Every OTHER path that runs one of the same named heavy commands directly
+ * — `skills-src/batch-backlog-items/parallel-execute.workflow.js`'s per-lane `npm run check:standards` + `npm
+ * test -- run` gate (step 4, deliberately NOT routed through `verify-lane.mjs` — see that file's own #3321
+ * comment for why), `AGENTS.md`'s own Definition-of-Done line ("Run affected tests … for broad changes, `npm
+ * test`"), and `docs/agent/testing.md`'s worked examples — runs the SAME heavy commands with ZERO admission-queue
+ * coordination, so N parallel `/workflow` lanes (or an ad-hoc interactive/subagent run) can each launch a full
+ * `test:unit`/`check:standards` pass at once regardless of the cap. `#3105`'s `guard-bash.mjs` PreToolUse deny
+ * only reaches a MECHANICALLY-DISPATCHED agent (one with `WE_DISPATCH_KIND` set); a `/workflow`/`/batch` parallel
+ * lane, or the operator's own interactive session, carries no such env var and is unaffected by that guard, so
+ * it is never forced through `verify-lane.mjs` either. `run` (see {@link runUnderAdmission} and the CLI section
+ * below) gives any such caller a one-line way to opt IN to the SAME semaphore `verify-lane.mjs` uses — never a
+ * second/parallel limiter — by wrapping its command: `node scripts/readiness/heavy-admission.mjs run --
+ * <command…>` acquires a slot (fail-open on timeout, exactly like `verify-lane.mjs`), runs `<command…>`
+ * synchronously in the foreground with inherited stdio, and releases the slot in a `finally` — the identical
+ * acquire → execSync → release sequencing `verify-lane.mjs` already has, just exported for any OTHER call site
+ * to reuse rather than re-deriving it. Wiring `parallel-execute.workflow.js`'s own step 4 (and the other
+ * documented direct-invocation sites) through this wrapper is a follow-up this investigation recommends but does
+ * not itself make — see the finding's own PR/commit message for the full list.
+ *
  * MECHANISM — generalized from the two existing single-holder advisory locks named in #3456's own "what this
  * decision does NOT settle" section:
  *   • `file-locks.mjs` (#1936) — ONE atomic `mkdir`/`O_EXCL` lock dir per reserved PATH, with a heartbeat-TTL
@@ -294,33 +314,21 @@ export async function acquireSlotBlocking({
   }
 }
 
-// ── status — what `tick-core.mjs` reads for the `waiting-for-capacity` note ────────────────────────────
-
-export function admissionStatus({ lockRoot, cap }) {
-  const held = heldSlots({ lockRoot, cap });
-  const waiting = listWaiting(lockRoot);
-  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting };
-}
-
-// ── run-under-admission — general-purpose wrapper, WITH the #3621 container hook built in ─────────────────
-//
-// This is the minimal general-purpose "acquire a slot → run a command → release" wrapper this module did not
-// yet have on `main` as of this POC (a fuller version exists on the separate, still-unmerged
-// `lane/mechanical-dispatcher` integration branch — #3383's own finding — landing here independently rather
-// than waiting on that branch, since main needed a real entry point for THIS item's container work today; the
-// two will need reconciling, likely a straightforward union, whenever that branch merges).
-//
-// The `exec` seam is exactly what makes the #3621 heavy-command-pool container POC possible: by default it
-// runs `command` on the HOST (`execSync`, unchanged behaviour), but a caller can inject
-// `scripts/lib/container-exec.mjs#execContainerized` instead — same acquire/execute/release sequencing, the
-// command now runs inside a real, CPU/memory-capped Apple `container` instance. See that module's own header
-// for exactly what is (and is not yet) proven to work this way.
+// ── run-under-admission — the general-purpose wrapper (#3383 finding) ──────────────────────────────────
 
 /**
- * Run `command` synchronously in the FOREGROUND, admitted through the SAME capacity semaphore this module's
- * `acquire`/`release` CLI modes already use. FAILS OPEN on a queuing timeout (mirrors `acquireSlotBlocking`
- * itself): `command` still runs, unslotted, with a stderr warning, rather than being refused — a queuing
- * timeout must never strand an otherwise-healthy caller.
+ * Run `command` synchronously in the FOREGROUND, admitted through the SAME capacity semaphore
+ * `verify-lane.mjs`'s own gate execution already uses (#3461) — never a parallel/second limiter. Mirrors
+ * `verify-lane.mjs`'s own call site exactly: {@link acquireSlotBlocking} (fail-open on a queuing timeout) →
+ * a synchronous, inherited-stdio execution → {@link releaseOwnedSlot} in a `finally` (only when a slot was
+ * actually won). Exported so the CLI's `run` mode and any other IN-PROCESS caller (a future operation, a
+ * workflow script) share ONE tested acquire/execute/release sequencing rather than each re-deriving it —
+ * the same reuse discipline this module's own header applies to `file-locks.mjs`'s primitives.
+ *
+ * FAILS OPEN, LIKE `verify-lane.mjs`: a timed-out admission still runs `command` unslotted (with a stderr
+ * warning) rather than refusing to run it at all — a queuing timeout must never strand an otherwise-healthy
+ * caller behind a stuck semaphore, exactly the residual-risk tradeoff `acquireSlotBlocking`'s own doc names.
+ *
  * @param {object} opts
  * @param {string} opts.lockRoot
  * @param {number} opts.cap
@@ -329,10 +337,9 @@ export function admissionStatus({ lockRoot, cap }) {
  * @param {string|null} [opts.num]
  * @param {number} [opts.timeoutMs]
  * @param {number} [opts.leaseMinutes]
- * @param {string} opts.command            the shell command to run (already shell-quoted by the CLI)
+ * @param {string} opts.command            the shell command to run (passed to `exec`, so `&&`/`;` work)
  * @param {string} [opts.cwd]              defaults to process.cwd()
- * @param {(cmd:string, opts:object)=>void} [opts.exec]  defaults to `execSync` — injectable; #3621's
- *   container POC passes `container-exec.mjs#execContainerized` here instead
+ * @param {(cmd:string, opts:object)=>void} [opts.exec]  defaults to `execSync` — injectable for tests
  * @param {(msg:string)=>void} [opts.log]  defaults to `process.stderr.write` — injectable for tests
  * @param {() => number} [opts.now]
  * @param {(ms:number) => Promise<void>} [opts.sleep]
@@ -359,6 +366,14 @@ export async function runUnderAdmission({
     if (admission.ok) releaseOwnedSlot({ lockRoot, cap, owner });
   }
   return { exitCode, admission };
+}
+
+// ── status — what `tick-core.mjs` reads for the `waiting-for-capacity` note ────────────────────────────
+
+export function admissionStatus({ lockRoot, cap }) {
+  const held = heldSlots({ lockRoot, cap });
+  const waiting = listWaiting(lockRoot);
+  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting };
 }
 
 /** Re-quote a single already-split argv word for a shell command line — a no-op for a plain word,

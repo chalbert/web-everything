@@ -96,7 +96,7 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
      separable from it in the branch's own commit history).
   6. Follow-up (not a graduation slice, a fresh child of slice 2): fold the gate's request/check modes into the
      declared `we:scripts/operations/verify.mjs` operation, per #3224 — already fully drafted, unlanded, on the
-     branch as `we:backlog/xab3jh7-*`; re-filed here as a real numbered child rather than cherry-picked
+     branch as `we:backlog/3636-*`; re-filed here as a real numbered child rather than cherry-picked
      verbatim — **we:backlog/3485-***, `blockedBy: 3484`.
 
   Slices 1 and 2 above are queued into the live conveyor tonight (2026-09-04) — see their own cards. Slice 3

@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  POC_REGISTRY_PATH, DEFAULT_GRADUATION_TARGET,
+  POC_REGISTRY_PATH, DEFAULT_GRADUATION_TARGET, AUTO_SYNC_ENV_VAR,
   normalizeBranchRef, validatePocBranch, normalizeRegistry, findPocBranch, isPocBranch,
-  upsertPocBranch, removePocBranch, validateDeliveryTarget,
+  upsertPocBranch, removePocBranch, validateDeliveryTarget, resolveAutoSyncEnabled,
   readRegistry, writeRegistry, primaryPocBranch, driftDefaults,
 } from '../poc-branches.mjs';
 
@@ -70,6 +70,36 @@ describe('validatePocBranch — doctrine rule 10(c): a POC branch must NAME what
     expect(validatePocBranch(null).ok).toBe(false);
     expect(validatePocBranch('nope').ok).toBe(false);
     expect(validatePocBranch([]).ok).toBe(false);
+  });
+  it('accepts an entry with autoSync true or false', () => {
+    expect(validatePocBranch({ ...ENTRY, autoSync: true }).ok).toBe(true);
+    expect(validatePocBranch({ ...ENTRY, autoSync: false }).ok).toBe(true);
+  });
+  it('REFUSES a non-boolean autoSync', () => {
+    const v = validatePocBranch({ ...ENTRY, autoSync: 'yes' });
+    expect(v.ok).toBe(false);
+    expect(v.errors.join(' ')).toMatch(/autoSync/);
+  });
+});
+
+describe('resolveAutoSyncEnabled — #3383 the per-branch/global auto-sync knob', () => {
+  it('defaults OFF when the entry never decided and no env override', () => {
+    expect(resolveAutoSyncEnabled({}, {})).toBe(false);
+  });
+  it('an explicit autoSync:true on the entry wins over no env', () => {
+    expect(resolveAutoSyncEnabled({ autoSync: true }, {})).toBe(true);
+  });
+  it('an explicit autoSync:false on the entry wins even if the env default would opt in', () => {
+    expect(resolveAutoSyncEnabled({ autoSync: false }, { [AUTO_SYNC_ENV_VAR]: '1' })).toBe(false);
+  });
+  it('env "1" opts an UNDECIDED entry in', () => {
+    expect(resolveAutoSyncEnabled({}, { [AUTO_SYNC_ENV_VAR]: '1' })).toBe(true);
+  });
+  it('env "0" is a GLOBAL KILL SWITCH — forces OFF even over an explicit per-branch true', () => {
+    expect(resolveAutoSyncEnabled({ autoSync: true }, { [AUTO_SYNC_ENV_VAR]: '0' })).toBe(false);
+  });
+  it('a null entry (unknown branch) with no env default is OFF', () => {
+    expect(resolveAutoSyncEnabled(null, {})).toBe(false);
   });
 });
 
@@ -203,5 +233,20 @@ describe('the SHIPPED registry', () => {
     expect(entry.target).toBe('main');
     expect(entry.graduationItem).toBe('3443');
     expect(entry.scope).toContain('we:scripts/conveyor/');
+    // #3383 — the operator's explicit instruction: auto-sync is ON for this branch right now.
+    expect(entry.autoSync).toBe(true);
+    expect(resolveAutoSyncEnabled(entry, {})).toBe(true);
+  });
+});
+
+describe('autoSync round-trips through write/read, and stays absent when never set', () => {
+  it('a branch that sets autoSync:true keeps it through a write/read cycle', () => {
+    writeRegistry({ registry: normalizeRegistry({ branches: [{ ...ENTRY, autoSync: true }] }), path });
+    expect(readRegistry({ path }).branches[0].autoSync).toBe(true);
+  });
+  it('a branch that never sets autoSync writes no `autoSync` key at all — no noisy `false` on every entry', () => {
+    writeRegistry({ registry: normalizeRegistry({ branches: [ENTRY] }), path });
+    expect(readFileSync(path, 'utf8')).not.toMatch(/autoSync/);
+    expect(readRegistry({ path }).branches[0].autoSync).toBeUndefined();
   });
 });

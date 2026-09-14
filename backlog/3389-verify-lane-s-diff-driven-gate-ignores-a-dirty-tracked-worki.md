@@ -2,6 +2,7 @@
 bornAs: xwdpujf
 kind: task
 status: open
+deliveryAgent: codex
 dateOpened: "2026-08-29"
 scope:
   - we:scripts/lib/verify-lane-gate.mjs

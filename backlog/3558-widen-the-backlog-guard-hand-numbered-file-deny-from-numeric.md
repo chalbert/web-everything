@@ -5,6 +5,7 @@ parent: "3383"
 status: open
 scope: ["we:scripts/backlog-guard.mjs", "we:scripts/backlog/__tests__/backlog-guard-handnumber.test.mjs", "we:scripts/__tests__/publish-secret-gate.test.mjs"]
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-07"
 tags: []
 ---
 

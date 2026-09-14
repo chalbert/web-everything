@@ -101,7 +101,7 @@ import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute 
 import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
 import { currentActorId, buildAuthorActorMarker, readAuthorActorStamps } from './lib/review-independence.mjs'; // #2844 — the author stamp the self-clear refusal compares against
-import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
+import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf, infraHas, readInfraStore } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 import { join } from 'node:path';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
@@ -617,12 +617,25 @@ function runCli() {
     // (where the /conveyor tick's retry pass reads) via the clone's git alternates; fall back to this checkout
     // when not a lane clone (e.g. a direct /pr from the primary). Best-effort — a record hiccup never changes
     // the already-diagnosed outcome; the emit below still surfaces the resume handle.
-    const itemNum = (REF.match(/^lane\/(x[a-z0-9]{5,7}|\d+)/i) || [])[1] || null;
+    //
+    // #<found this pass> — TWO bugs used to make a real infra block silently vanish (found while wiring the
+    // gh-throttle self-calibration): (1) `itemNum`'s regex only matched the standard `lane/<NNN>` or
+    // `lane/x<hash>` shapes; a ref like `lane/mark-3521-deliveryagent-codex` (a housekeeping/marker commit,
+    // not a numbered backlog item) matched neither, so `itemNum` came back `null` — and
+    // `recordInfraBlock`/`recordInfraBlockIO` treat a blank `num` as "nothing to track" and silently NO-OP
+    // (never throw). (2) this code then set `recorded = true` unconditionally after the call merely finished
+    // without THROWING, never checking whether the item was actually IN the store afterward — so a silent
+    // no-op above was reported as a successful record, and the resume/retry loop had nothing to find. Fixed
+    // by (a) falling back to the ref's own slug when the standard id patterns don't match — ANY lane ref is
+    // now a valid tracking key, never dropped — and (b) reading the store back to confirm ground truth
+    // instead of trusting a bare no-throw.
+    const itemNum = (REF.match(/^lane\/(x[a-z0-9]{5,7}|\d+)/i) || [])[1] || REF.replace(/^lane\//, '').trim() || null;
     let recorded = false;
     try {
       const root = primaryRootFromClone(REPO) || REPO;
-      recordInfraBlockIO({ num: itemNum, ref: REF, sha: refSha, base: BASE, repo: originSlugOf(REPO), cause, body: CREATE_BODY }, { path: infraStorePath(root) });
-      recorded = true;
+      const path = infraStorePath(root);
+      recordInfraBlockIO({ num: itemNum, ref: REF, sha: refSha, base: BASE, repo: originSlugOf(REPO), cause, body: CREATE_BODY }, { path });
+      recorded = infraHas(readInfraStore(path), itemNum);
     } catch { /* best-effort */ }
     emit({
       repo: REPO, merged: false, reason: 'blocked-on-infra',
@@ -905,6 +918,16 @@ function runCli() {
       try { forge.ensureLabel(verdict.label, { color: meta.color, description: meta.description }); } catch { /* already exists — fine */ }
       try { forge.addLabel(prNum, verdict.label); }
       catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply review label "${verdict.label}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+      // mechanical-dispatcher — a PR that opens review:human also opens carrying review:awaiting-advisory: the
+      // operator's standing rule is that no review:human PR is ever reviewed cold, and that "the advisory panel
+      // hasn't posted yet" state has to be a visible label, not something inferred from a missing bot comment.
+      // review-pr.mjs's `advise` step mechanically clears it the moment the panel actually posts (#xlw02hw).
+      if (verdict.label === REVIEW_LABELS.human && shouldApplyReviewLabel(REVIEW_LABELS.awaitingAdvisory, currentLabels)) {
+        const awaitMeta = REVIEW_LABEL_META[REVIEW_LABELS.awaitingAdvisory];
+        try { forge.ensureLabel(REVIEW_LABELS.awaitingAdvisory, { color: awaitMeta.color, description: awaitMeta.description }); } catch { /* already exists — fine */ }
+        try { forge.addLabel(prNum, REVIEW_LABELS.awaitingAdvisory); }
+        catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply "${REVIEW_LABELS.awaitingAdvisory}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+      }
       // Stamp the WHY into the PR body (mirrors the drain's #2324 guarantee) so an operator sees it without
       // re-deriving the rubric — and, for #2635, so the roster-expansion re-alignment reason is trailed where
       // the jury ledger (#2641) will read it. Best-effort. #3044 — RECONCILE, not guard-then-append: a re-run

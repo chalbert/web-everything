@@ -29,8 +29,12 @@ import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
-import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
-import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
+import {
+  createDefaultJudge, runOperationCli, buildCliSpec, cwdFlagValue, hasJsonFlag,
+} from './cli-adapter.mjs';
+import {
+  reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv, correctnessAdvisoryFromEnv, antigravityReviewFromEnv,
+} from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
 import { stagePrViewOperation, STAGE_PR_VIEW_OP } from './stage-pr-view.mjs';
 import { createPayloadReader, createStagePrViewSinks, defaultViewDir } from './stage-pr-view-io.mjs';
@@ -46,6 +50,10 @@ import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
+// mechanical-dispatcher #3383 Part 2 follow-up — see `defaultFreshenPrimaryCheckout`'s own docblock for why
+// this is the ONE place the real (git-shelling) freshen function is wired in, rather than a default anywhere
+// importable/testable code would hit unasked.
+import { defaultFreshenPrimaryCheckout } from './delivery-agent-marker.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
 // ALIASED, and the collision is worth naming: this file already exports `resolveOperation(name)` — the
@@ -72,6 +80,10 @@ import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { gapSweepStatusOperation, GAP_SWEEP_STATUS_OP } from './gap-sweep-status.mjs';
 import { createGapSweepSinks } from './gap-sweep-status-io.mjs';
+import { restartRunnerOperation, RESTART_RUNNER_OP, classifyLease } from './restart-runner.mjs';
+import { createRestartReader, createRestartRunnerSinks } from './restart-runner-io.mjs';
+import { clearStuckSessionOperation, CLEAR_STUCK_SESSION_OP } from './clear-stuck-session.mjs';
+import { createClearStuckSessionReader, createClearStuckSessionSinks } from './clear-stuck-session-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -89,8 +101,31 @@ export const OPERATIONS = Object.freeze({
   // no-op for them. See `createReviewPrSinks`'s own `json` doc (`we:scripts/operations/review-pr-io.mjs`) for
   // WHY this exists: a `--json` caller's stdout must stay pure JSON even when the `record` step's notice
   // effect fires mid-run.
-  [REVIEW_PR_OP]: ({ json = false } = {}) => ({
-    declaration: reviewPrOperation({ readPr: createReviewPrReader() }),
+  //
+  // #xqa9ttq — `codexAdvisory` reads `REVIEW_PR_CODEX_ADVISORY=1` off the environment (`codexAdvisoryFromEnv`,
+  // `we:scripts/operations/review-pr.mjs`), OFF by default — see that flag's own docs for why it is an env
+  // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
+  // `record-verdict-io.mjs`'s registration below reads the SAME env var. It composes with `json` above
+  // rather than replacing it: the two knobs are independent (one shapes stdout, the other seats a juror).
+  // #x8n4crp — `correctnessAdvisory` reads `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY=1` off the environment
+  // (`correctnessAdvisoryFromEnv`), a SEPARATE env var from `codexAdvisory`'s own — the two Codex seats are
+  // independently opt-in and OFF by default. Same reasoning as `codexAdvisory` for why an env var and not a
+  // CLI flag, and why `record-verdict-io.mjs`'s registration below must read the SAME env var.
+  // #3383 — `antigravityReview` reads `REVIEW_PR_ANTIGRAVITY_REVIEW=1` off the environment
+  // (`antigravityReviewFromEnv`), a SEPARATE env var from both Codex seats' own — all three optional seats are
+  // independently opt-in and OFF by default. Same reasoning, and the same `record-verdict-io.mjs` requirement.
+  // #xu2pp2m — `cwd` IS THREADED INTO THE READER, not only into the judge factory. See
+  // `we:scripts/operations/cli-adapter.mjs#cwdFlagValue` for the live PR #2122 false-accept this closes: the
+  // reader used to be built with NO arguments, so `--cwd=<lane>` steered the jurors' working tree while the
+  // DIFF still came from `REPO_ROOT`. `createReviewPrReader`'s own `cwd` default is `REPO_ROOT`, so an
+  // invocation with no `--cwd` is byte-identical to before.
+  [REVIEW_PR_OP]: ({ json = false, cwd = null } = {}) => ({
+    declaration: reviewPrOperation({
+      readPr: createReviewPrReader(cwd ? { cwd } : {}),
+      codexAdvisory: codexAdvisoryFromEnv(),
+      correctnessAdvisory: correctnessAdvisoryFromEnv(),
+      antigravityReview: antigravityReviewFromEnv(),
+    }),
     sinks: createReviewPrSinks({ json }),
   }),
   // backlog/xzdi27a-* — the sibling of `review-pr` for a BACKLOG CARD instead of a PR diff (no `gh`, no diff,
@@ -125,6 +160,29 @@ export const OPERATIONS = Object.freeze({
   [GAP_SWEEP_STATUS_OP]: () => ({
     declaration: gapSweepStatusOperation(),
     sinks: createGapSweepSinks(),
+  }),
+  // #3383 — the SAFE conveyor restart: refuse under a just-spawned build agent, SIGTERM the process that
+  // actually owns the loop, confirm it went down by EVIDENCE, sweep a leaked lease, start fresh. The one
+  // operation whose effects SIGNAL and SPAWN processes, which is why its declaration is asserted to hold
+  // neither (`restart-runner.mjs`'s import graph) and every verb lives in the io shell.
+  //
+  // `classifyLease` is handed to the SINKS from the declaration rather than re-imported inside the io shell:
+  // the "a lease is stale only when the heartbeat is past its TTL AND the pid is dead" rule decides both
+  // whether to sweep and whether a launch may proceed, and a second implementation of it on the io side is
+  // precisely the drift this wiring exists to prevent.
+  [RESTART_RUNNER_OP]: () => ({
+    declaration: restartRunnerOperation({ readRestartFacts: createRestartReader() }),
+    sinks: createRestartRunnerSinks({ classifyLease }),
+  }),
+  // #3383 — mechanizes the GH #77683 zombie-session workaround: a background session whose process has died
+  // but whose `<config-dir>/jobs/<id>/` directory is never cleaned up, so `claude agents --json --all` lists
+  // it forever and `claude stop`/`claude rm` both fail against it. `read`→`assess` replay the EXACT liveness
+  // rule `reconcile-core.mjs#assessLiveness` already uses (imported, never re-derived); `authorize` is a real
+  // human `confirm` because the effect touches `~/.claude`, not this repo's own tree; `move` quarantines the
+  // job directory (never deletes it) and is a no-op unless BOTH the verdict and the human agree.
+  [CLEAR_STUCK_SESSION_OP]: () => ({
+    declaration: clearStuckSessionOperation({ readStuckFacts: createClearStuckSessionReader() }),
+    sinks: createClearStuckSessionSinks(),
   }),
   // #xrrpfo7 — `claim`'s sibling: the CLOSE of the lifecycle whose OPEN #3034 declared. Same shape (read →
   // plan → write), same guarded writer, and the guards are REPLAYED from `we:scripts/backlog.mjs`'s
@@ -189,7 +247,10 @@ export const OPERATIONS = Object.freeze({
     // model and the effort a dispatched agent runs under are the operator's call, and a knob only a test can
     // reach is not a knob. Unset → no extra flags, which is the deliberate non-default (a baked-in
     // `--dangerously-skip-permissions` would widen every agent this ever launches).
-    sinks: createDispatchSinks({ extraArgs: agentArgsFromEnv() }),
+    // `freshenCheckout` — mechanical-dispatcher #3383 Part 2 follow-up: the ONE real (git-shelling) wiring of
+    // `defaultFreshenPrimaryCheckout`, so a REAL `dispatch-lane` run sees a `deliveryAgent:` marker that has
+    // already landed on this checkout's own tracked branch, not a stale on-disk snapshot.
+    sinks: createDispatchSinks({ extraArgs: agentArgsFromEnv(), freshenCheckout: defaultFreshenPrimaryCheckout }),
   }),
   // #3034 — the is-the-engine-too-heavy probe: `compute` → `compute` → `effect`, no judge, no confirm.
   // Registering here is what makes `node run.mjs claim --ref=<NNN>` work; `we:scripts/backlog.mjs claim`
@@ -246,7 +307,8 @@ export const OPERATIONS = Object.freeze({
 });
 
 /**
- * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model` become a juror's spawn options (#3151).
+ * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model`/`--provider` become a juror's spawn
+ * options (#3151, extended for `--provider` by #xqa9ttq).
  *
  * EXPORTED SO THE TEST DRIVES THIS FUNCTION AND NOT A COPY OF IT. The first cut inlined the arrow below and the
  * suite re-created the same expression, so the precedence was ASSERTED, never EXERCISED: deleting the flags
@@ -254,17 +316,22 @@ export const OPERATIONS = Object.freeze({
  * `env || cwd` would silently make `--cwd` lose to a stale environment variable and reopen #3151 with the gate
  * still green. One copy, imported by both.
  *
+ * `--provider` FOLLOWS THE SAME FLAG-WINS-ENV-FALLBACK SHAPE as `--cwd`, via `JUDGE_PROVIDER` — an operator who
+ * wants every juror in a session to default to Codex without typing `--provider=codex` on each command sets
+ * the env var once, exactly the workflow `JUDGE_LANE_CWD` already supports for the lane.
+ *
  * @param {object} [o]
- * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD` from.
+ * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD`/`JUDGE_PROVIDER` from.
  * @param {(o: object) => Function} [o.factory] - the judge builder, injected so a test can supply the spawn.
- * @returns {(flags: {cwd: (string|null), model: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
+ * @returns {(flags: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
  */
 export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge } = {}) {
   // THE FLAG WINS, and the env var is the fallback — the explicit act beats the ambient one. `|| null` on both,
   // never a fallback to this process's directory: see the `makeJudge` note at the call site.
-  return ({ cwd, model } = {}) => factory({
+  return ({ cwd, model, provider } = {}) => factory({
     cwd: cwd || env.JUDGE_LANE_CWD || null,
     model: model || null,
+    providerName: provider || env.JUDGE_PROVIDER || 'claude',
   });
 }
 
@@ -272,10 +339,12 @@ export function createCliJudgeFactory({ env = process.env, factory = createDefau
  * Build an isolated registry plus the bindings for ONE named operation. Throws on an unknown name.
  *
  * @param {string} name
- * @param {{json?: boolean}} [opts] - passed straight through to the table entry's builder. Every builder
- *   except `REVIEW_PR_OP`'s ignores it today (see the table above); it exists here so a CALLER can tell a
- *   builder what its OWN argv already says before the declaration it binds to is resolved — `json` is the one
- *   case that needs this (stdout purity under `--json`, `we:scripts/operations/review-pr-io.mjs`).
+ * @param {{json?: boolean, cwd?: string|null}} [opts] - passed straight through to the table entry's builder.
+ *   Every builder except `REVIEW_PR_OP`'s ignores it today (see the table above); it exists here so a CALLER
+ *   can tell a builder what its OWN argv already says before the declaration it binds to is resolved — `json`
+ *   (stdout purity under `--json`, `we:scripts/operations/review-pr-io.mjs`) and `cwd` (#xu2pp2m — which
+ *   checkout the DIFF is read from, `we:scripts/operations/cli-adapter.mjs#cwdFlagValue`) are the two cases
+ *   that need this.
  */
 export function resolveOperation(name, opts = {}) {
   // `Object.hasOwn`, never a bare bracket read: `OPERATIONS['toString']` on a normal-prototype object returns an
@@ -316,7 +385,10 @@ if (IS_CLI) {
   try {
     // `rest` is this invocation's OWN argv, known before the declaration is — see `hasJsonFlag`'s doc for why
     // a full `parseOperationArgv` pass cannot run yet at this point.
-    resolved = resolveOperation(name, { json: hasJsonFlag(rest) });
+    // #xu2pp2m — `cwd` rides alongside `json` for the SAME pre-parse reason (see `cwdFlagValue`): the
+    // `review-pr` reader is built HERE, before `parseOperationArgv` has run, so a `--cwd=<lane>` that only
+    // reached the judge factory left the DIFF coming from `REPO_ROOT`.
+    resolved = resolveOperation(name, { json: hasJsonFlag(rest), cwd: cwdFlagValue(rest) });
   } catch (e) {
     writeAllSync(1, `error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
     process.exit(2);
