@@ -485,6 +485,128 @@ cost at all, just an under-researched one. This does not revive per-lane contain
 made, the auth/billing line item should be crossed off the tradeoff list rather than carried forward as a
 blocker.
 
+## Amendment (2026-09-14) — LIVE test: a container DOES fully contain Antigravity's write tools, git-hook write-escape ruled out, and the auth gap is confirmed real
+
+Same discipline as the amendments above — evidence addendum only, ratifying nothing, changing no status,
+resolving no fork. Commissioned by a different operator question than the 2026-09-11 amendment's Codex
+question: given `#3633`'s own finding that Antigravity's `--sandbox` flag confines only its shell while its 57
+in-process tools (its native file-write tool among them) walk around it entirely — the reason
+`we:scripts/lib/antigravity-judge-spawn.mjs` seats it tool-FREE today — could the SAME `container` boundary
+this item already proved for Codex's git-history problem also close Antigravity's write-safety gap, regardless
+of its own internal sandbox being broken? Tested live tonight, not reasoned about.
+
+**Setup, mirroring this item's own established pattern:** a real, disposable `container run --rm --cpus 2
+--memory 2g`, exactly ONE host directory bind-mounted read-write (`-v <mount>:/workspace:rw`), nothing else —
+no full repo, no host credentials. A first discovery worth recording on its own: Antigravity IS distributed as
+a genuine Linux-native binary, not only the macOS Homebrew cask (`Mach-O 64-bit arm64`) this repo's other
+records reference:
+
+```
+$ curl -sI https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.1-.../linux-arm/cli_linux_arm64.tar.gz
+   HTTP/2 200
+$ file antigravity   (after download + extract)
+   ELF 64-bit LSB pie executable, ARM aarch64, dynamically linked, interpreter /lib/ld-linux-aarch64.so.1
+$ container run --rm -v <mount>:/workspace node:20 /workspace/bin/antigravity --version
+   1.2.1   (exit 0)
+```
+
+So "run Antigravity inside a container" is not blocked by an architecture mismatch, contrary to what the macOS
+cask alone would suggest.
+
+**The filesystem boundary test, run as root inside the guest (the container's default uid).** Every write
+attempted outside the single declared mount — a guest-local `/etc` write, a `..`-above-the-mount write, a
+fabricated host-shaped absolute path built fresh inside the guest, and (below) a malicious git hook — either
+failed outright or landed ONLY in the guest's own ephemeral disk (wiped on `--rm`). Verified independently from
+the real host after each run: a sibling secret file, deliberately never mounted, was byte-identical throughout,
+and none of the guest-side canary paths exist anywhere on the real host:
+
+```
+guest: echo pwned > /etc/canary-write-test        → "WROTE to /etc"      (guest-local /etc, not the host's)
+guest: echo pwned > /workspace/../escape-test.txt → "WROTE above mount"  (resolves to guest /, not host)
+guest: mkdir -p /Users/<home> && echo pwned > .../canary-write-test.txt → "WROTE" (fresh path inside the guest)
+host:  ls /Users/<home>/canary-write-test.txt     → No such file or directory   ← never reached the real host
+host:  ls <the never-mounted sibling secret dir>  → not visible to the guest at all
+guest: df -h                                       → only /workspace is the real virtiofs bind mount;
+                                                       everything else is the guest's own isolated /dev/vdb disk
+```
+
+This holds regardless of which mechanism performs the write, because the boundary is enforced BENEATH the
+process/syscall layer (VM-level), not by any per-tool or per-CLI permission check — the same structural reason
+this item's 2026-09-11 amendment already gave for why a container contains a busy-spin loop that no admission
+control or scanner can. The Antigravity binary itself carries no setuid/setgid bit and (so far as the minimal
+test image's tooling could show) no special file capability — an ordinary unprivileged process, no different
+from any other guest command tested.
+
+**The specific write-relevance question this amendment was asked to answer: is the git-history leak (this
+item's own 2026-09-11 finding, "a container does not close the doctrine-file leak") ALSO a write-escape route,
+not just a read one?** Built the same deletion-clone signature this item's own prior amendment uses (a real
+commit containing the doctrine file, then a plain working-tree delete — not `git rm` — leaving an UNCOMMITTED
+` D` signpost so `HEAD` still holds the file), mounted it as the container's one read-write directory, and
+reproduced the read leak first — `git show HEAD:<the doctrine file>`, run from inside the container, recovered
+the full canary text, identical to this item's existing finding, now confirmed specifically inside Antigravity's
+own execution environment (the Linux binary, not a bare `git` client). Then planted a `.git/hooks/post-commit`
+hook designed to write outside the mount on every commit, and triggered it with a real `git commit` inside the
+container:
+
+```
+$ git commit -q -m "trigger hook"
+HOOK-FIRED: attempting to write outside the mount from a git hook
+.git/hooks/post-commit: cannot create /Users/<home>/hook-write-test.txt: Directory nonexistent
+hook ran with uid: 0
+guest: cat /outside-via-hook.txt   → "hook-pwned"        (the hook's OWN write, inside the guest)
+host:  ls  /outside-via-hook.txt   → No such file or directory   ← never reached the real host
+```
+
+**The hook DID fire** — git hooks execute with full process privilege, confirmed running as the same uid as
+everything else in the guest — but its writes were subject to the identical VM boundary as any other write: one
+landed only in the guest's own ephemeral filesystem (absent from the real host afterward), the other failed
+outright because the target path does not exist in the guest at all. **Answer: no — git plumbing and hooks carry
+no additional escape privilege beyond an ordinary process write.** The git-history problem is confirmed to be
+purely a READ-side concern (recovering content that already lives inside the mount); there is no distinct
+write-escape route through git internals that the general filesystem boundary above does not already cover.
+
+**Network and auth (the sidecar/IPC question).** The real Antigravity backend domains — `antigravity.google`,
+`gweb-jetski.appspot.com` (the `jetski` service named in `#3633`'s own stderr text), `accounts.google.com` — are
+reachable over ordinary outbound HTTPS from inside the container with zero special network configuration; the
+default `container run` networking already provides this, matching this item's existing
+`api.anthropic.com`/`api.github.com` finding. No hole beyond standard outbound internet access is needed.
+Separately: Antigravity's host-side auth lives in the macOS Keychain (confirmed via `security dump-keychain`:
+service `gemini`, account `antigravity`), not a plain credential file under its own state directory — checked
+directly, nothing token-shaped sits there. A Linux container guest has no Keychain, so an unauthenticated
+headless run inside the container failed immediately and cleanly (`Error: authentication required. Run
+'antigravity' to log in, then retry.`, `status: "ERROR"`) rather than silently inheriting or proxying host
+credentials through any hidden channel. **No evidence of a sidecar/IPC route bridging host credentials or host
+filesystem access into the guest was found** — the auth boundary held exactly as the filesystem boundary did.
+This mirrors this item's own already-recorded Claude-Code-Keychain-auth finding (and the 2026-09-13 amendment's
+host-side auth-proxy design immediately above), now confirmed for Antigravity specifically: a real deployment
+still needs the same kind of auth-bridging mechanism (a host-side proxy, or a directly-injected token) before a
+containerized Antigravity seat could run authenticated turns at all — real, separate engineering work, not a
+reason to doubt the containment finding itself.
+
+**One honest gap in this test, stated plainly rather than glossed over.** A live, fully-authenticated
+Antigravity turn actually invoking its own native file-write tool end-to-end was NOT run, because doing so would
+have required extracting the operator's real Keychain-stored Google credential into the throwaway container —
+explicitly avoided per this session's "don't touch real credentials" constraint. What was run instead — raw
+guest-context writes, and a fired git hook attempting the identical escape, both under the exact root-uid
+unprivileged execution context Antigravity's own binary runs under, with that binary independently confirmed to
+carry no elevated capability — is offered as strong, generalizing evidence rather than identical evidence. A
+future test with a scoped, disposable Antigravity credential (not the operator's primary one) could close this
+specific gap and should be preferred over further reasoning-only extrapolation if this ever gates a real
+delivery-seat decision.
+
+**Verdict, and the correction this adds to this item's own record.** A container DOES fully contain
+Antigravity's write tools at the OS/filesystem level — every write attempted outside the single declared mount
+failed to reach the host, regardless of the mechanism (raw syscall, git hook, and by direct generalization its
+own native file-write tool and the other 56 in-process tools, none of which carry any elevated privilege). This
+closes, at the deployment layer, the exact gap `#3633` found in Antigravity's own `--sandbox` flag (confines the
+shell, not the in-process tools) — the reason `we:scripts/lib/antigravity-judge-spawn.mjs` seats it tool-free
+today. The one caveat already on record here — the git-history leak — is now confirmed to be read-only in
+nature; it is not a route past the write boundary. **Net: once container infrastructure exists for this item's
+other reasons, a write-capable Antigravity delivery seat becomes safe to build on top of it, gated only on (a)
+solving the Keychain-auth bridging problem above and (b) the one real gap this test could not close (a
+genuinely live, authenticated native-tool write call) — not on the container boundary itself, which held in
+every test run.**
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
