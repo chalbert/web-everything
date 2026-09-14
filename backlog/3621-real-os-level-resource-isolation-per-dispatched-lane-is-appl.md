@@ -675,6 +675,64 @@ judgment. If anything on this axis starts before that graduation, it should be t
 pool named in that section, not per-lane containers. Recorded in full on the epic tracker,
 we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md (operator note, 2026-09-13).
 
+## Amendment (2026-09-14, later the same day) — the heavy-command-pool container POC extended: `test:unit` (vitest) now proven too
+
+Same discipline as every amendment above: this records real code and real evidence, changes no `status`,
+resolves no fork, and stamps no `preparedDate`. Tracked as a progress note on
+`we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md` (see that item's own
+2026-09-14 session update, second entry) rather than a new formal item, same convention as the amendment
+directly above this one.
+
+**What this closes from the prior amendment's own "still explicitly open" list.** That amendment named
+`test:unit`/Playwright coverage as unstarted, the `frontierui`/`plateau-app` sibling-mount gap as open, and
+image-build automation as manual-only. This slice closes the first two for `test:unit` specifically (not
+Playwright — still unstarted) and adds real automation for the third:
+
+- **The predicted blocker was real and confirmed empirically, not just inferred**: mounting the lane's own
+  host-built (darwin) `node_modules` straight into the container — the shortcut that worked for
+  `check:standards`'s pure-JS dependency closure — fails for `test:unit` exactly as predicted. `npx vitest run`
+  inside a container with only the host `node_modules` mounted throws `Failed to resolve import
+  "@frontierui/plugs/..."` and, separately, esbuild's own native binding never resolves (only
+  `@esbuild/darwin-arm64` exists in the host tree; the guest needs `@esbuild/linux-arm64`).
+- **The fix, measured**: bake a real LINUX-built `node_modules` via `npm ci` inside `node:22-alpine`
+  (`we:scripts/lib/container-exec/Containerfile.test-unit-deps` — no compiler toolchain needed; every native
+  optionalDependency in this lockfile — esbuild, rollup, swc, lightningcss, sharp, `@parcel/watcher` — ships a
+  prebuilt `linux-arm64`/`linux-arm64-musl` binary; `npm ci` completes in ~15-20s), seed a named `container
+  volume` from the result, then mount that volume at `<cwd>/node_modules` OVER the checkout's own rw mount — a
+  more-specific-path mount genuinely shadows the parent bind mount for just that subtree (proven directly: a
+  host-side stub `we:node_modules/marker.json` placed under the checkout mount is completely unreachable inside
+  the guest once the volume is mounted on top, and a write the guest makes into the shadowed path never
+  reaches the host — see `we:scripts/lib/container-exec.mjs`'s own "test:unit slice" header section and its
+  test suite's real integration proof for the exact mechanism).
+- **The second predicted gap, also confirmed and closed**: `we:vitest.config.ts` resolves `@frontierui/plugs`/
+  `@frontierui/webtheme` to the sibling `frontierui` checkout (`we:vitest.shared.ts`'s
+  `resolve(repoRoot, '../frontierui/...')`) — mounting that sibling directory read-only at its own identical
+  host path (`we:scripts/lib/container-exec.mjs#frontieruiSiblingRoot`) fixes it. `plateau-app` was
+  deliberately NOT mounted — it is a `we:vite.config.mts`/dev-server-only reference, never part of `test:unit`'s
+  own import graph (confirmed by running the proof WITHOUT a plateau-app mount and getting a clean pass).
+- **Real evidence, measured on this machine**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on
+  the host and inside the container (via `node we:scripts/readiness/heavy-admission.mjs run --container
+  --container-node-modules -- npx vitest run we:blocks/__tests__`) produced IDENTICAL pass counts both times.
+  The full suite (447 files / 12007 tests, ~9m48s on the host) was NOT re-run inside the container for this
+  proof — a representative subset was used instead, matching this task's own explicit allowance, since the
+  full run's wall-clock cost does not belong in a first-proof loop. The busy-spin CPU-cap containment result
+  was independently reproduced a THIRD time under this exact node_modules-volume + sibling-mount
+  configuration: 8 unbounded spinners held to ~191-204% aggregate host CPU inside a `--cpus 2` container vs.
+  ~800% unconstrained on the host (8 separate `node -e` processes, each pinned at ~100%).
+- **Image-build automation, partially closed**: `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new)
+  builds the deps image, creates/seeds the named volume, stamps a lockfile-hash marker so a re-run is a cheap
+  no-op when the lockfile hasn't changed, and reports `status` (image/volume presence + staleness) for a
+  preflight. This is real automation for the ONE image this slice needs — it does not generalize to
+  `check:standards`'s own image (still built by hand per the prior amendment) or to any future image, so "no
+  image-build automation exists yet" is now only PARTIALLY true.
+
+**Still explicitly open, not resolved by this slice:** Playwright coverage (unstarted — a different, likely
+harder shape again, since it needs a real browser inside the guest, not just a Linux dependency tree);
+`--container`/`--container-node-modules` are not wired as any default anywhere; the full `test:unit` suite was
+not run side-by-side in the container (representative-subset evidence only, as stated above); `check:standards`'s
+own image-build step is still manual; and the same `lane/mechanical-dispatcher` reconciliation risk the prior
+amendment named is unchanged by this slice.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.

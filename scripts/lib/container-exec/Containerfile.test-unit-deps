@@ -1,0 +1,21 @@
+# scripts/lib/container-exec/Containerfile.test-unit-deps — the `test:unit` slice's deps-build image (#3621
+# sequencing note, tracked on #3383). Bakes a real LINUX-built `node_modules` via `npm ci`: unlike
+# `check:standards`'s own pure-JS dependency closure (see the sibling `Containerfile`, mounted straight from
+# the host), `test:unit` (vitest) pulls in esbuild/rollup/etc. — native `darwin-arm64` bindings in this lane's
+# HOST-built tree that simply do not exist for `linux-arm64` there. This image exists ONLY to produce that
+# tree; it is never the run-time image test:unit itself executes in (that stays the lightweight
+# `we-heavy-admission:poc` from the sibling Containerfile — see `container-exec.mjs`'s module header and
+# `build-test-unit-deps.mjs`, which seeds a named `container volume` from `/app/node_modules` built here and
+# then discards this image's own container instance).
+#
+# Every native optionalDependency in this repo's lockfile ships a prebuilt `linux-arm64`/`linux-arm64-musl`
+# binary (confirmed by inspecting package-lock.json before writing this: esbuild, rollup, swc, lightningcss,
+# sharp, @parcel/watcher all do) — so plain `node:22-alpine` + `npm ci` is enough; no node-gyp/compiler
+# toolchain is baked in, deliberately, to keep this image small and the build fast (~15-20s measured).
+#
+# Build (from the repo root): `container build -f scripts/lib/container-exec/Containerfile.test-unit-deps -t we-test-unit-deps:poc .`
+# (normally run via `node scripts/lib/container-exec/build-test-unit-deps.mjs`, which also seeds the volume)
+FROM node:22-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
