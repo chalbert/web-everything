@@ -94,6 +94,36 @@ export function qualifyPaths(repoKey, files) {
 }
 
 /**
+ * Is a lane's git history TRULY DIVERGED from its own `origin/<branch>` ref (both ahead AND behind, i.e. its
+ * HEAD and the remote tip share a common ancestor further back than either tip, rather than one being a
+ * straight-line descendant of the other)?
+ *
+ * WHY THIS MATTERS (live incident, 2026-09-14, #3521/lane-2): the committed-range observed-scope diff below is
+ * `git diff --name-only $(git merge-base origin/main HEAD)...HEAD`. When a lane's HEAD is a clean descendant of
+ * `origin/main` (behind=0, ahead≥0 — the normal "fresh reset, then some real edits" shape), that merge-base IS
+ * `origin/main` (or very close to it) and the diff faithfully reports only the lane's own new work. But when a
+ * lane's local branch was never hard-reset onto a current `origin/main` (both ahead>0 AND behind>0 — it carries
+ * OLD commits `origin/main` no longer has, most likely already-landed work whose PR squash/rebase-merged under
+ * different SHAs), the merge-base can sit far in the past. The diff from that stale point then sweeps in every
+ * file that changed across the ENTIRE intervening history — hundreds of unrelated files the lane never touched
+ * this session — and can spuriously overlap a totally unrelated item's declared scope (observed: lane-2 held a
+ * bogus 249-file scope, including `scripts/operations/run-record.mjs`, purely because merge-base(origin/main,
+ * HEAD) landed 138 commits back; #3521 declares that exact file and was held `overlaps lane-2` indefinitely,
+ * even though lane-2's working tree was completely clean and nothing was actually in progress there).
+ *
+ * A lane in this state is NOT reporting a trustworthy committed-range diff, so the collector drops that half of
+ * `observed` for it (see the IO shell) and flags it via `historyDiverged` instead of silently mis-scoping it.
+ * PURE — both counts are the caller's own `git rev-list --count` reads. Either count non-finite (unknown / a
+ * failed git read) reads as NOT diverged — never fabricate a flag from missing data.
+ * @param {number} aheadCount   commits in HEAD not in `origin/<branch>` (`git rev-list --count origin/x..HEAD`).
+ * @param {number} behindCount  commits in `origin/<branch>` not in HEAD (`git rev-list --count HEAD..origin/x`).
+ * @returns {boolean}
+ */
+export function isDivergedHistory(aheadCount, behindCount) {
+  return Number.isFinite(aheadCount) && aheadCount > 0 && Number.isFinite(behindCount) && behindCount > 0;
+}
+
+/**
  * Parse a lane's raw git outputs into its repo-qualified, deduped OBSERVED scope (the file-level live diff the
  * observer reads). Unions the committed range and the uncommitted working tree, so a lane's footprint includes
  * both what it has committed and what it is mid-edit on.
@@ -276,7 +306,7 @@ export function advanceBreachCount(prev, breach, session = null) {
  * reads/advances/writes the per-lane sidecar and returns the current attempt count for the just-built lease. Kept
  * OUT of the pure core (it does fs) — this pure fn only stamps the integer it returns onto `lease.breachAttempt`.
  */
-export function collectSnapshot({ poolStatus, observedForLane, planForLane = null, breachAttemptForLane = null, itemsForLane = null, leaseAgeMsForLane = null } = {}) {
+export function collectSnapshot({ poolStatus, observedForLane, planForLane = null, breachAttemptForLane = null, itemsForLane = null, leaseAgeMsForLane = null, divergedForLane = null } = {}) {
   const lanes = Array.isArray(poolStatus?.lanes) ? poolStatus.lanes : [];
   // Keep only LIVE-held lanes — `leased === true` marks an active work stream (a stale marker reads as free).
   const held = lanes.filter((l) => l && typeof l === 'object' && l.leased === true);
@@ -311,6 +341,11 @@ export function collectSnapshot({ poolStatus, observedForLane, planForLane = nul
       const a = breachAttemptForLane(lease);
       if (Number.isInteger(a) && a >= 1) lease.breachAttempt = a;
     }
+    // 2026-09-14 (#3521/lane-2 incident) — stamp `historyDiverged` when the injected check says so, so a
+    // consumer (the dispatch-plan overlap gate, telemetry, a human) can tell "this lease's scope came from a
+    // desynced git history" apart from a real overlap. Omitted (not `false`) when no checker is injected —
+    // exact back-compat with callers that don't wire one.
+    if (typeof divergedForLane === 'function' && divergedForLane(lane)) lease.historyDiverged = true;
     leases.push(lease);
   }
   return leases;
@@ -464,6 +499,9 @@ function main(argv) {
   // and the `itemsForLane` derivation below consult it — avoids doubling the merge-base/diff/status subprocesses
   // and pins both consumers to the SAME observation (no read-at-two-instants skew).
   const observedCache = new Map();
+  // 2026-09-14 (#3521/lane-2) — parallel cache of the divergence verdict, keyed the SAME way as `observedCache`
+  // so `observedForLane` and `divergedForLane` agree on the same git read (never a read-at-two-instants skew).
+  const divergedCache = new Map();
   const observedForLane = (lane) => {
     const path = lane?.path;
     if (!path) return [];
@@ -473,15 +511,38 @@ function main(argv) {
       const repoKey = repoKeyForLane(lane);
       // Diff base: merge-base(origin/main, HEAD); fall back to origin/main if merge-base fails.
       const base = tryGit(['merge-base', 'origin/main', 'HEAD'], path) || 'origin/main';
-      const diffOut = tryGit(['diff', '--name-only', '--end-of-options', `${base}...HEAD`], path) || '';
+      // #3521/lane-2 GUARD: a lane whose HEAD is BOTH ahead of AND behind its own `origin/main` never got a
+      // clean reset onto current upstream — its merge-base can sit far in the past, so the committed-range diff
+      // below would sweep in the entire intervening history (see {@link isDivergedHistory}'s header for the
+      // live incident this reproduces). Detect it BEFORE trusting that diff.
+      const aheadCount = Number.parseInt(tryGit(['rev-list', '--count', 'origin/main..HEAD'], path) ?? '', 10);
+      const behindCount = Number.parseInt(tryGit(['rev-list', '--count', 'HEAD..origin/main'], path) ?? '', 10);
+      const diverged = isDivergedHistory(aheadCount, behindCount);
+      divergedCache.set(path, diverged);
+      // Diverged ⇒ the committed-range diff is untrustworthy; fall back to the uncommitted working tree only
+      // (still a real, reliable live-work signal regardless of the lane's history health).
+      const diffOut = diverged ? '' : tryGit(['diff', '--name-only', '--end-of-options', `${base}...HEAD`], path) || '';
       const porcelainOut = tryGit(['status', '--porcelain'], path) || '';
+      if (diverged) {
+        log(
+          `  ⚠ lane-${lane?.lane ?? '?'}: history diverged from origin/main (${aheadCount} ahead / ${behindCount} behind) — ` +
+            `dropping the committed-range diff from observed scope (working-tree diff only)`,
+        );
+      }
       observed = parseObservedFiles({ diffOut, porcelainOut, repoKey });
     } catch (e) {
       log(`  ⚠ lane-${lane?.lane ?? '?'}: git read failed (${String(e.message || e).split('\n')[0]}) — treating observed scope as empty`);
       observed = [];
+      divergedCache.set(path, false);
     }
     observedCache.set(path, observed);
     return observed;
+  };
+  const divergedForLane = (lane) => {
+    const path = lane?.path;
+    if (!path) return false;
+    if (!divergedCache.has(path)) observedForLane(lane); // populate both caches together
+    return divergedCache.get(path) === true;
   };
 
   const planForLane = planMap
@@ -539,6 +600,7 @@ function main(argv) {
     breachAttemptForLane: trackAttempts ? breachAttemptForLane : null,
     itemsForLane,
     leaseAgeMsForLane,
+    divergedForLane,
   });
   const picture = liveScopePicture({ leases, policy });
 
