@@ -177,6 +177,32 @@ describe('verify-dispatch CLI — the hard wall-clock ceiling (epic #3383, live 
     const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
     expect(JSON.parse(after.out).status).toBe('green');
   });
+
+  // Independent-review finding (2026-09-14, epic #3383, PR #2236): an EXTERNAL actor killing the spawned
+  // verify-lane.mjs process (an operator's `kill -9`, an OS OOM-kill, a host restart) produces the exact same
+  // exit shape (`status: null`, a signal present) as OUR OWN ceiling firing — a prior version of the outer
+  // classifier re-derived "timed out" from that shape alone and would misattribute the external kill as
+  // "exceeded the ceiling". The gate here sends itself SIGTERM via `$PPID` (verify-lane.mjs's own pid, its
+  // direct parent) — simulating exactly that external-kill scenario — with both ceilings set far longer than
+  // this test could ever run, so NEITHER of our own timers can legitimately fire.
+  it('an EXTERNAL kill of the verify-lane child is reported as a plain failure, never mislabeled as a ceiling timeout', () => {
+    const req = runVerifyLane(['request', `--repo=${laneDir}`, '--gate=kill -TERM $PPID', '--json'], laneDir);
+    expect(req.code).toBe(0);
+
+    const r = runDispatch(['--json'], {
+      LANE_POOL_ROOT: poolRoot,
+      VERIFY_DISPATCH_TIMEOUT_MS: '60000',
+      VERIFY_DISPATCH_QUEUE_CEILING_MS: '60000',
+    });
+    const body = JSON.parse(r.out);
+    expect(body.dispatched).toEqual([]);
+    expect(body.failures).toHaveLength(1);
+    // A real failure IS reported (the lane still needs a retry) — but NOT as a ceiling timeout, since neither
+    // of our own timers fired.
+    expect(body.failures[0]).toMatchObject({ pool: 'flagtest', lane: 1 });
+    expect(body.failures[0].timedOut).toBeFalsy();
+    expect(body.failures[0].timedOutPhase).toBeUndefined();
+  });
 });
 
 // ── Skeptic-review fix (2026-09-14, epic #3383): GATE time only, not queue-plus-gate ───────────────────────
