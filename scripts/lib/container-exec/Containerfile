@@ -1,0 +1,14 @@
+# scripts/lib/container-exec/Containerfile — the heavy-command-pool container POC image (#3621 sequencing
+# note, tracked on #3383). Proven against exactly ONE heavy command so far: `check:standards`.
+#
+# Deliberately minimal: `check:standards`'s own npm dependency closure (`gray-matter`, `markdown-it`) is pure
+# JS with no native binding, so this image does NOT bake a linux-arm64 `node_modules` the way #3621's own
+# fuller research measured (that is a real, larger, still-open piece of work for `test:unit`, whose closure
+# — vitest/esbuild/rollup — DOES carry native darwin bindings in this lane's tree that would not resolve
+# inside this guest). The lane's own (host-built, darwin) `node_modules` is bind-mounted straight in at run
+# time by `scripts/lib/container-exec.mjs`; only `git` is missing from the `node:22-alpine` base image (alpine
+# ships no git at all) and `check-standards.mjs` shells out to it for its provenance/surface-classifier gates.
+#
+# Build (from the repo root): `container build -f scripts/lib/container-exec/Containerfile -t we-heavy-admission:poc .`
+FROM node:22-alpine
+RUN apk add --no-cache git

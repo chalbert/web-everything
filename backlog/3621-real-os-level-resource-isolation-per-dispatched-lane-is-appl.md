@@ -408,6 +408,61 @@ The 2026-09-08 git-manager idea (Idea 1 of the amendment above) is **not built**
 we:scripts/lib/gh-throttle.mjs exists and nothing under we:scripts/, we:docs/ or we:backlog/ references a
 git-manager or gh-throttle. It remains open as written.
 
+## Amendment (2026-09-14) — the heavy-command-pool container POC, started and given a real first working slice
+
+Same discipline as every amendment above: this one DOES change something — it records real code, not just
+research — but changes no `status` and resolves no fork; this item's own two remaining forks (Docker
+Desktop/OrbStack as a simpler mature alternative; the platform-neutral-abstraction question) are still open.
+Tracked as a progress note on `we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md`
+(see that item's own 2026-09-14 session update for the full account) rather than as a new formal backlog item
+— per the operator's own explicit direction, and confirmed against this repo's actual convention: landing a
+PR here does not require a fresh item number when the change legitimately references an existing one
+(precedent: `PR #2131` landed real code referencing `#3631` by number alone).
+
+**Why now, despite this item's own per-lane-container deferral still standing as written.** The
+2026-09-11 amendment above already drew the exact distinction this slice depends on: per-lane containers stay
+deferred on a real, unresolved auth/billing question (OAuth/keychain → metered `ANTHROPIC_API_KEY`); the
+heavy-command-pool slice needs none of that (`check:standards`/`test:unit` need no credentials at all) and was
+this item's OWN amendment's explicit recommendation for what should start first if anything did. Nothing about
+that recommendation has changed — this is that recommendation acted on, not a reopening of the per-lane
+question.
+
+**A real first working slice landed, `check:standards` only — see `#3383`'s session update for the full
+build/evidence writeup (`we:scripts/lib/container-exec.mjs`, `we:scripts/lib/container-exec/Containerfile`,
+and a new `run` CLI mode on `we:scripts/readiness/heavy-admission.mjs`).** Headline results, condensed here
+because they bear directly on open questions THIS item's own body left unresolved:
+
+- **The CPU cap reproduces this item's own 2026-09-11 busy-spin containment result on a second, independent
+  build**: 8 unbounded spinners inside a `--cpus 2 --memory 2g` container held host CPU at ~190-205%
+  throughout the run, versus ~800% unconstrained on this same 12-core host. Corroborates, does not merely
+  repeat, the earlier finding.
+- **A real fidelity proof for a HEAVY COMMAND specifically** (the earlier amendment proved the isolation
+  provider's own unit suite in-container; this proves an actual heavy command in the closed named set
+  `we:scripts/readiness/heavy-admission.mjs` gates): `check:standards` produced an identical error count and
+  identical error messages run inside the container vs. the host, back-to-back against the same repo state.
+- **A cheaper path than this item's own measured `npm ci`-in-container approach, for commands with a pure-JS
+  dependency closure**: `check:standards`'s only two npm dependencies (`gray-matter`, `markdown-it`) carry no
+  native binding, so the container mounts the lane's own HOST-BUILT (darwin) `node_modules` read-only rather
+  than baking a separate linux-arm64 tree. This is real, but narrow — it does NOT extend to `test:unit`
+  (vitest/esbuild/rollup carry native darwin bindings in this lane's tree), where this item's own
+  `MODULE_NOT_FOUND` finding almost certainly still applies and the baked-linux-tree approach already measured
+  above remains the needed path.
+- **A previously-unnamed friction point, found and closed while building this**: a lane clone's
+  `.git/objects/info/alternates` records an ABSOLUTE host path to the primary checkout (how `--reference`
+  object sharing works) — a container that mounts only the lane itself cannot resolve it, so `git merge-base
+  origin/main HEAD` and similar calls fail inside the guest. Fixed by mounting the primary checkout read-only
+  at its own identical absolute path alongside the lane's read-write mount. Worth recording here since any
+  future container work touching a lane clone (per-lane containers included) will hit the same thing.
+
+**Still explicitly open, not resolved by this slice:** whether `--container` should ever become the DEFAULT
+execution path for `check:standards` (not done here — opt-in only, via a new `--container` flag/
+`WE_HEAVY_ADMISSION_CONTAINER=1`); `test:unit`/Playwright coverage (unstarted); the `frontierui`/`plateau-app`
+sibling-checkout mount gap (a named, understood scope limitation, not yet closed); image-build automation (a
+human/agent runs `container build` by hand today); and a real, accepted risk that this landed on `main` while
+a fuller version of the same general-purpose `run`-CLI idea already exists, unmerged, on the separate
+`lane/mechanical-dispatcher` integration branch — reconciling the two is deferred to whoever lands that
+branch's eventual merge.
+
 ### This amendment does NOT stamp `preparedDate`, deliberately
 
 It closes real questions (is the tool usable; does the cap work; what does a lane cost; does the Codex

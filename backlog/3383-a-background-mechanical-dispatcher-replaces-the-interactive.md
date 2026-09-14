@@ -2834,3 +2834,89 @@ specific N per role is deferred to a follow-on ordinary (batched) finding once r
 never a separate ceremony. No graduation-check function is written and no threshold is wired into
 `we:model-probation.mjs` here — this card rules on the shape of the bar only; wiring it is still unfiled
 future work, distinct from this ratification.
+
+## Session update (2026-09-14) — heavy-command-pool container POC started, per operator direction
+
+Tracked here as a progress note rather than a new formal backlog item, per the operator's own explicit
+instruction ("we can maybe track on the prototype progress unless need formal item to be filed"). Checked
+first whether this repo's PR-landing convention requires a formal item: it does not — `we:scripts/pr-land.mjs`
+only refuses an EMPTY PR description (#2324), and recent precedent (`PR #2131`, "fix: throttle
+we:review-set-label.mjs's last bare execFileSync call (#3631 slice)") lands a real, tested code change that
+references an EXISTING item by number without filing a new one. This slice does the same: it references
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md` directly (an amendment was
+also added there, dated the same day) rather than opening a sibling item.
+
+**Why this slice, now, despite #3621's own per-lane-container deferral still standing.** #3621's 2026-09-11
+amendment corrected an earlier framing and drew a real distinction the operator's brief for this task also
+draws: per-lane containers remain gated on a real, unresolved auth/billing question (switching dispatched
+sessions from OAuth/keychain to `ANTHROPIC_API_KEY` metered billing) — that deferral is UNCHANGED and still
+applies. The heavy-command-pool slice is different: it needs no auth/billing change at all (`check:standards`
+and `test:unit` need no credentials), it was #3621's own amendment's explicit recommendation for "if anything
+starts in parallel sooner," and it answers a real, currently-live problem this same night: the heavy-admission
+semaphore (`we:scripts/readiness/heavy-admission.mjs`, `DEFAULT_ADMISSION_CAP = 2`) is a purely COOPERATIVE
+counting semaphore with no resource boundary behind it — it throttles how many heavy commands run at once,
+never what any one of them can do to the host once admitted.
+
+**What was built — a working first slice, `check:standards` only, proven with real evidence, not a mock.**
+
+- `we:scripts/lib/container-exec.mjs` (new) — builds the `container run --cpus N --memory Ng` argv and runs a
+  command inside a real Apple `container` instance. The checkout is bind-mounted read-write at its own
+  absolute path; when the checkout has a git-alternates primary root (a `--reference`-cloned lane, the normal
+  shape `we:scripts/lane-pool.mjs` produces), that primary is ALSO mounted read-only at its own identical
+  absolute path — without this, `git merge-base origin/main HEAD` and similar calls inside the container fail,
+  which was the first real failure mode hit while building this (git's alternates file records an absolute
+  host path that otherwise does not exist inside the guest).
+- `we:scripts/lib/container-exec/Containerfile` (new) — `node:22-alpine` plus `git` (alpine's base ships
+  none, and `we:scripts/check-standards.mjs` shells out to it). Deliberately does NOT bake a linux-arm64 `node_modules`
+  the way #3621's own fuller research measured: `check:standards`'s actual npm closure (`gray-matter`,
+  `markdown-it`) is pure JS with no native binding, so the lane's own host-built (darwin) `node_modules`
+  mounts straight in and just works. This is a real, narrower, cheaper path than #3621 measured for the FULL
+  suite — but it is NOT proven for `test:unit` (vitest/esbuild/rollup carry real native darwin bindings in
+  this lane's tree; #3621's own `MODULE_NOT_FOUND` finding almost certainly still applies there without the
+  baked-linux-tree approach that item already measured).
+- `we:scripts/readiness/heavy-admission.mjs` — gained a general-purpose `run` CLI mode
+  (`node we:scripts/readiness/heavy-admission.mjs run [--container] -- <cmd…>`, `runUnderAdmission`) that this
+  repo's `main` did not yet have (a fuller version of the same idea exists only on the separate, still-unmerged
+  `lane/mechanical-dispatcher` integration branch, per #3383's own earlier finding — the two will need
+  reconciling, likely a straightforward union, whenever that branch merges to `main`; flagged here rather than
+  silently duplicated). `--container` (or `WE_HEAVY_ADMISSION_CONTAINER=1`) is OPT-IN ONLY: it swaps the
+  command's execution from host `execSync` to `we:scripts/lib/container-exec.mjs#execContainerized`; every existing caller,
+  and `run` without the flag, is byte-for-byte unchanged.
+
+**Real evidence, measured on this machine tonight:**
+
+- **Fidelity**: `check:standards` run inside the container and on the host, back-to-back against the SAME repo
+  state, produced the IDENTICAL error count (3 errors — real, pre-existing, unrelated stranded-backlog-hash
+  issues live on `main` right now) and the identical error messages. The one output difference was a single
+  warning swap (`fui:`/`plateau:` sibling-checkout-absent vs. a block-export-shape warning) caused by this POC
+  not yet mounting the `frontierui`/`plateau-app` sibling checkouts — a named, understood scope gap, not a
+  correctness bug.
+- **Cap enforcement, reproducing #3621's own busy-spin containment method**: 8 unbounded `while :; do :;
+  done` spinners inside a `--cpus 2 --memory 2g` container held the host-side
+  `com.apple.Virtualization.VirtualMachine` process at ~190-205% CPU throughout the run (sampled 3x during a
+  live run) — on this 12-core host, the SAME shape ran unconstrained reaches ~800% per #3621's own prior
+  measurement. The cap is real, not aspirational.
+- **End-to-end via the actual wrapper**: `node we:scripts/readiness/heavy-admission.mjs run --container --
+  node we:scripts/check-standards.mjs` correctly acquired a real admission slot (this host's cap was genuinely
+  saturated by other live lane activity during this session — a real, not staged, demonstration of the
+  capacity pressure this whole item exists to address), ran the command inside the container, and propagated
+  its real nonzero exit code back out.
+- Unit tests added: `we:scripts/lib/__tests__/container-exec.test.mjs` (pure argv/mount-derivation logic, plus
+  a self-skipping REAL integration block that only runs when the `container` CLI and this POC's image are
+  actually present) and new cases in `we:scripts/readiness/__tests__/heavy-admission.test.mjs` for
+  `runUnderAdmission`/`shellQuoteWord`/the injectable container-exec seam.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Only `check:standards` is proven. `test:unit` and the Playwright visual-capture pass are NOT wired or
+   proven — `test:unit` in particular needs the baked-linux-tree approach #3621 already measured (~14s `npm
+   ci` in-image), not the bind-the-host-`node_modules` shortcut this slice uses.
+2. `--container` is not wired as the DEFAULT anywhere — `we:scripts/verify-lane.mjs`'s own gate execution, and every
+   other existing heavy-command call site, still runs on the host exactly as before this PR. Turning it on by
+   default (even for `check:standards` alone) is a deliberate follow-up decision, not made here.
+3. The `frontierui`/`plateau-app` sibling-checkout mounts are not included, so `check:standards`'s
+   cross-repo reference-resolution gates degrade to "skipped" inside the container today.
+4. No image-build automation exists yet (a human/agent runs `container build` by hand per this PR's
+   Containerfile) — a real gap if this is ever wired into an unattended dispatch path.
+5. This work landing on `main` while the fuller `run`-mode implementation lives unmerged on
+   `lane/mechanical-dispatcher` is a known, accepted duplication risk (see above) — not resolved by this PR.
