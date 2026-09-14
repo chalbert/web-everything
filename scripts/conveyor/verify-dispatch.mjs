@@ -26,6 +26,22 @@
  * lanes each still contend for host CPU exactly as a directly-run `npm run test:unit` always has (#3372
  * already shrinks the common case); this file changes WHO runs the gate, not how expensive it is.
  *
+ * A HARD WALL-CLOCK CEILING, NOT JUST A DOCUMENTED ONE (epic #3383, live incident 2026-09-14). The gate's
+ * documented normal range is 150-350s; before this, nothing here bounded it — a single genuinely-stuck (or
+ * merely starved, under heavy concurrent-lane contention) gate blocked EVERY lane's dispatch indefinitely,
+ * because this pass is synchronous and one request is handled to completion before the next is even looked
+ * at. `VERIFY_DISPATCH_TIMEOUT_MS` (default 30 minutes — several multiples of the documented ceiling, chosen
+ * generously so a legitimately slow run under contention is never killed for being merely slow — the live
+ * incident's own gate finished on its own at ~19-20 minutes under heavy contention, which is why the cap is
+ * NOT tucked in near the 15-20 minute range) now bounds that wait. On timeout the WHOLE process tree is
+ * killed, not just the immediate child: `verify-lane.mjs` itself `execSync`s the gate command through a
+ * shell, so the actual test runner is a grandchild that would never see a signal sent only to its parent —
+ * spawning the dispatch with `detached: true` puts that whole tree in one process group up front, so the
+ * timeout handler can kill the group as a unit. The tick then moves on, counting the lane as a dispatch
+ * failure. NO NEW RECOVERY PATH WAS NEEDED: a killed run leaves the marker `running`/stranded, which is
+ * already the exact shape `verify-lane.mjs`'s own marker-guard recovers from — the next tick just re-runs
+ * it, same as a human-killed run always has.
+ *
  * PURE-CORE / IO-SHELL SPLIT (mirrors lease-reaper.mjs): {@link laneNeedsVerifyDispatch} is pure (no fs/git);
  * the IO shell (`main()`) owns the POOL_ROOT walk, marker reads, the `git rev-parse HEAD` per lane, and the
  * actual `verify-lane.mjs` spawn.
@@ -37,6 +53,15 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readVerifyMarker } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+
+/** Several multiples of the gate's documented 150-350s normal range — generous on purpose (see file header):
+ *  a slow-but-healthy run under contention must never be mistaken for a stuck one. Overridable so tests don't
+ *  need to wait 30 real minutes to prove the mechanism. */
+const DEFAULT_VERIFY_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
+const VERIFY_DISPATCH_TIMEOUT_MS =
+  Number(process.env.VERIFY_DISPATCH_TIMEOUT_MS) > 0
+    ? Number(process.env.VERIFY_DISPATCH_TIMEOUT_MS)
+    : DEFAULT_VERIFY_DISPATCH_TIMEOUT_MS;
 
 // ── PURE CORE (no fs / git / clock) ─────────────────────────────────────────────────────────────────────────
 
@@ -132,7 +157,17 @@ function main(argv) {
       try {
         const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json'];
         if (marker.suites) args.push(`--gate=${marker.suites}`);
-        execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        // `detached: true` gives this child its OWN process group (pgid === its own pid) — the one thing
+        // that lets a timeout kill reach the real test runner, which sits two levels deeper (verify-lane.mjs
+        // → its execSync'd shell → the gate command) and would otherwise be orphaned, not terminated, by a
+        // signal aimed only at its immediate parent.
+        execFileSync('node', args, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: true,
+          timeout: VERIFY_DISPATCH_TIMEOUT_MS,
+          killSignal: 'SIGKILL',
+        });
         dispatched.push({ pool, lane, sha: headSha });
       } catch (e) {
         // A red gate is a NORMAL, expected exit (verify-lane exits 2 on red) — it already recorded the red
@@ -140,7 +175,23 @@ function main(argv) {
         // a marker write (a spawn error, an unexpected non-{0,2} exit) counts as one, and is logged, never
         // fatal to the rest of this pass — one bad lane must not block dispatching the others.
         const status = Number.isFinite(e && e.status) ? e.status : null;
-        if (status === 2) {
+        // A timeout kill reports a SIGNAL, never a status — that combination only happens here when OUR OWN
+        // `timeout`/`killSignal` above fired (verify-lane.mjs has no signal handling of its own to race it).
+        const timedOut = status === null && !!(e && e.signal);
+        if (timedOut) {
+          // Node's built-in `timeout` only signals the ONE pid we spawned — reach the whole group we put it
+          // in above so the real test runner dies too, instead of being orphaned to keep burning CPU (the
+          // exact contention pattern that made tonight's incident worse, not better).
+          if (Number.isFinite(e && e.pid)) {
+            try {
+              process.kill(-e.pid, 'SIGKILL');
+            } catch {
+              // already gone — fine, that's the goal.
+            }
+          }
+          log(`  ⚠ ${pool}/lane-${lane}: verify-lane exceeded the ${VERIFY_DISPATCH_TIMEOUT_MS}ms dispatch ceiling — killed (tree included). Marker is left running/stranded; the next tick re-runs it, same as any other killed-mid-run recovery.`);
+          failures.push({ pool, lane, sha: headSha, timedOut: true });
+        } else if (status === 2) {
           dispatched.push({ pool, lane, sha: headSha, red: true });
         } else {
           log(`  ⚠ ${pool}/lane-${lane}: verify-lane dispatch failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`);

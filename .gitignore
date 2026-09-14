@@ -86,6 +86,19 @@ commitment-policy/**/*.d.ts
 # and the shared fold (we:scripts/lib/jury-ledger.mjs) reconstructs the live jury tree the conveyor + #2642
 # console render. Operational observability state (the #2612 single source of truth), machine-local, never committed.
 .conveyor/jury/
+# Durable EXTERNAL driver-status file (#3521/lane-2 incident, 2026-09-14) — the headless runner's own
+# self-diagnosed per-tick status (statusLine, stalled items, dispatch), overwritten every tick so a SEPARATE
+# process (a human, another agent, `scripts/conveyor/driver-status.mjs`) can answer "is the driver stuck?"
+# without grepping runner.log. Machine-local, recreated every tick, never committed.
+.conveyor/driver-status.json
+# Day-sharded plain-language DECISION TRACE (#3521 decision-trace v1, 2026-09-14) — one JSONL file per day, one
+# line per dispatch/skip/stall decision the driver made and WHY, appended every tick. Operational observability
+# state (mirrors the `.operations/telemetry/<date>.jsonl` day-sharding convention), machine-local, never committed.
+.conveyor/decision-trace/
+# Live-toggleable driver-verbose marker (#3521 decision-trace v1 follow-up, 2026-09-14) — set/cleared via
+# `driver-verbose.mjs on|off`, re-read (and its bounded `--ticks=N` window advanced) every tick by the currently
+# running driver. Session-local advisory state, never committed, like every other `.conveyor/*.json` marker here.
+.conveyor/driver-verbose.json
 # Durable per-fork MICRO-DECISION log (#2665) — one .jsonl per review subject; the read port appends a record
 # per human action on a fork (challenge/ask/annotate) and the surface fold reconstructs it, mirroring the jury
 # sidecar above. Operational state (machine-local), recreated on demand, never committed.

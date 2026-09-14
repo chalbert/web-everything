@@ -7,6 +7,7 @@ status: resolved
 scope: ["we:scripts/lib/judge-spawn.mjs"]
 dateOpened: "2026-09-11"
 dateResolved: "2026-09-11"
+relatedTo: ["3632"]
 tags: [operations, multi-provider, probe]
 ---
 
