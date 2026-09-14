@@ -32,6 +32,7 @@ import {
   DEFAULT_CRASH_THRESHOLD_MS, DEFAULT_BASE_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_LOG_PATH,
   DEFAULT_IDLE_BASE_BACKOFF_MS, DEFAULT_IDLE_MAX_BACKOFF_MS,
   CRASH_CEILING_WARN_COUNT, CRASH_CEILING_CRIT_COUNT, IDLE_QUEUE_WARN_TICKS, IDLE_QUEUE_CRIT_TICKS, ALERT_RENAG_MS,
+  shouldRunWatchdog, startWatchdogSchedule, DEFAULT_WATCHDOG_INTERVAL_MS,
 } from '../supervisor.mjs';
 
 // ── (1) classifyExit — clean vs crash, from raw exit facts alone ────────────────────────────────────────────
@@ -588,5 +589,126 @@ describe('makeJsonlLog — real file IO, best-effort (never throws)', () => {
   it('DEFAULT_LOG_PATH sits under RUNNER_LOCK_ROOT — the established local-state home, not a third location', () => {
     expect(DEFAULT_LOG_PATH.endsWith('supervisor-history.jsonl')).toBe(true);
     expect(DEFAULT_LOG_PATH).toContain('conveyor-runner-locks');
+  });
+});
+
+// ── (6) driver-watchdog scheduling (epic #3383) — PR #2219-class evidence lives on the parked-pr-progress-watch
+// suite; this is the "nothing ever called driver-watchdog.mjs on a schedule" gap the file header names ─────────
+
+describe('shouldRunWatchdog — PURE cadence gate', () => {
+  it('never run yet (lastRunMs null) → always run now, no matter the interval', () => {
+    expect(shouldRunWatchdog({ lastRunMs: null, nowMs: 1_000_000, intervalMs: DEFAULT_WATCHDOG_INTERVAL_MS })).toBe(true);
+  });
+
+  it('non-finite lastRunMs (undefined/NaN) is treated the same as never-run', () => {
+    expect(shouldRunWatchdog({ lastRunMs: undefined, nowMs: 1_000_000 })).toBe(true);
+    expect(shouldRunWatchdog({ lastRunMs: NaN, nowMs: 1_000_000 })).toBe(true);
+  });
+
+  it('less than intervalMs since the last run → false', () => {
+    expect(shouldRunWatchdog({ lastRunMs: 1_000_000, nowMs: 1_000_000 + 60_000, intervalMs: 300_000 })).toBe(false);
+  });
+
+  it('AT OR PAST intervalMs since the last run → true', () => {
+    expect(shouldRunWatchdog({ lastRunMs: 1_000_000, nowMs: 1_000_000 + 300_000, intervalMs: 300_000 })).toBe(true);
+    expect(shouldRunWatchdog({ lastRunMs: 1_000_000, nowMs: 1_000_000 + 900_000, intervalMs: 300_000 })).toBe(true);
+  });
+
+  it('DEFAULT_WATCHDOG_INTERVAL_MS is 5 minutes — matches the ad-hoc shell loop found running the night this was built', () => {
+    expect(DEFAULT_WATCHDOG_INTERVAL_MS).toBe(5 * 60_000);
+  });
+});
+
+describe('startWatchdogSchedule — IO shell over an injected `run`/timer (no real driver, no real git/claude)', () => {
+  // A fake interval: `setIntervalFn` returns an opaque handle and NEVER auto-fires — each test advances it by
+  // hand via `fire()`, keeping this fully synchronous and independent of real wall-clock time.
+  function fakeTimer() {
+    let fn = null;
+    return {
+      setIntervalFn: (f) => { fn = f; return { id: 'fake-timer' }; },
+      clearIntervalFn: (h) => { if (h && h.id === 'fake-timer') fn = null; },
+      fire: () => { if (fn) fn(); },
+      isCleared: () => fn === null,
+    };
+  }
+
+  it('runs ONCE immediately on start, before any interval elapses', () => {
+    let calls = 0;
+    const { setIntervalFn, clearIntervalFn } = fakeTimer();
+    const handle = startWatchdogSchedule({
+      checkout: '/fake/checkout', run: () => { calls++; return { verdict: { state: 'idle', actionable: false } }; },
+      setIntervalFn, clearIntervalFn,
+    });
+    expect(calls).toBe(1);
+    handle.stop();
+  });
+
+  it('runs again each time the injected timer fires, and stop() ends it', () => {
+    let calls = 0;
+    const timer = fakeTimer();
+    const handle = startWatchdogSchedule({
+      checkout: '/fake/checkout', run: () => { calls++; return { verdict: { state: 'idle', actionable: false } }; },
+      setIntervalFn: timer.setIntervalFn, clearIntervalFn: timer.clearIntervalFn,
+    });
+    expect(calls).toBe(1);
+    timer.fire();
+    timer.fire();
+    expect(calls).toBe(3);
+    handle.stop();
+    expect(timer.isCleared()).toBe(true);
+  });
+
+  it('calls `run` with dryRun:true by default (heal:false) — check-only, never mutates', () => {
+    const seen = [];
+    const timer = fakeTimer();
+    const handle = startWatchdogSchedule({
+      checkout: '/fake/checkout', run: (o) => { seen.push(o); return { verdict: { state: 'idle', actionable: false } }; },
+      setIntervalFn: timer.setIntervalFn, clearIntervalFn: timer.clearIntervalFn,
+    });
+    expect(seen).toEqual([{ checkout: '/fake/checkout', dryRun: true }]);
+    handle.stop();
+  });
+
+  it('heal:true flips `run` to dryRun:false — the explicit opt-in to the full heal pipeline', () => {
+    const seen = [];
+    const timer = fakeTimer();
+    const handle = startWatchdogSchedule({
+      checkout: '/fake/checkout', heal: true,
+      run: (o) => { seen.push(o); return { verdict: { state: 'idle', actionable: false } }; },
+      setIntervalFn: timer.setIntervalFn, clearIntervalFn: timer.clearIntervalFn,
+    });
+    expect(seen).toEqual([{ checkout: '/fake/checkout', dryRun: false }]);
+    handle.stop();
+  });
+
+  it('logs a `watchdog` breadcrumb with the verdict state/action after every run', () => {
+    const logged = [];
+    const timer = fakeTimer();
+    const handle = startWatchdogSchedule({
+      checkout: '/fake/checkout',
+      run: () => ({ verdict: { state: 'stale', actionable: true }, action: 'healed' }),
+      log: (entry) => logged.push(entry),
+      setIntervalFn: timer.setIntervalFn, clearIntervalFn: timer.clearIntervalFn,
+    });
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({ event: 'watchdog', state: 'stale', actionable: true, action: 'healed', healEnabled: false });
+    handle.stop();
+  });
+
+  it('a throwing `run` is caught, logged as `watchdog-error`, and the schedule keeps going — never breaks the supervisor', () => {
+    const logged = [];
+    const timer = fakeTimer();
+    let calls = 0;
+    const handle = startWatchdogSchedule({
+      checkout: '/fake/checkout',
+      run: () => { calls++; throw new Error('claude agents timed out'); },
+      log: (entry) => logged.push(entry),
+      setIntervalFn: timer.setIntervalFn, clearIntervalFn: timer.clearIntervalFn,
+    });
+    timer.fire();
+    expect(calls).toBe(2);
+    expect(logged.every((e) => e.event === 'watchdog-error')).toBe(true);
+    expect(logged[0].error).toContain('claude agents timed out');
+    handle.stop(); // proves stop() still works cleanly after a run threw
   });
 });

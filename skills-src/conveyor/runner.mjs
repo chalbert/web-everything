@@ -429,6 +429,20 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
         process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
       }
     };
+    // epic #3383 — FIRST, before anything that might refuse on a stale `main`. `we:scripts/operations/
+    // review-dispatch.mjs#assertMainNotStale` (called by BOTH `reconcile-fix-dispatch.mjs` just below and the
+    // review-dispatch reconcile step later in this same pass) throws whenever this checkout's LOCAL `main` ref
+    // is behind `origin/main` by even one commit — and nothing else in this checkout's own operating loop ever
+    // touches `main` (its real work happens on `lane/mechanical-dispatcher`). Found live 2026-09-14: a real
+    // driver checkout's local `main` sat 161 commits / 33+ hours stale, so EVERY fix/review dispatch this pass
+    // tried silently refused, every tick, with only a swallowed one-line stderr warning to show for it — a real,
+    // capacity-available, correctly-computed dispatch plan that never once fired. `main-ref-sync.mjs` is a plain
+    // `git fetch origin main:main` (never touches the working tree; a no-op if `main` happens to be the checked-
+    // out branch here) — it does not touch or weaken `assertMainNotStale` itself, only keeps the ground truth it
+    // checks from going stale in the first place. `forwardRepo: false` — this pass takes `--repo-dir=`, a
+    // filesystem path, not the GH `owner/repo` slug `runQuiet` forwards by default (same reasoning
+    // `lane-pool-health-watch.mjs` below states for its own opt-out).
+    runQuiet('conveyor/main-ref-sync.mjs', [], { forwardRepo: false });
     runQuiet('conveyor/infra-blocked.mjs', ['retry']);
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
