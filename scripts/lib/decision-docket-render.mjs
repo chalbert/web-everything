@@ -82,6 +82,21 @@ function renderNote(note) {
 }
 
 function renderFork(fork) {
+  // A fork whose body doesn't match the documented prepared-fork shape (docs/agent/backlog-workflow.md
+  // #decision-docket) most often predates that convention — it uses a different, more free-form markdown
+  // dialect (bracket markers like "[bold default]" instead of "← **RECOMMENDED**", sub-bullets nested INSIDE
+  // one option's own body, unclosed ** pairs). Attempting to render that prose through the same fixed inline
+  // rules the canonical shape earns produces genuinely garbled output — stray literal "**", flattened
+  // sub-bullets running on as unpunctuated dash-separated fragments — which is worse than showing nothing:
+  // a decider could misread a mangled fragment as the item's actual position. So a parse-incomplete fork
+  // shows ONLY its heading + a clear referral to the source file, never a best-effort (and possibly
+  // misleading) rendering of content this renderer could not confidently structure.
+  if (!fork.parseOk) {
+    return `
+        <div class="forkhd"><span class="forktag">FORK ${fork.n}</span> ${mdInline(fork.crux || '')}</div>
+        <p class="attack flagged"><b>Parse incomplete:</b> ${escapeHtml(fork.warning || 'this fork did not match the documented prepared-fork shape.')} Read this fork directly in the item's own file — the extracted text is not shown here rather than risk a garbled or misleading render.</p>`;
+  }
+
   const optsHtml = fork.options.map(renderOption).join('\n          ');
   const notesHtml = fork.notes.map(renderNote).join('\n        ');
   // The verdict CLASS is read off the START of the Skeptic/Screen text (the actual vocabulary — REFUTED /
@@ -95,7 +110,6 @@ function renderFork(fork) {
   const skepticScreen = (fork.skeptic || fork.screen)
     ? `<p class="attack ${attackClass}">${fork.skeptic ? `<b>Skeptic:</b> ${mdInline(fork.skeptic)}` : ''}${fork.skeptic && fork.screen ? ' &nbsp;·&nbsp; ' : ''}${fork.screen ? `<b>Screen:</b> ${mdInline(fork.screen)}` : ''}</p>`
     : '';
-  const warningHtml = fork.parseOk ? '' : `<p class="attack flagged"><b>Parse note:</b> ${escapeHtml(fork.warning || 'this fork did not match the documented prepared-fork shape.')} Shown as extracted; see the item's own file for the authoritative text.</p>`;
   return `
         <div class="forkhd"><span class="forktag">FORK ${fork.n}</span> ${mdInline(fork.crux || '')}</div>
         ${fork.why ? `<p class="forkwhy">${mdInline(fork.why)}</p>` : ''}
@@ -103,7 +117,6 @@ function renderFork(fork) {
           ${optsHtml}
         </div>
         ${notesHtml}
-        ${warningHtml}
         ${skepticScreen}`;
 }
 

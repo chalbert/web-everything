@@ -57,6 +57,18 @@ describe('renderDocketHtml', () => {
     expect(html).toContain('clear.');
   });
 
+  it('shows only the heading + a referral for a parse-incomplete FORK — never a best-effort render of unreliable content', () => {
+    const data = sampleData();
+    data.items[0].forks[0].parseOk = false;
+    data.items[0].forks[0].warning = 'Fork 1: no option marked RECOMMENDED — default could not be identified.';
+    const html = renderDocketHtml(data, TEMPLATE, { now: new Date('2026-09-13') });
+    expect(html).toContain('Parse incomplete:');
+    expect(html).toContain('FORK 1');
+    // the (possibly garbled, from a non-canonical legacy dialect) option/skeptic text is NOT rendered
+    expect(html).not.toContain('Rejected: bad idea.');
+    expect(html).not.toContain('SURVIVES.');
+  });
+
   it('flags a parse-incomplete prepared item rather than silently thinning it to a table row', () => {
     const data = sampleData();
     data.items[0].parseOk = false;
