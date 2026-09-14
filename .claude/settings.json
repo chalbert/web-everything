@@ -35,6 +35,14 @@
             "command": "node scripts/bootstrap-session.mjs"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-prototype-tracker.mjs --session-start"
+          }
+        ]
       }
     ],
     "PreToolUse": [
