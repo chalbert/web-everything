@@ -199,17 +199,21 @@ export const METRIC_NAMES = Object.freeze([
   // loaded but never say by what; these say what). Sampled by the SAME tick-loop cadence, from ONE `ps`
   // snapshot enumerating every process on the host — see `host-process-sample.mjs` for the actual `ps`
   // invocation, the parser, and the category-matching rules (which live there, not here, because that is
-  // where the real judgment calls are made and tested). Six closed categories, checked in priority order:
-  // `conveyor` (the driver/runner itself + anything under `skills-src/conveyor/`), `drain` (the merge-queue
-  // daemon), `dispatched_agents` (a live `claude`/`codex` CHILD this system's own wrappers spawned — matched
-  // on argv shape, never the bare binary name, so the operator's own interactive session is never
-  // double-counted into it), `vscode`, `chrome`, and `other` — the deliberately-never-omitted catch-all that
-  // keeps the six numbers honest about not covering 100% of machine load (see `summarizeProcessSample`'s own
-  // docblock for why `other`'s sum is the audit check, not a shrug).
+  // where the real judgment calls are made and tested).
+  //
+  // REDESIGNED (#3383 telemetry-granularity follow-on). The original six FIXED categories included `vscode`/
+  // `chrome`/`other` — on a real capture, `other` alone summed 888 processes into ONE entry with zero
+  // per-process identity retained. Per the operator's direction ("any process taking substantial capacity
+  // should have its own entry"), only THREE categories stay fixed at collection time — `conveyor` (the
+  // driver/runner itself + anything under `skills-src/conveyor/`), `drain` (the merge-queue daemon),
+  // `dispatched_agents` (a live `claude`/`codex` CHILD this system's own wrappers spawned, matched on argv
+  // shape, never the bare binary name) — because those are THIS SYSTEM's own processes and were never the
+  // problem. Everything else is now individual per-process rows (`host.process.entry.*`, see below) or a
+  // clearly-labeled remainder (`host.process.below_floor_remainder.*`), never a silent catch-all.
   //
   // TWO metrics per category — CPU and MEMORY are separate names (never one name with a `metric` attribute),
   // the same "low-cardinality name, high-cardinality detail in attributes" rule `dispatch.tokens.*` above
-  // already follows: a plain sum-by-name rollup answers "how much CPU did chrome cost" with no attribute
+  // already follows: a plain sum-by-name rollup answers "how much CPU did drain cost" with no attribute
   // filter. `cpu_pct` is the RAW SUM of `ps`'s own `%CPU` column across every matched process — "percent of
   // one core", so a bucket can legitimately read over 100 on a multi-core host with several matched processes
   // (never pre-divided by `host.cpu.count`, which is recorded alongside for a reader to divide by); `mem_bytes`
@@ -217,9 +221,15 @@ export const METRIC_NAMES = Object.freeze([
   'host.process.conveyor.cpu_pct', 'host.process.conveyor.mem_bytes',
   'host.process.drain.cpu_pct', 'host.process.drain.mem_bytes',
   'host.process.dispatched_agents.cpu_pct', 'host.process.dispatched_agents.mem_bytes',
-  'host.process.vscode.cpu_pct', 'host.process.vscode.mem_bytes',
-  'host.process.chrome.cpu_pct', 'host.process.chrome.mem_bytes',
-  'host.process.other.cpu_pct', 'host.process.other.mem_bytes',
+  // ONE shared low-cardinality name for EVERY individual process that clears `host-process-sample.mjs`'s
+  // storage floor (default >2% CPU or >200MB — see `DEFAULT_PROCESS_CPU_PCT`'s own docblock for the real-data
+  // sizing math) — real identity (`pid`, `command`) travels in `attributes`, never in the metric name, so the
+  // closed vocabulary here never has to grow per-process. `telemetry.mjs#summarizeHostProcesses` is the
+  // reporting-layer function that reads these back and decides which get their own NAMED entry in a report.
+  'host.process.entry.cpu_pct', 'host.process.entry.mem_bytes',
+  // Everything below the storage floor, summed — clearly labeled as a REMAINDER (unlike the old `other`,
+  // which read as a category of its own), carrying `processCount` in its attributes.
+  'host.process.below_floor_remainder.cpu_pct', 'host.process.below_floor_remainder.mem_bytes',
 ]);
 
 /** Metric units — kept tiny and explicit so a renderer never has to guess whether 1200 is ms or a count.
@@ -801,4 +811,131 @@ export function goldenSignals(events) {
     .map((s) => ({ traceId: s.traceId, spanId: s.spanId, name: s.name, kind: s.kind, startedAt: s.startedAt, attempt: s.attempt }));
 
   return { latency, traffic, errors, saturation, retries, abandoned, corrupt: 0 };
+}
+
+// ── HOST-PROCESS REPORTING LAYER (#3383 telemetry-granularity follow-on) ───────────────────────────────
+
+/**
+ * THE DEFAULT "SUBSTANTIAL" REPORTING BAR — deliberately the SAME numbers as
+ * `host-process-sample.mjs#DEFAULT_PROCESS_CPU_PCT`/`#DEFAULT_PROCESS_MEM_BYTES`, the collection-time storage
+ * floor. See that constant's own docblock for the real-data sizing math (a 954-process capture on this host,
+ * three candidate floors costed out in MB/day) that landed on this exact pair. Re-exported here, under this
+ * module's own name, so a caller of {@link summarizeHostProcesses} is not required to reach into the
+ * collection module just to know its own function's default.
+ */
+export const DEFAULT_SUBSTANTIAL_CPU_PCT = 2;
+/** @see DEFAULT_SUBSTANTIAL_CPU_PCT — 200MB, in bytes. */
+export const DEFAULT_SUBSTANTIAL_MEM_BYTES = 200 * 1024 * 1024;
+
+/**
+ * PURE. THE REPORTING/QUERY LAYER — reads back the individual `host.process.entry.*` samples
+ * `host-process-sample.mjs#processSnapshotMetrics` wrote (paired `cpu_pct`/`mem_bytes` metric lines sharing one
+ * tick + pid) and decides, per sample, whether it clears the "substantial" bar. This is the split the operator
+ * asked for explicitly: collection just stores identity; THIS function is where "does this deserve its own
+ * named entry" is actually decided, and it can be re-decided at any time — raise or lower `cpuThresholdPct`/
+ * `memThresholdBytes` and re-run this over the SAME stored events, no re-collection needed.
+ *
+ * THE ONE HARD LIMIT, stated rather than hidden: a threshold LOWER than the collection-time storage floor
+ * cannot recover detail that plain never got written — an `host.process.entry.*` sample only exists for a
+ * process that already cleared `host-process-sample.mjs`'s own floor on the tick it was sampled. Passing a
+ * looser threshold here just means everything already stored qualifies as substantial (the below-threshold
+ * remainder this function computes will be empty save for whatever `host.process.below_floor_remainder.*`
+ * already folded in at collection time — see below). A STRICTER threshold works exactly as advertised: some
+ * already-stored rows move from "substantial" into this function's own remainder.
+ *
+ * GROUPED BY `command` (not `pid`) for the "substantial" bucket — a PID is a single tick's OS-assigned number
+ * and is meaningless to roll up ACROSS ticks (a restarted helper gets a new one); the full command line is the
+ * stable identity across the window, matching how `host-process-sample.mjs`'s own fixed-category matchers
+ * already key on command, not pid. `pids` on each group lists every distinct pid observed, so "one process that
+ * restarted 3 times" is still distinguishable from "3 processes running concurrently" if a reader needs that.
+ *
+ * THE REMAINDER STAYS HONEST: `belowThresholdRemainder` sums BOTH (a) any stored `entry` sample this function's
+ * own threshold judged not substantial, and (b) every `host.process.below_floor_remainder.*` sample in the
+ * window (the collection-time floor's own remainder) — so `substantial` entries + `belowThresholdRemainder` +
+ * the three fixed categories (already reported by `goldenSignals`'s `saturation.gauges`, untouched by this
+ * function) still account for the whole machine, the same honesty invariant the original `other` bucket
+ * existed to uphold.
+ * @param {object[]} events already-read telemetry events (see `telemetry-store.mjs#readAll`/`readDay`)
+ * @param {{cpuThresholdPct?: number, memThresholdBytes?: number}} [opts]
+ * @returns {{substantial: Array<{label: string, pids: number[], meanCpuPct: number, meanMemBytes: number,
+ *   maxCpuPct: number, maxMemBytes: number, samples: number}>,
+ *   belowThresholdRemainder: {meanCpuPct: number, meanMemBytes: number, samples: number},
+ *   cpuThresholdPct: number, memThresholdBytes: number}}
+ */
+export function summarizeHostProcesses(events, {
+  cpuThresholdPct = DEFAULT_SUBSTANTIAL_CPU_PCT, memThresholdBytes = DEFAULT_SUBSTANTIAL_MEM_BYTES,
+} = {}) {
+  const list = (Array.isArray(events) ? events : []).filter((e) => !!e && typeof e === 'object' && e.event === 'metric');
+
+  // Pair each tick+pid's cpu_pct/mem_bytes lines back into one row — mirrors how `processSnapshotMetrics`
+  // wrote them (two lines, same `attributes.pid`/`attributes.tick`, one name each).
+  const byKey = new Map();
+  for (const m of list) {
+    if (typeof m.name !== 'string' || !m.name.startsWith('host.process.entry.')) continue;
+    const attrs = (m.attributes && typeof m.attributes === 'object') ? m.attributes : {};
+    const key = `${attrs.tick ?? ''}:${attrs.pid ?? ''}:${attrs.command ?? ''}`;
+    const row = byKey.get(key) || { pid: attrs.pid ?? null, command: String(attrs.command ?? ''), cpuPct: 0, memBytes: 0 };
+    const v = Number.isFinite(m.value) ? m.value : 0;
+    if (m.name.endsWith('.cpu_pct')) row.cpuPct = v;
+    if (m.name.endsWith('.mem_bytes')) row.memBytes = v;
+    byKey.set(key, row);
+  }
+
+  const groups = new Map(); // label (command) -> accumulator
+  let remCpuSum = 0;
+  let remMemSum = 0;
+  let remSamples = 0;
+  for (const row of byKey.values()) {
+    const substantial = row.cpuPct > cpuThresholdPct || row.memBytes > memThresholdBytes;
+    if (substantial) {
+      const label = row.command || (row.pid == null ? '(unknown process)' : `pid ${row.pid}`);
+      const g = groups.get(label) || {
+        label, pids: new Set(), cpuSum: 0, memSum: 0, samples: 0, maxCpuPct: 0, maxMemBytes: 0,
+      };
+      if (row.pid != null) g.pids.add(row.pid);
+      g.cpuSum += row.cpuPct;
+      g.memSum += row.memBytes;
+      g.samples += 1;
+      g.maxCpuPct = Math.max(g.maxCpuPct, row.cpuPct);
+      g.maxMemBytes = Math.max(g.maxMemBytes, row.memBytes);
+      groups.set(label, g);
+    } else {
+      remCpuSum += row.cpuPct;
+      remMemSum += row.memBytes;
+      remSamples += 1;
+    }
+  }
+
+  // Fold in the collection-time floor's OWN remainder too — see the docblock's "the remainder stays honest".
+  for (const m of list) {
+    if (m.name === 'host.process.below_floor_remainder.cpu_pct' && Number.isFinite(m.value)) {
+      remCpuSum += m.value;
+      remSamples += 1;
+    } else if (m.name === 'host.process.below_floor_remainder.mem_bytes' && Number.isFinite(m.value)) {
+      remMemSum += m.value;
+    }
+  }
+
+  const substantial = [...groups.values()]
+    .map((g) => ({
+      label: g.label,
+      pids: [...g.pids].sort((a, b) => a - b),
+      meanCpuPct: g.samples ? g.cpuSum / g.samples : 0,
+      meanMemBytes: g.samples ? g.memSum / g.samples : 0,
+      maxCpuPct: g.maxCpuPct,
+      maxMemBytes: g.maxMemBytes,
+      samples: g.samples,
+    }))
+    .sort((a, b) => b.meanCpuPct - a.meanCpuPct || b.meanMemBytes - a.meanMemBytes);
+
+  return {
+    substantial,
+    belowThresholdRemainder: {
+      meanCpuPct: remSamples ? remCpuSum / remSamples : 0,
+      meanMemBytes: remSamples ? remMemSum / remSamples : 0,
+      samples: remSamples,
+    },
+    cpuThresholdPct,
+    memThresholdBytes,
+  };
 }

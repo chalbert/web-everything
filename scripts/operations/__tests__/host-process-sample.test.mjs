@@ -1,23 +1,27 @@
 /**
  * @file scripts/operations/__tests__/host-process-sample.test.mjs
- * @description Tests for the per-process attribution follow-on to #3383 (`host-process-sample.mjs`) — the
- * categorization logic that buckets a `ps` snapshot into the six `host.process.*` categories.
+ * @description Tests for the per-process attribution follow-on to #3383 (`host-process-sample.mjs`) — REDESIGNED
+ * so categorization happens at REPORT time, not collection time (see the module's own docblock for the
+ * real-data sizing behind {@link DEFAULT_PROCESS_CPU_PCT}). `conveyor`/`drain`/`dispatched_agents` stay fixed
+ * categories; everything else is kept as individual per-process rows above the storage floor, or folded into
+ * `belowFloor`.
  *
- * NO REAL `ps` CALL ANYWHERE IN THIS FILE. `parsePsOutput`/`categorizeProcess`/`summarizeProcessSample`/
- * `processCategoryMetrics` are pure and are tested against FIXTURE text (a trimmed, real
+ * NO REAL `ps` CALL ANYWHERE IN THIS FILE. `parsePsOutput`/`categorizeProcess`/`buildProcessSnapshot`/
+ * `processSnapshotMetrics` are pure and are tested against FIXTURE text (a trimmed, real
  * `ps -Awwo pid=,pcpu=,rss=,command=` capture, shaped by hand for exact, predictable values); the one IO edge,
  * `readProcessSample`, is tested with an INJECTED fake `exec`, never the real binary.
  */
 import { describe, it, expect } from 'vitest';
 
 import {
-  PROCESS_CATEGORIES, parsePsOutput, categorizeProcess, summarizeProcessSample, processCategoryMetrics,
-  readProcessSample,
+  FIXED_PROCESS_CATEGORIES, parsePsOutput, categorizeProcess, buildProcessSnapshot, processSnapshotMetrics,
+  readProcessSample, DEFAULT_PROCESS_CPU_PCT, DEFAULT_PROCESS_MEM_BYTES,
 } from '../host-process-sample.mjs';
 import { METRIC_NAMES, METRIC_UNITS } from '../telemetry.mjs';
 
 // A REAL capture shape (trimmed to one representative line per category, command lines shortened but kept
 // recognisable) — see the module's own docblock for why matching is on the FULL command line, not `comm`.
+// `rss` values are chosen so exactly the intended rows clear the default 2%/200MB storage floor.
 const FIXTURE_PS_OUTPUT = `
     1   0.0  27696 /sbin/launchd
   546   0.1  92896 /usr/libexec/logd
@@ -28,7 +32,7 @@ const FIXTURE_PS_OUTPUT = `
 77000   0.3  45000 claude
 10419   0.0 326592 /Applications/Visual Studio Code.app/Contents/MacOS/Code
 10422   0.6 118224 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper --type=gpu-process
- 1328   2.0 840224 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+ 1328   2.4 840224 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
  1665   1.0 213664 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --type=gpu-process
  1713   4.0  91120 /Applications/Spotify.app/Contents/Frameworks/Spotify Helper.app/Contents/MacOS/Spotify Helper --type=gpu-process
 `;
@@ -54,8 +58,8 @@ describe('parsePsOutput — the one place `ps -Awwo pid=,pcpu=,rss=,command=` te
   });
 });
 
-describe('categorizeProcess — the six-way match, checked in priority order', () => {
-  it('files the conveyor driver under `conveyor`, never `other`', () => {
+describe('categorizeProcess — the three FIXED categories, checked in priority order; everything else is null', () => {
+  it('files the conveyor driver under `conveyor`', () => {
     expect(categorizeProcess('node /repo/skills-src/conveyor/runner.mjs --max-ticks=1')).toBe('conveyor');
   });
 
@@ -80,95 +84,149 @@ describe('categorizeProcess — the six-way match, checked in priority order', (
     expect(categorizeProcess('claude --resume some-session-id')).not.toBe('dispatched_agents');
   });
 
-  it('files Visual Studio Code and its helpers under `vscode`', () => {
-    expect(categorizeProcess('/Applications/Visual Studio Code.app/Contents/MacOS/Code')).toBe('vscode');
-    expect(categorizeProcess('/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper --type=gpu-process')).toBe('vscode');
+  it('returns null (not a bucket label) for anything unmatched — VS Code, Chrome, Spotify, system daemons alike, so real identity survives to buildProcessSnapshot', () => {
+    expect(categorizeProcess('/Applications/Visual Studio Code.app/Contents/MacOS/Code')).toBeNull();
+    expect(categorizeProcess('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')).toBeNull();
+    expect(categorizeProcess('/Applications/Spotify.app/Contents/MacOS/Spotify')).toBeNull();
+    expect(categorizeProcess('/sbin/launchd')).toBeNull();
   });
 
-  it('files Google Chrome and its helpers under `chrome`', () => {
-    expect(categorizeProcess('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')).toBe('chrome');
-    expect(categorizeProcess('/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --type=gpu-process')).toBe('chrome');
-  });
-
-  it('files anything unmatched under the `other` catch-all, never dropped', () => {
-    expect(categorizeProcess('/Applications/Spotify.app/Contents/MacOS/Spotify')).toBe('other');
-    expect(categorizeProcess('/sbin/launchd')).toBe('other');
-  });
-
-  it('is total on hostile input — never throws, always returns a category', () => {
+  it('is total on hostile input — never throws, always returns a fixed category or null', () => {
     for (const junk of [undefined, null, 42, {}, []]) {
       expect(() => categorizeProcess(junk)).not.toThrow();
-      expect(PROCESS_CATEGORIES).toContain(categorizeProcess(junk));
+      const cat = categorizeProcess(junk);
+      expect(cat === null || FIXED_PROCESS_CATEGORIES.includes(cat)).toBe(true);
     }
   });
 });
 
-describe('summarizeProcessSample — buckets a parsed row list into per-category CPU/memory totals', () => {
-  it('sums cpu% and rss (as bytes) per category from the fixture capture', () => {
+describe('buildProcessSnapshot — fixed-category totals + individual above-floor rows + a belowFloor remainder', () => {
+  it('sums the three fixed categories exactly as before', () => {
     const rows = parsePsOutput(FIXTURE_PS_OUTPUT);
-    const totals = summarizeProcessSample(rows);
-    expect(totals.conveyor.cpuPct).toBeCloseTo(11.0);
-    expect(totals.conveyor.memBytes).toBe(210432 * 1024);
-    expect(totals.drain.cpuPct).toBeCloseTo(0.5);
-    // Two dispatched processes (claude + codex) sum together.
-    expect(totals.dispatched_agents.cpuPct).toBeCloseTo(145.2 + 60.0);
-    expect(totals.dispatched_agents.count).toBe(2);
-    expect(totals.vscode.count).toBe(2);
-    expect(totals.chrome.count).toBe(2);
-    // other: launchd, logd, the bare interactive claude, and Spotify Helper — 4 processes.
-    expect(totals.other.count).toBe(4);
+    const snap = buildProcessSnapshot(rows);
+    expect(snap.categories.conveyor.cpuPct).toBeCloseTo(11.0);
+    expect(snap.categories.conveyor.memBytes).toBe(210432 * 1024);
+    expect(snap.categories.drain.cpuPct).toBeCloseTo(0.5);
+    expect(snap.categories.dispatched_agents.cpuPct).toBeCloseTo(145.2 + 60.0);
+    expect(snap.categories.dispatched_agents.count).toBe(2);
   });
 
-  it('every category in PROCESS_CATEGORIES is always present, even at zero — an empty sample is not an empty object', () => {
-    const totals = summarizeProcessSample([]);
-    for (const cat of PROCESS_CATEGORIES) {
-      expect(totals[cat]).toEqual({ cpuPct: 0, memBytes: 0, count: 0 });
+  it('every fixed category is always present, even at zero', () => {
+    const snap = buildProcessSnapshot([]);
+    for (const cat of FIXED_PROCESS_CATEGORIES) {
+      expect(snap.categories[cat]).toEqual({ cpuPct: 0, memBytes: 0, count: 0 });
     }
+    expect(snap.processes).toEqual([]);
+    expect(snap.belowFloor).toEqual({ cpuPct: 0, memBytes: 0, count: 0 });
   });
 
-  it('the six categories account for the WHOLE sample — the honesty check that makes `other` load-bearing', () => {
+  it('a NAMED APP beyond vscode/chrome — Spotify Helper at 4.0% CPU — clears the default floor and keeps its real identity (pid + full command), never a bucket label', () => {
     const rows = parsePsOutput(FIXTURE_PS_OUTPUT);
-    const totals = summarizeProcessSample(rows);
-    const summedCount = Object.values(totals).reduce((s, c) => s + c.count, 0);
+    const snap = buildProcessSnapshot(rows);
+    const spotify = snap.processes.find((p) => p.pid === 1713);
+    expect(spotify).toBeDefined();
+    expect(spotify.command).toContain('Spotify Helper');
+    expect(spotify.cpuPct).toBeCloseTo(4.0);
+    expect(spotify.memBytes).toBe(91120 * 1024);
+  });
+
+  it('Google Chrome itself (2.4% CPU, over the default 2% floor) is its own row', () => {
+    const rows = parsePsOutput(FIXTURE_PS_OUTPUT);
+    const snap = buildProcessSnapshot(rows);
+    const chrome = snap.processes.find((p) => p.pid === 1328);
+    expect(chrome).toBeDefined();
+    expect(chrome.command).toContain('Google Chrome');
+  });
+
+  it('processes at/under the default floor on BOTH axes fold into belowFloor, not into a row', () => {
+    const rows = parsePsOutput(FIXTURE_PS_OUTPUT);
+    const snap = buildProcessSnapshot(rows);
+    // launchd, logd, VS Code main (0.0%/326592KB≈319MB — wait, that clears the mem floor; check by pid instead)
+    const launchd = snap.processes.find((p) => p.pid === 1);
+    expect(launchd).toBeUndefined();
+    expect(snap.belowFloor.count).toBeGreaterThan(0);
+  });
+
+  it('a custom floor is honoured — a lower floor pulls more rows out of belowFloor', () => {
+    const rows = parsePsOutput(FIXTURE_PS_OUTPUT);
+    const loose = buildProcessSnapshot(rows, { cpuFloorPct: 0, memFloorBytes: 0 });
+    const tight = buildProcessSnapshot(rows, { cpuFloorPct: 1000, memFloorBytes: Number.MAX_SAFE_INTEGER });
+    expect(loose.processes.length).toBeGreaterThan(tight.processes.length);
+    expect(tight.processes).toEqual([]);
+  });
+
+  it('the HONESTY INVARIANT: categories + processes + belowFloor account for the WHOLE sample, every time', () => {
+    const rows = parsePsOutput(FIXTURE_PS_OUTPUT);
+    const snap = buildProcessSnapshot(rows);
+    const fixedCount = Object.values(snap.categories).reduce((s, c) => s + c.count, 0);
+    const summedCount = fixedCount + snap.processes.length + snap.belowFloor.count;
     expect(summedCount).toBe(rows.length);
-    const summedCpu = Object.values(totals).reduce((s, c) => s + c.cpuPct, 0);
+
+    const fixedCpu = Object.values(snap.categories).reduce((s, c) => s + c.cpuPct, 0);
+    const processCpu = snap.processes.reduce((s, p) => s + p.cpuPct, 0);
+    const summedCpu = fixedCpu + processCpu + snap.belowFloor.cpuPct;
     const rawCpu = rows.reduce((s, r) => s + r.pcpu, 0);
     expect(summedCpu).toBeCloseTo(rawCpu);
   });
 
   it('is total on hostile input — never throws', () => {
     for (const junk of [undefined, null, 'nope', [null, undefined, 42, { command: 'x', pcpu: 'nope', rssKb: 'nope' }]]) {
-      expect(() => summarizeProcessSample(junk)).not.toThrow();
+      expect(() => buildProcessSnapshot(junk)).not.toThrow();
     }
   });
 });
 
-describe('processCategoryMetrics — shapes the totals into the telemetry sample array', () => {
-  it('emits exactly 12 samples — two per category, cpu_pct and mem_bytes', () => {
-    const totals = summarizeProcessSample(parsePsOutput(FIXTURE_PS_OUTPUT));
-    const metrics = processCategoryMetrics(totals);
-    expect(metrics).toHaveLength(PROCESS_CATEGORIES.length * 2);
-    for (const cat of PROCESS_CATEGORIES) {
+describe('DEFAULT_PROCESS_CPU_PCT / DEFAULT_PROCESS_MEM_BYTES — the documented, evidence-based storage floor', () => {
+  it('matches the operator\'s own suggested substantial bar: >2% CPU or >200MB', () => {
+    expect(DEFAULT_PROCESS_CPU_PCT).toBe(2);
+    expect(DEFAULT_PROCESS_MEM_BYTES).toBe(200 * 1024 * 1024);
+  });
+});
+
+describe('processSnapshotMetrics — shapes the snapshot into the telemetry sample array', () => {
+  it('emits 6 fixed-category metrics + 2 per above-floor process + 2 belowFloor-remainder metrics', () => {
+    const snap = buildProcessSnapshot(parsePsOutput(FIXTURE_PS_OUTPUT));
+    const metrics = processSnapshotMetrics(snap);
+    const expected = FIXED_PROCESS_CATEGORIES.length * 2 + snap.processes.length * 2 + 2;
+    expect(metrics).toHaveLength(expected);
+    for (const cat of FIXED_PROCESS_CATEGORIES) {
       expect(metrics.some((m) => m.name === `host.process.${cat}.cpu_pct`)).toBe(true);
       expect(metrics.some((m) => m.name === `host.process.${cat}.mem_bytes`)).toBe(true);
     }
+    expect(metrics.some((m) => m.name === 'host.process.below_floor_remainder.cpu_pct')).toBe(true);
+    expect(metrics.some((m) => m.name === 'host.process.below_floor_remainder.mem_bytes')).toBe(true);
   });
 
-  it('every sample carries a name from the closed METRIC_NAMES vocabulary and a valid unit', () => {
-    const metrics = processCategoryMetrics(summarizeProcessSample(parsePsOutput(FIXTURE_PS_OUTPUT)));
+  it('every above-floor process metric carries its REAL identity (pid + command) in attributes, never a category label', () => {
+    const snap = buildProcessSnapshot(parsePsOutput(FIXTURE_PS_OUTPUT));
+    const metrics = processSnapshotMetrics(snap);
+    const spotifyMetric = metrics.find((m) => m.name === 'host.process.entry.cpu_pct' && m.attributes.pid === 1713);
+    expect(spotifyMetric).toBeDefined();
+    expect(spotifyMetric.attributes.command).toContain('Spotify Helper');
+    expect(spotifyMetric.value).toBeCloseTo(4.0);
+  });
+
+  it('every sample carries a name from the closed METRIC_NAMES vocabulary and a valid unit — including the new `entry`/`below_floor_remainder` names', () => {
+    const metrics = processSnapshotMetrics(buildProcessSnapshot(parsePsOutput(FIXTURE_PS_OUTPUT)));
     for (const m of metrics) {
       expect(METRIC_NAMES).toContain(m.name);
       expect(METRIC_UNITS).toContain(m.unit);
       expect(Number.isFinite(m.value)).toBe(true);
     }
-    expect(metrics.find((m) => m.name === 'host.process.chrome.cpu_pct').unit).toBe('percent');
-    expect(metrics.find((m) => m.name === 'host.process.chrome.mem_bytes').unit).toBe('bytes');
   });
 
-  it('is total on a bare/junk totals object', () => {
+  it('a command line longer than the recorder\'s own attribute-value bound is still shaped without throwing', () => {
+    const longCommand = `/Applications/Some App.app/${'x'.repeat(1000)}`;
+    const snap = buildProcessSnapshot([{ pid: 999, pcpu: 5, rssKb: 300 * 1024, command: longCommand }]);
+    expect(() => processSnapshotMetrics(snap)).not.toThrow();
+    const m = processSnapshotMetrics(snap).find((x) => x.name === 'host.process.entry.cpu_pct');
+    expect(m.attributes.command.length).toBeLessThan(longCommand.length);
+  });
+
+  it('is total on a bare/junk snapshot object', () => {
     for (const junk of [undefined, null, {}]) {
-      expect(() => processCategoryMetrics(junk)).not.toThrow();
-      const metrics = processCategoryMetrics(junk);
+      expect(() => processSnapshotMetrics(junk)).not.toThrow();
+      const metrics = processSnapshotMetrics(junk);
       expect(metrics.every((m) => Number.isFinite(m.value))).toBe(true);
     }
   });
@@ -194,7 +252,7 @@ describe('readProcessSample — the one IO edge, with `ps` MOCKED (no real shell
     // This process itself (`node`, running the test runner) must appear somewhere in a real snapshot.
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => Number.isInteger(r.pid) && Number.isFinite(r.pcpu) && Number.isFinite(r.rssKb))).toBe(true);
-    // `summarizeProcessSample`/`processCategoryMetrics` must accept this real shape with no coercion surprises.
-    expect(() => processCategoryMetrics(summarizeProcessSample(rows))).not.toThrow();
+    // buildProcessSnapshot/processSnapshotMetrics must accept this real shape with no coercion surprises.
+    expect(() => processSnapshotMetrics(buildProcessSnapshot(rows))).not.toThrow();
   });
 });
