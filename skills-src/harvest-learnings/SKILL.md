@@ -1,6 +1,6 @@
 ---
 name: harvest-learnings
-description: Harvest the cross-session learnings pool — read every session's dropped observations at once, dedup across sessions, red-team what recurs, and route survivors to backlog items or agent memory via the normal lane → PR. This is the ONLY place learnings are judged; sessions merely collect. Use when the user wants to "harvest the learnings", "run the harvest", "triage the feedback pool", "what has the pool accumulated", or when a close reports the pool is deep/stale. NOT a session close (that only emits) and NOT the product-side owner-review screen (#2610).
+description: Harvest the cross-session learnings pool — read every session's dropped observations at once, dedup across sessions, verify each note's quoted turn against its transcript, red-team the ranked candidates, and route survivors to backlog items or agent memory via the normal lane → PR. This is the ONLY place learnings are judged; sessions merely collect. Use when the user wants to "harvest the learnings", "run the harvest", "triage the feedback pool", "what has the pool accumulated", or when a close reports the pool is deep/stale. NOT a session close (that only emits) and NOT the product-side owner-review screen (#2610).
 ---
 
 # Harvest — the periodic adjudication pass over the learnings pool
@@ -12,9 +12,14 @@ decided **here**, once, over the whole pool. Three reasons the judgment does not
 1. **A subagent cannot run a close.** Curation at close meant a delivery agent's observation only counted
    if some *other* session later closed cleanly.
 2. **A session that never closes loses everything it noticed.**
-3. **Dedup-from-a-sample-of-one.** "Is this a fresh angle or a covered cluster?", "is it narrow/rare or
-   recurring?" — the red-team's own filters are recurrence questions one session structurally cannot
-   answer. A pool answers them with a count.
+3. **Dedup-from-a-sample-of-one.** "Are these five notes five problems, or five symptoms of one cause?" is a
+   question one session structurally cannot ask. A pool can.
+
+**Recurrence diagnoses and ranks; it never admits** (ratified #2978,
+[platform-decisions.md#memory-admission-verified-grounding](../../../docs/agent/platform-decisions.md#memory-admission-verified-grounding)).
+A cluster's `sessions`/`days`/`count` tell you where a common cause may be and what to look at first. They
+do not decide whether a note is real. A one-session note is a real signal that just sorts lower. What admits
+a note to agent memory is **verified grounding** (step 1 checks it) **plus** surviving the red-team.
 
 Eventually this generalizes to the multi-tenant shape (#2610): many people experience, one owner
 adjudicates. The single-tenant harvest is deliberately the same pipeline, so nothing has to be rebuilt.
@@ -22,8 +27,7 @@ adjudicates. The single-tenant harvest is deliberately the same pipeline, so not
 ## Step 1 — read the pool (deterministic, no judgment)
 
 ```bash
-npm run harvest -- --json                 # candidates + stats over the whole pool
-npm run harvest -- --min-sessions=2       # only what ≥2 distinct sessions independently hit
+npm run harvest -- --json                 # every candidate, ranked, + stats over the whole pool
 ```
 
 `we:scripts/conveyor/learnings-harvest.mjs` is the deterministic core (per
@@ -31,8 +35,23 @@ npm run harvest -- --min-sessions=2       # only what ≥2 distinct sessions ind
 it reads every `*.jsonl` in the machine pool (`$LEARNINGS_POOL`, else `~/.claude/conveyor/learnings`) —
 one fixed directory outside any working copy, so a lane clone's drops and the primary checkout's are the
 **same** pool — re-validates every entry against the drop-box SCHEMA (allow-list, `kind`, field caps),
-clusters near-duplicates **across sessions**, and ranks by `sessions` (distinct sessions) before `count`
-(raw entries). **Do not re-derive any of that in context** — read its output.
+**verifies each note's grounding** (below), clusters near-duplicates **across sessions**, and returns
+**every** cluster ranked by `sessions` (distinct sessions), then `days` (distinct days), then `count` (raw
+entries). There is no recurrence floor — the old `--min-sessions` flag is refused. **Do not re-derive any of
+that in context** — read its output.
+
+**Grounding verification.** A note may carry `quotedTurn` (the verbatim turn that established it) and
+`transcript` (the harness session transcript it came from). The harvest opens that transcript and checks the
+quote is really in a visible user or assistant turn. It never matches the drop command itself or its output,
+and the transcript must live under `~/.claude/projects`. Each note gets one verdict:
+
+- `verified` — the quote is there. `role` says whether it was a `human` turn or an `assistant` one, and
+  `turn` is the turn id.
+- `failed` — with a `reason`: `quote-not-found`, `unreadable` (transcript pruned or missing),
+  `outside-transcript-root`, `relative-pointer`, or `incomplete`.
+- `ungrounded` — the note carries no quote. That is not a failure, just no evidence.
+
+`stats.verification` counts the verdicts for the whole run.
 
 > **That schema re-validation is NOT a secret scrub** (#3015). The content scrub moved off the append seam
 > to the publish seam, so a pool line carrying a secret now reaches this step and your context. It is
@@ -42,9 +61,12 @@ clusters near-duplicates **across sessions**, and ranks by `sessions` (distinct 
 An **empty pool is the common, correct outcome.** Say so and stop; nothing observed since the last harvest
 is not a failure.
 
-Each candidate carries: `kind`, `area`, `summary`, `suggestion`, `count`, `sessions`, plus every distinct
-member `summaries`/`suggestions` — a member's own suggestion is never dropped in favour of the
-representative's.
+Each candidate carries: `kind`, `area`, `summary`, `suggestion`, `count`, `sessions`, `days`, plus every
+distinct member `summaries`/`suggestions` — a member's own suggestion is never dropped in favour of the
+representative's. It also carries `grounding` (`{verified, failed, ungrounded}` over its members) and, when
+any member is grounded, one `evidence` row per grounded member: `session`, `transcript`, `quotedTurn`,
+`grounding`. A quote longer than the per-row context budget is sent as an excerpt (`truncated: true`,
+`quoteChars` = full length). The full turn is stored in the pool and is one open of `transcript` away.
 
 ### Gated entries — blocking hiccups awaiting approval (#3421)
 
@@ -94,36 +116,35 @@ node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
   --depth=0 --max-depth=2 --max-total-budget-usd=6 --run-id="harvest-<yyyy-mm-dd>"
 ```
 
-> **A tool-free skeptic cannot go looking — so YOU fetch the evidence first.** The Grounding filter below
-> asks the skeptic to open a corroborating in-repo artifact, and `judgePanel` seats are `--tools ''`. Before
-> writing the payload, do that lookup yourself for each candidate (grep the area, open the file/item/PR the
-> claim implies) and put **what you actually found — including "nothing"** — into the material next to the
-> candidate. The skeptic then judges whether that text corroborates the claim, which is the same filter with
-> the search moved to the one actor that can run it. Do **not** let a seat infer corroboration it could not
-> read; `panel-fanout` already tells it that it has no tools and must not claim to have opened anything.
+> **A tool-free skeptic cannot go looking — so YOU put the evidence in its material.** `judgePanel` seats are
+> `--tools ''`. For each candidate, include its `evidence` rows (the quote excerpt, its `role`, its verdict) and
+> anything else the merit question needs — the file/item/PR the claim implies, opened by you, and **what you
+> actually found, including "nothing"**. Do **not** let a seat infer anything it could not read;
+> `panel-fanout` already tells it that it has no tools and must not claim to have opened anything.
 
-A candidate must clear all five:
+A candidate bound for **memory** must clear all four (a backlog-bound one needs only the last three — an item
+is a *proposal* that gets reviewed, a memory entry is a *standing instruction* every future session obeys):
 
-- **Grounding** — is the lesson *true*, or just asserted? The pool carries no transcript and no evidence
-  field, so the harvest cannot re-ask "quote the turn that established this" the way the old in-session
-  red-team could. It asks the version it *can* verify: **name a concrete in-repo artifact that corroborates
-  the claim** — a file whose content shows the friction, a commit or PR that hit it, a backlog item that
-  records it. Open the artifact and confirm it says what the candidate says. **No corroborating artifact →
-  the candidate may not route to memory.** It can still become a backlog item (an item is a *proposal* that
-  gets reviewed; a memory entry is a *standing instruction* every future session obeys), or stay in the pool
-  until it recurs with something citable attached. This is the one filter that is not about worth — a
-  candidate can be recurring, novel, and in-budget, and still be wrong.
+- **Grounding** — did this moment really happen? Step 1 already checked, mechanically: **a memory rule needs
+  at least one `verified` evidence row.** A `failed` or `ungrounded` note **routes to `we:backlog/`, never to
+  memory** — no matter how often it recurs or how obviously right it reads. Put the verified quote (the
+  excerpt, plus its `role`) into the skeptic's material. Grounding proves the **moment**, not the **merit**:
+  the skeptic still asks whether the lesson drawn from that turn actually follows from it. A real quote with a
+  self-serving conclusion hung on it is a reject. Never upgrade a `failed` verdict by reading the transcript
+  yourself and deciding it "basically" says it — the check is mechanical so it cannot be argued with.
 - **Dedup against existing memory** — a fresh *angle* on a cluster `MEMORY.md` already covers, rather than
   a new axis? → reject.
 - **Budget/eviction** — would adding it evict a stronger existing entry (index at/near cap)? → reject.
   Escalate to a 3-vote panel **only** when this filter fires.
-- **On-disk sufficiency** — does the lesson already live where anyone working that area will see it, and is
-  it narrow/rare? → reject.
-- **Recurrence** — this is the filter the close never had. `sessions: 1` is a hypothesis, not evidence.
-  A single-session candidate needs a *stated* reason it will recur, or it stays in the pool for next time.
+- **On-disk sufficiency** — does the lesson already live where anyone working that area will see it? →
+  reject.
+
+There is **no recurrence filter**. `sessions: 1` is not a reason to reject: a thing the operator said once
+is still a real directive. Recurrence only tells you what to look at first and whether several notes share
+one cause.
 
 **A rejected candidate is not deleted.** It stays in the pool unless it was clearly noise — a later harvest
-may see it recur, and recurrence is exactly the evidence that would change the verdict.
+may see more of the same cause, or a grounded restatement of it.
 
 ## Step 3 — route the survivors
 
@@ -148,7 +169,9 @@ destroys the uncommitted routing work mid-run (this is item **#2955**).
   quotes** — a pooled observation is verbatim operator text and a double-quoted value still runs `` ` `` /
   `$(…)` through bash) with a real ≤100-word digest. `kind: friction | missing-convention` with a concrete fix usually lands here.
 - **Memory** — write the file + its index pointer line, per the memory-management policy. Only for a
-  candidate that cleared the **Grounding** filter with a named artifact; cite that artifact in the entry.
+  candidate with a `verified` evidence row that also survived the red-team. Paraphrase the grounding turn —
+  never paste a raw transcript quote into a committed file (the publish-seam scrub catches secrets, not
+  everything a transcript can hold).
 - Then `we:scripts/pr-land.mjs` from the lane.
 
 ## Step 4 — archive what you acted on
@@ -172,8 +195,8 @@ run unbounded: pass `--files=` (preferred), or `--before=<the ISO time of the st
 alternative. It also **exits non-zero if the pool directory does not exist** — that means you resolved the
 wrong pool, not that there is nothing to archive.
 
-**If you deliberately left candidates un-acted (below the recurrence floor), do NOT archive** — archiving
-would silently discard exactly the observations you decided to wait on.
+**If you deliberately left candidates un-acted (their cause is not yet clear), do NOT archive the files they
+came from** — archiving would silently discard exactly the observations you decided to wait on.
 
 ## Report
 
@@ -181,9 +204,10 @@ would silently discard exactly the observations you decided to wait on.
 ## Harvest
 
 **Pool:** <N entries across M sessions, oldest Xd — or "empty">
-**Candidates:** <K ranked; J below the ×N-session floor, left in the pool>
-**Survived red-team:** <name each, with sessions×count and its grounding artifact — or "none (the common outcome)">
-**Routed:** <backlog #NNN… / memory <slugs> (each with the artifact that grounded it) — via PR #NNN, or "nothing to route">
+**Candidates:** <K ranked>
+**Grounding:** <V verified / F failed / U ungrounded, from stats.verification>
+**Survived red-team:** <name each, with sessions×days×count and its grounding verdict — or "none (the common outcome)">
+**Routed:** <backlog #NNN… / memory <slugs> (each with the verified turn that grounded it) — via PR #NNN, or "nothing to route">
 **Archived:** <stamp + how many files, or "not archived — candidates deliberately deferred">
 ```
 
@@ -197,4 +221,5 @@ would silently discard exactly the observations you decided to wait on.
   lane→PR; the durable artifacts this skill lands are what reaches git. It lives outside every working copy
   precisely so it is **per machine, not per clone** — a repo-anchored pool forks silently per lane clone.
 - **Nothing routes to memory on the pool's word alone.** The pool is an unverified report; agent memory is a
-  standing instruction. The Grounding filter is the seam between the two.
+  standing instruction. A `verified` grounding verdict plus the red-team is the seam between the two — and a
+  recurrence count is never a substitute for either.

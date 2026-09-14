@@ -60,7 +60,7 @@ costs one poll a tick instead of one dispatch a tick.
 
 `unresolved` deliberately collapses two cases that want different answers — *the build failed* (react to it)
 and *the dispatch never took* (retry it) — because the engine can express NEITHER today. Both are now filed:
-[#xdoahvu] (an effect step writes no finding, so nothing can read an outcome) and [#xlt67co] (retry has no
+[#3082] (an effect step writes no finding, so nothing can read an outcome) and [#3083] (retry has no
 policy and no owner). Until they exist, reporting and stopping is the only answer that is not a guess.
 
 ## Why fail-soft, per run

@@ -6,6 +6,7 @@ parent: "3029"
 status: open
 dateOpened: "2026-08-17"
 tags: [plateau-loop, operations, console, dev-server, cross-locus]
+deliveryAgent: codex
 ---
 
 # The mounted operation surface runs on the dev server thread, so a click blocks it

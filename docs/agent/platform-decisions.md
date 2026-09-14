@@ -4451,6 +4451,110 @@ branch; this build lands on `main` through the normal lane → PR → independen
 extending [#parked-pr-conflict-dispatched-not-scripted](#parked-pr-conflict-dispatched-not-scripted) (`#3544`).
 Full reasoning: [#3556](/backlog/3556-auto-dispatch-a-reconciliation-agent-when-we-branch-sync-mjs/).
 
+### A model/provider graduates out of probation on a selection-bias-proof trial bar with an independent calibration veto, scaled by role authority, under one uniform floor {#model-probation-graduation-criteria}
+
+**Ratified 2026-09-13 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
+amendments (`#3654`).** Extends the already-ratified probation mechanism
+(`we:scripts/lib/model-probation.mjs`, epic `#3383`; PR #2182: every new `{provider, model}` identity
+starts `unvalidated`→`probation` before any blocking/gating authority, promotion is always an explicit
+human decision grounded in accumulated data, never automatic, never inherited by a model upgrade) with
+the shape of the bar that decision itself left undefined. Four clauses; **no concrete numeric threshold
+is fixed by any of them** — each names what a follow-on ordinary (batched) finding must propose once
+real trial-count data exists per role, never a separate ceremony:
+
+1. **Volume/mix — a minimum trial count PLUS at least one informative trial, never count alone.** A
+   trial is "informative" only for a checkable event — a confirmed miss the agent should have caught, or
+   a documented cross-reviewer disagreement over severity — never a vibe call. A pure count is rejected
+   as provably gameable by selection bias — the `advisory-review` role's own recorded trial history
+   already clears a pure-count bar despite carrying a confirmed missed blocker inside it (`#2107`, PR
+   #2182; the live record and its evidentiary detail live on `#3654`, not restated here).
+2. **What's measured — success rate is a floor; a confirmed calibration miss is an INDEPENDENT VETO,
+   never diluted into a blended score.** Raw accept/reject rate alone is rejected as blind by
+   construction to the one failure mode already observed (a PR can go `review:accepted` while the same
+   agent, unsupervised, would have waved through something dangerous). A single composite score blending
+   success, calibration and cost is rejected **as the gate** for the same reason — it would let volume
+   mathematically dilute a real miss — though publishing such a composite purely as an informational
+   trend metric alongside the veto is not foreclosed.
+3. **Per-role, never one global bar — the bar scales with the role's eventual authority.**
+   `advisory-review` (structurally non-gating, per `NEVER_BLOCKING_ROLES`) earns the lightest bar;
+   `delivery` (unattended code lands) a moderate bar; any future blocking/gating reviewer role would earn
+   the strictest bar, should one come to exist. Proportionality between evidence required and authority
+   granted is the ratified default; only the *shape* (scale by authority) is ratified now, any tier's
+   specific N is deferred exactly as clauses 1–2 defer theirs. (Whether such a role exists yet, and what
+   still needs building, is tracked on `#3654` itself, not restated here.)
+4. **One uniform FLOOR for every `{provider, model}` identity; no identity buys an easier bar on
+   reputation.** Directly grounded in PR #2182's own text: promotion never inherits authority "by vendor
+   reputation, or by benchmark claims made outside this system." A project MAY still configure a
+   *stricter* bar for a provider class it independently distrusts — an optional per-project tightening,
+   not a rival branch — consistent with
+   [#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate)'s already-ratified "a
+   repo may tighten a scored signal to a gate as config" precedent. Differentiation across identities
+   happens only through the *data* each identity accumulates against the one shared floor, never through
+   a differently defined bar.
+
+**Not built here, by design.** No graduation-check function is written and no threshold is wired into
+`we:model-probation.mjs` by this ruling — it rules on the shape of the bar; wiring a concrete threshold
+is separately-scoped future work, proposed only once a real trial-count distribution exists per role.
+
+**Lineage:** ratified via `#3654` (2026-09-13), filed under the background mechanical dispatcher epic
+`#3383`, grounded in `we:reports/2026-09-12-run-quality-benchmark-for-dispatched-agent-runs.md` and
+composing with (not duplicating)
+[#agent-convergence-independent-validation](#agent-convergence-independent-validation) (`#2398`: staged
+auto-fix autonomy is a sibling axis keyed by repo, not by provider/model trust). Full reasoning:
+[#3654](/backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob/).
+
+### A triggered calibration veto clears only through a root-caused, similarity-matched trial bar — decay and trust never substitute for it {#calibration-veto-clearing}
+
+**Ratified 2026-09-14 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
+amendments (`#3673`).** Extends
+[#model-probation-graduation-criteria](#model-probation-graduation-criteria)'s independent calibration
+veto (`#3654` clause 2: a confirmed calibration miss is an INDEPENDENT VETO, never diluted into a blended
+score) with the shape of how a triggered veto is ever lifted — a question that ruling's own "Done when"
+left as an out-of-scope follow-on, not a re-litigation of the veto rule itself. Four clauses; **no
+concrete numeric threshold is fixed by any of them** — each names what a follow-on ordinary (batched)
+finding must propose once real trial-count data exists, never a separate ceremony:
+
+1. **Root-cause precondition — a documented root-cause finding is required before any post-miss trial
+   counts toward clearing.** The finding must name which of `we:scripts/lib/jury-core.mjs`'s
+   `deriveFindingDisposition` sub-answers (`introduced`, `worseThanBase`, `parallelizable`) diverged
+   between reviewers and why (or the equivalent diagnostic for a future non-jury-core review mechanism).
+   Trial volume alone is rejected as gameable without ever diagnosing why the miss happened — a fix whose
+   relevance to the calibration mechanism is plausible but unestablished does not itself count as a
+   root-cause finding, whatever coverage gap it separately closes.
+2. **Trial evidence bar — a fixed minimum count PLUS at least one similarity-matched trial, never count
+   alone.** Once eligible, clearing requires a minimum trial count N and at least one trial specifically
+   targeting a case similar in kind to the trigger (a severity-ambiguous, borderline-blocker-vs-carve-out
+   case); a deliberately constructed test scenario satisfies this when a naturally-occurring one is
+   scarce. N dissimilar clean trials never suffice — the same selection-bias objection
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 1 already applies to
+   initial graduation, reused here by direct analogy. Exact N deferred.
+3. **Decay alone never clears the veto.** A cooling-off/decay window may narrow which trials are eligible
+   to count (for example, only trials run since a relevant fix landed) but never substitutes for the
+   affirmative clean-trial evidence clauses 1–2 require. Elapsed trial count or elapsed time alone, with no
+   clean/relevant requirement, is temporal dilution of the same kind
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 2 already forecloses
+   for a blended composite score.
+4. **Human override only as a narrow, documented factual reclassification — never a trust grant.** An
+   override is available only on identity/evidentiary grounds: the cited finding fails independent
+   verification, the "same bug" framing does not actually hold (the two reviewers were not in fact looking
+   at the same finding), or a bookkeeping error in how the trigger was recorded. Re-answering the
+   disposition sub-judgments themselves — `introduced`/`worseThanBase`/`parallelizable`, or the equivalent
+   severity sub-judgments for a future non-jury-core mechanism — on confidence or trust alone is explicitly
+   out of scope for any override, at any point; doing so case-by-case would let every future miss be argued
+   away on the same substantive grounds the veto exists to catch.
+
+**Not built here, by design.** No `calibrationMiss` (proposed) field is added to `we:model-probation.json` and no
+clearing-check function is wired by this ruling — it rules on the shape of clearing; wiring a concrete
+mechanism is separately-scoped future work. The live PR #2107 veto on Codex's `advisory-review` role is
+not cleared by this ruling itself: clearing it requires either clause 1's root-cause finding followed by
+clause 2's similarity-matched trials, or clause 4's narrow reclassification override on its own facts —
+never the tooling-asymmetry finding alone.
+
+**Lineage:** ratified via `#3673` (2026-09-14), filed under the background mechanical dispatcher epic
+`#3383`, extending [#model-probation-graduation-criteria](#model-probation-graduation-criteria) (`#3654`)
+and grounded in `we:reports/2026-09-14-calibration-veto-clearing-grounding.md`. Full reasoning:
+[#3673](/backlog/3673-define-what-clears-a-triggered-calibration-veto-so-a-role-ca/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)

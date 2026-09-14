@@ -12,7 +12,7 @@
  *     stops on the core's idle-stop and on the tick budget, and stops when its singleton lease is lost.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -28,8 +28,10 @@ import {
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
   bookkeepingForDispatch, installShutdownHandlers, finalEventLine, SHUTDOWN_SIGNALS,
   recordLaunchPosture,
+  writeDriverStatus, appendDecisionTrace, DRIVER_STATUS_FILENAME,
 } from '../runner.mjs';
 import { readDriverMode, driverModePath } from '../../../scripts/conveyor/driver-mode.mjs';
+import { localDateString } from '../../../scripts/lib/local-date.mjs';
 
 // Hoisted mock — `makeCliMechanicalPasses` dynamically `import('node:child_process')`s `execFileSync`
 // (§below, x5v8yy9 review finding), so the module itself must be mocked rather than the binding. Keeps every
@@ -200,6 +202,8 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
       spawnBuilds: [{ num: 1, lane: 1 }], spawnPrepareScope: [{ num: 2, lane: 2 }],
       spawnPrepareDecision: [{ num: 3, lane: 3 }], spawnFixes: [{ pr: 9 }], spawnCiHeals: [{ pr: 10 }],
       armWatchers: [{ pr: 9, releaseSession: 'conveyor-1' }],
+      stalled: [{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }],
+      decisionTrace: [{ kind: 'dispatch', num: 1, text: 'dispatched #1 to lane-1: build' }],
     } };
     const s = tickSurface(out);
     expect(s.statusLine).toBe('conveyor · 2 building');
@@ -211,10 +215,18 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
       prepareDecision: [{ num: 3, lane: 3 }], fixes: [{ pr: 9 }], ciHeals: [{ pr: 10 }],
     });
     expect(s.armWatchers).toEqual([{ pr: 9, releaseSession: 'conveyor-1' }]);
+    // 2026-09-14 (#3521/lane-2 incident) — the self-diagnosed stall list and the plain-language decision trace
+    // are projected through just as faithfully as every other decisions field.
+    expect(s.stalled).toEqual([{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }]);
+    expect(s.decisionTrace).toEqual([{ kind: 'dispatch', num: 1, text: 'dispatched #1 to lane-1: build' }]);
   });
   it('is total on a bare tick output (all empties, never throws)', () => {
     const s = tickSurface({});
-    expect(s).toEqual({ statusLine: '', counts: null, notes: [], suppressedBuilds: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
+    expect(s).toEqual({
+      statusLine: '', counts: null, notes: [], suppressedBuilds: [],
+      dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] },
+      armWatchers: [], stalled: [], decisionTrace: [],
+    });
   });
 
   // #3383 — the projection's own describe-block promises it "drops nothing", and until now it dropped
@@ -227,6 +239,81 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
       suppressedBuilds: [{ num: 7, lane: 4, by: 'capacity-cap' }, { num: 8, lane: 5, by: 'build-guard' }],
     } });
     expect(s.suppressedBuilds).toEqual([{ num: 7, lane: 4, by: 'capacity-cap' }, { num: 8, lane: 5, by: 'build-guard' }]);
+  });
+});
+
+describe('writeDriverStatus — the durable EXTERNAL status file (2026-09-14, #3521/lane-2 incident)', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'driver-status-')); });
+  afterEach(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  it('writes tick, timestamp, statusLine, stalled, and dispatch — readable by a separate process', () => {
+    const path = join(root, '.conveyor', DRIVER_STATUS_FILENAME);
+    const surface = {
+      statusLine: 'conveyor · 1 building',
+      stalled: [{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }],
+      dispatch: { builds: [{ num: 1, lane: 1 }], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] },
+    };
+    writeDriverStatus(path, { tick: 7 }, surface);
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written.tick).toBe(7);
+    expect(typeof written.at).toBe('string');
+    expect(written.statusLine).toBe('conveyor · 1 building');
+    expect(written.stalled).toEqual([{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }]);
+    expect(written.dispatch.builds).toEqual([{ num: 1, lane: 1 }]);
+  });
+
+  it('overwrites (not appends) on the next tick — the file always reflects only the LATEST tick', () => {
+    const path = join(root, '.conveyor', DRIVER_STATUS_FILENAME);
+    writeDriverStatus(path, { tick: 1 }, { statusLine: 'a', stalled: [], dispatch: {} });
+    writeDriverStatus(path, { tick: 2 }, { statusLine: 'b', stalled: [], dispatch: {} });
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written.tick).toBe(2);
+    expect(written.statusLine).toBe('b');
+  });
+
+  it('never throws on an unwritable path (best-effort — a status write must never wedge the tick)', () => {
+    expect(() => writeDriverStatus('/nonexistent-root-xyz/.conveyor/driver-status.json', { tick: 0 }, { statusLine: '', stalled: [], dispatch: {} })).not.toThrow();
+  });
+});
+
+describe('appendDecisionTrace — the durable, day-sharded decision-trace JSONL sidecar (2026-09-14, #3521 decision-trace v1)', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'decision-trace-')); });
+  afterEach(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  it('appends one JSON line per trace entry, each carrying the tick and a timestamp', () => {
+    const dir = join(root, '.conveyor', 'decision-trace');
+    appendDecisionTrace(dir, { tick: 3 }, [
+      { kind: 'dispatch', num: 10, text: 'dispatched #10 to lane-4: build' },
+      { kind: 'skip', num: 3521, reason: 'overlaps lane-2', text: 'skipped #3521: overlaps lane-2' },
+    ]);
+    const day = localDateString(new Date());
+    const lines = readFileSync(join(dir, `${day}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ tick: 3, kind: 'dispatch', num: 10, text: 'dispatched #10 to lane-4: build' });
+    expect(lines[1]).toMatchObject({ tick: 3, kind: 'skip', num: 3521, reason: 'overlaps lane-2' });
+    expect(typeof lines[0].at).toBe('string');
+  });
+
+  it('appends across multiple calls into the SAME day file rather than overwriting', () => {
+    const dir = join(root, '.conveyor', 'decision-trace');
+    appendDecisionTrace(dir, { tick: 1 }, [{ kind: 'dispatch', num: 1, text: 'a' }]);
+    appendDecisionTrace(dir, { tick: 2 }, [{ kind: 'dispatch', num: 2, text: 'b' }]);
+    const day = localDateString(new Date());
+    const lines = readFileSync(join(dir, `${day}.jsonl`), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+  });
+
+  it('is a no-op on an empty/absent entries list — never creates a file for a quiet tick', () => {
+    const dir = join(root, '.conveyor', 'decision-trace');
+    appendDecisionTrace(dir, { tick: 1 }, []);
+    appendDecisionTrace(dir, { tick: 2 }, null);
+    expect(existsSync(join(dir, `${localDateString(new Date())}.jsonl`))).toBe(false);
+  });
+
+  it('never throws on an unwritable path (best-effort)', () => {
+    expect(() => appendDecisionTrace('/nonexistent-root-xyz/.conveyor/decision-trace', { tick: 0 }, [{ kind: 'dispatch', num: 1, text: 'x' }])).not.toThrow();
   });
 });
 
@@ -757,6 +844,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     // cited as its only prior check, catches none of that).
     expect(calls.map((c) => c.join(' '))).toEqual([
       'node /scripts/conveyor/main-ref-sync.mjs', // epic #3383 — no --repo: takes --repo-dir=, a filesystem path, not this GH slug
+      'node /scripts/conveyor/poc-branch-sync.mjs', // epic #3383 — same reasoning: no --repo, takes --repo-dir=
       'node /scripts/conveyor/infra-blocked.mjs retry --repo=owner/repo',
       'node /scripts/conveyor/lease-reaper.mjs --repo=owner/repo',
       'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',

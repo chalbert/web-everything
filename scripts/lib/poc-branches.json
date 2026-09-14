@@ -8,7 +8,8 @@
       "dateOpened": "2026-08-28",
       "target": "main",
       "scope": ["we:scripts/conveyor/", "we:skills-src/conveyor/"],
-      "graduationItem": "3443"
+      "graduationItem": "3443",
+      "autoSync": true
     }
   ]
 }
