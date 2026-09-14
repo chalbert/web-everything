@@ -2811,3 +2811,26 @@ per-lane containers** — `#3621`'s own distinction, restated here because it is
 idea this deferral does not cover: it needs no auth/billing change, answers `#3621`'s founding incident
 (`#3594`'s busy-spin) directly, and would produce the throughput measurement data the core-split amendment
 still lacks.
+
+## Session update (2026-09-13, continued) — `#3654` (graduation criteria for exiting probation) ratified, all four forks
+
+`#3654` — "Define graduation criteria for a model/provider to exit probation status," filed and prepared
+earlier this session (see the "new decision filed and prepared" update above) — was ratified by the operator
+(Nicolas Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**,
+`codifiedIn: we:docs/agent/platform-decisions.md#model-probation-graduation-criteria` — unlike `#3649`, this
+card's full ruling earns statute (it *is* the shape of the graduation bar), not a narrow rider under an
+existing anchor.
+
+Ratified, as recommended: **(1)** a minimum trial count plus at least one genuinely informative trial (a
+confirmed miss or a documented cross-reviewer disagreement), never count alone; **(2)** success rate as a
+floor, with a confirmed calibration miss an independent veto regardless of accept rate, never diluted into a
+blended composite; **(3)** the bar scales with the role's eventual authority (`advisory-review` lightest,
+`delivery` moderate, a future gating role strictest, not yet built); **(4)** one uniform floor for every
+`{provider, model}` identity — no identity buys an easier bar on reputation, though a project may tighten
+(never loosen) per identity as an optional config choice.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3649` Fork 4's own precedent — a
+specific N per role is deferred to a follow-on ordinary (batched) finding once real trial-count data exists,
+never a separate ceremony. No graduation-check function is written and no threshold is wired into
+`we:model-probation.mjs` here — this card rules on the shape of the bar only; wiring it is still unfiled
+future work, distinct from this ratification.
