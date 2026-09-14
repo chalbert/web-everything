@@ -14,6 +14,7 @@ import {
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
   markWaiting, clearWaiting, listWaiting,
   acquireSlotBlocking, admissionStatus,
+  runUnderAdmission, shellQuoteWord,
 } from '../heavy-admission.mjs';
 
 const T0 = Date.parse('2026-09-03T12:00:00.000Z');
@@ -204,5 +205,56 @@ describe('admissionStatus — the shape tick-core.mjs reads', () => {
     expect(s.held).toHaveLength(1);
     expect(s.waiting).toHaveLength(1);
     expect(s.waiting[0]).toMatchObject({ owner: 'B', lane: '5' });
+  });
+});
+
+describe('shellQuoteWord — round-trips an already-split argv word through /bin/sh -c', () => {
+  it('leaves a plain word untouched', () => expect(shellQuoteWord('check:standards')).toBe('check:standards'));
+  it('single-quotes a word containing whitespace', () => expect(shellQuoteWord('a b')).toBe(`'a b'`));
+  it('escapes an embedded single quote the POSIX way', () => expect(shellQuoteWord(`it's`)).toBe(`'it'\\''s'`));
+});
+
+describe('runUnderAdmission — acquire → exec → release, the #3621 container-hook seam', () => {
+  it('acquires a slot, runs the injected exec, releases on success', async () => {
+    const calls = [];
+    const exec = (cmd, o) => calls.push({ cmd, cwd: o.cwd });
+    const r = await runUnderAdmission({ lockRoot, cap: 2, owner: 'A', command: 'echo hi', cwd: '/repo', exec, now: () => T0, sleep: async () => {} });
+    expect(r.exitCode).toBe(0);
+    expect(r.admission.ok).toBe(true);
+    expect(calls).toEqual([{ cmd: 'echo hi', cwd: '/repo' }]);
+    expect(heldSlots({ lockRoot, cap: 2 })).toHaveLength(0); // released
+  });
+
+  it('maps a thrown exec error status to the returned exitCode, and still releases the slot', async () => {
+    const exec = () => { const e = new Error('boom'); e.status = 7; throw e; };
+    const r = await runUnderAdmission({ lockRoot, cap: 1, owner: 'A', command: 'false', exec, now: () => T0, sleep: async () => {} });
+    expect(r.exitCode).toBe(7);
+    expect(heldSlots({ lockRoot, cap: 1 })).toHaveLength(0);
+  });
+
+  it('defaults a thrown error with no numeric status to exitCode 1', async () => {
+    const exec = () => { throw new Error('no status field'); };
+    const r = await runUnderAdmission({ lockRoot, cap: 1, owner: 'A', command: 'false', exec, now: () => T0, sleep: async () => {} });
+    expect(r.exitCode).toBe(1);
+  });
+
+  it('the exec seam is swappable — the #3621 container POC injects container-exec.mjs#execContainerized here instead of execSync, unchanged acquire/release sequencing either way', async () => {
+    const seen = [];
+    const fakeContainerExec = (cmd, o) => seen.push(`container:${cmd}`);
+    const r = await runUnderAdmission({ lockRoot, cap: 1, owner: 'A', command: 'node scripts/check-standards.mjs', exec: fakeContainerExec, now: () => T0, sleep: async () => {} });
+    expect(r.exitCode).toBe(0);
+    expect(seen).toEqual(['container:node scripts/check-standards.mjs']);
+  });
+
+  it('still fails open on a queuing timeout — runs unslotted rather than refusing', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let clock = T0;
+    const calls = [];
+    const r = await runUnderAdmission({
+      lockRoot, cap: 1, owner: 'B', command: 'echo hi', timeoutMs: 3000,
+      exec: (cmd) => calls.push(cmd), now: () => clock, sleep: async (ms) => { clock += ms; },
+    });
+    expect(r.admission.timedOut).toBe(true);
+    expect(calls).toEqual(['echo hi']); // ran anyway
   });
 });
