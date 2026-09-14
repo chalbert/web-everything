@@ -116,6 +116,57 @@
       "effort": "low",
       "dispatchKind": "advisory-review",
       "probationStatus": "probation"
+    },
+    {
+      "v": 1,
+      "outcome": null,
+      "scoredAt": "2026-09-14T00:58:47.036Z",
+      "rubricVersion": "2026-09-13.1",
+      "criteriaEvaluated": 5,
+      "deductions": [],
+      "score": 100,
+      "item": null,
+      "handle": null,
+      "subjectClass": "work-agent",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "dispatchKind": "advisory-review",
+      "probationStatus": "probation"
+    },
+    {
+      "v": 1,
+      "outcome": null,
+      "scoredAt": "2026-09-14T00:59:27.224Z",
+      "rubricVersion": "2026-09-13.1",
+      "criteriaEvaluated": 5,
+      "deductions": [],
+      "score": 100,
+      "item": null,
+      "handle": null,
+      "subjectClass": "work-agent",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "dispatchKind": "advisory-review",
+      "probationStatus": "probation"
+    },
+    {
+      "v": 1,
+      "outcome": null,
+      "scoredAt": "2026-09-14T00:59:49.819Z",
+      "rubricVersion": "2026-09-13.1",
+      "criteriaEvaluated": 5,
+      "deductions": [],
+      "score": 100,
+      "item": null,
+      "handle": null,
+      "subjectClass": "work-agent",
+      "provider": "antigravity",
+      "model": "gemini-3.1-pro",
+      "effort": "low",
+      "dispatchKind": "advisory-review",
+      "probationStatus": "probation"
     }
   ]
 }
