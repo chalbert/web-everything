@@ -2,10 +2,11 @@
 bornAs: x0eymrj
 kind: story
 size: 3
-status: active
+status: resolved
 blockedBy: ["3015"]
 dateOpened: "2026-08-08"
 dateStarted: "2026-09-14"
+dateResolved: "2026-09-14"
 tags: []
 scope:
   - we:scripts/conveyor/learnings-drop.mjs
