@@ -98,6 +98,7 @@ export function validatePocBranch(entry) {
   else if (normalizeBranchRef(target) === normalizeBranchRef(entry.branch)) errors.push('`target` must differ from `branch` — a branch cannot graduate into itself');
   if (entry.scope != null && (!Array.isArray(entry.scope) || !entry.scope.every(isNonEmptyString))) errors.push('`scope` must be an array of repo-qualified `<repo>:<path>` strings');
   if (entry.graduationItem != null && !isNonEmptyString(entry.graduationItem)) errors.push('`graduationItem` must be an item id string (e.g. "3443")');
+  if (entry.autoSync != null && typeof entry.autoSync !== 'boolean') errors.push('`autoSync` must be a boolean when present (opts this branch in/out of #3383\'s mechanical target-into-branch sync)');
   return { ok: errors.length === 0, errors };
 }
 
@@ -129,6 +130,11 @@ export function normalizeRegistry(parsed) {
       target: normalizeBranchRef(e.target ?? DEFAULT_GRADUATION_TARGET),
       scope: Object.freeze(Array.isArray(e.scope) ? [...e.scope] : []),
       graduationItem: e.graduationItem != null ? String(e.graduationItem).trim() : null,
+      // #3383 — see `resolveAutoSyncEnabled` below. `undefined` (not `false`) when the entry never set it, so
+      // "explicitly off" and "never decided" stay distinct for the resolver's own env-default fallback, and so
+      // `writeRegistry`'s JSON.stringify drops the key entirely for a branch that never opted in — no noisy
+      // `"autoSync": false` line on every entry that doesn't care.
+      autoSync: typeof e.autoSync === 'boolean' ? e.autoSync : undefined,
     }));
   }
   const version = Number.isFinite(Number(parsed?.version)) ? Number(parsed.version) : POC_REGISTRY_VERSION;
@@ -157,6 +163,35 @@ export function findPocBranch(registry, branch) {
  * @returns {boolean}
  */
 export function isPocBranch(registry, branch) { return findPocBranch(registry, branch) !== null; }
+
+/**
+ * THE #3383 ON/OFF KNOB for "keep this POC branch mechanically synced with its graduation target" — the config
+ * convention this repo already established for a feature toggle: a `WE_<NAME>` env var
+ * ({@link AUTO_SYNC_ENV_VAR}, mirroring `we:scripts/lib/lane-concurrency.mjs`'s `WE_MAX_CONCURRENT_LANES` and
+ * `we:scripts/readiness/heavy-admission.mjs`'s `WE_HEAVY_ADMISSION_CAP`), settable PER-BRANCH via this
+ * registry's own `autoSync` field, with a conservative global default (OFF) when neither says otherwise. PURE.
+ *
+ * RESOLUTION ORDER, each one a deliberate footgun-avoidance choice:
+ *   1. `env.WE_POC_BRANCH_SYNC === '0'` is a GLOBAL KILL SWITCH — it forces every branch OFF regardless of its
+ *      own `autoSync: true`, so an operator can pause every mechanical branch-sync at once (e.g. mid-incident)
+ *      without hand-editing the registry entry-by-entry.
+ *   2. The entry's OWN `autoSync` (an explicit `true`/`false`) wins next — the registry is the durable,
+ *      per-branch, committed decision, and is meant to win over a machine-local env default.
+ *   3. Otherwise (the entry never decided): `env.WE_POC_BRANCH_SYNC === '1'` opts every undecided branch IN;
+ *      anything else (unset, any other value) is the conservative default — OFF. A brand-new POC branch that
+ *      forgets to set `autoSync` never gets pushed to automatically, matching this repo's "footguns first"
+ *      default-safe convention (mirrors {@link resolveCap}-style resolvers' own min-1-not-0 floor).
+ * @param {{autoSync?: boolean}|null} entry - a normalized registry entry (or `null` for "no such branch").
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export const AUTO_SYNC_ENV_VAR = 'WE_POC_BRANCH_SYNC';
+
+export function resolveAutoSyncEnabled(entry, env = process.env) {
+  if (env?.[AUTO_SYNC_ENV_VAR] === '0') return false;
+  if (entry && typeof entry.autoSync === 'boolean') return entry.autoSync;
+  return env?.[AUTO_SYNC_ENV_VAR] === '1';
+}
 
 /**
  * Add or replace one entry, returning a NEW registry object (the input is never mutated — every registry this
