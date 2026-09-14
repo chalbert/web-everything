@@ -733,6 +733,136 @@ not run side-by-side in the container (representative-subset evidence only, as s
 own image-build step is still manual; and the same `lane/mechanical-dispatcher` reconciliation risk the prior
 amendment named is unchanged by this slice.
 
+## Amendment (2026-09-14, later still) — three forward-looking requirements for the NEXT phase of this work, plus a live test of one of them
+
+Same discipline as every amendment above — a requirements/evidence addendum only, ratifying nothing, changing
+no status, resolving no fork, and deliberately NOT designing the full solution (that is real scoping work for
+later, per the operator's own explicit instruction). Captured now, precisely, so nothing said tonight gets lost
+to conversation. Triggered by the operator's own direct statement: *"we will need to use a container for the
+heavy command soon. Have capacity reserved for it separate from lane capacity. Commands like vitest and
+verify lane must use the correct parallelism to not overflow allocation and the cap 2 should be aware of what
+each heavy command usage is."* That statement breaks cleanly into three distinct requirements, none of which
+either `#2206` or `#2211` (the two container POC slices landed earlier tonight, see the two amendments directly
+above) actually built — both proved CONTAINMENT works (a command runs correctly inside a capped container,
+producing identical results), not CAPACITY PARTITIONING, INTERNAL-PARALLELISM CORRECTNESS, or an
+INTELLIGENT ADMISSION POLICY. Checked before writing this in: grepped `we:scripts/` for any existing
+implementation of a separate heavy-command resource pool, a container-aware worker-count derivation, or a
+per-command-weighted admission cap — none exists; each of the three below is genuinely open ground, not a
+rediscovery.
+
+### Requirement 1 — reserved capacity for heavy-command containers, kept SEPARATE from lane capacity (two pools, not one shared budget)
+
+A heavy-command container needs its own CPU/memory budget that does not compete with, or get counted against,
+`we:scripts/lib/lane-concurrency.mjs`'s lane-concurrency cap (`DEFAULT_MAX_CONCURRENT_LANES = 8`, env-overridable
+via `WE_MAX_CONCURRENT_LANES`). Today those are already two DIFFERENT counters
+(`we:scripts/lib/lane-concurrency.mjs`'s lane cap vs. `we:scripts/readiness/heavy-admission.mjs`'s `DEFAULT_ADMISSION_CAP = 2`
+heavy-command cap) — but neither is backed by an actual reserved slice of host CPU/memory; both are purely
+COOPERATIVE counting semaphores drawing from the same undivided host resource pool. This is exactly the
+"low-cpu lane containers + a separate heavy-command core pool" idea this item's own 2026-09-08 amendment
+already floated in the abstract (see above) — this requirement makes it concrete and names it as a real,
+needed piece of work rather than a still-open idea: whatever eventually runs heavy commands in containers needs
+a resource reservation (e.g. a fixed CPU/memory slice carved out up front, or a hard ceiling enforced
+independently of how many lanes happen to be open) that a burst of lane-orchestration activity cannot eat into,
+and vice versa. Neither `#2206` nor `#2211` touched this — both ran a SINGLE container ad hoc, on demand, with
+no notion of a standing reserved pool at all.
+
+### Requirement 2 — a heavy command must configure its OWN internal parallelism to fit the container it actually runs in, not autodetect (or assume) the host's full core count
+
+A command like `vitest` (`test:unit`) or `we:scripts/verify-lane.mjs`, when run inside a `container run --cpus
+N` instance, must size its own worker/thread pool to fit within N — never oversubscribe its OWN container
+allocation. This needs to be verified/fixed PER COMMAND, not assumed to already hold repo-wide.
+
+**Live-tested tonight, on this machine, per the operator's own request for a real answer rather than an
+assumption** — using `#2211`'s already-built container infrastructure directly (a fresh lane, `lane-20`,
+acquired via `we:scripts/lane-pool.mjs` specifically for this test; the node_modules volume/image were already
+built and fresh on this host):
+
+- **Does Node itself see a container's real CPU allocation?** Mixed, and worth recording precisely rather than
+  as a single yes/no. `container run --cpus 2 --memory 2g node:22-alpine node -e "os.cpus().length"` → **3**
+  (an off-by-one, N+1 — matching this item's own 2026-09-11 amendment's earlier finding, now reconfirmed with
+  `--cpus 1` → 2 and `--cpus 4` → 5, a consistent pattern, not a one-off fluke). But `os.availableParallelism()`
+  — the newer, cgroup-aware Node API — correctly reported **2** for `--cpus 2`. So a command that reads the
+  older `os.cpus().length` API gets a systematically wrong (inflated by one) view of its container's real
+  allocation; one that reads `os.availableParallelism()` gets the correct, cgroup-limited number. Which API a
+  given command's dependency chain actually calls is exactly the kind of thing that has to be checked per
+  command, not assumed.
+- **Does THIS repo's `test:unit` (vitest) actually use either API to size its pool?** No — and this is the
+  more important finding. `we:vitest.shared.ts#maxTestWorkers` is a **hardcoded literal constant, `= 4`**, wired
+  into `we:vitest.config.ts`/`we:vitest.maas-conformance.config.ts`'s `poolOptions.threads.maxThreads` and
+  `we:vitest.integration.config.ts`'s `poolOptions.forks.maxForks`. It calls neither `os.cpus()` nor
+  `os.availableParallelism()` at all — confirmed by reading the constant's own definition and every call site.
+  It was deliberately sized (per that constant's own `#x1jcikc` comment, already in the repo, unrelated to this
+  amendment) for the HOST's 12-core budget under a documented worst-case assumption of **3 concurrent `vitest`
+  invocations** racing past `we:scripts/readiness/heavy-admission.mjs`'s admission cap during its fail-open timeout window (3×4=12,
+  "fully subscribed but never oversubscribed" — on the HOST). **That sizing has nothing to do with, and does
+  not adapt to, any container it might later run inside.** Ran the real 35-file/441-test `we:blocks/__tests__`
+  subset (the same subset `#2211` proved fidelity with) inside a real `--cpus 2 --memory 2g` container via the
+  actual wrapper — `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules --
+  npx vitest run --config we:vitest.config.ts we:blocks/__tests__` — and it passed 35/35 files, 441/441 tests,
+  confirming the pipeline itself works end to end. But the config value governing its worker count is still the
+  same literal `4`, regardless of the `--cpus 2` the container was actually given.
+- **The confirmed, specific instance of this requirement, stated plainly:** `test:unit`, run inside a `--cpus 2`
+  container exactly the way a future heavy-command-pool default would run it, will request up to **4** worker
+  threads against a container that only has **2** real cores — a genuine 2x oversubscription of the
+  container's own allocation, distinct from (and not fixed by) the host-level oversubscription
+  `maxTestWorkers = 4` was originally built to prevent. This is NOT the naive failure mode this requirement's
+  own framing worried about going in (blind `os.cpus().length` autodetection of the HOST'S full core count) —
+  that specific shape is already avoided by the existing hardcoded constant. It is a related but different
+  gap: a fixed value tuned for one resource budget (the host, under a specific concurrent-invocation
+  assumption) silently carried into a different, smaller, actual resource budget (one container's `--cpus N`)
+  with no mechanism connecting the two. Diagnosed here, not fixed — per the operator's own instruction, fixing
+  vitest's config to read its container's real allocation (e.g. via `os.availableParallelism()`, or an
+  explicit `--cpus`-derived env var the wrapper could pass in) is real scope, better sequenced as its own
+  follow-up once Requirement 1's capacity reservation is designed — a worker-count fix sized against an
+  UNRESERVED container allocation would just be guessing at a moving target.
+- **Not yet checked, flagged rather than assumed:** `we:scripts/verify-lane.mjs` itself and `check:standards`'s
+  own internal parallelism (if any) were not tested this way tonight — only `test:unit`/vitest was, since it is
+  the one with a real, already-discovered worker-pool config to inspect. Whoever picks this requirement up
+  should check each named heavy command individually, not generalize from vitest's result alone.
+
+### Requirement 3 — the admission cap should become resource-aware per command, not a flat cap-of-2 treating every heavy command as equal
+
+`we:scripts/readiness/heavy-admission.mjs`'s own header is explicit that v1 is "an EQUAL-COST NAMED SET — every
+heavy command consumes exactly one slot, none is weighted differently." The operator's direction tonight is
+that this should change: the cap should know what each specific heavy command actually needs (e.g. `vitest`
+plausibly needing more CPU/memory budget than `check:standards`'s pure-JS static analysis pass) rather than
+treating every admitted command as an interchangeable unit. This is a real evolution of the semaphore model —
+weighted/typed slots, or a per-command resource-cost table the admission logic consults — not a small tweak to
+the existing flat-count code.
+
+**This is not purely theoretical — a live instance of the SAME underlying "admission control does not actually
+see what is really happening" gap was found and is being fixed separately tonight, worth citing here as
+concrete, dated evidence rather than a hypothetical.** Confirmed 2026-09-14: `we:scripts/readiness/heavy-admission.mjs`'s slot
+reentrancy is keyed by LANE PATH STRING, not process identity — so two genuinely different processes legitimately
+verifying the same lane back-to-back (the conveyor's own auto-verify, then a manual re-verify after a new
+commit landed) both get treated as "one slot" under that owner key, meaning real concurrent load on this host
+was 3 processes while the gate reported a healthy 2/2. A fix for that specific reentrancy bug is separately in
+flight this same session (not yet landed as of this note) — flagged here only as evidence that a cap-of-2
+which cannot see what is really holding its slots is already producing real, measurable blind spots today, not
+as a claim that fixing it resolves this requirement. Requirement 3 is the larger, forward-looking shape:
+even a cap that correctly counts HOW MANY processes hold a slot still treats every one of them as costing the
+same, which this requirement says should not remain true.
+
+**Cross-reference, not merged into this requirement:** this item's own 2026-09-13 "Operator goal, recorded for
+the record: make the lane-concurrency admission cap resource-aware instead of a flat count" entry (above, under
+`we:scripts/lib/lane-concurrency.mjs`) is a SIBLING goal, not a duplicate — that one is about the LANE-COUNT cap
+(how many lanes may be open at once) becoming resource-aware using accumulated `host.process.*` telemetry;
+this requirement is about the HEAVY-COMMAND admission cap (how many heavy commands may run at once) becoming
+aware of each named command's own resource footprint. Both point at the same underlying shift — flat counts
+are a crude stopgap, real capacity should be measured/weighted, not counted — but they are two different caps
+on two different resources, and should likely be designed together rather than one blocking the other, per
+whoever eventually scopes this.
+
+### Explicitly not decided or built by this amendment
+
+None of the three requirements above is designed in any technical detail here, deliberately, per the
+operator's own instruction that this needs proper scoping later rather than being designed or built now. Left
+open: how a reserved heavy-command pool would actually be carved out of host resources (Requirement 1); how
+each per-command worker-pool fix would read its container's real allocation, and whether that is env-var-based,
+API-based, or something else (Requirement 2); and what shape a weighted/typed admission cap takes — a static
+per-command cost table, measured telemetry, or something else (Requirement 3). This amendment does not stamp
+`preparedDate` — it is a requirements capture, not a readiness claim.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
