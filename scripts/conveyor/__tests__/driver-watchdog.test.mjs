@@ -31,6 +31,7 @@ import {
   defaultDriverLease, newestScopedRun, readHead, recordLastKnownGood, readLastKnownGood,
   healDriver, runWatchdogOnce, readWatchdogFacts, parseFlags, lastKnownGoodPath, alertPath, logPath,
   driverModePath, WATCHDOG_REPO_ROOT,
+  resolvePidAlive, defaultIsPidAlive, scanPsOutput,
 } from '../driver-watchdog.mjs';
 import { driverModeFor, parseDriverMode, readDriverMode, writeDriverMode, DRIVER_MODES } from '../driver-mode.mjs';
 import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
@@ -118,7 +119,71 @@ describe('splitQueue — what is being worked vs what is waiting', () => {
   it('never throws on junk rows on either side', () => {
     expect(splitQueue([null, { num: '' }, { num: '5' }], [null, 'nope', { name: null }]).eligible.map((e) => e.num))
       .toEqual(['5']);
-    expect(splitQueue(null, null)).toEqual({ inFlight: [], eligible: [] });
+    expect(splitQueue(null, null)).toEqual({ inFlight: [], eligible: [], deadSessions: [] });
+  });
+
+  it('moves a CONFIRMED-dead registered session to eligible, and names it in `deadSessions` — never silently blocks dispatch on a stale registry entry', () => {
+    const { inFlight, eligible, deadSessions } = splitQueue(
+      [{ num: '2786' }],
+      [{ name: 'conveyor-2786', startedAt: NOW - 10 * 24 * 60 * MIN, pidAlive: false }],
+    );
+    expect(inFlight).toEqual([]);
+    expect(eligible.map((e) => e.num)).toEqual(['2786']);
+    expect(deadSessions).toEqual([{ num: '2786', session: 'conveyor-2786' }]);
+  });
+
+  it('keeps a name-matched session in-flight when liveness is merely UNKNOWN (pidAlive undefined/null) — absence of a field is not evidence of death', () => {
+    expect(splitQueue([{ num: '9' }], [{ name: 'conveyor-9', startedAt: NOW }]).inFlight)
+      .toEqual([{ num: '9', session: 'conveyor-9', startedAt: NOW }]);
+    expect(splitQueue([{ num: '9' }], [{ name: 'conveyor-9', startedAt: NOW, pidAlive: null }]).inFlight.map((e) => e.num))
+      .toEqual(['9']);
+  });
+
+  it('keeps a name-matched session in-flight when pidAlive is CONFIRMED true', () => {
+    expect(splitQueue([{ num: '9' }], [{ name: 'conveyor-9', startedAt: NOW, pidAlive: true }]).inFlight.map((e) => e.num))
+      .toEqual(['9']);
+  });
+});
+
+describe('resolvePidAlive — the two-signal liveness probe (#3383)', () => {
+  it('a real `pid` field wins outright — `isPidAlive` decides, the `ps aux` scan is never consulted', () => {
+    expect(resolvePidAlive({ pid: 4242 }, { isPidAlive: () => true, psOutput: 'nothing relevant here' })).toBe(true);
+    expect(resolvePidAlive({ pid: 4242 }, { isPidAlive: () => false, psOutput: 'irrelevant' })).toBe(false);
+  });
+
+  it('no `pid` → scans the already-captured `ps aux` text for the full `sessionId`, case-insensitively', () => {
+    const psOutput = 'nicolasgilbert 123 0.0 0.0 … claude --resume=ABCD-1234-full-uuid\n';
+    expect(resolvePidAlive({ sessionId: 'abcd-1234-full-uuid' }, { psOutput })).toBe(true);
+    expect(resolvePidAlive({ sessionId: 'never-appears-anywhere' }, { psOutput })).toBe(false);
+  });
+
+  it('no `pid` and no `sessionId` → UNKNOWN (`null`), never read as death', () => {
+    expect(resolvePidAlive({}, { psOutput: 'anything' })).toBe(null);
+  });
+
+  it('the `ps aux` scan itself failed (`psOutput: null`) → UNKNOWN, even with a `sessionId` to look for', () => {
+    expect(resolvePidAlive({ sessionId: 'abcd-1234' }, { psOutput: null })).toBe(null);
+  });
+});
+
+describe('defaultIsPidAlive — process.kill(pid, 0)', () => {
+  it('the current process\'s own pid is alive', () => {
+    expect(defaultIsPidAlive(process.pid)).toBe(true);
+  });
+
+  it('a pid nothing holds answers false', () => {
+    // A pid that is astronomically unlikely to exist; ESRCH ⇒ false (not EPERM ⇒ true).
+    expect(defaultIsPidAlive(999_999_999)).toBe(false);
+  });
+});
+
+describe('scanPsOutput — best-effort `ps aux`, never throws', () => {
+  it('returns the exec output', () => {
+    expect(scanPsOutput({ exec: () => 'line one\nline two\n' })).toBe('line one\nline two\n');
+  });
+
+  it('an exec failure reads as `null` (unknown), never a throw', () => {
+    expect(scanPsOutput({ exec: () => { throw new Error('ps: command not found'); } })).toBe(null);
   });
 });
 
@@ -254,6 +319,58 @@ describe('classifyDriver — every way a HEALTHY driver could be mistaken for a 
     const v = classifyDriver(stuck({ lease: { held: false, detail: 'the live runner lease belongs to a different checkout (/other)' } }));
     expect(v.state).toBe('down');
     expect(v.reason).toContain('/other');
+  });
+});
+
+// ── (3a) THE #3383 STALE-REGISTRATION BUG — a NAME MATCH is not liveness ───────────────────────────────────
+//
+// Live incident, 2026-09-14: 18 queued items (`conveyor-2786`, `prepare-3438`, …) all read as "have a live
+// session" — the watchdog logged `working` every 5 minutes for over an hour — while every one of those
+// sessions' transcripts had last written 6-13 days earlier, with no backing process at all. `splitQueue`
+// matched purely on NAME, so a stale/orphaned `claude agents --json` registration (the same #77683-shaped
+// decay `clear-stuck-session.mjs` documents) was indistinguishable from a genuinely live delivery agent. Fixed
+// by reading `agent.pidAlive` (attached by the IO shell via `resolvePidAlive`) before counting a match as
+// in-flight: `pidAlive === false` is the ONLY value that excludes it.
+
+describe('classifyDriver — a CONFIRMED-DEAD registered session must not read as in-flight work (#3383)', () => {
+  it('THE BUG, reproduced: a name-matched session with NO liveness field defaults to in-flight (unchanged, conservative default)', () => {
+    const v = classifyDriver(stuck({ agents: [{ name: 'conveyor-3383', startedAt: NOW - 10 * 24 * 60 * MIN }] }));
+    expect(v.state).toBe('working');
+  });
+
+  it('THE FIX: the SAME name-matched session, now CONFIRMED dead (pidAlive:false), is NOT in-flight — the item is eligible and the driver reaches `stale`', () => {
+    const v = classifyDriver(stuck({
+      agents: [{ name: 'conveyor-3383', startedAt: NOW - 10 * 24 * 60 * MIN, pidAlive: false }],
+      progress: { source: 'queue-sidecar', atMs: NOW - 45 * MIN },
+    }));
+    expect(v.state).toBe('stale');
+    expect(v.actionable).toBe(true);
+    expect(v.eligible.map((e) => e.num)).toEqual(['3383']);
+    expect(v.inFlight).toEqual([]);
+    expect(v.deadSessions).toEqual([{ num: '3383', session: 'conveyor-3383' }]);
+  });
+
+  it('a MERELY-UNPROBED liveness (pidAlive:null, e.g. `ps` itself failed) stays in-flight — unknown is never read as death', () => {
+    const v = classifyDriver(stuck({ agents: [{ name: 'conveyor-3383', startedAt: NOW - 10 * 24 * 60 * MIN, pidAlive: null }] }));
+    expect(v.state).toBe('working');
+    expect(v.deadSessions).toEqual([]);
+  });
+
+  it('a CONFIRMED-live session (pidAlive:true) stays in-flight, as ever', () => {
+    const v = classifyDriver(stuck({ agents: [{ name: 'conveyor-3383', startedAt: NOW, pidAlive: true }] }));
+    expect(v.state).toBe('working');
+  });
+
+  it('18 stale sessions across 18 queued items ALL become eligible at once — the exact live-incident shape', () => {
+    const nums = ['2786', '3435', '3442', '3443', '3445', '3411', '3447', '3448', '2416', '3438', '3441', '3436', '3399', '3401', '3454', '3452', '3402', '3457'];
+    const queue = nums.map((num) => ({ num, addedAt: null }));
+    const agents = nums.map((num) => ({ name: `conveyor-${num}`, startedAt: NOW - 8 * 24 * 60 * MIN, pidAlive: false }));
+    const v = classifyDriver(stuck({ queue, agents, progress: { source: 'queue-sidecar', atMs: NOW - 45 * MIN } }));
+    expect(v.inFlight).toEqual([]);
+    expect(v.eligible.map((e) => e.num).sort()).toEqual([...nums].sort());
+    expect(v.deadSessions).toHaveLength(18);
+    expect(v.state).toBe('stale');
+    expect(v.actionable).toBe(true);
   });
 });
 
@@ -653,6 +770,25 @@ describe('runWatchdogOnce — observe, judge, heal, and ALWAYS surface', () => {
     expect(seen.heals).toEqual([]);
   });
 
+  it('#3383 FIX: a CONFIRMED-dead registered session is logged distinctly, EVERY check, never silently dropped', () => {
+    const { result, seen } = harness({
+      facts: {
+        agents: [{ name: 'conveyor-3383', startedAt: NOW - 10 * 24 * 60 * MIN, pidAlive: false }],
+        progress: { source: 'queue-sidecar', atMs: NOW - 45 * MIN },
+      },
+    });
+    expect(result.verdict.state).toBe('stale'); // the item is now correctly eligible, not falsely "working"
+    expect(result.verdict.deadSessions).toEqual([{ num: '3383', session: 'conveyor-3383' }]);
+    const logged = seen.logs.map((l) => l[1]).join('\n');
+    expect(logged).toContain('CONFIRMED no longer running');
+    expect(logged).toContain('conveyor-3383');
+  });
+
+  it('a merely-unprobed (unknown) session logs NO dead-session line — never a false accusation', () => {
+    const { seen } = harness({ facts: { agents: [{ name: 'conveyor-3383', startedAt: NOW }] } });
+    expect(seen.logs.map((l) => l[1]).join('\n')).not.toContain('CONFIRMED no longer running');
+  });
+
   it('a STALE driver is rolled back and restarted, and a human is told', () => {
     const { result, seen } = harness();
     expect(result.action).toBe('healed');
@@ -826,6 +962,37 @@ describe('readWatchdogFacts — the marker reaches the verdict', () => {
       stat: (p) => { statted.push(p); return NOW; }, scanRuns: () => null, now: () => NOW,
     });
     expect(statted).not.toContain(driverModePath('/drv'));
+  });
+
+  it('#3383 FIX: attaches a resolved `pidAlive` to every listed agent, via ONE shared `ps aux` scan — never one subprocess per row', () => {
+    let psCalls = 0;
+    const f = readWatchdogFacts({
+      checkout: '/drv',
+      listAgents: () => [
+        { name: 'conveyor-3383', sessionId: 'alive-uuid' },
+        { name: 'conveyor-9999', sessionId: 'dead-uuid' },
+      ],
+      readQueueText: () => JSON.stringify([{ num: '3383' }, { num: '9999' }]),
+      leaseStatus: () => ({ held: true }),
+      readMode: () => null,
+      stat: () => NOW,
+      scanRuns: () => null,
+      scanPs: () => { psCalls += 1; return 'proc … --resume=alive-uuid …\n'; },
+      now: () => NOW,
+    });
+    expect(psCalls).toBe(1); // ONE scan for the whole batch
+    expect(f.agents.find((a) => a.name === 'conveyor-3383').pidAlive).toBe(true);
+    expect(f.agents.find((a) => a.name === 'conveyor-9999').pidAlive).toBe(false);
+  });
+
+  it('skips the `ps aux` scan entirely when nothing was listed — no rows, nothing to probe', () => {
+    let psCalls = 0;
+    readWatchdogFacts({
+      checkout: '/drv', listAgents: () => [], readQueueText: () => '[]',
+      leaseStatus: () => ({ held: true }), readMode: () => null, stat: () => NOW, scanRuns: () => null,
+      scanPs: () => { psCalls += 1; return ''; }, now: () => NOW,
+    });
+    expect(psCalls).toBe(0);
   });
 });
 
