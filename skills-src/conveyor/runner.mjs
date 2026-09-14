@@ -455,6 +455,17 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // filesystem path, not the GH `owner/repo` slug `runQuiet` forwards by default (same reasoning
     // `lane-pool-health-watch.mjs` below states for its own opt-out).
     runQuiet('conveyor/main-ref-sync.mjs', [], { forwardRepo: false });
+    // epic #3383 — THE GENERALIZED POC-BRANCH ↔ TARGET SYNC. `main-ref-sync.mjs` just above keeps this
+    // checkout's own LOCAL `main` ref fresh; this pass is the OTHER half — it keeps every REGISTERED POC
+    // branch (`we:scripts/lib/poc-branches.json`) mechanically merged with its own graduation target, gated
+    // per branch by the `autoSync` knob (`we:scripts/lib/poc-branches.mjs#resolveAutoSyncEnabled` — off by
+    // default, on today for `lane/mechanical-dispatcher`). Bare git plumbing only (fetch → `merge-tree`
+    // conflict probe → `commit-tree` + a never-forced push) — no `git checkout`, so it is safe to run from
+    // this driver's own checkout regardless of which branch that checkout currently has checked out. A clean
+    // divergence merges automatically; a real conflict is bounded-retried then durably escalated, exactly
+    // `conveyor/branch-sync.mjs`'s own discipline (reused here, not reimplemented) — never force-merged
+    // through. `forwardRepo: false` — like `main-ref-sync.mjs`, this pass takes no GH-slug flag at all.
+    runQuiet('conveyor/poc-branch-sync.mjs', [], { forwardRepo: false });
     runQuiet('conveyor/infra-blocked.mjs', ['retry']);
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435

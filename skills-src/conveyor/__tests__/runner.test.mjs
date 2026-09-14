@@ -844,6 +844,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     // cited as its only prior check, catches none of that).
     expect(calls.map((c) => c.join(' '))).toEqual([
       'node /scripts/conveyor/main-ref-sync.mjs', // epic #3383 — no --repo: takes --repo-dir=, a filesystem path, not this GH slug
+      'node /scripts/conveyor/poc-branch-sync.mjs', // epic #3383 — same reasoning: no --repo, takes --repo-dir=
       'node /scripts/conveyor/infra-blocked.mjs retry --repo=owner/repo',
       'node /scripts/conveyor/lease-reaper.mjs --repo=owner/repo',
       'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',
