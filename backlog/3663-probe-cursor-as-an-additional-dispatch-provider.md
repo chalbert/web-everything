@@ -1,4 +1,5 @@
 ---
+bornAs: x8hzy1m
 kind: story
 size: 5
 parent: "3383"
@@ -6,7 +7,7 @@ status: open
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
 preparedDate: "2026-09-13"
-relatedTo: ["3581", "3513", "3371", "xhprieg", "xldrls6"]
+relatedTo: ["3581", "3513", "3371", "3664", "3665"]
 tags: []
 ---
 

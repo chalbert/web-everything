@@ -1,4 +1,5 @@
 ---
+bornAs: xhprieg
 kind: story
 size: 5
 parent: "3383"
@@ -6,7 +7,7 @@ status: open
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-13"
 preparedDate: "2026-09-13"
-relatedTo: ["3581", "3513", "3371", "x8hzy1m", "xldrls6"]
+relatedTo: ["3581", "3513", "3371", "3663", "3665"]
 tags: []
 ---
 
@@ -53,7 +54,7 @@ Operator's own hypothesis, to be TESTED not assumed: a high-tier ('top') Grok su
 
 Filed under epic `#3383` (the mechanical dispatcher). Mirrors `#3371`'s probe shape and cites `#3581`'s
 risk-tiered surface framing for how to state the verdict. Companion items: the sibling Cursor probe filed the
-same session (`#x8hzy1m`), and the later-filed open-weight PAYG probe (`#xldrls6`, DeepSeek/Qwen/etc.), which
+same session (`#3663`), and the later-filed open-weight PAYG probe (`#3665`, DeepSeek/Qwen/etc.), which
 evaluates candidates for this SAME proposed bulk/high-volume executor role — the two are not independent;
 whoever prepares either must compare candidates against each other rather than in isolation.
 
@@ -104,9 +105,9 @@ Grok Build authenticates two ways: browser-based login for a human subscription 
 `XAI_API_KEY` env var, pay-as-you-go, no seat at all. **This item evaluates the subscription-seat path**,
 because that is the operator's own stated hypothesis ("a high-tier ('top') Grok subscription may offer
 very high usage limits"). The bare-API-key path is not rejected on any merit — it is simply the **same
-cost/access shape as the sibling open-weight PAYG item** (`#xldrls6`: metered per token, no seat), so
+cost/access shape as the sibling open-weight PAYG item** (`#3665`: metered per token, no seat), so
 evaluating it here would duplicate that item's own scope rather than answer a different question. Per
-`#xldrls6`'s own Done-when item 2 and this card's Lineage cross-link, any Grok-via-API-key evaluation
+`#3665`'s own Done-when item 2 and this card's Lineage cross-link, any Grok-via-API-key evaluation
 belongs in the cross-candidate comparison both items already carry (see "Grok and open-weight PAYG add up"
 below), not as a second access-model branch inside this card.
 
@@ -133,7 +134,7 @@ is cost-staged rollout, not a forced merit exclusion — stated as that, not dre
 
 ## Supported by default — Grok and open-weight PAYG add up, not a fork
 
-Required explicitly by `#xldrls6`'s own Done-when item 2 and this card's Lineage cross-link. This is a
+Required explicitly by `#3665`'s own Done-when item 2 and this card's Lineage cross-link. This is a
 support-both conclusion, not a forced either/or — nothing here is excluded, so it is filed as "supported by
 default" rather than a `## Fork` carrying a manufactured winner. **Verdict: Grok's subscription seat and
 open-weight PAYG models ADD UP as a two-tier strategy**, on real cited pricing:
@@ -141,17 +142,17 @@ open-weight PAYG models ADD UP as a two-tier strategy**, on real cited pricing:
 - **Grok (subscription)** is a **flat-rate** cost (~$30/mo at the base tier) regardless of throughput up to
   the tier's rate-limit ceiling — the right fit when task volume is **high and steady**, since marginal
   dispatches cost nothing once the seat is paid for.
-- **Open-weight PAYG (DeepSeek/Qwen, per `#xldrls6`'s own prep)** is **metered per token** (DeepSeek V4.1
+- **Open-weight PAYG (DeepSeek/Qwen, per `#3665`'s own prep)** is **metered per token** (DeepSeek V4.1
   Flash: $0.30/$1.20 per 1M input/output tokens peak, $0.15/$0.60 off-peak; Qwen3-235B-A22B: $0.70/$2.80
   per 1M) — the right fit when volume is **low, spiky, or single-shot**, since there is no flat seat cost
-  wasted during quiet periods, and per `#xldrls6`'s own prep, DeepSeek's API can in some cases be reached
+  wasted during quiet periods, and per `#3665`'s own prep, DeepSeek's API can in some cases be reached
   through this repo's *already-validated* `claude` wrapper via base-URL redirection, at near-zero
   integration cost.
 
 **Neither replaces the other.** A dispatcher facing steady bulk low-judgment volume should prefer a Grok
 subscription seat once `#3513`'s gate fires; one facing occasional or spiky low-judgment calls (or a task
 needing a specific open-weight model's characteristics) should prefer metered PAYG. This is stated here,
-in this card, per `#xldrls6`'s own requirement, rather than left to whichever item resolves second.
+in this card, per `#3665`'s own requirement, rather than left to whichever item resolves second.
 
 ## What still needs a live probe
 
@@ -174,7 +175,7 @@ in this card, per `#xldrls6`'s own requirement, rather than left to whichever it
 bulk/low-judgment role, base SuperGrok — not SuperGrok Heavy — is the tier to probe live first, as a
 cost-staged rollout (escalate only if its rate limits prove insufficient), not because Heavy is
 capability-mismatched on the merits. Per the "Grok and open-weight PAYG add up" section above, this
-candidate does not compete winner-take-all with `#xldrls6`'s open-weight PAYG candidates — the two serve
+candidate does not compete winner-take-all with `#3665`'s open-weight PAYG candidates — the two serve
 different volume shapes and should both remain live options. Nothing is wired into the dispatcher; probing
 the actual rate-limit ceiling and schema-enforcement behavior against a real base-tier account remains open
 work per Done-when item 5.
