@@ -152,22 +152,79 @@ export function sessionMatchesItem(name, num) {
  * An agent row with an unreadable `startedAt` still counts as in-flight — a session we cannot date is a session
  * we must assume is live, because the cost of being wrong is restarting a driver mid-dispatch.
  *
+ * A NAME MATCH ALONE IS NOT LIVENESS (found live 2026-09-14, epic #3383's own resident restart: 18 queued items
+ * read as "have a live session" — `conveyor-2786`, `prepare-3438`, … — while every one of those sessions'
+ * transcripts had last written 6-13 days earlier, with no backing process at all: a stale/orphaned registry
+ * entry, the same #77683-shaped decay `we:scripts/operations/clear-stuck-session.mjs`'s header documents, not a
+ * live agent). `agent.pidAlive` — attached by the IO shell ({@link readWatchdogFacts}, via {@link
+ * resolvePidAlive}) using the SAME two-signal liveness probe `we:scripts/operations/clear-stuck-session-io.mjs`
+ * already established (a listing row's own `pid` when present, else a `ps aux` scan for the session's full
+ * `sessionId`) — is read here to tell a CONFIRMED-dead registration apart from a live or merely-unprobed one.
+ * `pidAlive === false` is the ONLY value that moves a name-matched row out of `inFlight`: `true` (a real live
+ * pid) obviously stays in-flight, and — just as importantly — `undefined`/`null` (unknown: `ps` itself failed,
+ * or no `sessionId` at all) ALSO stays in-flight, the same "absence of a field is not evidence of death"
+ * direction `we:scripts/conveyor/reconcile-core.mjs#assessLiveness` already rules for the identical shape. So a
+ * confirmed-dead match is never silently dropped either — it is reported back as {@link splitQueue}'s third
+ * bucket, `deadSessions`, so a caller can both stop treating the item as claimed AND say out loud that a stale
+ * registry entry was found (see {@link runWatchdogOnce}'s own log line) rather than quietly forgetting it —
+ * reaping the entry itself stays `we:scripts/conveyor/session-reaper.mjs`'s job (already wired into every tick,
+ * `we:skills-src/conveyor/runner.mjs` §4d), never re-implemented here.
+ *
  * @param {Array<{num:string}>} queue - already parsed by {@link parseQueue}.
- * @param {Array<{name:string, id?:string|null, startedAt?:number}>} agents
- * @returns {{inFlight: Array<object>, eligible: Array<object>}}
+ * @param {Array<{name:string, id?:string|null, startedAt?:number, pidAlive?:boolean|null}>} agents
+ * @returns {{inFlight: Array<object>, eligible: Array<object>, deadSessions: Array<{num:string, session:string}>}}
  */
 export function splitQueue(queue, agents) {
   const rows = Array.isArray(agents) ? agents.filter((a) => a && typeof a === 'object') : [];
   const inFlight = [];
   const eligible = [];
+  const deadSessions = [];
   for (const entry of Array.isArray(queue) ? queue : []) {
     const num = String(entry?.num ?? '').trim();
     if (!num) continue;
     const session = rows.find((a) => sessionMatchesItem(a.name, num));
-    if (session) inFlight.push({ num, session: String(session.name ?? ''), startedAt: Number(session.startedAt) || null });
-    else eligible.push({ num, addedAt: entry?.addedAt ?? null });
+    if (session && session.pidAlive === false) {
+      // CONFIRMED dead — a registered session name-matches this item, but its process is verifiably gone (not
+      // merely unprobed). Never counted as in-flight; the item is eligible, and the stale entry is called out
+      // distinctly rather than silently dropped (see the file header for why liveness must be checked at all).
+      deadSessions.push({ num, session: String(session.name ?? '') });
+      eligible.push({ num, addedAt: entry?.addedAt ?? null });
+    } else if (session) {
+      inFlight.push({ num, session: String(session.name ?? ''), startedAt: Number(session.startedAt) || null });
+    } else {
+      eligible.push({ num, addedAt: entry?.addedAt ?? null });
+    }
   }
-  return { inFlight, eligible };
+  return { inFlight, eligible, deadSessions };
+}
+
+/** `process.kill(pid, 0)` — `true`/`false` when established (an `EPERM` still proves the pid exists, just not
+ *  ours to signal). The direct, no-subprocess probe used when a listing row carries a `pid`. */
+export function defaultIsPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; }
+}
+
+/**
+ * Resolve `pidAlive` for ONE `claude agents --json` row — the row's own `pid` when present (rare for this
+ * listing shape, but honoured when it exists: a direct `kill(pid, 0)` must never be second-guessed by a wider,
+ * noisier scan), else a scan of an already-captured `ps aux` snapshot for the row's full `sessionId` — the SAME
+ * two-signal technique `we:scripts/operations/clear-stuck-session-io.mjs#resolvePidAlive`/`scanPsForSession`
+ * established, reimplemented locally rather than imported (this file's own six-lines-not-reuse convention — see
+ * {@link defaultListAgents}'s docblock — and that module transitively reaches `dispatch-lane-io.mjs`, on this
+ * file's own forbidden-import list; see the purity suite). PURE over its inputs: the `ps aux` text and the pid
+ * prober are both injected, so this never touches a subprocess itself.
+ * @param {{pid?:number|null, sessionId?:string|null}} row
+ * @param {{psOutput?:string|null, isPidAlive?:(pid:number)=>boolean}} [o] - `psOutput` is a full `ps aux`
+ *   capture (or `null` when the scan itself failed/was skipped), lower-cased matching done here.
+ * @returns {boolean|null} `true`/`false` when established, `null` when NEITHER probe could say — UNKNOWN, never
+ *   read as death (see {@link splitQueue}).
+ */
+export function resolvePidAlive(row, { psOutput = null, isPidAlive = defaultIsPidAlive } = {}) {
+  const pid = Number(row?.pid);
+  if (Number.isInteger(pid) && pid > 0) return isPidAlive(pid);
+  const sid = row?.sessionId ? String(row.sessionId).trim() : '';
+  if (!sid || psOutput == null) return null; // no sessionId to scan for, or the scan itself failed — unknown
+  return String(psOutput).toLowerCase().includes(sid.toLowerCase());
 }
 
 /**
@@ -275,9 +332,9 @@ export function classifyDriver({
   nowMs, staleAfterMs = DEFAULT_STALE_AFTER_MS, queue = [], listingReadable = true, agents = [],
   lease = null, progress = null, listingError = null, driverMode = null,
 } = {}) {
-  const { inFlight, eligible } = splitQueue(queue, agents);
+  const { inFlight, eligible, deadSessions } = splitQueue(queue, agents);
   const base = {
-    eligible, inFlight, queueSize: Array.isArray(queue) ? queue.length : 0,
+    eligible, inFlight, deadSessions, queueSize: Array.isArray(queue) ? queue.length : 0,
     progress, quietMs: progress ? Math.max(0, Number(nowMs) - progress.atMs) : null,
     staleAfterMs, lease, driverMode,
   };
@@ -429,6 +486,21 @@ export function defaultListAgents({ exec = execFileSync } = {}) {
 }
 
 /**
+ * A `ps aux` snapshot, or `null` when the scan itself could not run — the shared read {@link resolvePidAlive}
+ * probes for a listing row's full `sessionId` (a real live Claude Code background session is a
+ * `--resume=<full-uuid>` subprocess; matching the full id, never an 8-hex short one, avoids a coincidental
+ * substring match against an unrelated commit sha or temp path). Best-effort, bounded, never throws — the same
+ * "unreadable ⇒ unknown, not death" discipline every probe in this file follows.
+ */
+export function scanPsOutput({ exec = execFileSync } = {}) {
+  try {
+    return String(exec('ps', ['aux'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 10_000, killSignal: 'SIGKILL' }));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * IS THE DRIVER WE ARE WATCHING ACTUALLY UP? Read through the machine-global singleton lease
  * ({@link ../../skills-src/conveyor/runner-lock.mjs}) plus {@link ./resolve-runner-checkout.mjs}, which walks
  * the lease's pid to its working directory. Both modules are lock/process plumbing, not dispatch logic.
@@ -513,6 +585,8 @@ export function readWatchdogFacts({
   readMode = readDriverMode,
   stat = mtimeMs,
   scanRuns = newestScopedRun,
+  scanPs = scanPsOutput,
+  isPidAlive = defaultIsPidAlive,
   now = () => Date.now(),
 } = {}) {
   const root = resolve(checkout);
@@ -525,7 +599,15 @@ export function readWatchdogFacts({
   let listingError = null;
   try {
     const raw = listAgents();
-    agents = (Array.isArray(raw) ? raw : []).map((r) => ({ name: String(r?.name ?? ''), id: r?.id ?? null, startedAt: Number(r?.startedAt) }));
+    const rows = (Array.isArray(raw) ? raw : []).map((r) => ({
+      name: String(r?.name ?? ''), id: r?.id ?? null, startedAt: Number(r?.startedAt),
+      pid: Number.isInteger(r?.pid) ? r.pid : null, sessionId: r?.sessionId ?? null,
+    }));
+    // LIVENESS (#3383 stale-registration fix — see {@link splitQueue}'s header): ONE `ps aux` scan for the
+    // whole batch, never one subprocess per row, then resolved per-row through {@link resolvePidAlive}. Skipped
+    // entirely when nothing was listed — no rows, nothing to probe.
+    const psOutput = rows.length ? scanPs() : null;
+    agents = rows.map((r) => ({ ...r, pidAlive: resolvePidAlive(r, { psOutput, isPidAlive }) }));
   } catch (e) {
     agents = [];
     listingReadable = false;
@@ -658,6 +740,17 @@ export function runWatchdogOnce({
   });
 
   const line = (msg) => appendLog(logPath(root), `${iso(facts.nowMs)} watchdog[${verdict.state}]: ${msg}`);
+
+  // NEVER SILENT (see `splitQueue`'s header) — a confirmed-dead registered session is excluded from `inFlight`
+  // every check, but that must not read as "quietly forgotten": name it, every time it recurs, so the log is
+  // the durable trail an operator (or `session-reaper.mjs`'s own ground-truth axis) can act on. Logged
+  // regardless of `verdict.state` — a dead registration is worth knowing about even on a tick that is
+  // otherwise `working`/`settling` because other, genuinely-live sessions are also in the queue.
+  if (verdict.deadSessions?.length) {
+    line(`${verdict.deadSessions.length} queued item(s) name a registered session CONFIRMED no longer running `
+      + `(${verdict.deadSessions.map((d) => d.session).join(', ')}) — not counted as in-flight; a stale registry `
+      + 'entry for `session-reaper.mjs`/`clear-stuck-session.mjs` to reap, not this file\'s job');
+  }
 
   if (!verdict.actionable) {
     line(verdict.reason);

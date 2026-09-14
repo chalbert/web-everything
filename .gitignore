@@ -64,6 +64,11 @@ commitment-policy/**/*.d.ts
 # hit a PR-open failure on an outside dependency (a GitHub outage) records the resumable handle here; the
 # conveyor auto-retries + resume-opens once infra recovers. Operational recovery state, never committed.
 .conveyor/infra-blocked.json
+# …and (epic #3383) the re-nag dedup record + human log for its own "surfaced past the attempt cap, needs a
+# human" escalation (`planSurfaceEscalation`) — same per-checkout, machine-disposable state as the
+# driver-watchdog's own alert/log pair just below, never committed.
+.conveyor/infra-blocked-alert.json
+.conveyor/infra-blocked.log
 # CI queue-wait history sidecar (#3574) — the periodic `gh run list` wait-time sample the resident runner's own
 # tick appends to, so a genuine Actions run-queue regression becomes a visible trend instead of invisible.
 # Machine-local, recreated on demand by ci-queue-watch.mjs sweep; never committed, like the other sidecars here.

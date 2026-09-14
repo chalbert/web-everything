@@ -29,6 +29,7 @@ import {
   withInfraLock,
   mutateInfraStore,
   recordInfraBlockIO,
+  planSurfaceEscalation,
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_BASE_MS,
   DEFAULT_CAP_MS,
@@ -202,6 +203,49 @@ describe('retryDecision — the wait → retry → surface state machine', () =>
   it('a custom max-attempts is honoured', () => {
     expect(retryDecision(entry(2, T0 - 1), { now: T0, maxAttempts: 2 }).action).toBe('surface');
     expect(retryDecision(entry(1, T0 - 1), { now: T0, maxAttempts: 2 }).action).toBe('retry');
+  });
+});
+
+// ── #3383 — SURFACED BUT NEVER HEARD ────────────────────────────────────────────────────────────────────────
+//
+// Live incident, 2026-09-14: five real entries hit the attempt cap (`retryDecision` correctly returned
+// `surface` — the state machine above is right, and stays right) and then sat for 3+ days (four of them) and
+// 30+ minutes (`#3383` itself) with a STALE `nextRetryAt` that will never fire again, because nothing told a
+// human the auto-retry loop had already given up. `planSurfaceEscalation` is the durable, deduped notice that
+// was missing.
+
+describe('planSurfaceEscalation — a surfaced (attempt-capped) entry must durably reach a human, deduped (#3383)', () => {
+  const surfaced = (nums) => nums.map((num) => ({ num, cause: 'GitHub rate limit (transient)', attempt: DEFAULT_MAX_ATTEMPTS }));
+
+  it('nothing surfaced → never fires', () => {
+    expect(planSurfaceEscalation([], { nowMs: T0 })).toEqual({ fire: false, record: null });
+    expect(planSurfaceEscalation(null, { nowMs: T0 })).toEqual({ fire: false, record: null });
+  });
+
+  it('THE #3383 SHAPE: a fresh set of surfaced (attempt-capped, stale-nextRetryAt) entries fires with NO prior alert', () => {
+    // The exact live shape: 5 items long past their (now-irrelevant) `nextRetryAt`, all attempt-capped.
+    const d = planSurfaceEscalation(surfaced(['3194', '1589', '3621', '3553', '3383']), { lastAlert: null, nowMs: T0 });
+    expect(d.fire).toBe(true);
+    expect(d.record.signature).toBe('1589,3194,3383,3553,3621'); // sorted — order-independent dedup
+  });
+
+  it('the SAME surfaced set, alerted recently → does NOT re-fire (dedup)', () => {
+    const first = planSurfaceEscalation(surfaced(['3194']), { lastAlert: null, nowMs: T0 });
+    const second = planSurfaceEscalation(surfaced(['3194']), { lastAlert: first.record, nowMs: T0 + 60_000 });
+    expect(second.fire).toBe(false);
+  });
+
+  it('the SAME set, but the prior alert has gone stale past the renag window → re-fires (never silent forever)', () => {
+    const first = planSurfaceEscalation(surfaced(['3194']), { lastAlert: null, nowMs: T0 });
+    const RENAG = 30 * 60_000;
+    const second = planSurfaceEscalation(surfaced(['3194']), { lastAlert: first.record, nowMs: T0 + RENAG, renagMs: RENAG });
+    expect(second.fire).toBe(true);
+  });
+
+  it('a CHANGED surfaced set (a new item hits the cap) fires even inside the renag window', () => {
+    const first = planSurfaceEscalation(surfaced(['3194']), { lastAlert: null, nowMs: T0 });
+    const second = planSurfaceEscalation(surfaced(['3194', '1589']), { lastAlert: first.record, nowMs: T0 + 1000 });
+    expect(second.fire).toBe(true);
   });
 });
 
