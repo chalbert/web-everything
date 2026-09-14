@@ -143,19 +143,45 @@ node scripts/conveyor/learnings-drop.mjs \
   --area="<coarse label — the subsystem or activity, ≤60 chars>" \
   --summary="<the observation, one sentence, ≤240 chars>" \
   --suggestion="<what you'd do about it, ≤400 chars>" \
-  --quoted-turn='<the verbatim turn that established it>' \
-  --transcript="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')/$CLAUDE_CODE_SESSION_ID.jsonl" \
   --session="$LEARNINGS_SESSION"
 ```
 
-**Quote the grounding turn whenever there is one.** `--quoted-turn` + `--transcript` (both or neither) are
-what can admit the note to agent memory: `/harvest` checks the quote is really in that transcript, and a note
-without a verified quote can only ever become a backlog item. Copy the turn **verbatim** — the operator's
-words, or your own reply — never a paraphrase, or it will not verify. It is uncapped, so include the whole
-turn. The `--transcript` expression above builds this session's transcript path; `pwd` must be the directory
-the session **started** in (the harness names the project folder after it), so run it from there. Use
-**single quotes** around the quote, since a transcript turn can hold `` ` `` or `$(…)`.
-No such turn (a friction you only noticed yourself) → omit both flags; the note is still worth emitting.
+**Quote the grounding turn whenever there is one.** `quotedTurn` + `transcript` (both or neither) are what can
+admit the note to agent memory: `/harvest` checks the quote is really in that transcript, and a note without a
+verified quote can only ever become a backlog item. Copy the turn **verbatim** — the operator's words, or your
+own reply — never a paraphrase, or it will not verify. It is uncapped, so include the whole turn.
+
+**Never inline the verbatim turn into a shell string.** It is raw, uncapped text, and no shell quoting style
+safely holds arbitrary text: single quotes have no escape for an embedded apostrophe (a turn like "that's
+slow" breaks out mid-argument), and double quotes still run any `` ` ``/`$(…)` in it through bash. Route it
+through a file instead, via a quoted heredoc (its body is taken completely literally — no expansion, no
+escaping needed for quotes or backticks), then build the JSON payload with `jq --rawfile` and pipe it to
+`--stdin`:
+
+```bash
+QUOTE_FILE=$(mktemp)
+cat <<'QUOTE_EOF' > "$QUOTE_FILE"
+<the verbatim turn that established it — paste it exactly, including any quotes or backticks>
+QUOTE_EOF
+
+jq -n --rawfile quotedTurn "$QUOTE_FILE" \
+  --arg kind "friction|missing-convention|doc-gap|skill-gap|improvement" \
+  --arg area "<coarse label — the subsystem or activity, ≤60 chars>" \
+  --arg summary "<the observation, one sentence, ≤240 chars>" \
+  --arg suggestion "<what you'd do about it, ≤400 chars>" \
+  --arg transcript "$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')/$CLAUDE_CODE_SESSION_ID.jsonl" \
+  '{kind:$kind, area:$area, summary:$summary, suggestion:$suggestion,
+    quotedTurn: ($quotedTurn | sub("\n$"; "")), transcript:$transcript}' \
+| node scripts/conveyor/learnings-drop.mjs --stdin --session="$LEARNINGS_SESSION"
+
+rm -f "$QUOTE_FILE"
+```
+
+The `--transcript` expression builds this session's transcript path; `pwd` must be the directory the session
+**started** in (the harness names the project folder after it), so run it from there. If the verbatim turn
+itself contains a line that reads exactly `QUOTE_EOF`, pick a different delimiter word (e.g. `QUOTE_EOF_2`)
+that doesn't appear in the text before running this.
+No such turn (a friction you only noticed yourself) → use the plain four-flag form above instead.
 
 **The session slug is not optional.** The pool ranks by *distinct sessions*, so entries with no slug of their
 own would all land in one file and read as one session forever — a cause several sessions independently hit

@@ -48,20 +48,37 @@ If you route to `backlog/` or memory from here, you have broken that split.
 3. **Mint one session slug for this capture** (this shell session has no pre-existing slug to reuse, unlike
    a close or a delivery agent, which already have one):
 
+   **Never inline the verbatim turn into a shell string** — it is uncapped, raw operator text, and no shell
+   quoting style (single OR double) can safely hold arbitrary text: single quotes have no escape for an
+   embedded apostrophe (`don't re-run…` breaks out mid-argument), and double quotes still run any `` ` ``/
+   `$(…)` in it through bash. Route it through a file instead, via a quoted heredoc (which takes its body
+   completely literally — no expansion, no escaping needed for quotes or backticks), then build the JSON
+   payload with `jq --rawfile` and pipe it to `--stdin`:
+
    ```bash
-   node scripts/conveyor/learnings-drop.mjs \
-     --kind=<friction|missing-convention|doc-gap|skill-gap|improvement> \
-     --summary="<the observation, one sentence, ≤240 chars>" \
-     --area="<coarse label, ≤60 chars>" \
-     --suggestion="<what you'd do about it, ≤400 chars>" \
-     --quoted-turn='<the operator turn, verbatim>' \
-     --transcript="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')/$CLAUDE_CODE_SESSION_ID.jsonl" \
-     --session="note-$(date +%Y%m%d-%H%M%S)"
+   QUOTE_FILE=$(mktemp)
+   cat <<'QUOTE_EOF' > "$QUOTE_FILE"
+   <the operator turn, verbatim — paste it exactly as said, including any quotes or backticks>
+   QUOTE_EOF
+
+   jq -n --rawfile quotedTurn "$QUOTE_FILE" \
+     --arg kind "<friction|missing-convention|doc-gap|skill-gap|improvement>" \
+     --arg summary "<the observation, one sentence, ≤240 chars>" \
+     --arg area "<coarse label, ≤60 chars>" \
+     --arg suggestion "<what you'd do about it, ≤400 chars>" \
+     --arg transcript "$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')/$CLAUDE_CODE_SESSION_ID.jsonl" \
+     '{kind:$kind, summary:$summary, area:$area, suggestion:$suggestion,
+       quotedTurn: ($quotedTurn | sub("\n$"; "")), transcript:$transcript}' \
+   | node scripts/conveyor/learnings-drop.mjs --stdin --session="note-$(date +%Y%m%d-%H%M%S)"
+
+   rm -f "$QUOTE_FILE"
    ```
 
-   Use **single quotes** around the quoted turn (it is raw operator text — double quotes would run any
-   `` ` ``/`$(…)` in it through bash). The `--transcript` expression assumes `pwd` is the directory this
-   session started in; the harness names the transcript folder after it.
+   The `<friction|…>`, `summary`, `area`, and `suggestion` placeholders are YOUR shaped, agent-authored text
+   (safe to author inline); only the quoted turn is raw external text and MUST go through the file. The
+   `--transcript` expression assumes `pwd` is the directory this session started in; the harness names the
+   transcript folder after it. If the verbatim turn itself contains a line that reads exactly `QUOTE_EOF`,
+   pick a different delimiter word (e.g. `QUOTE_EOF_2`) that doesn't appear in the text before running this.
 
    Do not reimplement the append, the scrub, or the schema — this CLI (`we:scripts/conveyor/
    learnings-drop.mjs`) is the only writer of the pool; shell it, don't hand-roll a JSONL append. If two
