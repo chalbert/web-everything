@@ -148,7 +148,12 @@ export function otelSampleToRecord(sample, receivedAt) {
 // ── IO SHELL ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** Resolved by SCRIPT LOCATION, never CWD — same convention as `telemetry-store.mjs#TELEMETRY_ROOT`. */
+/** Resolved by SCRIPT LOCATION, never CWD. NOTE: `telemetry-store.mjs#TELEMETRY_ROOT` no longer follows this
+ *  exact convention (#3383 follow-on) — it now resolves to a shared, workspace-anchored root so every lane
+ *  clone agrees on one storage location, since a per-clone root there meant a rolling-window rollup silently
+ *  only ever saw whichever clone produced it. This file's own per-clone `CLAUDE_OTEL_ROOT` has the identical
+ *  latent fragmentation and was NOT in scope for that fix; worth applying the same treatment if/when this
+ *  collector's cross-clone rollup story matters the same way. */
 export const CLAUDE_OTEL_ROOT = resolve(HERE, '..', '..');
 
 /** `<root>/.operations/claude-otel` — day-rotated NDJSON, overridable via `OPERATION_CLAUDE_OTEL_DIR`
