@@ -918,37 +918,69 @@ export function readHostSample() {
   }
 }
 
+/** Emit one already-computed metric list under this tick's shared `tick` attribute, isolated in its own
+ *  try/catch so a bad sample can never take a SIBLING group down with it (see {@link emitTickMetrics}'s
+ *  own docblock for why the three groups below each get one of these instead of sharing one try/catch). A
+ *  failure is LOGGED, not swallowed — `⚠ … (non-fatal)` matches this file's own convention for every other
+ *  best-effort mechanical pass (see e.g. the reconcile-pass/hiccup-sink call sites), so a partial tick is
+ *  never silently indistinguishable from "nothing to emit". Never throws.
+ * @param {object} recorder
+ * @param {string} label identifies which group failed, for the log line
+ * @param {() => Array<{name: string, value: number, unit?: string, attributes?: object}>} computeMetrics
+ * @param {number|undefined} tick
+ */
+function emitMetricGroup(recorder, label, computeMetrics, tick) {
+  try {
+    for (const m of computeMetrics()) {
+      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick } });
+    }
+  } catch (e) {
+    process.stderr.write(`⚠ telemetry ${label} metrics failed mid-tick (non-fatal): ${String((e && e.message) || e).split('\n')[0]}\n`);
+  }
+}
+
 /**
  * #3383 — IO. Record this tick as one `runner.tick` span plus {@link tickMetrics}' and {@link hostMetrics}'
  * samples — the dispatch/queue saturation signals and the host-resource signals, side by side, at the SAME
- * `tick` attribute (see {@link hostMetrics}'s own docblock for why that co-location is the whole point). Wrapped
- * whole in a try/catch on top of the recorder's own never-throw contract — belt and braces, because this runs
- * inside the RESIDENT driver, where the discipline is the watchdog's: an observability bug must never be able
- * to stop the conveyor. The tick span is zero-width by construction (the surface is already computed by the
- * time `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the
- * same trace, not to time the tick.
+ * `tick` attribute (see {@link hostMetrics}'s own docblock for why that co-location is the whole point).
+ *
+ * EACH GROUP IS ISOLATED (bugfix, #3383 follow-on): this used to wrap the span-open, all three metric-emission
+ * loops, and `span.ok()` in ONE try/catch, so a throw partway through — e.g. `hostMetrics(readHostSample())`
+ * mid-loop — silently dropped every group after it AND skipped `span.ok()`, with nothing logged; a partial
+ * tick was indistinguishable from a tick with nothing to emit. Now the span open/close is its own guarded
+ * step and each metric group runs through {@link emitMetricGroup}, so `tick`/`host`/`process` metrics succeed
+ * or fail independently and any real failure is at least visible on stderr — still never able to stop the
+ * conveyor (this runs inside the RESIDENT driver, where the discipline is the watchdog's), just no longer
+ * silently total. The tick span is zero-width by construction (the surface is already computed by the time
+ * `emit` is called); it exists to carry the per-tick attributes and to give the metrics a sibling in the same
+ * trace, not to time the tick.
  */
 function emitTickMetrics(recorder, surface, ctx) {
+  const tick = ctx && ctx.tick;
+  let span;
   try {
-    const span = recorder.startSpan('runner.tick', {
-      attributes: { tick: ctx && ctx.tick, statusLine: (surface && surface.statusLine) || null },
+    span = recorder.startSpan('runner.tick', {
+      attributes: { tick, statusLine: (surface && surface.statusLine) || null },
     });
-    for (const m of tickMetrics(surface)) {
-      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
+  } catch (e) {
+    process.stderr.write(`⚠ telemetry runner.tick span open failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}\n`);
+    span = null;
+  }
+
+  emitMetricGroup(recorder, 'tick', () => tickMetrics(surface), tick);
+  emitMetricGroup(recorder, 'host', () => hostMetrics(readHostSample()), tick);
+  // #3383 follow-on — per-process attribution: ONE `ps` shell-out per tick (matching the whole-machine
+  // sample's own cadence, never a hot path), bucketed into the six `host.process.*` categories. See
+  // `host-process-sample.mjs` for the full pure/IO split; `readProcessSample` never throws (an empty sample
+  // on any `ps` failure), so a missing/unexpected `ps` degrades to six zeroed categories, not a broken tick.
+  emitMetricGroup(recorder, 'process', () => processCategoryMetrics(summarizeProcessSample(readProcessSample())), tick);
+
+  if (span) {
+    try {
+      span.ok();
+    } catch (e) {
+      process.stderr.write(`⚠ telemetry runner.tick span close failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}\n`);
     }
-    for (const m of hostMetrics(readHostSample())) {
-      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
-    }
-    // #3383 follow-on — per-process attribution: ONE `ps` shell-out per tick (matching the whole-machine
-    // sample's own cadence, never a hot path), bucketed into the six `host.process.*` categories. See
-    // `host-process-sample.mjs` for the full pure/IO split; `readProcessSample` never throws (an empty sample
-    // on any `ps` failure), so a missing/unexpected `ps` degrades to six zeroed categories, not a broken tick.
-    for (const m of processCategoryMetrics(summarizeProcessSample(readProcessSample()))) {
-      recorder.recordMetric(m.name, m.value, { unit: m.unit, attributes: { ...m.attributes, tick: ctx && ctx.tick } });
-    }
-    span.ok();
-  } catch {
-    // Deliberately silent and total: the conveyor keeps ticking regardless of what telemetry does.
   }
 }
 

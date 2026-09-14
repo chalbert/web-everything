@@ -10,10 +10,12 @@
  * ================================================================================================
  * WHERE IT LIVES, AND WHY THAT SHAPE — `we:.operations/telemetry/<YYYY-MM-DD>.jsonl`
  *
- * A gitignored, DAY-ROTATED, append-only NDJSON sidecar, resolved by SCRIPT LOCATION (never CWD) with an
- * `OPERATION_TELEMETRY_DIR` override — mirroring `call-log-store.mjs` exactly, which is the repo's one
- * existing append-only store. Three properties decided it over the alternatives, each of which is a real
- * store already in this directory:
+ * A gitignored, DAY-ROTATED, append-only NDJSON sidecar with an `OPERATION_TELEMETRY_DIR` override, rooted at
+ * a SHARED workspace location so every clone of this repo on the host — the primary checkout and every lane
+ * — agrees on one directory (fixed 2026-09, #3383 follow-on: it originally resolved by SCRIPT LOCATION alone,
+ * mirroring `call-log-store.mjs`, which meant each lane clone wrote its own private, never-read sidecar —
+ * see {@link TELEMETRY_ROOT}'s own docblock for the fix). Three properties decided the NDJSON shape over the
+ * alternatives, each of which is a real store already in this directory:
  *
  *   1. ONE FILE PER RUN (the `run-store.mjs` / `completion-store.mjs` shape: temp-write + rename, one JSON
  *      document per key) was rejected because a span is not a document. A single delivery emits 8–12 spans
@@ -65,6 +67,7 @@ import {
   classifyOutcomeStatus, deriveTraceId, newMetric, newSpanEnd, newSpanStart, parseTelemetryLines,
   serializeTelemetryEvent, validateTelemetryEvent, DURABLE_SPAN_NAMES,
 } from './telemetry.mjs';
+import { workspaceFor } from '../lib/lane-pool-paths.mjs';
 
 export {
   DISPATCH_KINDS,
@@ -98,10 +101,46 @@ export {
   validateTelemetryEvent,
 } from './telemetry.mjs';
 
-// Resolved by SCRIPT LOCATION, never CWD — the same reason `call-log-store.mjs#CALLS_ROOT` is: a span
-// recorded from a lane clone and read from the main checkout must resolve to the SAME sidecar.
+// Resolved by SCRIPT LOCATION, never CWD — same reason `call-log-store.mjs#CALLS_ROOT` is.
 const HERE = dirname(fileURLToPath(import.meta.url));
-export const TELEMETRY_ROOT = resolve(HERE, '..', '..');
+
+/**
+ * THIS PROCESS'S OWN checkout root — the lane/primary clone the code is actually running from. Used ONLY
+ * for git-resource detection ({@link readGitResource}/{@link resourceAttributes}): a span's `branch`/`commit`
+ * resource attributes must describe the clone that produced it, which is necessarily per-clone and must
+ * NEVER be repointed at the shared storage location below (that directory holds no `.git` of its own).
+ */
+const CHECKOUT_ROOT = resolve(HERE, '..', '..');
+
+/**
+ * THE SHARED STORAGE ROOT — bugfix (#3383 follow-on, storage fragmentation). Before this fix `TELEMETRY_ROOT`
+ * WAS `CHECKOUT_ROOT`, so every lane clone (each its own full `git clone` under `we:.lanes/<pool>/lane-N` —
+ * confirmed on disk to be a real `.git` DIRECTORY, not a linked worktree, so nothing shares an object store
+ * or a common dir the way a `git worktree add` clone would) resolved its own private
+ * `<clone>/.operations/telemetry/`, and a rolling-window rollup run from any ONE clone only ever saw that
+ * clone's own slice of dispatch history — silently, with no error, which is exactly how the fragmentation
+ * went unnoticed.
+ *
+ * Fixed by reusing {@link workspaceFor} — the IDENTICAL "many clones, one source of truth" derivation
+ * `lane-pool-paths.mjs` already established for `LANE_POOL_ROOT` (`defaultPoolRoot`), rather than inventing a
+ * second convention: it strips a path at its `.lanes` segment (a lane clone) or takes the parent (a primary
+ * checkout), so `<workspace>/webeverything` and `<workspace>/.lanes/<pool>/lane-N` both resolve to the SAME
+ * `<workspace>` — one physical directory every clone on the host agrees on, with no coordination between them.
+ *
+ * Wrapped in a try/catch and falling back to this clone's own `CHECKOUT_ROOT` on any failure — degrading to
+ * the (fragmented, but previously-shipped) per-clone behavior rather than throwing, because a telemetry-root
+ * bug must never be able to break a delivery (see the file header's purity discipline).
+ *
+ * `OPERATION_TELEMETRY_DIR` (below) remains the escape hatch for a fully explicit override of the final
+ * directory, independent of this root.
+ */
+export const TELEMETRY_ROOT = (() => {
+  try {
+    return workspaceFor(CHECKOUT_ROOT);
+  } catch {
+    return CHECKOUT_ROOT;
+  }
+})();
 
 /** The env var that turns recording off entirely. Any value other than `0`/`false`/`off` leaves it on. */
 export const TELEMETRY_ENV = 'WE_TELEMETRY';
@@ -165,7 +204,7 @@ let cachedResource = null;
  * @param {string} [root]
  * @returns {{branch: (string|null), commit: (string|null)}}
  */
-export function readGitResource(root = TELEMETRY_ROOT) {
+export function readGitResource(root = CHECKOUT_ROOT) {
   try {
     let gitPath = join(root, '.git');
     if (!existsSync(gitPath)) return { branch: null, commit: null };
@@ -211,7 +250,7 @@ export function readGitResource(root = TELEMETRY_ROOT) {
  * @param {{root?: string, env?: object}} [o]
  * @returns {object}
  */
-export function resourceAttributes({ root = TELEMETRY_ROOT, env = process.env } = {}) {
+export function resourceAttributes({ root = CHECKOUT_ROOT, env = process.env } = {}) {
   if (cachedResource) return cachedResource;
   let git = { branch: null, commit: null };
   let host = null;
@@ -400,11 +439,14 @@ export function createNullRecorder() {
  *
  * @param {{kind?: string, item?: *, pr?: *, traceId?: string|null, attributes?: object, resource?: object,
  *          store?: object, now?: () => Date, newSpanId?: () => string, enabled?: boolean, root?: string}} [o]
+ *   `root` (default {@link CHECKOUT_ROOT}) governs ONLY git-resource detection (this clone's own
+ *   branch/commit) — it never affects where events are written; that is always {@link TELEMETRY_ROOT}
+ *   (the shared storage root) unless `store` or `OPERATION_TELEMETRY_DIR` override it.
  */
 export function createTelemetryRecorder({
   kind = 'unknown', item = null, pr = null, traceId = null, attributes = {},
   resource = null, store = null, now = () => new Date(), newSpanId = defaultSpanId,
-  enabled = null, root = TELEMETRY_ROOT,
+  enabled = null, root = CHECKOUT_ROOT,
 } = {}) {
   const on = enabled === null ? telemetryEnabled() : !!enabled;
   if (!on) return createNullRecorder();
