@@ -23,9 +23,8 @@ Three reasons the judgment moved off the close (2026-08-06, operator directive):
 1. **A subagent cannot run a close.** Curating here meant a delivery agent's observation only counted if
    the session it rode under happened to close cleanly.
 2. **A session that never closes loses everything it noticed.**
-3. **Dedup-from-a-sample-of-one.** "Fresh angle or covered cluster?", "narrow one-off or recurring?" — the
-   red-team's own filters are recurrence questions a single session structurally cannot answer. A pool
-   answers them with a count.
+3. **Dedup-from-a-sample-of-one.** "Fresh angle or covered cluster?", "one cause behind several notes?" — a
+   single session structurally cannot answer those. A pool can.
 
 It also makes the single-tenant path identical in shape to the eventual multi-tenant one (#2610): many
 people experience, one owner adjudicates.
@@ -126,8 +125,9 @@ Specifically, scan for:
 
   **This is the bullet the emit-only rule most improves.** Under the old shape you had to decide, from one
   session, whether a reframe was a new axis or a fourth take on a covered cluster — from a sample of one.
-  Now you just record that it happened. If it's real, another session will hit it too, and the harvest will
-  see the count.
+  Now you just record that it happened — with the turn that established it quoted (§1a), so the harvest can
+  verify it. A reframe the operator made once is exactly the kind of note that never recurs and still
+  matters.
 
 ### 1a. Emit to the learnings pool — the ONE thing the close does with an observation
 
@@ -143,15 +143,26 @@ node scripts/conveyor/learnings-drop.mjs \
   --area="<coarse label — the subsystem or activity, ≤60 chars>" \
   --summary="<the observation, one sentence, ≤240 chars>" \
   --suggestion="<what you'd do about it, ≤400 chars>" \
+  --quoted-turn='<the verbatim turn that established it>' \
+  --transcript="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')/$CLAUDE_CODE_SESSION_ID.jsonl" \
   --session="$LEARNINGS_SESSION"
 ```
 
-**The session slug is not optional, and it is the whole ranking signal.** The pool ranks by *distinct
-sessions*, so entries with no slug of their own would all land in one file and read as one session forever —
-`sessions` pinned at 1, and `--min-sessions=2` (the recurrence floor `/harvest` advertises) filtering out
-every one of them. `learnings-drop.mjs` **refuses** an append it cannot attribute to a session, so a dropped
-flag fails loudly instead of silently flattening the pool. Give this close one slug and reuse it for every
-entry — a *new* slug per entry would be just as wrong in the other direction, faking recurrence.
+**Quote the grounding turn whenever there is one.** `--quoted-turn` + `--transcript` (both or neither) are
+what can admit the note to agent memory: `/harvest` checks the quote is really in that transcript, and a note
+without a verified quote can only ever become a backlog item. Copy the turn **verbatim** — the operator's
+words, or your own reply — never a paraphrase, or it will not verify. It is uncapped, so include the whole
+turn. The `--transcript` expression above builds this session's transcript path; `pwd` must be the directory
+the session **started** in (the harness names the project folder after it), so run it from there. Use
+**single quotes** around the quote, since a transcript turn can hold `` ` `` or `$(…)`.
+No such turn (a friction you only noticed yourself) → omit both flags; the note is still worth emitting.
+
+**The session slug is not optional.** The pool ranks by *distinct sessions*, so entries with no slug of their
+own would all land in one file and read as one session forever — a cause several sessions independently hit
+would be indistinguishable from one session repeating itself. `learnings-drop.mjs` **refuses** an append it
+cannot attribute to a session, so a dropped flag fails loudly instead of silently flattening the pool. Give
+this close one slug and reuse it for every entry — a *new* slug per entry would be just as wrong in the other
+direction, faking recurrence.
 
 **Writing the entry well is the close's actual skill.** The harvest can only judge what you recorded, so:
 
@@ -164,14 +175,14 @@ entry — a *new* slug per entry would be just as wrong in the other direction, 
 - **Always fill `suggestion`.** Every distinct member suggestion survives clustering, so yours reaches the
   harvest even if another entry becomes the representative.
 - **Emit when unsure.** The floor for emitting is "I actually observed this", not "this is important".
-  Importance is the harvest's call, and an entry nothing else corroborates simply never recurs.
+  Importance is the harvest's call — and it never discounts a note just because nothing else repeats it.
 
-**The schema is the privacy boundary, and it is enforced.** Only `kind`/`area`/`summary`/`suggestion`
-exist — there is deliberately no field for code, diffs, paths, or secrets — and the append runs a
-deterministic scrub that **rejects on hit** (secret-shaped values, absolute or repo-identifying paths,
-high-entropy tokens, over-long fields). A rejected entry is never written. If the helper rejects yours,
-**rewrite it more generally** — do not work around the gate. This is the same seam that later ships to the
-multi-tenant inbox (#2610), where minimal-by-construction is a hard requirement.
+**The schema is an allow-list, and it is enforced.** The lesson is `kind`/`area`/`summary`/`suggestion`
+(capped — a lesson is a sentence), plus the optional `quotedTurn`/`transcript` evidence pair. An
+out-of-schema field or an over-long lesson field is **rejected** and never written; if the helper rejects
+yours, **rewrite it more tightly** — do not work around the gate. The pool itself is not scrubbed for
+secrets (#3015 moved that to the publish seam, where harvest output becomes a committed file), so the pool
+stays machine-local and untracked.
 
 **The pool is untracked, machine-local, and cumulative.** Entries land in
 `<pool>/<session>.jsonl` — one file per session so concurrent agents never contend — where `<pool>` is
