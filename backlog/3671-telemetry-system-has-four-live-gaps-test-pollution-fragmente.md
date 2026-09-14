@@ -48,6 +48,23 @@ after the fact from a transcript; per-span or per-delivery granularity; whether 
 mechanical fix like the other three. Needs that design call made (or at minimum a concrete proposed schema
 field + emission call site) before it's buildable.
 
+**No hook point exists to feed it, and closing that is a repo-wide expansion, not a small fix.** The schema
+question above is downstream of a bigger gap: today `we:.claude/settings.json` declares hook matchers for
+only `Edit|Write` (PreToolUse + PostToolUse) and `Bash` (PreToolUse) — there is **no matcher that fires on
+every tool call**, so a `Read`, `Grep`, `Glob`, `Agent`, or any other tool invocation is invisible to any hook
+right now. Making a tool-use tally possible at all means adding a hook point with unrestricted (or
+near-unrestricted) matcher coverage across every tool, in every session — a **repo-wide hook-scope
+expansion**, not an isolated change alongside the schema/emission-site design above.
+
+**Open design question this surfaces, not just missing code: does interactive-session tool use even belong in
+this telemetry stream?** `we:scripts/operations/telemetry.mjs` is currently scoped to **dispatched-agent**
+spans (a lane's build, a judge run, etc.) — not to the operator's own interactive Claude Code session. A
+hook that fires on every tool call fires in BOTH kinds of session; widening hook coverage to make the tally
+possible would, by construction, also start observing interactive-session tool calls. Whether interactive
+tool-use counts should feed this same dispatched-agent-scoped stream, a separate stream, or nothing at all is
+a real judgment call — not resolved by this card, and needs deciding before (or alongside) the schema design
+above, not after building the hook expansion.
+
 ## Done when
 
 1. **Executable** — a command that fails before this item lands and passes after: a per-agent tool-use
