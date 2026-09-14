@@ -64,6 +64,12 @@ const fixPayload = (over = {}) => ({
   ...over,
 });
 
+/** A stable, non-lane-shaped root for every `createDispatchSinks` call in this file — see the identical
+ *  constant + rationale in `./dispatch-lane-build-wiring.test.mjs` (#3637's 16-test false-failure regression):
+ *  `assertNotALaneCheckout` fires on the checkout's own on-disk BASENAME, which these tests never mean to
+ *  exercise, so a fixed fake root keeps them hermetic to where they happen to be checked out. */
+const PRIMARY = '/primary/webeverything';
+
 /** A `spawnDetached` stub that records the argv + options and answers with a fake child. */
 function recordingSpawnDetached(pid = 4242) {
   const calls = [];
@@ -91,6 +97,7 @@ describe('#3640 — the fix dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached(9002);
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider`, NO per-kind scalar: the sink resolves the mode itself from an environment with nothing
       // in it and installs its own router over the table.
       modes: dispatchModesFromEnv({}),
@@ -125,6 +132,7 @@ describe('#3640 — the fix dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({ WE_FIX_DISPATCH_MODE: 'agent' }),
       registry: registryWithSpawn(spawnDetached),
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
@@ -153,6 +161,7 @@ describe('#3640 — the fix dispatch is MECHANICAL by default', () => {
       if (kind !== 'fix') expect(mode, kind).toBe(defaults[kind]);
     }
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes,
       registry: Object.freeze({
         ...DISPATCH_PROVIDER_REGISTRY,
@@ -265,6 +274,7 @@ describe('#3640 — PR-keyed, not item-keyed: build\'s assumptions do NOT carry 
   it('the sink forwards `pr` (and `reason`) onto the port request — without it the provider has nothing', async () => {
     const seen = [];
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv({}),
       registry: Object.freeze({
         ...DISPATCH_PROVIDER_REGISTRY,
