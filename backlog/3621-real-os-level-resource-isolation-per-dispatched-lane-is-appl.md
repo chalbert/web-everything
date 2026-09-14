@@ -424,6 +424,67 @@ the **heavy-command container pool**, not per-lane containers: it is the cheap h
 billing change, answers this item's founding incident directly, and would produce the throughput
 measurement the prior amendment's core-split premise still lacks.
 
+## Amendment (2026-09-13) — correction: the 2026-09-11 amendment's "requires API-key billing" claim is FALSE, tested live tonight
+
+Same discipline as the four amendments above — a factual correction to prior research, not a decision:
+ratifies nothing, changes no status, stamps no `preparedDate`, and does not change the operator's
+already-recorded sequencing (containers stay deferred until Codex/Gemini are hooked up, per the
+2026-09-11 amendment's "Recommended sequencing" above — this only corrects a technical claim that will
+matter whenever that work eventually resumes).
+
+**The claim being corrected.** The 2026-09-11 amendment's "Auth: confirmed, and it is a billing
+decision, not a config flag" section states the container route "requires switching to API-key auth,
+which is a different *billing model* (metered API credits vs. the subscription the CLI uses)." Tested
+live tonight, real Apple `container` CLI, not desk research: **this is false, or at minimum stated far
+too pessimistically.** Subscription auth (Claude Max plan, Codex ChatGPT subscription) works fine from
+inside a container. No API-key billing switch is required.
+
+**Evidence, already verified tonight — not to be re-tested:**
+- **Claude Code CLI** has a plain-file credential fallback, mode 0600, at:
+  ```
+  ~/.claude/.credentials.json
+  ```
+  used on Linux/when Keychain is unavailable, plus an official headless path: `claude setup-token` mints
+  a one-year OAuth token settable via `CLAUDE_CODE_OAUTH_TOKEN`. Verified live in a real `container run`
+  (Apple container CLI 1.3.1, `node:20` image): the CLI made a real authenticated round-trip to
+  Anthropic's servers from inside the container, zero Keychain involved.
+- **Codex CLI**'s credential file is *always* plain (never Keychain, on any platform), at:
+  ```
+  ~/.codex/auth.json
+  ```
+  holding `{auth_mode, tokens: {access_token, refresh_token, ...}}`. Verified live the same way — real
+  calls to chatgpt.com's backend from inside a container. Also found: `codex login
+  --with-access-token` (headless bearer-token injection) and a `chatgpt_base_url`/`model_providers`
+  config override — both official, supported mechanisms.
+- **Antigravity** is Keychain-only; no plain-file fallback was found. This one gap is real, but matters
+  less: Antigravity isn't run headlessly by the conveyor today anyway.
+
+**Best design identified, for whenever this work resumes:** a host-side auth proxy — the real credential
+stays outside the container on the host, and the container points at it via the officially-supported
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` env vars (Claude) and the `chatgpt_base_url` override
+(Codex). The container never holds the real secret at all. This also sidesteps a footgun found tonight:
+a raw copied Codex credential file can have its refresh token rotated *inside* the container, causing a
+split-brain with the host session — a proxy avoids that because the container never holds a token that
+can itself be refreshed and diverge. A lower-effort interim step, if a quick unblock is ever needed
+before the proxy is built: inject `CLAUDE_CODE_OAUTH_TOKEN` directly, or use `codex login
+--with-access-token` directly — no proxy required, at the cost of the token living in the container.
+
+**A third option, tested and ruled out:** scoping a credential file's visibility to a single process
+rather than the whole container. This does not exist as an Apple `container` CLI primitive — mounts are
+whole-container, whole-lifetime only, with no per-process visibility control. Not worth pursuing further
+since the host-side proxy is strictly better anyway (never exposes the secret to the container at all,
+process-scoped or not).
+
+**Net correction to this item's own record:** the 2026-09-11 amendment's "Two real costs this item's
+desk research missed" section and its auth paragraph should now be read alongside this one — the
+dependency-tree cost and the ~3.6x mount I/O penalty measured that night both still stand untouched by
+tonight's testing, but the auth/billing cost does not: it was the single biggest asymmetry that amendment
+named between the per-lane-container and heavy-command-only halves, and it turns out not to be a real
+cost at all, just an under-researched one. This does not revive per-lane containers as an active proposal
+— the operator's sequencing call above still holds — it only means that when the decision is eventually
+made, the auth/billing line item should be crossed off the tradeoff list rather than carried forward as a
+blocker.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
