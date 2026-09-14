@@ -3093,7 +3093,7 @@ infrastructure (a fresh lane, `lane-20`, acquired specifically for this test).**
 a guest where `os.cpus().length` reports **3** (a confirmed off-by-one, N+1, consistent across `--cpus 1`→2 and
 `--cpus 4`→5) but `os.availableParallelism()` correctly reports **2**. THIS repo's own `test:unit` config
 (`we:vitest.shared.ts#maxTestWorkers`) does not call either API — it is a **hardcoded literal `4`**, already
-tuned (by an existing, unrelated `#x1jcikc` fix) for the HOST's 12-core budget under a 3-concurrent-invocation
+tuned (by an existing, unrelated `#3650` fix) for the HOST's 12-core budget under a 3-concurrent-invocation
 burst assumption, with zero awareness of whatever container it might run inside. Ran the real 35-file/441-test
 `we:blocks/__tests__` subset inside an actual `--cpus 2 --memory 2g` container via `node
 we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run …` — passed

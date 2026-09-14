@@ -791,7 +791,7 @@ built and fresh on this host):
   into `we:vitest.config.ts`/`we:vitest.maas-conformance.config.ts`'s `poolOptions.threads.maxThreads` and
   `we:vitest.integration.config.ts`'s `poolOptions.forks.maxForks`. It calls neither `os.cpus()` nor
   `os.availableParallelism()` at all — confirmed by reading the constant's own definition and every call site.
-  It was deliberately sized (per that constant's own `#x1jcikc` comment, already in the repo, unrelated to this
+  It was deliberately sized (per that constant's own `#3650` comment, already in the repo, unrelated to this
   amendment) for the HOST's 12-core budget under a documented worst-case assumption of **3 concurrent `vitest`
   invocations** racing past `we:scripts/readiness/heavy-admission.mjs`'s admission cap during its fail-open timeout window (3×4=12,
   "fully subscribed but never oversubscribed" — on the HOST). **That sizing has nothing to do with, and does
