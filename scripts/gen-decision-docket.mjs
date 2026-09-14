@@ -25,9 +25,13 @@
  * unstarted (no branch/PR exists for it as of this write).
  *
  * USAGE
- *   node scripts/gen-decision-docket.mjs data   [--ref=<git-ref>] [--limit=N] [--out=reports/decision-docket-data.json]
+ *   node scripts/gen-decision-docket.mjs data   [--ref=<git-ref>] [--allow-stale] [--limit=N] [--out=reports/decision-docket-data.json]
  *   node scripts/gen-decision-docket.mjs render [--data=reports/decision-docket-data.json] [--out=reports/decision-docket.html]
- *   node scripts/gen-decision-docket.mjs all    [--ref=<git-ref>] [--limit=N]   # both steps, default paths
+ *   node scripts/gen-decision-docket.mjs all    [--ref=<git-ref>] [--allow-stale] [--limit=N]   # both steps, default paths
+ *
+ * `--allow-stale` bypasses check-readiness.mjs's own diverged-local-main guard — safe to pass whenever `--ref`
+ * already points at real, current state (e.g. `--ref=origin/main`), since the ranking read and the file read
+ * are two separate steps and `--ref` alone controls the latter.
  *
  * `--ref` reads backlog files via `git show <ref>:<path>` instead of the working tree — use this when the
  * current checkout isn't a fresh `main` (e.g. `--ref=origin/main`), so the docket reflects real landed state
@@ -74,14 +78,21 @@ function readBacklogFile(id, ref) {
  * alternative that warning itself recommends (redirect-to-a-file-then-read is the shell-side equivalent of
  * what `execFileSync` does here in-process).
  */
-function loadTierBRanking() {
-  const out = execFileSync('node', ['scripts/check-readiness.mjs', '--select', '--json'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+function loadTierBRanking({ allowStale } = {}) {
+  const args = ['scripts/check-readiness.mjs', '--select', '--json'];
+  // check-readiness.mjs refuses to rank against a checkout whose local `main` has diverged from
+  // origin/main (own local commits ahead, or behind) rather than silently ranking against stale state. This
+  // repo is a busy shared checkout — a caller who already knows its own `--ref` points at real, current state
+  // (e.g. `--ref=origin/main` itself) can pass `--allow-stale` to bypass that guard; it never changes what
+  // gets READ (still `--ref`), only whether the RANKING step tolerates a diverged local `main`.
+  if (allowStale) args.push('--allow-stale');
+  const out = execFileSync('node', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const json = JSON.parse(out);
   return json.selection?.tierB ?? [];
 }
 
-function buildData({ ref, limit } = {}) {
-  const tierB = loadTierBRanking();
+function buildData({ ref, limit, allowStale } = {}) {
+  const tierB = loadTierBRanking({ allowStale });
   const ranked = [...tierB].sort((a, b) => (b.leverageScore ?? 0) - (a.leverageScore ?? 0));
   const limited = limit ? ranked.slice(0, limit) : ranked;
   const now = new Date();
@@ -95,7 +106,7 @@ function buildData({ ref, limit } = {}) {
 }
 
 function cmdData(flags) {
-  const data = buildData({ ref: flags.ref, limit: flags.limit ? Number.parseInt(flags.limit, 10) : null });
+  const data = buildData({ ref: flags.ref, limit: flags.limit ? Number.parseInt(flags.limit, 10) : null, allowStale: !!flags['allow-stale'] });
   const outPath = flags.out ? join(ROOT, flags.out) : DEFAULT_DATA_PATH;
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(data, null, 2)}\n`);
@@ -123,7 +134,7 @@ function main(argv) {
   if (sub === 'data') { cmdData(flags); return; }
   if (sub === 'render') { cmdRender(flags); return; }
   if (sub === 'all') { cmdData(flags); cmdRender(flags); return; }
-  process.stderr.write('usage: gen-decision-docket.mjs <data|render|all> [--ref=<git-ref>] [--limit=N] [--data=<path>] [--out=<path>]\n');
+  process.stderr.write('usage: gen-decision-docket.mjs <data|render|all> [--ref=<git-ref>] [--allow-stale] [--limit=N] [--data=<path>] [--out=<path>]\n');
   process.exitCode = 2;
 }
 

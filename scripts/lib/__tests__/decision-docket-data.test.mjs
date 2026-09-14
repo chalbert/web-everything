@@ -104,6 +104,33 @@ function f() {
     expect(fork.warning).toMatch(/no option marked RECOMMENDED/);
   });
 
+  it('flags a fork whose option text carries an unclosed bold marker (a nested sub-bullet that got flattened)', () => {
+    // Real shape found in backlog/2209: an option's own body contains a nested "- (b1) ... - (b2) ..." list,
+    // each with its own bold markers, that joinSoft flattens into one run-on line with an ODD "**" count.
+    const section = `Why.
+
+- **(a)** keep letterforms.** Legible, zero work.
+- **(b)** **concept-bearing symbol** ← **RECOMMENDED**. Three candidates: - **(b1) horizon** — sun over the line. - **(b2) flag** — planted-flag metaphor.
+
+**Skeptic:** SURVIVES.
+**Screen:** clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(false);
+    expect(fork.warning).toMatch(/unclosed bold marker/);
+  });
+
+  it('does NOT flag a fork whose option text has cleanly paired bold markers', () => {
+    const section = `Why.
+
+- **(a)** A plain option. **Rejected**: no.
+- **(b)** **A clean bold phrase** ← **RECOMMENDED**. Trailing prose with no more bold at all.
+
+**Skeptic:** SURVIVES.
+**Screen:** clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(true);
+  });
+
   it('accepts the legacy label style where the bold does not close right after the letter', () => {
     const section = `Why it forks.
 

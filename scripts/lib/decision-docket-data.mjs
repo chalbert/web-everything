@@ -211,6 +211,14 @@ export function parseForkSection(n, headingRest, sectionText) {
   const warnings = [];
   if (!hasDefault && options.length) warnings.push(`Fork ${n}: no option marked RECOMMENDED — default could not be identified.`);
   if (!skeptic) warnings.push(`Fork ${n}: no "Skeptic:" verdict line found.`);
+  // An odd count of "**" inside an option's own text means a bold span never closed within that option — the
+  // classic tell of a legacy item whose sub-bullets (nested lists INSIDE one option's body, each with its own
+  // bold markers) got flattened by `joinSoft` into one run-on line. Rendering that through mdInline produces
+  // stray literal asterisks and mismatched emphasis — worse than showing nothing. Flag it structurally rather
+  // than let a malformed render reach the page.
+  if (options.some((o) => (o.body.match(/\*\*/g) || []).length % 2 !== 0)) {
+    warnings.push(`Fork ${n}: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly.`);
+  }
 
   return {
     n, crux, why, options, notes, skeptic, screen,
