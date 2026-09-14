@@ -1,6 +1,6 @@
 ---
 name: capture-learning
-description: Capture a one-off observation into the cross-session learnings pool — the write side whose read side is /harvest. Use when the operator says "note this", "save this as feedback", "remember this friction", "log that", "add this to the pool", "capture that as a lesson", or runs /note. Shapes ONE sentence into the pool's four-field entry (kind/summary/area/suggestion) and shells the existing CLI (we:scripts/conveyor/learnings-drop.mjs) — never reimplements the append, the scrub, or the schema. Capture-only — NEVER routes to we:backlog/ or agent memory, and NEVER judges, dedups, or decides whether the observation matters. That adjudication happens exactly once, later, at harvest.
+description: Capture a one-off observation into the cross-session learnings pool — the write side whose read side is /harvest. Use when the operator says "note this", "save this as feedback", "remember this friction", "log that", "add this to the pool", "capture that as a lesson", or runs /note. Shapes ONE sentence into the pool's four-field entry (kind/summary/area/suggestion), attaches the verbatim turn it came from plus its transcript pointer, and shells the existing CLI (we:scripts/conveyor/learnings-drop.mjs) — never reimplements the append, the scrub, or the schema. Capture-only — NEVER routes to we:backlog/ or agent memory, and NEVER judges, dedups, or decides whether the observation matters. That adjudication happens exactly once, later, at harvest.
 ---
 
 # Capture a learning — the pool's front door
@@ -24,7 +24,7 @@ If you route to `backlog/` or memory from here, you have broken that split.
    enough. If the input actually bundles two unrelated observations, split it: one observation per entry
    (a bundled entry clusters with neither at harvest time). Run steps 2–4 once per observation.
 
-2. **Shape the one sentence into the CLI's four fields.** This is the only judgment this skill exercises —
+2. **Shape the one sentence into the CLI's four fields, and attach its grounding.** This is the only judgment this skill exercises —
    picking words, not picking a destination:
    - `kind` — pick the single best fit from `friction | missing-convention | doc-gap | skill-gap |
      improvement`. If genuinely ambiguous, default to `friction` (the loosest bucket — the harvest can
@@ -39,18 +39,46 @@ If you route to `backlog/` or memory from here, you have broken that split.
    - `suggestion` — what you'd do about it, in one short line. ≤400 chars. If the operator gave none, offer
      your own best short recommendation rather than leaving it thin — every surviving member suggestion
      matters at harvest even when another entry becomes the cluster's representative.
+   - `quoted-turn` + `transcript` — **the operator's own words, verbatim, and where they were said.** When the
+     observation came from something the operator said in this session (the usual case for "note this"),
+     copy that turn exactly — not your shaped `summary` — into `--quoted-turn`. Uncapped: take the whole turn.
+     This is the evidence `/harvest` verifies against the transcript, and only a verified note can ever become
+     an agent-memory rule. Both flags or neither; skip them only when there is no turn to quote.
 
 3. **Mint one session slug for this capture** (this shell session has no pre-existing slug to reuse, unlike
    a close or a delivery agent, which already have one):
 
+   **Never inline the verbatim turn into a shell string** — it is uncapped, raw operator text, and no shell
+   quoting style (single OR double) can safely hold arbitrary text: single quotes have no escape for an
+   embedded apostrophe (`don't re-run…` breaks out mid-argument), and double quotes still run any `` ` ``/
+   `$(…)` in it through bash. Route it through a file instead, via a quoted heredoc (which takes its body
+   completely literally — no expansion, no escaping needed for quotes or backticks), then build the JSON
+   payload with `jq --rawfile` and pipe it to `--stdin`:
+
    ```bash
-   node scripts/conveyor/learnings-drop.mjs \
-     --kind=<friction|missing-convention|doc-gap|skill-gap|improvement> \
-     --summary="<the observation, one sentence, ≤240 chars>" \
-     --area="<coarse label, ≤60 chars>" \
-     --suggestion="<what you'd do about it, ≤400 chars>" \
-     --session="note-$(date +%Y%m%d-%H%M%S)"
+   QUOTE_FILE=$(mktemp)
+   cat <<'QUOTE_EOF' > "$QUOTE_FILE"
+   <the operator turn, verbatim — paste it exactly as said, including any quotes or backticks>
+   QUOTE_EOF
+
+   jq -n --rawfile quotedTurn "$QUOTE_FILE" \
+     --arg kind "<friction|missing-convention|doc-gap|skill-gap|improvement>" \
+     --arg summary "<the observation, one sentence, ≤240 chars>" \
+     --arg area "<coarse label, ≤60 chars>" \
+     --arg suggestion "<what you'd do about it, ≤400 chars>" \
+     --arg transcript "$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')/$CLAUDE_CODE_SESSION_ID.jsonl" \
+     '{kind:$kind, summary:$summary, area:$area, suggestion:$suggestion,
+       quotedTurn: ($quotedTurn | sub("\n$"; "")), transcript:$transcript}' \
+   | node scripts/conveyor/learnings-drop.mjs --stdin --session="note-$(date +%Y%m%d-%H%M%S)"
+
+   rm -f "$QUOTE_FILE"
    ```
+
+   The `<friction|…>`, `summary`, `area`, and `suggestion` placeholders are YOUR shaped, agent-authored text
+   (safe to author inline); only the quoted turn is raw external text and MUST go through the file. The
+   `--transcript` expression assumes `pwd` is the directory this session started in; the harness names the
+   transcript folder after it. If the verbatim turn itself contains a line that reads exactly `QUOTE_EOF`,
+   pick a different delimiter word (e.g. `QUOTE_EOF_2`) that doesn't appear in the text before running this.
 
    Do not reimplement the append, the scrub, or the schema — this CLI (`we:scripts/conveyor/
    learnings-drop.mjs`) is the only writer of the pool; shell it, don't hand-roll a JSONL append. If two

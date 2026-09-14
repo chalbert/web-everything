@@ -120,3 +120,31 @@ describe('#3421 review fix — a blocking member propagates blocking:true + prop
     expect(clusters[0]).not.toHaveProperty('proposedFixes');
   });
 });
+
+describe('#3016 — a cluster carries its corroboration axes and every member\'s grounding evidence', () => {
+  const summary = 'the lane gate reruns the full suite for docs only diffs';
+
+  it('`days` is the sorted set of distinct UTC days its members were observed on', () => {
+    const at = (ts) => ({ ...e('friction', 'gating', summary), ts });
+    const { clusters } = dedup([at('2026-08-03T23:59:00.000Z'), at('2026-08-01T01:00:00.000Z'), at('2026-08-03T00:00:00.000Z'), e('friction', 'gating', summary)]);
+    expect(clusters[0].days).toEqual(['2026-08-01', '2026-08-03']);
+  });
+
+  it('every grounded member reaches the cluster as an evidence row — none is elected away', () => {
+    const quoted = (session, quotedTurn, grounding) => ({ ...e('friction', 'gating', summary), session, ts: '2026-08-01T00:00:00.000Z', quotedTurn, transcript: `/t/${session}.jsonl`, grounding });
+    const { clusters } = dedup([
+      quoted('s1', 'first real turn quoted here', { status: 'verified', role: 'human', turn: 't1' }),
+      { ...e('friction', 'gating', `${summary} again`), session: 's3' },
+      quoted('s2', 'second real turn quoted here'),
+    ]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].evidence).toEqual([
+      { session: 's1', ts: '2026-08-01T00:00:00.000Z', transcript: '/t/s1.jsonl', quotedTurn: 'first real turn quoted here', grounding: { status: 'verified', role: 'human', turn: 't1' } },
+      { session: 's2', ts: '2026-08-01T00:00:00.000Z', transcript: '/t/s2.jsonl', quotedTurn: 'second real turn quoted here' },
+    ]);
+  });
+
+  it('an ungrounded cluster carries no evidence key — shape is unchanged', () => {
+    expect(dedup([e('friction', 'x', 'an ordinary friction entry')]).clusters[0]).not.toHaveProperty('evidence');
+  });
+});
