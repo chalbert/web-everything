@@ -5,6 +5,7 @@
  */
 import { pathToFileURL } from 'node:url';
 import { appendScorecard } from './run-scorecard-store.mjs';
+import { scrubPublish } from '../lib/secret-scrub.mjs';
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
 const enums = {
@@ -39,6 +40,12 @@ export function logDelegationTrial(row, io = {}) {
   }
   if (row.retroactive !== undefined && typeof row.retroactive !== 'boolean') {
     throw new Error('log-delegation-trial: retroactive must be a boolean');
+  }
+  for (const field of ['taskDescription', 'findings', 'scoredAt']) {
+    const value = row[field];
+    if (isNonEmptyString(value) && scrubPublish(value).length > 0) {
+      throw new Error(`log-delegation-trial: ${field} failed the append-time scrub — denying, never redacting`);
+    }
   }
 
   try {

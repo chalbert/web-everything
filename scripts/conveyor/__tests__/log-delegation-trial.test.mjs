@@ -73,6 +73,22 @@ describe('logDelegationTrial', () => {
     }
   });
 
+  it.each(['taskDescription', 'findings', 'scoredAt'])('refuses secret-shaped %s without writing', (field) => {
+    const io = memIo();
+    const secret = 'AKIAABCDEFGHIJKLMNOP';
+    expect(() => logDelegationTrial({ ...baseRow(), [field]: secret }, io)).toThrow('scrub');
+    expect(readStore(io).records).toEqual([]);
+  });
+
+  it('accepts realistic findings/taskDescription text that names a file path and a function call', () => {
+    const input = {
+      ...baseRow(),
+      taskDescription: 'Reviewed scripts/conveyor/log-delegation-trial.mjs:31 for a secret-scrub gap',
+      findings: 'logDelegationTrial() now scrubs taskDescription/findings before appendScorecard()',
+    };
+    expect(logDelegationTrial(input, memIo())).toMatchObject(input);
+  });
+
   it('accepts arbitrary provider/model identities and explicit null optional fields', () => {
     const input = { ...baseRow(), provider: 'future-provider', model: 'future-model', findings: null, item: null, pr: null };
     expect(logDelegationTrial(input, memIo())).toMatchObject(input);
