@@ -27,7 +27,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createRegistry } from './registry.mjs';
-import { createFileRunStore, newRunId } from './run-store.mjs';
+import { createFileRunStore, createMemoryRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
@@ -43,6 +43,8 @@ import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from
 import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
+import { staleStateOperation, STALE_STATE_OP } from './stale-state.mjs';
+import { createStaleStateReader } from './stale-state-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -165,6 +167,10 @@ export const OPERATIONS = Object.freeze({
   // reviewer could only run it by hand-writing the wiring. Same no-sinks reasoning as `suggest-next`.
   // #xewnork — did a check actually RUN on the head that is there now? Read-only, same no-sinks reasoning as
   // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
+  [STALE_STATE_OP]: () => ({
+    declaration: staleStateOperation({ readState: createStaleStateReader() }),
+    sinks: {},
+  }),
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
     sinks: {},
@@ -336,11 +342,12 @@ if (IS_CLI) {
     declaration,
     argv: rest,
     registry,
-    store: createFileRunStore(),
+    // stale-state promises zero filesystem writes, including engine bookkeeping.
+    store: declaration.name === STALE_STATE_OP ? createMemoryRunStore() : createFileRunStore(),
     // #3451 — the real, file-backed call-visibility signal. A compute-only operation (gate-health,
     // suggest-next, verify, pr-status) settles in one `driveRun` sweep and never gets a run record; this
     // is the ONLY trace a real CLI invocation of one of those leaves behind.
-    callLog: createFileCallLogStore(),
+    callLog: declaration.name === STALE_STATE_OP ? undefined : createFileCallLogStore(),
     sinks,
     // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
     // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot

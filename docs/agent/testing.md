@@ -208,3 +208,27 @@ If a sibling's primary checkout is missing entirely, provision warns and skips t
 3. **Parameterization** — passing args via attributes (`args-*`).
 4. **Reliability** — error handling, timeouts, forgivable failures.
 5. **Deferred/Lazy** — interaction with the loading/visibility Intent.
+
+### Stale-state inventory
+
+`node scripts/operations/run.mjs stale-state --json` inventories this checkout's active/preparing
+backlog claims, its repository lane pool, and the configured operation run store. Read
+`verdict.records` together with `verdict.gaps`; a failed source enumeration is never an empty-source
+claim. Corrupt run records remain visible as unknown. Lane status preserves lease read/parse failures
+as `readError`; the inventory retains each such lane as a lease record with unknown owner liveness.
+
+`pidAlive` records the current probe of the recorded PID; `ownerPidAlive` drives the verdict.
+The lease `pid` is the acquire CLI, not the agent, so leases without a durable `agentPid` have unknown
+owner liveness even if their recorded PID is dead. Probes reuse `reconcile-pass.mjs#probePid`;
+null/invalid PIDs and foreign-host PIDs remain unknown. TTL and run completion never prove death.
+Claims do not normally record an owner or PID; the report preserves that missing evidence as null.
+
+`hasUnsafeWork` reuses lane status cleanliness and supplements its behind count with a read-only
+count of commits absent from local origin refs. No fetch occurs: remote ref freshness is a named
+limit, and false is never cleanup authorization. Unassociated claims/runs have null work safety.
+Age is milliseconds since the recorded acquisition/start time, or null when missing/unreadable.
+
+The CLI normally persists runs and call telemetry even for compute-only operations. This inventory
+uses the existing memory run store and omits the optional call logger to honor its zero-write contract.
+All child git reads inherit `GIT_OPTIONAL_LOCKS=0` so status does not refresh an index. Cleanup stays
+with supported manual lifecycle commands; never edit lease/claim files by hand.
