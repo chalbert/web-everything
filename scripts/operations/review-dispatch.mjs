@@ -355,8 +355,16 @@ export function planReviewDispatch({ pr, repo } = {}) {
  *   `review-loop-cli.mjs` invocation (brief step 2) is told to pass `--provider=<this>`. One of
  *   `JUDGE_PROVIDER_NAMES`; defaults to `'claude'`, today's behaviour, unchanged — this is OPT-IN. Note what
  *   this does NOT do: it never makes the DISPATCHED SESSION ITSELF (a tool-bearing `claude --bg` agent) run on
- *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` spawns underneath it, which is the one part
- *   of this whole dispatch `#3581`'s ratified sequencing actually clears Codex for.
+ *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` could spawn underneath it would ever be
+ *   eligible (#3581: Codex is tool-free-only). CORRECTION (PR #2115 human review): this dispatch's OWN real
+ *   judge steps (`review-pr.mjs`'s `judge`/`judgeSecurity`, built by `buildReviewJudgeRequest`) are
+ *   UNCONDITIONALLY tool-bearing (`REVIEW_JUROR_TOOLS` — the tools ARE the finding mechanism, by ratified
+ *   design, #3158/#3319), so `judgeProvider: 'codex'` reaching THIS dispatch's review-pr judge steps always
+ *   throws `createDefaultJudge`'s tool-bearing refusal (`we:scripts/operations/cli-adapter.mjs`) — there is no
+ *   tool-free judge step here for it to select today. This flag still exists because it is generic dispatch
+ *   plumbing (`review-loop-cli.mjs --provider=` is not specific to review-pr's declaration), so it is left
+ *   wired rather than removed, but do not read its presence as proof review-pr can already run a Codex-backed
+ *   judge — it cannot, until a tool-free lens exists for it to seat.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({

@@ -55,6 +55,7 @@ vi.mock('../../lib/judge-spawn.mjs', async (importOriginal) => {
 
 const { createDefaultJudge, resolveJudgeProvider, JUDGE_PROVIDER_NAMES, unwrapJudgeOutcome } = await import('../cli-adapter.mjs');
 const { judgeSpawn } = await import('../../lib/judge-spawn.mjs');
+const { buildReviewJudgeRequest, DEFAULT_LENS } = await import('../review-pr.mjs');
 
 describe('JUDGE_PROVIDER_NAMES', () => {
   it('is exactly claude, codex — additive, claude first/default', () => {
@@ -130,5 +131,22 @@ describe('createDefaultJudge — providerName selection end to end (no injected 
     await expect(judgeFn({
       mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: ['Read'], cwd: '/tmp/x',
     })).rejects.toThrow(/TOOL-FREE panelist only/);
+  });
+
+  // PR #2115 human review (CONFIRMED, correctness): the two tests above only ever pass a SYNTHETIC tool-free or
+  // hand-built tool-bearing request — neither proves anything about `review-pr.mjs`'s REAL judge steps, which
+  // are `review-pr`'s only current caller of this dispatch's `--judge-provider`/`--provider` threading
+  // (`we:scripts/operations/review-dispatch.mjs`). `buildReviewJudgeRequest` is the actual recipe those steps
+  // use, and it is UNCONDITIONALLY tool-bearing (`REVIEW_JUROR_TOOLS`, by ratified design — see its own header).
+  // This drives THAT real request, not a stand-in, to pin down the actual, intended outcome: `--provider=codex`
+  // can never reach a real `review-pr` judge step today.
+  it('the REAL review-pr.mjs judge request (not a synthetic stand-in) is refused for providerName: \'codex\'', async () => {
+    const judgeFn = createDefaultJudge({ providerName: 'codex', cwd: '/tmp/x' });
+    const read = {
+      repo: 'o/r', pr: 1, title: 't', body: '', netChangedFiles: ['a.mjs'], diffText: 'diff',
+    };
+    const request = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+    expect(request.allowedTools).toBeTruthy();
+    await expect(judgeFn(request)).rejects.toThrow(/TOOL-FREE panelist only/);
   });
 });

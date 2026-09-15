@@ -409,6 +409,24 @@ describe('#xqa9ttq requireAllProperties — the OpenAI-strict schema transform (
     expect(out.properties.file.type).toEqual(['string', 'null']);
   });
 
+  it('a property literally named `required` does not shadow the schema\'s own `required` array (PR #2115 human review)', () => {
+    const shape = {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        required: { type: 'boolean' },
+      },
+      required: ['summary'],
+    };
+    const out = requireAllProperties(shape);
+    // `summary` was genuinely required by the schema's own `required` array — its type must stay untouched,
+    // not widened, which only happens if `alreadyRequired` correctly read `out.required` and not the
+    // `required` PROPERTY's own (unrelated) schema node.
+    expect(out.properties.summary.type).toBe('string');
+    expect(out.properties.required.type).toEqual(['boolean', 'null']);
+    expect(out.required).toEqual(['summary', 'required']);
+  });
+
   it('never mutates the input, at any depth', () => {
     const shape = {
       type: 'object',

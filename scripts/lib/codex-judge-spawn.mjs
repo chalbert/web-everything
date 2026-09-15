@@ -135,7 +135,7 @@ export function requireAllProperties(schema) {
   }
 
   if (out.properties && typeof out.properties === 'object' && !Array.isArray(out.properties)) {
-    const alreadyRequired = new Set(Array.isArray(out.properties.required ?? out.required) ? (out.required ?? []) : []);
+    const alreadyRequired = new Set(Array.isArray(out.required) ? out.required : []);
     const propKeys = Object.keys(out.properties);
     const nextProperties = {};
     for (const key of propKeys) {
