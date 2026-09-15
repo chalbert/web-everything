@@ -549,6 +549,53 @@ describe('guard-bash — direct-push-to-main block (#2203)', () => {
   });
 });
 
+describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3390)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+
+  it('still denies a REAL sed/perl in-place edit or tee write into backlog|reports (unchanged from before)', () => {
+    denied('sed -i s/x/y/ backlog/2200-a.md');
+    denied("sed -i '' s/x/y/ backlog/2200-a.md"); // BSD empty in-place suffix
+    denied('sed --in-place s/x/y/ reports/2200-a.md');
+    denied("perl -pi -e 's/x/y/' backlog/2200-a.md");
+    denied("perl -i -pe 's/x/y/' backlog/2200-a.md");
+    denied('tee -a backlog/2200-a.md');
+    denied('tee reports/2200-a.md'); // bare tee still WRITES the named file
+    denied('echo hi >> backlog/2200-a.md'); // the untouched `>>` half of the OR
+    denied('echo hi >> ./reports/2200-a.md');
+  });
+
+  it('does NOT deny a READ-ONLY sed/tee/perl invocation that merely MENTIONS a backlog|reports path (#3390 false positive)', () => {
+    allowed("sed -n '1,200p' backlog/123-foo.md");
+    allowed("sed -n '1,200p' reports/123-foo.md");
+    allowed("perl -ne 'print' backlog/123-foo.md");
+    allowed("perl -ne 'print if /x/' reports/123-foo.md");
+    allowed('tee /tmp/scratch.md < backlog/123-foo.md'); // reads from backlog, writes only to scratch
+    allowed("sed 's/x/y/' backlog/123-foo.md"); // no -i at all — prints to stdout, writes nothing
+  });
+
+  it('still denies when the write target is backlog|reports even though the READ input is a different path', () => {
+    denied('sed -i s/x/y/ /tmp/scratch.md backlog/2200-a.md');
+    denied("tee -a backlog/2200-a.md < /tmp/in.txt");
+  });
+
+  // Security review on #2108 — sed's `w` write mechanism needs NO `-i`/`--in-place`: a trailing `w <file>`
+  // flag on an `s///` command, or a standalone `/addr/w <file>` address-command, both genuinely write
+  // `<file>` from the script text alone. Verified directly against real sed: pre-fix, `fileWriteTargets`
+  // only ever read ARGV flags (never the script TEXT), so both commands below returned `[]` and were
+  // allowed — a real regression the flag-only rewrite introduced while fixing the mere-mention false
+  // positive above.
+  it('denies a sed `w`-command/`w`-flag write into backlog|reports with NO -i anywhere (#2108 security finding)', () => {
+    denied("sed 's/x/y/w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/w backlog/2200-a.md' file.txt");
+  });
+
+  it('does NOT deny a sed `w`-command/`w`-flag write whose target is NOT backlog|reports', () => {
+    allowed("sed 's/x/y/w /tmp/scratch.md' file.txt");
+    allowed("sed -n '/pat/w /tmp/scratch.md' file.txt");
+  });
+});
+
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
   const blockedMerge = (c) => expect(decide(c), c).toMatch(/assertMayMerge/);
   const allowed = (c) => expect(decide(c), c).toBeNull();
