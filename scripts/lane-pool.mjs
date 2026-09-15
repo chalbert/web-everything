@@ -535,13 +535,16 @@ function ensureDeps(dir) {
 // off-limits to `refresh`/`provision`'s `reset --hard` AND to another session's `acquire`, until `release`
 // (or TTL-reclaim). See scripts/lib/lane-lease.mjs for the pure decision logic.
 const LEASE_MARKER = (dir) => join(dir, '.git', LEASE_FILENAME);
-function readLease(dir) {
+function readLease(dir, onReadError = () => {}) {
   const file = LEASE_MARKER(dir);
-  if (!existsSync(file)) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('lease marker must contain a JSON object');
+    return parsed;
+  } catch (error) {
+    // Status must distinguish absent markers from unreadable evidence. Other callers retain
+    // their existing lease semantics; the diagnostic is not a synthetic lease.
+    if (error.code !== 'ENOENT') onReadError(error);
     return null; // a corrupt marker is treated as no live lease (isLeaseStale also fails-open)
   }
 }
@@ -731,7 +734,8 @@ function laneStatus(repo, n) {
   const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const behind = tryGit(['rev-list', '--count', `HEAD..origin/${repo.branch}`], dir);
-  const lease = readLease(dir);
+  let readError;
+  const lease = readLease(dir, (error) => { readError = error.message; });
   return {
     lane: n,
     path: dir,
@@ -744,6 +748,7 @@ function laneStatus(repo, n) {
     // #2275 — surface the hold so a picker can filter (and a human sees who owns a lane). `leased` is only
     // true for a LIVE lease; a stale marker reads as free (reclaimable), matching acquire's own logic.
     lease: lease || null,
+    ...(readError ? { readError } : {}),
     leased: lease ? !isLeaseStale(lease, Date.now(), ttlMsFromFlags()) : false,
   };
 }
