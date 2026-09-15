@@ -139,6 +139,11 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review']);
  *                          dead. Refuses AND surfaces, because nobody is coming to answer it.
  *   `liveness-unknown`   — a session is bound but its `pid` is absent or unprobed. Absence of a field is never
  *                          evidence of death, so this refuses rather than dispatching over a possibly-live agent.
+ *                          If the session is CONFIRMED stuck by other means (GH #77683 — listed forever, and
+ *                          `claude stop`/`claude rm` fail or silently no-op against it), the fix is
+ *                          `we:scripts/operations/clear-stuck-session.mjs` (`node scripts/operations/run.mjs
+ *                          clear-stuck-session --session=<id>`), which replays THIS function's own verdict
+ *                          rather than re-deriving a second one — never a manual `~/.claude/jobs/<id>/` move.
  *   `owed-elsewhere`     — real work is owed, by a job this pass does not run (a human clear, a CI heal, a
  *                          rebase). Named rather than dropped, so the PR is visible in the report.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
@@ -329,7 +334,10 @@ export function isAwaitingPermission(agent) {
  *      "busy" is how a 211-hour block stays invisible. The distinct kind is the whole point.
  *   2. `live-process` — a bound session with a probed-live pid. Something IS working this PR; do not pile on.
  *   3. `liveness-unknown` — bound, but the `pid` is absent (4 of 17 entries carry none) or was not probed.
- *      Absence of a field is never evidence of death, so this REFUSES. It does not read as idle.
+ *      Absence of a field is never evidence of death, so this REFUSES. It does not read as idle. A session
+ *      confirmed stuck by other means (the GH #77683 zombie bug — `claude stop`/`claude rm` fail or no-op) is
+ *      cleared via `we:scripts/operations/clear-stuck-session.mjs`, never by hand-moving its job directory or
+ *      re-deriving a second liveness check.
  *   4. Only when every bound session is probed DEAD (`pidAlive === false`) does this return `null`, meaning
  *      "nothing live here, the caller may dispatch".
  *
