@@ -180,6 +180,7 @@ export function readTick({
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
   now = () => new Date(),
   all = false,
+  verbose,
 } = {}) {
   const key = normNum(num);
   if (!all && !key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
@@ -196,6 +197,13 @@ export function readTick({
     stdin = forwarded.stdin;
     droppedKeys = forwarded.dropped;
     bookkeepingSource = 'file';
+  }
+
+  // An explicit verbose setting bypasses tick-core's read-and-advance of the
+  // persisted diagnostic window. Read-only reports must supply false.
+  if (verbose != null) {
+    const payload = JSON.parse(stdin);
+    stdin = JSON.stringify({ ...payload, config: { ...payload.config, verbose } });
   }
 
   let tick;
@@ -692,7 +700,7 @@ export function resolveDeliveryBase(target, num, registry) {
 
 /** `readTick` bound to one root — the shape the declaration wants. */
 export function createTickReader(bindings = {}) {
-  return ({ num, bookkeepingFile, all = false }) => readTick({ ...bindings, num, bookkeepingFile, all });
+  return ({ num, bookkeepingFile, all = false, verbose = bindings.verbose }) => readTick({ ...bindings, num, bookkeepingFile, all, verbose });
 }
 
 /**

@@ -24,15 +24,24 @@ export function dispatchEligibilityOperation({ readTick } = {}) {
     read: compute({
       reads: ['input.item', 'input.bookkeepingFile', 'input.expectedWithinMinutes'],
       fn: ({ input }) => {
-        const raw = readTick({ num: input.item, all: !input.item, bookkeepingFile: input.bookkeepingFile });
+        const raw = readTick({ num: input.item, all: !input.item, bookkeepingFile: input.bookkeepingFile, verbose: false });
         const rows = input.item ? [raw] : raw;
         if (!Array.isArray(rows)) throw new TypeError('dispatch-eligibility: whole-queue reader must return an array');
         return rows.map((row) => {
-          const read = shapeDispatchRead(row, { num: row.resolvedNum, expectedWithinMinutes: input.expectedWithinMinutes });
+          let read;
+          try {
+            read = shapeDispatchRead(row, { num: row.resolvedNum, expectedWithinMinutes: input.expectedWithinMinutes });
+          } catch (error) {
+            if (input.item) throw error;
+            // A malformed item must not hide the rest of the queue. Do not invent a
+            // gate trace for a shaping call that did not return its evidence.
+            read = { num: row.resolvedNum, dispatching: false, gates: [], error: String(error?.message ?? error) };
+          }
           // Keep the admission evidence, not every filled agent brief and the whole tick's
           // hypothetical bookkeeping repeated once per queue item.
           return {
             num: read.num,
+            ...(read.error !== undefined ? { error: read.error } : {}),
             dispatching: read.dispatching,
             holdReason: read.holdReason,
             gates: read.gates,
@@ -59,6 +68,7 @@ export function dispatchEligibilityOperation({ readTick } = {}) {
       fn: ({ findings }) => ({
         items: findings.read.map((row) => ({
           num: row.num,
+          ...(row.error !== undefined ? { error: row.error } : {}),
           eligible: row.dispatching,
           firstBlockingGate: firstBlockingGate(row),
           reason: row.holdReason,

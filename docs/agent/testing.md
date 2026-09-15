@@ -226,3 +226,9 @@ admission rules: a missing `deliveryAgent` is not a refusal in this path, and an
 Attach the JSON, observation time, item id, and expected progress to a starvation bug filed
 through the `file-item` operation. Preserve `guardsFrom`, dropped bookkeeping and unreadable
 record counts: an incomplete observation must not read as a complete guard check.
+
+Eligibility reads explicitly send `config.verbose: false` to the tick CLI: omitting it advances
+and persists the runner's bounded diagnostic verbose window, even if liveness recording is disabled.
+The prepare trace records `dispatch-paused` before its other gates so an unscoped item's build
+`scope` hold does not mask the pause. Whole-queue shaping errors appear on the affected entry as
+`error` with `eligible: false`; single-item invariant failures retain the CLI error contract.

@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync, statSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { dispatchPlan, selectClearedRows, clearedNotReady } from '../../readiness/dispatch-plan.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
@@ -112,6 +116,87 @@ describe('dispatch-eligibility agrees with the live admission path', () => {
     } else {
       expect(row.firstBlockingGate).toBeNull();
       expect(row.launchKind).toBe('prepare');
+    }
+  });
+
+  it('reports dispatch-paused for an unscoped whole-queue item with one free lane', () => {
+    const items = [{ ...queue[0], scope: [] }];
+    for (const dispatchPaused of [false, true]) {
+      const { readTick } = fixture(
+        { queue: items, freeLanes: [901], dispatchPaused },
+        { state: { queue: items, unshaped: items }, dispatchPaused },
+      );
+      const report = execute(dispatchEligibilityOperation({ readTick }), {}).verdict.items;
+      expect(report).toHaveLength(1);
+      expect(report[0]).toMatchObject({
+        eligible: !dispatchPaused,
+        firstBlockingGate: dispatchPaused ? 'dispatch-paused' : null,
+        ...(dispatchPaused ? {} : { launchKind: 'prepare' }),
+      });
+    }
+  });
+
+  it.each([
+    ['assigned-lane', (row) => { row.launch.lane = null; }, 'assigned it no lane'],
+    ['item-spec', (row) => { row.item.specPath = ''; }, 'no backlog file resolved'],
+    ['scope', (row) => { row.item.scope = []; }, 'has no `scope:`'],
+  ])('contains a %s invariant error per row, preserving single-item failure', async (_gate, corrupt, message) => {
+    const { readTick } = fixture();
+    const rows = readTick({ all: true });
+    corrupt(rows[0]);
+    expect(() => shapeDispatchRead(rows[0], { num: rows[0].resolvedNum })).toThrow(message);
+    const result = await cli(() => rows, ['--json']);
+    expect(result.code).toBe(0);
+    const report = JSON.parse(result.lines[0]).verdict.items;
+    expect(report.map((row) => row.num)).toEqual(queue.map((row) => row.num));
+    expect(report[0]).toMatchObject({ eligible: false, error: expect.stringContaining(message) });
+    expect(report.slice(1).map((row) => row.eligible)).toEqual([false, false, true]);
+    expect((await cli(() => rows[0], ['--item=9001', '--json'])).code).toBe(1);
+  });
+
+  it.each(['', '9001'])('disables verbose-window advancement in tick CLI input (item=%s)', (item) => {
+    const { readTick, runNode } = fixture();
+    execute(dispatchEligibilityOperation({ readTick }), { item });
+    expect(JSON.parse(runNode.mock.calls[0][1].input).config.verbose).toBe(false);
+  });
+
+  it('leaves a bounded verbose file unchanged through the real tick CLI', () => {
+    const root = mkdtempSync(join(tmpdir(), 'eligibility-verbose-'));
+    try {
+      const marker = join(root, 'verbose.json');
+      const preload = join(root, 'fake-tick-children.mjs');
+      // Fake only external command reads. Execute the real tick CLI and verbose
+      // store IO, isolated from live queue, agents, and diagnostic state.
+      writeFileSync(preload, `
+        import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        cp.execFileSync = (_cmd, args) => {
+          if (String(args[0]).endsWith('conveyor-state.mjs')) return '{"queue":[]}';
+          if (String(args[0]).endsWith('dispatch-plan.mjs')) return '{"launch":[],"held":[]}';
+          return '[]';
+        };
+        syncBuiltinESMExports();
+      `);
+      const content = JSON.stringify({ verbose: true, ticksRemaining: 2 });
+      writeFileSync(marker, content);
+      const before = statSync(marker);
+      const readTick = createTickReader({
+        runNode: (argv, opts) => execFileSync(process.execPath, ['--import', preload, ...argv, '--no-pause-check'], {
+          ...opts, encoding: 'utf8', env: { ...process.env, WE_DRIVER_VERBOSE_FILE: marker },
+        }),
+        loadItems: () => [], recordLiveness: (rows) => rows,
+      });
+      const report = execute(dispatchEligibilityOperation({ readTick }), {});
+      expect(report.verdict.items).toEqual([]);
+      expect(readFileSync(marker, 'utf8')).toBe(content);
+      expect(statSync(marker).mtimeMs).toBe(before.mtimeMs);
+      expect(statSync(marker).ino).toBe(before.ino);
+      // Positive control: the same CLI without the read-only override really
+      // advances the marker, proving the fixture reaches the persistence path.
+      readTick({ all: true });
+      expect(JSON.parse(readFileSync(marker, 'utf8')).ticksRemaining).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

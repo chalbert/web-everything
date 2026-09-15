@@ -527,7 +527,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * @param {{ unshaped?:object[], decisions?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, trace = false } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, trace = false, dispatchPaused = false } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -545,6 +545,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
       if (trace) gates.push({ name, pass: !condition, observed });
       return condition;
     };
+    if (blocked('dispatch-paused', dispatchPaused, dispatchPaused)) return;
     if (blocked('prepare-guard', guardNums.has(key), { num: key, guards: [...guardNums] })) return; // live prepare-guard entry → already in flight
     const existingPr = openPrForNum(prs, num);
     if (blocked('existing-PR', !!existingPr, existingPr ?? null)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
@@ -1136,9 +1137,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    to `dispatch-paused` holds when paused): these spawns are computed straight off `state.unshaped` /
   //    `state.decisions` / `state.prs`, never off `plan.launch`, so this tick's OWN `dispatchPaused` input —
   //    not a re-read of `plan.held` — is what gates them. Already-live guards are untouched either way.
-  const prep = dispatchPaused
-    ? { scopeSpawns: [], decisionSpawns: [], newGuards: [], consumedLanes: [], notes: [] }
-    : planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick, trace: true });
+  const prep = planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick, trace: true, dispatchPaused });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
   const livePrepareGuards = [...prepare.live, ...prep.newGuards];
