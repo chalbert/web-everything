@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import {
   AGY_CLI, DEFAULT_TIMEOUT_MS, buildAgyDirectTaskArgv, buildAgyPrompt, buildAgyStdinLine,
   buildScratchCloneArgv, planDepsInstall, parseJsonlLine, parseJsonlEvents, summarizeAgyEvents,
+  defaultExecFn,
   setupScratchClone, captureDiff, runGate, runAgyDirectExec, geminiDirectTask, parseFlags, main, formatReport,
 } from '../gemini-direct-task.mjs';
 
@@ -22,6 +23,17 @@ afterEach(() => {
   vi.useRealTimers();
   process.exitCode = 0;
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('defaultExecFn — real child-process output buffering', () => {
+  it('returns the full stdout when output exceeds Node’s default 1 MiB buffer', () => {
+    const outputSize = 2 * 1024 * 1024;
+    const output = defaultExecFn(process.execPath, [
+      '-e', `process.stdout.write('x'.repeat(${outputSize}))`,
+    ]);
+    expect(output.length).toBeGreaterThan(1024 * 1024);
+    expect(output).toBe('x'.repeat(outputSize));
+  });
 });
 
 describe('buildScratchCloneArgv — pure local-clone argv', () => {
@@ -389,6 +401,25 @@ function fakeExec(calls = []) {
 }
 
 describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', () => {
+  it('preserves UTF-8 split inside an emoji in both the JSONL log and parsed summary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-gemini-utf8-test-'));
+    const logFile = join(dir, 'events.jsonl');
+    const message = 'Updated café 🚀';
+    const stdout = JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: message } }) + '\n';
+    const bytes = Buffer.from(stdout);
+    const split = bytes.indexOf(Buffer.from('🚀')) + 2;
+    const { fn } = fakeSpawn(stdout, { chunks: [bytes.subarray(0, split), bytes.subarray(split)] });
+    try {
+      const result = await runAgyDirectExec({ dir, task: 't', logFile, stream: false, spawnFn: fn });
+      expect(result.stdout).toBe(stdout);
+      expect(readFileSync(logFile, 'utf8')).toBe(stdout);
+      expect(summarizeAgyEvents(parseJsonlEvents(result.stdout)).finalResponse).toBe(message);
+      expect(result.stdout).not.toContain('�');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each([false, true])('uses the real git directory for a linked worktree default log and preserves explicit logs (explicit: %s)', async (explicitLog) => {
     const dir = mkdtempSync(join(tmpdir(), 'we-gemini-direct-worktree-test-'));
     const worktree = join(dir, 'linked');
@@ -422,7 +453,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     const result = await runAgyDirectExec({ dir, task: '/settings\nDo the thing', logFile, stream: false, spawnFn: fn, ...opts });
     expect(seen.cli).toBe(AGY_CLI);
     expect(seen.argv).toEqual(buildAgyDirectTaskArgv({ ...opts, printTimeoutMs: 5010 }));
-    expect(seen.opts).toEqual({ cwd: dir, stdio: ['pipe', 'pipe', 'pipe'] });
+    expect(seen.opts).toEqual({ cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     expect(seen.stdin).toBe(buildAgyStdinLine(buildAgyPrompt('/settings\nDo the thing', dir)));
     expect(JSON.parse(seen.stdin).message.content).toContain('do not run `git commit`');
     expect(seen.argv.join(' ')).not.toContain('Do the thing');
@@ -440,13 +471,20 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     expect(seen.cli).toBe('/bin/custom-agy');
     expect(r).toMatchObject({ code: 1, stderr: 'remedy' });
   });
-  it('SIGKILLs on the parent wall and resolves partial output with no terminal', async () => {
+  it.each([false, true])('SIGKILLs the process group and child on timeout (group kill throws: %s)', async (groupKillThrows) => {
+    const groupKill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      if (groupKillThrows) throw new Error('group unavailable');
+      return true;
+    });
     vi.useFakeTimers();
     const dir = tempDir();
     const { fn, seen } = fakeSpawn(jsonl(REAL_EVENTS.slice(0, 2)), { hang: true });
     const pending = runAgyDirectExec({ dir, task: 't', logFile: join(dir, 'log'), stream: false, timeoutMs: 5, spawnFn: fn });
+    seen.child.pid = 12345;
     await vi.advanceTimersByTimeAsync(6);
     const r = await pending;
+    expect(seen.opts.detached).toBe(true);
+    expect(groupKill).toHaveBeenCalledWith(-12345, 'SIGKILL');
     expect(seen.child.kill).toHaveBeenCalledWith('SIGKILL');
     expect(r).toMatchObject({ code: null, timedOut: true, stdout: jsonl(REAL_EVENTS.slice(0, 2)) });
     expect(summarizeAgyEvents(parseJsonlEvents(r.stdout)).terminal).toBeNull();
@@ -491,6 +529,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     expect(r.scratch).toEqual({ created: true, source: '/source', depsInstall: null });
     expect(seen.opts.cwd).toBe(dir);
     expect(calls.filter((c) => c.args.includes('diff')).every((c) => c.args[1] === dir)).toBe(true);
+    expect(calls.filter((c) => c.bin === 'git').every((c) => !c.args.includes('commit') && !c.args.includes('push') && (!c.args.includes('add') || c.args.includes('--intent-to-add')))).toBe(true);
   });
   it.each([{ task: 't' }, { task: '' }, { task: 't', dir: '' }, { task: 't', dir: '/d', timeoutMs: NaN }, { task: 't', dir: '/d', gate: 'oops' }])('rejects missing/invalid required fields before mutations: %j', async (opts) => {
     const execFn = vi.fn(); const spawnFn = vi.fn();

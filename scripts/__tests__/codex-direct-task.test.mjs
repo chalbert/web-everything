@@ -6,6 +6,7 @@
  * file, recorded in the module's own header and in the delivering PR, not re-proved here).
  */
 
+import { EventEmitter } from 'node:events';
 import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -30,6 +31,7 @@ import {
   parseJsonlLine,
   parseJsonlEvents,
   summarizeEvents,
+  defaultExecFn,
   setupScratchClone,
   captureDiff,
   runGate,
@@ -41,6 +43,17 @@ function flagValue(argv, flag) {
   const i = argv.indexOf(flag);
   return i === -1 ? undefined : argv[i + 1];
 }
+
+describe('defaultExecFn — real child-process output buffering', () => {
+  it('returns the full stdout when output exceeds Node’s default 1 MiB buffer', () => {
+    const outputSize = 2 * 1024 * 1024;
+    const output = defaultExecFn(process.execPath, [
+      '-e', `process.stdout.write('x'.repeat(${outputSize}))`,
+    ]);
+    expect(output.length).toBeGreaterThan(1024 * 1024);
+    expect(output).toBe('x'.repeat(outputSize));
+  });
+});
 
 describe('buildCodexDirectTaskArgv — pure argv for agentic/workspace-write mode', () => {
   it('always carries exec, --json, workspace-write sandbox, and -C, never a positional prompt', () => {
@@ -605,21 +618,42 @@ describe('runGate — none/standards/full, never commits', () => {
 
 describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an injected spawnFn + execFn', () => {
   /** Same fakeSpawn shape `judge-spawn.test.mjs` uses — records argv/stdin, replays canned stdout. */
-  function fakeSpawn(stdout, { code = 0 } = {}) {
+  function fakeSpawn(stdout, { code = 0, chunks } = {}) {
     const seen = { cli: null, argv: null, opts: null, stdin: '' };
     const fn = (cli, argv, opts) => {
       seen.cli = cli; seen.argv = argv; seen.opts = opts;
-      const child = {
-        stdout: { on: (e, cb) => { if (e === 'data') setTimeout(() => cb(Buffer.from(stdout)), 0); } },
-        stderr: { on: () => {} },
-        stdin: { on: () => {}, end: (d) => { seen.stdin = d; } },
-        on: (e, cb) => { if (e === 'close') setTimeout(() => cb(code), 1); },
-        kill: () => {},
-      };
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { on: () => {}, end: (d) => { seen.stdin = d; } };
+      child.kill = () => {};
+      setTimeout(() => {
+        for (const chunk of chunks ?? [stdout]) child.stdout.emit('data', Buffer.from(chunk));
+        child.emit('close', code);
+      }, 0);
       return child;
     };
     return { fn, seen };
   }
+
+  it('preserves UTF-8 split inside an emoji in both the JSONL log and parsed summary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-codex-utf8-test-'));
+    const logFile = join(dir, 'events.jsonl');
+    const message = 'Updated café 🚀';
+    const stdout = JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: message } }) + '\n';
+    const bytes = Buffer.from(stdout);
+    const split = bytes.indexOf(Buffer.from('🚀')) + 2;
+    const { fn } = fakeSpawn(stdout, { chunks: [bytes.subarray(0, split), bytes.subarray(split)] });
+    try {
+      const result = await runCodexDirectExec({ dir, task: 't', logFile, stream: false, spawnFn: fn });
+      expect(result.stdout).toBe(stdout);
+      expect(readFileSync(logFile, 'utf8')).toBe(stdout);
+      expect(summarizeEvents(parseJsonlEvents(result.stdout)).agentMessages).toEqual([message]);
+      expect(result.stdout).not.toContain('�');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it.each([false, true])('uses the real git directory for a linked worktree default log and preserves explicit logs (explicit: %s)', async (explicitLog) => {
     const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-worktree-test-'));
@@ -663,13 +697,20 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     }
   });
 
-  it('SIGKILLs the child on the parent-imposed timeout wall and still resolves with partial output', async () => {
+  it.each([false, true])('SIGKILLs the process group and child on timeout (group kill throws: %s)', async (groupKillThrows) => {
+    const groupKill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      if (groupKillThrows) throw new Error('group unavailable');
+      return true;
+    });
     const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
     const logFile = join(dir, 'events.jsonl');
     let killed = false;
-    const spawnFn = () => {
+    let spawnOpts;
+    const spawnFn = (cli, argv, opts) => {
+      spawnOpts = opts;
       let closeCb = null;
       return {
+        pid: 12345,
         stdout: { on: (e, cb) => { if (e === 'data') setTimeout(() => cb(Buffer.from('{"type":"turn.started"}\n')), 0); } },
         stderr: { on: () => {} },
         stdin: { on: () => {}, end: () => {} },
@@ -682,9 +723,12 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     };
     try {
       const r = await runCodexDirectExec({ dir, task: 't', logFile, stream: false, timeoutMs: 5, spawnFn });
+      expect(spawnOpts.detached).toBe(true);
+      expect(groupKill).toHaveBeenCalledWith(-12345, 'SIGKILL');
       expect(killed).toBe(true);
       expect(r.timedOut).toBe(true);
     } finally {
+      groupKill.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });

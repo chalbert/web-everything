@@ -204,9 +204,9 @@ export function summarizeAgyEvents(events) {
   };
 }
 
-/** `execFileSync`-shaped default, trimmed stdout, for the small git/npm calls below. */
-const defaultExecFn = (bin, args, opts = {}) =>
-  execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+/** `execFileSync`-shaped default with room for large diffs and git/npm/gate output. */
+export const defaultExecFn = (bin, args, opts = {}) =>
+  execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024, ...opts });
 
 /**
  * Make a fresh scratch clone of `repoRoot` and install its deps — the default target when the
@@ -347,7 +347,7 @@ export async function runAgyDirectExec({
     };
     const recordError = (e) => { err += `${e.message}\n`; };
     try {
-      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     } catch (e) {
       recordError(e);
       settle(null);
@@ -355,11 +355,15 @@ export async function runAgyDirectExec({
     }
     timer = setTimeout(() => {
       timedOut = true;
+      try {
+        if (Number.isInteger(child.pid) && child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+      } catch { /* already gone, or process-group kill is unavailable */ }
       try { child.kill('SIGKILL'); } catch (e) { recordError(e); settle(null); }
     }, timeoutMs);
     timer.unref?.();
-    child.stdout?.on('data', (d) => {
-      const text = d.toString();
+    const stdoutDecoder = new TextDecoder();
+    const recordStdout = (text) => {
+      if (!text) return;
       out += text;
       try {
         appendFileSync(logFile, text);
@@ -368,10 +372,14 @@ export async function runAgyDirectExec({
         recordError(e);
         try { child.kill('SIGKILL'); } catch { settle(null); }
       }
-    });
+    };
+    child.stdout?.on('data', (d) => recordStdout(stdoutDecoder.decode(d, { stream: true })));
     child.stderr?.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => { recordError(e); settle(null); });
-    child.on('close', (code) => settle(code));
+    child.on('close', (code) => {
+      recordStdout(stdoutDecoder.decode());
+      settle(code);
+    });
     child.stdin?.on('error', recordError); // EPIPE can precede close on an early CLI rejection.
     try { child.stdin?.end(stdinLine); } catch (e) {
       recordError(e);

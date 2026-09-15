@@ -520,9 +520,9 @@ export function collectAndClearRolloutQuota({
 
 // ── impure: scratch clone, diff capture, gate ────────────────────────────────────────────────────
 
-/** `execFileSync`-shaped default, trimmed stdout, for the small git/npm calls below. */
-const defaultExecFn = (bin, args, opts = {}) =>
-  execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+/** `execFileSync`-shaped default with room for large diffs and git/npm/gate output. */
+export const defaultExecFn = (bin, args, opts = {}) =>
+  execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024, ...opts });
 
 /**
  * Make a fresh, isolated scratch clone of `repoRoot` and install its deps — the default target when the
@@ -675,7 +675,7 @@ export async function runCodexDirectExec({
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
-      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     } catch (e) {
       reject(new Error(`codex-direct-task: could not start \`${cli}\`: ${e.message}`));
       return;
@@ -694,22 +694,30 @@ export async function runCodexDirectExec({
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         killed = true;
+        try {
+          if (Number.isInteger(child.pid) && child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+        } catch { /* already gone, or process-group kill is unavailable */ }
         try { child.kill('SIGKILL'); } catch { /* already gone */ }
       }, timeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
     }
-    child.stdout?.on('data', (d) => {
-      const text = d.toString();
+    const stdoutDecoder = new TextDecoder();
+    const recordStdout = (text) => {
+      if (!text) return;
       out += text;
       appendFileSync(logFile, text);
       if (stream) process.stdout.write(text);
-    });
+    };
+    child.stdout?.on('data', (d) => recordStdout(stdoutDecoder.decode(d, { stream: true })));
     child.stderr?.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       if (timer) clearTimeout(timer);
       reject(new Error(`codex-direct-task: \`${cli}\` failed to run: ${e.message}`));
     });
-    child.on('close', (code) => settle({ stdout: out, stderr: err, code, timedOut: killed, argv, outputLastMessageFile }));
+    child.on('close', (code) => {
+      recordStdout(stdoutDecoder.decode());
+      settle({ stdout: out, stderr: err, code, timedOut: killed, argv, outputLastMessageFile });
+    });
     // NO POSITIONAL PROMPT — the task rides stdin, and `.end()` closes it (the stdin-trap avoidance).
     child.stdin?.on('error', () => { /* the child may exit before we finish writing; `close` reports it */ });
     child.stdin?.end(prompt);
