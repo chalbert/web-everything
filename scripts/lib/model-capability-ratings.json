@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "entries": [],
+  "exampleEntry": {
+    "_comment": "Shape reference only — never read as data. Populate real rows only under `entries`, each one passing validateCapabilityEntry.",
+    "provider": "example-provider",
+    "model": "example-model",
+    "verified": false,
+    "source": "unverified external report, needs confirmation",
+    "asOf": "2026-01-01",
+    "lastUpdated": "2026-01-01",
+    "categories": {
+      "contextIngestion": { "value": null, "unit": "tokens", "note": "" },
+      "autonomousAgenticWork": { "value": null, "unit": "0-100 index", "note": "" },
+      "algorithmicSpeedIdeSync": { "value": null, "unit": "0-100 index", "note": "" },
+      "cliToolUse": { "value": null, "unit": "0-100 index", "note": "" },
+      "overallCodingIndex": { "value": null, "unit": "0-100 index", "note": "" }
+    }
+  }
+}
