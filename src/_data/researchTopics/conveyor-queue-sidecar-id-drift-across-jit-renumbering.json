@@ -1,0 +1,13 @@
+{
+  "id": "conveyor-queue-sidecar-id-drift-across-jit-renumbering",
+  "title": "Conveyor queue sidecar ids that go stale at JIT-renumbering — rename at write time, or resolve the alias at read time?",
+  "status": "open",
+  "summary": "Grounds decision #3605. The conveyor's gitignored cleared-set sidecar (.conveyor/queue.json) stores item ids as typed, and the file-item operation's queue sink routinely stores a card's birth hash, because a freshly filed card has no number yet. When the drain JIT-numbers that card at land, it rewrites tracked backlog/docs/agent-memory files but never the sidecar. Every sidecar matcher then compares by normNum alone (dispatch-plan's selectClearedRows/clearedNotReady, conveyor-state's shapeQueue/deriveClearedNotReady, queue.mjs's readinessOf), so the entry matches no ready row and the item is held as cleared-but-not-ready indefinitely. The survey finds a stale hash entry is the normal lifecycle for any card queued at filing, not an edge case. It also finds three in-repo precedents for resolving an old hash at read time: queue.mjs kindOf's bornAs fallback, backlog.mjs resolveParent's landedNumberFor mapping, and lease-reaper's two-form lane-ref grammar. There is one for renaming at write time, the drain's applyLedger, but it covers tracked files only. And the capture's claim that the renumbering step has no way to find the live sidecar is overstated: resolveRunnerCheckout (#3478) already locates the live runner's checkout and file-item-io uses it. External prior art maps the same axis: SQL ON UPDATE CASCADE (rename at write), HTTP 301/308 and GitHub repo-rename redirects (keep the old name as an alias and resolve on read, with the client re-linking), and Dynamo/Cassandra read repair (resolve on read, then write back). Read repair is safe in those systems only because writes carry versions, and queue-store's writer is explicitly last-write-wins. Net: resolve the alias at the consumers, through one canonicalization step at the sidecar read boundary. Persist the canonical id only when an operator's add or remove already rewrites the file, never from the dispatch tick.",
+  "dateOpened": "2026-09-15",
+  "lastReviewed": "2026-09-15",
+  "reviewHorizon": "P6M",
+  "tags": ["conveyor", "backlog-identity", "jit-numbering", "sidecar-state", "dispatch", "decision-prep"],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
