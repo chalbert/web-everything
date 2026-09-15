@@ -20,7 +20,15 @@
  *   1. the job directory actually exists on disk;
  *   2. the session IS listed by `claude agents --json --all` (this operation clears a listed-but-dead
  *      session, not an already-vanished one — see the io shell for what "not listed" means instead);
- *   3. its last self-reported state is `"blocked"` — the shape every known stuck session carries;
+ *   3. its last self-reported state is one of {@link STUCK_JOB_STATES} — originally `"blocked"` alone (the
+ *      shape every known stuck session carried on 2026-09-13), WIDENED to also include `"working"` (#3383,
+ *      2026-09-14 — a live audit of 26 stale `claude agents` rows found the identical stuck shape — a listed,
+ *      dead-pid session `session-reaper.mjs`'s own `pid-dead` axis had just confirmed via `assessLiveness`
+ *      below — self-reporting `"working"` instead, never advancing on its own once the harness lost track of
+ *      the real process). The set names EVERY state this operation has EVER measured on a genuinely dead
+ *      session; it is not "any non-terminal state", which would blur past `session-reaper.mjs`'s own distinct
+ *      job of walking the FULL listing — this operation still only ever runs against ONE session a caller
+ *      already named;
  *   4. {@link ../conveyor/reconcile-core.mjs#assessLiveness}, called with THIS session's own listing row,
  *      reports **nothing live** — the SAME liveness rule `reconcile-core.mjs`'s reconcile pass already uses,
  *      reused rather than re-derived so the two can never disagree about what "alive" means. The io shell
@@ -58,8 +66,11 @@ export const CLEAR_STUCK_SESSION_OP = 'clear-stuck-session';
 /** The effect type the `move` step declares — the sink is registered under this string in the io shell. */
 export const QUARANTINE_MOVE_EFFECT = 'claude-jobs.quarantine-move';
 
-/** The last-self-reported job state every known stuck session carries. Anything else is not this shape. */
-export const STUCK_JOB_STATE = 'blocked';
+/** The last-self-reported job states a known stuck session can carry. Anything else is not this shape.
+ *  `'blocked'` was the original (and, until #3383, only) measured shape; `'working'` was added 2026-09-14 once
+ *  the SAME dead-pid-but-still-listed shape was confirmed live on `state: "working"` rows too (see the file
+ *  header). A future state joins this set only on the same standard: measured live, not guessed ahead of it. */
+export const STUCK_JOB_STATES = new Set(['blocked', 'working']);
 
 /**
  * SHAPE one `readStuckFacts()` result into the `read` finding. PURE — separated from the injected reader so
@@ -121,8 +132,8 @@ export function assessStuck(read) {
   }
 
   const state = r.stateJson?.state ?? null;
-  if (state !== STUCK_JOB_STATE) {
-    return { ...base, confirmedStuck: false, liveness: null, reason: `job state is ${JSON.stringify(state)}, not ${JSON.stringify(STUCK_JOB_STATE)} — only a session in that state is cleared here` };
+  if (!STUCK_JOB_STATES.has(state)) {
+    return { ...base, confirmedStuck: false, liveness: null, reason: `job state is ${JSON.stringify(state)}, not one of ${JSON.stringify([...STUCK_JOB_STATES])} — only a session in one of those states is cleared here` };
   }
   if (r.runStoreBound) {
     const runs = (r.boundRuns || []).map((b) => `${b.runId}:${b.key}`).join(', ');
@@ -131,7 +142,7 @@ export function assessStuck(read) {
 
   return {
     ...base, confirmedStuck: true, liveness: null,
-    reason: `confirmed stuck: state is "${STUCK_JOB_STATE}", assessLiveness found nothing live, and no run record references it`,
+    reason: `confirmed stuck: state is "${state}", assessLiveness found nothing live, and no run record references it`,
   };
 }
 
