@@ -3566,3 +3566,94 @@ Closes the exact race that let PR #2011 clear early on luck rather than on an ac
   only — explicitly NOT used for graduation decisions).
 - `/wip` skill update to show supervisor-model/delegation-target per running task.
 - Phase 1 of the operations-coverage plan is still landing, not done.
+
+## Session update (2026-09-15) — Wind-down iteration: conflict-resolution delegation trial, dispatch-consistency fix, conveyor health check
+
+### Delegation/graduation trial
+
+Ran a first-ever supervised trial of Gemini Flash 3.8 (low) doing merge-conflict resolution on PRs
+#2291 and #2292, with a genuinely independent Claude process verifying each resolution (3-way diff +
+full test suite) before push — both accepted and pushed. First entries logged in the
+`{antigravity, gemini-3.8-flash-low, conflict-resolution}` graduation bucket via PR #2294.
+**Verified at note time**: #2294 is still OPEN, carrying `review:changes` — independent review
+bounced it for a real bug (two byte-for-byte duplicate JSON records inflating the clean-streak
+count). Not yet fixed/re-pushed.
+
+### PR #2288 (pr-reconcile op)
+
+Independently reviewed and REJECTED — 3 confirmed real logic bugs. **Verified at note time**: still
+OPEN on `review:changes`, and has since also picked up `merge-status:conflicting` (drifted into a
+real merge conflict on top of the unresolved review bugs). Needs author/Codex follow-up; not yet
+actioned.
+
+### PR #2295
+
+Small Codex-authored fix adding foreground-only banners to `we:codex-direct-task.mjs` /
+`we:gemini-direct-task.mjs` plus an additive we:CLAUDE.md pinned-rule paragraph, addressing a real
+recurring bug where subagents backgrounded these (already-synchronous) dispatch scripts and waited
+on Monitor instead of blocking in the foreground. **Verified at note time**: MERGED
+(2026-09-15T18:21:52Z).
+
+### Real operational gap found and fixed this session
+
+`we:parked-pr-conflict-watch.mjs` bounces a PR to `review:changes` on a real merge conflict, but had no
+mechanism to transition it to a FRESH review once the conflict was genuinely resolved — it either
+sits on the stale label forever (drain won't touch it) or risks someone resurrecting a stale
+pre-fix verdict (caught mid-session before it happened). Manually re-armed #2291/#2292 to
+`review:pending` via `we:rearm-review.mjs` as an immediate fix. A mechanical fix (Codex-built, dispatched
+as agent `a4ce7efd8698d3bfe`) followed: `defaultPostConflictRearm` now shells the same sanctioned
+`we:rearm-review.mjs` hand-back whenever `planConflictLabelChange` sees GitHub's own `mergeable ===
+'MERGEABLE'` (never just the absence of this pass's label, and never on an `UNKNOWN` mergeable
+result) on a PR still carrying `review:changes`. **Verified at note time**: shipped as PR #2296,
+OPEN, all completed CI checks green (a couple of shards still in flight), the dispatching agent still
+correctly blocking in the foreground on its own land process rather than assuming a notification —
+not yet merged.
+
+- #2291: **MERGED** — re-armed, received a fresh review, landed.
+- #2292: OPEN, carries `ready-to-merge` + `review:accepted` (review-round 2) — accepted after re-arm,
+  not yet drained/merged.
+
+### Conveyor supervisor health
+
+Diagnosed a "stale"/"refused"/`healEnabled:false` watchdog state — confirmed NOT a real stall. The
+driver's own readiness check showed zero items genuinely dispatchable (of 94 watchdog-flagged
+"eligible" items: 50 stale already-resolved noise, 31 not-yet-ready, 6 need scope/decision, 8
+lane-conflict-held). Deliberately left alone rather than forcing a heal (checkout has uncommitted
+changes + unpushed commits, so writing a `last-known-good` marker or enabling `--watchdog-heal` was
+judged a real-consequence decision to defer, not something to force from a diagnostic pass).
+
+### Graduation data health check
+
+Confirmed still flowing — 69 scorecard entries logged in a recent 4-hour window (mostly conveyor
+advisory-review observations, codex/gpt-6-astra + antigravity/gemini-3.1-pro, plus 3 real build
+trials on item #3360).
+
+### Recurring theme, still unresolved as a systemic fix
+
+The "subagent ends its turn assuming a backgrounded process/Monitor will notify it" violation
+recurred multiple more times this session, including — notably — around the very agent building the
+fix meant to prevent exactly that pattern for the two delegation scripts. Each instance was caught
+and the agent resumed with an explicit foreground-blocking instruction. This remains a live,
+recurring maintenance cost worth a more structural fix (e.g. a real PreToolUse hook denying
+`run_in_background` on known-synchronous dispatch scripts, not just a memory/prompt rule) — not yet
+built.
+
+### Next-session priorities
+
+- Confirm final state of PR #2294 (duplicate-entry fix needed — still open on `review:changes` as of
+  this note) and PR #2295 (already merged as of this note — just double-check nothing regressed).
+- Confirm PR #2296 (conflict-resolved→fresh-review mechanical fix, agent `a4ce7efd8698d3bfe`) actually
+  lands — CI was green with two shards still running and the PR unmerged as of this note.
+- Confirm #2291/#2292 actually received and passed a fresh review after being re-armed to
+  `review:pending` — #2291 confirmed merged; #2292 confirmed `review:accepted`/`ready-to-merge` but
+  still awaiting drain as of this note.
+- PR #2288 needs real author fixes for its 3 logic bugs, and now also a real merge-conflict
+  resolution on top of that — not yet started.
+- Consider a real PreToolUse hook to hard-block `run_in_background`/Monitor usage on
+  `we:codex-direct-task.mjs`/`we:gemini-direct-task.mjs` invocations, given the prompt-level fix alone
+  hasn't stopped the recurrence.
+- `harness-coverage` operation still deferred pending a design decision.
+- `agy`/`manage_task` task-160 kill-race root cause still not fully investigated (next steps were
+  documented earlier in the session, not yet executed).
+- Antigravity `grep_search` crash: still only a soft prompt-level workaround; a real `we:hooks.json`
+  PreToolUse hard-block was confirmed feasible but not yet wired in.
