@@ -5,6 +5,12 @@ parent: "2527"
 status: open
 dateOpened: "2026-08-02"
 tags: []
+scope:
+  - we:scripts/lib/
+  - we:scripts/check-standards.mjs
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/check-standards.contract.json
+  - we:scripts/__tests__/
 ---
 
 # Raw NUL byte in we:scripts/lib/jury-ledger.mjs makes a trust-chain file's diff unreviewable
