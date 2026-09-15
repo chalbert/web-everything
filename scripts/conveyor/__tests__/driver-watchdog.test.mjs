@@ -861,6 +861,111 @@ describe('runWatchdogOnce — observe, judge, heal, and ALWAYS surface', () => {
   });
 });
 
+// ── (8a) THE GAP FOUND TONIGHT: a fully-DOWN driver never alerted ─────────────────────────────────────────
+//
+// `.conveyor/watchdog-alert.json` was confirmed to sit untouched through two real "down" episodes: `down`
+// always sets `actionable:false`, and `runWatchdogOnce` gated the desktop notification ENTIRELY on
+// `verdict.actionable` — so the most severe verdict this file can reach (the driver is not even running) was
+// the one that never told anyone. The fix widens ONLY the alert path for `down`, reusing the exact
+// `notifyDesktop`/`decideEscalation` mechanism `stale` already had. It must NOT widen healing: `down` must
+// never reach `decideRollback`/`healDriver` (rolling a checkout back under a dead driver destroys evidence —
+// see `classifyDriver`'s own `down` branch), so `verdict.actionable` stays `false` and is asserted so below.
+
+describe('runWatchdogOnce — a DOWN driver now ALERTS, but is still never healed (tonight\'s gap)', () => {
+  const downFacts = (over = {}) => ({
+    checkout: '/drv', nowMs: NOW, staleAfterMs: DEFAULT_STALE_AFTER_MS,
+    ...stuck({ lease: { held: false, stale: true, detail: 'holder crashed' } }),
+    ...over,
+  });
+
+  it('THE FIX: a DOWN verdict fires the SAME desktop notification `stale` uses, and records the dedup alert', () => {
+    const seen = { logs: [], notices: [], alerts: [] };
+    const result = runWatchdogOnce({
+      checkout: '/drv',
+      readFacts: () => downFacts(),
+      readHeadFn: () => { throw new Error('a DOWN verdict must never read the driver\'s HEAD — see decideRollback\'s not-stale guard'); },
+      readMarker: () => { throw new Error('a DOWN verdict must never read the last-known-good marker'); },
+      heal: () => { throw new Error('a DOWN driver must NEVER be healed by this file — that stays restart-runner\'s job'); },
+      notify: (n) => seen.notices.push(n),
+      appendLog: (p, l) => seen.logs.push([p, l]),
+      loadAlert: () => null,
+      saveAlert: (p, v) => { seen.alerts.push([p, v]); return p; },
+      now: () => NOW,
+    });
+    expect(result.verdict.state).toBe('down');
+    expect(result.verdict.actionable).toBe(false); // THE HEAL-GATING IS UNCHANGED — only the alert widened
+    expect(result.action).toBe('alert-only');
+    expect(result.rollback).toBeNull();
+    expect(result.heal).toBeNull();
+    expect(result.alerted).toBe(true);
+    expect(seen.notices).toHaveLength(1);
+    expect(seen.notices[0].title).toBe('Conveyor driver DOWN');
+    expect(seen.notices[0].body).toContain('/drv');
+    expect(seen.notices[0].body).toContain('holder crashed');
+    expect(seen.alerts[0][0]).toBe(alertPath('/drv'));
+    expect(seen.alerts[0][1]).toMatchObject({ state: 'down', action: 'alert-only' });
+    expect(seen.logs.map((l) => l[1]).join('\n')).toContain('watchdog[down]');
+  });
+
+  it('DEDUPS exactly like `stale` — the SAME down cause does not re-notify inside the re-nag window', () => {
+    const notices = [];
+    const alertStore = { value: null };
+    const run = () => runWatchdogOnce({
+      checkout: '/drv',
+      readFacts: () => downFacts(),
+      readHeadFn: () => { throw new Error('must not read HEAD for `down`'); },
+      heal: () => { throw new Error('must not heal `down`'); },
+      notify: (n) => notices.push(n),
+      appendLog: () => {},
+      loadAlert: () => alertStore.value,
+      saveAlert: (p, v) => { alertStore.value = v; return p; },
+      now: () => NOW,
+    });
+    expect(run().alerted).toBe(true);
+    expect(run().alerted).toBe(false);
+    expect(notices).toHaveLength(1);
+  });
+
+  it('a CHANGED down cause re-notifies immediately — a different lease detail is a different signature', () => {
+    const notices = [];
+    const alertStore = { value: null };
+    const run = (detail) => runWatchdogOnce({
+      checkout: '/drv',
+      readFacts: () => downFacts({ lease: { held: false, stale: true, detail } }),
+      readHeadFn: () => { throw new Error('must not read HEAD for `down`'); },
+      heal: () => { throw new Error('must not heal `down`'); },
+      notify: (n) => notices.push(n),
+      appendLog: () => {},
+      loadAlert: () => alertStore.value,
+      saveAlert: (p, v) => { alertStore.value = v; return p; },
+      now: () => NOW,
+    });
+    expect(run('holder crashed').alerted).toBe(true);
+    expect(run('a completely different failure').alerted).toBe(true);
+    expect(notices).toHaveLength(2);
+  });
+
+  it('REGRESSION GUARD: `stale`\'s own heal path is untouched — still reaches decideRollback/heal exactly as before', () => {
+    const seen = { heals: [], notices: [] };
+    const result = runWatchdogOnce({
+      checkout: '/drv',
+      readFacts: () => ({ checkout: '/drv', nowMs: NOW, staleAfterMs: DEFAULT_STALE_AFTER_MS, ...stuck() }),
+      readHeadFn: () => ({ sha: HEAD_SHA, dirty: false }),
+      readMarker: () => ({ sha: GOOD }),
+      heal: (a) => { seen.heals.push(a); return { rolledBack: true, restarted: true, sha: GOOD, error: null }; },
+      notify: (n) => seen.notices.push(n),
+      appendLog: () => {},
+      loadAlert: () => null,
+      saveAlert: () => '/drv/.conveyor/watchdog-alert.json',
+      now: () => NOW,
+    });
+    expect(result.verdict.state).toBe('stale');
+    expect(result.action).toBe('healed');
+    expect(seen.heals).toHaveLength(1);
+    expect(seen.notices[0].title).toContain('ROLLED BACK');
+  });
+});
+
 describe('parseFlags', () => {
   it('splits --k=v, bare --flags and positionals', () => {
     expect(parseFlags(['heal', '--checkout=/drv', '--stale-after-min=5', '--dry-run']))
