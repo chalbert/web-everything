@@ -13,11 +13,19 @@
  * `gh` call and prints. The assembler REUSES `we:scripts/lib/review-escalation.mjs`
  * (`ESCALATION_REASON_MARKER`, `REVIEW_LABELS`, `hasReviewLabel`) and `we:scripts/lib/review-core.mjs`
  * (`deriveReviewDisposition`) — it never re-hardcodes those markers/labels/logic.
+ *
+ * #2447 — the contract also carries `resolutionBasis`: a backlog-only PR that resolves its item via `graduatedTo`
+ * (the deliverable already landed earlier) is otherwise indistinguishable from a hollow resolve on a console that
+ * shows labels + a diff stat. Derived by `deriveResolutionBasis` (`we:scripts/lib/review-render.mjs`) from the
+ * lane manifest in the body, the resolve frontmatter (when a `diff` text rides the view), or the body's own
+ * `graduatedTo:` note; the text output prints its banner right under the title.
  */
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { ESCALATION_REASON_MARKER, REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
 import { deriveReviewDisposition, careLevelFromReasons } from './lib/review-core.mjs';
+import { deriveResolutionBasis, renderResolutionBasisBanner } from './lib/review-render.mjs';
+import { extractManifestFromBody } from './readiness/lane-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /** The drain's advisory AI-review comment marker (the body the drain posts on an agent-review park). */
@@ -75,12 +83,14 @@ function labelNames(labels) {
  * The PURE review-context assembler (#2470). Takes the parsed `gh pr view … --json` object and returns the
  * STABLE contract the Plateau Loop review console depends on. Never throws on a missing field — an unparked PR
  * yields `escalationReason: []`, `disposition: null`, `reviewClass: "none"`.
- * @param {{view: object}} o - `view` is the parsed `gh pr view` JSON (number,title,url,body,labels,comments,files).
+ * @param {{view: object}} o - `view` is the parsed `gh pr view` JSON (number,title,url,body,labels,comments,files),
+ *   optionally with a unified `diff` text (`gh pr diff`) so the resolve frontmatter can source `resolutionBasis`.
  * @returns {{pr:number, repo:string, title:string, url:string, labels:string[], humanRequired:boolean,
  *   reviewClass:('human'|'pending'|'none'), disposition:(object|null), escalationReason:string[],
  *   careLevel:('none'|'low'|'elevated'|'high'), advisoryComment:(string|null), humanComment:(string|null),
  *   advisoryCommentAt:(string|null), humanCommentAt:(string|null),
- *   diffStat:Array<{path:string, additions:number, deletions:number}>, filesChanged:number}}
+ *   diffStat:Array<{path:string, additions:number, deletions:number}>, filesChanged:number,
+ *   resolutionBasis:({graduatedTo:string, ref:string, isCommit:boolean, source:string}|null)}}
  */
 export function assembleReviewDetail({ view } = {}) {
   const v = view || {};
@@ -147,6 +157,13 @@ export function assembleReviewDetail({ view } = {}) {
     humanCommentAt,
     diffStat,
     filesChanged: diffStat.length,
+    // #2447 — `null` for every PR that is not a backlog-only graduatedTo resolve (the common case).
+    resolutionBasis: deriveResolutionBasis({
+      manifest: extractManifestFromBody(typeof v.body === 'string' ? v.body : ''),
+      diffText: typeof v.diff === 'string' ? v.diff : null,
+      body: typeof v.body === 'string' ? v.body : null,
+      changedFiles: diffStat.map((f) => f.path).filter(Boolean),
+    }),
   };
 }
 
@@ -190,6 +207,8 @@ function runCli() {
   const lines = [
     `${detail.repo}#${detail.pr} — ${detail.title}`,
     `  ${detail.url}`,
+    // #2447 — the resolution basis goes UP FRONT, before labels/files, so a backlog-only diff reads as documented.
+    ...(detail.resolutionBasis ? [`  ${renderResolutionBasisBanner(detail.resolutionBasis)}`] : []),
     `  review: ${detail.reviewClass}${detail.humanRequired ? ' (human required)' : ''}  labels: ${detail.labels.join(', ') || '(none)'}`,
     `  disposition: ${detail.disposition ? `${detail.disposition.mode} (autoLand=${detail.disposition.autoLand})` : '(none)'}`,
     `  escalation reason: ${detail.escalationReason.length ? `\n    - ${detail.escalationReason.join('\n    - ')}` : '(none)'}`,

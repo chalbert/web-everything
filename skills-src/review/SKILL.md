@@ -131,6 +131,17 @@ reason, the disposition, the net changed-file list, any advisory comment), its `
 the operator is on a constrained model budget, so report the dollar figure, never omit it) and its
 `pending.asks` to the operator, then stop.
 
+**Lead with the resolution basis when there is one (#2447).** A backlog-only PR that resolves its item via
+`graduatedTo` — the deliverable already landed in an earlier commit — reads like a hollow resolve if you present
+its file list first. Before the findings, check for the basis: `node scripts/review-detail.mjs <PR>
+--repo=<owner/name> --json` carries it as `resolutionBasis` (and prints its banner under the title), and the drain's
+park comment opens with the same `📦 Resolution basis: graduatedTo: <sha> — no code change — deliverable already
+landed in <sha>` line. Present that line first, then the rest. When you render a comment through
+`review-core-cli.mjs comment`, pass `changedFiles` plus the PR `body` (or `graduatedTo`) in its input and the banner
+heads the comment for you — it fires only for an all-`backlog/` diff, so a code resolve renders unchanged. What
+you are still judging on such a PR is whether the cited commit really delivers the item's acceptance; the banner
+says where to look, it is not a verdict.
+
 **A run seats TWO jurors, and `--lens=` steers only the first (#3319).** There are two declared `judge` steps:
 `judge`, whose lens comes from `--lens=` and defaults to `correctness` (`MANDATORY_LENSES[0]`), and
 `judgeSecurity`, pinned to `MANDATORY_LENSES[1]` and **deliberately not reachable from the command line**. Both

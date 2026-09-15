@@ -7,6 +7,11 @@ import { describe, it, expect } from 'vitest';
 import { assembleReviewDetail, parseEscalationReason } from '../review-detail.mjs';
 import { buildEscalationReasonBlock } from '../lib/review-escalation.mjs';
 import { careLevelFromReasons } from '../lib/review-core.mjs';
+import { embedManifestInBody, parseManifest } from '../readiness/lane-manifest.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 
 // #3101 — a REAL PR body, captured via `gh pr view 1177 --json body` (2026-08-14), not hit over the network in
 // this test. PR #1177 was parked with two escalation reasons AND the drain's trailing policy-stamp comment
@@ -229,5 +234,39 @@ describe('assembleReviewDetail — disposition resolves on a stamped size-only p
     const body = `An unrelated PR description.${buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)'])}`;
     const d = assembleReviewDetail({ view: { ...parkedHumanView, body } });
     expect(d.disposition).toEqual({ mode: 'converge', autoLand: true });
+  });
+});
+
+// #2447 — the console contract carries the graduatedTo RESOLUTION BASIS, so a backlog-only dedup-resolve is not read
+// as a hollow resolve off its labels + diff stat. Sourced from the lane manifest actually written by the producer CLI.
+describe('assembleReviewDetail — resolutionBasis (#2447)', () => {
+  const resolveView = {
+    number: 421, title: 'resolve #2403 via graduatedTo', url: 'https://github.com/chalbert/webeverything/pull/421',
+    labels: [{ name: 'ready-to-merge' }], comments: [],
+    files: [{ path: 'backlog/2403-review-disposition.md', additions: 3, deletions: 1 }],
+  };
+
+  it('reads graduatedTo from a manifest written by lane-manifest-write --graduated-to (the real producer path)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rd-2447-'));
+    try {
+      const out = join(dir, 'manifest.json');
+      execFileSync('node', [resolve(process.cwd(), 'scripts/lane-manifest-write.mjs'), '--item=2403', '--repos=[{"repo":"we","ref":"lane/2403-x"}]', '--graduated-to=6b5874f7', `--out=${out}`, '--json'], { encoding: 'utf8' });
+      const body = embedManifestInBody('Resolved as a dedup — see graduatedTo.', parseManifest(readFileSync(out, 'utf8')));
+      const d = assembleReviewDetail({ view: { ...resolveView, body } });
+      expect(d.resolutionBasis).toEqual({ graduatedTo: '6b5874f7', ref: '6b5874f7', isCommit: true, source: 'manifest' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('falls back to the resolve frontmatter in a supplied diff, then the body note', () => {
+    const diff = 'diff --git a/backlog/2403-review-disposition.md b/backlog/2403-review-disposition.md\n+graduatedTo: f6384ac5';
+    expect(assembleReviewDetail({ view: { ...resolveView, body: '', diff } }).resolutionBasis).toMatchObject({ ref: 'f6384ac5', source: 'frontmatter' });
+    expect(assembleReviewDetail({ view: { ...resolveView, body: 'graduatedTo: b54f49a8' } }).resolutionBasis).toMatchObject({ ref: 'b54f49a8', source: 'body' });
+  });
+
+  it('is null for a code PR carrying the same note, and for a PR with no files or body', () => {
+    const codeView = { ...resolveView, body: 'graduatedTo: b54f49a8', files: [...resolveView.files, { path: 'scripts/x.mjs', additions: 9, deletions: 0 }] };
+    expect(assembleReviewDetail({ view: codeView }).resolutionBasis).toBe(null);
+    expect(assembleReviewDetail({ view: {} }).resolutionBasis).toBe(null);
+    expect(assembleReviewDetail({ view: parkedHumanView }).resolutionBasis).toBe(null);
   });
 });
