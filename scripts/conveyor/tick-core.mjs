@@ -403,20 +403,39 @@ const BUILD_SESSION_RE = /^conveyor-(\d+)[a-z]?$/i;
  * restart path. This mirrors the fix/ci-heal retry-cap's OWN restart-surviving floor (`prRearmCounts`/
  * `prCiHealCounts`, #2643/#2666): read a fact from the GROUND TRUTH each tick — here, whether the OS session
  * the dispatch spawned is still alive — rather than trusting only the in-process TTL countdown. Pure: given the
- * live-session NAMES (the IO shell's one `claude agents --json` read, {@link defaultListAgents} in
+ * live-session ROWS (the IO shell's one `claude agents --json` read, {@link defaultListAgents} in
  * `../operations/dispatch-lane-io.mjs`), extract every num with a live BUILD session. A session merely being
- * LISTED counts as durable-live regardless of `pid`/`state` ambiguity (unlike `reconcile-core.mjs`'s liveness
+ * LISTED counts as durable-live regardless of `state` ambiguity (unlike `reconcile-core.mjs`'s liveness
  * refusal, which must tell "alive" apart from "unknown" to avoid a WRONG dispatch): here the failure mode this
  * guards against is a double-dispatch, so erring toward "still guarded" a little longer than strictly necessary
- * is the safe direction — once the OS session actually exits, `claude agents --json` stops listing it and this
- * floor clears on its own, no TTL of its own required.
- * @param {Array<{name?:string}>|Array<string>} sessions - `claude agents --json` rows, or plain name strings.
- * @returns {string[]} normalized nums with a live BUILD session.
+ * is the safe direction.
+ *
+ * #3383 FOLLOW-UP (2026-09-14) — `pidAlive === false` IS THE ONE EXCEPTION, and it is load-bearing, not merely
+ * an optimization. This function's ORIGINAL reasoning ("once the OS session actually exits, `claude agents
+ * --json` stops listing it and this floor clears on its own") was found FALSE the same night a live audit
+ * turned up 26 registry rows — `conveyor-*` among them — still listed 6-13.5 DAYS after their process died,
+ * `state` never advancing. Before this exception, ANY listed `conveyor-<num>` name durable-guarded that num
+ * forever, however long the listing itself was stale — permanently suppressing a REAL re-dispatch of an item
+ * whose only "in-flight" evidence was a phantom registry row, silently (the status line's own display already
+ * ages a never-claimed durable entry out of its COUNT after `buildTtlTicks` — see `countableBuildGuards` at
+ * this function's call site — but that never touched the guard itself, which kept blocking dispatch under the
+ * cover of a status line that had stopped mentioning it at all). A row carrying an explicit `pidAlive === false`
+ * — the SAME two-signal probe `driver-watchdog.mjs#resolvePidAlive`/`scanPsOutput` established and
+ * `lease-reaper.mjs`/`session-reaper.mjs` already reuse (a row's own `pid` when present, else a `ps aux` scan
+ * for its full `sessionId`) — is a CONFIRMED death, not an absence of evidence: nothing double-dispatches
+ * against a session that provably no longer exists, so excluding it here costs none of the protection this
+ * floor exists for. `true` (genuinely alive) and `undefined`/`null` (unknown — no `pidAlive` resolved at all,
+ * the exact shape every pre-#3383 caller/test still passes) both keep the ORIGINAL "list alone is enough"
+ * behavior, byte-identical — this is strictly narrower than before, never wider.
+ * @param {Array<{name?:string, pidAlive?:boolean|null}>|Array<string>} sessions - `claude agents --json` rows
+ *   (optionally carrying a `pidAlive` fact the IO shell already resolved), or plain name strings.
+ * @returns {string[]} normalized nums with a live (not confirmed-dead) BUILD session.
  */
 export function durableBuildNums(sessions) {
   const out = [];
   for (const s of Array.isArray(sessions) ? sessions : []) {
     const name = typeof s === 'string' ? s : s?.name;
+    if (typeof s === 'object' && s !== null && s.pidAlive === false) continue; // confirmed dead — never a floor
     const m = BUILD_SESSION_RE.exec(String(name ?? ''));
     if (m) out.push(normNum(m[1]));
   }
@@ -927,6 +946,18 @@ export function routeWatcherExit(code, labels = []) {
  *   • parked — distinct conveyor-launched OPEN PRs carrying any `review:*` label.
  *   • health — `state.health.verdict`; a `warn` appends the flagged lanes.
  *   • infra — `state.infraBlocked` count (only when non-empty).
+ *
+ * `building` HERE IS NOT `dispatch.builds.length` IN `.conveyor/driver-status.json` — an intentional, DIFFERENT
+ * number, not a bug (a live report on 2026-09-14 read the two together as inconsistent — worth naming here so
+ * the next reader doesn't re-diagnose the same non-bug). `building` is this tick's TOTAL currently-in-flight
+ * build count (guards + leased lanes, carried forward across ticks); `surface.dispatch.builds` (`decisionsOut.
+ * spawnBuilds`, `runner.mjs#tickSurface`) is only the builds THIS tick freshly spawned — routinely 0 while
+ * `building` stays > 0, whenever nothing new needed dispatching but earlier builds are still running. What WAS
+ * a real bug, fixed alongside this comment (#3383 follow-up, see `durableBuildNums`): a phantom `claude agents`
+ * registry row (listed, `pid: null`, its real process long dead) used to inflate `building` right along with a
+ * genuinely live one, since the durable-floor read below had no way to tell them apart. It now excludes any row
+ * a real `ps aux`-backed liveness probe confirms dead, so `building` (and this line) reflect only sessions
+ * nothing has disproven — never a stale registry artifact.
  * @returns {string}
  */
 /**
@@ -1515,6 +1546,20 @@ async function main(argv) {
   try {
     const { defaultListAgents } = await import('../operations/dispatch-lane-io.mjs');
     liveAgentSessions = defaultListAgents({});
+    // #3383 FOLLOW-UP — resolve REAL pid liveness for this same listing, feeding `durableBuildNums`'s new
+    // `pidAlive === false` exclusion (see its own doc): a live audit found `conveyor-*` rows still listed 6-13.5
+    // DAYS after their process died, which the durable floor's original "the listing clears itself" assumption
+    // never accounted for. ONE `ps aux` scan for the whole batch (never one subprocess per row) — the SAME
+    // reused probe `driver-watchdog.mjs`/`lease-reaper.mjs`/`session-reaper.mjs` already share. Best-effort: a
+    // scan failure leaves every row's `pidAlive` at `null` (unknown), which `durableBuildNums` already treats
+    // exactly like today's un-annotated row — no behavior change on a probe failure.
+    if (Array.isArray(liveAgentSessions) && liveAgentSessions.length) {
+      const { resolvePidAlive, scanPsOutput, defaultIsPidAlive } = await import('./driver-watchdog.mjs');
+      const psOutput = scanPsOutput({});
+      liveAgentSessions = liveAgentSessions.map((s) => (
+        s && typeof s === 'object' ? { ...s, pidAlive: resolvePidAlive(s, { psOutput, isPidAlive: defaultIsPidAlive }) } : s
+      ));
+    }
   } catch { /* leave the floor unset — the in-session TTL still guards */ }
 
   // DURABLE retry-cap floor (#2643): for each OPEN `review:changes` PR, read its re-arm comments off the PR and

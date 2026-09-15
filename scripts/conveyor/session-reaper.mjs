@@ -18,6 +18,37 @@
  *     `stopSession` — the ONE existing `claude stop <id>` wrapper in this repo (built for #3383's own "don't
  *     `kill`, `claude stop`" lesson) — rather than re-shelling `claude` a second way.
  *
+ * THE PID-LIVENESS AXIS (#3383, found live 2026-09-14 — an independent audit of a live registry turned up 26
+ * `conveyor-*`/`prepare-*`/`prepare-decision-*` rows, ALL `state: "working"`, `pid: null`, `startedAt` 6-13.5
+ * DAYS old). This is a DIFFERENT shape from the `conveyor-3451` gap the ground-truth axis above closed: that
+ * gap needed the session's OWN target (its item/PR) to be independently confirmed done, which a genuinely
+ * still-open item never is — so a dead session sitting on a still-open item was invisible to BOTH the original
+ * state-only axis (state never advances once the harness loses track of the process) AND the ground-truth axis
+ * (nothing to confirm). `driver-watchdog.mjs` and `lease-reaper.mjs` had ALREADY built the real fix for this
+ * exact failure mode — a two-signal `pid`/`ps aux` liveness probe — for THEIR OWN downstream decisions (is an
+ * item in-flight? is a lease still held?), but this reaper, the one file whose actual job is registry hygiene
+ * (getting a dead entry off the `claude agents` listing at all), never got the same probe. So the 26 entries
+ * were correctly excluded from in-flight/lease bookkeeping by the earlier two fixes, yet sat in the registry
+ * itself untouched — `claude stop` was never even attempted on them. {@link classifySessionReap}'s `pid-dead`
+ * branch closes that: REUSED, not reimplemented, from `driver-watchdog.mjs`'s own `resolvePidAlive`/
+ * `scanPsOutput` (the SAME reuse `lease-reaper.mjs` already established for the identical probe).
+ *
+ * `pid: null` ITSELF IS NOT THE BUG — it is documented (`clear-stuck-session-io.mjs`'s own header) as the
+ * NORMAL shape of every background row this harness lists; nothing here ever registers a real OS pid for a
+ * background session, so waiting for one to "arrive" is not a fix. The real gap is that nothing besides a
+ * `ps aux` scan for the row's own `sessionId` can ever tell a genuinely-still-running session apart from one
+ * whose process died with the harness never noticing — which is exactly what the reused probe does.
+ *
+ * THE REGISTRY ITSELF IS NOT THIS REPO'S CODE. `claude agents --json` / `claude stop` / `claude rm` are the
+ * harness's own CLI surface; nothing in this repository writes a `state: "working"` row or assigns it a `pid`
+ * — every file in this codebase that touches that registry (this one included) only ever READS it (`claude
+ * agents --json[--all]`) or asks the harness to mutate it (`claude stop`/`rm`, or — as a last-resort, human-
+ * gated repair for a KNOWN harness bug, GitHub #77683 — `clear-stuck-session.mjs`'s own directory move). So the
+ * durable fix on THIS side of that boundary is exactly the standing rule the #3383 epic's other two fixes
+ * already apply: never trust `state` at face value — always cross-check a repo-owned liveness signal (the pid/
+ * `ps aux` probe here; a lease's own session-liveness in `lease-reaper.mjs`; the driver's own progress
+ * signals in `driver-watchdog.mjs`) before treating a registry row as live.
+ *
  * WHY `done`/`failed` STATE ALONE WAS NOT ENOUGH (found live 2026-09-03, `conveyor-3451`). The original cut of
  * this reaper (above) reasoned that a state-only reap axis was safe by construction because no `done`/`failed`
  * FALSE POSITIVE had ever been observed (a session `claude` itself reports finished that was still actually
@@ -137,6 +168,11 @@ import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
+// #3383 — REUSE, never reimplement, the real PID-liveness probe `driver-watchdog.mjs` built and `lease-reaper.mjs`
+// already reuses for the IDENTICAL gap (a `claude agents --json` row LISTED, non-terminal, with NO backing OS
+// process at all): a row's own `pid` when present, else a `ps aux` scan for its full `sessionId`. See
+// `classifySessionReap`'s own `pid-dead` axis, below.
+import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from './driver-watchdog.mjs';
 // THE #77683 REPAIR (see the file header) — driving `clear-stuck-session` end to end, in-process, with a
 // TRUSTED `proceed` this reaper's own call path supplies. Nothing here is a second implementation of that
 // operation's own verdict: `assessStuck` (reached through `clearStuckSessionOperation`) is the ONLY thing that
@@ -162,11 +198,12 @@ export const ALREADY_STOPPED_STATES = new Set(['stopped']);
 
 /**
  * The DETERMINISTIC reap verdict for ONE `claude agents --json` row — pure, same row → same verdict. This is
- * the STATE-ONLY axis; see {@link classifySessionReapWithGroundTruth} for the axis that can ALSO reap a
- * `not-terminal` row once its target is independently confirmed done.
+ * the STATE-ONLY + PID-LIVENESS axis; see {@link classifySessionReapWithGroundTruth} for the axis that can
+ * ALSO reap a `not-terminal` row once its target is independently confirmed done.
  *
- * @param {object|null} session - one element of a `claude agents --json` listing.
- * @returns {{reap:boolean, reason:('done'|'failed'|'already-stopped'|'not-background'|'not-terminal')}}
+ * @param {object|null} session - one element of a `claude agents --json` listing, optionally carrying a
+ *   `pidAlive` fact the IO shell already resolved (see the `pid-dead` branch below).
+ * @returns {{reap:boolean, reason:('done'|'failed'|'already-stopped'|'not-background'|'pid-dead'|'not-terminal')}}
  */
 export function classifySessionReap(session) {
   if (!session || typeof session !== 'object') return { reap: false, reason: 'not-terminal' };
@@ -175,6 +212,20 @@ export function classifySessionReap(session) {
   const state = session.state;
   if (TERMINAL_REAP_STATES.has(state)) return { reap: true, reason: state };
   if (ALREADY_STOPPED_STATES.has(state)) return { reap: false, reason: 'already-stopped' };
+  // #3383 (found live 2026-09-14 — the "26 entries, `pid: null`, 6-13.5 DAYS old, `state: working`" audit) — THE
+  // PID-LIVENESS AXIS. `working`/`blocked` is NOT evidence of life: a background row under today's harness never
+  // carries a `pid` at all (measured — see `clear-stuck-session-io.mjs`'s own header), so `state` simply never
+  // advances once the harness has lost track of the real process, and nothing before this axis ever noticed —
+  // the OTHER axis here (ground truth, below) only fires once the item/PR a session names is INDEPENDENTLY
+  // confirmed done elsewhere, which a genuinely still-open item never is, so a dead session working a real,
+  // still-open item sat listed forever. `session.pidAlive` is a REAL, DIRECT liveness read the IO shell resolves
+  // before calling this — the SAME two-signal probe `driver-watchdog.mjs#resolvePidAlive`/`scanPsOutput`
+  // established and `lease-reaper.mjs` already reuses for its own in-flight axis, reused a THIRD time here,
+  // never reimplemented: a row's own `pid` when present (rare for this listing shape), else a `ps aux` scan for
+  // its full `sessionId`. Only an explicit `false` fires — `true` (genuinely alive) and `undefined`/`null`
+  // (unknown: no `sessionId` to scan, or the scan itself failed) both leave this exactly as before, so a
+  // session merely not yet probed, or freshly spawned, is never mistaken for a dead one.
+  if (session.pidAlive === false) return { reap: true, reason: 'pid-dead' };
   return { reap: false, reason: 'not-terminal' }; // working / blocked / undefined — never touched by THIS axis
 }
 
@@ -531,6 +582,18 @@ async function main(argv) {
     process.exit(0);
   }
   if (!Array.isArray(sessions)) sessions = [];
+
+  // #3383 — resolve REAL pid liveness for every BACKGROUND row, feeding `classifySessionReap`'s new `pid-dead`
+  // axis (see its own doc). ONE `ps aux` scan for the whole batch (never one subprocess per row), only when
+  // something background was actually listed — mirrors `driver-watchdog.mjs`'s and `lease-reaper.mjs`'s own
+  // discipline for the identical probe, reused here verbatim via `scanPsOutput`/`resolvePidAlive`.
+  const hasBackground = sessions.some((s) => s && typeof s === 'object' && s.kind === 'background');
+  const psOutput = hasBackground ? scanPsOutput({ exec: execFileSync }) : null;
+  sessions = sessions.map((s) => (
+    s && typeof s === 'object' && s.kind === 'background'
+      ? { ...s, pidAlive: resolvePidAlive(s, { psOutput, isPidAlive: defaultIsPidAlive }) }
+      : s
+  ));
 
   const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor });
 

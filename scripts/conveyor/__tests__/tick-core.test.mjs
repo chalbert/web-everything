@@ -110,6 +110,33 @@ describe('durableBuildNums — #3403 the restart-surviving build-guard floor', (
       expect(durableBuildNums([{ name: sessionSlugFor(77, kind) }])).toEqual([]);
     }
   });
+
+  // #3383 FOLLOW-UP (found live 2026-09-14 — a `conveyor-*` row still listed 6-13.5 DAYS after its process died,
+  // `pid: null`, `state: "working"`) — a CONFIRMED-dead row must not durable-guard forever.
+  describe('the pidAlive === false exclusion (#3383)', () => {
+    it('a row explicitly confirmed dead (pidAlive: false) is EXCLUDED from the durable floor', () => {
+      expect(durableBuildNums([{ name: 'conveyor-77', pidAlive: false }])).toEqual([]);
+    });
+    it('a row confirmed ALIVE (pidAlive: true) is still counted — unchanged', () => {
+      expect(durableBuildNums([{ name: 'conveyor-77', pidAlive: true }])).toEqual(['77']);
+    });
+    it('a row with no `pidAlive` field at all (every pre-#3383 caller/test) is still counted — byte-identical to before', () => {
+      expect(durableBuildNums([{ name: 'conveyor-77' }])).toEqual(['77']);
+    });
+    it('a row with `pidAlive: null` (probed, unknown) is still counted — unknown never guesses at death', () => {
+      expect(durableBuildNums([{ name: 'conveyor-77', pidAlive: null }])).toEqual(['77']);
+    });
+    it('a plain name STRING (no object, so no pidAlive is even possible) is still counted — unchanged', () => {
+      expect(durableBuildNums(['conveyor-77'])).toEqual(['77']);
+    });
+    it('one dead row among several live ones excludes only the dead one', () => {
+      expect(durableBuildNums([
+        { name: 'conveyor-10', pidAlive: false },
+        { name: 'conveyor-20', pidAlive: true },
+        { name: 'conveyor-30' },
+      ]).sort()).toEqual(['20', '30']);
+    });
+  });
 });
 
 describe('retireBuildGuards — claim / Agent-return / TTL (SKILL §2, three ways)', () => {
