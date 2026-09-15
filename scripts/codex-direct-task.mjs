@@ -520,9 +520,9 @@ export function collectAndClearRolloutQuota({
 
 // ── impure: scratch clone, diff capture, gate ────────────────────────────────────────────────────
 
-/** `execFileSync`-shaped default, trimmed stdout, for the small git/npm calls below. */
-const defaultExecFn = (bin, args, opts = {}) =>
-  execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+/** `execFileSync`-shaped default with room for large git diffs and npm output. */
+export const defaultExecFn = (bin, args, opts = {}) =>
+  execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024, ...opts });
 
 /**
  * Make a fresh, isolated scratch clone of `repoRoot` and install its deps — the default target when the
