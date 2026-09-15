@@ -44,6 +44,7 @@ import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import { GATE_HEALTH_OP } from '../gate-health.mjs';
 import { GRADUATION_PROGRESS_REPORT_OP } from '../graduation-progress-report.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
+import { DISPATCH_ELIGIBILITY_OP } from '../dispatch-eligibility.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
 import { RESOLVE_OP } from '../resolve.mjs';
@@ -294,6 +295,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     [SUGGEST_NEXT_OP]: 'suggest-next.mjs',
     [GATE_HEALTH_OP]: 'gate-health.mjs',
     [DISPATCH_LANE_OP]: 'dispatch-lane.mjs',
+    [DISPATCH_ELIGIBILITY_OP]: 'dispatch-eligibility.mjs',
     // backlog/xzdi27a-* — `review-prep`'s judge+effect steps make it NOT read-only (see the pinned list two
     // tests below), so it needs no import-graph purity of its own; it is listed here only so THIS map keeps
     // covering every registered operation (the assertion immediately below).
@@ -372,7 +374,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)

@@ -208,3 +208,21 @@ If a sibling's primary checkout is missing entirely, provision warns and skips t
 3. **Parameterization** — passing args via attributes (`args-*`).
 4. **Reliability** — error handling, timeouts, forgivable failures.
 5. **Deferred/Lazy** — interaction with the loading/visibility Intent.
+
+## Dispatch eligibility reports
+
+When the runner is alive but an item does not move, use
+`node scripts/operations/run.mjs dispatch-eligibility --item=NNN --json` (omit `--item` for
+all cleared queue entries). Supply the runner's `--bookkeepingFile=<path>` when available.
+The report reuses `dispatch-lane-io.mjs#readTick` and `dispatch-lane.mjs#shapeDispatchRead`.
+`verdict.items[].gates` records the executed short-circuit path; later gates were not evaluated.
+`buildAdmission.selection` records the existing `selectClearedRows` / `clearedNotReady` checks;
+`buildAdmission.gates` is `dispatchPlan`'s ordered build trace. A build hold can route to preparation
+or PR repair; `buildAdmission.prepare` records `planPrepareSpawns`'s guard, existing-PR and lane checks.
+The first blocking gate names the failing recorded condition, including that alternate prepare route. `markers` are observed values, not additional
+admission rules: a missing `deliveryAgent` is not a refusal in this path, and an omitted
+`deliveryTarget` resolves to `main`.
+
+Attach the JSON, observation time, item id, and expected progress to a starvation bug filed
+through the `file-item` operation. Preserve `guardsFrom`, dropped bookkeeping and unreadable
+record counts: an incomplete observation must not read as a complete guard check.

@@ -1503,7 +1503,7 @@ describe('the tick reader', () => {
     expect(readTick({ num: '3037', ...bindings }).item).toEqual({
       num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: [],
       // #3637 — an item with no `deliveryTarget:` resolves to the default target, `main`.
-      deliveryTarget: null, deliveryBase: 'main',
+      deliveryTarget: null, deliveryBase: 'main', status: null, deliveryAgent: null,
     });
   });
 
