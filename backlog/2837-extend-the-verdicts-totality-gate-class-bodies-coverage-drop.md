@@ -5,6 +5,11 @@ parent: "2527"
 status: open
 dateOpened: "2026-08-02"
 tags: []
+scope:
+  - we:scripts/lib/
+  - we:scripts/check-standards.mjs
+  - we:scripts/pr-status.mjs
+  - we:scripts/conveyor/jury-tree.mjs
 ---
 
 # Extend the VERDICTS totality gate: class bodies + coverage drop-out below the 2-verdict threshold
