@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-14T18:32:51.732Z",
-  "generatedFromRef": null,
+  "generatedAt": "2026-09-15T01:43:04.847Z",
+  "generatedFromRef": "origin/main",
   "targetCount": null,
   "items": [
     {
@@ -3612,6 +3612,51 @@
       "warnings": []
     },
     {
+      "num": "3589",
+      "title": "Should clear-human wait for an independent review to actually run before the drain merges — config toggle",
+      "prepared": true,
+      "preparedDate": "2026-09-14",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "dateOpened": "2026-09-07",
+      "ageInDays": 8,
+      "digest": [
+        "**Prepared** (#3589 `/prepare` close-out, 2026-09-14) — the inline authoring already carried real forks, concrete `file:line` grounding, and a self-conducted per-fork `Skeptic:` attack. This pass added the missing DoR artifacts: a fresh-context two-confusion `Screen:` line under every fork (#2091 — it flagged the original Fork 3 as prioritization-in-fork-costume, folded below), a concrete code example for Fork 2(c)'s code-level shape, and — since the scope touches `we:docs/agent/platform-decisions.md` (a statute file), which makes the eventual build `humanRequired` and therefore `careLevel: high` — the pre-registered review jury charter (#2638). No fork's substance/recommendation changed; Fork 3 was reclassified, not re-decided (see \"Supported by default,\" below)."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Which operator-cleared PRs must wait?",
+          "why": "*Fork-existence justification:* the excluded branch is (b) — a sub-scope inside `review:human` (e.g. \"only a raw statute-anchor touch like #2011, not a declarative-leash file\"). It is a real, buildable alternative (the escalation rubric already computes `statuteFiles` vs `leashFiles` separately per `#review-human-declarative-leash-only`, #2771), so this is a genuine either/or, not a forced invariant.",
+          "options": [],
+          "notes": [],
+          "skeptic": null,
+          "screen": null,
+          "parseOk": false,
+          "warning": "Fork 1: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork."
+        },
+        {
+          "n": 2,
+          "crux": "How does \"wait\" actually work?",
+          "why": "*Fork-existence justification:* the excluded branches genuinely differ in what code exists and what a caller of `clear-human` experiences — a relabel-and-ride-the-pipeline design (a) leaves `clear-human` succeeding immediately but not-yet-mergeable, while a precondition-refusal design (c) leaves `clear-human` itself failing until a prior step ran. These are not the same code shape stripped of cost.",
+          "options": [],
+          "notes": [],
+          "skeptic": null,
+          "screen": null,
+          "parseOk": false,
+          "warning": "Fork 2: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork."
+        }
+      ],
+      "doneWhen": [],
+      "parseOk": false,
+      "warnings": [
+        "Fork 1: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork.",
+        "Fork 2: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork."
+      ]
+    },
+    {
       "num": "3672",
       "title": "Generalize `investigate` into a contained \"playground\" mode for open-ended AI experiments",
       "prepared": false,
@@ -3767,23 +3812,6 @@
     {
       "num": "3575",
       "title": "Parallelize a build below the item level: micro-task splitting, pre-build splittability analysis, and overlap coordination models",
-      "prepared": false,
-      "preparedDate": null,
-      "leverageScore": 0,
-      "directUnblocks": 0,
-      "transitiveUnblocks": 0,
-      "unblocksToReady": 0,
-      "dateOpened": "2026-09-07",
-      "ageInDays": 8,
-      "digest": [],
-      "forks": [],
-      "doneWhen": [],
-      "parseOk": true,
-      "warnings": []
-    },
-    {
-      "num": "3589",
-      "title": "Should clear-human wait for an independent review to actually run before the drain merges — config toggle",
       "prepared": false,
       "preparedDate": null,
       "leverageScore": 0,
@@ -4005,6 +4033,40 @@
     {
       "num": "3682",
       "title": "Decouple conveyor tick cadence from gate/check duration (verify-dispatch and similar mechanical passes)",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "dateOpened": "2026-09-14",
+      "ageInDays": 1,
+      "digest": [],
+      "forks": [],
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3684",
+      "title": "Narrow the human authorize gate in clear-stuck-session for one deterministic dead-session signature?",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "dateOpened": "2026-09-14",
+      "ageInDays": 1,
+      "digest": [],
+      "forks": [],
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3686",
+      "title": "Name the liveness guarantee before trusting it: harness-tracked notification vs. self-managed background vs. external watch",
       "prepared": false,
       "preparedDate": null,
       "leverageScore": 0,
