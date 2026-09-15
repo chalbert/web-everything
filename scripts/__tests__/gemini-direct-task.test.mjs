@@ -1,7 +1,8 @@
-/** Mechanical tests only. Supplied live agy 1.2.2 streams are literal fixtures; no real child processes. */
+/** Mechanical tests only. Supplied live agy 1.2.2 streams are literal fixtures; real git regressions; no real agy processes. */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -110,7 +111,34 @@ describe('setupScratchClone — clones locally and installs deps, over injected 
   });
 });
 
+function initGitRepo(dir) {
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('config', 'core.quotePath', 'true');
+  git('-c', 'user.name=Direct Task Test', '-c', 'user.email=direct-task@example.test',
+    '-c', 'commit.gpgSign=false', '-c', 'core.hooksPath=/dev/null',
+    'commit', '--quiet', '--allow-empty', '-m', 'Test baseline');
+  return git;
+}
+
 describe('captureDiff — the review artifact, never a commit/push', () => {
+  it.each(['a file.txt', 'café.txt', 'a"quote.txt', 'a\nline.txt'])('captures an untracked filename with spaces, Unicode or quoting: %j', (filename) => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-gemini-direct-git-test-'));
+    try {
+      const git = initGitRepo(dir);
+      const startSha = git('rev-parse', 'HEAD');
+      writeFileSync(join(dir, filename), 'new file review evidence\n');
+      const report = captureDiff({ dir, startSha });
+      expect(report.hasChanges).toBe(true);
+      expect(report.diff).toContain('+new file review evidence');
+      expect(report.diffStat).toContain('1 file changed');
+      expect(execFileSync('git', ['-C', dir, 'diff', '--name-only', '-z', startSha], { encoding: 'utf8' }))
+        .toBe(`${filename}\0`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // Every real call is shaped `['-C', dir, <subcommand>, ...]` (see `captureDiff`'s own `execFn('git', ['-C',
   // dir, 'status', ...])` etc.), so these mocks match on `args.includes(...)`, never `args[0]`.
   it('reports a clean tree as no changes', () => {
@@ -130,7 +158,7 @@ describe('captureDiff — the review artifact, never a commit/push', () => {
     const calls = [];
     const execFn = (bin, args) => {
       calls.push(args.join(' '));
-      if (args.includes('status')) return '?? new-file.txt\n M existing.txt\n';
+      if (args.includes('status')) return '?? new-file.txt\0 M existing.txt\0';
       if (args.includes('diff') && args.includes('--stat')) return ' 2 files changed\n';
       if (args.includes('diff')) return 'diff --git a/existing.txt …';
       if (args.includes('log')) return '';
@@ -146,7 +174,7 @@ describe('captureDiff — the review artifact, never a commit/push', () => {
     const calls = [];
     const execFn = (bin, args) => {
       calls.push(args);
-      if (args.includes('status')) return '?? x.txt\n';
+      if (args.includes('status')) return '?? x.txt\0';
       return '';
     };
     captureDiff({ dir: '/d', startSha: 'abc', execFn });
@@ -351,8 +379,9 @@ function fakeSpawn(stdout, { code = 0, stderr = '', hang = false, error = null, 
 function fakeExec(calls = []) {
   return vi.fn((bin, args, opts) => {
     calls.push({ bin, args, opts });
+    if (args.includes('--absolute-git-dir')) return join(args[1], 'git-metadata');
     if (args.includes('rev-parse')) return 'startsha123\n';
-    if (args.includes('status')) return '?? new-file.txt\n M edited.txt\n';
+    if (args.includes('status')) return '?? new-file.txt\0 M edited.txt\0';
     if (args.includes('--stat')) return '2 files changed\n';
     if (args.includes('diff')) return 'diff --git a/edited.txt b/edited.txt\n+change';
     return '';
@@ -360,6 +389,29 @@ function fakeExec(calls = []) {
 }
 
 describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', () => {
+  it.each([false, true])('uses the real git directory for a linked worktree default log and preserves explicit logs (explicit: %s)', async (explicitLog) => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-gemini-direct-worktree-test-'));
+    const worktree = join(dir, 'linked');
+    try {
+      const git = initGitRepo(dir);
+      git('worktree', 'add', '--quiet', '--detach', worktree, 'HEAD');
+      expect(statSync(join(worktree, '.git')).isFile()).toBe(true);
+      const gitDir = execFileSync('git', ['-C', worktree, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim();
+      const stdout = '{}\n';
+      const { fn: spawnFn, seen } = fakeSpawn(stdout);
+      const logFile = explicitLog ? join(dir, 'logs', 'custom.jsonl') : undefined;
+      const report = await geminiDirectTask({ dir: worktree, task: 'Inspect the checkout', stream: false, spawnFn, logFile });
+      expect(seen.opts.cwd).toBe(worktree);
+      expect(report.exitCode).toBe(0);
+      expect(report.logFile).toBe(logFile ?? join(gitDir, 'gemini-direct-task.jsonl'));
+      expect(report.logFile.startsWith(join(worktree, '.git') + '/')).toBe(false);
+      expect(readFileSync(report.logFile, 'utf8')).toBe(stdout);
+      expect(report.diff.hasChanges).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('spawns exact argv in cwd, closes valid stdin JSON, logs chunked JSONL even with no-stream', async () => {
     const dir = tempDir();
     const logFile = join(dir, 'events.jsonl');
@@ -421,7 +473,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     expect(report).toMatchObject({ dir, scratch: { created: false }, startSha: 'startsha123', exitCode: 0,
       timedOut: false, events: { terminal: 'SUCCESS' }, diff: { hasChanges: true }, gate: { pass: true, mode: 'full' } });
     expect(report.argv).toEqual(seen.argv);
-    expect(report.logFile).toBe(join(dir, '.git', 'gemini-direct-task.jsonl'));
+    expect(report.logFile).toBe(join(dir, 'git-metadata', 'gemini-direct-task.jsonl'));
     expect(Object.keys(report).sort()).toEqual(['dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'events', 'diff', 'gate'].sort());
     expect(calls[0].args).toEqual(['-C', dir, 'rev-parse', 'HEAD']);
     expect(calls.some((c) => c.args.includes('clone'))).toBe(false);

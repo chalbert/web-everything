@@ -82,7 +82,7 @@ import {
   mkdtempSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync,
 } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 // ── constants ─────────────────────────────────────────────────────────────────────────────────────
 export const CODEX_CLI = 'codex';
@@ -583,8 +583,8 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
   if (typeof dir !== 'string' || !dir.trim()) throw new TypeError('codex-direct-task: `dir` must be a non-empty path');
   if (typeof startSha !== 'string' || !startSha.trim()) throw new TypeError('codex-direct-task: `startSha` must be a non-empty sha');
 
-  const status = execFn('git', ['-C', dir, 'status', '--porcelain']);
-  const untracked = status.split('\n').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
+  const status = execFn('git', ['-C', dir, 'status', '--porcelain', '-z']);
+  const untracked = status.split('\0').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
   if (untracked.length) {
     try { execFn('git', ['-C', dir, 'add', '--intent-to-add', '--', ...untracked]); } catch { /* best-effort */ }
   }
@@ -791,8 +791,9 @@ export async function codexDirectTask({
   const startSha = execFn('git', ['-C', targetDir, 'rev-parse', 'HEAD']).trim();
   // Same `.git/`-hiding reasoning as `outputLastMessageFile` above — the default log file must never leak
   // into `captureDiff`'s output. A caller-supplied `--log=<path>` is trusted as-is (their choice, their risk).
-  const resolvedLogFile = logFile || join(targetDir, '.git', 'codex-direct-task.jsonl');
-  mkdirSync(resolvedLogFile.slice(0, resolvedLogFile.lastIndexOf('/')) || '.', { recursive: true });
+  const gitDir = logFile ? null : execFn('git', ['-C', targetDir, 'rev-parse', '--absolute-git-dir']).trim();
+  const resolvedLogFile = logFile || join(gitDir, 'codex-direct-task.jsonl');
+  mkdirSync(dirname(resolvedLogFile), { recursive: true });
 
   // #x8wbivt: resolve the effort rung ONCE, here — the same explicit value then flows into both the real
   // argv (`runCodexDirectExec` → `buildCodexDirectTaskArgv`) and, implicitly, the model pin (which

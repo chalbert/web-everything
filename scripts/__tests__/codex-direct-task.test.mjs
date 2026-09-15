@@ -1,13 +1,14 @@
 /**
  * @file codex-direct-task.test.mjs — the mechanical parts of the personal Codex-direct-task escape hatch,
- * proved WITHOUT spawning anything real (mirrors `judge-spawn.test.mjs`'s split: pure argv/plan functions get
- * cheap, exhaustive tests; the one thing that actually needed a real process — whether agentic mode's `--json`
+ * proved with real git regressions and without spawning Codex (mirrors `judge-spawn.test.mjs`'s split:
+ * pure argv/plan functions get cheap, exhaustive tests; the one thing that actually needed a real process — whether agentic mode's `--json`
  * stream shows granular tool calls — was checked with a real, live `codex exec` invocation while building this
  * file, recorded in the module's own header and in the delivering PR, not re-proved here).
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -478,7 +479,34 @@ describe('setupScratchClone — clones locally and installs deps, over injected 
   });
 });
 
+function initGitRepo(dir) {
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('config', 'core.quotePath', 'true');
+  git('-c', 'user.name=Direct Task Test', '-c', 'user.email=direct-task@example.test',
+    '-c', 'commit.gpgSign=false', '-c', 'core.hooksPath=/dev/null',
+    'commit', '--quiet', '--allow-empty', '-m', 'Test baseline');
+  return git;
+}
+
 describe('captureDiff — the review artifact, never a commit/push', () => {
+  it.each(['a file.txt', 'café.txt', 'a"quote.txt', 'a\nline.txt'])('captures an untracked filename with spaces, Unicode or quoting: %j', (filename) => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-git-test-'));
+    try {
+      const git = initGitRepo(dir);
+      const startSha = git('rev-parse', 'HEAD');
+      writeFileSync(join(dir, filename), 'new file review evidence\n');
+      const report = captureDiff({ dir, startSha });
+      expect(report.hasChanges).toBe(true);
+      expect(report.diff).toContain('+new file review evidence');
+      expect(report.diffStat).toContain('1 file changed');
+      expect(execFileSync('git', ['-C', dir, 'diff', '--name-only', '-z', startSha], { encoding: 'utf8' }))
+        .toBe(`${filename}\0`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // Every real call is shaped `['-C', dir, <subcommand>, ...]` (see `captureDiff`'s own `execFn('git', ['-C',
   // dir, 'status', ...])` etc.), so these mocks match on `args.includes(...)`, never `args[0]`.
   it('reports a clean tree as no changes', () => {
@@ -498,7 +526,7 @@ describe('captureDiff — the review artifact, never a commit/push', () => {
     const calls = [];
     const execFn = (bin, args) => {
       calls.push(args.join(' '));
-      if (args.includes('status')) return '?? new-file.txt\n M existing.txt\n';
+      if (args.includes('status')) return '?? new-file.txt\0 M existing.txt\0';
       if (args.includes('diff') && args.includes('--stat')) return ' 2 files changed\n';
       if (args.includes('diff')) return 'diff --git a/existing.txt …';
       if (args.includes('log')) return '';
@@ -514,7 +542,7 @@ describe('captureDiff — the review artifact, never a commit/push', () => {
     const calls = [];
     const execFn = (bin, args) => {
       calls.push(args);
-      if (args.includes('status')) return '?? x.txt\n';
+      if (args.includes('status')) return '?? x.txt\0';
       return '';
     };
     captureDiff({ dir: '/d', startSha: 'abc', execFn });
@@ -593,6 +621,29 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     return { fn, seen };
   }
 
+  it.each([false, true])('uses the real git directory for a linked worktree default log and preserves explicit logs (explicit: %s)', async (explicitLog) => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-worktree-test-'));
+    const worktree = join(dir, 'linked');
+    try {
+      const git = initGitRepo(dir);
+      git('worktree', 'add', '--quiet', '--detach', worktree, 'HEAD');
+      expect(statSync(join(worktree, '.git')).isFile()).toBe(true);
+      const gitDir = execFileSync('git', ['-C', worktree, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim();
+      const stdout = '{}\n';
+      const { fn: spawnFn, seen } = fakeSpawn(stdout);
+      const logFile = explicitLog ? join(dir, 'logs', 'custom.jsonl') : undefined;
+      const report = await codexDirectTask({ dir: worktree, task: 'Inspect the checkout', stream: false, spawnFn, logFile });
+      expect(seen.opts.cwd).toBe(worktree);
+      expect(report.exitCode).toBe(0);
+      expect(report.logFile).toBe(logFile ?? join(gitDir, 'codex-direct-task.jsonl'));
+      expect(report.logFile.startsWith(join(worktree, '.git') + '/')).toBe(false);
+      expect(readFileSync(report.logFile, 'utf8')).toBe(stdout);
+      expect(report.diff.hasChanges).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('spawns codex with the exact argv buildCodexDirectTaskArgv would produce, writes the task to stdin, and logs raw stdout to the log file', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
     const logFile = join(dir, 'events.jsonl');
@@ -644,8 +695,9 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     const execCalls = [];
     const execFn = (bin, args, opts) => {
       execCalls.push({ bin, args });
+      if (args.includes('--absolute-git-dir')) return join(args[1], 'git-metadata');
       if (args.includes('rev-parse')) return 'startsha123\n';
-      if (args.includes('status')) return ' M edited.txt\n';
+      if (args.includes('status')) return ' M edited.txt\0';
       if (args.includes('diff') && args.includes('--stat')) return ' 1 file changed\n';
       if (args.includes('diff')) return 'diff --git a/edited.txt …';
       if (args.includes('log')) return '';
@@ -660,6 +712,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
       expect(report.scratch.created).toBe(false);
       expect(report.dir).toBe(dir);
       expect(report.startSha).toBe('startsha123');
+      expect(report.logFile).toBe(join(dir, 'git-metadata', 'codex-direct-task.jsonl'));
       expect(report.diff.hasChanges).toBe(true);
       expect(report.events.threadId).toBe('t1');
       expect(execCalls.some((c) => c.bin === 'git' && c.args.includes('clone'))).toBe(false);
@@ -679,6 +732,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     const execFn = (bin, args) => {
       if (bin === 'git' && args[0] === 'clone') return '';
       if (bin === 'git' && args.includes('get-url')) throw new Error('no origin');
+      if (args.includes('--absolute-git-dir')) return join(args[1], 'git-metadata');
       if (bin === 'git' && args.includes('rev-parse')) return 'sha0\n';
       if (bin === 'git' && args.includes('status')) return '';
       if (bin === 'git' && args.includes('diff')) return '';
@@ -703,7 +757,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     it('surfaces quotaUsedPercent/quotaWindowMinutes/quotaResetsAt/quotaPlanType via the injected readQuotaFn (default: read-only)', async () => {
       const stdout = '{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.completed","usage":{}}\n';
       const { fn: spawnFn } = fakeSpawn(stdout);
-      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const execFn = (bin, args) => (args.includes('--absolute-git-dir') ? join(args[1], 'git-metadata') : args.includes('rev-parse') ? 'sha0\n' : '');
       const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
       const readQuotaFn = vi.fn(({ threadId }) => {
         expect(threadId).toBe('t1');
@@ -726,7 +780,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     it('uses collectQuotaFn (read-then-delete) instead when clearRolloutAfterRun is true', async () => {
       const stdout = '{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.completed","usage":{}}\n';
       const { fn: spawnFn } = fakeSpawn(stdout);
-      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const execFn = (bin, args) => (args.includes('--absolute-git-dir') ? join(args[1], 'git-metadata') : args.includes('rev-parse') ? 'sha0\n' : '');
       const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
       const readQuotaFn = vi.fn();
       const collectQuotaFn = vi.fn(() => ({ quota: { usedPercent: 7, windowMinutes: 300, resetsAt: 1, planType: 'prolite' }, rolloutFile: '/h/sessions/x.jsonl', deleted: true }));
@@ -746,7 +800,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     it('never looks up quota for an --ephemeral run (no rollout was ever written)', async () => {
       const stdout = '{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.completed","usage":{}}\n';
       const { fn: spawnFn } = fakeSpawn(stdout);
-      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const execFn = (bin, args) => (args.includes('--absolute-git-dir') ? join(args[1], 'git-metadata') : args.includes('rev-parse') ? 'sha0\n' : '');
       const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
       const readQuotaFn = vi.fn();
       const collectQuotaFn = vi.fn();
@@ -766,7 +820,7 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     it('never looks up quota when the run produced no thread id at all (nothing to key the lookup on)', async () => {
       const stdout = '{"type":"turn.completed","usage":{}}\n'; // no thread.started
       const { fn: spawnFn } = fakeSpawn(stdout);
-      const execFn = (bin, args) => (args.includes('rev-parse') ? 'sha0\n' : '');
+      const execFn = (bin, args) => (args.includes('--absolute-git-dir') ? join(args[1], 'git-metadata') : args.includes('rev-parse') ? 'sha0\n' : '');
       const dir = mkdtempSync(join(tmpdir(), 'we-codex-direct-test-'));
       const readQuotaFn = vi.fn();
       try {

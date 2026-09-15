@@ -267,8 +267,8 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
   if (typeof dir !== 'string' || !dir.trim()) throw new TypeError('gemini-direct-task: `dir` must be a non-empty path');
   if (typeof startSha !== 'string' || !startSha.trim()) throw new TypeError('gemini-direct-task: `startSha` must be a non-empty sha');
 
-  const status = execFn('git', ['-C', dir, 'status', '--porcelain']);
-  const untracked = status.split('\n').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
+  const status = execFn('git', ['-C', dir, 'status', '--porcelain', '-z']);
+  const untracked = status.split('\0').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
   if (untracked.length) {
     try { execFn('git', ['-C', dir, 'add', '--intent-to-add', '--', ...untracked]); } catch { /* best-effort */ }
   }
@@ -404,7 +404,8 @@ export async function geminiDirectTask({
   }
   const startSha = execFn('git', ['-C', targetDir, 'rev-parse', 'HEAD']).trim();
   // Default bookkeeping is hidden from git status. Explicit --log paths are the operator's choice.
-  const resolvedLogFile = logFile ? resolve(logFile) : join(targetDir, '.git', 'gemini-direct-task.jsonl');
+  const gitDir = logFile ? null : execFn('git', ['-C', targetDir, 'rev-parse', '--absolute-git-dir']).trim();
+  const resolvedLogFile = logFile ? resolve(logFile) : join(gitDir, 'gemini-direct-task.jsonl');
   mkdirSync(dirname(resolvedLogFile), { recursive: true });
   const run = await runAgyDirectExec({
     dir: targetDir, task, model, effort, addDirs, sandbox, timeoutMs,
