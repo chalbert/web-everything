@@ -129,6 +129,10 @@ for (const f of files) {
 // Export the live matchers for regression tests; keep the right boundary to reject numeric prefixes.
 export const PROSE_PREREQ = /\b(gated on|blocked on|blocked by|depends on|needs|requires|premise[d]? on|consumed via|builds on)\s+#?(\d+)\b/gi;
 export const ANY_REF = /(?:#|\/backlog\/)(\d+)\b/g;
+// G1's `blocked on/by` enumeration guard (used below): an adjacent #M to the left of a matched id
+// means it's already a citation/enumeration, not a fresh edge. Exported so its own id-width bound
+// stays in sync with PROSE_PREREQ/ANY_REF and is regression-tested directly (#3522 follow-up).
+export const CITATION_GUARD = /#\d+\b/;
 const BACKTICK = /`([^`]+)`/g;
 
 // G4 false-prepared-fork — prioritization/effort smuggled into a `## Fork` section of a *prepared*
@@ -428,7 +432,7 @@ for (const it of items.values()) {
     if (p === it.id || blocked.has(p) || !items.has(p) || g1seen.has(p)) continue;
     // `blocked on/by` guard: another #M within ~40 chars to its left = a citation/enumeration
     // ("blocked by #M, #N"), already-anchored — not a fresh ungoverned edge.
-    if (kw.startsWith('blocked') && /#\d{1,3}\b/.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
+    if (kw.startsWith('blocked') && CITATION_GUARD.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
     g1seen.add(p);
     const dec = isDecision(p), open = items.get(p)?.status !== 'resolved';
     // both ends resolved → historical lineage, not a live gap: demote to INFO (suppressed from the count).

@@ -6,7 +6,7 @@
  * whole live audit (which reads the real backlog dir and writes `audits/backlog-health-audit.md`).
  */
 import { describe, it, expect } from 'vitest';
-import { missingDoneWhenProof, forkLeansOnUnruled, PROSE_PREREQ, ANY_REF } from '../audit-backlog-health.mjs';
+import { missingDoneWhenProof, forkLeansOnUnruled, PROSE_PREREQ, ANY_REF, CITATION_GUARD } from '../audit-backlog-health.mjs';
 
 // #3522: exercise the live extractors so G1/D2 cannot silently lose short or long ids.
 describe('PROSE_PREREQ — G1', () => {
@@ -28,6 +28,26 @@ describe('PROSE_PREREQ — G1', () => {
   it('requires a right word boundary instead of reading a numeric prefix', () => {
     const body = 'Requires #2209suffix and builds on #3512_suffix.';
     expect([...body.matchAll(PROSE_PREREQ)]).toEqual([]);
+  });
+});
+
+describe("CITATION_GUARD — G1 'blocked on/by' enumeration guard", () => {
+  it('recognizes a 4-digit citation to the left as already-anchored', () => {
+    const body = 'Related to #2209, blocked by #3512 for scheduling.';
+    const m = [...body.matchAll(PROSE_PREREQ)].find(m => m[2] === '3512');
+    expect(CITATION_GUARD.test(body.slice(Math.max(0, m.index - 40), m.index))).toBe(true);
+  });
+
+  it('recognizes a 1-2 digit citation to the left as already-anchored', () => {
+    const body = 'Related to #7, blocked by #39 for scheduling.';
+    const m = [...body.matchAll(PROSE_PREREQ)].find(m => m[2] === '39');
+    expect(CITATION_GUARD.test(body.slice(Math.max(0, m.index - 40), m.index))).toBe(true);
+  });
+
+  it('does not match when there is no citation to the left', () => {
+    const body = 'This item is blocked by #39 for scheduling.';
+    const m = [...body.matchAll(PROSE_PREREQ)].find(m => m[2] === '39');
+    expect(CITATION_GUARD.test(body.slice(Math.max(0, m.index - 40), m.index))).toBe(false);
   });
 });
 
