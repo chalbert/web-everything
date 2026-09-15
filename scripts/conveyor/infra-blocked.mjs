@@ -14,6 +14,14 @@
  *   Grounded in the 2026-07-24 GitHub Partial System Outage that blocked #2654's PR-open — the incident that
  *   motivated this story.
  *
+ *   THE #3383 "SURFACED BUT NEVER HEARD" FIX. "Surfaces to the operator" ABOVE used to mean only "a `surface`
+ *   row in this CLI's own stdout" — and the tick's own `runQuiet` wrapper discards that stdout every single
+ *   run. Five real entries sat capped for days with nobody the wiser. {@link planSurfaceEscalation} now decides,
+ *   from the surfaced set, whether THIS pass should durably escalate (append a log line, notify the desktop),
+ *   deduped the same way `we:scripts/conveyor/driver-watchdog.mjs` already dedups its own "needs a human"
+ *   alert. The attempt cap itself is unchanged — auto-retry still stops on schedule; only the silence after it
+ *   is fixed.
+ *
  * PURE-CORE / IO-SHELL SPLIT (mirrors queue-store.mjs #2613 and conveyor-state.mjs #2611): the PURE core
  *   (`classifyPrOpenFailure` / `correlateCause` / `backoffMs` / `retryDecision` / `parseInfraStore` /
  *   `recordInfraBlock` / `markRetryAttempt` / `removeInfraBlock` / `deriveInfraByNum` / `serializeInfraStore`)
@@ -46,6 +54,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { normNum } from './queue-store.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { decideEscalation, notifyDesktop, defaultAppendLog, DEFAULT_RENAG_MS } from './branch-sync.mjs';
 
 // ── TUNING (exported so a caller/test can override; the conveyor tick uses the defaults) ──────────────────────
 
@@ -323,6 +332,36 @@ export function deriveInfraByNum(store, now = Date.now(), { maxAttempts = DEFAUL
   return out;
 }
 
+/**
+ * SURFACED-BUT-NEVER-HEARD (found live 2026-09-14, epic #3383): once `retryDecision` returns `surface` for an
+ * entry (the attempt cap is hit — see its own doc), that verdict was reaching nothing but this CLI's own
+ * stdout, and the ONE production caller (`we:skills-src/conveyor/runner.mjs`'s `runQuiet`) invokes this pass
+ * with `stdio: ['ignore', 'ignore', 'pipe']` — stdout is DISCARDED, every tick. Five real entries sat capped for
+ * 3+ days (four) and 30+ minutes (one, `#3383` itself) with `nextRetryAt` still in the payload looking exactly
+ * like a retry that should have fired — because nothing ever told a human the auto-retry loop had already given
+ * up and was waiting on THEM. `retryDecision`'s attempt cap is correct and stays exactly as designed ("never
+ * loop a doomed resume forever"); the missing piece was durable escalation for the outcome the design always
+ * intended a human to see — the SAME dedup/notify pattern `we:scripts/conveyor/driver-watchdog.mjs` already
+ * uses for its own "stuck, needs a human" verdict (`we:scripts/conveyor/branch-sync.mjs#decideEscalation` /
+ * `#notifyDesktop` / `#defaultAppendLog`, the repo's existing #3472 ESCALATE-DURABLY convention), reused here
+ * rather than reinvented.
+ *
+ * PURE: given the surfaced entries and the last-persisted alert (cross-restart dedup, read from disk not
+ * memory — a restarted tick must not re-fire on every relaunch), decide whether THIS pass should notify. Fires
+ * on a CHANGED set of surfaced nums (a materially different situation) or once the previous alert has gone
+ * stale past `renagMs` (the SAME set, still stuck, but quiet long enough to re-nag) — mirrors {@link
+ * decideEscalation}'s own signature/dedup shape exactly, just fed a set of nums instead of a conflict hash.
+ * @param {Array<{num:string, cause?:string, attempt?:number}>} surfaced
+ * @param {{lastAlert?:object|null, nowMs?:number, renagMs?:number}} [o]
+ * @returns {{fire:boolean, record:(object|null)}}
+ */
+export function planSurfaceEscalation(surfaced, { lastAlert = null, nowMs = Date.now(), renagMs = DEFAULT_RENAG_MS } = {}) {
+  const rows = Array.isArray(surfaced) ? surfaced.filter((s) => s && s.num != null) : [];
+  if (!rows.length) return { fire: false, record: null };
+  const signature = [...rows].map((s) => normNum(s.num)).sort().join(',');
+  return decideEscalation({ signature, lastAlert, nowMs, renagMs });
+}
+
 // ── THIN FS/IO SHELL (the boundary — used by pr-land.mjs and the /conveyor tick) ──────────────────────────────
 
 // Resolve the repo root by SCRIPT LOCATION (this file is scripts/conveyor/infra-blocked.mjs → root is two up),
@@ -333,6 +372,17 @@ export const INFRA_ROOT = resolve(HERE, '..', '..');
 /** The session sidecar path: `<root>/.conveyor/infra-blocked.json`. */
 export function infraStorePath(root = INFRA_ROOT) {
   return join(root, '.conveyor', 'infra-blocked.json');
+}
+
+/** The dedup record for {@link planSurfaceEscalation} — mirrors `driver-watchdog.mjs#alertPath`'s own
+ *  `<checkout>/.conveyor/<name>-alert.json` convention, one sidecar per escalating pass. */
+export function infraAlertPath(root = INFRA_ROOT) {
+  return join(root, '.conveyor', 'infra-blocked-alert.json');
+}
+
+/** The human-readable trail — mirrors `driver-watchdog.mjs#logPath`'s own convention. */
+export function infraLogPath(root = INFRA_ROOT) {
+  return join(root, '.conveyor', 'infra-blocked.log');
 }
 
 /** The canonical sidecar path every consumer resolves to — `CONVEYOR_INFRA_FILE` override wins, else script-location. */
@@ -489,6 +539,20 @@ export async function fetchGithubStatus({ timeoutMs = 5_000 } = {}) {
 
 const log = (m) => process.stderr.write(m + '\n');
 
+/** Tolerant JSON read for the alert sidecar — `null` on anything unreadable (mirrors `driver-watchdog.mjs`'s
+ *  own private `loadJson`). */
+function loadJson(path) {
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
+}
+/** Atomic temp+rename write, the sidecar convention this file already uses for the store itself. */
+function saveJson(path, obj) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
+  renameSync(tmp, path);
+  return path;
+}
+
 /** Hand-rolled `--k=v` / `--flag` parsing (+ positional subcommand). */
 function parseArgv(argv) {
   const flags = {};
@@ -619,6 +683,22 @@ async function main(argv) {
       if (r.ok) { mutateInfraStore((s) => removeInfraBlock(s, entry.num), { path }); resumed.push({ num: entry.num, pr: r.prNumber ?? null }); }
       else { mutateInfraStore((s) => markRetryAttempt(s, entry.num, Date.now(), { cause: refined }), { path }); log(`  ⊘ #${entry.num} resume still failing (${r.detail}) — backing off`); }
     }
+
+    // #3383 FIX — "surfaced" must reach a HUMAN, not just this CLI's own stdout (which `runQuiet`'s
+    // `stdio: ['ignore', 'ignore', 'pipe']` discards every tick — see the file header). Durable, deduped —
+    // fires on a changed surfaced set or once the previous alert has gone stale past the renag window.
+    const root = INFRA_ROOT;
+    const escalation = planSurfaceEscalation(surfaced, { lastAlert: loadJson(infraAlertPath(root)), nowMs: Date.now() });
+    if (escalation.fire) {
+      saveJson(infraAlertPath(root), escalation.record);
+      const summary = surfaced.map((s) => `#${s.num} (${s.cause || 'infra'}, attempt ${s.attempt ?? '?'})`).join(', ');
+      defaultAppendLog(infraLogPath(root), `${new Date().toISOString()} infra-blocked[surfaced]: ${surfaced.length} item(s) past their auto-retry attempt cap, needs a human: ${summary}`);
+      notifyDesktop({
+        title: 'Conveyor infra-blocked items need you',
+        body: `${surfaced.length} item(s) exhausted their auto-retry budget and are waiting on you: ${summary}`,
+      });
+    }
+
     writeAllSync(1, JSON.stringify({ retried, resumed, surfaced, waiting }) + '\n');
     return 0;
   }

@@ -22,24 +22,56 @@
  *   back off first? And: has either failure mode gone on long enough that a person needs to know? Everything
  *   else (guards, dispatch, the lease) stays runner.mjs's job.
  *
+ * DRIVER-WATCHDOG SCHEDULING (epic #3383, added here — see {@link startWatchdogSchedule}). `we:scripts/conveyor/
+ *   driver-watchdog.mjs` diagnoses (and can heal) the OTHER failure shape neither the anomaly detectors above
+ *   nor `runner.mjs`'s own tick loop can see: a driver that is alive, heartbeating its lease, ticking on
+ *   schedule, and dispatching NOTHING because its own planner wrongly and repeatedly decides there is nothing
+ *   to do — from the outside indistinguishable from a healthy idle conveyor. Confirmed tonight
+ *   (`we:backlog/3383-*.md`): nothing in the repo ever SCHEDULED it; it ran only by hand, or as an ad-hoc
+ *   shell loop that lived outside version control and vanished with the terminal that started it. This
+ *   supervisor is the right place to schedule it FROM: it is already a process wholly separate from the driver
+ *   it watches (it spawns `runner.mjs` as a child and never imports its planning/dispatch modules), which is
+ *   exactly the "run the CHECK on a timer from OUTSIDE the driver process" shape `driver-watchdog.mjs`'s own
+ *   header calls for — as opposed to running it FROM INSIDE the driver's own tick, which that header explicitly
+ *   forbids ("IT MUST NOT SHARE THE DRIVER'S OWN DECISION LOGIC").
+ *
+ * DEFAULT IS CHECK-ONLY (alert, never heal). `driver-watchdog.mjs heal`'s `git reset --hard` + `restart-runner`
+ *   pipeline is unit-tested end to end but has never been LIVE-fired unattended against a real driver checkout
+ *   (this epic's own running punch-list names that as the next concrete step, not a code change). Scheduling
+ *   `check` here closes the "nobody ever finds out" gap — a stale verdict still fires the identical desktop
+ *   alert + log line `heal` would (`driver-watchdog.mjs`'s own escalation fires on the verdict, not the heal
+ *   outcome) — without this supervisor also being the first unattended caller of a real `git reset --hard`.
+ *   `--watchdog-heal` opts into the full heal pipeline once that has been proven; `--no-watchdog` disables the
+ *   schedule entirely; `--watchdog-interval-ms` / `--watchdog-checkout` tune it. None of this touches the
+ *   restart/backoff/alert ring above — the watchdog's own log + escalation dedup already live under
+ *   `<checkout>/.conveyor/` (`driver-watchdog.mjs`'s own sidecars), so it rides a SEPARATE breadcrumb
+ *   (`baseLog`, never the anomaly-ring `log`) to avoid an unrelated event type interrupting
+ *   {@link detectSupervisorAnomalies}'s own backward trailing-run scans.
+ *
  * PURE-CORE / IO-SHELL SPLIT (mirrored from runner.mjs's own header, which mirrors tick-core.mjs's):
  *   • The PURE core ({@link classifyExit}, {@link decideRestart}, {@link runSupervisorLoop},
- *     {@link detectSupervisorAnomalies}, {@link healthFromAnomalies}, {@link decideAlert}) has NO child_process
- *     / fs / clock of its own — every effect (spawning the child, sleeping, logging) is INJECTED, so the whole
- *     restart/backoff/alert decision is unit-tested with fakes (skills-src/conveyor/__tests__/supervisor.test.mjs)
- *     — no real runner.mjs, no real lease, no real `osascript`.
+ *     {@link detectSupervisorAnomalies}, {@link healthFromAnomalies}, {@link decideAlert},
+ *     {@link shouldRunWatchdog}) has NO child_process / fs / clock of its own — every effect (spawning the
+ *     child, sleeping, logging, running the watchdog) is INJECTED, so the whole restart/backoff/alert/
+ *     watchdog-scheduling decision is unit-tested with fakes (skills-src/conveyor/__tests__/supervisor.test.mjs)
+ *     — no real runner.mjs, no real lease, no real `osascript`, no real driver-watchdog run.
  *   • The IO SHELL (`main()`, gated on the direct-invocation check) actually spawns
  *     `node skills-src/conveyor/runner.mjs --json [flags]`, forwards SIGINT/SIGTERM to it so a stopped
- *     supervisor never leaves an orphaned runner child behind, appends the JSONL log, and (#3398) fires a
- *     best-effort desktop notification when the pure core's alert decision says to.
+ *     supervisor never leaves an orphaned runner child behind, appends the JSONL log, (#3398) fires a
+ *     best-effort desktop notification when the pure core's alert decision says to, and (epic #3383) runs the
+ *     driver watchdog on its own timer via {@link startWatchdogSchedule}.
  */
 
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { RUNNER_LOCK_ROOT } from './runner-lock.mjs';
+// epic #3383 — see the file header's "DRIVER-WATCHDOG SCHEDULING" section. `driver-watchdog.mjs` already
+// avoids the driver's own decision logic by design (its own header's central rule), so importing it here does
+// NOT reintroduce the shared-decision-logic hazard that rule guards against.
+import { runWatchdogOnce } from '../../scripts/conveyor/driver-watchdog.mjs';
 
 // ── PURE CORE (no IO — every effect is injected; unit-tested directly) ─────────────────────────────────────
 
@@ -210,6 +242,26 @@ export async function runSupervisorLoop({
       await sleep(restart.delayMs);
     }
   }
+}
+
+// ── driver-watchdog scheduling (epic #3383) — see the file header's own section for the full rationale ──────
+
+/** 5 min — matches the ad-hoc, uncommitted shell loop that was found genuinely running (by hand) the night this
+ *  was built, polling `we:scripts/conveyor/driver-watchdog.mjs check` on that same cadence. Comfortably below
+ *  {@link DEFAULT_STALE_AFTER_MS}-equivalent windows (the watchdog's own 20-minute default staleness bar), so a
+ *  driver that goes stale is checked several times inside that window rather than possibly missed by one. */
+export const DEFAULT_WATCHDOG_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * PURE: has enough time passed since the last watchdog run to run it again? `lastRunMs === null` (never run
+ * yet) always says yes — the supervisor's very first check should not wait a full interval before it looks,
+ * the same "check once immediately" bias {@link startWatchdogSchedule} applies in its IO shell.
+ * @param {{lastRunMs?:number|null, nowMs?:number, intervalMs?:number}} [o]
+ * @returns {boolean}
+ */
+export function shouldRunWatchdog({ lastRunMs = null, nowMs = Date.now(), intervalMs = DEFAULT_WATCHDOG_INTERVAL_MS } = {}) {
+  if (lastRunMs === null || !Number.isFinite(lastRunMs)) return true;
+  return (nowMs - lastRunMs) >= intervalMs;
 }
 
 // ── out-of-band alerting (#3398) ────────────────────────────────────────────────────────────────────────────
@@ -451,6 +503,61 @@ function makeMaybeAlert({ ring, maxBackoffMs, alertStatePath, log }) {
   };
 }
 
+/**
+ * IO SHELL — start the driver-watchdog schedule (epic #3383, see the file header's own section). Runs `run`
+ * (defaults to `we:scripts/conveyor/driver-watchdog.mjs#runWatchdogOnce`) once IMMEDIATELY (a supervisor that
+ * just started should not wait a full interval before its first look) and then every `intervalMs`. Every
+ * effect is injected so the whole schedule is testable with a fake timer and a fake `run`, no real driver, no
+ * real `git`, no real `claude` — mirrors {@link makeRealSpawnChild}/{@link makeJsonlLog}'s own "IO shell wraps
+ * a pure decision" shape, even though the run itself (`runWatchdogOnce`) is `driver-watchdog.mjs`'s own IO
+ * shell, not a decision made here.
+ *
+ * NEVER THROWS, NEVER STOPS THE SCHEDULE: a single failed watchdog run (a transient `git`/`claude` hiccup) is
+ * logged via `watchdog-error` and the timer keeps ticking — identical "observability only" bias to
+ * {@link makeMaybeAlert}. Uses its OWN breadcrumb (`log`, expected to be the plain {@link makeJsonlLog} effect,
+ * i.e. `baseLog` in `main()` — NEVER the ring-touching composite `log`) so a `watchdog`/`watchdog-error` entry
+ * can never interleave into {@link detectSupervisorAnomalies}'s trailing backward scans and truncate them early
+ * (see the file header for why that would be a real hazard, not a hypothetical one).
+ *
+ * @param {object} o
+ * @param {string} o.checkout - the driver checkout to watch; the SAME repo this supervisor's own `runner.mjs`
+ *   child runs from (see `main()`'s `REPO_ROOT`), matching `driver-watchdog.mjs`'s own "the driver checkout is
+ *   whoever's HEAD moves" assumption.
+ * @param {number} [o.intervalMs]
+ * @param {boolean} [o.heal] - `false` (default) ⇒ `dryRun: true` — diagnose + alert, never `git reset --hard` /
+ *   `restart-runner`. `true` opts into the full heal pipeline (see the file header for why that is NOT the
+ *   default yet).
+ * @param {Function} [o.run] - `({checkout, dryRun}) => result`, defaults to the real `runWatchdogOnce`.
+ * @param {(entry:object)=>any} [o.log] - a PLAIN log effect (never the anomaly-ring composite — see above).
+ * @param {Function} [o.setIntervalFn]
+ * @param {Function} [o.clearIntervalFn]
+ * @returns {{ stop: () => void }}
+ */
+export function startWatchdogSchedule({
+  checkout,
+  intervalMs = DEFAULT_WATCHDOG_INTERVAL_MS,
+  heal = false,
+  run = runWatchdogOnce,
+  log = () => {},
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+} = {}) {
+  const tick = () => {
+    try {
+      const result = run({ checkout, dryRun: !heal });
+      log({
+        event: 'watchdog', at: new Date().toISOString(), state: result?.verdict?.state ?? 'unknown',
+        actionable: !!result?.verdict?.actionable, action: result?.action ?? 'none', healEnabled: heal,
+      });
+    } catch (e) {
+      log({ event: 'watchdog-error', at: new Date().toISOString(), error: String((e && e.message) || e), healEnabled: heal });
+    }
+  };
+  tick();
+  const timer = setIntervalFn(tick, intervalMs);
+  return { stop: () => clearIntervalFn(timer) };
+}
+
 function parseFlags(argv) {
   const flags = {};
   for (const a of argv) {
@@ -474,6 +581,7 @@ function finiteOr(val, fallback) {
 const OWN_FLAGS = new Set([
   'max-restarts', 'base-backoff-ms', 'max-backoff-ms', 'crash-threshold-ms', 'log-path', 'alert-state-path',
   'idle-base-backoff-ms', 'idle-max-backoff-ms', // #3406
+  'no-watchdog', 'watchdog-heal', 'watchdog-interval-ms', 'watchdog-checkout', // epic #3383
 ]);
 
 async function main(argv) {
@@ -524,6 +632,25 @@ async function main(argv) {
   };
   const spawnChild = makeRealSpawnChild({ runnerPath: RUNNER_PATH, extraArgs, onChild: (c) => { currentChild = c; }, onTickLine });
 
+  // epic #3383 — see the file header's "DRIVER-WATCHDOG SCHEDULING" section. `checkout` defaults to THIS
+  // process's own repo root (same derivation `RUNNER_PATH` uses), i.e. the same checkout whose `runner.mjs`
+  // this supervisor is driving — `--watchdog-checkout` overrides it for a supervisor watching a DIFFERENT
+  // driver checkout than its own (mirrors `driver-watchdog.mjs`'s own `--checkout` flag). `baseLog`, NOT the
+  // ring-touching composite `log`, is threaded through deliberately — see `startWatchdogSchedule`'s own doc.
+  const watchdogEnabled = flags['no-watchdog'] !== true;
+  const watchdogCheckout = typeof flags['watchdog-checkout'] === 'string' ? flags['watchdog-checkout'] : resolve(HERE, '..', '..');
+  const watchdogIntervalMs = finiteOr(flags['watchdog-interval-ms'], DEFAULT_WATCHDOG_INTERVAL_MS);
+  const watchdogHeal = flags['watchdog-heal'] === true;
+  const watchdogHandle = watchdogEnabled
+    ? startWatchdogSchedule({ checkout: watchdogCheckout, intervalMs: watchdogIntervalMs, heal: watchdogHeal, log: baseLog })
+    : null;
+  if (watchdogEnabled) {
+    baseLog({
+      event: 'watchdog-scheduled', at: new Date().toISOString(), checkout: watchdogCheckout,
+      intervalMs: watchdogIntervalMs, healEnabled: watchdogHeal,
+    });
+  }
+
   // Shutdown: SIGTERM first (runner.mjs gets a chance to run its own driveConveyor `finally` — release the
   // singleton lease — same as the pattern drain-daemon's releaseAndExit uses on ITS child), SIGKILL only if it
   // hangs on past a grace window. Never leaves the child running once the supervisor itself is gone — the
@@ -539,6 +666,7 @@ async function main(argv) {
     if (stopRequested) return; // a second signal shouldn't double-log or re-kill an already-dying child
     stopRequested = true;
     log({ event: 'shutdown', at: new Date().toISOString(), signal });
+    if (watchdogHandle) watchdogHandle.stop(); // never leave a timer outliving the process it was watching for
     if (currentChild) {
       const child = currentChild;
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
@@ -553,6 +681,11 @@ async function main(argv) {
     baseBackoffMs, maxBackoffMs, idleBaseBackoffMs, idleMaxBackoffMs, crashThresholdMs,
   });
   log({ event: 'stopped', at: new Date().toISOString(), reason: result.stoppedReason, restarts: result.restarts });
+  // Covers the `max-restarts` exit path, which returns from `runSupervisorLoop` WITHOUT ever calling `shutdown`
+  // (that path never sets `stopRequested`) — `shutdown`'s own `watchdogHandle.stop()` above only fires on a
+  // real signal. `process.exit` would tear the timer down anyway, but stopping it explicitly avoids depending
+  // on that for correctness.
+  if (watchdogHandle) watchdogHandle.stop();
   process.exit(0);
 }
 

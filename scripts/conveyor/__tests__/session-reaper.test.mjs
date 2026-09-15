@@ -56,6 +56,32 @@ describe('classifySessionReap — the per-row verdict', () => {
     expect(classifySessionReap(undefined)).toEqual({ reap: false, reason: 'not-terminal' });
     expect(classifySessionReap('not-an-object')).toEqual({ reap: false, reason: 'not-terminal' });
   });
+
+  // #3383 (found live 2026-09-14 — the "26 entries, `pid: null`, 6-13.5 DAYS old" audit): the PID-LIVENESS axis.
+  describe('the pid-dead axis (#3383)', () => {
+    it('a `working` session CONFIRMED dead via a real pid/ps-aux probe is reaped, reason `pid-dead`', () => {
+      expect(classifySessionReap(bg({ state: 'working', pidAlive: false }))).toEqual({ reap: true, reason: 'pid-dead' });
+    });
+    it('a `blocked` session confirmed dead is reaped the same way', () => {
+      expect(classifySessionReap(bg({ state: 'blocked', pidAlive: false }))).toEqual({ reap: true, reason: 'pid-dead' });
+    });
+    it('a `working` session with a LIVE pid is never reaped on this axis', () => {
+      expect(classifySessionReap(bg({ state: 'working', pidAlive: true }))).toEqual({ reap: false, reason: 'not-terminal' });
+    });
+    it('`pidAlive` unresolved (undefined — no IO shell ever attached it) never guesses at death', () => {
+      expect(classifySessionReap(bg({ state: 'working' }))).toEqual({ reap: false, reason: 'not-terminal' });
+    });
+    it('`pidAlive: null` (probed but unknown) never guesses at death either', () => {
+      expect(classifySessionReap(bg({ state: 'working', pidAlive: null }))).toEqual({ reap: false, reason: 'not-terminal' });
+    });
+    it('a `done`/`failed`/`stopped` row is unaffected by `pidAlive` — the terminal axes still win first', () => {
+      expect(classifySessionReap(bg({ state: 'done', pidAlive: false }))).toEqual({ reap: true, reason: 'done' });
+      expect(classifySessionReap(bg({ state: 'stopped', pidAlive: false }))).toEqual({ reap: false, reason: 'already-stopped' });
+    });
+    it('an INTERACTIVE session confirmed "dead" is still never reaped — the structural guard outranks pid-dead too', () => {
+      expect(classifySessionReap(interactive({ state: 'working', pidAlive: false }))).toEqual({ reap: false, reason: 'not-background' });
+    });
+  });
 });
 
 describe('TERMINAL_REAP_STATES / ALREADY_STOPPED_STATES — the state sets themselves', () => {
@@ -179,6 +205,15 @@ describe('classifySessionReapWithGroundTruth — the new axis found live on `con
     expect(classifySessionReapWithGroundTruth(bg({ state: 'stopped', name: 'conveyor-1' }), alwaysResolved)).toEqual({ reap: false, reason: 'already-stopped' });
     expect(classifySessionReapWithGroundTruth(interactive({ state: 'blocked', name: 'conveyor-1' }), alwaysResolved)).toEqual({ reap: false, reason: 'not-background' });
   });
+  it('#3383 — a confirmed pid-dead row reaps via the base axis WITHOUT ever consulting the ground-truth resolver', () => {
+    let called = false;
+    const spy = () => { called = true; return { resolved: true }; };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'conveyor-2786', pidAlive: false }), spy)).toEqual({
+      reap: true,
+      reason: 'pid-dead',
+    });
+    expect(called).toBe(false);
+  });
 });
 
 describe('sessionReapPlan with groundTruthFor — end to end over a mixed listing', () => {
@@ -206,6 +241,27 @@ describe('sessionReapPlan with groundTruthFor — end to end over a mixed listin
     const { reap, keep } = sessionReapPlan(listing);
     expect(reap.map((r) => r.session.sessionId)).toEqual(['done-1']);
     expect(keep.map((r) => r.session.sessionId)).toEqual(['blocked-resolved']);
+  });
+});
+
+describe('sessionReapPlan — the "26 stale entries" shape (#3383, found live 2026-09-14)', () => {
+  it('a `state: working`, `pidAlive: false` row on a STILL-OPEN item (ground truth unresolved) is reaped anyway', () => {
+    // The exact gap: ground truth alone never catches this (the item is genuinely still open — nothing to
+    // confirm), and the state-only axis never catches it either (`state` never advances on its own). Only the
+    // pid-liveness axis closes it.
+    const listing = [
+      bg({ sessionId: 'phantom-1', state: 'working', name: 'conveyor-2900', pidAlive: false, startedAt: 1 }),
+      bg({ sessionId: 'phantom-2', state: 'working', name: 'prepare-3010', pidAlive: false, startedAt: 1 }),
+      bg({ sessionId: 'phantom-3', state: 'working', name: 'prepare-decision-3020', pidAlive: false, startedAt: 1 }),
+      bg({ sessionId: 'live-1', state: 'working', name: 'conveyor-3030', pidAlive: true }),
+      bg({ sessionId: 'unknown-1', state: 'working', name: 'conveyor-3040', pidAlive: null }),
+    ];
+    const groundTruthFor = () => ({ resolved: false }); // every item is still genuinely open — never resolved
+    const { reap, keep } = sessionReapPlan(listing, { groundTruthFor });
+
+    expect(reap.map((r) => r.session.sessionId).sort()).toEqual(['phantom-1', 'phantom-2', 'phantom-3']);
+    expect(reap.every((r) => r.reason === 'pid-dead')).toBe(true);
+    expect(keep.map((r) => r.session.sessionId).sort()).toEqual(['live-1', 'unknown-1']);
   });
 });
 

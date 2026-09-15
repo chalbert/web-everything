@@ -51,6 +51,16 @@
  *     acknowledged): an all-empty listing would have read as "everyone's gone" fleet-wide, and a lease acquired
  *     moments ago (whose session had not yet had time to appear in the listing) would have been reaped mid-start
  *     — the exact #3283 "reclaims a lane seconds after it is acquired" failure, reintroduced through this axis.
+ *     #3383 (2026-09-14) WIDENED this axis again: `claude agents --json --all` can also report a PHANTOM row —
+ *     LISTED, in a non-terminal state (`working`/`blocked`), with NO backing OS process at all (the same "still
+ *     listed, nothing behind it" decay `driver-watchdog.mjs` found live for the driver's own queue-claim check,
+ *     `splitQueue`, the same day). Neither the absence branch nor the terminal-state check above catches that
+ *     shape — the row IS present and its `state` never transitions on its own. `sessionGoneForLease` now also
+ *     takes a REAL, direct `pidAlive` read for the lease's session (`sessionPidAliveByName`, reusing
+ *     `driver-watchdog.mjs`'s own `resolvePidAlive`/`scanPsOutput` two-signal probe — a listing row's own `pid`
+ *     when present, else a `ps aux` scan for its full `sessionId`), and `pidAlive === false` reaps regardless of
+ *     the listed state or lease age. Confirmed live: 12 of 14 "leased" lanes had no corroborating process
+ *     anywhere on the box, several sessions silent 4+ hours, none of them near their 240-minute TTL.
  *   • ttl-stale — the lease outlived its TTL (`isLeaseStale`; AGE-based — there is no heartbeat, so a >TTL live
  *     build is reapable, exactly as `acquire` already treats a >TTL lease as reclaimable); the owner is presumed
  *     gone. This is the zero-IO backstop that reclaims a dead agent's lane with no PR, no network, and no
@@ -76,6 +86,19 @@ import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
+// #3383 (this incident, 2026-09-14) — REUSE, never reimplement, the real PID-liveness probe `driver-watchdog.mjs`
+// just built for the IDENTICAL gap in a different place: a `claude agents --json` row can be a PHANTOM — still
+// LISTED (present, in some non-terminal state like `working`/`blocked`), with NO backing OS process at all (that
+// file's own header: sessions whose transcripts had gone silent for hours/days while the listing kept reporting
+// them as if alive). `sessionGoneForLease` below only ever checked ABSENCE-past-grace or a listed TERMINAL state
+// (`done`/`failed`/`stopped`) — neither catches a phantom that is listed in a NON-terminal state, which is
+// exactly the shape of tonight's incident: 12 lane leases held for 4+ hours by sessions still "in the listing"
+// but with zero corroborating process anywhere on the box. `resolvePidAlive`/`scanPsOutput`/`defaultIsPidAlive`
+// are the SAME two-signal probe `we:scripts/operations/clear-stuck-session-io.mjs#resolvePidAlive`/
+// `scanPsForSession` established first (a listing row's own `pid` when present, else a `ps aux` scan for its
+// full `sessionId`) — reused verbatim, not re-derived a third time. No import cycle: `driver-watchdog.test.mjs`'s
+// own asserted import graph never reaches this file or `lane-pool.mjs`.
+import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from './driver-watchdog.mjs';
 
 // ── PURE CORE (no fs / git / gh / clock — every signal is injected) ───────────────────────────────────────────
 
@@ -288,6 +311,27 @@ export function sessionStatesForReap(sessions) {
 }
 
 /**
+ * #3383 (2026-09-14 incident) — REAL PROCESS liveness for every background listing row, keyed by `name`. Pure —
+ * mirrors {@link sessionStateByName}'s own reduction (background rows only), but resolves `pidAlive` instead of
+ * `state`, through the SAME two-signal probe `driver-watchdog.mjs`'s own `resolvePidAlive` already established
+ * (a row's own `pid` when present, else a `ps aux` scan for its full `sessionId`). `psOutput` is the raw `ps aux`
+ * capture (or `null` when the scan itself failed/was skipped — every row then resolves to `null`, i.e. unknown,
+ * never a false death) taken ONCE for the whole listing, not per row.
+ * @param {Array<{kind?:string, name?:string, pid?:number|null, sessionId?:string|null}>} sessions
+ * @param {{psOutput?:string|null, isPidAlive?:(pid:number)=>boolean}} [o]
+ * @returns {Map<string, boolean|null>} session `name` → `pidAlive` (`true`/`false` when established, `null` when
+ *   neither probe could say).
+ */
+export function sessionPidAliveByName(sessions, { psOutput = null, isPidAlive = defaultIsPidAlive } = {}) {
+  const byName = new Map();
+  for (const s of Array.isArray(sessions) ? sessions : []) {
+    if (!s || typeof s !== 'object' || s.kind !== 'background') continue;
+    if (typeof s.name === 'string' && s.name) byName.set(s.name, resolvePidAlive(s, { psOutput, isPidAlive }));
+  }
+  return byName;
+}
+
+/**
  * Is the delivery agent a lease's own `session` names CONFIRMED gone? THE FIX for the 2026-09-04/05 incident
  * (`conveyor-3466` on lane-38, `conveyor-2412`/`conveyor-2412c` on lane-40): both sessions died/disappeared
  * ENTIRELY from `claude agents --json` — not merely reported `done`/`failed`, simply no longer listed at all,
@@ -295,12 +339,13 @@ export function sessionStatesForReap(sessions) {
  * hours, because neither the PR axis (no PR was ever opened) nor the TTL axis (nowhere near its 4-hour mark) had
  * anything to reclaim them with.
  *
- *   true  — `sessionStates` doesn't list this session at all AND the lease is past the {@link
+ *   true  — a REAL, direct liveness read says the process is gone (`pidAlive === false`, see below and #3383's
+ *           widening), OR `sessionStates` doesn't list this session at all AND the lease is past the {@link
  *           DISPATCH_GUARD_LISTING_GRACE_MINUTES} grace window (see below), OR the session IS listed in one of
  *           {@link AGENT_GONE_STATES} (`done`/`failed`/`stopped`) — the same three states `session-reaper.mjs`
- *           already reaps on. Either way the session is provably not going to do any more work.
- *   false — the session IS listed and its state is none of those (`working`/`blocked`/undefined) — a slow
- *           build, not a dead one.
+ *           already reaps on. Any of these three and the session is provably not going to do any more work.
+ *   false — the session IS listed, its state is none of the terminal ones (`working`/`blocked`/undefined), and
+ *           either no `pidAlive` signal was supplied or it read `true`/`null` — a slow build, not a dead one.
  *   null  — never guess: `lease.session` matches no dispatcher-minted grammar ({@link itemNumFromSession}), so
  *           it was never spawned via `claude --bg` and would legitimately never appear in this listing (a
  *           manually-acquired or interactive lane) — absence there proves nothing about it. Also null when
@@ -308,6 +353,19 @@ export function sessionStatesForReap(sessions) {
  *           {@link fetchSessionStates} / {@link sessionStatesForReap}), OR when the lease is absent from the
  *           listing but still inside its grace window and so too young to judge (see below) — a slow-to-list
  *           session is left `null`, not asserted alive, since nothing here actually confirms that either.
+ *
+ * THE PHANTOM-LISTING WIDENING (#3383, 2026-09-14 incident — the SAME shape `driver-watchdog.mjs` fixed for the
+ * driver's own queue-claim check, just found again here). A session can be LISTED, in a non-terminal state,
+ * with NO backing OS process at all — the CLI's own job-directory bookkeeping simply never noticed the process
+ * died (the decay `we:scripts/operations/clear-stuck-session.mjs`'s header documents). Neither the absence
+ * branch nor {@link AGENT_GONE_STATES} catches that: the row IS present, and its stuck `state` is whatever it
+ * last wrote, never transitioning to `done`/`failed`/`stopped` on its own. `pidAlive` is the caller's REAL,
+ * DIRECT process-liveness read for this exact session ({@link sessionPidAliveByName}, the SAME two-signal probe
+ * `driver-watchdog.mjs`'s own `resolvePidAlive` uses) and is checked FIRST, before either the absence or the
+ * listed-state branch: `pidAlive === false` is a positive, independent death signal that fires regardless of
+ * what the listing's own `state` field says or how young the lease is — it needs no grace window, because it is
+ * not an inference from silence the way absence is. `pidAlive === true` or `null` (unknown — no `sessionId` to
+ * scan, or the `ps aux` scan itself failed) changes nothing: the existing listed/absent logic below still runs.
  *
  * THE GRACE WINDOW — independent-review finding on PR #1921 (security/concurrency-race, CONFIRMED). `claude
  * --bg` returns before its session is necessarily visible in `claude agents --json --all`
@@ -335,15 +393,21 @@ export function sessionStatesForReap(sessions) {
  *
  * @param {object|null} lease
  * @param {Map<string,string|null>|null} sessionStates  from {@link sessionStatesForReap}; null = axis off.
- * @param {{nowMs?:number, graceMs?:number}} [o]  `nowMs` = the clock reading to age the lease against (no
- *   default — omitting it makes the absence branch always `null`, never guessing at an unknown age); `graceMs`
- *   defaults to {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES}.
+ * @param {{nowMs?:number, graceMs?:number, pidAlive?:boolean|null}} [o]  `nowMs` = the clock reading to age the
+ *   lease against (no default — omitting it makes the absence branch always `null`, never guessing at an
+ *   unknown age); `graceMs` defaults to {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES}; `pidAlive` (#3383) = this
+ *   session's REAL process-liveness read from {@link sessionPidAliveByName} (`null` when not supplied/unknown —
+ *   exact back-compat with every pre-#3383 caller).
  * @returns {boolean|null}
  */
-export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000 } = {}) {
+export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000, pidAlive = null } = {}) {
   const session = lease && typeof lease.session === 'string' ? lease.session : null;
   if (!session || itemNumFromSession(session) === null) return null; // not a dispatcher-minted name — don't guess
   if (!(sessionStates instanceof Map)) return null; // listing unavailable/all-empty this pass — axis off
+  // #3383 — a REAL, direct death signal wins outright: no grace window (it is not an inference from silence),
+  // and it fires even when the row is LISTED with a non-terminal state (the phantom shape neither branch below
+  // can see — see the docblock above).
+  if (pidAlive === false) return true;
   if (!sessionStates.has(session)) {
     // Absence alone is ambiguous until the lease has outlived the listing's own visibility lag.
     if (typeof nowMs !== 'number') return null; // can't judge age — never guess
@@ -463,29 +527,37 @@ function fetchPrStates(flags) {
 }
 
 /**
- * ONE `claude agents --json --all` read → the session-name→state Map {@link sessionGoneForLease} checks leases
- * against — the real fix for the 2026-09-04/05 dead-session-stays-leased incident (see this file's header and
- * {@link sessionGoneForLease}'s own doc). `--all` IS LOAD-BEARING, exactly as `session-reaper.mjs` documents for
- * its own identical read: the plain (no-`--all`) listing drops a session the instant it stops running, which is
- * precisely the `done`/`failed`/`stopped` shape this axis needs to see, not the shape it needs hidden.
- * Best-effort: any failure (no `claude` on PATH, a hung/timed-out CLI, unparsable output) disables the axis for
- * this run (returns null → every lease's `sessionGone` is unknown → TTL-stale still bites), matching
- * {@link fetchPrStates}'s own degrade-on-failure convention. Routes through {@link sessionStatesForReap}, NOT
- * {@link sessionStateByName} directly, so a listing that PARSED but yielded zero background rows (a review
- * finding on #1921 — indistinguishable from a bad read) degrades the axis off too, not just a hard throw.
+ * ONE `claude agents --json --all` read → `{ states, pidAlive }` — the session-name→state Map
+ * {@link sessionGoneForLease} checks leases against, PLUS (#3383) the session-name→real-liveness Map from the
+ * SAME listing, so the phantom-listing widening above needs no second `claude` call. The real fix for the
+ * 2026-09-04/05 dead-session-stays-leased incident (see this file's header and {@link sessionGoneForLease}'s own
+ * doc). `--all` IS LOAD-BEARING, exactly as `session-reaper.mjs` documents for its own identical read: the plain
+ * (no-`--all`) listing drops a session the instant it stops running, which is precisely the
+ * `done`/`failed`/`stopped` shape this axis needs to see, not the shape it needs hidden.
+ * Best-effort: any failure (no `claude` on PATH, a hung/timed-out CLI, unparsable output) disables BOTH axes for
+ * this run (`states: null` → every lease's `sessionGone` is unknown → TTL-stale still bites), matching
+ * {@link fetchPrStates}'s own degrade-on-failure convention. `states` routes through {@link sessionStatesForReap},
+ * NOT {@link sessionStateByName} directly, so a listing that PARSED but yielded zero background rows (a review
+ * finding on #1921 — indistinguishable from a bad read) degrades that axis off too, not just a hard throw. The
+ * ONE `ps aux` scan behind `pidAlive` ({@link scanPsOutput}, driver-watchdog.mjs's own probe) is skipped entirely
+ * when nothing was listed — no rows, nothing to probe — mirroring that file's own discipline.
  */
-function fetchSessionStates(flags) {
-  if (flags['no-check-sessions']) return null;
+function fetchSessionSignals(flags) {
+  if (flags['no-check-sessions']) return { states: null, pidAlive: new Map() };
   let sessions;
   try {
     sessions = defaultListAgents({ exec: execFileSync, all: true });
   } catch (e) {
     log(`  ⚠ \`claude agents --json --all\` failed — session-gone reap axis OFF this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
-    return null;
+    return { states: null, pidAlive: new Map() };
   }
   const states = sessionStatesForReap(sessions);
   if (!states) log('  ⚠ `claude agents --json --all` listed zero background session(s) — session-gone reap axis OFF this run (indistinguishable from a bad read; TTL-stale still applies)');
-  return states;
+  // #3383 — ONE `ps aux` scan for the whole batch (never one subprocess per row), only when something was
+  // listed at all; `scanPsOutput` itself never throws (best-effort, returns null on failure).
+  const psOutput = Array.isArray(sessions) && sessions.length ? scanPsOutput({ exec: execFileSync }) : null;
+  const pidAlive = sessionPidAliveByName(sessions, { psOutput });
+  return { states, pidAlive };
 }
 
 /** Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). */
@@ -518,7 +590,7 @@ function main(argv) {
   const nowMs = Date.now();
 
   const prStates = fetchPrStates(flags); // null when the axis is off
-  const sessionStates = fetchSessionStates(flags); // null when the axis is off
+  const { states: sessionStates, pidAlive: sessionPidAlive } = fetchSessionSignals(flags); // states null when off
 
   // Collect every held lease across the scanned pools into flat candidates.
   const candidates = [];
@@ -534,7 +606,15 @@ function main(argv) {
   const signalsFor = (c) => {
     const num = itemNumFromSession(c.lease?.session);
     const prState = prStates && num ? prStates.get(num) ?? null : null;
-    return { prState, sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs }), pidAlive: pidAliveForLease(c.lease) };
+    // #3383 — the lease's own session's REAL process-liveness read (`null` when unknown/unlisted), threaded
+    // into sessionGoneForLease's phantom-listing widening. Distinct from `pidAliveForLease` below, which
+    // remains the dormant future-`agentPid` axis (today's leases carry no durable per-agent pid at all).
+    const sessionPidAliveNow = c.lease?.session && sessionPidAlive.has(c.lease.session) ? sessionPidAlive.get(c.lease.session) : null;
+    return {
+      prState,
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow }),
+      pidAlive: pidAliveForLease(c.lease),
+    };
   };
   const { reap, keep } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
 

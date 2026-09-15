@@ -60,6 +60,12 @@ const preparePayload = (over = {}) => ({
   ...over,
 });
 
+/** A stable, non-lane-shaped root for every `createDispatchSinks` call in this file — see the identical
+ *  constant + rationale in `./dispatch-lane-build-wiring.test.mjs` (#3637's 16-test false-failure regression):
+ *  `assertNotALaneCheckout` fires on the checkout's own on-disk BASENAME, which these tests never mean to
+ *  exercise, so a fixed fake root keeps them hermetic to where they happen to be checked out. */
+const PRIMARY = '/primary/webeverything';
+
 /** A `spawnDetached` stub that records the argv + options and answers with a fake child. */
 function recordingSpawnDetached(pid = 9310) {
   const calls = [];
@@ -88,6 +94,7 @@ describe('#3644 — a prepare-decision dispatch is MECHANICAL by default', () =>
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
 
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider`, NO `modes` override for this kind beyond what an EMPTY environment resolves to — the
       // sink reads the table itself and installs its own router over it.
       modes: dispatchModesFromEnv({}),
@@ -127,6 +134,7 @@ describe('#3644 — a prepare-decision dispatch is MECHANICAL by default', () =>
     const env = { WE_PREPARE_DECISION_DISPATCH_MODE: 'agent' };
 
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       modes: dispatchModesFromEnv(env),
       registry: registryWithRecordedSpawn(spawnDetached),
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },

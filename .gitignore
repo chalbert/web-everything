@@ -20,6 +20,15 @@ test-results/
 reports/progress-board.html
 reports/.progress-board-cache.json
 
+# Decision Docket GENERATED HTML (backlog/3562's data/template separation, scripts/gen-decision-docket.mjs)
+# — same shape as progress-board above: the page is a PURE re-render of reports/decision-docket-data.json
+# through skills-src/decision-docket/template.html, so committing it would churn the tree every run (the
+# generatedAt timestamp alone) with nothing a reader could review in the diff. The DATA file is the thing
+# meant to be tracked — its git history is the real, diff-able "what changed and when" record this rebuild
+# exists to provide, replacing the hand-written "Correction —"/"second pass" prose the old process baked
+# into the page itself. Regenerate the page any time with `npm run gen:decision-docket`.
+reports/decision-docket.html
+
 # Parcel build cache (trait-enforcer #787 conformance harness)
 .parcel-cache/
 
@@ -55,6 +64,11 @@ commitment-policy/**/*.d.ts
 # hit a PR-open failure on an outside dependency (a GitHub outage) records the resumable handle here; the
 # conveyor auto-retries + resume-opens once infra recovers. Operational recovery state, never committed.
 .conveyor/infra-blocked.json
+# …and (epic #3383) the re-nag dedup record + human log for its own "surfaced past the attempt cap, needs a
+# human" escalation (`planSurfaceEscalation`) — same per-checkout, machine-disposable state as the
+# driver-watchdog's own alert/log pair just below, never committed.
+.conveyor/infra-blocked-alert.json
+.conveyor/infra-blocked.log
 # CI queue-wait history sidecar (#3574) — the periodic `gh run list` wait-time sample the resident runner's own
 # tick appends to, so a genuine Actions run-queue regression becomes a visible trend instead of invisible.
 # Machine-local, recreated on demand by ci-queue-watch.mjs sweep; never committed, like the other sidecars here.
@@ -99,6 +113,19 @@ commitment-policy/**/*.d.ts
 # and the shared fold (we:scripts/lib/jury-ledger.mjs) reconstructs the live jury tree the conveyor + #2642
 # console render. Operational observability state (the #2612 single source of truth), machine-local, never committed.
 .conveyor/jury/
+# Durable EXTERNAL driver-status file (#3521/lane-2 incident, 2026-09-14) — the headless runner's own
+# self-diagnosed per-tick status (statusLine, stalled items, dispatch), overwritten every tick so a SEPARATE
+# process (a human, another agent, `scripts/conveyor/driver-status.mjs`) can answer "is the driver stuck?"
+# without grepping runner.log. Machine-local, recreated every tick, never committed.
+.conveyor/driver-status.json
+# Day-sharded plain-language DECISION TRACE (#3521 decision-trace v1, 2026-09-14) — one JSONL file per day, one
+# line per dispatch/skip/stall decision the driver made and WHY, appended every tick. Operational observability
+# state (mirrors the `.operations/telemetry/<date>.jsonl` day-sharding convention), machine-local, never committed.
+.conveyor/decision-trace/
+# Live-toggleable driver-verbose marker (#3521 decision-trace v1 follow-up, 2026-09-14) — set/cleared via
+# `driver-verbose.mjs on|off`, re-read (and its bounded `--ticks=N` window advanced) every tick by the currently
+# running driver. Session-local advisory state, never committed, like every other `.conveyor/*.json` marker here.
+.conveyor/driver-verbose.json
 # Durable per-fork MICRO-DECISION log (#2665) — one .jsonl per review subject; the read port appends a record
 # per human action on a fork (challenge/ask/annotate) and the surface fold reconstructs it, mirroring the jury
 # sidecar above. Operational state (machine-local), recreated on demand, never committed.

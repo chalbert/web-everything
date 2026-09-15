@@ -26,7 +26,7 @@ import { createMemoryRunStore, newRunRecord } from '../run-store.mjs';
 import { createRegistry } from '../registry.mjs';
 import { resolveOperation } from '../run.mjs';
 import {
-  CLEAR_STUCK_SESSION_OP, QUARANTINE_MOVE_EFFECT, STUCK_JOB_STATE,
+  CLEAR_STUCK_SESSION_OP, QUARANTINE_MOVE_EFFECT, STUCK_JOB_STATES,
   shapeStuckRead, assessStuck, authorizeQuestion, planMove, clearStuckSessionOperation,
 } from '../clear-stuck-session.mjs';
 import {
@@ -120,10 +120,10 @@ describe('assessStuck', () => {
     expect(v.reason).toMatch(/NOT dead \(liveness-unknown\)/);
   });
 
-  it('refusal 5 — job state is not "blocked"', () => {
-    const v = assessStuck(shapeStuckRead(stuckFacts({ stateJson: { state: 'working', detail: null, needs: null } })));
+  it('refusal 5 — job state is not one of STUCK_JOB_STATES', () => {
+    const v = assessStuck(shapeStuckRead(stuckFacts({ stateJson: { state: 'starting', detail: null, needs: null } })));
     expect(v.confirmedStuck).toBe(false);
-    expect(v.reason).toMatch(/job state is "working"/);
+    expect(v.reason).toMatch(/job state is "starting"/);
   });
 
   it('refusal 6 — a run record still holds this session in-flight', () => {
@@ -132,8 +132,14 @@ describe('assessStuck', () => {
     expect(v.reason).toMatch(/run-1:dispatch:0/);
   });
 
-  it('STUCK_JOB_STATE is "blocked" — pinned so a rename cannot silently widen the shape', () => {
-    expect(STUCK_JOB_STATE).toBe('blocked');
+  it('#3383 (2026-09-14) — a "working" session is ALSO confirmed stuck now, same as "blocked"', () => {
+    const v = assessStuck(shapeStuckRead(stuckFacts({ stateJson: { state: 'working', detail: null, needs: null } })));
+    expect(v).toMatchObject({ confirmedStuck: true, shortId: '08f5fdf9' });
+    expect(v.reason).toMatch(/confirmed stuck: state is "working"/);
+  });
+
+  it('STUCK_JOB_STATES names exactly {blocked, working} — pinned so a future widening is deliberate, not silent', () => {
+    expect([...STUCK_JOB_STATES].sort()).toEqual(['blocked', 'working']);
   });
 });
 

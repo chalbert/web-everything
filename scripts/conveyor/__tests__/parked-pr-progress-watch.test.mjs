@@ -63,6 +63,45 @@ describe('the real incidents this pass was born from', () => {
       pr: PR_1939.number, labels: PR_1939.labels, agents: [], labelEvents: events1939, now: NOW,
     })).toBe(false);
   });
+
+  // PR #2035 (2026-09-14, live): an OLD `review-2035`/`fix-2035` session ran once on 2026-09-07. The PR was
+  // later RE-PARKED — its fix landed, `review:changes` flipped back to `review:pending` — and then sat with
+  // NO new review dispatched for 19.7h before an unattended pass finally reviewed it. Before `sinceMs` existed,
+  // the stale 2026-09-07 session satisfied "ever dispatched" forever, so this pass could never have flagged
+  // that 19.7h re-parked window no matter how long it ran — see `everDispatchedReviewOrFix`'s own docblock.
+  const PR_2035 = { number: 2035, headRefName: 'lane/3627-fix-restricted-provider', labels: [{ name: 'review:pending' }] };
+  // The CURRENT `review:pending` hold started 30h ago (past the 24h default threshold) — this is the RE-park,
+  // not the PR's first one; an earlier `review:changes` event further back is irrelevant, `labeledAtFor` picks
+  // the latest `review:pending` event specifically.
+  const events2035 = [
+    { createdAt: H(200), labelName: 'review:changes' },
+    { createdAt: H(30), labelName: 'review:pending' },
+  ];
+  // The OLD sessions from the PR's first park period, well before this re-park (H(30)).
+  const staleAgents = [
+    { name: 'review-2035', state: 'done', startedAt: NOW - 190 * 60 * 60 * 1000 },
+    { name: 'fix-2035', state: 'done', startedAt: NOW - 185 * 60 * 60 * 1000 },
+  ];
+
+  it('#2035 (re-parked, nothing dispatched since the CURRENT park period began) is flagged neglected', () => {
+    expect(isNeglectedPr({
+      pr: PR_2035.number, labels: PR_2035.labels, agents: staleAgents, labelEvents: events2035, now: NOW,
+    })).toBe(true);
+  });
+
+  it('#2035 is NOT flagged once a FRESH `review-2035` session starts after the current park period began', () => {
+    const freshReview = { name: 'review-2035', state: 'working', startedAt: NOW - 10 * 60 * 60 * 1000 }; // H(10) — after H(30)
+    expect(isNeglectedPr({
+      pr: PR_2035.number, labels: PR_2035.labels, agents: [...staleAgents, freshReview], labelEvents: events2035, now: NOW,
+    })).toBe(false);
+  });
+
+  it('the OLD-sessions-only case would have been WRONGLY suppressed by the pre-fix "ever" rule — proves the gap this closes', () => {
+    // Calling the underlying predicate the way the old (pre-#2035-fix) call site did: no `sinceMs` at all.
+    expect(everDispatchedReviewOrFix({ pr: PR_2035.number, agents: staleAgents })).toBe(true); // old rule: never fires again
+    // The scoped rule used by `isNeglectedPr`/`watchNeglectedPrs` today correctly sees nothing dispatched since the re-park.
+    expect(everDispatchedReviewOrFix({ pr: PR_2035.number, agents: staleAgents, sinceMs: NOW - 30 * 60 * 60 * 1000 })).toBe(false);
+  });
 });
 
 describe('isNeglectedPr — the four ratified branches', () => {
@@ -150,6 +189,46 @@ describe('everDispatchedReviewOrFix', () => {
   it('false when no matching name is present', () => {
     expect(everDispatchedReviewOrFix({ pr: 9, agents: [{ name: 'review-8', state: 'done' }] })).toBe(false);
     expect(everDispatchedReviewOrFix({ pr: 9, agents: [] })).toBe(false);
+  });
+
+  describe('sinceMs (PR #2035 fix — scope the search to the current park period)', () => {
+    const sinceMs = NOW - 24 * 60 * 60 * 1000; // 24h before NOW
+
+    it('no match at all → false regardless of sinceMs', () => {
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: [], sinceMs })).toBe(false);
+    });
+
+    it('sinceMs omitted or non-finite → the original UNSCOPED "ever" behavior, unchanged', () => {
+      const old = [{ name: 'review-9', state: 'done', startedAt: NOW - 999 * 60 * 60 * 1000 }];
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: old })).toBe(true);
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: old, sinceMs: null })).toBe(true);
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: old, sinceMs: NaN })).toBe(true);
+    });
+
+    it('a matching row started BEFORE sinceMs does not count — the #2035 gap', () => {
+      const old = [{ name: 'review-9', state: 'done', startedAt: sinceMs - 60 * 60 * 1000 }]; // 1h before the window
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: old, sinceMs })).toBe(false);
+    });
+
+    it('a matching row started AT OR AFTER sinceMs counts', () => {
+      const atBoundary = [{ name: 'fix-9', state: 'done', startedAt: sinceMs }];
+      const after = [{ name: 'review-9', state: 'working', startedAt: sinceMs + 60 * 60 * 1000 }];
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: atBoundary, sinceMs })).toBe(true);
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: after, sinceMs })).toBe(true);
+    });
+
+    it('a matching row with unreadable/missing startedAt still counts — fail SAFE, never falsely flag', () => {
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: [{ name: 'review-9', state: 'done' }], sinceMs })).toBe(true);
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: [{ name: 'review-9', state: 'done', startedAt: 'not-a-number' }], sinceMs })).toBe(true);
+    });
+
+    it('one stale row and one fresh row for the SAME pr → true (any qualifying row is enough)', () => {
+      const rows = [
+        { name: 'review-9', state: 'done', startedAt: sinceMs - 60 * 60 * 1000 }, // stale
+        { name: 'fix-9', state: 'done', startedAt: sinceMs + 60 * 60 * 1000 },    // fresh
+      ];
+      expect(everDispatchedReviewOrFix({ pr: 9, agents: rows, sinceMs })).toBe(true);
+    });
   });
 });
 
@@ -313,5 +392,43 @@ describe('watchNeglectedPrs — the IO shell over injected fakes', () => {
     });
     expect(results).toHaveLength(1);
     expect(results.filter((r) => r.neglected)).toHaveLength(0);
+  });
+
+  it('PR #2035 shape end-to-end: a RE-PARKED PR with only an OLD review/fix session IS flagged by the real sweep', () => {
+    // Proves the production IO shell actually threads `labeledAt` into `isNeglectedPr` — a unit test on the
+    // pure core alone would not catch a wiring regression where `watchNeglectedPrs` stopped passing it through.
+    const prs = [{ number: 2035, headRefName: 'lane/3627-x', labels: [{ name: 'review:pending' }] }];
+    const events = [
+      { createdAt: H(200), labelName: 'review:changes' },
+      { createdAt: H(30), labelName: 'review:pending' }, // re-parked 30h ago — past the 24h threshold
+    ];
+    const staleAgents = [{ name: 'review-2035', state: 'done', startedAt: NOW - 190 * 60 * 60 * 1000 }]; // long before the re-park
+    const posted = [];
+    const results = watchNeglectedPrs({
+      now: NOW,
+      listPrs: () => prs,
+      listAgents: () => staleAgents,
+      listLabelEvents: () => events,
+      postFinding: ({ pr, body }) => posted.push({ pr, body }),
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ pr: 2035, neglected: true, posted: true });
+    expect(posted).toHaveLength(1);
+  });
+
+  it('the SAME PR #2035 shape is NOT flagged once a fresh session starts after the re-park', () => {
+    const prs = [{ number: 2035, headRefName: 'lane/3627-x', labels: [{ name: 'review:pending' }] }];
+    const events = [{ createdAt: H(30), labelName: 'review:pending' }];
+    const agents = [
+      { name: 'review-2035', state: 'done', startedAt: NOW - 190 * 60 * 60 * 1000 }, // stale
+      { name: 'review-2035', state: 'working', startedAt: NOW - 5 * 60 * 60 * 1000 }, // fresh, after the re-park
+    ];
+    const results = watchNeglectedPrs({
+      now: NOW,
+      listPrs: () => prs,
+      listAgents: () => agents,
+      listLabelEvents: () => events,
+    });
+    expect(results).toHaveLength(0);
   });
 });

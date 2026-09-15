@@ -230,6 +230,19 @@ export const METRIC_NAMES = Object.freeze([
   // Everything below the storage floor, summed — clearly labeled as a REMAINDER (unlike the old `other`,
   // which read as a category of its own), carrying `processCount` in its attributes.
   'host.process.below_floor_remainder.cpu_pct', 'host.process.below_floor_remainder.mem_bytes',
+  // ── gh-CALL RATE-LIMIT THROTTLE (epic #3383's git-manager vision, first real slice — `gh-throttle.mjs`
+  // self-calibration against GitHub's real live rate-limit signals, wired into `pr-land.mjs`'s `gh pr create`
+  // after it failed twice in one day with no automatic retry). `rate_limited` counts EVERY classified
+  // rate-limit-shaped `gh` failure — retried or finally given up on — tagged in `attributes` with `op` (the
+  // `gh` subcommand), `attempt`, `source` (`secondary-retry-after` | `primary-reset` | `guessed-backoff` —
+  // WHICH real signal, if any, calibrated the wait; see `gh-throttle.mjs`'s own header for why primary and
+  // secondary are never conflated) and `outcome` (`retry` | `exhausted`). `backoff_ms` is the wait actually
+  // chosen before a retry (not emitted on the terminal exhausted give-up, since no wait is taken there).
+  // `exhausted` counts a retry budget running out — the capacity signal a bare `rate_limited` count cannot
+  // give alone (a hit that succeeded on retry vs one that never recovered). Three separate low-cardinality
+  // names, not one name with a `metric` attribute — this file's own established convention (see
+  // `dispatch.tokens.*` / `host.process.*` above) so a plain sum-by-name rollup needs no attribute filter.
+  'gh.throttle.rate_limited', 'gh.throttle.backoff_ms', 'gh.throttle.exhausted',
 ]);
 
 /** Metric units — kept tiny and explicit so a renderer never has to guess whether 1200 is ms or a count.

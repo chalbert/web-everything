@@ -644,6 +644,22 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/reason: 'blocked-on-infra'/);
     expect(src).toMatch(/resumeHandle:/);
   });
+  it('#3383: a non-standard lane ref (no numeric/hash id) still gets a resumable infra-block record, never silently dropped', () => {
+    // The OLD `itemNum` regex only matched `lane/<NNN>` or `lane/x<hash>` — a ref like
+    // `lane/mark-3521-deliveryagent-codex` (a housekeeping/marker commit) matched neither, so `itemNum` came
+    // back `null`, and `recordInfraBlock` treats a blank `num` as "nothing to track" and silently no-ops. The
+    // fix falls back to the ref's own slug so ANY lane ref is a valid tracking key.
+    expect(src).toMatch(/REF\.replace\(\/\^lane\\\/\/, ''\)\.trim\(\) \|\| null/);
+  });
+  it('#3383: `recorded` reflects GROUND TRUTH (the store actually holds the item) rather than a bare no-throw', () => {
+    // recordInfraBlockIO is idempotent-as-a-no-op both on a missing num/ref AND on an already-tracked item —
+    // "it did not throw" is not the same claim as "the record now exists". The fix re-reads the store and
+    // checks real membership via `infraHas`, rather than setting `recorded = true` unconditionally after a
+    // non-throwing call (which is exactly how a falsy itemNum used to silently vanish while still being
+    // reported as `recorded: true`).
+    expect(src).toMatch(/recorded = infraHas\(readInfraStore\(path\), itemNum\)/);
+    expect(src).not.toMatch(/recorded = true;/);
+  });
   it('#2290: the --fallback-git local merge is routed through the shared gate (break-glass only)', () => {
     // fallback-git is a write to main → it must assert the caller may merge (blocked unless break-glass).
     expect(src).toMatch(/assertMayMerge\(\{ caller: 'pr-land'/);
