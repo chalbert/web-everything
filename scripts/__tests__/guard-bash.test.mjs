@@ -2132,3 +2132,108 @@ describe('truncated operation --json — pipeline scoping, not string scanning',
     expect(decide('node scripts/operations/run.mjs verify --json > /tmp/run.json; git log | tail -5')).toBeFalsy();
   });
 });
+
+// #3627 — the delivery agent's OWN Bash session (`--restricted`, spawned by
+// `we:scripts/operations/deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER`) may never run any of the
+// mechanical lifecycle commands its own wrapper drives end to end. Scoped via `dispatchKind === 'delivery'` —
+// the SAME `WE_DISPATCH_KIND` channel the #3105 dispatched-verification arm above already reads, now also
+// stamped by `CLAUDE_RESTRICTED_PROVIDER.spawn`. Every arm here is `reason(segment, { dispatchKind })`-level
+// (the per-segment table), never `decide`-only, EXCEPT the last describe block, which proves the real
+// enforcement point (`decide`) denies too, not just the pure predicate.
+describe('guard-bash — a delivery agent may never run the mechanical lifecycle commands itself (#3627)', () => {
+  it('denies `lane-pool.mjs` (any subcommand) for a delivery-agent session', () => {
+    expect(reason('node scripts/lane-pool.mjs acquire --lane=3', { dispatchKind: 'delivery' })).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs status --json', { dispatchKind: 'delivery' })).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs release --lane=3', { dispatchKind: 'delivery' })).toMatch(/lane-pool\.mjs/);
+  });
+
+  it('denies `backlog.mjs claim` and `backlog.mjs release` for a delivery-agent session', () => {
+    expect(reason('node scripts/backlog.mjs claim 1234 --session=x', { dispatchKind: 'delivery' })).toMatch(/backlog\.mjs claim/);
+    expect(reason('node scripts/backlog.mjs release 1234 --session=x', { dispatchKind: 'delivery' })).toMatch(/backlog\.mjs release/);
+  });
+
+  it('denies `gh pr` (any subcommand) for a delivery-agent session', () => {
+    expect(reason('gh pr view 1234', { dispatchKind: 'delivery' })).toMatch(/gh pr/);
+    expect(reason('gh pr create --title=x --body=y', { dispatchKind: 'delivery' })).toMatch(/gh pr/);
+    expect(reason('gh pr merge 1234', { dispatchKind: 'delivery' })).toMatch(/gh pr/); // the delivery-scoped arm, not just the #2290 merge-only arm
+  });
+
+  it('denies `run.mjs open-pr` and `open-pr.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/operations/run.mjs open-pr --ref=lane/1234-x --sha=HEAD --base=main', { dispatchKind: 'delivery' })).toMatch(/open-pr/);
+    expect(reason('node scripts/operations/open-pr.mjs', { dispatchKind: 'delivery' })).toMatch(/open-pr/);
+  });
+
+  it('denies `pr-land.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/pr-land.mjs --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
+  });
+
+  it('denies `learnings-drop.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x --area=y --suggestion=z', { dispatchKind: 'delivery' })).toMatch(/learnings-drop\.mjs/);
+  });
+
+  it('denies `converge-cli.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/converge-cli.mjs init --lane=/lane-3 --state=/lane-3/.converge-state.json', { dispatchKind: 'delivery' })).toMatch(/converge-cli\.mjs/);
+    expect(reason('node scripts/converge-cli.mjs step --state=/lane-3/.converge-state.json', { dispatchKind: 'delivery' })).toMatch(/converge-cli\.mjs/);
+  });
+
+  it('denies `verify-lane.mjs` for a delivery-agent session in EVERY mode — including `request`/`check`/`reset`, '
+    + 'unlike the #3105 build/fix/ci-heal carve-out (a delivery agent never runs the gate at all, not even the poll form)', () => {
+    expect(reason('node scripts/verify-lane.mjs --json', { dispatchKind: 'delivery' })).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs request', { dispatchKind: 'delivery' })).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs check', { dispatchKind: 'delivery' })).toMatch(/verify-lane\.mjs/);
+  });
+
+  it('denies `review-core-cli.mjs` for a delivery-agent session', () => {
+    expect(reason('node scripts/review-core-cli.mjs invite --file=x.json --json', { dispatchKind: 'delivery' })).toMatch(/review-core-cli\.mjs/);
+  });
+
+  it('never fires for an interactive session or any OTHER dispatch kind — scoped strictly to `delivery`', () => {
+    const commands = [
+      'node scripts/lane-pool.mjs acquire --lane=3',
+      'node scripts/backlog.mjs claim 1234 --session=x',
+      'gh pr view 1234',
+      'node scripts/operations/run.mjs open-pr --ref=lane/1234-x',
+      'node scripts/pr-land.mjs --pr=1234',
+      'node scripts/conveyor/learnings-drop.mjs --kind=friction',
+      'node scripts/converge-cli.mjs init --lane=/lane-3',
+      'node scripts/verify-lane.mjs request',
+      'node scripts/review-core-cli.mjs invite --file=x.json',
+    ];
+    for (const cmd of commands) {
+      expect(reason(cmd, {}), cmd).toBeNull();
+      expect(reason(cmd), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: null }), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: 'build' }), cmd).toBeNull(); // a DIFFERENT dispatch kind — not this table
+    }
+  });
+
+  it('does NOT over-block ordinary build/test/git commands for a delivery-agent session', () => {
+    const ordinary = [
+      'npm test',
+      'npm run test:unit',
+      'npm run check:standards',
+      'node --test scripts/operations/__tests__/deliver-item-wrapper.test.mjs',
+      'git status',
+      'git diff',
+      'git add scripts/operations/deliver-item-wrapper.mjs',
+      'git commit -m "build item #1234"',
+      'node scripts/some-other-tool.mjs --flag=lane-pool-ish-but-not-really',
+    ];
+    for (const cmd of ordinary) {
+      expect(reason(cmd, { dispatchKind: 'delivery' }), cmd).toBeNull();
+    }
+  });
+
+  it('reaches decide() — the real enforcement point, not just the pure per-segment predicate', () => {
+    expect(String(decide('node scripts/lane-pool.mjs acquire --lane=3', { dispatchKind: 'delivery' }))).toMatch(/lane-pool\.mjs/);
+    expect(String(decide('gh pr merge 1234', { dispatchKind: 'delivery' }))).toMatch(/gh pr/);
+    // chained: the deny fires even when the denied command sits alongside an otherwise-benign one
+    expect(String(decide('git status && node scripts/verify-lane.mjs check', { dispatchKind: 'delivery' }))).toMatch(/verify-lane\.mjs/);
+    // an ordinary, undenied chain still passes clean under the same dispatchKind. (`npm test`/check:standards
+    // are deliberately NOT used here — those are already denied for ANY dispatchKind by the pre-existing
+    // #3105 arm above, which is correct and unrelated to this new table.)
+    expect(decide('git status && git add -- scripts/x.mjs && git commit -m "build item #1234"', { dispatchKind: 'delivery' })).toBeNull();
+    // the identical commands, no dispatchKind at all (interactive) — untouched
+    expect(decide('node scripts/lane-pool.mjs acquire --lane=3')).toBeNull();
+  });
+});
