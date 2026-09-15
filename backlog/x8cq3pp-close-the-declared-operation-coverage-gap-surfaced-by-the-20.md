@@ -27,8 +27,8 @@ lacks*. Sorting them by what they actually are:
 | A **one-off build** of harness machinery (already an epic elsewhere) | 71 | ~96 | No — these are backlog items, and most are filed |
 | **Judgment work** (arbitration, trials, design calls, prior-art research) | 75 | ~89 | **No — should stay ad hoc; see § What must NOT become an operation** |
 
-So the real target is roughly **90 gap rows / ~228 dispatches**, and the 16 operations below cover them.
-The other ~146 rows are correctly ad hoc or already tracked; padding the plan with them would manufacture
+So the real target is roughly **95 gap rows / ~235 dispatches**, and the 17 operations below cover them.
+The other ~141 rows are correctly ad hoc or already tracked; padding the plan with them would manufacture
 work and, worse, would push judgment into declarations that cannot hold it.
 
 **The second, sharper finding:** the two heaviest clusters (runner activity at ~33 dispatches, PR-state
@@ -57,7 +57,7 @@ approximate at the margins (±1 from rows spanning two themes).
 | C18 | One-off research & scope questions | 15 | 22 | **No — route through `explore`** |
 | C9 | Prototype / POC branch lifecycle | 14 | 20 | **Build — phase 3** (`poc-land` exists, unregistered) |
 | C4 | Independent critique / adversarial draft screening | 3 | 20 | **Build — phase 2, cleanest candidate in the set** |
-| C12 | Heavy-command admission & container execution | 14 | 18 | **Mostly build work** — one read op |
+| C12 | Heavy-command admission & container execution | 14 | 18 | **Split** — audit half phase 1 (op 17); container/build half stays ad hoc |
 | C17 | One-off harness bug fixes | 15 | 17 | **No — these are backlog items** |
 | C8 | Dispatch eligibility & starvation diagnosis | 9 | 16 | **Build — phase 1** |
 | C10 | Lane recovery & verification repair | 9 | 14 | **Split — phase 3** |
@@ -68,9 +68,9 @@ approximate at the margins (±1 from rows spanning two themes).
 
 ## Phase 1 — read-only observability (build first)
 
-Five operations, all pure reads. No mutation, no gate-self exposure, no blast radius beyond a wrong answer
-on stdout. Together they cover ~107 of the 413 gap dispatches — the largest return in the plan and the
-safest. **Build all five before touching anything in phase 2**, because three of the phase-2/3 write
+Six operations, all pure reads. No mutation, no gate-self exposure, no blast radius beyond a wrong answer
+on stdout. Together they cover ~114 of the 413 gap dispatches — the largest return in the plan and the
+safest. **Build all six before touching anything in phase 2**, because three of the phase-2/3 write
 operations want these readers as their `-io` layer anyway.
 
 ### 1. `runner-activity` — *fresh build* (C1: 9 rows, ~33 dispatches)
@@ -188,9 +188,42 @@ re-audited by hand every time a child of #3643 lands.
   package — adding a skill here would be ceremony. *(Noting the absence deliberately: not every operation
   earns a skill, and pretending otherwise dilutes the ones that do.)*
 
+### 6. `heavy-admission-audit` — *extends `we:scripts/readiness/heavy-admission.mjs`* (C12 read half: ~5 of 14 rows, ~7 of 18 dispatches)
+
+**Purpose.** Report which commands are wired through the shared heavy-command capacity semaphore (#3461,
+ratified by #3456), whether observed concurrency matches what the semaphore actually admitted, and surface
+bypasses and slot-reentrancy leaks — without fixing any of them.
+
+Three *Audit heavy-command admission* dispatches, plus *Wire instructions to heavy admission*,
+*Record/probe container parallelism* and *Assess shared heavy-operation queue*, were all hand-tracing a
+decision `we:scripts/readiness/heavy-admission.mjs` already makes and records — exactly the shape
+`dispatch-eligibility` (#3) covers for `we:scripts/operations/dispatch-lane.mjs`'s predicate and
+`harness-coverage` (#5) covers for the dispatch-provider registry, applied to the *other* declared capacity
+gate. The module is real and already shipped (`resolveCap`, `tryAcquireSlot`, `releaseOwnedSlot`,
+`heldSlots`, `admissionStatus`) but is not wired to any declared operation —
+`we:scripts/operations/run.mjs --list` names nothing under "heavy" today.
+
+- **Extends vs fresh:** extend `we:scripts/readiness/heavy-admission.mjs` — it already exports the slot
+  ledger and lock-file layout; expose them as a reporting mode. **Do not fork a second slot reader**, the
+  same discipline `dispatch-eligibility` states for the dispatch predicate.
+- **Done when:** `we:scripts/operations/run.mjs heavy-admission-audit` lists every known heavy-command call
+  site (the ones named in `we:AGENTS.md`'s Definition of Done plus the actual
+  `we:scripts/readiness/heavy-admission.mjs` invocation sites) with wired yes/no — mirroring
+  `harness-coverage`'s shape — the currently held/free slots with owner, pid and age, and flags two named
+  defects the audit hit by hand tracing: a **bypass** (a heavy command observed running outside the
+  semaphore) and a **reentrancy leak** (one lane holding more than one slot at once). It is **read-only**: it
+  reports a bypass or a leak, it never closes one — closing one is a normal code fix, not this operation.
+  Exits non-zero when a known call site is found unwired, so it can fold into `check:standards` the same way
+  `harness-coverage` does.
+- **Companion skill:** `we:skills-src/heavy-admission-audit/SKILL.md` — teaches reaching for this instead of
+  hand-tracing "did concurrent lanes oversubscribe the host" (the audit's *Audit heavy-command admission*
+  ×3); states the negative case plainly: it reports wiring and slot state, it never wires a new call site
+  itself and never kills or reaps a process holding a stuck slot (that is incident response — an ordinary
+  bug, same disposition as C16 below, not this operation's job).
+
 ## Phase 2 — mechanical writes, bounded blast radius
 
-### 6. `critique-draft` — *extends `we:scripts/operations/review-prep.mjs`* (C4: 3 rows, ~20 dispatches)
+### 7. `critique-draft` — *extends `we:scripts/operations/review-prep.mjs`* (C4: 3 rows, ~20 dispatches)
 
 **Purpose.** Run a read-only adversarial screen over an arbitrary draft (a decision fork, a proposal, a
 scope amendment) and return structured findings.
@@ -214,7 +247,7 @@ mechanical to wire, zero blast radius (it writes nothing), and it removes 18 han
   not the model tier, per `we:agent-memory-src/right-size-the-panel-count-not-model-tier.md`; and that it
   is advisory only — it produces findings, never a verdict that gates anything.
 
-### 7. `mark-delivery` — *extends `we:scripts/operations/delivery-agent-marker.mjs`* (C7 part: ~6 dispatches)
+### 8. `mark-delivery` — *extends `we:scripts/operations/delivery-agent-marker.mjs`* (C7 part: ~6 dispatches)
 
 **Purpose.** Set or correct an item's `deliveryAgent` / `deliveryTarget` routing metadata.
 
@@ -232,7 +265,7 @@ mechanical, and it currently requires hand-editing frontmatter — which is how 
   enqueue) and two skills for one workflow is exactly the packaging noise that stops agents reaching for
   either.
 
-### 8. `queue-item` — *extends `we:scripts/operations/file-item.mjs`* (C7 part: ~2 dispatches, high leverage)
+### 9. `queue-item` — *extends `we:scripts/operations/file-item.mjs`* (C7 part: ~2 dispatches, high leverage)
 
 **Purpose.** Admit an **already-filed** item to the queue.
 
@@ -248,7 +281,7 @@ one that already exists. Cheap to add, and it closes a sharp edge.
   mark-then-enqueue pair as one workflow, and states the rule the audit shows being missed — filing and
   queueing are separate acts, and an item filed with `queue=false` needs this operation, not a re-file.
 
-### 9. `backlog-identity` — *extends `we:scripts/operations/scaffold.mjs`* (C7 part: ~5 dispatches)
+### 10. `backlog-identity` — *extends `we:scripts/operations/scaffold.mjs`* (C7 part: ~5 dispatches)
 
 **Purpose.** Detect and repair invalid, duplicated or hand-assigned backlog ids without breaking lineage.
 
@@ -269,7 +302,7 @@ exactly why it is worth declaring.
   is permanent; the newer item yields) so an agent does not have to have read
   `we:docs/agent/backlog-workflow.md` to stay safe.
 
-### 10. `epic-reconcile` — *fresh build* (C7 part: 7 dispatches)
+### 11. `epic-reconcile` — *fresh build* (C7 part: 7 dispatches)
 
 **Purpose.** Compare an epic's tracker state against the real state of its children and the code, and
 report the drift.
@@ -288,7 +321,7 @@ Today this is pure hand-reconciliation and it silently rots between sessions.
   session touching a standing epic (the audit shows the drift accumulating across seven separate
   reconstructions) and is explicit that it reports drift, it does not resolve anything.
 
-### 11. `inspect-run` — *promote existing skills* (C15: 6 rows, ~8 dispatches)
+### 12. `inspect-run` — *promote existing skills* (C15: 6 rows, ~8 dispatches)
 
 **Purpose.** Read back what a dispatched run actually did — Claude subagent or Codex — from its transcript.
 
@@ -309,7 +342,7 @@ scorecard writer) can call them.
 
 ## Phase 3 — mutating and judgment-adjacent (build last, verify hardest)
 
-### 12. `reap-stale-state` — *extends `we:scripts/operations/clear-stuck-session.mjs`* (C2 write half: ~9 dispatches)
+### 13. `reap-stale-state` — *extends `we:scripts/operations/clear-stuck-session.mjs`* (C2 write half: ~9 dispatches)
 
 **Purpose.** Release leases and quarantine records that `stale-state` proved dead.
 
@@ -328,7 +361,7 @@ re-deriving liveness.
   (`stale-state` first, always; never reap on a hunch), names the unpushed-work refusal as a feature rather
   than an obstacle to work around, and states plainly that `unknown` is not `dead`.
 
-### 13. `poc-land` (register) + `poc-sync` — *register existing + extend* (C9: ~10 of 20 dispatches)
+### 14. `poc-land` (register) + `poc-sync` — *register existing + extend* (C9: ~10 of 20 dispatches)
 
 **Purpose.** Land onto and keep current the registered prototype branches.
 
@@ -348,7 +381,7 @@ registry; this entry must **build on #3638, not duplicate it**.
   by design, and that no review tax applies on a POC landing (the #3637 ruling) — which is the single most
   misunderstood rule in tonight's prototype dispatches.
 
-### 14. `rescue-lane` — *composes `stale-state` + `verify` + `open-pr`* (C10: ~6 of 14 dispatches)
+### 15. `rescue-lane` — *composes `stale-state` + `verify` + `open-pr`* (C10: ~6 of 14 dispatches)
 
 **Purpose.** Inventory work stranded in an abandoned lane and, where it verifies clean, land it.
 
@@ -365,7 +398,7 @@ is not mechanisable. What *is* mechanical is the inventory and the verify→PR c
   landing is gated; is explicit that deciding whether stranded work is still wanted is the operator's call,
   not the operation's; and points at `reap-stale-state` for the lane afterwards.
 
-### 15. `graduation-report` — *fresh, read-only over existing stores* (C5 read half: ~6 of 41 dispatches)
+### 16. `graduation-report` — *fresh, read-only over existing stores* (C5 read half: ~6 of 41 dispatches)
 
 **Purpose.** Report each provider/role's accumulated trial evidence against its graduation criteria.
 
@@ -383,7 +416,7 @@ exist (`we:scripts/operations/record-verdict.mjs`, `we:scripts/operations/delive
   proposing a provider be graduated or vetoed, and states the boundary: it reports evidence, it does not
   judge sufficiency, and it never grants or clears a veto.
 
-### 16. `record-rule` — *extends `we:scripts/conveyor/learnings-drop.mjs`* (C6 write half: ~12 of 33 dispatches)
+### 17. `record-rule` — *extends `we:scripts/conveyor/learnings-drop.mjs`* (C6 write half: ~12 of 33 dispatches)
 
 **Purpose.** Write a durable rule to an **explicitly named** home, correctly shaped for that home.
 
@@ -428,6 +461,20 @@ Stated plainly, because the failure mode here is padding the plan to look thorou
   the routing is judgment and must stay so.
 - **Decision docket publishing** (C14, 13 dispatches) — **already filed as #3277**, blocked-on by #3562.
   Listed here only so it is not re-filed as a duplicate. Do not open a new card.
+- **Container execution & the semaphore's own build defects** (C12 build half, ~9 of 14 rows, ~11 of 18
+  dispatches) — the container POC (*Build heavy-command container POC*), extending it to tests (*Extend
+  container execution to tests*), the container credential/auth transport (*Research container subscription
+  authentication*, *Correct container auth/billing record*), isolation verification (*Test Antigravity
+  container isolation*), sequencing (*Record container sequencing*), the semaphore's own concurrency bug
+  (*Fix heavy-slot reentrancy*), and the two runaway-process incidents that surfaced through it (*Diagnose
+  runaway history search*, *Kill runaway diagnostic shells*) are new dispatch/execution infrastructure and
+  one-off incident response — exactly what `we:docs/agent/prototype-based-dev.md` says to **park until
+  genuinely exercised end to end**, never declare as a mechanical operation while the design (the container
+  auth model, the isolation boundary, correct slot accounting under real concurrent lanes) is still being
+  worked out. Each stays a backlog item under the container-execution effort or gets filed individually, the
+  same disposition C16/C17 already get above. `heavy-admission-audit` (operation 6) covers only the read
+  half — the wiring/state report — and was the one piece of C12 genuinely shaped like every other phase-1
+  operation: a report over a predicate the code already computes.
 
 ## Build and verify pattern
 
@@ -456,13 +503,13 @@ Per tonight's established convention:
 ## Done when
 
 1. **Executable** — `we:scripts/operations/run.mjs --list` names all of `runner-activity`, `pr-reconcile`,
-   `dispatch-eligibility`, `stale-state` and `harness-coverage` (phase 1), each exits 0 on a clean repo,
-   and `harness-coverage` exits non-zero when a launch kind regresses to unwired. Fails today; passes when
-   phase 1 lands.
-2. **Children filed** — the 16 operations above exist as child items under this epic, each carrying its own
+   `dispatch-eligibility`, `stale-state`, `harness-coverage` and `heavy-admission-audit` (phase 1), each
+   exits 0 on a clean repo, and `harness-coverage`/`heavy-admission-audit` each exit non-zero when a known
+   call site regresses to unwired. Fails today; passes when phase 1 lands.
+2. **Children filed** — the 17 operations above exist as child items under this epic, each carrying its own
    acceptance criteria and its companion-skill line, in the phase order given.
 3. **Coverage re-measured** — the dispatch audit is re-run against the enlarged operation set and the
-   ~228-dispatch target band is demonstrably reduced. A second audit that shows no movement means the
+   ~235-dispatch target band is demonstrably reduced. A second audit that shows no movement means the
    operations were built but not *packaged*, and the skills are the fix.
 4. **No duplicate cards** — nothing here is re-filed against #3277, #3562, #3638, #3643 or #3671; those
    clusters are cross-referenced, not re-opened.
