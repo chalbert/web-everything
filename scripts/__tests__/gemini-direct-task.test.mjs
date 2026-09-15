@@ -284,9 +284,18 @@ describe('buildAgyDirectTaskArgv — observed stdin route, no invented flags or 
   it('leaves model/effort compatibility to agy, without a hardcoded catalogue', () => {
     expect(buildAgyDirectTaskArgv({ model: 'claude-sonnet-4-6', effort: 'low' })).toContain('low');
   });
+  it('resumes an explicit conversation in text print mode with the same execution options', () => {
+    expect(buildAgyDirectTaskArgv({ resumeConversationId: 'afa6b941-eb5d-4652-9471-4bae369c1cbd',
+      model: 'chosen', effort: 'high', addDirs: ['/extra'], sandbox: true, printTimeoutMs: 540000 }))
+      .toEqual(['--input-format', 'text', '--output-format', 'stream-json',
+        '--disable-slash-commands', '--dangerously-skip-permissions', '--add-dir', '/extra',
+        '--model', 'chosen', '--effort', 'high', '--sandbox', '--print-timeout', '540s',
+        '--conversation', 'afa6b941-eb5d-4652-9471-4bae369c1cbd', '--print', '']);
+  });
   it.each([
     { addDirs: 'path' }, { addDirs: [''] }, { addDirs: [false] }, { model: '' }, { model: true },
     { model: '--oops' }, { effort: 'constructor' }, { effort: 'ultra' }, { sandbox: 'false' },
+    ...['', '   ', false, '--continue'].map((resumeConversationId) => ({ resumeConversationId })),
     ...[0, -1, NaN, Infinity, '100', 0.5, 2147483648].map((printTimeoutMs) => ({ printTimeoutMs })),
   ])('rejects malformed options %j', (opts) => { expect(() => buildAgyDirectTaskArgv(opts)).toThrow(TypeError); });
 });
@@ -418,6 +427,94 @@ function fakeExec(calls = []) {
 }
 
 describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', () => {
+  it('recovers the init UUID after SIGKILL and resumes once with a fresh budget and no task replay', async () => {
+    vi.useFakeTimers();
+    const dir = tempDir();
+    const id = 'afa6b941-eb5d-4652-9471-4bae369c1cbd';
+    // The supplied real-timeout ID and init envelope, followed by an unfinished JSONL line.
+    const partial = jsonl([{ event: 'init', conversation_id: id }]) + '{"event":"step_update"';
+    const first = fakeSpawn(partial, { hang: true, stderr: 'first attempt interrupted' });
+    const second = fakeSpawn('', { hang: true });
+    const spawnFn = vi.fn().mockImplementationOnce(first.fn).mockImplementationOnce(second.fn);
+    const execFn = fakeExec();
+    const pending = geminiDirectTask({ dir, task: 'original task', stream: false, timeoutMs: 20,
+      model: 'chosen', effort: 'high', addDirs: ['/extra'], sandbox: true, gate: 'standards', execFn, spawnFn });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(first.seen.child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(spawnFn).toHaveBeenCalledTimes(1); // wait for close/output drain before starting the resume
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(second.seen.argv).toEqual(['--input-format', 'text', '--output-format', 'stream-json',
+      '--disable-slash-commands', '--dangerously-skip-permissions', '--add-dir', '/extra',
+      '--model', 'chosen', '--effort', 'high', '--sandbox', '--print-timeout', '0.02s',
+      '--conversation', id, '--print', '']);
+    expect(second.seen.opts).toEqual(first.seen.opts);
+    expect(first.seen.stdin).toContain('original task');
+    expect(second.seen.ended).toBe(true);
+    expect(second.seen.stdin).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(19); // almost a full new budget after the original wall expired
+    expect(second.seen.child.kill).not.toHaveBeenCalled();
+    const result = jsonl([{ event: 'result', result: { status: 'SUCCESS', response: 'Finished resumed task' } }]);
+    second.seen.child.stdout.emit('data', Buffer.from(result));
+    second.seen.child.emit('close', 0);
+    const report = await pending;
+    expect(report).toMatchObject({ exitCode: 0, timedOut: false, resumed: true, resumeConversationId: id,
+      events: { conversationId: id, terminal: 'SUCCESS', finalResponse: 'Finished resumed task', errorMessage: null },
+      diff: { hasChanges: true }, gate: { ran: true, pass: true } });
+    expect(report.argv).toEqual(second.seen.argv);
+    expect(readFileSync(report.logFile, 'utf8')).toBe(partial + '\n' + result);
+    expect(execFn.mock.calls.filter(([, args]) => args.includes('check:standards'))).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([1, null])('resumes a mid-run crash with exit code %s and an init ID', async (code) => {
+    const first = fakeSpawn(jsonl(REAL_EVENTS.slice(0, 2)), { code });
+    const second = fakeSpawn(jsonl(REAL_EVENTS));
+    const spawnFn = vi.fn().mockImplementationOnce(first.fn).mockImplementationOnce(second.fn);
+    const report = await geminiDirectTask({ dir: tempDir(), task: 't', stream: false, execFn: fakeExec(), spawnFn });
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(second.seen.argv.slice(-4)).toEqual(['--conversation', REAL_EVENTS[0].conversation_id, '--print', '']);
+    expect(report).toMatchObject({ resumed: true, resumeConversationId: REAL_EVENTS[0].conversation_id,
+      exitCode: 0, timedOut: false, events: { terminal: 'SUCCESS' } });
+  });
+
+  it.each([true, false])('does not retry without a conversation ID (timeout: %s)', async (hang) => {
+    vi.useFakeTimers();
+    const { fn: spawnFn } = fakeSpawn('partial non-JSON output', { hang, code: 1 });
+    const pending = geminiDirectTask({ dir: tempDir(), task: 't', stream: false, timeoutMs: 20,
+      execFn: fakeExec(), spawnFn });
+    await vi.runAllTimersAsync();
+    const report = await pending;
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(report).toMatchObject({ resumed: false, resumeConversationId: null, timedOut: hang,
+      exitCode: hang ? null : 1, events: { conversationId: null, terminal: null }, diff: { hasChanges: true } });
+  });
+
+  it.each(['timeout', 'crash', 'terminal error'])('caps the retry at one after a second %s', async (failure) => {
+    vi.useFakeTimers();
+    // Even a stale SUCCESS before a timeout must not mask a subsequent failed resume.
+    const first = fakeSpawn(jsonl(REAL_EVENTS), { hang: true });
+    const second = fakeSpawn(jsonl(failure === 'terminal error' ? [REAL_EVENTS[0], ERROR_EVENT] : [REAL_EVENTS[0]]),
+      { hang: failure === 'timeout', code: 1 });
+    const spawnFn = vi.fn().mockImplementationOnce(first.fn).mockImplementationOnce(second.fn);
+    const pending = geminiDirectTask({ dir: tempDir(), task: 't', stream: false, timeoutMs: 20,
+      execFn: fakeExec(), spawnFn });
+    await vi.runAllTimersAsync();
+    const report = await pending;
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(report).toMatchObject({ resumed: true, resumeConversationId: REAL_EVENTS[0].conversation_id,
+      timedOut: failure === 'timeout', exitCode: failure === 'timeout' ? null : 1,
+      events: { terminal: failure === 'terminal error' ? 'ERROR' : null }, diff: { hasChanges: true } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([0, 1])('does not resume a completed terminal failure (exit %s)', async (code) => {
+    const { fn: spawnFn } = fakeSpawn(jsonl([REAL_EVENTS[0], ERROR_EVENT]), { code });
+    const report = await geminiDirectTask({ dir: tempDir(), task: 't', stream: false, execFn: fakeExec(), spawnFn });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(report).toMatchObject({ resumed: false, resumeConversationId: null, exitCode: code, events: { terminal: 'ERROR' } });
+  });
+
   it.each([
     ['SIGINT', false], ['SIGINT', true], ['SIGTERM', false], ['SIGTERM', true],
   ])('kills the child group and re-delivers %s (group kill throws: %s)', async (signal, groupKillThrows) => {
@@ -559,10 +656,12 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     const { fn: spawnFn, seen } = fakeSpawn(jsonl(REAL_WRITE_EVENTS));
     const report = await geminiDirectTask({ task: 'edit a file', dir, gate: 'full', stream: false, execFn, spawnFn });
     expect(report).toMatchObject({ dir, scratch: { created: false }, startSha: 'startsha123', exitCode: 0,
-      timedOut: false, events: { terminal: 'SUCCESS' }, diff: { hasChanges: true }, gate: { pass: true, mode: 'full' } });
+      timedOut: false, resumed: false, resumeConversationId: null,
+      events: { terminal: 'SUCCESS' }, diff: { hasChanges: true }, gate: { pass: true, mode: 'full' } });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
     expect(report.argv).toEqual(seen.argv);
     expect(report.logFile).toBe(join(dir, 'git-metadata', 'gemini-direct-task.jsonl'));
-    expect(Object.keys(report).sort()).toEqual(['dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'events', 'diff', 'gate'].sort());
+    expect(Object.keys(report).sort()).toEqual(['dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'resumed', 'resumeConversationId', 'events', 'diff', 'gate'].sort());
     expect(calls[0].args).toEqual(['-C', dir, 'rev-parse', 'HEAD']);
     expect(calls.some((c) => c.args.includes('clone'))).toBe(false);
     expect(calls.some((c) => c.args.join(' ') === `-C ${dir} diff startsha123`)).toBe(true);
@@ -635,6 +734,9 @@ describe('CLI — flag parsing and truthful reports without a real process', () 
     expect(taskFn).not.toHaveBeenCalled();
     expect(output.mock.calls[0][0]).toContain('bookkeeping only');
     expect(output.mock.calls[0][0]).toContain("NOT agy's own native file tools");
+    expect(output.mock.calls[0][0]).toContain('resume exactly once via --conversation <ID>');
+    expect(output.mock.calls[0][0]).toContain('No ID means no retry');
+    expect(output.mock.calls[0][0]).toContain('up to twice --timeout-ms');
   });
   it.each([{ argv: [] }, { argv: ['--task=t', '--task-file=f'] }])('requires exactly one task source: %j', async ({ argv }) => {
     await expect(main(argv, { taskFn: vi.fn() })).rejects.toThrow(/exactly one/);
@@ -653,6 +755,9 @@ describe('CLI — flag parsing and truthful reports without a real process', () 
     expect(text).toContain('AGENT MADE COMMITS');
     expect(text).toContain('bad123 unwanted commit');
     expect(text).toContain('NO real sandbox');
+  });
+  it('shows the resumed conversation in the human report', () => {
+    expect(formatReport({ ...report, resumed: true, resumeConversationId: 'known-id' })).toContain('resumed once: known-id');
   });
   it.each([
     { exitCode: 1 }, { timedOut: true }, { events: { ...report.events, terminal: 'ERROR' } },

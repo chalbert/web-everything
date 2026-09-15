@@ -24,7 +24,9 @@
  * not probes repeated by this implementation. #3632 tested a DIFFERENT, retired standalone Gemini CLI;
  * its verdict and flags do not apply. This implementation uses only agy's observed flag surface:
  * --input-format, --output-format, --disable-slash-commands, --dangerously-skip-permissions, --add-dir,
- * --model, --effort, --sandbox, --print-timeout, --print. There is NO -C; Node spawn's cwd sets launch cwd.
+ * --model, --effort, --sandbox, --print-timeout, --print. Local `agy --help` also confirms --continue
+ * (most recent conversation) and --conversation (resume by ID); retries use the latter unambiguously.
+ * There is NO -C; Node spawn's cwd sets launch cwd.
  * The tool shell's own cwd is UNRELIABLE (#3633 probe 20); the prompt names the absolute target and
  * requires absolute paths, including explicit command working directories, rather than trusting pwd.
  *
@@ -48,7 +50,9 @@
  * mkTempDir/existsFn; runAgyDirectExec takes spawnFn. Tests replay the supplied literal event shapes,
  * never launch a real agy/git/npm process. This is a self-contained sibling of codex-direct-task.mjs.
  * The parent SIGKILL wall is the real ceiling (30 min default); --print-timeout is a secondary hint
- * because it does not cover the interactive OAuth hang (#3633 probe 17).
+ * because it does not cover the interactive OAuth hang (#3633 probe 17). geminiDirectTask resumes ONCE
+ * after a timeout or a nonzero/null exit without a terminal result, only with an init conversation ID.
+ * Each attempt gets the full timeout budget (up to two parent walls); resuming sends no original prompt.
  * Logs default inside .git so bookkeeping does not pollute the working-tree diff. Scratch clones are
  * local clones of committed HEAD, not copies of uncommitted changes. Gates are none/standards/full;
  * full runs check:standards + the WHOLE Vitest suite, without changed-test selection.
@@ -81,8 +85,10 @@ function validateTimeout(value) {
 }
 
 /** Pure argv AFTER agy. No required cwd flag exists; scope is supplied via spawn and the prompt. */
-export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs } = {}) {
-  const argv = ['--input-format', 'stream-json', '--output-format', 'stream-json',
+export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs, resumeConversationId = null } = {}) {
+  // Resume is a text-mode empty --print with an explicit conversation, not a new NDJSON user turn.
+  // stream-json input is for the initial task only: it runs one turn per stdin message.
+  const argv = ['--input-format', resumeConversationId === null ? 'stream-json' : 'text', '--output-format', 'stream-json',
     '--disable-slash-commands', '--dangerously-skip-permissions'];
   if (!Array.isArray(addDirs)) throw new TypeError('gemini-direct-task: addDirs must be an array');
   for (const dir of addDirs) {
@@ -104,7 +110,12 @@ export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = 
     validateTimeout(printTimeoutMs);
     argv.push('--print-timeout', `${printTimeoutMs / 1000}s`);
   }
-  return [...argv, '--print', '']; // REQUIRED empty value. The entire prompt rides stdin.
+  if (resumeConversationId !== null) {
+    requireText(resumeConversationId, 'resumeConversationId');
+    if (resumeConversationId.trim().startsWith('-')) throw new TypeError('gemini-direct-task: resumeConversationId must not be flag-shaped');
+    argv.push('--conversation', resumeConversationId);
+  }
+  return [...argv, '--print', '']; // REQUIRED empty value; initial prompt rides stdin, resume has none.
 }
 
 export function buildAgyPrompt(task, absoluteDir) {
@@ -318,20 +329,23 @@ export function runGate({ dir, mode, execFn = defaultExecFn }) {
 /**
  * Stream raw JSONL to logFile and optionally stdout. Always resolves, including spawn/log/timeout errors.
  * The parent wall kills with SIGKILL; the child's close event drains remaining output before reporting.
+ * Runs one attempt. Resume mode appends to the log and closes stdin without replaying the task.
  * No child process is created by unit tests: spawnFn is injectable.
  */
 export async function runAgyDirectExec({
   dir, task, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI,
+  logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null,
 } = {}) {
   let argv = [];
   let stdinLine;
   try {
     validateTimeout(timeoutMs);
-    argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs });
-    stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir));
+    argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs, resumeConversationId });
+    if (resumeConversationId === null) stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir));
     requireText(logFile, 'logFile');
-    writeFileSync(logFile, '');
+    // A killed process can leave a partial final line. Separate attempts before appending new JSONL.
+    if (resumeConversationId !== null) appendFileSync(logFile, '\n');
+    else writeFileSync(logFile, '');
   } catch (e) {
     return { stdout: '', stderr: e.message, code: null, timedOut: false, argv };
   }
@@ -408,7 +422,7 @@ export async function runAgyDirectExec({
   });
 }
 
-/** Resolve target, record HEAD, run once, capture diff, optionally gate. NEVER commit/push/open a PR. */
+/** Resolve target, record HEAD, run with at most one resume, capture diff, gate. NEVER commit/push/open a PR. */
 export async function geminiDirectTask({
   task, dir, repoRoot, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
   gate = 'none', logFile, stream = true, installDeps = true,
@@ -435,11 +449,27 @@ export async function geminiDirectTask({
   const gitDir = logFile ? null : execFn('git', ['-C', targetDir, 'rev-parse', '--absolute-git-dir']).trim();
   const resolvedLogFile = logFile ? resolve(logFile) : join(gitDir, 'gemini-direct-task.jsonl');
   mkdirSync(dirname(resolvedLogFile), { recursive: true });
-  const run = await runAgyDirectExec({
+  const runOptions = {
     dir: targetDir, task, model, effort, addDirs, sandbox, timeoutMs,
     logFile: resolvedLogFile, stream, spawnFn,
-  });
-  const summary = summarizeAgyEvents(parseJsonlEvents(run.stdout));
+  };
+  let run = await runAgyDirectExec(runOptions);
+  let summary = summarizeAgyEvents(parseJsonlEvents(run.stdout));
+  let resumeConversationId = null;
+  // A terminal result is a completed failure/success, not a mid-run crash. Without an init ID there
+  // is nothing safe to resume; --continue could select another concurrent task's conversation.
+  if ((run.timedOut || (run.code !== 0 && summary.terminal === null))
+      && typeof summary.conversationId === 'string' && summary.conversationId.trim()
+      && !summary.conversationId.trim().startsWith('-')) {
+    resumeConversationId = summary.conversationId;
+    // Exactly one additional call, never recursion/a loop. Give the resumed work a full fresh parent
+    // SIGKILL wall: the original budget may already be exhausted, leaving no time to make progress.
+    run = await runAgyDirectExec({ ...runOptions, resumeConversationId });
+    // Status/events describe the final attempt; the append-only resume log preserves both traces.
+    // In particular, an earlier result must not mask a resumed attempt that crashes before any result.
+    summary = summarizeAgyEvents(parseJsonlEvents(run.stdout));
+    summary.conversationId ??= resumeConversationId;
+  }
   // Startup errors can precede every JSONL event. Preserve the CLI's remedy instead of losing stderr.
   if (!summary.errorMessage && run.stderr.trim()) summary.errorMessage = run.stderr.trim();
   const diff = captureDiff({ dir: targetDir, startSha, execFn });
@@ -448,6 +478,7 @@ export async function geminiDirectTask({
     dir: targetDir,
     scratch: scratch ? { created: true, source: repoRoot, depsInstall: scratch.depsInstall } : { created: false },
     startSha, argv: run.argv, logFile: resolvedLogFile, exitCode: run.code, timedOut: run.timedOut,
+    resumed: resumeConversationId !== null, resumeConversationId,
     events: summary, diff, gate: gateResult,
   };
 }
@@ -481,12 +512,16 @@ export const HELP = `usage: node scripts/gemini-direct-task.mjs --task=<text>|--
   --model=<slug> --effort=low|medium|high  Optional passthroughs; no validated recommendation for this role.
   --add-dir=<dir>            Repeatable bookkeeping only, NOT a sandbox or permission boundary.
   --sandbox                  Confines the shell only, NOT agy's own native file tools.
-  --timeout-ms=<n>            Parent SIGKILL ceiling, default 30 min; print-timeout is a secondary hint.
+  --timeout-ms=<n>            Parent SIGKILL ceiling PER ATTEMPT, default 30 min; print-timeout is a hint.
   --gate=none|standards|full  Default none; full = check:standards + WHOLE Vitest suite.
   --no-stream                Still logs JSONL; suppresses live stdout.
   --log=<path>               Default <dir>/.git/gemini-direct-task.jsonl.
   --no-install               Skip scratch clone dependency installation.
   --json                     Full report only on stdout (implies --no-stream).
+Timeout or nonzero/null exit without a terminal result: resume exactly once via --conversation <ID>,
+only with a captured init conversation ID. No ID means no retry. Each attempt gets a fresh timeout
+budget (up to twice --timeout-ms); the original prompt is not replayed. Both attempts stay in the log.
+Report status/events describe the last attempt; resumed and resumeConversationId identify the retry.
 No real write/read confinement exists. Review the diff; this script never commits or pushes.`;
 
 /** Human report prints the full artifact, not merely a diff stat or the agent's self-report. PURE. */
@@ -498,6 +533,7 @@ export function formatReport(report) {
     `log: ${report.logFile}`,
     `usage (tokens only): ${JSON.stringify(report.events.usage)}`,
   ];
+  if (report.resumed) lines.push(`resumed once: ${report.resumeConversationId}`);
   if (report.events.errorMessage) lines.push(`error: ${report.events.errorMessage}`);
   if (report.events.finalResponse) lines.push(`agent response:\n${report.events.finalResponse}`);
   if (report.diff.commits.length) {
