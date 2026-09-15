@@ -162,7 +162,11 @@ import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 // #xu2pp2m — THE MECHANICAL ARC THIS FILE NOW DEFAULTS TO. See the header block: the wrapper IS the three
 // commands `review-agent-brief.md` told a spawned agent to type, done as pure Node with no LLM turn.
 import { BLOCKED_ON_INFRA, dispatchReviewMechanical } from './review-dispatch-wrapper.mjs';
-import { autoFixAfterReview } from '../conveyor/autofix-review-findings.mjs';
+import { autoFixAfterReview, summarizeAutoFixDecline, renderAutoFixDeclineNote } from '../conveyor/autofix-review-findings.mjs';
+// #3383 mechanical-dispatcher — the SAME bare-comment primitive `we:scripts/operations/review-pr-io.mjs`'s
+// `ADVISORY_NOTE` effect posts through, reused here for the decline note for the identical reason: this is a
+// comment with no label swap attached, never `we:scripts/review-set-label.mjs` (#2644 always couples the two).
+import { createGhProvider } from '../lib/review-label-provider.mjs';
 
 /** The review-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
  *  (`#xy8di3v`, extending `#3418`/`#xqyyoje`'s fix to the review-dispatch path). Passed via
@@ -600,18 +604,39 @@ export function dispatchReviewCli(argv = [], {
  * autofix-review-findings.mjs`'s own header) — it re-runs no judge and posts no second review. A `--agent`
  * dispatch (`mode !== 'mechanical'`) and every non-parked/non-human outcome are left untouched, byte-identical
  * to before this existed.
+ *
+ * #3383 — THE VISIBILITY GAP: a clean "0 of N auto-fixable" decline (e.g. every finding path-blacklisted) used
+ * to post NOTHING to the PR — only a `writeErr` on an actual thrown error, and a decline is not an error. An
+ * operator reading the advisory comment had no way to tell "auto-fix ran and found nothing to touch" apart from
+ * "auto-fix never ran". When {@link summarizeAutoFixDecline} finds that exact shape, this now posts one small,
+ * visible follow-up comment via the SAME bare `postComment` primitive `we:scripts/operations/review-pr-io.mjs`'s
+ * `ADVISORY_NOTE` effect uses (never `we:scripts/review-set-label.mjs` — no label swap is involved). Posting the
+ * note is best-effort: a failure there is reported the same way an auto-fix router failure already is
+ * (`writeErr`, never rethrown) — the review verdict already landed and nothing here should risk it.
  * @param {{code: number, mode: string, result: object|null}} cliResult
- * @param {{autoFixFn?: Function, writeErr?: Function}} [io]
- * @returns {Promise<{ran: boolean, autofix?: object, error?: string}>}
+ * @param {{autoFixFn?: Function, writeErr?: Function, postDeclineNote?: Function}} [io]
+ * @returns {Promise<{ran: boolean, autofix?: object, decline?: object|null, error?: string}>}
  */
-export async function runAutoFixRoute(cliResult, { autoFixFn = autoFixAfterReview, writeErr = (l) => writeLineSync(2, l) } = {}) {
+export async function runAutoFixRoute(cliResult, {
+  autoFixFn = autoFixAfterReview,
+  writeErr = (l) => writeLineSync(2, l),
+  postDeclineNote = (repo, pr, body) => createGhProvider().postComment(repo, pr, body),
+} = {}) {
   const { mode, result } = cliResult ?? {};
   if (mode !== 'mechanical') return { ran: false };
   const humanParked = result?.classified?.outcome === 'parked' && result?.raw?.verdict?.humanRequired === true;
   if (!humanParked) return { ran: false };
   try {
     const autofix = await autoFixFn({ pr: result.pr, repo: result.repo, findings: result.raw.verdict.findings });
-    return { ran: true, autofix };
+    const decline = summarizeAutoFixDecline(autofix);
+    if (decline) {
+      try {
+        postDeclineNote(result.repo, result.pr, renderAutoFixDeclineNote(decline));
+      } catch (e) {
+        writeErr(`review-dispatch: auto-fix decline note failed to post (advisory comment + verdict are unaffected): ${String(e?.message ?? e)}`);
+      }
+    }
+    return { ran: true, autofix, decline };
   } catch (e) {
     const message = String(e?.message ?? e);
     writeErr(`review-dispatch: auto-fix route failed (advisory comment + verdict are unaffected): ${message}`);

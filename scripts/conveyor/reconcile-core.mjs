@@ -104,6 +104,9 @@ import { classifyPr } from '../progress-board.mjs';
 import { reduceCheckState } from '../operations/pr-status.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../lib/jury-core.mjs';
 import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
+// #3383 mechanical-dispatcher round-cap fix — see this module's own header note on REFUSAL 3 below, and
+// `advisory-round-count.mjs`'s header for the PR #2117 incident this closes.
+import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
@@ -518,7 +521,22 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
     // the PR's comment thread; `countRearmComments` re-reads the same thread here so a shell that forgot to
     // supply the map cannot silently reset a burned PR to zero. NO in-process tally is consulted, by design:
     // this pass is one-shot, it carries nothing in, and a cap a restart can reset is not a cap.
-    const attempts = Math.max(Number(counts[prNumber]) || 0, countRearmComments(pr?.comments));
+    //
+    // #3383 — `countAdvisoryComments` IS UNIONED IN, not swapped for `countRearmComments`. A `needs-human` PR's
+    // `review:pending` label never clears (INVARIANT 2, `decideSetLabel`), so its `record` step never bounces
+    // and NO re-arm comment is ever posted for it — `countRearmComments` alone stayed pinned at 0 across all
+    // SIX real advisory rounds PR #2117 ran (confirmed live 2026-09-14, identical commit range every time),
+    // which is exactly why the cap never bound. What DOES post once per completed round for that population is
+    // the automatic advisory-panel comment (`we:scripts/operations/review-pr.mjs`'s `advise` step, #xlw02hw) —
+    // counting THAT recovers the real round count. Kept as a `Math.max` alongside the rearm count, not a
+    // replacement: a PR can carry BOTH kinds of history (a `review:human` PR that was once bounced and re-armed
+    // before also picking up advisory rounds), and the cap must bind on whichever count is higher, never reset
+    // by only reading one of the two.
+    const attempts = Math.max(
+      Number(counts[prNumber]) || 0,
+      countRearmComments(pr?.comments),
+      countAdvisoryComments(pr?.comments),
+    );
     if (attempts >= roundCap) {
       refuse('cap-exhausted', {
         ...withPhase, attempts, cap: roundCap,

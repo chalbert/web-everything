@@ -644,4 +644,58 @@ describe('runAutoFixRoute', () => {
     expect(writeErr).toHaveBeenCalledTimes(1);
     expect(writeErr.mock.calls[0][0]).toMatch(/auto-fix route failed/);
   });
+
+  // #3383 — THE VISIBILITY GAP: a clean "0 of N auto-fixable" decline used to post nothing to the PR at all.
+  describe('the auto-fix decline note (#3383)', () => {
+    it('posts a small visible note when every finding declines auto-fix (e.g. path-blacklisted)', async () => {
+      const autoFixFn = vi.fn(async () => ({
+        tier: 'strict',
+        results: [{ finding: FINDINGS[0], dispatched: false, risk: { reason: 'path-blacklisted' } }],
+      }));
+      const postDeclineNote = vi.fn();
+      const out = await runAutoFixRoute(cliResult(), { autoFixFn, postDeclineNote });
+      expect(out.ran).toBe(true);
+      expect(out.decline).toEqual({ count: 1, reasonCounts: { 'path-blacklisted': 1 } });
+      expect(postDeclineNote).toHaveBeenCalledTimes(1);
+      const [repo, pr, body] = postDeclineNote.mock.calls[0];
+      expect(repo).toBe('o/r');
+      expect(pr).toBe(7);
+      expect(body).toMatch(/1 finding\(s\)/);
+      expect(body).toMatch(/fixed 0/);
+      expect(body).toMatch(/path-blacklisted/);
+    });
+
+    it('posts NOTHING when at least one finding WAS auto-fixed', async () => {
+      const autoFixFn = vi.fn(async () => ({
+        tier: 'strict',
+        results: [{ finding: FINDINGS[0], dispatched: true, risk: { reason: 'clean' } }],
+      }));
+      const postDeclineNote = vi.fn();
+      const out = await runAutoFixRoute(cliResult(), { autoFixFn, postDeclineNote });
+      expect(out.decline).toBeNull();
+      expect(postDeclineNote).not.toHaveBeenCalled();
+    });
+
+    it('posts NOTHING when there were zero findings to consider in the first place', async () => {
+      const autoFixFn = vi.fn(async () => ({ tier: 'strict', results: [] }));
+      const postDeclineNote = vi.fn();
+      const out = await runAutoFixRoute(cliResult(), { autoFixFn, postDeclineNote });
+      expect(out.decline).toBeNull();
+      expect(postDeclineNote).not.toHaveBeenCalled();
+    });
+
+    it('a failure posting the decline note is caught and reported, never rethrown — the verdict already landed', async () => {
+      const autoFixFn = vi.fn(async () => ({
+        tier: 'strict',
+        results: [{ finding: FINDINGS[0], dispatched: false, risk: { reason: 'path-blacklisted' } }],
+      }));
+      const postDeclineNote = vi.fn(() => { throw new Error('gh pr comment: network blip'); });
+      const writeErr = vi.fn();
+      const out = await runAutoFixRoute(cliResult(), { autoFixFn, postDeclineNote, writeErr });
+      expect(out.ran).toBe(true);
+      expect(out.decline).toBeTruthy();
+      expect(writeErr).toHaveBeenCalledTimes(1);
+      expect(writeErr.mock.calls[0][0]).toMatch(/decline note failed to post/);
+    });
+  });
 });
