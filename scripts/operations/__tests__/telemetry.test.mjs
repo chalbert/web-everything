@@ -15,9 +15,10 @@ import { join } from 'node:path';
 import {
   DISPATCH_KINDS, DURABLE_SPAN_NAMES, ERROR_OUTCOMES, MAX_ATTRIBUTE_KEYS, MAX_LINE_BYTES, MAX_VALUE_LENGTH,
   METRIC_NAMES, METRIC_UNITS, OK_OUTCOMES, SPAN_NAMES, SPAN_STATUS, TELEMETRY_SCHEMA_VERSION,
+  DEFAULT_SUBSTANTIAL_CPU_PCT, DEFAULT_SUBSTANTIAL_MEM_BYTES,
   classifyOutcomeStatus, deriveTraceId, durationMs, goldenSignals, groupByTrace, newMetric, newSpanEnd,
   newSpanStart, normItemKey, normalizeAttributes, parseTelemetryLine, parseTelemetryLines, percentile,
-  serializeTelemetryEvent, truncateValue, validateTelemetryEvent,
+  serializeTelemetryEvent, summarizeHostProcesses, truncateValue, validateTelemetryEvent,
 } from '../telemetry.mjs';
 import {
   activeRecorder, createFileTelemetryStore, createMemoryTelemetryStore, createNullRecorder,
@@ -911,19 +912,17 @@ describe('the read CLI', () => {
     expect(text).toContain('no host samples recorded in this window');
   });
 
-  // #3383 follow-on — per-process attribution: the six `host.process.*` categories get their OWN table,
-  // separate from the whole-machine HOST section above (no double-reporting either way).
-  it('report breaks per-process samples into their OWN table, all six categories, with an honest total', () => {
+  // #3383 telemetry-granularity follow-on — the three FIXED categories keep their own rows exactly as before;
+  // everything else now gets an INDIVIDUAL named row (real pid + command) once it clears the substantial bar,
+  // rather than being flattened into `vscode`/`chrome`/`other`.
+  it('report breaks per-process samples into fixed categories + individually-named substantial processes + a labeled remainder', () => {
     const { store, now } = loaded();
-    const categories = {
+    const fixed = {
       conveyor: { cpu: 12.5, mem: 100 * 1024 * 1024 },
       drain: { cpu: 3, mem: 40 * 1024 * 1024 },
       dispatched_agents: { cpu: 220, mem: 900 * 1024 * 1024 },
-      vscode: { cpu: 15, mem: 800 * 1024 * 1024 },
-      chrome: { cpu: 40, mem: 1200 * 1024 * 1024 },
-      other: { cpu: 30, mem: 500 * 1024 * 1024 },
     };
-    for (const [cat, { cpu, mem }] of Object.entries(categories)) {
+    for (const [cat, { cpu, mem }] of Object.entries(fixed)) {
       store.append(`${JSON.stringify({
         v: 1, event: 'metric', name: `host.process.${cat}.cpu_pct`, kind: 'runner', value: cpu, unit: 'percent',
         timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
@@ -933,16 +932,34 @@ describe('the read CLI', () => {
         timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: {}, resource: {},
       })}\n`, '2026-09-12');
     }
+    // A NAMED APP beyond vscode/chrome, above the default substantial bar — its own row, real identity.
+    const entryAttrs = { pid: 1713, command: '/Applications/Spotify.app/.../Spotify Helper --type=gpu-process', tick: 5 };
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.process.entry.cpu_pct', kind: 'runner', value: 40, unit: 'percent',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: entryAttrs, resource: {},
+    })}\n`, '2026-09-12');
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.process.entry.mem_bytes', kind: 'runner', value: 1200 * 1024 * 1024, unit: 'bytes',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: entryAttrs, resource: {},
+    })}\n`, '2026-09-12');
+    // The collection-time remainder — everything below the storage floor, clearly labeled.
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.process.below_floor_remainder.cpu_pct', kind: 'runner', value: 30, unit: 'percent',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: { processCount: 900 }, resource: {},
+    })}\n`, '2026-09-12');
+    store.append(`${JSON.stringify({
+      v: 1, event: 'metric', name: 'host.process.below_floor_remainder.mem_bytes', kind: 'runner', value: 500 * 1024 * 1024, unit: 'bytes',
+      timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: { processCount: 900 }, resource: {},
+    })}\n`, '2026-09-12');
     let text = '';
     runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
     expect(text).toContain('HOST PROCESSES — who is actually consuming it');
-    for (const cat of Object.keys(categories)) expect(text).toContain(cat);
-    // The catch-all is never omitted — it must appear even though it is the least "interesting" category.
-    expect(text).toContain('other');
-    // A total row sums all six — auditable against the whole-machine `host.cpu.load1` figure elsewhere in the
-    // same report (this test only checks the total row itself renders; the cross-check is a human/analysis
-    // task this report exists to support, not something the CLI computes on its own).
-    expect(text).toContain('total (all 6)');
+    for (const cat of Object.keys(fixed)) expect(text).toContain(cat);
+    // The specific named process shows up by name, not lost inside `other`/`chrome`.
+    expect(text).toContain('Spotify Helper');
+    // The remainder is CLEARLY labeled as a remainder, never read as a bucket of its own the way `other` was.
+    expect(text).toContain('below-threshold remainder');
+    expect(text).toContain('— total —');
     // The generic SATURATION and whole-machine HOST sections must not ALSO print these per-process names.
     const beforeProcessTable = text.slice(0, text.indexOf('HOST PROCESSES'));
     expect(beforeProcessTable).not.toContain('host.process.');
@@ -1001,11 +1018,22 @@ describe('METRIC_NAMES / DISPATCH_KINDS cover what the system actually has', () 
     expect(METRIC_UNITS).toContain('bytes');
   });
 
-  // #3383 follow-on — per-process attribution: the six closed `host.process.*` categories, CPU + memory each.
-  it('covers all six host.process.* categories, CPU and memory each', () => {
-    for (const cat of ['conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other']) {
+  // #3383 telemetry-granularity follow-on — three FIXED categories (this system's own processes) plus the
+  // generic per-process `entry`/`below_floor_remainder` pair that carries every OTHER process's real identity
+  // in `attributes` instead of in the metric name (a closed vocabulary can never grow per-process).
+  it('covers the three fixed host.process.* categories, plus the generic entry/remainder pair, CPU and memory each', () => {
+    for (const cat of ['conveyor', 'drain', 'dispatched_agents']) {
       expect(METRIC_NAMES).toContain(`host.process.${cat}.cpu_pct`);
       expect(METRIC_NAMES).toContain(`host.process.${cat}.mem_bytes`);
+    }
+    expect(METRIC_NAMES).toContain('host.process.entry.cpu_pct');
+    expect(METRIC_NAMES).toContain('host.process.entry.mem_bytes');
+    expect(METRIC_NAMES).toContain('host.process.below_floor_remainder.cpu_pct');
+    expect(METRIC_NAMES).toContain('host.process.below_floor_remainder.mem_bytes');
+    // The old fixed vscode/chrome/other buckets are GONE — a real process now keeps its own identity instead.
+    for (const cat of ['vscode', 'chrome', 'other']) {
+      expect(METRIC_NAMES).not.toContain(`host.process.${cat}.cpu_pct`);
+      expect(METRIC_NAMES).not.toContain(`host.process.${cat}.mem_bytes`);
     }
   });
 
@@ -1016,10 +1044,90 @@ describe('METRIC_NAMES / DISPATCH_KINDS cover what the system actually has', () 
 
   it('a `host.process.*.cpu_pct` metric validates with unit `percent`', () => {
     const rec = newMetric({
-      name: 'host.process.chrome.cpu_pct', kind: 'runner', value: 42, unit: 'percent',
+      name: 'host.process.entry.cpu_pct', kind: 'runner', value: 42, unit: 'percent',
       timestamp: '2026-09-12T10:00:00.000Z',
     });
     expect(validateTelemetryEvent(rec)).toEqual({ ok: true, errors: [] });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('summarizeHostProcesses — the reporting/query layer that decides which processes get their own named entry', () => {
+  /** One tick's paired cpu_pct/mem_bytes `host.process.entry.*` lines for one pid+command. */
+  function entry({ pid, command, cpuPct, memBytes, tick = 1 }) {
+    const attrs = { pid, command, tick };
+    return [
+      { v: 1, event: 'metric', name: 'host.process.entry.cpu_pct', kind: 'runner', value: cpuPct, unit: 'percent', timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: attrs, resource: {} },
+      { v: 1, event: 'metric', name: 'host.process.entry.mem_bytes', kind: 'runner', value: memBytes, unit: 'bytes', timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: attrs, resource: {} },
+    ];
+  }
+
+  it('defaults to the operator\'s own suggested bar: >2% CPU or >200MB', () => {
+    expect(DEFAULT_SUBSTANTIAL_CPU_PCT).toBe(2);
+    expect(DEFAULT_SUBSTANTIAL_MEM_BYTES).toBe(200 * 1024 * 1024);
+  });
+
+  it('a process above the CPU bar (even under the mem bar) gets its own named entry', () => {
+    const events = entry({ pid: 100, command: 'git log -1', cpuPct: 80, memBytes: 50 * 1024 * 1024 });
+    const s = summarizeHostProcesses(events);
+    expect(s.substantial).toHaveLength(1);
+    expect(s.substantial[0]).toMatchObject({ label: 'git log -1', pids: [100], meanCpuPct: 80 });
+  });
+
+  it('a process above the MEM bar (even under the cpu bar) gets its own named entry', () => {
+    const events = entry({ pid: 200, command: 'Google Chrome Helper (Renderer)', cpuPct: 0.1, memBytes: 620 * 1024 * 1024 });
+    const s = summarizeHostProcesses(events);
+    expect(s.substantial).toHaveLength(1);
+    expect(s.substantial[0].label).toBe('Google Chrome Helper (Renderer)');
+  });
+
+  it('a process under BOTH bars folds into the below-threshold remainder, not its own entry', () => {
+    const events = entry({ pid: 300, command: 'some small helper', cpuPct: 0.5, memBytes: 10 * 1024 * 1024 });
+    const s = summarizeHostProcesses(events);
+    expect(s.substantial).toHaveLength(0);
+    expect(s.belowThresholdRemainder.samples).toBe(1);
+    expect(s.belowThresholdRemainder.meanCpuPct).toBeCloseTo(0.5);
+  });
+
+  it('groups by COMMAND across ticks (not by pid, which is meaningless across a restart) and reports every distinct pid seen', () => {
+    const events = [
+      ...entry({ pid: 400, command: 'Code Helper (Plugin)', cpuPct: 3, memBytes: 250 * 1024 * 1024, tick: 1 }),
+      ...entry({ pid: 400, command: 'Code Helper (Plugin)', cpuPct: 5, memBytes: 260 * 1024 * 1024, tick: 2 }),
+      ...entry({ pid: 401, command: 'Code Helper (Plugin)', cpuPct: 4, memBytes: 255 * 1024 * 1024, tick: 3 }),
+    ];
+    const s = summarizeHostProcesses(events);
+    expect(s.substantial).toHaveLength(1);
+    expect(s.substantial[0].samples).toBe(3);
+    expect(s.substantial[0].pids).toEqual([400, 401]);
+    expect(s.substantial[0].meanCpuPct).toBeCloseTo((3 + 5 + 4) / 3);
+    expect(s.substantial[0].maxMemBytes).toBe(260 * 1024 * 1024);
+  });
+
+  it('a STRICTER threshold moves an already-stored entry into the remainder, with no re-collection needed', () => {
+    const events = entry({ pid: 500, command: 'Windows App.app', cpuPct: 2.5, memBytes: 210 * 1024 * 1024 });
+    expect(summarizeHostProcesses(events).substantial).toHaveLength(1);
+    const stricter = summarizeHostProcesses(events, { cpuThresholdPct: 5, memThresholdBytes: 500 * 1024 * 1024 });
+    expect(stricter.substantial).toHaveLength(0);
+    expect(stricter.belowThresholdRemainder.samples).toBe(1);
+  });
+
+  it('folds the collection-time below_floor_remainder metrics into its OWN remainder — honest even below its own floor', () => {
+    const events = [
+      { v: 1, event: 'metric', name: 'host.process.below_floor_remainder.cpu_pct', kind: 'runner', value: 12, unit: 'percent', timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: { processCount: 300 }, resource: {} },
+      { v: 1, event: 'metric', name: 'host.process.below_floor_remainder.mem_bytes', kind: 'runner', value: 3 * 1024 * 1024 * 1024, unit: 'bytes', timestamp: '2026-09-12T10:00:00.000Z', traceId: null, attributes: { processCount: 300 }, resource: {} },
+    ];
+    const s = summarizeHostProcesses(events);
+    expect(s.substantial).toHaveLength(0);
+    expect(s.belowThresholdRemainder.samples).toBe(1);
+    expect(s.belowThresholdRemainder.meanCpuPct).toBeCloseTo(12);
+  });
+
+  it('is total on empty/hostile input — never throws', () => {
+    for (const junk of [undefined, null, [], [null, undefined, 42, {}]]) {
+      expect(() => summarizeHostProcesses(junk)).not.toThrow();
+    }
+    const s = summarizeHostProcesses([]);
+    expect(s).toMatchObject({ substantial: [], belowThresholdRemainder: { samples: 0 } });
   });
 });
 

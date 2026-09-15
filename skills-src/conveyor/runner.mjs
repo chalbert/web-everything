@@ -77,11 +77,14 @@ import { writeDriverMode, driverModeFor } from '../../scripts/conveyor/driver-mo
 // (admission decisions, lane-pool pressure, heavy-command queue wait) that belong to no single item, and that
 // spans alone cannot express. Never throws by construction; see `telemetry-store.mjs`'s purity discipline.
 import { createTelemetryRecorder } from '../../scripts/operations/telemetry-store.mjs';
-// #3383 follow-on — per-process attribution: categorize EVERY process on the host (not just this system's own)
-// into the six named `host.process.*` buckets, from one `ps` snapshot per tick. See that file's own header for
-// the pure/IO split and the category-matching rules; `readProcessSample` is the one IO edge, never throwing.
+// #3383 follow-on — per-process attribution, REDESIGNED (telemetry-granularity follow-on): capture EVERY
+// process on the host from one `ps` snapshot per tick, keep the three FIXED `conveyor`/`drain`/
+// `dispatched_agents` totals, and record every OTHER process that clears the storage floor as its own row —
+// real identity, not a `vscode`/`chrome`/`other` bucket label. See that file's own header for the pure/IO
+// split, the category-matching rules, and the real-data sizing math behind the storage floor;
+// `readProcessSample` is the one IO edge, never throwing.
 import {
-  readProcessSample, summarizeProcessSample, processCategoryMetrics,
+  readProcessSample, buildProcessSnapshot, processSnapshotMetrics,
 } from '../../scripts/operations/host-process-sample.mjs';
 import { localDateString } from '../../scripts/lib/local-date.mjs';
 
@@ -899,12 +902,13 @@ export function tickMetrics(surface) {
  *     `telemetry-store.mjs`) argues against for a per-tick sample.
  *   • PER-PROCESS / PER-CONTAINER breakdown from THESE `os.*` samples specifically — `os.loadavg()`/
  *     `os.freemem()` are whole-HOST aggregates and cannot themselves attribute load to any one process. This
- *     is now covered by a SIBLING sample, not by this function: {@link module:host-process-sample} categorizes
- *     every process on the host (via `ps`, once per tick, right alongside this one — see `emitTickMetrics`)
- *     into the `host.process.*` buckets, and the harder per-agent-turn case (a delivery agent's own CPU cost)
- *     is covered by `telemetry-store.mjs#spanAroundAsyncWithCpu` on the `agent.turn` span itself. Neither
- *     follow-on touches `hostMetrics`/`readHostSample` here, which is why this docblock still describes only
- *     the whole-machine `os.*` gauges.
+ *     is now covered by a SIBLING sample, not by this function: {@link module:host-process-sample} keeps
+ *     `conveyor`/`drain`/`dispatched_agents` as fixed totals and records every OTHER process that clears its
+ *     storage floor as its OWN row (via `ps`, once per tick, right alongside this one — see
+ *     `emitTickMetrics`), and the harder per-agent-turn case (a delivery agent's own CPU cost) is covered by
+ *     `telemetry-store.mjs#spanAroundAsyncWithCpu` on the `agent.turn` span itself. Neither follow-on touches
+ *     `hostMetrics`/`readHostSample` here, which is why this docblock still describes only the whole-machine
+ *     `os.*` gauges.
  *
  * @param {{loadavg?: number[], freeBytes?: number, totalBytes?: number, cpuCount?: number}} [sample]
  * @returns {Array<{name: string, value: number, unit: string, attributes: object}>}
@@ -1004,11 +1008,14 @@ function emitTickMetrics(recorder, surface, ctx) {
 
   emitMetricGroup(recorder, 'tick', () => tickMetrics(surface), tick);
   emitMetricGroup(recorder, 'host', () => hostMetrics(readHostSample()), tick);
-  // #3383 follow-on — per-process attribution: ONE `ps` shell-out per tick (matching the whole-machine
-  // sample's own cadence, never a hot path), bucketed into the six `host.process.*` categories. See
-  // `host-process-sample.mjs` for the full pure/IO split; `readProcessSample` never throws (an empty sample
-  // on any `ps` failure), so a missing/unexpected `ps` degrades to six zeroed categories, not a broken tick.
-  emitMetricGroup(recorder, 'process', () => processCategoryMetrics(summarizeProcessSample(readProcessSample())), tick);
+  // #3383 follow-on — per-process attribution, REDESIGNED (telemetry-granularity follow-on): ONE `ps`
+  // shell-out per tick (matching the whole-machine sample's own cadence, never a hot path). `conveyor`/`drain`/
+  // `dispatched_agents` stay fixed totals; every OTHER process that clears the storage floor is recorded as
+  // its own row (real pid + command, not a `vscode`/`chrome`/`other` bucket). See `host-process-sample.mjs`
+  // for the full pure/IO split and the real-data sizing math behind the floor; `readProcessSample` never
+  // throws (an empty sample on any `ps` failure), so a missing/unexpected `ps` degrades to zeroed totals and no
+  // rows, not a broken tick.
+  emitMetricGroup(recorder, 'process', () => processSnapshotMetrics(buildProcessSnapshot(readProcessSample())), tick);
 
   if (span) {
     try {
