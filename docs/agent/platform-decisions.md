@@ -3929,13 +3929,13 @@ steps landing — is a coarser "does any advisory comment exist" proxy: a PR for
 pass it on stale grounds, a real but narrower gap than having no guard clause at all. Neither the guard nor
 the marker is built in this ratifying PR (see Lineage) — this decisions-only PR ships zero code.
 
-**Lineage:** ratified by #3589 (operator, 2026-09-14; bornAs `xmyj37e`, prepared 2026-09-14 — Screen pass +
+**Lineage:** ratified by #3589 (operator, 2026-09-14; bornAs `3589`, prepared 2026-09-14 — Screen pass +
 review jury charter, filed on PR #2011's own incident). Cites [#review-human-declarative-leash-only](#review-human-declarative-leash-only)
 (#2771/#2840 — the `review:human` trigger set this rule's scope leans on being already narrow) and
 [#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (#3434 —
 the sibling `review:pending` tier this rule does not touch; `clear-human`'s human-only ceremony stays
 human-only). Implementation follow-on: the guard clause in `we:scripts/review-set-label.mjs`, the
-`advisory-sha` marker in `we:scripts/operations/review-pr.mjs`, and the config toggle — filed as `xcskm9h`
+`advisory-sha` marker in `we:scripts/operations/review-pr.mjs`, and the config toggle — filed as `3692`
 ("Gate `clear-human` on a posted advisory review for the current head"), `blockedBy` nothing (ratified in
 the same lane it was filed from), numbered on land.
 

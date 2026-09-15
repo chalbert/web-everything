@@ -48,8 +48,8 @@ durable per-head marker today, so an exact "is this the CURRENT head's note" che
 `<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker` in `we:scripts/lib/review-escalation.mjs`,
 before the coarse "does any advisory comment exist" check can be tightened):
 
-- [Gate `clear-human` on a posted advisory review for the current head](/backlog/xcskm9h-gate-clear-human-on-a-posted-advisory-review-for-the-current/)
-  (parent: this item; filed `xcskm9h`, numbered on land) — implements Fork 2(c)'s guard clause in
+- [Gate `clear-human` on a posted advisory review for the current head](/backlog/3692-gate-clear-human-on-a-posted-advisory-review-for-the-current/)
+  (parent: this item; filed `3692`, numbered on land) — implements Fork 2(c)'s guard clause in
   `we:scripts/review-set-label.mjs`, the per-head `advisory-sha` marker in
   `we:scripts/operations/review-pr.mjs`'s `renderAdvisoryNote`, and the
   `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style config toggle (Fork 3, default on) that gates it.
