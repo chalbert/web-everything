@@ -6,6 +6,7 @@ status: open
 scope: ["we:scripts/lane-drain.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/queue-store.mjs", "we:scripts/conveyor/queue.mjs"]
 relatedTo: ["3570", "3567", "3478"]
 dateOpened: "2026-09-07"
+preparedDate: "2026-09-15"
 tags: []
 ---
 
