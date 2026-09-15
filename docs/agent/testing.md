@@ -2,6 +2,33 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## Runner activity report
+
+`node scripts/operations/run.mjs runner-activity --json` reports driver health in `verdict` using
+the machine-global singleton lease (PID and heartbeat), process command identity, and the driven
+checkout's existing `.conveyor/driver-status.json` (zero-based tick number, timestamp, planned
+dispatch lists and the tick core's own held-work stalls). A single snapshot proves recency, not
+continuous progress between observations. Fresh evidence with no self-diagnosed stall is
+`alive-and-idle`; `dispatching` is an independent boolean for sessions actually listed alive.
+An expired heartbeat/tick or a self-diagnosed stall is `alive-and-stalled`; a lease whose PID no
+longer identifies the runner is `dead`; no lease is `down`. The stale window is the existing runner
+lease duration. Missing first-tick data stays null, with the fresh lease providing startup evidence.
+
+In-flight rows reuse `inFlightDispatchesFor`, `stampLiveness`, and `dispatchStillHolds`. Terminal
+dispatch effects supply `applied`/`failed` outcomes. Their dispatch-step finish time orders recent
+outcomes; legacy records without it explicitly report a `last-attempt-proxy`. Call-log completion
+is not dispatch completion: a dispatch call can complete without launching anything.
+
+The IO shell places all synchronous file/store reads inside a 10-second, SIGKILL-bounded snapshot
+subprocess; process/session reads have a 2-second bound within it. A failed required read is an
+operation error, never `down`. Corrupt individual run records are counted as partial history, and
+an unavailable session listing preserves unknown liveness. This report performs no restart,
+reaping, tick execution, or liveness write-back. For runner-activity only, CLI persistence (including
+resume reads, all run-record writes, and call-log appends) uses separate 2-second SIGKILL-bounded
+children. Store failures refuse the invocation; call-log failures remain best-effort. Other operations
+retain their existing CLI stores. Relative runner script paths are resolved against the runner PID's
+cwd before identity checking and deriving the checkout; cwd itself is not the checkout.
+
 ## Proof-based verification — observe before you claim
 
 The first rule of verifying anything here is **observe the real running system; don't reason about
