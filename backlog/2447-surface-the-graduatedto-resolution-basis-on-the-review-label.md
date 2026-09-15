@@ -1,9 +1,10 @@
 ---
 bornAs: xutzb7q
 kind: task
-status: active
+status: resolved
 dateOpened: "2026-07-11"
 dateStarted: "2026-09-15"
+dateResolved: "2026-09-15"
 tags: []
 scope:
   - we:scripts/lib/review-core.mjs
