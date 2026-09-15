@@ -5,7 +5,7 @@
  */
 import { pathToFileURL } from 'node:url';
 import { appendScorecard } from './run-scorecard-store.mjs';
-import { scrubReasons } from '../lib/secret-scrub.mjs';
+import { scrubPublish } from '../lib/secret-scrub.mjs';
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
 const enums = {
@@ -32,13 +32,22 @@ export function logDelegationTrial(row, io = {}) {
   if (row.findings !== undefined && row.findings !== null && !isNonEmptyString(row.findings)) {
     throw new Error('log-delegation-trial: findings must be a non-empty string or null');
   }
-  // Free-text fields must pass the same secret scrub the store already applies to
-  // `deductions[].evidence` — a live independent review of this file (PR #2267) confirmed a
-  // secret-shaped `findings` value reached the committed store unfiltered before this check existed.
-  // Denying here, never redacting, matches run-scorecard-store.mjs's own "deny on a hit" discipline.
-  for (const field of ['taskDescription', 'findings']) {
+  // Free-text fields must pass a secret scrub before landing in this COMMITTED, append-only store — a
+  // live independent review of this file (PR #2267, round 1) confirmed a secret-shaped `findings` value
+  // reached the store unfiltered before this check existed. `scrubPublish`, not the wider `scrubReasons`
+  // the store already applies to `deductions[].evidence`, is the right scrub HERE: round 2 of that same
+  // review caught `scrubReasons`'s "source file path/name" rule flagging ordinary task descriptions that
+  // simply name a script (e.g. "Self-fix codex-direct-task.mjs's own ENOBUFS failure"), which broke
+  // `backfill-2026-09-14-delegation-trials.mjs` outright (6 of its 9 real descriptions mention a `.mjs`
+  // file). `scrubPublish` is this repo's deliberately NARROWER, corpus-calibrated scrub for content that
+  // is committed to the repo (the same one `we:scripts/check-standards.mjs`'s 6f-i sweep runs over
+  // backlog/agent-memory-src) — it still denies a real secret (verified: an `AKIA…` value is still
+  // caught) without false-positiving on a bare filename mention. `provider`/`model` are scrubbed too
+  // (round 2's second, non-blocking finding: they were free-text with no scrub at all) — denying, never
+  // redacting, matches run-scorecard-store.mjs's own "deny on a hit" discipline.
+  for (const field of ['provider', 'model', 'taskDescription', 'findings']) {
     const value = row[field];
-    if (isNonEmptyString(value) && scrubReasons(value).length > 0) {
+    if (isNonEmptyString(value) && scrubPublish(value).length > 0) {
       throw new Error(`log-delegation-trial: ${field} failed the secret scrub — denying, never redacting`);
     }
   }

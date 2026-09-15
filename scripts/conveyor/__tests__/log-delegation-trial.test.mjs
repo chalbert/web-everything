@@ -78,13 +78,24 @@ describe('logDelegationTrial', () => {
     expect(logDelegationTrial(input, memIo())).toMatchObject(input);
   });
 
-  it('rejects secret-shaped taskDescription or findings without writing (independent review finding, PR #2267)', () => {
+  it('rejects a secret-shaped provider/model/taskDescription/findings without writing (independent review, PR #2267 round 1)', () => {
     const secret = 'leaked key AKIA1234567890ABCDEF';
-    for (const field of ['taskDescription', 'findings']) {
+    for (const field of ['provider', 'model', 'taskDescription', 'findings']) {
       const io = memIo();
       expect(() => logDelegationTrial({ ...baseRow(), [field]: secret }, io)).toThrow('secret scrub');
       expect(readStore(io).records).toEqual([]);
     }
+  });
+
+  it('accepts an ordinary description that names a script file (independent review, PR #2267 round 2)', () => {
+    // Round 1's fix used the wide `scrubReasons`, whose "source file path/name" rule flagged any bare
+    // `*.mjs` mention — which broke real backfill descriptions like this one. `scrubPublish` must not.
+    const input = {
+      ...baseRow(),
+      taskDescription: "Self-fix codex-direct-task.mjs's own ENOBUFS failure",
+      findings: 'Hardened codex-direct-task.mjs and gemini-direct-task.mjs after a real finding',
+    };
+    expect(logDelegationTrial(input, memIo())).toMatchObject(input);
   });
 
   it('rejects a missing or non-object row clearly', () => {
