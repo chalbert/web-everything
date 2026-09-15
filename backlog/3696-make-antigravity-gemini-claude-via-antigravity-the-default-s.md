@@ -1,4 +1,5 @@
 ---
+bornAs: xlp48ig
 kind: story
 size: 5
 status: open
@@ -30,7 +31,7 @@ Open implementation questions for whoever picks this up:
 3. **Existing test suite** — all ~59 current `selectProvider` tests assert `alternateBackend` is `null`
    unless `quotaStrained=true`. These need deliberate review, not blanket rewriting.
 
-Spun off while landing we:scripts/lib/model-capability-ratings.mjs (backlog/xij3dkb, PR #2285) —
+Spun off while landing we:scripts/lib/model-capability-ratings.mjs (backlog/3695, PR #2285) —
 deliberately not folded into that already-merged PR.
 
 ## Done when
