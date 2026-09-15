@@ -3897,17 +3897,19 @@ preconditions ever checked whether that advisory note existed.** Two rulings clo
    sub-scoping a narrower incident-shaped subset — the leash-contract / gate-config / conformance-suite files
    the tier also catches are at least as sensitive as a statute-anchor prose edit.
 2. **Mechanism — a precondition, not a relabel.** `clear-human`'s decision function
-   (`decideSetLabel`'s `clear-human` target, `we:scripts/review-set-label.mjs`) gains ONE more guard, the
-   same shape as its existing `--actor`/`--reason` honesty-tax checks: it refuses unless the PR already
+   (`decideSetLabel`'s `clear-human` target, `we:scripts/review-set-label.mjs`) MUST gain ONE more guard,
+   the same shape as its existing `--actor`/`--reason` honesty-tax checks: it refuses unless the PR already
    carries the `advise` step's advisory-note comment for its **current** head. An absent note refuses with
    the fix named — dispatch `we:scripts/operations/review-dispatch.mjs --pr=<n>` (or wait for the next
    conveyor tick, which already auto-dispatches `advise` for every `needs-review` PR), then retry. Nothing
    about `advise`, `we:scripts/operations/review-dispatch.mjs`, or the conveyor's existing dispatch cadence
-   changes — this is a refusal-with-actionable-fix, never a synchronous dispatch-and-block: blocking a CLI
-   call for the minutes a real independent review takes is exactly the passive-wait shape this repo's own
-   agents are barred from sitting on. The clearing operator (or session) still has full authority to clear
-   over real findings — the note only has to have **posted**, not be acted on — because the incident was
-   about ordering, never about overruling the operator.
+   is meant to change — this is specified as a refusal-with-actionable-fix, never a synchronous
+   dispatch-and-block: blocking a CLI call for the minutes a real independent review takes would be exactly
+   the passive-wait shape this repo's own agents are barred from sitting on. The clearing operator (or
+   session) keeps full authority to clear over real findings — the note only has to have **posted**, not be
+   acted on — because the incident was about ordering, never about overruling the operator. **This guard is
+   RULED here; no implementation of it exists anywhere in the codebase** — see the Residual paragraph and
+   Lineage below for exactly what code this ratification obligates and where that obligation is tracked.
 
 **Config posture (not a third ratified fork — a config dimension, both values legitimate end-states):** the
 precondition is gated by a `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style env var (name TBD at build
@@ -3916,14 +3918,16 @@ ON.** The night of the incident, 4 of 5 `clear-human` clearances already had the
 "on" asks nothing new of the common case and only makes the ordering that already usually holds guaranteed;
 an operator in genuinely time-sensitive incident response is one flag away from the old fast path.
 
-**Residual — build status lives on the follow-on item, not this rule (#2854):** an exact "is this the
-CURRENT head's note" check depends on `renderAdvisoryNote` (`we:scripts/operations/review-pr.mjs`) carrying
-a durable per-head marker (an `<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker` in
-`we:scripts/lib/review-escalation.mjs`). Absent that marker the precondition check is a bounded, accepted
-coarser proxy — "does any advisory comment exist" — a PR force-pushed after its note would pass on stale
-grounds, which is a real but narrower gap than the total absence of a check this rule replaces. Closed by
-the marker's own follow-on rather than built in the ratifying PR
-(see Lineage).
+**Residual — build status lives on the follow-on item, not this rule (#2854):** `we:scripts/review-set-label.mjs`'s
+`decideSetLabel` carries no advisory-note check of any kind, coarse or exact, until the follow-on item below
+ships it — this anchor rules what `clear-human` must do, it does not claim any of it runs. That build owes
+two things, in order: first, the guard clause itself (an absent-note refusal); second, an exact "is this the
+CURRENT head's note" test, which depends on `renderAdvisoryNote` (`we:scripts/operations/review-pr.mjs`)
+gaining a durable per-head marker (an `<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker`
+in `we:scripts/lib/review-escalation.mjs`). The ratified, accepted interim shape — usable between those two
+steps landing — is a coarser "does any advisory comment exist" proxy: a PR force-pushed after its note would
+pass it on stale grounds, a real but narrower gap than having no guard clause at all. Neither the guard nor
+the marker is built in this ratifying PR (see Lineage) — this decisions-only PR ships zero code.
 
 **Lineage:** ratified by #3589 (operator, 2026-09-14; bornAs `xmyj37e`, prepared 2026-09-14 — Screen pass +
 review jury charter, filed on PR #2011's own incident). Cites [#review-human-declarative-leash-only](#review-human-declarative-leash-only)

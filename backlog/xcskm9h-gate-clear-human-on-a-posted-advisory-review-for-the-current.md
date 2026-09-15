@@ -13,8 +13,14 @@ Implements the ratified ruling from #3589 (should clear-human wait for an indepe
 
 ## Done when
 
-1. **Executable** — `npx vitest run we:scripts/__tests__/review-set-label.test.mjs` passes with new cases
-   added for `decideSetLabel`'s `clear-human` target: (a) refuses (with the dispatch-fix message named) when
+1. **Executable** —
+
+   ```
+   npx vitest run scripts/__tests__/review-set-label.test.mjs
+   ```
+
+   passes with new cases added for `decideSetLabel`'s `clear-human` target: (a) refuses (with the
+   dispatch-fix message named) when
    no advisory-note comment is present for the PR's current head, (a′) ALSO refuses when an advisory-note
    comment IS present but its `<!-- advisory-sha: <sha> -->` marker names an OLDER head (the force-push race
    this gate exists for — a stale-marker fixture, so a coarse "any advisory comment exists" check fails this
