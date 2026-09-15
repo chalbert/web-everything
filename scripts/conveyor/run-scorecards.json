@@ -189,6 +189,48 @@
       "verifiedBy": "other",
       "findings": "Verified via a live smoke test, not a Claude-subagent code review. NOTE: gemini-direct-task.mjs pins no default model (model/effort are optional passthroughs — see its own header); \"gemini-3.1-pro\" here is a best-effort label, not a confirmed pinned identity for this run.",
       "retroactive": true
+    },
+    {
+      "v": 1,
+      "outcome": "landed",
+      "scoredAt": "2026-09-15T14:35:48.764Z",
+      "provider": "claude-native",
+      "model": "claude-sonnet-5",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": 3690,
+      "pr": 2223,
+      "handle": null,
+      "taskDescription": "Independently review+verify PR 2223 (heavy-admission slot reentrancy by real process identity, scripts/readiness/heavy-admission.mjs + file-locks.mjs), as a native dispatched Claude subagent with full repo tool access",
+      "taskType": "other",
+      "verifiedBy": "independent-claude",
+      "findings": "Comparative trial vs antigravity-claude-review of same PR 2223 diff. Ran real vitest: targeted suite 80/80 passed, broader readiness suite 871/871 passed. Verified the follow-up commit fix (raw pid vs selfPid forwarding bug) is the only such call site by grepping every reserve/reclaimDecision/releaseOwnedSlot caller in the repo; confirmed default-false backward compat holds for all untouched callers. Found one minor undocumented blast-radius note (gh-throttle.mjs reuses the same admission primitive, benefits from the fix but PR description does not mention it) and a positional-arg readability nit on reserve(). Verdict: approve as-is. Delivered a complete, usable, file:line-cited review.",
+      "retroactive": false
+    },
+    {
+      "v": 1,
+      "outcome": "rejected",
+      "scoredAt": "2026-09-15T14:35:57.236Z",
+      "provider": "antigravity",
+      "model": "claude-sonnet-4-6",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": 3690,
+      "pr": 2223,
+      "handle": null,
+      "taskDescription": "Independently review+verify PR 2223 (heavy-admission slot reentrancy by real process identity) via node scripts/gemini-direct-task.mjs pointed at agy --model=claude-sonnet-4-6, same diff and instructions as the paired native-claude-review trial",
+      "taskType": "other",
+      "verifiedBy": "independent-claude",
+      "findings": "Comparative trial vs claude-native-review of same PR 2223 diff, run via agy inside its own real Antigravity execution context (not native subagent trust). Genuinely ran the same two real vitest commands and got IDENTICAL results to the native trial (80/80 targeted, 871/871 broader) -- confirms real tool execution, not fabrication. Was mid-investigation on the same lead the native reviewer checked (a releaseOwnedSlot call site with no explicit pid arg) when it tried to write its final review as a file via its own write_to_file tool; that call failed with a TOOL_ERROR (ArtifactMetadata schema mismatch) writing to its own internal antigravity-cli brain scratch path, not even the target repo. The wrapper still reported top-level status SUCCESS and terminal:SUCCESS -- the failure is invisible unless the raw JSONL log is inspected. Net effect: no usable review verdict was ever delivered despite claiming success. Outcome recorded as rejected because the actual deliverable did not land, not because the underlying investigation looked unsound. This is exactly the sandbox-reliability gap the native/antigravity split is meant to surface -- same model family, same task, but its own execution context lost the output.",
+      "retroactive": false
     }
   ]
 }
