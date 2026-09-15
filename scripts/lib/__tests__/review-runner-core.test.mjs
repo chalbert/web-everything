@@ -172,6 +172,10 @@ describe('runnerShadowPlan — THE ZERO-MUTATION GUARANTEE (forced shadow, never
     expect(plan.apply).toBe(false);
   });
 
+  // The zero-mutation guarantee #2838 rests on until the enforce flip: no scheduled run applies anything. Marked
+  // (#2840/#2892) so weakening this assertion is a principle edit that reaches review:human, even though this
+  // unit suite is not itself a declarative-leash file.
+  // @invariant runner-forced-shadow pin:3663cff3bfcb — enforces docs/agent/platform-decisions.md#enforce-flip-triple-gated
   it('plan.apply is ALWAYS false across every ledger/label combination (the invariant, exhaustively)', () => {
     const ledgers = [cleanDiverseLedger(), contestedLedger(), []];
     const labelSets = [[REVIEW_LABELS.pending], [REVIEW_LABELS.human], ['ready-to-merge', REVIEW_LABELS.pending], []];
@@ -183,6 +187,7 @@ describe('runnerShadowPlan — THE ZERO-MUTATION GUARANTEE (forced shadow, never
       }
     }
   });
+  // @end-invariant runner-forced-shadow
 });
 
 describe('buildShadowRecord — the structured shadow-log record', () => {
