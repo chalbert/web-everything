@@ -126,8 +126,9 @@ for (const f of files) {
 // (lineage citation, not a gate) and `after`/`once` (temporal/prioritization ordering, not a
 // dependency). `blocked on/by` is kept but guarded below (an adjacent #M to its left = an
 // enumeration/citation, not a fresh edge). Group 1 is the verb (for the guard), group 2 the id.
-const PROSE_PREREQ = /\b(gated on|blocked on|blocked by|depends on|needs|requires|premise[d]? on|consumed via|builds on)\s+#?(\d{1,3})\b/gi;
-const ANY_REF = /(?:#|\/backlog\/)(\d{1,3})\b/g;
+// Export the live matchers for regression tests; keep the right boundary to reject numeric prefixes.
+export const PROSE_PREREQ = /\b(gated on|blocked on|blocked by|depends on|needs|requires|premise[d]? on|consumed via|builds on)\s+#?(\d+)\b/gi;
+export const ANY_REF = /(?:#|\/backlog\/)(\d+)\b/g;
 const BACKTICK = /`([^`]+)`/g;
 
 // G4 false-prepared-fork — prioritization/effort smuggled into a `## Fork` section of a *prepared*

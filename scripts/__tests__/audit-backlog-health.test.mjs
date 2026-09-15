@@ -6,7 +6,52 @@
  * whole live audit (which reads the real backlog dir and writes `audits/backlog-health-audit.md`).
  */
 import { describe, it, expect } from 'vitest';
-import { missingDoneWhenProof, forkLeansOnUnruled } from '../audit-backlog-health.mjs';
+import { missingDoneWhenProof, forkLeansOnUnruled, PROSE_PREREQ, ANY_REF } from '../audit-backlog-health.mjs';
+
+// #3522: exercise the live extractors so G1/D2 cannot silently lose short or long ids.
+describe('PROSE_PREREQ — G1', () => {
+  it('hits on 1-2 digit prerequisite ids', () => {
+    const body = 'Requires #7 and builds on #39.';
+    expect([...body.matchAll(PROSE_PREREQ)].map(m => m[2])).toEqual(['7', '39']);
+  });
+
+  it('hits on a 4-digit prerequisite id without truncating it', () => {
+    const body = 'Gated on #3512.';
+    expect([...body.matchAll(PROSE_PREREQ)].map(m => m[2])).toEqual(['3512']);
+  });
+
+  it('accepts longer prerequisite ids, including citations without a hash', () => {
+    const body = 'Depends on #12345 and requires 123456.';
+    expect([...body.matchAll(PROSE_PREREQ)].map(m => m[2])).toEqual(['12345', '123456']);
+  });
+
+  it('requires a right word boundary instead of reading a numeric prefix', () => {
+    const body = 'Requires #2209suffix and builds on #3512_suffix.';
+    expect([...body.matchAll(PROSE_PREREQ)]).toEqual([]);
+  });
+});
+
+describe('ANY_REF — D2 (also G3/G7)', () => {
+  it('hits on 1-2 digit ids in hash and backlog-path citations', () => {
+    const body = 'See #7, #39, /backlog/7 and /backlog/39.';
+    expect([...body.matchAll(ANY_REF)].map(m => m[1])).toEqual(['7', '39', '7', '39']);
+  });
+
+  it('hits on 4-digit ids in hash and backlog-path citations without truncating them', () => {
+    const body = 'See #2209 and /backlog/3512-gate-fix/.';
+    expect([...body.matchAll(ANY_REF)].map(m => m[1])).toEqual(['2209', '3512']);
+  });
+
+  it('accepts longer ids in hash and backlog-path citations', () => {
+    const body = 'See #12345 and /backlog/123456.';
+    expect([...body.matchAll(ANY_REF)].map(m => m[1])).toEqual(['12345', '123456']);
+  });
+
+  it('requires a right word boundary instead of reading a numeric prefix', () => {
+    const body = 'See #2209suffix, #3512_suffix, /backlog/2209suffix and /backlog/3512_suffix.';
+    expect([...body.matchAll(ANY_REF)]).toEqual([]);
+  });
+});
 
 describe('missingDoneWhenProof — A1 (#2949)', () => {
   it('hits when the body has neither a `## Done when` nor `## Acceptance` heading', () => {
