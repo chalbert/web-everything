@@ -231,6 +231,48 @@
       "verifiedBy": "independent-claude",
       "findings": "Comparative trial vs claude-native-review of same PR 2223 diff, run via agy inside its own real Antigravity execution context (not native subagent trust). Genuinely ran the same two real vitest commands and got IDENTICAL results to the native trial (80/80 targeted, 871/871 broader) -- confirms real tool execution, not fabrication. Was mid-investigation on the same lead the native reviewer checked (a releaseOwnedSlot call site with no explicit pid arg) when it tried to write its final review as a file via its own write_to_file tool; that call failed with a TOOL_ERROR (ArtifactMetadata schema mismatch) writing to its own internal antigravity-cli brain scratch path, not even the target repo. The wrapper still reported top-level status SUCCESS and terminal:SUCCESS -- the failure is invisible unless the raw JSONL log is inspected. Net effect: no usable review verdict was ever delivered despite claiming success. Outcome recorded as rejected because the actual deliverable did not land, not because the underlying investigation looked unsound. This is exactly the sandbox-reliability gap the native/antigravity split is meant to surface -- same model family, same task, but its own execution context lost the output.",
       "retroactive": false
+    },
+    {
+      "v": 1,
+      "outcome": "reworked",
+      "scoredAt": "2026-09-15T14:35:34.138Z",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": null,
+      "pr": null,
+      "handle": null,
+      "taskDescription": "Build model-capability-ratings.mjs/.json schema (round 1 of the capability-ratings task); also asked to wire provider-routing.mjs in the same round",
+      "taskType": "other",
+      "verifiedBy": "claude-subagent",
+      "findings": "Registry portion (model-capability-ratings.mjs/.json + its test, 51 tests) landed unchanged in the final diff -- correct on the first pass. The routing portion could not land in round 1: the task brief incorrectly assumed provider-routing.mjs did not exist yet; Codex correctly detected the real file already existed with a different, already-shipped API (epic #3690) and a conflicting model-probation.mjs dependency assumption, restored the tracked files untouched, and asked for clarification instead of guessing or overwriting real code. A corrected round 2 task then completed the routing wiring cleanly.",
+      "retroactive": false
+    },
+    {
+      "v": 1,
+      "outcome": "landed",
+      "scoredAt": "2026-09-15T14:35:36.247Z",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": null,
+      "pr": null,
+      "handle": null,
+      "taskDescription": "Wire model-capability-ratings.mjs into provider-routing.mjs's selectProvider as an additive, advisory explorationHint, with a static/behavioral test proving selectSupervisionLevel cannot be influenced by it (round 2, corrected task)",
+      "taskType": "other",
+      "verifiedBy": "claude-subagent",
+      "findings": null,
+      "retroactive": false
     }
   ]
 }
