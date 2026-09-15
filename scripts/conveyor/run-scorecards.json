@@ -273,6 +273,27 @@
       "verifiedBy": "claude-subagent",
       "findings": null,
       "retroactive": false
+    },
+    {
+      "v": 1,
+      "outcome": "landed",
+      "scoredAt": "2026-09-15T15:30:50.712Z",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": null,
+      "pr": 2285,
+      "handle": null,
+      "taskDescription": "Read-only review pass over PR #2285's diff (model-capability-ratings + provider-routing wiring) against 8 stated acceptance criteria, no edits",
+      "taskType": "other",
+      "verifiedBy": "claude-subagent",
+      "findings": null,
+      "retroactive": true
     }
   ]
 }
