@@ -82,7 +82,7 @@ import {
   mkdtempSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, rmSync,
 } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 // ── constants ─────────────────────────────────────────────────────────────────────────────────────
 export const CODEX_CLI = 'codex';
@@ -520,7 +520,7 @@ export function collectAndClearRolloutQuota({
 
 // ── impure: scratch clone, diff capture, gate ────────────────────────────────────────────────────
 
-/** `execFileSync`-shaped default with room for large git diffs and npm output. */
+/** `execFileSync`-shaped default with room for large diffs and git/npm/gate output. */
 export const defaultExecFn = (bin, args, opts = {}) =>
   execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024, ...opts });
 
@@ -583,8 +583,8 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
   if (typeof dir !== 'string' || !dir.trim()) throw new TypeError('codex-direct-task: `dir` must be a non-empty path');
   if (typeof startSha !== 'string' || !startSha.trim()) throw new TypeError('codex-direct-task: `startSha` must be a non-empty sha');
 
-  const status = execFn('git', ['-C', dir, 'status', '--porcelain']);
-  const untracked = status.split('\n').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
+  const status = execFn('git', ['-C', dir, 'status', '--porcelain', '-z']);
+  const untracked = status.split('\0').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
   if (untracked.length) {
     try { execFn('git', ['-C', dir, 'add', '--intent-to-add', '--', ...untracked]); } catch { /* best-effort */ }
   }
@@ -592,7 +592,7 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
   const diffStat = execFn('git', ['-C', dir, 'diff', '--stat', startSha]);
   const commitsRaw = execFn('git', ['-C', dir, 'log', '--oneline', `${startSha}..HEAD`]);
   const commits = commitsRaw.split('\n').map((l) => l.trim()).filter(Boolean);
-  return { status, diff, diffStat, commits, hasChanges: diff.trim().length > 0 || commits.length > 0 };
+  return { status: status.split('\0').filter(Boolean).join('\n'), diff, diffStat, commits, hasChanges: diff.trim().length > 0 || commits.length > 0 };
 }
 
 /**
@@ -675,7 +675,7 @@ export async function runCodexDirectExec({
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
-      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     } catch (e) {
       reject(new Error(`codex-direct-task: could not start \`${cli}\`: ${e.message}`));
       return;
@@ -685,31 +685,57 @@ export async function runCodexDirectExec({
     let timer = null;
     let killed = false;
     let settled = false;
+    const removeSignalListeners = () => {
+      process.removeListener('SIGINT', onSigint);
+      process.removeListener('SIGTERM', onSigterm);
+    };
+    const onSignal = (signal) => {
+      try {
+        if (Number.isInteger(child.pid) && child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+      } catch { /* already gone, or process-group kill is unavailable */ }
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      removeSignalListeners();
+      process.kill(process.pid, signal);
+    };
+    const onSigint = () => onSignal('SIGINT');
+    const onSigterm = () => onSignal('SIGTERM');
     const settle = (r) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      removeSignalListeners();
       resolvePromise(r);
     };
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         killed = true;
+        try {
+          if (Number.isInteger(child.pid) && child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+        } catch { /* already gone, or process-group kill is unavailable */ }
         try { child.kill('SIGKILL'); } catch { /* already gone */ }
       }, timeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
     }
-    child.stdout?.on('data', (d) => {
-      const text = d.toString();
+    const stdoutDecoder = new TextDecoder();
+    const recordStdout = (text) => {
+      if (!text) return;
       out += text;
       appendFileSync(logFile, text);
       if (stream) process.stdout.write(text);
-    });
+    };
+    child.stdout?.on('data', (d) => recordStdout(stdoutDecoder.decode(d, { stream: true })));
     child.stderr?.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       if (timer) clearTimeout(timer);
+      removeSignalListeners();
       reject(new Error(`codex-direct-task: \`${cli}\` failed to run: ${e.message}`));
     });
-    child.on('close', (code) => settle({ stdout: out, stderr: err, code, timedOut: killed, argv, outputLastMessageFile }));
+    child.on('close', (code) => {
+      recordStdout(stdoutDecoder.decode());
+      settle({ stdout: out, stderr: err, code, timedOut: killed, argv, outputLastMessageFile });
+    });
     // NO POSITIONAL PROMPT — the task rides stdin, and `.end()` closes it (the stdin-trap avoidance).
     child.stdin?.on('error', () => { /* the child may exit before we finish writing; `close` reports it */ });
     child.stdin?.end(prompt);
@@ -791,8 +817,9 @@ export async function codexDirectTask({
   const startSha = execFn('git', ['-C', targetDir, 'rev-parse', 'HEAD']).trim();
   // Same `.git/`-hiding reasoning as `outputLastMessageFile` above — the default log file must never leak
   // into `captureDiff`'s output. A caller-supplied `--log=<path>` is trusted as-is (their choice, their risk).
-  const resolvedLogFile = logFile || join(targetDir, '.git', 'codex-direct-task.jsonl');
-  mkdirSync(resolvedLogFile.slice(0, resolvedLogFile.lastIndexOf('/')) || '.', { recursive: true });
+  const gitDir = logFile ? null : execFn('git', ['-C', targetDir, 'rev-parse', '--absolute-git-dir']).trim();
+  const resolvedLogFile = logFile || join(gitDir, 'codex-direct-task.jsonl');
+  mkdirSync(dirname(resolvedLogFile), { recursive: true });
 
   // #x8wbivt: resolve the effort rung ONCE, here — the same explicit value then flows into both the real
   // argv (`runCodexDirectExec` → `buildCodexDirectTaskArgv`) and, implicitly, the model pin (which
