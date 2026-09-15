@@ -5,12 +5,15 @@
  *   - Pure, deterministic execution (identical inputs -> deep-equal results).
  *   - Provider recommendation cascade: Gemini fit, Codex fit, Both (high-stakes & thin history),
  *     and Claude fallback at Haiku, Sonnet, and Opus tiers.
- *   - Quota-strained Claude alternates: tier mapping, audit entries, branch isolation and determinism.
+ *   - Default agy Claude alternates: native identity/reliability vetoes, audit entries and determinism.
  *   - Statute-tier paths strictly force Claude Opus regardless of external model track record.
  *   - Supervision level backdown plan (#3690): clean streak counting, informative trial gating,
  *     calibration-miss hard veto on most recent record, and 'other'-verified skipping.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   selectProvider,
   selectSupervisionLevel,
@@ -23,6 +26,7 @@ import {
   SUPERVISION_LEVELS,
   DEFAULT_BACKDOWN_THRESHOLDS,
   PROVEN_TASK_ENVELOPES,
+  THIN_TRIAL_THRESHOLD,
 } from '../provider-routing.mjs';
 
 // ── Fixture Scorecard Helpers ──────────────────────────────────────────────────
@@ -382,7 +386,7 @@ describe('selectProvider — cascade branches', () => {
   });
 });
 
-describe('selectProvider — quotaStrained alternate backend (agy Claude route)', () => {
+describe('selectProvider — default Antigravity alternate backend (agy Claude route)', () => {
   it('freezes exactly the two real agy Claude tier mappings', () => {
     expect(Object.isFrozen(AGY_CLAUDE_MODEL_BY_TIER)).toBe(true);
     expect(Object.keys(AGY_CLAUDE_MODEL_BY_TIER).sort()).toEqual(['opus', 'sonnet']);
@@ -393,7 +397,7 @@ describe('selectProvider — quotaStrained alternate backend (agy Claude route)'
     expect('haiku' in AGY_CLAUDE_MODEL_BY_TIER).toBe(false);
   });
 
-  it('keeps omitted and false quota flags identical and deterministic on Claude Sonnet', () => {
+  it('offers Sonnet by default with identical, deterministic output for omitted, true and false quota flags', () => {
     const task = { description: 'Refactor CLI option parsing across modules', taskType: 'bugfix' };
     const context = {
       filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
@@ -401,35 +405,11 @@ describe('selectProvider — quotaStrained alternate backend (agy Claude route)'
       scorecards: [],
     };
     const res = selectProvider(task, context);
+    const explicitTrue = selectProvider(task, { ...context, quotaStrained: true });
     const explicitFalse = selectProvider(task, { ...context, quotaStrained: false });
 
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
-    expect(res.alternateBackend).toBeNull();
-    expect(explicitFalse.alternateBackend).toBeNull();
-    expect(explicitFalse.auditTrail).toHaveLength(res.auditTrail.length);
-    expect(explicitFalse).toEqual(res);
-    expect(res.auditTrail.map((a) => a.criterion)).toEqual([
-      'gemini-fitness', 'codex-fitness', 'both-together', 'claude-tier',
-    ]);
-    expect(selectProvider(task, context)).toEqual(res);
-    expect(JSON.stringify(selectProvider(task, context))).toBe(JSON.stringify(res));
-  });
-
-  it('offers Sonnet with one appended audit entry and preserves the original tier decision', () => {
-    const task = { description: 'Refactor CLI option parsing across modules', taskType: 'bugfix' };
-    const context = {
-      filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
-      estimatedSize: 180,
-      scorecards: [],
-      quotaStrained: true,
-    };
-    const res = selectProvider(task, context);
-    const baseline = selectProvider(task, { ...context, quotaStrained: false });
-
-    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
-    expect(res.reasoning).toBe(baseline.reasoning);
     expect(res.alternateBackend).toEqual({
       tool: 'scripts/gemini-direct-task.mjs',
       cliModel: 'claude-sonnet-4-6',
@@ -437,18 +417,91 @@ describe('selectProvider — quotaStrained alternate backend (agy Claude route)'
     });
     expect(res.alternateBackend.reason).toContain('gemini-direct-task.mjs');
     expect(res.alternateBackend.reason).toContain('claude-sonnet-4-6');
-    expect(res.auditTrail.slice(0, -1)).toEqual(baseline.auditTrail);
+    expect(res.alternateBackend.reason).toContain('Default capacity-relief');
+    expect(explicitTrue).toEqual(res);
+    expect(explicitFalse).toEqual(res);
+    expect(res.auditTrail.map((a) => a.criterion)).toEqual([
+      'gemini-fitness', 'codex-fitness', 'both-together', 'claude-tier', 'agy-alternate-backend',
+    ]);
     expect(res.auditTrail.at(-1)).toEqual({
-      criterion: 'quota-strain-alternate-backend',
+      criterion: 'agy-alternate-backend',
       result: 'offered',
-      dataConsulted: "claudeTier='sonnet', quotaStrained=true",
+      dataConsulted: "claudeTier='sonnet', taskType='bugfix', statute=false, latestAntigravityTrial=none",
       reasoning: expect.stringContaining('claude-sonnet-4-6'),
     });
     expect(selectProvider(task, context)).toEqual(res);
     expect(JSON.stringify(selectProvider(task, context))).toBe(JSON.stringify(res));
   });
 
-  it('offers Opus for statute-tier work while retaining the statute gate', () => {
+  it.each([
+    { filesTouched: Array.from({ length: 9 }, (_, i) => `scripts/module-${i}.mjs`), estimatedSize: 180 },
+    { filesTouched: ['scripts/module.mjs'], estimatedSize: 501 },
+    { filesTouched: ['scripts/module.mjs'], estimatedSize: 180, acceptanceTestable: false },
+  ])('offers Opus by default for effort sizing/caution: %j', (context) => {
+    const res = selectProvider({ taskType: 'bugfix' }, context);
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
+    expect(res.alternateBackend).toEqual({
+      tool: 'scripts/gemini-direct-task.mjs',
+      cliModel: 'claude-opus-4-6-thinking',
+      reason: expect.stringContaining('claude-opus-4-6-thinking'),
+    });
+    expect(res.auditTrail).toHaveLength(5);
+    expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'offered' });
+  });
+
+  it.each([
+    { outcome: 'rejected', findings: null },
+    { outcome: 'landed', findings: 'Unresolved write_to_file failure' },
+  ])('vetoes only the taskType with the latest unclean Antigravity trial: %j', (failure) => {
+    // An older informative trial bypasses Step 3's thin-history branch; scope exceeds
+    // the external fitness envelope so these calls exercise the Claude branch.
+    const context = {
+      filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
+      estimatedSize: 280,
+      scorecards: [
+        makeRecord({ provider: 'antigravity', findings: 'Earlier review finding' }),
+        makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', scoredAt: '2026-09-15T03:00:00.000Z', verifiedBy: 'other', ...failure }),
+        makeRecord({ provider: 'antigravity', scoredAt: '2026-09-15T02:00:00.000Z' }),
+        makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T04:00:00.000Z' }),
+      ],
+    };
+    const snapshot = JSON.stringify(context);
+    const res = selectProvider({ taskType: 'bugfix' }, context);
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.alternateBackend).toBeNull();
+    expect(res.auditTrail).toHaveLength(5);
+    expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'recent-failure' });
+    const otherTask = selectProvider({ taskType: 'build-new-feature' }, context);
+    expect(otherTask.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(otherTask.alternateBackend.cliModel).toBe('claude-sonnet-4-6');
+    expect(otherTask.auditTrail.at(-1).result).toBe('offered');
+    expect(JSON.stringify(selectProvider({ taskType: 'bugfix' }, context))).toBe(JSON.stringify(res));
+    expect(JSON.stringify(context)).toBe(snapshot);
+  });
+
+  it('restores the default when a later clean Antigravity trial supersedes failure across models', () => {
+    const context = {
+      filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
+      estimatedSize: 280,
+      model: 'claude-sonnet-4-6',
+      scorecards: { records: [
+        makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'other' }),
+        makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', outcome: 'rejected', findings: 'Unresolved build crash' }),
+        makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T03:00:00.000Z', outcome: 'rejected' }),
+      ] },
+    };
+    const res = selectProvider({ taskType: 'bugfix' }, context);
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.alternateBackend.cliModel).toBe('claude-sonnet-4-6');
+    expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'offered' });
+  });
+
+  it('requires native Opus for statute-tier work even with quota strain and clean Antigravity history', () => {
     const task = { description: 'Update platform decision on auto-land seam', taskType: 'doc-fix' };
     const context = {
       filesTouched: ['docs/agent/platform-decisions.md'],
@@ -456,6 +509,7 @@ describe('selectProvider — quotaStrained alternate backend (agy Claude route)'
       scorecards: [
         makeRecord({ provider: 'gemini', model: 'gemini-3.1-pro', taskType: 'doc-fix' }),
         makeRecord({ provider: 'codex', model: 'gpt-6-astra', taskType: 'doc-fix' }),
+        makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType: 'doc-fix' }),
       ],
       quotaStrained: true,
     };
@@ -463,11 +517,26 @@ describe('selectProvider — quotaStrained alternate backend (agy Claude route)'
 
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
-    expect(res.alternateBackend.cliModel).toBe('claude-opus-4-6-thinking');
-    expect(res.auditTrail.at(-1).result).toBe('offered');
-    expect(res.auditTrail.slice(0, -1)).toEqual(
-      selectProvider(task, { ...context, quotaStrained: false }).auditTrail
-    );
+    expect(res.alternateBackend).toBeNull();
+    expect(res.auditTrail).toHaveLength(5);
+    expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'forced-native' });
+    expect(res).toEqual(selectProvider(task, { ...context, quotaStrained: false }));
+  });
+
+  it.each(['architectural-decision', 'triage-research'])('requires native Opus for %s regardless of Antigravity history', (taskType) => {
+    for (const findings of [null, 'Unresolved build failure']) {
+      const res = selectProvider({ taskType }, {
+        filesTouched: ['scripts/module.mjs'],
+        estimatedSize: 20,
+        quotaStrained: true,
+        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType, findings })],
+      });
+      expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+      expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
+      expect(res.alternateBackend).toBeNull();
+      expect(res.auditTrail).toHaveLength(5);
+      expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'forced-native' });
+    }
   });
 
   it('returns null and audits why Haiku has no alternate', () => {
@@ -476,20 +545,18 @@ describe('selectProvider — quotaStrained alternate backend (agy Claude route)'
       filesTouched: ['docs/reference.md'],
       estimatedSize: 5,
       scorecards: [],
-      quotaStrained: true,
     };
     const res = selectProvider(task, context);
 
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.claudeTier).toBe(CLAUDE_TIERS.HAIKU);
     expect(res.alternateBackend).toBeNull();
-    expect(res.auditTrail.slice(0, -1)).toEqual(
-      selectProvider(task, { ...context, quotaStrained: false }).auditTrail
-    );
+    expect(res.auditTrail).toHaveLength(5);
+    expect(res).toEqual(selectProvider(task, { ...context, quotaStrained: true }));
     expect(res.auditTrail.at(-1)).toEqual({
-      criterion: 'quota-strain-alternate-backend',
+      criterion: 'agy-alternate-backend',
       result: 'not-applicable',
-      dataConsulted: "claudeTier='haiku', quotaStrained=true",
+      dataConsulted: "claudeTier='haiku', taskType='doc-fix', statute=false, latestAntigravityTrial=none",
       reasoning: expect.stringContaining('Haiku has no agy-hosted equivalent'),
     });
   });
@@ -640,5 +707,171 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
       requireInformativeTrial: false,
     });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+  });
+});
+
+describe('selectProvider — explorationHint (model-capability-ratings)', () => {
+  // Synthetic test ratings only; these do not claim any real benchmark performance.
+  function makeRating(overrides = {}) {
+    return {
+      provider: 'codex',
+      model: 'test-coding-model',
+      verified: true,
+      source: 'https://example.test/synthetic-benchmark',
+      asOf: '2026-09-01',
+      lastUpdated: '2026-09-15',
+      categories: {
+        contextIngestion: { value: null, unit: 'points', note: '' },
+        autonomousAgenticWork: { value: 80, unit: 'points', note: '' },
+        algorithmicSpeedIdeSync: { value: null, unit: 'points', note: '' },
+        cliToolUse: { value: 60, unit: 'points', note: '' },
+        overallCodingIndex: { value: 70, unit: 'points', note: '' },
+      },
+      ...overrides,
+    };
+  }
+  const task = { taskType: 'bugfix' };
+
+  it('surfaces a verified rating with provenance when both groups have zero trials', () => {
+    const entry = makeRating();
+    const { explorationHint } = selectProvider(task, {
+      scorecards: [], capabilityRatings: { version: 1, entries: [entry], dropped: [] },
+    });
+    expect(THIN_TRIAL_THRESHOLD).toBe(3);
+    expect(explorationHint).toEqual({
+      suggestedProvider: 'codex', suggestedModel: 'test-coding-model',
+      category: 'autonomousAgenticWork', value: 80, unit: 'points',
+      asOf: entry.asOf, source: entry.source,
+      reason: "Real trial history for taskType 'bugfix' is thin (gemini/antigravity: 0, codex: 0 trials, threshold 3); verified external rating suggests trying codex/test-coding-model (autonomousAgenticWork=80) next.",
+    });
+  });
+
+  it.each([false, undefined])('never surfaces verification=%s', (verified) => {
+    expect(selectProvider(task, { capabilityRatings: [makeRating({ verified })] }).explorationHint).toBeNull();
+  });
+
+  it('returns null when ratings or context are omitted, or the registry is empty', () => {
+    expect(selectProvider(task, { scorecards: [] }).explorationHint).toBeNull();
+    expect(selectProvider(task).explorationHint).toBeNull();
+    expect(selectProvider(task, { capabilityRatings: { version: 1, entries: [], dropped: [] } }).explorationHint).toBeNull();
+  });
+
+  it.each([3, 4])('does not consult ratings with %i trials in each group, including antigravity', (count) => {
+    const scorecards = Array.from({ length: count }, (_, i) => [
+      makeRecord({ provider: i % 2 ? 'gemini' : 'antigravity' }), makeRecord(),
+    ]).flat();
+    const registry = { version: 1, entries: [makeRating()], dropped: [] };
+    expect(selectProvider(task, { scorecards, capabilityRatings: registry }).explorationHint).toBeNull();
+    // Prove the gate prevents consultation, rather than merely discarding a ranked hint.
+    expect(selectProvider(task, {
+      scorecards,
+      get capabilityRatings() { throw new Error('Registry must not be consulted'); },
+    }).explorationHint).toBeNull();
+  });
+
+  it.each(['gemini', 'codex'])('consults when only %s has thin task-specific history', (thinProvider) => {
+    const scorecards = ['gemini', 'codex'].flatMap((provider) =>
+      Array.from({ length: provider === thinProvider ? 2 : 3 }, () => makeRecord({ provider }))
+    );
+    scorecards.push(makeRecord({ provider: thinProvider, taskType: 'doc-fix' }), makeRecord({ provider: 'claude' }), null);
+    const result = selectProvider(task, { scorecards: { records: scorecards }, capabilityRatings: [makeRating()] });
+    expect(result.explorationHint.suggestedProvider).toBe('codex');
+    expect(result.explorationHint.reason).toContain(
+      `gemini/antigravity: ${thinProvider === 'gemini' ? 2 : 3}, codex: ${thinProvider === 'codex' ? 2 : 3} trials`
+    );
+  });
+
+  it.each([
+    ['bugfix', 'autonomousAgenticWork'], ['build-new-feature', 'autonomousAgenticWork'],
+    ['self-fix', 'autonomousAgenticWork'], ['conflict-resolution', 'cliToolUse'],
+    ['doc-fix', 'cliToolUse'], ['triage-research', 'overallCodingIndex'],
+  ])('uses %s default category %s', (taskType, category) => {
+    expect(selectProvider({ taskType }, { capabilityRatings: [makeRating()] }).explorationHint.category).toBe(category);
+  });
+
+  it('category override changes the ranking and winning provider/model', () => {
+    const codex = makeRating();
+    const gemini = makeRating({ provider: 'gemini', model: 'test-cli-model', categories: {
+      ...codex.categories,
+      autonomousAgenticWork: { value: 40, unit: 'points', note: '' },
+      cliToolUse: { value: 90, unit: 'points', note: '' },
+    } });
+    const context = { capabilityRatings: [codex, gemini] };
+    expect(selectProvider(task, context).explorationHint.suggestedProvider).toBe('codex');
+    expect(selectProvider(task, { ...context, capabilityCategory: 'cliToolUse' }).explorationHint).toMatchObject({
+      suggestedProvider: 'gemini', suggestedModel: 'test-cli-model', category: 'cliToolUse', value: 90,
+    });
+  });
+
+  it('skips unknown values and unsupported providers, keeps measured zero and stable ties', () => {
+    const unknown = makeRating({ categories: {
+      ...makeRating().categories, autonomousAgenticWork: { value: null, unit: 'points', note: '' },
+    } });
+    const zero = makeRating({ provider: 'antigravity', model: 'test-zero-model', categories: {
+      ...makeRating().categories, autonomousAgenticWork: { value: 0, unit: 'points', note: '' },
+    } });
+    const context = { capabilityRatings: [unknown, makeRating({ provider: 'claude' }), zero, { ...zero, provider: 'gemini' }] };
+    expect(selectProvider(task, context).explorationHint).toMatchObject({ suggestedProvider: 'antigravity', value: 0 });
+    expect(selectProvider(task, { capabilityRatings: [unknown] }).explorationHint).toBeNull();
+    expect(selectProvider(task, { ...context, capabilityCategory: 'unknown-category' }).explorationHint).toBeNull();
+  });
+
+  it.each([
+    ['gemini', { scorecards: [makeRecord({ provider: 'gemini' })] }],
+    ['codex', { scorecards: [makeRecord()] }],
+    ['both', { filesTouched: ['scripts/lib/parser.mjs', 'scripts/lib/__tests__/parser.test.mjs'] }],
+    ['claude', { scorecards: [], quotaStrained: true }],
+  ])('adds only explorationHint on the %s branch, preserving all existing output bytes', (recommendation, context) => {
+    const { explorationHint: absent, ...baseline } = selectProvider(task, context);
+    const withRatings = { ...context, capabilityRatings: [makeRating()] };
+    const snapshot = JSON.stringify(withRatings);
+    const { explorationHint, ...result } = selectProvider(task, withRatings);
+    expect(result.recommendation).toBe(recommendation);
+    expect(absent).toBeNull();
+    expect(explorationHint.suggestedModel).toBe('test-coding-model');
+    expect(JSON.stringify(result)).toBe(JSON.stringify(baseline));
+    expect(JSON.stringify(withRatings)).toBe(snapshot);
+    expect(selectProvider(task, withRatings)).toEqual({ ...result, explorationHint });
+  });
+});
+
+describe('selectSupervisionLevel — architectural separation from model-capability-ratings', () => {
+  it('retains its five declared parameters and identical behavior on identical evidence', () => {
+    // JavaScript .length stops before the first default: backdownThresholds = {}.
+    expect(selectSupervisionLevel.length).toBe(4);
+    expect(selectSupervisionLevel.toString().split('\n')[0]).toBe(
+      'function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}) {'
+    );
+    const scorecards = [makeRecord()];
+    const thresholds = { minCleanStreak: 1, requireInformativeTrial: false };
+    const first = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', scorecards, thresholds);
+    const second = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', scorecards, thresholds);
+    expect(first.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  });
+
+  it('contains no capability registry, imported helper, or exploration references in its source span', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../provider-routing.mjs'), 'utf8');
+    const start = source.indexOf('export function selectSupervisionLevel');
+    expect(start).toBeGreaterThanOrEqual(0);
+    // route-import-graph.mjs extracts imports, but has no function-span helper.
+    // Start AFTER the parameter list so the default {} is not mistaken for the body.
+    const openingBrace = source.indexOf('{', source.indexOf(')', start) + 1);
+    expect(openingBrace).toBeGreaterThan(start);
+    let depth = 0;
+    let end = -1;
+    for (let i = openingBrace; i < source.length; i++) {
+      if (source[i] === '{') depth++;
+      else if (source[i] === '}') {
+        depth--;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    expect(end).toBeGreaterThan(openingBrace);
+    const span = source.slice(start, end);
+    // Check the counter captured the entire function, including its final return.
+    expect(span).toBe(`export ${selectSupervisionLevel.toString()}`);
+    expect(span).not.toContain('model-capability-ratings');
+    expect(span).not.toMatch(/isUsableForExploration|getExplorationHint|capabilityRatings|capabilityCategory|explorationHint|THIN_TRIAL_THRESHOLD|forcedNativeIdentity|latestAntigravityTrial|agyAlternateResult/);
   });
 });
