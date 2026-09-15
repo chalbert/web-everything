@@ -189,6 +189,48 @@
       "verifiedBy": "other",
       "findings": "Verified via a live smoke test, not a Claude-subagent code review. NOTE: gemini-direct-task.mjs pins no default model (model/effort are optional passthroughs — see its own header); \"gemini-3.1-pro\" here is a best-effort label, not a confirmed pinned identity for this run.",
       "retroactive": true
+    },
+    {
+      "v": 1,
+      "outcome": "reworked",
+      "scoredAt": "2026-09-15T14:35:34.138Z",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": null,
+      "pr": null,
+      "handle": null,
+      "taskDescription": "Build model-capability-ratings.mjs/.json schema (round 1 of the capability-ratings task); also asked to wire provider-routing.mjs in the same round",
+      "taskType": "other",
+      "verifiedBy": "claude-subagent",
+      "findings": "Registry portion (model-capability-ratings.mjs/.json + its test, 51 tests) landed unchanged in the final diff -- correct on the first pass. The routing portion could not land in round 1: the task brief incorrectly assumed provider-routing.mjs did not exist yet; Codex correctly detected the real file already existed with a different, already-shipped API (epic #3690) and a conflicting model-probation.mjs dependency assumption, restored the tracked files untouched, and asked for clarification instead of guessing or overwriting real code. A corrected round 2 task then completed the routing wiring cleanly.",
+      "retroactive": false
+    },
+    {
+      "v": 1,
+      "outcome": "landed",
+      "scoredAt": "2026-09-15T14:35:36.247Z",
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": null,
+      "pr": null,
+      "handle": null,
+      "taskDescription": "Wire model-capability-ratings.mjs into provider-routing.mjs's selectProvider as an additive, advisory explorationHint, with a static/behavioral test proving selectSupervisionLevel cannot be influenced by it (round 2, corrected task)",
+      "taskType": "other",
+      "verifiedBy": "claude-subagent",
+      "findings": null,
+      "retroactive": false
     }
   ]
 }

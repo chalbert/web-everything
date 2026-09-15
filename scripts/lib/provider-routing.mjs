@@ -14,6 +14,10 @@
  *   • No Date.now(), Math.random(), or implicit time reads. Timestamps in scorecards are treated as
  *     deterministic ISO-8601 strings.
  *
+ * `explorationHint` is an ADDITIONAL, purely advisory field sourced from caller-loaded
+ * `we:scripts/lib/model-capability-ratings.mjs` data, consulted ONLY inside `selectProvider`,
+ * NEVER inside `selectSupervisionLevel`. It cannot change recommendation, claudeTier, or level.
+ *
  * PROGRESSIVE BACKDOWN & GRADUATION MODEL (#3690):
  *   • Unit of trust is strictly {provider, model, taskType}, never broader (identity never inherits trust).
  *   • N = 5 consecutive clean trials (verified by claude-subagent or independent-claude) required for spot-check.
@@ -40,6 +44,57 @@
  *   under docs/agent/ constitute the repo's statute/governance layer. Touching ANY statute-tier path
  *   forces Claude Opus, never Gemini or Codex, regardless of track record.
  */
+
+import { isUsableForExploration } from './model-capability-ratings.mjs';
+
+// ── EXPLORATION SIGNAL ONLY — advisory benchmarks, separate from supervision ──
+// @test-only-export-ok: Shared threshold for caller-visible exploration hints
+export const THIN_TRIAL_THRESHOLD = 3;
+
+/** Pure advisory lookup used only when finalizing selectProvider's return value. */
+function getExplorationHint(taskType, scorecards, context) {
+  let geminiCount = 0;
+  let codexCount = 0;
+  for (const record of scorecards) {
+    if (!record || record.taskType !== taskType) continue;
+    if (['gemini', 'antigravity'].includes(record.provider)) geminiCount++;
+    else if (record.provider === 'codex') codexCount++;
+  }
+  // Sufficient real evidence prevents even consulting the external registry.
+  if (geminiCount >= THIN_TRIAL_THRESHOLD && codexCount >= THIN_TRIAL_THRESHOLD) return null;
+
+  const registry = context?.capabilityRatings;
+  const entries = Array.isArray(registry) ? registry : (Array.isArray(registry?.entries) ? registry.entries : []);
+  const category = typeof context?.capabilityCategory === 'string'
+    ? context.capabilityCategory
+    : (['bugfix', 'build-new-feature', 'self-fix'].includes(taskType)
+      ? 'autonomousAgenticWork'
+      : (['conflict-resolution', 'doc-fix'].includes(taskType) ? 'cliToolUse' : 'overallCodingIndex'));
+
+  let best = null;
+  for (const entry of entries) {
+    if (!['gemini', 'antigravity', 'codex'].includes(entry?.provider) || !isUsableForExploration(entry)) continue;
+    const value = entry.categories?.[category]?.value;
+    // Unknown values never rank; retain registry order for equal measured values.
+    if (!Number.isFinite(value)) continue;
+    if (best === null || value > best.categories[category].value) best = entry;
+  }
+  if (best === null) return null;
+
+  const { value, unit } = best.categories[category];
+  return {
+    suggestedProvider: best.provider,
+    suggestedModel: best.model,
+    category,
+    value,
+    unit,
+    asOf: best.asOf,
+    source: best.source,
+    reason: `Real trial history for taskType '${taskType}' is thin (gemini/antigravity: ${geminiCount}, codex: ${codexCount} trials, threshold ${THIN_TRIAL_THRESHOLD}); verified external rating suggests trying ${best.provider}/${best.model} (${category}=${value}) next.`,
+  };
+}
+
+// ── EVIDENCE-BASED SIGNAL — existing routing and supervision policy ────────────
 
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
 export const RECOMMENDATIONS = Object.freeze({
@@ -313,6 +368,7 @@ function evaluateProviderFitness(providerNames, taskType, filesTouched, estimate
  * @property {{ tool: string, cliModel: string, reason: string }|null} [alternateBackend] - Informational agy route on the Claude branch only; null unless quota-strained Sonnet/Opus.
  * @property {AuditTrailEntry[]} auditTrail - Sequence of criteria evaluated in cascade order.
  * @property {string} reasoning - Human-readable summary paragraph explaining the recommendation.
+ * @property {{ suggestedProvider: string, suggestedModel: string, category: string, value: number, unit: string, asOf: string, source: string, reason: string }|null} explorationHint - Advisory verified external rating when either provider group's trial history is thin.
  */
 
 /**
@@ -327,7 +383,7 @@ function evaluateProviderFitness(providerNames, taskType, filesTouched, estimate
  * PURE: No filesystem or process reads. Deterministic over its arguments.
  *
  * @param {{ description?: string, taskType: 'bugfix'|'doc-fix'|'conflict-resolution'|'triage-research'|'build-new-feature'|'architectural-decision' }} task
- * @param {{ filesTouched?: string[], estimatedSize?: number, scorecards?: Array<object>, acceptanceTestable?: boolean, model?: string, quotaStrained?: boolean }} context - quotaStrained is caller-supplied; only true requests an alternate Claude backend.
+ * @param {{ filesTouched?: string[], estimatedSize?: number, scorecards?: Array<object>|{records: Array<object>}, acceptanceTestable?: boolean, model?: string, quotaStrained?: boolean, capabilityRatings?: Array<object>|{version: number, entries: Array<object>, dropped: Array<object>}, capabilityCategory?: string }} context - All data is caller-loaded; capabilityCategory overrides the task's default exploration category. Only quotaStrained=true requests an alternate Claude backend.
  * @returns {ProviderRecommendation} Includes optional alternateBackend on the Claude branch only (null when not applicable).
  */
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
@@ -376,6 +432,7 @@ export function selectProvider(task, context) {
       claudeTier: null,
       auditTrail,
       reasoning,
+      explorationHint: getExplorationHint(taskType, scorecards, context),
     };
   }
 
@@ -404,6 +461,7 @@ export function selectProvider(task, context) {
       claudeTier: null,
       auditTrail,
       reasoning,
+      explorationHint: getExplorationHint(taskType, scorecards, context),
     };
   }
 
@@ -468,6 +526,7 @@ export function selectProvider(task, context) {
       claudeTier: null,
       auditTrail,
       reasoning,
+      explorationHint: getExplorationHint(taskType, scorecards, context),
     };
   }
 
@@ -543,6 +602,7 @@ export function selectProvider(task, context) {
     alternateBackend,
     auditTrail,
     reasoning,
+    explorationHint: getExplorationHint(taskType, scorecards, context),
   };
 }
 
