@@ -6,7 +6,10 @@
  *   no real `gh`, no real lane/agent spawn.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { autoFixAfterReview, renderScopedFindingBrief, resolveBaseRefName } from '../autofix-review-findings.mjs';
+import {
+  autoFixAfterReview, renderScopedFindingBrief, resolveBaseRefName,
+  summarizeAutoFixDecline, renderAutoFixDeclineNote,
+} from '../autofix-review-findings.mjs';
 
 const REGISTRY = { branches: [{ branch: 'lane/mechanical-dispatcher', target: 'main' }] };
 
@@ -130,5 +133,67 @@ describe('autoFixAfterReview — the router', () => {
     );
     expect(out.results).toEqual([]);
     expect(dispatchFixFn).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #3383 — summarizeAutoFixDecline / renderAutoFixDeclineNote: THE VISIBILITY GAP. Before this, a clean "0 of N
+// auto-fixable" outcome (e.g. every finding path-blacklisted) posted NOTHING to the PR — only a `writeErr` on an
+// actual thrown error, and a decline is not an error. These pin the pure classifier and its note.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('summarizeAutoFixDecline (#3383)', () => {
+  it('is null when there is nothing to consider — zero findings is not a decline', () => {
+    expect(summarizeAutoFixDecline({ tier: 'strict', results: [] })).toBeNull();
+    expect(summarizeAutoFixDecline({})).toBeNull();
+    expect(summarizeAutoFixDecline(null)).toBeNull();
+  });
+
+  it('is null when at least one finding WAS dispatched — not "all declined"', () => {
+    const results = [
+      { finding: {}, dispatched: true, risk: { reason: 'clean' } },
+      { finding: {}, dispatched: false, risk: { reason: 'path-blacklisted' } },
+    ];
+    expect(summarizeAutoFixDecline({ results })).toBeNull();
+  });
+
+  it('summarizes an all-declined outcome, grouping by reason', async () => {
+    const dispatchFixFn = vi.fn(async () => ({}));
+    const out = await autoFixAfterReview(
+      {
+        pr: 1,
+        repo: 'o/r',
+        findings: [
+          { file: 'docs/agent/platform-decisions.md', summary: 'wording nit' }, // statute-layer → path-blacklisted
+          { summary: 'a finding with no file anchor at all' }, // no-file-anchor
+        ],
+      },
+      { dispatchFixFn, registry: REGISTRY, run: vi.fn(() => JSON.stringify({ baseRefName: 'main' })) },
+    );
+    const decline = summarizeAutoFixDecline(out);
+    expect(decline).toEqual({ count: 2, reasonCounts: { 'path-blacklisted': 1, 'no-file-anchor': 1 } });
+  });
+
+  it('the exact PR #2117-shaped case: every finding path-blacklisted, nothing dispatched', () => {
+    const results = [
+      { finding: { file: 'docs/agent/platform-decisions.md' }, dispatched: false, risk: { reason: 'path-blacklisted' } },
+      { finding: { file: 'scripts/guard-lane.mjs' }, dispatched: false, risk: { reason: 'path-blacklisted' } },
+    ];
+    expect(summarizeAutoFixDecline({ results })).toEqual({ count: 2, reasonCounts: { 'path-blacklisted': 2 } });
+  });
+});
+
+describe('renderAutoFixDeclineNote (#3383)', () => {
+  it('names the count and the reason(s) — the operator-facing footnote', () => {
+    const note = renderAutoFixDeclineNote({ count: 2, reasonCounts: { 'path-blacklisted': 2 } });
+    expect(note).toMatch(/2 finding\(s\)/);
+    expect(note).toMatch(/fixed 0/);
+    expect(note).toMatch(/2 path-blacklisted/);
+    expect(note).toMatch(/No fix was dispatched/);
+  });
+
+  it('renders multiple reasons, one count each', () => {
+    const note = renderAutoFixDeclineNote({ count: 2, reasonCounts: { 'path-blacklisted': 1, 'no-file-anchor': 1 } });
+    expect(note).toMatch(/1 path-blacklisted/);
+    expect(note).toMatch(/1 no-file-anchor/);
   });
 });
