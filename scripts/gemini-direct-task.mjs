@@ -81,6 +81,7 @@ import { pathToFileURL } from 'node:url';
 
 export const AGY_CLI = 'agy';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
 
 function requireText(value, name) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -204,7 +205,9 @@ export function summarizeAgyEvents(events) {
   const steps = list.filter((e) => e?.event === 'step_update').map((e) => e.step_update);
   const toolCalls = steps.filter((s) => s?.step_type === 'tool' && s.state === 'DONE')
     .map((s) => ({ name: s.tool_name, params: s.tool_info?.parameters, output: s.tool_info?.output }));
-  const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
+  // Tool outcome is independent of step lifecycle and the CLI's terminal self-report.
+  const toolErrors = steps.filter((s) => s?.status === 'TOOL_ERROR')
+    .map((s) => ({ name: s.tool_name, params: s.tool_info?.parameters, output: s.tool_info?.output }));
   const filesTouched = [...new Set(toolCalls.filter((t) => writingTools.includes(t.name)).flatMap((t) => {
     if (!t.params || typeof t.params !== 'object') return [];
     return Object.entries(t.params).filter(([key, value]) =>
@@ -220,7 +223,7 @@ export function summarizeAgyEvents(events) {
   }
   const result = [...list].reverse().find((e) => e?.event === 'result')?.result;
   return {
-    conversationId, toolCalls, filesTouched, agentMessages: [...messages.values()],
+    conversationId, toolCalls, toolErrors, filesTouched, agentMessages: [...messages.values()],
     terminal: typeof result?.status === 'string' ? result.status : null,
     finalResponse: typeof result?.response === 'string' ? result.response : null,
     errorMessage: result?.error ?? null,
@@ -539,6 +542,10 @@ export function formatReport(report) {
   const lines = [
     `gemini-direct-task: ${report.scratch.created ? 'scratch clone' : 'target dir'} → ${report.dir}`,
     `conversation: ${report.events.conversationId ?? '<none>'}  terminal: ${report.events.terminal ?? '<none>'}  exit: ${report.exitCode}  timedOut: ${report.timedOut}`,
+    ...(report.events.toolErrors.length ? [
+      `WARNING: TOOL ERRORS DURING RUN (${report.events.toolErrors.length}) — the terminal status above may not reflect real success:`,
+      ...report.events.toolErrors.map((t) => `  ${t.name}: ${t.output ?? '<no output>'}`),
+    ] : []),
     `tool calls: ${report.events.toolCalls.length}  files touched (informational): ${report.events.filesTouched.length}`,
     `log: ${report.logFile}`,
     `usage (tokens only): ${JSON.stringify(report.events.usage)}`,
@@ -583,7 +590,8 @@ export async function main(argv = process.argv.slice(2), { taskFn = geminiDirect
     }) : defaultExecFn,
   });
   console.log(flags.json ? JSON.stringify(report, null, 2) : formatReport(report));
-  if (report.timedOut || report.exitCode !== 0 || report.events.terminal !== 'SUCCESS' || !report.gate.pass) {
+  if (report.timedOut || report.exitCode !== 0 || report.events.terminal !== 'SUCCESS' || !report.gate.pass
+      || report.events.toolErrors.some((t) => writingTools.includes(t.name))) {
     process.exitCode = 1;
   }
   return report;

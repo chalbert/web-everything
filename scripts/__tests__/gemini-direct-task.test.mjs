@@ -346,17 +346,25 @@ const REAL_WRITE_EVENTS = [
   { event: 'result', result: { conversation_id: '32e9cd5a-...', status: 'SUCCESS', response: 'Created NOTES.md containing:\n\n```text\nagy-direct-task-works\n```\n\nNo git commit was run.\n', duration_seconds: 38.438833, num_turns: 1, usage: { input_tokens: 137321, output_tokens: 3965, thinking_tokens: 2627, cache_read_tokens: 113377, total_tokens: 141286 } } },
 ];
 const ERROR_EVENT = { event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: 'authentication failed or timed out', duration_seconds: 0, num_turns: 0, usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0 } } };
+// Incident reproduction using the observed step_update.status envelope; lifecycle fields may be absent.
+const WRITE_ERROR_EVENTS = [
+  { event: 'step_update', step_update: { tool_name: 'write_to_file',
+    tool_info: { parameters: { TargetFile: '/scratch/dir/NOTES.md' }, output: 'permission check failed' },
+    status: 'TOOL_ERROR' } },
+  REAL_WRITE_EVENTS.at(-1),
+];
 const jsonl = (events) => events.map((e) => JSON.stringify(e)).join('\n') + '\n';
 
 describe('summarizeAgyEvents — observed events and defensive parsing', () => {
   it('reads terminal response and inline usage, joins ACTIVE and DONE deltas per step', () => {
     const result = summarizeAgyEvents(parseJsonlEvents(jsonl(REAL_EVENTS)));
-    expect(result).toEqual({ conversationId: REAL_EVENTS[0].conversation_id, toolCalls: [], filesTouched: [],
+    expect(result).toEqual({ conversationId: REAL_EVENTS[0].conversation_id, toolCalls: [], toolErrors: [], filesTouched: [],
       agentMessages: ['pong\n'], terminal: 'SUCCESS', finalResponse: 'pong\n', errorMessage: null,
       usage: { input_tokens: 13115, output_tokens: 27, thinking_tokens: 26, cache_read_tokens: 0, total_tokens: 13142 } });
   });
   it('counts only DONE tools, preserving parameters/output and informational file paths', () => {
     const result = summarizeAgyEvents(REAL_WRITE_EVENTS);
+    expect(result.toolErrors).toEqual([]);
     expect(result.conversationId).toBe('32e9cd5a-...');
     expect(result.toolCalls).toEqual([
       { name: 'run_command', params: { CommandLine: 'pwd' }, output: '/some/other/dir\n' },
@@ -366,6 +374,31 @@ describe('summarizeAgyEvents — observed events and defensive parsing', () => {
     expect(result.agentMessages).toEqual(['Created NOTES.md ...']);
     expect(result.finalResponse).toBe(REAL_WRITE_EVENTS.at(-1).result.response);
     expect(result.usage.total_tokens).toBe(141286);
+  });
+  it.each([undefined, 'ACTIVE', 'DONE'])('retains a failed write despite terminal SUCCESS (state: %s)', (state) => {
+    const [failure, terminal] = WRITE_ERROR_EVENTS;
+    const events = [{ ...failure, step_update: { ...failure.step_update,
+      ...(state === undefined ? {} : { state, step_type: 'tool' }) } }, terminal];
+    const result = summarizeAgyEvents(parseJsonlEvents(jsonl(events)));
+    expect(result.terminal).toBe('SUCCESS');
+    expect(result.toolErrors).toEqual([{ name: 'write_to_file',
+      params: { TargetFile: '/scratch/dir/NOTES.md' }, output: 'permission check failed' }]);
+    // The additive error trace must not alter any existing summary field.
+    const { toolErrors, ...existing } = result;
+    const { toolErrors: cleanErrors, ...cleanExisting } = summarizeAgyEvents([
+      { ...events[0], step_update: { ...events[0].step_update, status: 'SUCCESS' } }, terminal,
+    ]);
+    expect(existing).toEqual(cleanExisting);
+    expect(cleanErrors).toEqual([]);
+  });
+  it('collects every error, including non-writers and missing tool details', () => {
+    const result = summarizeAgyEvents([WRITE_ERROR_EVENTS[0],
+      { event: 'step_update', step_update: { tool_name: 'view_file', status: 'TOOL_ERROR' } },
+      { event: 'step_update' }, WRITE_ERROR_EVENTS[1]]);
+    expect(result.toolErrors).toEqual([
+      { name: 'write_to_file', params: { TargetFile: '/scratch/dir/NOTES.md' }, output: 'permission check failed' },
+      { name: 'view_file', params: undefined, output: undefined },
+    ]);
   });
   it('reports auth ERROR with no tools; the LAST result owns all terminal fields', () => {
     const result = summarizeAgyEvents([ERROR_EVENT]);
@@ -702,6 +735,28 @@ describe('CLI — flag parsing and truthful reports without a real process', () 
     events: summarizeAgyEvents(REAL_EVENTS), diff: { status: ' M file', diff: '+actual change', diffStat: '1 file', commits: [], hasChanges: true },
     gate: { ran: false, mode: 'none', pass: true, steps: [] },
   };
+  it.each([
+    ['write_to_file', 1], ['replace_file_content', 1], ['sed_file', 1],
+    ['multi_replace_file_content', 1], ['notebook_edit', 1], ['view_file', 0], ['run_command', 0],
+  ])('surfaces %s TOOL_ERROR followed by SUCCESS and sets wrapper exit %s', async (tool_name, exitCode) => {
+    const dir = tempDir();
+    const [failure, terminal] = WRITE_ERROR_EVENTS;
+    const events = [{ ...failure, step_update: { ...failure.step_update, tool_name } }, terminal];
+    const { fn: spawnFn } = fakeSpawn(jsonl(events));
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    process.exitCode = 0;
+    const result = await main(['--task=t', `--dir=${dir}`, '--no-stream'], {
+      taskFn: (opts) => geminiDirectTask({ ...opts, execFn: fakeExec(), spawnFn }),
+    });
+    expect(result).toMatchObject({ exitCode: 0, events: { terminal: 'SUCCESS',
+      toolErrors: [{ name: tool_name, output: 'permission check failed' }] } });
+    expect(process.exitCode).toBe(exitCode);
+    expect(spawnFn).toHaveBeenCalledOnce();
+    expect(output).toHaveBeenCalledOnce();
+    const text = output.mock.calls[0][0];
+    expect(text.split('\n')[2]).toBe('WARNING: TOOL ERRORS DURING RUN (1) — the terminal status above may not reflect real success:');
+    expect(text).toContain(`${tool_name}: permission check failed`);
+  });
   it('preserves equals inside values and repeated add-dir flags', () => {
     expect(parseFlags(['--task=a=b', '--add-dir=/one', '--add-dir=/two', '--sandbox'])).toEqual({ task: 'a=b', 'add-dir': ['/one', '/two'], sandbox: true });
   });
