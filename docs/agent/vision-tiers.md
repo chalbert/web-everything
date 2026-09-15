@@ -131,11 +131,13 @@ zero-shot VLM critique is ~13% valid; a rubric + few-shot grounding is what make
   `CODIFICATION_FACETS`); extensibility lives in the open findings; a deliberate **version bump** is the
   escape hatch for the axis set.
 
-**Rubric version: `v2`** (provenance added #1587, 2026-06-22; `v1` = the #1034-ratified 8-axis set). The
-version-bump escape hatch (#1034 Fork 3) covers the axis set; `v2` is **additive** — same 8 axes, now each
-carrying a **provenance** ref to the admitted authoritative source(s) it codifies (the design-knowledge
-intake program #1585; source ids are the rows of [`designKnowledgeWatch.json`](../../src/_data/designKnowledgeWatch.json)).
-This is AI over a *contract*: a codified heuristic carries its authoritative basis, never raw source text.
+**Rubric version: `v3`** (distilled guidance added #1589, 2026-09-15; `v2` = provenance added #1587,
+2026-06-22; `v1` = the #1034-ratified 8-axis set). The version-bump escape hatch (#1034 Fork 3) covers the
+axis set; `v2` and `v3` are both **additive** — same 8 axes. `v2` gave each a **provenance** ref to the
+admitted authoritative source(s) it codifies (the design-knowledge intake program #1585; source ids are the
+rows of [`designKnowledgeWatch.json`](../../src/_data/designKnowledgeWatch.json)); `v3` adds codified
+**distilled guidance** — what a critique should look for — for the single-source axes (§Distilled guidance
+below). This is AI over a *contract*: a codified heuristic carries its authoritative basis, never raw source text.
 
 **Axis vocabulary** (8 closed axes; tier-tag → grounding; the list itself is config + versioned, not
 frozen constants). **Grounded in** is the page's *declared WE standard* read as input (#1034 Fork 1);
@@ -157,8 +159,50 @@ The **open-findings** contract carries provenance too: the severity scale `{seve
 (`nielsen-heuristics`, cosmetic → catastrophe), and the closed-axes-plus-localized-findings output shape
 is UICrit's (`uicrit-uist24`). Provenance ids resolve against the #1586 ledger; an id with no ledger row
 is a dangling ref the watch should admit or correct. (The provenance links alone are not "distilled" in
-the #1586 metric sense — flipping a ledger row's `distilledInto` is #1589's job, once #1588 ratifies the
-credibility weights; `v2` carries the *citation*, not the weighted distillation.)
+the #1586 metric sense — a citation says *which* source grounds an axis, never *what to look for*. A ledger
+row's `distilledInto` flips only when codified guidance content lands below; `v2` carries the *citation*,
+`v3` the distillation.)
+
+### Distilled guidance (v3)
+
+AI-synthesized, original wording — never source text — each paragraph naming the specific sub-principle of
+its provenance source it codifies, then what a critique should concretely **flag**. Scoped to the axes
+backed by exactly one admitted source (#1589); a multi-source axis needs a credibility-weighted
+reconciliation of overlapping guidance first, so those stay pending.
+
+> **1 — Contrast & legibility.** Codified from the WCAG success criteria the APG (`w3c-apg`) builds on,
+> SC 1.4.3 *Contrast (Minimum)* and SC 1.4.11 *Non-text Contrast*: text must stand clearly apart from what
+> sits behind it, and the visual cues a user needs to operate a control — its boundary, focus ring, or state
+> indicator — must stand apart from their surroundings too. The ratio itself is the a11y gate's call
+> (Tier A, consumed, never re-derived from pixels); the critique owns what the ratio misses. Flag: a gate
+> contrast failure surfaced as a finding on the element it names; text laid over an image or gradient whose
+> legibility changes across its extent; a focus or selected state distinguishable only by a faint tint;
+> information carried by colour alone.
+
+> **2 — Spacing & rhythm.** Codified from Apple HIG's *Layout* guidance on consistent margins and padding:
+> space is a structural signal, so related content should sit on a steady, repeated spacing rhythm and
+> gaps should grow deliberately as relationships loosen, with content kept clear of edges and other
+> controls. Flag: sibling elements of the same role separated by visibly unequal gaps; spacing values off
+> the declared spacing-token scale; content crowding a container edge or another control; a region whose
+> internal padding differs from its peers for no evident reason.
+
+> **4 — Typographic scale.** Codified from Apple HIG's *Typography* guidance on text styles and hierarchy:
+> use a small, deliberate set of text styles whose size and weight steps are distinct enough to read as
+> different levels, and keep body text comfortably readable rather than shrinking it to fit. Flag: more
+> distinct size/weight combinations than the hierarchy needs; two adjacent levels too close in size or
+> weight to tell apart; body or label text below a comfortable reading size; a text size off the declared
+> type-token scale.
+
+> **5 — Consistency & token use.** Codified from Nielsen's heuristic #4, *Consistency and standards*: the
+> same concept should carry the same word, icon, or design token everywhere it appears, and interactions
+> should follow platform convention rather than inventing a bespoke one without reason. Flag: two elements
+> serving the same role (e.g. two "primary action" buttons) styled from different color/spacing tokens; a
+> control whose interaction pattern diverges from the platform norm with no stated reason.
+
+- **3 — Alignment & structure** — pending — multi-source, tracked by `#3116`.
+- **6 — Grouping & proximity** — pending — multi-source, tracked by `#3116`.
+- **7 — Visual hierarchy & emphasis** — pending — multi-source, tracked by `#3116`.
+- **8 — Aesthetic polish / craft** — pending — multi-source, tracked by `#3116`.
 
 The tier-tags route cheaply: Tier A (deterministic from DOM/CSS), Tier B (algorithmic-perceptual from
 pixels), Tier C (genuine VLM/human judgment). #1035's `/review-design` skill applies this rubric;
