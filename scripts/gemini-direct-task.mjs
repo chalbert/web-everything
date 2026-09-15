@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+/* ==================== FOREGROUND ONLY ====================
+ * This script is SYNCHRONOUS: it blocks until the delegated task actually completes.
+ * Invoke it as a normal FOREGROUND Bash call. NEVER use run_in_background: true.
+ * NEVER wrap it in Monitor or a nested wait — there is nothing to watch;
+ * the call itself already returns the final result when it finishes.
+ * ========================================================= */
 /**
  * gemini-direct-task.mjs — a PERSONAL, manually invoked escape hatch: delegate ONE open-ended coding
  * task to Google's Antigravity CLI (`agy`), then hand a real diff to an operator for review.
