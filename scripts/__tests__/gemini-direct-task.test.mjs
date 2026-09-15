@@ -134,6 +134,23 @@ function initGitRepo(dir) {
 }
 
 describe('captureDiff — the review artifact, never a commit/push', () => {
+  it('returns readable lines for real modified and untracked status entries', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-direct-status-test-'));
+    try {
+      const git = initGitRepo(dir);
+      const startSha = git('rev-parse', 'HEAD');
+      writeFileSync(join(dir, 'tracked.txt'), 'original\n');
+      git('add', 'tracked.txt');
+      writeFileSync(join(dir, 'tracked.txt'), 'modified\n');
+      writeFileSync(join(dir, 'untracked.txt'), 'new\n');
+      const result = captureDiff({ dir, startSha });
+      expect(result.status).not.toContain('\0');
+      expect(result.status.split('\n')).toEqual(['AM tracked.txt', '?? untracked.txt']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each(['a file.txt', 'café.txt', 'a"quote.txt', 'a\nline.txt'])('captures an untracked filename with spaces, Unicode or quoting: %j', (filename) => {
     const dir = mkdtempSync(join(tmpdir(), 'we-gemini-direct-git-test-'));
     try {
@@ -401,9 +418,41 @@ function fakeExec(calls = []) {
 }
 
 describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', () => {
+  it.each([
+    ['SIGINT', false], ['SIGINT', true], ['SIGTERM', false], ['SIGTERM', true],
+  ])('kills the child group and re-delivers %s (group kill throws: %s)', async (signal, groupKillThrows) => {
+    const counts = ['SIGINT', 'SIGTERM'].map((s) => process.listenerCount(s));
+    const dir = mkdtempSync(join(tmpdir(), 'we-direct-signal-test-'));
+    const child = new EventEmitter();
+    child.pid = 12345;
+    child.kill = vi.fn(() => { queueMicrotask(() => child.emit('close', null)); });
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid === process.pid) {
+        expect(['SIGINT', 'SIGTERM'].map((s) => process.listenerCount(s))).toEqual(counts);
+      } else if (groupKillThrows) throw new Error('group unavailable');
+      return true;
+    });
+    try {
+      const pending = runAgyDirectExec({
+        dir, task: 't', logFile: join(dir, 'events.jsonl'), stream: false, spawnFn: () => child,
+      });
+      process.emit(signal);
+      const result = await pending;
+      expect(kill).toHaveBeenCalledWith(-12345, 'SIGKILL');
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(kill).toHaveBeenCalledWith(process.pid, signal);
+      expect(result).toMatchObject({ code: null, timedOut: false });
+      expect(['SIGINT', 'SIGTERM'].map((s) => process.listenerCount(s))).toEqual(counts);
+    } finally {
+      kill.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves UTF-8 split inside an emoji in both the JSONL log and parsed summary', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'we-gemini-utf8-test-'));
     const logFile = join(dir, 'events.jsonl');
+    const counts = ['SIGINT', 'SIGTERM'].map((s) => process.listenerCount(s));
     const message = 'Updated café 🚀';
     const stdout = JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: message } }) + '\n';
     const bytes = Buffer.from(stdout);
@@ -411,6 +460,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     const { fn } = fakeSpawn(stdout, { chunks: [bytes.subarray(0, split), bytes.subarray(split)] });
     try {
       const result = await runAgyDirectExec({ dir, task: 't', logFile, stream: false, spawnFn: fn });
+      expect(['SIGINT', 'SIGTERM'].map((s) => process.listenerCount(s))).toEqual(counts);
       expect(result.stdout).toBe(stdout);
       expect(readFileSync(logFile, 'utf8')).toBe(stdout);
       expect(summarizeAgyEvents(parseJsonlEvents(result.stdout)).finalResponse).toBe(message);

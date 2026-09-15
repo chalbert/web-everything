@@ -276,7 +276,7 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
   const diffStat = execFn('git', ['-C', dir, 'diff', '--stat', startSha]);
   const commitsRaw = execFn('git', ['-C', dir, 'log', '--oneline', `${startSha}..HEAD`]);
   const commits = commitsRaw.split('\n').map((l) => l.trim()).filter(Boolean);
-  return { status, diff, diffStat, commits, hasChanges: diff.trim().length > 0 || commits.length > 0 };
+  return { status: status.split('\0').filter(Boolean).join('\n'), diff, diffStat, commits, hasChanges: diff.trim().length > 0 || commits.length > 0 };
 }
 
 /**
@@ -339,10 +339,25 @@ export async function runAgyDirectExec({
     let settled = false;
     let timer;
     let child;
+    const removeSignalListeners = () => {
+      process.removeListener('SIGINT', onSigint);
+      process.removeListener('SIGTERM', onSigterm);
+    };
+    const onSignal = (signal) => {
+      try {
+        if (Number.isInteger(child.pid) && child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+      } catch { /* already gone, or process-group kill is unavailable */ }
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      removeSignalListeners();
+      process.kill(process.pid, signal);
+    };
+    const onSigint = () => onSignal('SIGINT');
+    const onSigterm = () => onSignal('SIGTERM');
     const settle = (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      removeSignalListeners();
       resolvePromise({ stdout: out, stderr: err, code, timedOut, argv });
     };
     const recordError = (e) => { err += `${e.message}\n`; };
@@ -353,6 +368,8 @@ export async function runAgyDirectExec({
       settle(null);
       return;
     }
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
     timer = setTimeout(() => {
       timedOut = true;
       try {

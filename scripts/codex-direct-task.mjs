@@ -592,7 +592,7 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
   const diffStat = execFn('git', ['-C', dir, 'diff', '--stat', startSha]);
   const commitsRaw = execFn('git', ['-C', dir, 'log', '--oneline', `${startSha}..HEAD`]);
   const commits = commitsRaw.split('\n').map((l) => l.trim()).filter(Boolean);
-  return { status, diff, diffStat, commits, hasChanges: diff.trim().length > 0 || commits.length > 0 };
+  return { status: status.split('\0').filter(Boolean).join('\n'), diff, diffStat, commits, hasChanges: diff.trim().length > 0 || commits.length > 0 };
 }
 
 /**
@@ -685,12 +685,29 @@ export async function runCodexDirectExec({
     let timer = null;
     let killed = false;
     let settled = false;
+    const removeSignalListeners = () => {
+      process.removeListener('SIGINT', onSigint);
+      process.removeListener('SIGTERM', onSigterm);
+    };
+    const onSignal = (signal) => {
+      try {
+        if (Number.isInteger(child.pid) && child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+      } catch { /* already gone, or process-group kill is unavailable */ }
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      removeSignalListeners();
+      process.kill(process.pid, signal);
+    };
+    const onSigint = () => onSignal('SIGINT');
+    const onSigterm = () => onSignal('SIGTERM');
     const settle = (r) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      removeSignalListeners();
       resolvePromise(r);
     };
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         killed = true;
@@ -712,6 +729,7 @@ export async function runCodexDirectExec({
     child.stderr?.on('data', (d) => { err += d.toString(); });
     child.on('error', (e) => {
       if (timer) clearTimeout(timer);
+      removeSignalListeners();
       reject(new Error(`codex-direct-task: \`${cli}\` failed to run: ${e.message}`));
     });
     child.on('close', (code) => {
