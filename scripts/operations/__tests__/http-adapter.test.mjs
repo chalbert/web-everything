@@ -42,6 +42,7 @@ import { OPERATIONS, resolveOperation } from '../run.mjs';
 import { reviewPrOperation, REVIEW_PR_OP, REVIEW_EFFECTS } from '../review-pr.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import { GATE_HEALTH_OP } from '../gate-health.mjs';
+import { GRADUATION_PROGRESS_REPORT_OP } from '../graduation-progress-report.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
@@ -358,6 +359,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // reaches nothing that can act — both effects' sinks live in `file-item-io.mjs`, which reuses
     // `scaffold-io.mjs`'s own guarded write sink and adds only a `queue-store.mjs` sink beside it.
     [FILE_ITEM_OP]: 'file-item.mjs',
+    // #3690/#xd9xwtn — READ-ONLY and genuinely so: both steps are `compute`, the declaring module imports
+    // only `registry.mjs` and `step-kinds.mjs`, and the `readStore()` call lives in
+    // `graduation-progress-report-io.mjs` behind the injected `readScorecards` reader.
+    [GRADUATION_PROGRESS_REPORT_OP]: 'graduation-progress-report.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
@@ -367,7 +372,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)
