@@ -11,46 +11,205 @@ tags: []
 
 # JIT-renumbering never re-keys the conveyor queue sidecar, so a cleared item silently falls out of dispatch under its stale hash
 
-Live-observed 2026-09-07: at least 16 entries in the conveyor's session-local we:.conveyor/queue.json sidecar are still keyed by their pre-JIT-renumbering birth hash (e.g. 3594, 3591, 3595) even though each item's card was already renumbered to a real NNN when its filing PR landed (confirmed via bornAs: on main and the drain's own `JIT-number <hash>→#<NNN>` land commits). This is the same class of drift a sibling session hand-fixed for #3567 tonight (we:scripts/conveyor/queue.mjs remove 3567 && we:scripts/conveyor/queue.mjs add 3567) but nothing sweeps it systemically. Distinct from #3570 (held already-done items whose real work already landed elsewhere): these items are still genuinely open and ready, just mis-keyed. Traced in we:scripts/readiness/dispatch-plan.mjs's IO shell: the sidecar's cleared set is matched against we:scripts/backlog.mjs build-queue --json rows (keyed by CURRENT numeric id) via we:scripts/readiness/dispatch-plan.mjs#selectClearedRows, with no bornAs fallback — so a stale-hash-keyed entry matches NO ready row, drops out of the launchable set entirely, and instead lands in we:scripts/readiness/dispatch-plan.mjs#clearedNotReady's cleared-but-not-ready held bucket forever. This is DISPATCH-FUNCTIONALLY BROKEN, not cosmetic: a genuinely ready, highest-priority item stays permanently held under its old key. Root cause confirmed in we:scripts/lane-drain.mjs#numberPendingHashes (the sole JIT-renumbering path, 'drain: JIT-number <hash>→#<NNN> at land' commits): it rewrites we:backlog/*.md, we:docs/agent/*.md and we:agent-memory-src/*.md but has no hook that touches any conveyor queue sidecar. That is a genuine architectural fork, not a mechanical one-liner: the drain's own self-hosting boundary decision (we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary, #2501) runs the drain from a DEDICATED clone distinct from the operator's primary checkout, and #3478 separately proved live that the conveyor's cleared-set sidecar can legitimately live in yet another checkout entirely (a runner rooted in an ad hoc scratch clone) — so a rekey-at-renumber-time fix inside numberPendingHashes cannot in general reach the sidecar file that actually matters, because the renumbering process has no reliable way to know which checkout(s) hold a live we:.conveyor/queue.json referencing the hash it just renumbered. The alternative — teach the sidecar's CONSUMERS (we:scripts/readiness/dispatch-plan.mjs#selectClearedRows / #clearedNotReady) to resolve a non-matching sidecar id against each candidate item's bornAs frontmatter field before giving up, mirroring the bornAs fallback we:scripts/conveyor/queue.mjs#kindOf already implements for its own kind-check (we:scripts/conveyor/queue-store.mjs's readinessOf lacks this fallback too, a related gap) — needs no cross-checkout coordination at all, since we:scripts/readiness/dispatch-plan.mjs already reads the live backlog directly out of the same checkout it dispatches for. Recommendation: resolve dynamically via bornAs at the consumer (Fork B), not rekey-in-place at JIT-number time (Fork A), specifically because of the demonstrated cross-checkout gap; this fork needs a stated ruling before either gets built.
+**Prepared** (2026-09-15). The survey of prior art is published as
+[conveyor queue sidecar id drift across JIT-renumbering](/research/conveyor-queue-sidecar-id-drift-across-jit-renumbering/).
+The original capture leaned toward Fork B. This pass confirmed that lean with evidence, corrected two claims in
+the capture (one about which file holds the code, one about how hard write-time re-keying would be), found a
+second sidecar reader the capture missed, and split out a second real fork: whether anything should write the
+corrected id back into the sidecar.
 
-## The fork
+## What happened
 
-**Fork A — re-key the queue sidecar in place, at JIT-number time.** we:scripts/lane-drain.mjs#numberPendingHashes
-already builds the exact `hash → NNN` ledger this needs; teach it (or a step it calls right after committing the
-rename) to also open any `we:.conveyor/queue.json` it can find and swap a matching hash entry for the new NNN —
-the same edit already hand-proven correct for #3567 (`we:scripts/conveyor/queue.mjs remove 3567 && we:scripts/conveyor/queue.mjs add 3567`),
-just made automatic. Cost: the drain's own self-hosting boundary decision
-(we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary, #2501) runs the drain from a DEDICATED
-clone, not the operator's primary checkout — and #3478 independently proved live that the conveyor's cleared-set
-sidecar can legitimately live in yet a THIRD checkout (an ad hoc scratch clone the runner happened to be rooted
-in). `numberPendingHashes` has no general way to discover every checkout that might hold a live
-`we:.conveyor/queue.json` referencing the hash it just renumbered, so this fork can reliably rewrite only a
-sidecar that happens to be co-located with wherever the fix runs — it does not close the gap for the common case
-where the operator's queue lives elsewhere, which is exactly the case both the motivating incident and #3567's
-own manual fix were.
+On 2026-09-07 at least 16 entries in the conveyor's session-local cleared-set sidecar (`we:.conveyor/queue.json`)
+were observed still keyed by pre-land birth hashes. Each item's card had already been renumbered by the drain's
+`drain: JIT-number <hash>→#<NNN> at land` commit (`we:scripts/lane-drain.mjs:768`). Every sidecar reader matches
+by `normNum` only, so a stale-hash entry matches no ready build-queue row. The item then never launches and
+stays in the `cleared-but-not-ready` held bucket permanently. **This breaks dispatch; it is not cosmetic.**
+#3567 was fixed by hand with `remove` followed by `add`, which is the workaround the CLI's own docblock
+prescribes (`we:scripts/conveyor/queue.mjs:20-23`). Nothing corrects these entries automatically.
 
-**Fork B — resolve dynamically via `bornAs`, at the sidecar's consumers.** Leave the sidecar's stored id alone
-(it may be a stale hash forever) and instead teach the code that MATCHES a sidecar entry against a live backlog
-item — we:scripts/readiness/dispatch-plan.mjs#selectClearedRows and #clearedNotReady today, and
-we:scripts/conveyor/queue-store.mjs's `readinessOf` for the CLI's own warning — to fall back to a `bornAs:`
-match when the id doesn't match any current item's numeric id directly. This is not a new pattern:
-we:scripts/conveyor/queue.mjs#kindOf already does exactly this for its own kind-check, so the fallback is proven
-in this same file family. It needs no cross-checkout coordination at all, because every consumer already reads
-the live backlog directly out of the checkout it is running in — the checkout-discovery problem Fork A runs
-into simply does not arise.
+**Findings from preparation that change the picture:**
 
-## Default (lean — NOT prepared)
+1. **Stale hash entries are the normal case, not a rare edge case.** New cards are filed under a birth hash.
+   The `file-item` operation's queue sink clears the card for the conveyor at filing time
+   (`we:scripts/operations/file-item-io.mjs:76-82`), so it stores the hash. Every card queued at filing goes
+   stale the moment it lands.
+2. **The capture missed a reader.** `we:scripts/readiness/conveyor-state.mjs:97` (`shapeQueue`'s `buildQueued`)
+   and `we:scripts/readiness/conveyor-state.mjs:463` (`deriveClearedNotReady`) have the same gap, so the tick
+   picture miscounts as well. The capture also placed `readinessOf` in `we:scripts/conveyor/queue-store.mjs`.
+   It is actually `we:scripts/conveyor/queue.mjs:95`. `removeFromQueue`
+   (`we:scripts/conveyor/queue-store.mjs:110`) has the gap too: `remove <NNN>` cannot remove an entry stored
+   under the hash.
+3. **Write-time re-keying is harder to rule out than the capture said, but it still falls short.** Since #3478,
+   `we:scripts/conveyor/resolve-runner-checkout.mjs` can locate the live runner's checkout. Both
+   `we:scripts/conveyor/queue-work.mjs:67` and `we:scripts/operations/file-item-io.mjs:71` already use it. So
+   the renumbering step *could* find the sidecar that matters in the common case. It would still miss: no live
+   runner at land time, an ambiguous runner lock, the entries that are already stale, and hashes an operator
+   types after land.
 
-**Recommend Fork B.** The cross-checkout evidence is concrete, not hypothetical: #2501 (ratified) and #3478
-(resolved, live incident) both establish that the drain's checkout, the conveyor runner's checkout, and the
-operator's primary checkout can all legitimately differ, and that mismatch has already caused a real production
-incident once (#3478). A fix that lives inside the renumbering step can only ever patch the sidecar(s) it
-happens to be co-located with; a fix that lives in the matcher works everywhere, unconditionally, because it
-piggybacks on the same live-backlog read every consumer already does for its primary purpose. This is a capture,
-not a prepared ruling — no `preparedDate`: prepare it (confirm no third option is preferable, e.g. having
-`numberPendingHashes` ALSO best-effort patch the co-located sidecar as defense-in-depth even if Fork B ships)
-before ratifying.
+### Recommended path at a glance
 
-Links: #3567 (the hand-fixed instance) · #3570 (the DISTINCT already-done-hold sweep — not this gap) · #3478
-(the cross-checkout sidecar-resolution incident this fork's cost analysis rests on) · #2501 (the drain
-self-hosting boundary ratification) · #3383 (parent epic).
+| | recommended default | main alternative | confidence |
+| --- | --- | --- | --- |
+| Fork 1 — where the hash→NNN translation happens | **(b) at the sidecar's consumers, via `bornAs`** | (c) consumers plus a best-effort write-time re-key | high |
+| Fork 2 — who may write the corrected id back to the sidecar | **(a) only an operator add/remove that already rewrites the file** | (b) the dispatch tick writes back on every read | medium-high |
+
+## Fork 1 — Where does the hash→NNN translation happen?
+
+*Fork-existence justification:* picking (a) puts the fix in the drain and leaves every reader unchanged.
+Picking (b) puts the fix in the conveyor readers and leaves the drain unchanged. These are different
+subsystems with different coupling. (c) would couple the drain to conveyor internals, which neither (a) nor (b)
+does.
+
+**(a) Re-key the sidecar at JIT-number time.** `numberPendingHashes` already builds the exact `hash → NNN`
+ledger (`we:scripts/lane-drain.mjs:704`). After committing, it would call `resolveRunnerCheckout()` and rewrite
+matching entries in that checkout's `we:.conveyor/queue.json`.
+- *For:* the sidecar ends up with the correct ids, so `queue list` shows real numbers and every reader stays
+  as simple as it is today.
+- *Against:*
+  - It only reaches the sidecar of a runner that is live at the moment of land. `resolveRunnerCheckout`
+    refuses on `no-live-lock` or `ambiguous` (`we:scripts/conveyor/queue-work.mjs:67-72`), and the file-item
+    sink falls back to its own script-location sidecar in those cases
+    (`we:scripts/operations/file-item-io.mjs:69-72`). Entries written that way are never re-keyed.
+  - It does nothing for the 16 entries that are already stale, nor for a hash typed after land.
+  - It makes the drain (`we:scripts/lane-drain.mjs`) import conveyor modules and write an untracked file
+    outside its own dedicated clone, which is the separation
+    `we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary` (#2501) sets up.
+  - It adds a second, unsynchronized writer to a file whose store says outright that it is last-write-wins
+    and relies on a single operator (`we:scripts/conveyor/queue-store.mjs:154-158`).
+
+**(b) Resolve through `bornAs` at the consumers — RECOMMENDED.** Leave the stored id as it is. When an id
+matches no current item number, readers map it through the `bornAs` values on the backlog they already load.
+- *For:*
+  - It works in whatever checkout the reader runs in, with no need to find other checkouts.
+  - It fixes the existing stale entries and any future ones.
+  - It follows three precedents already in the repo: `kindOf`'s `bornAs` fallback
+    (`we:scripts/conveyor/queue.mjs:75-83`), `resolveParent`'s `landedNumberFor` mapping
+    (`we:scripts/backlog.mjs:1214-1224`), and `matchLaneRef`, which accepts both forms of an id
+    (`we:scripts/conveyor/lease-reaper.mjs:161`).
+  - The data is already in memory: the loader spreads `...data` (`we:src/_data/backlog.js:357`), so `bornAs` is
+    present on the items the dispatcher loads at `we:scripts/readiness/dispatch-plan.mjs:546-555`.
+  - The build is local to the conveyor: move that load ahead of the matching at
+    `we:scripts/readiness/dispatch-plan.mjs:542-545`.
+- *Against:*
+  - The sidecar keeps the stale spelling unless something rewrites it (that question is Fork 2).
+  - It adds one alias-map build per tick. That is cheap, because the loader has already read every card.
+  - If the loader fails (the `catch` at `we:scripts/readiness/dispatch-plan.mjs:553`), matching falls back to
+    today's behaviour. That is a safe degradation, not a new failure.
+
+**(c) Both: (b), plus (a) as a best-effort extra step.**
+- *For:* when a runner is live at land time, `list` shows the real number sooner.
+- *Against:* it carries all of (a)'s coupling and second-writer costs, for a benefit that is display only,
+  because (b) already restores dispatch on its own.
+
+**Skeptic:** the strongest case against (b) is that it treats the symptom indefinitely. The stale spelling
+stays in the file, and one reader added later without the fallback brings the bug back. That objection
+survives, and it shapes the build rather than overturning the default. The translation must live in **one**
+function in the queue store that every reader calls (see *Build note* below), so a new reader gets it by
+reusing the existing loader. Fork 2 settles whether the file itself is ever corrected. (a) still does not
+replace (b), because it cannot reach the entries that already exist.
+
+**Screen:** clear. (1) Not an implementation detail: the fork decides which subsystem owns backlog-identity
+translation for conveyor state, and whether the drain may write conveyor sidecars. A builder should not settle
+that cross-subsystem boundary alone. (2) Not a prioritization question: the bug breaks dispatch and #3567
+already needed a hand fix, so whether to act is not in question. Even ignoring cost, (a) and (b) differ in
+which failure cases they cover.
+
+## Fork 2 — Who may write the corrected id back into the sidecar?
+
+*Fork-existence justification:* picking (a) keeps the operator as the only writer of the sidecar, which is
+the assumption `we:scripts/conveyor/queue-store.mjs:154-158` states. Picking (b) makes the dispatch tick a
+periodic writer as well. Picking (c) adds a new CLI verb that neither (a) nor (b) needs. Each option excludes
+the other two ownership models.
+
+**(a) Only when an operator's add or remove already rewrites the file — RECOMMENDED.** Readers translate in
+memory only. The two operator CLIs (`we:scripts/conveyor/queue.mjs`, `we:scripts/conveyor/queue-work.mjs`)
+apply the same translation to the queue before `addToQueue`/`removeFromQueue` and write the result back. Any
+operator action therefore stores correct ids, and `remove <NNN>` removes an entry stored under the hash.
+- *For:*
+  - The file's only writers stay the ones it has today.
+  - It needs no new race window.
+  - It fixes the "cannot remove by current number" problem (finding 2).
+  - The dispatcher's `--backlog-dir` fixture mode (`we:scripts/readiness/dispatch-plan.mjs:536-539`) can never
+    write fixture-derived ids into a live sidecar.
+- *Against:* a sidecar nobody touches keeps stale spellings, so `list` shows hashes until the next add or
+  remove. The cost is display only.
+
+**(b) The dispatch tick writes back (read repair).** Whenever translation changes an entry, the dispatcher
+writes the corrected queue.
+- *For:* the file converges without anyone touching it.
+- *Against:*
+  - The tick becomes a second, unversioned writer. An operator `add` that lands between the tick's read and
+    its write is silently lost, the exact outcome the store's "single-operator, last-write-wins" note accepts
+    only because there is one writer.
+  - Dynamo-style read repair is safe only because its writes carry versions (see the research topic), and
+    this store's writes do not.
+  - Under `--backlog-dir` the tick would translate against a fixture corpus and could write wrong ids into the
+    real sidecar.
+
+**(c) An explicit sweep verb** (`queue canonicalize`), run by hand or by the conveyor skill, in the same spirit
+as #3570's sweep.
+- *For:* the write happens deliberately and can be seen.
+- *Against:* it is a new verb to document and remember, for a benefit (a clean `list`) that (a) mostly
+  delivers anyway. It has the same race as (b) if the skill runs it automatically.
+
+**Skeptic:** the strongest objection to (a) is that the operator reads `list`, sees an unfamiliar hash, and
+removes it or adds a duplicate. A duplicate is harmless: after translation, deduplication by the translated key
+collapses both entries into one (`parseQueue` already deduplicates by key,
+`we:scripts/conveyor/queue-store.mjs:68-76`). A removal by hash still works, because it matches the stored
+spelling. The objection points at a display fix, not a write-policy change: `list` should print
+`#NNN (cleared as <hash>)` from the same translation. The default stands, with that display addition folded
+into the build.
+
+**Screen:** partially flagged. (1) Implementation detail? Mostly no. (a) versus (b) changes who writes an
+operator-intent file, and the queue store states that as a design assumption. (c) versus (a) is closer to a
+detail and could reasonably be left to the builder. (2) Prioritization? No. Even ignoring cost, (a) and (b)
+differ in how they fail under concurrent writes. Recommendation: ratify the (a)-versus-(b) line, and treat (c)
+as an optional later addition that needs no ruling.
+
+## Build note — one translation step, not a fallback in each reader (collapsed; not a fork)
+
+Screened as an implementation detail. Anyone building Fork 1(b) should put the translation in one place
+rather than threading an alias map through `selectClearedRows`, `clearedNotReady`, `shapeQueue`,
+`deriveClearedNotReady` and `readinessOf` separately. The single-step shape keeps every existing pure matcher
+and its tests unchanged, and it follows the store's rule that one normalizer serves every consumer
+(`we:scripts/conveyor/queue-store.mjs:38-53`).
+
+```js
+// REJECTED shape: an alias map in every matcher's signature (5+ call sites that can drift apart)
+export function selectClearedRows(rows, clearedKeys, norm, aliasOf) {
+  return rows.filter((r) => clearedKeys.has(norm(r.num)) || clearedKeys.has(aliasOf.get(norm(r.num))));
+}
+
+// PREFERRED shape: one pure translation step in queue-store.mjs, applied once per IO shell right after reading
+/** Map each entry's id through birth-hash → current NNN; deduplicate by the translated key, keeping the first addedAt. */
+export function canonicalizeQueue(queue, aliases /* Map<normNum(hash), NNN> */) {
+  return parseQueue(JSON.stringify(
+    queue.map((e) => ({ ...e, num: aliases.get(normNum(e.num)) ?? e.num })),
+  ));
+}
+
+// dispatch-plan.mjs IO shell — load the backlog BEFORE matching (today it loads after, :546)
+const aliases = new Map(items.filter((it) => it.bornAs).map((it) => [normNum(it.bornAs), String(it.num)]));
+const sidecar = canonicalizeQueue(readQueueFile(resolveQueuePath()), aliases);
+const rows = selectClearedRows(bqRows, new Set(sidecar.map((e) => normNum(e.num))), normNum); // unchanged
+```
+
+(Illustrative only. Printing `cleared as <hash>` in `list` needs the original spelling, which `parseQueue`
+currently drops as an unknown field, so the real build either extends it or keeps a side map.) The same
+`aliases` map feeds the tick picture (read at `we:scripts/readiness/conveyor-state.mjs:863`) and the CLI's
+`add`/`remove`/`list`.
+
+## What this does not settle
+
+- #3570, which covers held items whose work already landed elsewhere, is a different population: those items
+  are done, while these are ready but stored under the wrong key. Neither sweep replaces the other.
+- Whether the item's `scope:` should add `we:scripts/readiness/conveyor-state.mjs` and
+  `we:scripts/conveyor/queue-work.mjs` (finding 2). The build should widen its touch set to include both. This
+  pass did not edit frontmatter.
+- A backfill for the 16 entries that are already stale is not needed under Fork 1(b), because translation at
+  read time covers them.
+
+Links: #3567 (the instance fixed by hand) · #3570 (the separate already-done sweep) · #3478
+(`resolveRunnerCheckout`, which changes the cost of option (a)) · #2501 (the drain self-hosting boundary) ·
+#2392 (`bornAs` as proof of land) · #3383 (parent epic).
