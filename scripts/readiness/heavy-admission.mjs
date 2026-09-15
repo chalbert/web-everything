@@ -179,7 +179,7 @@ export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null
     // holder (the #3383 case); `probeSlotHolderLiveness` itself no-ops to 'unknown' when `current.pid ===
     // selfPid` (our own slot), so it is always safe to call unconditionally here.
     const pidLiveness = current ? probeSlotHolderLiveness(current.pid, selfPid) : 'unknown';
-    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, pid, pidLiveness, leaseMinutes, meta, /* requireOwnProcess */ true);
+    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, selfPid, pidLiveness, leaseMinutes, meta, /* requireOwnProcess */ true);
     if (r.ok) return { ok: true, slot: i, cap, heldBy };
     heldBy.push({ slot: i, owner: r.heldBy });
   }

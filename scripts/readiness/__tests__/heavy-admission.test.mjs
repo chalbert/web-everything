@@ -126,6 +126,19 @@ describe('tryAcquireSlot / releaseOwnedSlot / heldSlots — cap independent slot
     // 'dead' — proving this is NOT just the already-covered dead-pid-reclaim path.
     const SAME_LANE_PATH = '/Users/x/workspace/.lanes/web-everything/lane-34';
 
+    it('omitting pid records the real process identity, including on same-owner re-acquisition', () => {
+      const cap = 2;
+      const first = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0) });
+      expect(first.ok).toBe(true);
+      expect(heldSlots({ lockRoot, cap })[0].pid).toBe(process.pid);
+      const again = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0 + 1000, nowIso: iso(T0 + 1000) });
+      expect(again.ok).toBe(true);
+      expect(again.slot).toBe(first.slot); // both omitted-pid calls belong to THIS real process
+      const held = heldSlots({ lockRoot, cap });
+      expect(held).toHaveLength(1);
+      expect(held[0].pid).toBe(process.pid);
+    });
+
     it('BEFORE this fix, two different alive processes under the same owner string would have shared one slot — now the second genuinely different process takes a real SECOND slot', () => {
       const cap = 2;
       const a = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.pid });
