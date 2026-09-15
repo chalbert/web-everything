@@ -28,6 +28,14 @@
  * The tool shell's own cwd is UNRELIABLE (#3633 probe 20); the prompt names the absolute target and
  * requires absolute paths, including explicit command working directories, rather than trusting pwd.
  *
+ * MODEL FAMILIES: --model/--effort are generic passthroughs, not Gemini-specific (effort vocabulary:
+ * low|medium|high). A live `agy models` listing carries multiple real families under one CLI: the default
+ * Gemini Pro tier (gemini-3.1-pro-high/low), a fast/cheap Gemini Flash tier for simple, low-judgment tasks
+ * (gemini-3.8-flash-high/medium/low, and the 3.7/3.6 predecessor generations), and two Claude backends
+ * (claude-sonnet-4-6, claude-opus-4-6-thinking) — this same escape hatch can route Claude through
+ * Antigravity's separate quota, distinct from a Claude Code operator's own usage. This is not a validated
+ * model/effort recommendation for any of these families; `agy models` is the source of truth, not this file.
+ *
  * STDIN: text-mode --print requires a VALUE, and '-' is literal text, not a stdin sentinel. The ONLY
  * prompt-on-stdin route is --input-format stream-json --output-format stream-json with --print ''
  * (the explicit empty value is required), plus one JSON-stringified user/message/content event and LF.
@@ -55,6 +63,8 @@
  *
  * USAGE
  *   node scripts/gemini-direct-task.mjs --task="Document X" --repo-root=/absolute/repo
+ *   node scripts/gemini-direct-task.mjs --model=claude-sonnet-4-6 --task="..." --repo-root=<repo>
+ *   node scripts/gemini-direct-task.mjs --model=gemini-3.8-flash-high --task="..." --repo-root=<repo>
  *   node scripts/gemini-direct-task.mjs --task-file=/path/task.txt --dir=/existing/checkout --gate=full
  *   node scripts/gemini-direct-task.mjs --help
  */

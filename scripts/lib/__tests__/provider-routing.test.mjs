@@ -5,6 +5,7 @@
  *   - Pure, deterministic execution (identical inputs -> deep-equal results).
  *   - Provider recommendation cascade: Gemini fit, Codex fit, Both (high-stakes & thin history),
  *     and Claude fallback at Haiku, Sonnet, and Opus tiers.
+ *   - Quota-strained Claude alternates: tier mapping, audit entries, branch isolation and determinism.
  *   - Statute-tier paths strictly force Claude Opus regardless of external model track record.
  *   - Supervision level backdown plan (#3690): clean streak counting, informative trial gating,
  *     calibration-miss hard veto on most recent record, and 'other'-verified skipping.
@@ -18,6 +19,7 @@ import {
   isWithinProvenEnvelope,
   RECOMMENDATIONS,
   CLAUDE_TIERS,
+  AGY_CLAUDE_MODEL_BY_TIER,
   SUPERVISION_LEVELS,
   DEFAULT_BACKDOWN_THRESHOLDS,
   PROVEN_TASK_ENVELOPES,
@@ -377,6 +379,147 @@ describe('selectProvider — cascade branches', () => {
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
+  });
+});
+
+describe('selectProvider — quotaStrained alternate backend (agy Claude route)', () => {
+  it('freezes exactly the two real agy Claude tier mappings', () => {
+    expect(Object.isFrozen(AGY_CLAUDE_MODEL_BY_TIER)).toBe(true);
+    expect(Object.keys(AGY_CLAUDE_MODEL_BY_TIER).sort()).toEqual(['opus', 'sonnet']);
+    expect(AGY_CLAUDE_MODEL_BY_TIER).toEqual({
+      sonnet: 'claude-sonnet-4-6',
+      opus: 'claude-opus-4-6-thinking',
+    });
+    expect('haiku' in AGY_CLAUDE_MODEL_BY_TIER).toBe(false);
+  });
+
+  it('keeps omitted and false quota flags identical and deterministic on Claude Sonnet', () => {
+    const task = { description: 'Refactor CLI option parsing across modules', taskType: 'bugfix' };
+    const context = {
+      filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
+      estimatedSize: 180,
+      scorecards: [],
+    };
+    const res = selectProvider(task, context);
+    const explicitFalse = selectProvider(task, { ...context, quotaStrained: false });
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.alternateBackend).toBeNull();
+    expect(explicitFalse.alternateBackend).toBeNull();
+    expect(explicitFalse.auditTrail).toHaveLength(res.auditTrail.length);
+    expect(explicitFalse).toEqual(res);
+    expect(res.auditTrail.map((a) => a.criterion)).toEqual([
+      'gemini-fitness', 'codex-fitness', 'both-together', 'claude-tier',
+    ]);
+    expect(selectProvider(task, context)).toEqual(res);
+    expect(JSON.stringify(selectProvider(task, context))).toBe(JSON.stringify(res));
+  });
+
+  it('offers Sonnet with one appended audit entry and preserves the original tier decision', () => {
+    const task = { description: 'Refactor CLI option parsing across modules', taskType: 'bugfix' };
+    const context = {
+      filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
+      estimatedSize: 180,
+      scorecards: [],
+      quotaStrained: true,
+    };
+    const res = selectProvider(task, context);
+    const baseline = selectProvider(task, { ...context, quotaStrained: false });
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.reasoning).toBe(baseline.reasoning);
+    expect(res.alternateBackend).toEqual({
+      tool: 'scripts/gemini-direct-task.mjs',
+      cliModel: 'claude-sonnet-4-6',
+      reason: expect.any(String),
+    });
+    expect(res.alternateBackend.reason).toContain('gemini-direct-task.mjs');
+    expect(res.alternateBackend.reason).toContain('claude-sonnet-4-6');
+    expect(res.auditTrail.slice(0, -1)).toEqual(baseline.auditTrail);
+    expect(res.auditTrail.at(-1)).toEqual({
+      criterion: 'quota-strain-alternate-backend',
+      result: 'offered',
+      dataConsulted: "claudeTier='sonnet', quotaStrained=true",
+      reasoning: expect.stringContaining('claude-sonnet-4-6'),
+    });
+    expect(selectProvider(task, context)).toEqual(res);
+    expect(JSON.stringify(selectProvider(task, context))).toBe(JSON.stringify(res));
+  });
+
+  it('offers Opus for statute-tier work while retaining the statute gate', () => {
+    const task = { description: 'Update platform decision on auto-land seam', taskType: 'doc-fix' };
+    const context = {
+      filesTouched: ['docs/agent/platform-decisions.md'],
+      estimatedSize: 20,
+      scorecards: [
+        makeRecord({ provider: 'gemini', model: 'gemini-3.1-pro', taskType: 'doc-fix' }),
+        makeRecord({ provider: 'codex', model: 'gpt-6-astra', taskType: 'doc-fix' }),
+      ],
+      quotaStrained: true,
+    };
+    const res = selectProvider(task, context);
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
+    expect(res.alternateBackend.cliModel).toBe('claude-opus-4-6-thinking');
+    expect(res.auditTrail.at(-1).result).toBe('offered');
+    expect(res.auditTrail.slice(0, -1)).toEqual(
+      selectProvider(task, { ...context, quotaStrained: false }).auditTrail
+    );
+  });
+
+  it('returns null and audits why Haiku has no alternate', () => {
+    const task = { description: 'Fix typo in documentation comment', taskType: 'doc-fix' };
+    const context = {
+      filesTouched: ['docs/reference.md'],
+      estimatedSize: 5,
+      scorecards: [],
+      quotaStrained: true,
+    };
+    const res = selectProvider(task, context);
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.HAIKU);
+    expect(res.alternateBackend).toBeNull();
+    expect(res.auditTrail.slice(0, -1)).toEqual(
+      selectProvider(task, { ...context, quotaStrained: false }).auditTrail
+    );
+    expect(res.auditTrail.at(-1)).toEqual({
+      criterion: 'quota-strain-alternate-backend',
+      result: 'not-applicable',
+      dataConsulted: "claudeTier='haiku', quotaStrained=true",
+      reasoning: expect.stringContaining('Haiku has no agy-hosted equivalent'),
+    });
+  });
+
+  it('leaves Gemini, Codex and Both return objects untouched by quota strain', () => {
+    const task = { description: 'Fix parser bug', taskType: 'bugfix' };
+    const cases = [
+      {
+        recommendation: RECOMMENDATIONS.GEMINI,
+        filesTouched: ['scripts/lib/parser.mjs'],
+        scorecards: [makeRecord({ provider: 'gemini', model: 'gemini-3.1-pro' })],
+      },
+      {
+        recommendation: RECOMMENDATIONS.CODEX,
+        filesTouched: ['scripts/lib/parser.mjs'],
+        scorecards: [makeRecord()],
+      },
+      {
+        recommendation: RECOMMENDATIONS.BOTH,
+        filesTouched: ['scripts/conveyor/drain.mjs', 'scripts/conveyor/__tests__/drain.test.mjs'],
+        scorecards: [makeRecord({ findings: 'Deadlock detection race condition in worker loop' })],
+      },
+    ];
+    for (const { recommendation, filesTouched, scorecards } of cases) {
+      const context = { filesTouched, scorecards, estimatedSize: 120 };
+      const res = selectProvider(task, { ...context, quotaStrained: true });
+      expect(res.recommendation).toBe(recommendation);
+      expect('alternateBackend' in res).toBe(false);
+      expect(res).toEqual(selectProvider(task, context));
+    }
   });
 });
 
