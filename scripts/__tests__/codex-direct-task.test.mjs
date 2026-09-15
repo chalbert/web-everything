@@ -1,6 +1,7 @@
 /**
  * @file codex-direct-task.test.mjs — the mechanical parts of the personal Codex-direct-task escape hatch,
- * proved WITHOUT spawning anything real (mirrors `judge-spawn.test.mjs`'s split: pure argv/plan functions get
+ * proved with injected processes except for the real Node stdout-buffer regression (mirrors
+ * `judge-spawn.test.mjs`'s split: pure argv/plan functions get
  * cheap, exhaustive tests; the one thing that actually needed a real process — whether agentic mode's `--json`
  * stream shows granular tool calls — was checked with a real, live `codex exec` invocation while building this
  * file, recorded in the module's own header and in the delivering PR, not re-proved here).
@@ -29,6 +30,7 @@ import {
   parseJsonlLine,
   parseJsonlEvents,
   summarizeEvents,
+  defaultExecFn,
   setupScratchClone,
   captureDiff,
   runGate,
@@ -426,6 +428,18 @@ describe('#x8wbivt Fork 4 — the ratified quota signal: locate, parse, read, an
       expect(result.deleted).toBe(false);
       expect(removeFileFn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('defaultExecFn — real child-process output buffering', () => {
+  it('returns the full stdout when output exceeds Node’s default 1 MiB buffer', () => {
+    const outputSize = 2 * 1024 * 1024;
+    const output = defaultExecFn(process.execPath, [
+      '-e', `process.stdout.write('x'.repeat(${outputSize}))`,
+    ]);
+
+    expect(output.length).toBeGreaterThan(1024 * 1024);
+    expect(output).toBe('x'.repeat(outputSize));
   });
 });
 
