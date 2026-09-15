@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  AGY_CLI, DEFAULT_TIMEOUT_MS, buildAgyDirectTaskArgv, buildAgyPrompt, buildAgyStdinLine,
+  AGY_CLI, AGY_RESUME_PROMPT, DEFAULT_TIMEOUT_MS, buildAgyDirectTaskArgv, buildAgyPrompt, buildAgyStdinLine,
   buildScratchCloneArgv, planDepsInstall, parseJsonlLine, parseJsonlEvents, summarizeAgyEvents,
   defaultExecFn,
   setupScratchClone, captureDiff, runGate, runAgyDirectExec, geminiDirectTask, parseFlags, main, formatReport,
@@ -290,7 +290,12 @@ describe('buildAgyDirectTaskArgv — observed stdin route, no invented flags or 
       .toEqual(['--input-format', 'text', '--output-format', 'stream-json',
         '--disable-slash-commands', '--dangerously-skip-permissions', '--add-dir', '/extra',
         '--model', 'chosen', '--effort', 'high', '--sandbox', '--print-timeout', '540s',
-        '--conversation', 'afa6b941-eb5d-4652-9471-4bae369c1cbd', '--print', '']);
+        '--conversation', 'afa6b941-eb5d-4652-9471-4bae369c1cbd', '--print', AGY_RESUME_PROMPT]);
+  });
+  it('prevents the text-mode empty prompt error when resuming a conversation', () => {
+    const argv = buildAgyDirectTaskArgv({ resumeConversationId: 'b7875fe9-67ee-4479-b147-fdc48e787d70' });
+    expect(argv).toContain('--print');
+    expect(argv[argv.indexOf('--print') + 1]).toMatch(/\S/);
   });
   it.each([
     { addDirs: 'path' }, { addDirs: [''] }, { addDirs: [false] }, { model: '' }, { model: true },
@@ -480,7 +485,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     expect(second.seen.argv).toEqual(['--input-format', 'text', '--output-format', 'stream-json',
       '--disable-slash-commands', '--dangerously-skip-permissions', '--add-dir', '/extra',
       '--model', 'chosen', '--effort', 'high', '--sandbox', '--print-timeout', '0.02s',
-      '--conversation', id, '--print', '']);
+      '--conversation', id, '--print', AGY_RESUME_PROMPT]);
     expect(second.seen.opts).toEqual(first.seen.opts);
     expect(first.seen.stdin).toContain('original task');
     expect(second.seen.ended).toBe(true);
@@ -506,7 +511,8 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     const spawnFn = vi.fn().mockImplementationOnce(first.fn).mockImplementationOnce(second.fn);
     const report = await geminiDirectTask({ dir: tempDir(), task: 't', stream: false, execFn: fakeExec(), spawnFn });
     expect(spawnFn).toHaveBeenCalledTimes(2);
-    expect(second.seen.argv.slice(-4)).toEqual(['--conversation', REAL_EVENTS[0].conversation_id, '--print', '']);
+    expect(second.seen.argv.slice(-4)).toEqual(['--conversation', REAL_EVENTS[0].conversation_id, '--print', AGY_RESUME_PROMPT]);
+    expect(second.seen.argv[second.seen.argv.indexOf('--print') + 1]).toMatch(/\S/);
     expect(report).toMatchObject({ resumed: true, resumeConversationId: REAL_EVENTS[0].conversation_id,
       exitCode: 0, timedOut: false, events: { terminal: 'SUCCESS' } });
   });
