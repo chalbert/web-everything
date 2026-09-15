@@ -38,7 +38,8 @@
  * Antigravity's separate quota, distinct from a Claude Code operator's own usage. This is not a validated
  * model/effort recommendation for any of these families; `agy models` is the source of truth, not this file.
  *
- * STDIN: text-mode --print requires a VALUE, and '-' is literal text, not a stdin sentinel. The ONLY
+ * STDIN: text-mode --print requires a NON-EMPTY VALUE; resume supplies a short continuation instruction
+ * via --print without replaying the original task text. '-' is literal text, not a stdin sentinel. The ONLY
  * prompt-on-stdin route is --input-format stream-json --output-format stream-json with --print ''
  * (the explicit empty value is required), plus one JSON-stringified user/message/content event and LF.
  * stdin is then closed. No positional prompt, no argv-size exposure, no inherited stdin-trap pattern.
@@ -60,7 +61,8 @@
  * The parent SIGKILL wall is the real ceiling (30 min default); --print-timeout is a secondary hint
  * because it does not cover the interactive OAuth hang (#3633 probe 17). geminiDirectTask resumes ONCE
  * after a timeout or a nonzero/null exit without a terminal result, only with an init conversation ID.
- * Each attempt gets the full timeout budget (up to two parent walls); resuming sends no original prompt.
+ * Each attempt gets the full timeout budget (up to two parent walls); resume sends a short continuation
+ * instruction via --print, without replaying the original task text.
  * Logs default inside .git so bookkeeping does not pollute the working-tree diff. Scratch clones are
  * local clones of committed HEAD, not copies of uncommitted changes. Gates are none/standards/full;
  * full runs check:standards + the WHOLE Vitest suite, without changed-test selection.
@@ -80,7 +82,9 @@ import { join, resolve, isAbsolute, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const AGY_CLI = 'agy';
+export const AGY_RESUME_PROMPT = 'Continue the task from where you left off and finish it. Do not restart from scratch or repeat already-completed work.';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
 
 function requireText(value, name) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -96,7 +100,7 @@ function validateTimeout(value) {
 
 /** Pure argv AFTER agy. No required cwd flag exists; scope is supplied via spawn and the prompt. */
 export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs, resumeConversationId = null } = {}) {
-  // Resume is a text-mode empty --print with an explicit conversation, not a new NDJSON user turn.
+  // Resume supplies a non-empty continuation instruction via text-mode --print and an explicit conversation.
   // stream-json input is for the initial task only: it runs one turn per stdin message.
   const argv = ['--input-format', resumeConversationId === null ? 'stream-json' : 'text', '--output-format', 'stream-json',
     '--disable-slash-commands', '--dangerously-skip-permissions'];
@@ -125,7 +129,7 @@ export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = 
     if (resumeConversationId.trim().startsWith('-')) throw new TypeError('gemini-direct-task: resumeConversationId must not be flag-shaped');
     argv.push('--conversation', resumeConversationId);
   }
-  return [...argv, '--print', '']; // REQUIRED empty value; initial prompt rides stdin, resume has none.
+  return [...argv, '--print', resumeConversationId === null ? '' : AGY_RESUME_PROMPT]; // Initial prompt rides stdin with the required empty value.
 }
 
 export function buildAgyPrompt(task, absoluteDir) {
@@ -204,7 +208,9 @@ export function summarizeAgyEvents(events) {
   const steps = list.filter((e) => e?.event === 'step_update').map((e) => e.step_update);
   const toolCalls = steps.filter((s) => s?.step_type === 'tool' && s.state === 'DONE')
     .map((s) => ({ name: s.tool_name, params: s.tool_info?.parameters, output: s.tool_info?.output }));
-  const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
+  // Tool outcome is independent of step lifecycle and the CLI's terminal self-report.
+  const toolErrors = steps.filter((s) => s?.status === 'TOOL_ERROR')
+    .map((s) => ({ name: s.tool_name, params: s.tool_info?.parameters, output: s.tool_info?.output }));
   const filesTouched = [...new Set(toolCalls.filter((t) => writingTools.includes(t.name)).flatMap((t) => {
     if (!t.params || typeof t.params !== 'object') return [];
     return Object.entries(t.params).filter(([key, value]) =>
@@ -220,7 +226,7 @@ export function summarizeAgyEvents(events) {
   }
   const result = [...list].reverse().find((e) => e?.event === 'result')?.result;
   return {
-    conversationId, toolCalls, filesTouched, agentMessages: [...messages.values()],
+    conversationId, toolCalls, toolErrors, filesTouched, agentMessages: [...messages.values()],
     terminal: typeof result?.status === 'string' ? result.status : null,
     finalResponse: typeof result?.response === 'string' ? result.response : null,
     errorMessage: result?.error ?? null,
@@ -539,6 +545,10 @@ export function formatReport(report) {
   const lines = [
     `gemini-direct-task: ${report.scratch.created ? 'scratch clone' : 'target dir'} → ${report.dir}`,
     `conversation: ${report.events.conversationId ?? '<none>'}  terminal: ${report.events.terminal ?? '<none>'}  exit: ${report.exitCode}  timedOut: ${report.timedOut}`,
+    ...(report.events.toolErrors.length ? [
+      `WARNING: TOOL ERRORS DURING RUN (${report.events.toolErrors.length}) — the terminal status above may not reflect real success:`,
+      ...report.events.toolErrors.map((t) => `  ${t.name}: ${t.output ?? '<no output>'}`),
+    ] : []),
     `tool calls: ${report.events.toolCalls.length}  files touched (informational): ${report.events.filesTouched.length}`,
     `log: ${report.logFile}`,
     `usage (tokens only): ${JSON.stringify(report.events.usage)}`,
@@ -583,7 +593,8 @@ export async function main(argv = process.argv.slice(2), { taskFn = geminiDirect
     }) : defaultExecFn,
   });
   console.log(flags.json ? JSON.stringify(report, null, 2) : formatReport(report));
-  if (report.timedOut || report.exitCode !== 0 || report.events.terminal !== 'SUCCESS' || !report.gate.pass) {
+  if (report.timedOut || report.exitCode !== 0 || report.events.terminal !== 'SUCCESS' || !report.gate.pass
+      || report.events.toolErrors.some((t) => writingTools.includes(t.name))) {
     process.exitCode = 1;
   }
   return report;

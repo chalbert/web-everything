@@ -527,7 +527,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * @param {{ unshaped?:object[], decisions?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0 } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, trace = false, dispatchPaused = false } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -536,11 +536,20 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
   const consumedLanes = [];
   const notes = [];
 
+  const admission = [];
   const plan = (num, kind, sink) => {
     const key = normNum(num);
-    if (guardNums.has(key)) return; // live prepare-guard entry → already in flight
-    if (openPrForNum(prs, num)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
-    if (lanes.length === 0) { notes.push({ kind: 'prepare-no-lane', num, text: `no free lane to auto-prepare #${num}` }); return; }
+    const gates = [];
+    if (trace) admission.push({ num, kind, gates });
+    const blocked = (name, condition, observed) => {
+      if (trace) gates.push({ name, pass: !condition, observed });
+      return condition;
+    };
+    if (blocked('dispatch-paused', dispatchPaused, dispatchPaused)) return;
+    if (blocked('prepare-guard', guardNums.has(key), { num: key, guards: [...guardNums] })) return; // live prepare-guard entry → already in flight
+    const existingPr = openPrForNum(prs, num);
+    if (blocked('existing-PR', !!existingPr, existingPr ?? null)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
+    if (blocked('prepare-lane-capacity', lanes.length === 0, [...lanes])) { notes.push({ kind: 'prepare-no-lane', num, text: `no free lane to auto-prepare #${num}` }); return; }
     const lane = lanes.shift();
     consumedLanes.push(lane);
     guardNums.add(key); // a decision and a scope item never share a num, but stay safe against a duplicate row
@@ -552,7 +561,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
   for (const d of Array.isArray(decisions) ? decisions : []) {
     if (d?.num != null && d.prepared !== true) plan(d.num, 'prepare-decision', decisionSpawns);
   }
-  return { scopeSpawns, decisionSpawns, newGuards, consumedLanes, notes };
+  return { scopeSpawns, decisionSpawns, newGuards, consumedLanes, notes, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -1128,9 +1137,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    to `dispatch-paused` holds when paused): these spawns are computed straight off `state.unshaped` /
   //    `state.decisions` / `state.prs`, never off `plan.launch`, so this tick's OWN `dispatchPaused` input —
   //    not a re-read of `plan.held` — is what gates them. Already-live guards are untouched either way.
-  const prep = dispatchPaused
-    ? { scopeSpawns: [], decisionSpawns: [], newGuards: [], consumedLanes: [], notes: [] }
-    : planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick });
+  const prep = planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick, trace: true, dispatchPaused });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
   const livePrepareGuards = [...prepare.live, ...prep.newGuards];
@@ -1286,6 +1293,16 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   });
 
   const decisionsOut = {
+    // Carry the planner's evidence verbatim; a reporter must never reconstruct its gates.
+    admission: {
+      queue,
+      cleared: Array.isArray(plan.cleared) ? plan.cleared : null,
+      selection: Array.isArray(plan.selection) ? plan.selection : [],
+      held: Array.isArray(plan.held) ? plan.held : [],
+      planned: Array.isArray(plan.launch) ? plan.launch : [],
+      traces: Array.isArray(plan.admission) ? plan.admission : [],
+      prepare: prep.admission ?? [],
+    },
     counts,
     spawnBuilds: launched.spawn,
     suppressedBuilds: launched.suppressed,

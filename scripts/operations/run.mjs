@@ -49,6 +49,7 @@ import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
+import { dispatchEligibilityOperation, DISPATCH_ELIGIBILITY_OP } from './dispatch-eligibility.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
@@ -195,6 +196,12 @@ export const OPERATIONS = Object.freeze({
   // #3037 — the first operation whose effect STARTS work instead of finishing it. Its one sink launches a
   // delivery agent and returns an in-flight marker; the matching OBSERVER is registered by the waker
   // (`we:scripts/operations/wake.mjs`), which is the process that polls it. Both live in `dispatch-lane-io.mjs`.
+  [DISPATCH_ELIGIBILITY_OP]: () => ({
+    declaration: dispatchEligibilityOperation({
+      readTick: createTickReader({ recordLiveness: (stamped) => stamped }),
+    }),
+    sinks: {},
+  }),
   [DISPATCH_LANE_OP]: () => ({
     declaration: dispatchLaneOperation({ readTick: createTickReader() }),
     // `WE_DISPATCH_AGENT_ARGS` is read HERE rather than defaulted inside the sink: the permission mode, the
