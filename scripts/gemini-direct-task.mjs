@@ -116,6 +116,9 @@ export function buildAgyPrompt(task, absoluteDir) {
     + "Use only absolute paths and never trust your shell's own cwd: it may be agy's internal scratch directory, "
     + 'even when the launch cwd is correct. Set command working directories explicitly using that absolute target; '
     + 'use git -C with the absolute target for git commands. Read and follow the target repository’s agent instructions.\n\n'
+    + 'Do not use the grep_search tool — it has a known bug where it can silently report SUCCESS with zero '
+    + 'results instead of surfacing a real match. For any code/text search, run a shell command instead '
+    + '(e.g. `rg` or `grep`) via your shell-exec capability.\n\n'
     + 'Make the change directly by editing files in this working directory. When you are done, STOP — do '
     + 'not run `git commit`, do not run `git push`, and do not open a pull request. Do not run `git add` '
     + '(the wrapper handles content-free --intent-to-add for diff capture). A human will review the '
