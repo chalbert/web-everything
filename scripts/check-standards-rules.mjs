@@ -3605,3 +3605,77 @@ export function gitHookAllFlagError(file, hit) {
     + `a tree the operator already has), or write \`# ${GITHOOK_ALL_ALLOW} <why>\` on that line or the one above.`
     + `\n    ${hit.text}`;
 }
+
+// ── #2892 — the PRINCIPLE-SURFACE gate's two check:standards floors (#2840) ─────────────────────────────────────
+
+/**
+ * Every `@principle`/`@invariant` marked block carries a PIN that matches its body (`markerBlockPin`), and the
+ * marker structure is well-formed. This is what makes the scorer's marker axis sound: `isMarkedInvariantEdit`
+ * only sees lines a hunk REMOVES, so an edit to the middle of a long marked block is caught only because it must
+ * also rewrite the pinned open marker — and this rule is what says "must". A body edit that skips the re-pin
+ * fails the gate here instead of slipping past the human.
+ *
+ * Also rejects a marker id reused across files: a marker is a greppable handle for ONE guarantee.
+ * @param {Array<{file:string, content:string}>} docs marker-source files (`isMarkerSourcePath`), repo-relative
+ * @param {{parseMarkedBlocks:Function, markerBlockPin:Function}} grammar the gate-config grammar (injected for tests)
+ * @returns {Array<{file:string, line:number, message:string}>}
+ */
+export function validateMarkedInvariants(docs, { parseMarkedBlocks, markerBlockPin }) {
+  const out = [];
+  const firstSeen = new Map();
+  for (const { file, content } of docs || []) {
+    if (!String(content ?? '').includes('@')) continue;
+    const { blocks, problems } = parseMarkedBlocks(content);
+    for (const p of problems) out.push({ file, line: p.line, message: p.message });
+    for (const b of blocks) {
+      const expected = markerBlockPin(b.body);
+      if (b.pin !== expected) {
+        out.push({ file, line: b.openLine, message: `\`@${b.kind} ${b.id}\` pin:${b.pin} does not match its body (expected pin:${expected}). The body of a marked guarantee changed: re-pin it to that value — which rewrites the marker line, so the change reaches review:human as #2840 requires` });
+      }
+      const prior = firstSeen.get(b.id);
+      if (prior && prior.file !== file) out.push({ file, line: b.openLine, message: `marker id \`${b.id}\` is already used at ${prior.file}:${prior.line} — one id per guarantee` });
+      else if (!prior) firstSeen.set(b.id, { file, line: b.openLine });
+    }
+  }
+  return out;
+}
+
+/**
+ * THE LEASH PIN (#2840 trigger 3, guarding #2838's flip-edit safeguard). The declarative-leash files stay
+ * human-gated as WHOLE files, permanently — so the one edit that reduces oversight most (`landMode: shadow →
+ * enforce` in the policy contract) can never become agent-clearable. Asserts, over the live gate:
+ *   1. every basename in the ratified floor is still in the leash set;
+ *   2. every leash file — at each recorded home, bare, and relocated — is a principle surface under EVERY diff
+ *      shape (unknown, empty, whitespace-only, an ordinary edit), i.e. the composition never content-gates it;
+ *   3. the real scorer, fed that same file with a benign whitespace diff, sets `humanRequired` and labels
+ *      `review:human` — the call path the producer and the drain actually run, not just the predicate.
+ * Returns plain messages; an empty array is green.
+ * @param {{floor:readonly string[], specBasenames:ReadonlySet<string>, trustChain:Array<object>,
+ *          isPrincipleSurface:Function, scoreEscalation:Function, producerReviewLabel:Function, humanLabel:string}} gate
+ * @returns {string[]}
+ */
+export function validateLeashPin({ floor, specBasenames, trustChain, isPrincipleSurface, scoreEscalation, producerReviewLabel, humanLabel }) {
+  const out = [];
+  for (const base of floor || []) {
+    if (!specBasenames.has(base)) out.push(`leash pin: \`${base}\` is in RATIFIED_POLICY_SPEC_FLOOR but no longer in POLICY_SPEC_BASENAMES — a ratified declarative-leash file has dropped out of the human gate (#2840 trigger 3 is permanent)`);
+  }
+  for (const base of specBasenames) {
+    const homes = (trustChain.find((m) => m.file === base) || {}).homes || [];
+    const paths = [...new Set([...homes, base, `relocated/elsewhere/${base}`])];
+    for (const path of paths) {
+      const header = `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n`;
+      const shapes = {
+        unknown: null,
+        empty: '',
+        'whitespace-only': `${header}@@ -1 +1 @@\n-a  b\n+a b\n`,
+        ordinary: `${header}@@ -1 +1 @@\n-a\n+b\n`,
+      };
+      for (const [shape, fileDiff] of Object.entries(shapes)) {
+        if (!isPrincipleSurface(path, fileDiff)) out.push(`leash pin: \`${path}\` is not a principle surface for a ${shape} diff — isPrincipleSurface must fire on every declarative-leash file by path alone, whatever its content`);
+      }
+      const score = scoreEscalation({ changedFiles: [path], humanBasisFiles: [path], diffHunks: shapes['whitespace-only'] });
+      if (!score.humanRequired || producerReviewLabel(score) !== humanLabel) out.push(`leash pin: scoreEscalation does not route a whitespace-only edit to \`${path}\` to ${humanLabel} — the scorer has dropped a declarative-leash file from the human gate`);
+    }
+  }
+  return out;
+}

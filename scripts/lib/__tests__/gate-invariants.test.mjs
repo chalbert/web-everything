@@ -243,6 +243,61 @@ describe('INVARIANT 1 — policy/statute ⇒ human; engine ⇒ escalate-but-agen
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 1b — the PRINCIPLE SURFACE (#2840, built by #2892). The human trigger is a SUPERSET of the post-#2785
+// path gate except for exactly ONE ratified narrowing: a statute doc whose diff is PROVEN whitespace/reflow-only.
+// Every other diff shape — including no content at all — keeps the post-#2785 line, and the leash never reads
+// content. A marker edit only ever ADDS a human.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 1b — #2840 principle surface: superset of the post-#2785 gate, one ratified narrowing', () => {
+  const sectionFor = (path, hunks) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${hunks}`;
+  const HUNK_SHAPES = {
+    none: () => undefined,
+    empty: () => '',
+    garbage: () => 'not a diff',
+    reflow: (p) => sectionFor(p, '@@ -1,2 +1 @@\n-a rule\n-that binds\n+a rule that binds\n'),
+    ruleText: (p) => sectionFor(p, '@@ -1 +1 @@\n-may\n+must\n'),
+    markerEdit: (p) => sectionFor(p, '@@ -1 +1 @@\n-// @invariant x pin:aaaaaaaaaaaa\n+// @invariant x pin:bbbbbbbbbbbb\n'),
+  };
+  it('the DECLARATIVE LEASH is humanRequired under EVERY hunk shape, with noise (never content-gated)', () => {
+    for (const leash of [...DECLARATIVE_LEASH_FILES, ...RELOCATED_LEASH_FILES]) {
+      for (const [shape, hunksFor] of Object.entries(HUNK_SHAPES)) {
+        for (const noise of powerset(LEAF_FILES).slice(0, 4)) {
+          const r = scoreEscalation({ changedFiles: [...noise, leash], diffHunks: hunksFor(leash) });
+          expect(r.humanRequired, `${leash} / ${shape}`).toBe(true);
+        }
+      }
+    }
+  });
+  it('a STATUTE doc is humanRequired under every shape EXCEPT a proven reflow — the one ratified narrowing', () => {
+    for (const s of STATUTE_FILES) {
+      for (const [shape, hunksFor] of Object.entries(HUNK_SHAPES)) {
+        const r = scoreEscalation({ changedFiles: [s], diffHunks: hunksFor(s) });
+        expect(r.humanRequired, `${s} / ${shape}`).toBe(shape !== 'reflow');
+        expect(r.escalate).toBe(true); // …and even the reflow still gets an independent review
+      }
+    }
+  });
+  it('a marker edit ADDS a human to derivation code, engine and leaf files; no other shape does', () => {
+    for (const f of [...DERIVATION_CODE_FILES, ...ENGINE_FILES]) {
+      for (const [shape, hunksFor] of Object.entries(HUNK_SHAPES)) {
+        expect(scoreEscalation({ changedFiles: [f], diffHunks: hunksFor(f) }).humanRequired, `${f} / ${shape}`).toBe(shape === 'markerEdit');
+      }
+    }
+    const leaf = 'src/features/guard.test.ts';
+    expect(scoreEscalation({ changedFiles: [leaf], diffHunks: HUNK_SHAPES.markerEdit(leaf) }).humanRequired).toBe(true);
+  });
+  it('humanRequired always carries a human-clearance reason token (gate-self or statute), so the router agrees', () => {
+    for (const f of [...DECLARATIVE_LEASH_FILES, ...STATUTE_FILES, ...DERIVATION_CODE_FILES, ...LEAF_FILES]) {
+      for (const hunksFor of Object.values(HUNK_SHAPES)) {
+        const r = scoreEscalation({ changedFiles: [f], diffHunks: hunksFor(f) });
+        const humanReason = r.reasons.some((x) => /^(gate-self|statute) \(/.test(x));
+        expect(humanReason, `${f}`).toBe(r.humanRequired);
+      }
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // INVARIANT 2 — a human-gated PR NEVER reaches an auto-merge action without an explicit human accept.
 // This is the core safety property: no refactor of decideReviewGate may open a path by which a PR that is
 // human-required (fresh score) OR already carries the sticky review:human label lands on main, EXCEPT when a
