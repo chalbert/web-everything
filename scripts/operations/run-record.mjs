@@ -233,10 +233,10 @@ export function extractInvocationRole(row, run = null) {
  * Groups telemetry rows by role, summing cache read, cache creation, fresh input, and loaded context tokens.
  *
  * SURFACES ZERO HIT RATE ACROSS REPEATED SAME-ROLE INVOCATIONS (#3521 Done-when #2):
- * A role with 2 or more invocations whose aggregate hit rate is 0, OR any role that experienced a run
- * with 2 or more invocations where all had 0 cache reads, has `zeroHitAlert: true` and the runs recorded in
- * `zeroHitRuns`. This prevents zero hit rates on repeated invocations from being silently averaged away into
- * a misleadingly non-zero aggregate across runs.
+ * A role with 2 or more zero-cache-read invocations across all aggregated runs has `zeroHitAlert: true`.
+ * Runs with 2 or more zero-cache-read invocations are recorded in `zeroHitRuns`.
+ * This prevents zero hit rates on repeated invocations from being silently averaged away into
+ * a misleadingly non-zero aggregate across runs, even when spread across multiple separate run records.
  *
  * @param {object|object[]} runs - one or more run records.
  * @returns {Array<{role: string, invocations: number, cacheReadTokens: number, cacheCreationTokens: number, inputTokens: number, loadedContextTokens: number, hitRate: number|null, readsPerWrite: number|null, zeroHitInvocations: number, zeroHitAlert: boolean, zeroHitRuns: Array<{runId: string, invocations: number}>}>}
@@ -312,7 +312,7 @@ export function aggregateRoleCacheMetrics(runs) {
       ? entry.cacheReadTokens / entry.cacheCreationTokens
       : null;
 
-    const zeroHitAlert = (entry.invocations >= 2 && entry.cacheReadTokens === 0) || entry.zeroHitRuns.length > 0;
+    const zeroHitAlert = entry.zeroHitInvocations >= 2;
 
     results.push({
       role: entry.role,

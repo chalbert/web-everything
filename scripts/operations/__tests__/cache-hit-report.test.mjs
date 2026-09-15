@@ -311,6 +311,35 @@ describe('aggregateRoleCacheMetrics — KNOWN SPLIT ARITHMETIC ASSERTION (#3521 
     expect(results[0].hitRate).toBe(0.0);
     expect(results[0].zeroHitAlert).toBe(true);
   });
+
+  it('TRIGGERS zeroHitAlert when repeated zero-cache-read invocations are spread across separate run records even with healthy hits', () => {
+    // Reviewer finding: 3 run records for one role:
+    // 2 separate runs each contributing exactly 1 zero-cache-read invocation,
+    // plus 1 run with a healthy non-zero invocation.
+    const runA = {
+      id: 'r-a',
+      telemetry: [{ role: 'agent', usage: { cache_read: 0, cache_creation: 500, input: 500 } }],
+    };
+    const runB = {
+      id: 'r-b',
+      telemetry: [{ role: 'agent', usage: { cache_read: 0, cache_creation: 500, input: 500 } }],
+    };
+    const runC = {
+      id: 'r-c',
+      telemetry: [{ role: 'agent', usage: { cache_read: 2000, cache_creation: 0, input: 0 } }],
+    };
+
+    const results = aggregateRoleCacheMetrics([runA, runB, runC]);
+    expect(results).toHaveLength(1);
+    const [agent] = results;
+
+    expect(agent.invocations).toBe(3);
+    expect(agent.zeroHitInvocations).toBe(2);
+    expect(agent.cacheReadTokens).toBe(2000);
+    expect(agent.loadedContextTokens).toBe(4000);
+    expect(agent.hitRate).toBe(0.5); // non-zero hit rate (50%)
+    expect(agent.zeroHitAlert).toBe(true);
+  });
 });
 
 describe('renderCacheHitReport — SURFACING ZERO HIT RATES (#3521 Done-when #2)', () => {
@@ -342,6 +371,28 @@ describe('renderCacheHitReport — SURFACING ZERO HIT RATES (#3521 Done-when #2)
 
   it('renders a plain message when no usage records are present', () => {
     expect(renderCacheHitReport([])).toEqual(['cache-hit-report: no telemetry with usage found in run record(s).']);
+  });
+
+  it('surfaces zero-hit alert when repeated zero-cache-read invocations are spread across runs even with healthy hits', () => {
+    const runA = {
+      id: 'r-a',
+      telemetry: [{ role: 'agent', usage: { cache_read: 0, cache_creation: 500, input: 500 } }],
+    };
+    const runB = {
+      id: 'r-b',
+      telemetry: [{ role: 'agent', usage: { cache_read: 0, cache_creation: 500, input: 500 } }],
+    };
+    const runC = {
+      id: 'r-c',
+      telemetry: [{ role: 'agent', usage: { cache_read: 2000, cache_creation: 0, input: 0 } }],
+    };
+    const metrics = aggregateRoleCacheMetrics([runA, runB, runC]);
+    const lines = renderCacheHitReport(metrics);
+    const agentLine = lines.find((l) => l.includes('agent:'));
+    expect(agentLine).toContain('50.0% hit rate');
+    const alertLine = lines.find((l) => l.includes('ALERT'));
+    expect(alertLine).toBeDefined();
+    expect(alertLine).toMatch(/⚠️ ALERT: zero hit rate across 2 repeated invocation\(s\)/);
   });
 });
 

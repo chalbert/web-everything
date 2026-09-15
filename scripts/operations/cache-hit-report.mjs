@@ -99,7 +99,7 @@ export function renderCacheHitReport(rows) {
         }
       } else {
         lines.push(
-          `    ⚠️ ALERT: zero hit rate across ${r.invocations} repeated invocation(s) (prompt caching inactive or prefix broken)`,
+          `    ⚠️ ALERT: zero hit rate across ${r.zeroHitInvocations ?? r.invocations} repeated invocation(s) (prompt caching inactive or prefix broken)`,
         );
       }
     }
