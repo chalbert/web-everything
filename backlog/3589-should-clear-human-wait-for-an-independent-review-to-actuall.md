@@ -1,15 +1,62 @@
 ---
 bornAs: xmyj37e
 kind: decision
-status: open
+status: resolved
 relatedTo: ["2895", "2844", "3279"]
 scope: ["we:scripts/review-set-label.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/review-pr.mjs", "we:scripts/lib/review-independence.mjs", "we:docs/agent/platform-decisions.md"]
 dateOpened: "2026-09-07"
+dateResolved: "2026-09-14"
+codifiedIn: "docs/agent/platform-decisions.md#clear-human-requires-current-head-advisory-review"
 preparedDate: "2026-09-14"
 tags: [review, gate, drain]
 ---
 
 # Should clear-human wait for an independent review to actually run before the drain merges — config toggle
+
+## Ruling (2026-09-14)
+
+**Ratified 2026-09-14** — per the operator's explicit in-conversation instruction to ratify this card
+("I ratify 3589"), confirming both live forks on the card's own bolded recommended defaults. No alternative
+picked, no amendment beyond what each fork's own prepared reasoning — including its self-conducted
+`Skeptic:` attack and the fresh-context `Screen:` pass (#2091) already run under this card — already folded
+in.
+
+- **Fork 1: (a) — apply the wait to every `clear-human` clearance, no sub-scoping, the bold default.**
+  `review:human` is already the narrow, high-blast-radius tier by ratified design (#2771/#2840); there is
+  no larger population to protect against by carving out a `#2011`-shaped subset, and nothing in the
+  incident or the existing statute motivates cutting an already-deliberately-narrow tier in two.
+- **Fork 2: (c) — `clear-human` gets one more precondition, the bold default.** It refuses unless the PR
+  already carries the `advise` step's (#3453) advisory-note comment for its CURRENT head. If absent, the
+  refusal names the fix — dispatch `we:scripts/operations/review-dispatch.mjs --pr=<n>` (or wait for the
+  next conveyor tick), then retry `clear-human`. Nothing about `advise`, `we:scripts/operations/review-dispatch.mjs`,
+  or the conveyor's dispatch decision changes: a single new guard clause, the same shape as the existing
+  `--actor`/`--reason` checks already in `decideSetLabel`'s `clear-human` target
+  (`we:scripts/review-set-label.mjs`).
+
+**Fork 3 (the config default) is not a third ratifiable fork — already correctly dissolved at `/prepare`,
+not re-opened here.** The fresh-context Screen pass (#2091) reclassified it as a config dimension (both
+`on`/`off` are legitimate end-states once build/maintenance cost is zeroed out), so it carries an
+**operational default, not a ratified pick**: **ON** by default, via a
+`WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style env var (name TBD at build time, following the existing
+`WE_MERGE_BREAK_GLASS` convention in `we:scripts/merge-ai-prs.mjs`) — recorded as the item's own "Supported
+by default" text, above, unchanged by this ruling.
+
+**Follow-on build filed at ratification, deliberately NOT built in this same PR** — the item's own "What
+this does not settle" section explicitly deferred the exact precondition-check implementation and the
+`advise`-step per-head marker Fork 2(c) itself flags as a real residual (`renderAdvisoryNote` posts no
+durable per-head marker today, so an exact "is this the CURRENT head's note" check needs a
+`<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker` in `we:scripts/lib/review-escalation.mjs`,
+before the coarse "does any advisory comment exist" check can be tightened):
+
+- [Gate `clear-human` on a posted advisory review for the current head](/backlog/xcskm9h-gate-clear-human-on-a-posted-advisory-review-for-the-current/)
+  (parent: this item; filed `xcskm9h`, numbered on land) — implements Fork 2(c)'s guard clause in
+  `we:scripts/review-set-label.mjs`, the per-head `advisory-sha` marker in
+  `we:scripts/operations/review-pr.mjs`'s `renderAdvisoryNote`, and the
+  `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style config toggle (Fork 3, default on) that gates it.
+
+Codified in `we:docs/agent/platform-decisions.md#clear-human-requires-current-head-advisory-review`.
+
+---
 
 **Prepared** (#3589 `/prepare` close-out, 2026-09-14) — the inline authoring already carried real forks,
 concrete `file:line` grounding, and a self-conducted per-fork `Skeptic:` attack. This pass added the
