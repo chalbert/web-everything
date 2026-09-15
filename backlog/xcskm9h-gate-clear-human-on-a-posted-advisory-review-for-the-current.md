@@ -15,8 +15,10 @@ Implements the ratified ruling from #3589 (should clear-human wait for an indepe
 
 1. **Executable** — `npx vitest run we:scripts/__tests__/review-set-label.test.mjs` passes with new cases
    added for `decideSetLabel`'s `clear-human` target: (a) refuses (with the dispatch-fix message named) when
-   no advisory-note comment is present for the PR's current head, (b) allows the existing clearance path
-   unchanged when one is present, and (c) is a no-op (unchanged behavior) when the
+   no advisory-note comment is present for the PR's current head, (a′) ALSO refuses when an advisory-note
+   comment IS present but its `<!-- advisory-sha: <sha> -->` marker names an OLDER head (the force-push race
+   this gate exists for — a stale-marker fixture, so a coarse "any advisory comment exists" check fails this
+   case), (b) allows the existing clearance path unchanged when one is present for the current head, and (c) is a no-op (unchanged behavior) when the
    `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style toggle is off. A companion case in
    `we:scripts/operations/review-pr.mjs`'s test suite asserts `renderAdvisoryNote` now emits an
    `<!-- advisory-sha: <head-sha> -->` marker per #3589's stated residual.
