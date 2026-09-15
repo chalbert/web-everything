@@ -43,6 +43,8 @@ import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from
 import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
+import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
+import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -168,6 +170,10 @@ export const OPERATIONS = Object.freeze({
   // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
+    sinks: {},
+  }),
+  [RUNNER_ACTIVITY_OP]: () => ({
+    declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({
@@ -339,15 +345,19 @@ if (IS_CLI) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
   }
+  // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
+  const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores() : {
+    store: createFileRunStore(), callLog: createFileCallLogStore(),
+  };
   runOperationCli({
     declaration,
     argv: rest,
     registry,
-    store: createFileRunStore(),
+    store: cliStores.store,
     // #3451 — the real, file-backed call-visibility signal. A compute-only operation (gate-health,
     // suggest-next, verify, pr-status) settles in one `driveRun` sweep and never gets a run record; this
     // is the ONLY trace a real CLI invocation of one of those leaves behind.
-    callLog: createFileCallLogStore(),
+    callLog: cliStores.callLog,
     sinks,
     // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
     // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot
