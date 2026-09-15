@@ -3880,6 +3880,67 @@ never `review:human` to begin with).
 
 ---
 
+### `clear-human` refuses unless an independent advisory review has already posted for the PR's current head {#clear-human-requires-current-head-advisory-review}
+
+**Ratified 2026-09-14 by the operator (Nicolas Gilbert) (#3589).** PR #2011 (`WE #3174`, a ratify+codify
+touching the declarative-leash/statute surface) was parked `review:human` by the escalation rubric; the
+operator said "I approve 2011", the session ran `we:scripts/review-set-label.mjs --to=clear-human` (the
+sanctioned #2895 ceremony), and the drain landed it **before** the independent `advise` step's (#3453)
+advisory-note comment had posted — the one clearance, of five that same night, where the operator's own
+approval outran the mechanism. **This was a race, not a design choice: nothing in `clear-human`'s
+preconditions ever checked whether that advisory note existed.** Two rulings close it:
+
+1. **Scope — every `clear-human` clearance, no sub-scoping.** `review:human` is already the narrow,
+   high-blast-radius tier by ratified design ([#review-human-declarative-leash-only](#review-human-declarative-leash-only),
+   #2771/#2840): a statute-anchor edit, an edit to an already-present `@principle`/`@invariant` marker, or the
+   declarative-leash path floor. There is no larger population within that tier to protect against by
+   sub-scoping a narrower incident-shaped subset — the leash-contract / gate-config / conformance-suite files
+   the tier also catches are at least as sensitive as a statute-anchor prose edit.
+2. **Mechanism — a precondition, not a relabel.** `clear-human`'s decision function
+   (`decideSetLabel`'s `clear-human` target, `we:scripts/review-set-label.mjs`) MUST gain ONE more guard,
+   the same shape as its existing `--actor`/`--reason` honesty-tax checks: it refuses unless the PR already
+   carries the `advise` step's advisory-note comment for its **current** head. An absent note refuses with
+   the fix named — dispatch `we:scripts/operations/review-dispatch.mjs --pr=<n>` (or wait for the next
+   conveyor tick, which already auto-dispatches `advise` for every `needs-review` PR), then retry. Nothing
+   about `advise`, `we:scripts/operations/review-dispatch.mjs`, or the conveyor's existing dispatch cadence
+   is meant to change — this is specified as a refusal-with-actionable-fix, never a synchronous
+   dispatch-and-block: blocking a CLI call for the minutes a real independent review takes would be exactly
+   the passive-wait shape this repo's own agents are barred from sitting on. The clearing operator (or
+   session) keeps full authority to clear over real findings — the note only has to have **posted**, not be
+   acted on — because the incident was about ordering, never about overruling the operator. **This guard is
+   RULED here; no implementation of it exists anywhere in the codebase** — see the Residual paragraph and
+   Lineage below for exactly what code this ratification obligates and where that obligation is tracked.
+
+**Config posture (not a third ratified fork — a config dimension, both values legitimate end-states):** the
+precondition is gated by a `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style env var (name TBD at build
+time, the existing `WE_MERGE_BREAK_GLASS` convention, `we:scripts/merge-ai-prs.mjs`), **operational default
+ON.** The night of the incident, 4 of 5 `clear-human` clearances already had the advisory note land first —
+"on" asks nothing new of the common case and only makes the ordering that already usually holds guaranteed;
+an operator in genuinely time-sensitive incident response is one flag away from the old fast path.
+
+**Residual — build status lives on the follow-on item, not this rule (#2854):** `we:scripts/review-set-label.mjs`'s
+`decideSetLabel` carries no advisory-note check of any kind, coarse or exact, until the follow-on item below
+ships it — this anchor rules what `clear-human` must do, it does not claim any of it runs. That build owes
+two things, in order: first, the guard clause itself (an absent-note refusal); second, an exact "is this the
+CURRENT head's note" test, which depends on `renderAdvisoryNote` (`we:scripts/operations/review-pr.mjs`)
+gaining a durable per-head marker (an `<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker`
+in `we:scripts/lib/review-escalation.mjs`). The ratified, accepted interim shape — usable between those two
+steps landing — is a coarser "does any advisory comment exist" proxy: a PR force-pushed after its note would
+pass it on stale grounds, a real but narrower gap than having no guard clause at all. Neither the guard nor
+the marker is built in this ratifying PR (see Lineage) — this decisions-only PR ships zero code.
+
+**Lineage:** ratified by #3589 (operator, 2026-09-14; bornAs `3589`, prepared 2026-09-14 — Screen pass +
+review jury charter, filed on PR #2011's own incident). Cites [#review-human-declarative-leash-only](#review-human-declarative-leash-only)
+(#2771/#2840 — the `review:human` trigger set this rule's scope leans on being already narrow) and
+[#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (#3434 —
+the sibling `review:pending` tier this rule does not touch; `clear-human`'s human-only ceremony stays
+human-only). Implementation follow-on: the guard clause in `we:scripts/review-set-label.mjs`, the
+`advisory-sha` marker in `we:scripts/operations/review-pr.mjs`, and the config toggle — filed as `3692`
+("Gate `clear-human` on a posted advisory review for the current head"), `blockedBy` nothing (ratified in
+the same lane it was filed from), numbered on land.
+
+---
+
 ### A learning is admitted to agent memory by verified grounding; recurrence diagnoses and ranks, never admits {#memory-admission-verified-grounding}
 
 **Ratified 2026-08-08 by the operator (Nicolas Gilbert) (#2978).** The learnings pipeline **consolidates and prioritizes**; it is not an authentication checkpoint and no human stands in its path. Four rules, ruled together because each makes the next affordable. **(1) Admission is verified grounding, plus the red-team.** A note reaches agent memory only if it carries the **quoted grounding turn** plus a **transcript pointer**, and the harvest confirms the quote is really in that file — a check against a file the *harness* writes, not one the emitter controls. Grounding proves the **moment**, never the **merit**, so admission reads *grounded **and** survives the red-team*; a note that cannot be tied to a real moment routes to `we:backlog/`, never to memory. A **recurrence count may never gate admission**: `session` and `ts` are emitter-written, so counting authenticates nothing (four hand-written lines manufacture "2 sessions across 2 days"), and a recurrence bar structurally excludes the **one-off user directive** — the source that produced essentially the entire existing `feedback_*` corpus. **(2) Recurrence is a diagnostic signal first, a ranking key second.** N similar notes are evidence of **one cause with N symptoms**, so a cluster's output is a design-level **story naming that cause**, not N patches on a faulty design — and the cluster reaches synthesis with all its members, never an elected "representative" (which elects the best-described *symptom*). A single grounded note becomes a memory rule; a cluster becomes a backlog story. Those are different destinations. No admission floor: a one-session cluster is a real signal that merely sorts lower. **(3) While single-tenant, the pool entry carries the full evidence, uncapped** — storing the real context beats storing a digest and hoping it reconstructs, and cause-synthesis is impossible from a count alone. The secret/entropy scrub therefore **relocates rather than dies**: it moves from the *append* seam to the **publish seam**, because the pool is untracked machine-local state but harvest *output* is committed and pushed. Size limits belong on **what the harvest sends per cluster** (a model-context budget) — never on what is stored. **(4) The harvest fires on a cadence, with the manual command retained**, the two sharing one lock so a tick and a manual run cannot double-file; and a harvest **may defer** a cluster whose cause is not yet clear, re-emitting it to the pool with a reason and a deferral count rather than draining everything. A repeatedly-deferred cluster is itself a finding.
