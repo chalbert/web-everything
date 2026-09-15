@@ -33,11 +33,13 @@
  *   3. Both together (high-stakes critical or thin history without informative trials) -> 'both'
  *   4. Claude fallback by effort tier ('haiku' | 'sonnet' | 'opus') -> 'claude'
  *
- * OPTIONAL QUOTA ALTERNATE: caller-supplied context.quotaStrained === true offers an informational
- * alternateBackend for the finalized Claude Sonnet/Opus tier via gemini-direct-task.mjs and Antigravity's
- * separate quota. No fitness claim or scorecard history is implied; recommendation, tier and gates stay
- * unchanged. Claude returns null otherwise (Haiku has no agy equivalent); other branches omit the field.
- * Only an explicit true adds a quota-strain audit entry, after claude-tier. No quota is read implicitly.
+ * DEFAULT AGY ALTERNATE: Claude Sonnet/Opus offers alternateBackend via gemini-direct-task.mjs and
+ * Antigravity's separate quota by default for capacity relief. Three opt-outs return null: Haiku has no
+ * agy equivalent; statute-tier paths, architectural-decision and triage-research require native Claude
+ * session identity/tools; or the most recent Antigravity trial for this exact taskType is not clean.
+ * Antigravity's sandbox is a different execution context from a native Claude Code session. This routing
+ * recommendation does not change supervision or graduation. Every Claude branch appends an
+ * agy-alternate-backend audit entry after claude-tier; other branches omit the alternateBackend field.
  *
  * STATUTE-TIER PATHS:
  *   Per AGENTS.md line 49 and docs/agent/ conventions: docs/agent/platform-decisions.md and any path
@@ -365,7 +367,7 @@ function evaluateProviderFitness(providerNames, taskType, filesTouched, estimate
  * @typedef {Object} ProviderRecommendation
  * @property {'gemini'|'codex'|'both'|'claude'} recommendation - The selected provider.
  * @property {'haiku'|'sonnet'|'opus'|null} claudeTier - Claude tier when recommendation is 'claude', otherwise null.
- * @property {{ tool: string, cliModel: string, reason: string }|null} [alternateBackend] - Informational agy route on the Claude branch only; null unless quota-strained Sonnet/Opus.
+ * @property {{ tool: string, cliModel: string, reason: string }|null} [alternateBackend] - Default capacity-relief agy route on the Claude branch only; null for Haiku, forced-native identity, or an unclean latest Antigravity trial for this taskType.
  * @property {AuditTrailEntry[]} auditTrail - Sequence of criteria evaluated in cascade order.
  * @property {string} reasoning - Human-readable summary paragraph explaining the recommendation.
  * @property {{ suggestedProvider: string, suggestedModel: string, category: string, value: number, unit: string, asOf: string, source: string, reason: string }|null} explorationHint - Advisory verified external rating when either provider group's trial history is thin.
@@ -383,7 +385,7 @@ function evaluateProviderFitness(providerNames, taskType, filesTouched, estimate
  * PURE: No filesystem or process reads. Deterministic over its arguments.
  *
  * @param {{ description?: string, taskType: 'bugfix'|'doc-fix'|'conflict-resolution'|'triage-research'|'build-new-feature'|'architectural-decision' }} task
- * @param {{ filesTouched?: string[], estimatedSize?: number, scorecards?: Array<object>|{records: Array<object>}, acceptanceTestable?: boolean, model?: string, quotaStrained?: boolean, capabilityRatings?: Array<object>|{version: number, entries: Array<object>, dropped: Array<object>}, capabilityCategory?: string }} context - All data is caller-loaded; capabilityCategory overrides the task's default exploration category. Only quotaStrained=true requests an alternate Claude backend.
+ * @param {{ filesTouched?: string[], estimatedSize?: number, scorecards?: Array<object>|{records: Array<object>}, acceptanceTestable?: boolean, model?: string, capabilityRatings?: Array<object>|{version: number, entries: Array<object>, dropped: Array<object>}, capabilityCategory?: string }} context - All data is caller-loaded; capabilityCategory overrides the task's default exploration category. Scorecards also inform the default agy alternate's taskType-specific reliability veto.
  * @returns {ProviderRecommendation} Includes optional alternateBackend on the Claude branch only (null when not applicable).
  */
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
@@ -401,7 +403,6 @@ export function selectProvider(task, context) {
     : (Array.isArray(rawScorecards?.records) ? rawScorecards.records : []);
   const preferredModel = typeof context?.model === 'string' ? context.model : undefined;
   const acceptanceTestable = context?.acceptanceTestable;
-  const quotaStrained = context?.quotaStrained;
 
   const auditTrail = [];
   const statuteFiles = filesTouched.filter(isStatuteTierPath);
@@ -577,22 +578,30 @@ export function selectProvider(task, context) {
   });
 
   const cliModel = AGY_CLAUDE_MODEL_BY_TIER[claudeTier];
-  const alternateBackend = quotaStrained === true && cliModel ? {
+  const forcedNativeIdentity = hasStatuteFile || taskType === 'architectural-decision' || taskType === 'triage-research';
+  const latestAntigravityTrial = getSortedRecordsForProviderAndTask(scorecards, ['antigravity'], taskType)[0];
+  const agyAlternateResult = !cliModel ? 'not-applicable'
+    : forcedNativeIdentity ? 'forced-native'
+      : latestAntigravityTrial && !isCleanRecord(latestAntigravityTrial) ? 'recent-failure'
+        : 'offered';
+  const alternateBackend = agyAlternateResult === 'offered' ? {
     tool: 'scripts/gemini-direct-task.mjs',
     cliModel,
-    reason: `Operator Claude usage is quota-strained; this same ${claudeTier}-tier dispatch can instead run via \`node scripts/gemini-direct-task.mjs --model=${cliModel}\`, tapping Antigravity's separate quota bucket for the same model family instead of this session's own Claude usage.`,
+    reason: `Default capacity-relief recommendation: run this ${claudeTier}-tier dispatch via \`node scripts/gemini-direct-task.mjs --model=${cliModel}\`, using Antigravity's separate quota for the same model family.`,
   } : null;
 
-  if (quotaStrained === true) {
-    auditTrail.push({
-      criterion: 'quota-strain-alternate-backend',
-      result: alternateBackend ? 'offered' : 'not-applicable',
-      dataConsulted: `claudeTier='${claudeTier}', quotaStrained=true`,
-      reasoning: alternateBackend
-        ? `Offered agy model '${cliModel}' for the same Claude tier because operator Claude usage is quota-strained.`
-        : 'Haiku has no agy-hosted equivalent, so no alternate backend applies.',
-    });
-  }
+  auditTrail.push({
+    criterion: 'agy-alternate-backend',
+    result: agyAlternateResult,
+    dataConsulted: `claudeTier='${claudeTier}', taskType='${taskType}', statute=${hasStatuteFile}, latestAntigravityTrial=${latestAntigravityTrial ? (latestAntigravityTrial.scoredAt || 'unscored') : 'none'}`,
+    reasoning: agyAlternateResult === 'not-applicable'
+      ? 'Haiku has no agy-hosted equivalent, so no alternate backend applies.'
+      : agyAlternateResult === 'forced-native'
+        ? 'Statute-tier paths, architectural decisions and triage research require native Claude session identity and tool access.'
+        : agyAlternateResult === 'recent-failure'
+          ? `The most recent Antigravity trial for taskType '${taskType}' is not clean; native Claude is required until a later clean trial supersedes it.`
+          : `Offered agy model '${cliModel}' by default for capacity relief on the same Claude tier.`,
+  });
 
   const reasoning = `Claude (${claudeTier}) is recommended for task '${taskType}' (${description || 'unnamed'}): external models (Gemini/Codex) were not fit or lacked clean track record. Effort tier '${claudeTier}' assigned because: ${claudeReason}`;
 
