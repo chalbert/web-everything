@@ -134,7 +134,17 @@ if (bg && resumeId) {
 if (bg) {
   // The real CLI returns IMMEDIATELY and the session may not be listed yet. It is listed here so the round
   // trip is assertable; the not-yet-listed grace window is the dispatcher's own concern and is unit-tested.
-  const id = sessionId || 'generated-' + state.sessions.length;
+  //
+  // #3331 — \`--bg\` IGNORES \`--session-id\` AND SAYS SO. This shim used to honour it (\`sessionId || generated-N\`)
+  // and that cooperativeness is precisely how the defect survived: the round-trip test below was green
+  // against an assumption the real CLI had never honoured, for as long as the assumption was wrong. The real
+  // 2.1.269 behaviour, measured, is this warning on stderr followed by a session under an id of the CLI's own
+  // choosing. Only the \`--bg\` branch is changed — \`-p\` (the foreground branch) genuinely DOES honour
+  // \`--session-id\`, which is what \`judge-spawn.mjs\`'s jurors rely on.
+  if (sessionId) {
+    process.stderr.write('warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing session)\\n');
+  }
+  const id = 'generated-' + state.sessions.length;
   state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, systemPromptFile, kind: 'background', state: 'running', cwd: process.cwd() });
   write(state);
   process.stdout.write('backgrounded · ' + id.slice(0, 8) + (name ? ' · ' + name : '') + '\\n');

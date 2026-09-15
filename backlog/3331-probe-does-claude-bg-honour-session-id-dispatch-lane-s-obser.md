@@ -3,11 +3,12 @@ bornAs: xhmktct
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: active
 scaffoldedBy: "rule3118"
 dateScaffolded: "2026-08-26"
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs"]
 dateOpened: "2026-08-26"
+dateStarted: "2026-09-11"
 relatedTo: ["3118", "3096", "3037"]
 tags: [plateau-loop, delivery, operations, conveyor, dispatch, probe]
 ---
@@ -111,7 +112,106 @@ Two further facts read off the same listing, neither assumed beyond what was obs
    normally. Whether it also covers a crashed session — the distinction the `unresolved` vocabulary exists
    for — was not probed and must not be assumed without a separate crash probe.
 
-**Remedy status (`Done when` #3): started, not landed.** A build attempt produced a checkpoint commit
+## Re-confirmed 2026-09-11 at CLI 2.1.269, and the COST finally measured
+
+The probe above was run at 2.1.246 with a bare `claude --bg --session-id <uuid> -n probe …`. Re-run on
+2026-09-11 at **2.1.269**, twice, this time with the **real dispatch argv** — the filled review brief,
+`--append-system-prompt-file`, and `reviewDispatchDisallowedToolsArgs()`'s deny list all included, to rule out
+any interaction with the review-specific flags:
+
+| run | minted (passed in) | printed / listed (actual) | match |
+|---|---|---|---|
+| 1 | `37bd4e7d-6f21-4855-aa0b-82b54ebdaf4b` | `fe8b4df8` / `fe8b4df8-f682-46e4-a3a8-e7a2b772e88c` | no |
+| 2 | `11111111-2222-3333-4444-555555555555` | `624b44ca` / `624b44ca-…` | no |
+
+Same stderr warning verbatim, both runs. **5 of 5 mismatched across two CLI versions.**
+
+**WHAT IT ACTUALLY COST, and why the bug survived a year of dispatches.** Nothing crashed and no dispatch was
+lost. `claude --bg` starts the session, names it from `-n`, and it does its work: `review-2129` (dispatched
+2026-09-11 under a minted id nothing in this repo could find) ran a full independent review to an `accept`
+verdict and auto-cleared the label. Checked across the whole listing: `claude agents --json --all` carries
+**246** `review-*`/`fix-*` sessions, and every one of `review-2115`, `review-2127`, `review-2128`,
+`review-2129`, `fix-2127` is present and reached `done`.
+
+What broke was **addressability**, three ways:
+1. The dispatcher's own printed instruction — `watch it: claude agents --json | grep <sessionId>` — can never
+   match. An operator who followed it saw nothing and reasonably concluded **the dispatch had silently
+   failed**. That is the reported symptom this card's remedy actually fixes.
+2. `stampLiveness` compares the stored handle against the listing, so **every** in-flight dispatch read
+   `live: false` permanently, degrading `dispatchStillHolds`'s double-dispatch guard to its clock backstop —
+   exactly the G1 failure `stampLiveness`'s own docblock says liveness exists to prevent.
+3. `claude logs/attach/stop <handle>` were unusable, so a stuck dispatch could not be steered or killed by the
+   id the dispatcher reported (only by hunting its `-n` name).
+
+**Two things that are NOT affected**, checked rather than assumed:
+- `we:scripts/lib/judge-spawn.mjs` and `we:scripts/operations/deliver-item-wrapper.mjs` spawn with `-p`, not
+  `--bg`. **`-p` honours `--session-id`** — the warning is `--bg`-specific — so juror independence is untouched.
+- `we:scripts/conveyor/reconcile-core.mjs#bindAgents` binds a review/fix session by its `-n` **name**
+  (#3437/#3438), not by the dispatched id, so the re-dispatch guard for those two kinds never depended on the
+  broken handle.
+
+**Still carrying the same defect, named not fixed here:** `we:scripts/operations/explore-io.mjs#buildInvestigatorArgv`
+emits `--bg --session-id` and its own `defaultClaudeProvider` returns the minted id as the panelist handle. The
+report-path derivation still works (both sides use the minted id), but its liveness axis has the same permanent
+`live: false`. Out of this card's scope; worth its own item.
+
+## Remedy landed 2026-09-11 (`Done when` #3)
+
+- `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` no longer emits `--session-id` on the `--bg`
+  branch (the `--resume` branch is untouched).
+- `we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider` returns the id `claude --bg` **prints**
+  (`backgrounded · <id> · <name>`), read with the already-existing `parseBackgroundedId`; it falls back to the
+  minted id only when stdout is unparseable, so no dispatch ever lands a null handle.
+- `we:scripts/operations/dispatch-lane-io.mjs#listedSessionIds` collects the listing's short `id` alongside
+  `sessionId`, which is what makes a printed handle findable. A minted uuid still matches nothing (36
+  characters never equals 8).
+- `we:scripts/operations/review-dispatch.mjs` and
+  `we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix` return and print `agentId`, the id that actually
+  addresses the session.
+- The sink header's *"THE HANDLE IS MINTED, NOT DISCOVERED"* paragraph and the review-dispatch header's
+  *"supplying `--session-id` makes the spawned session's identity exactly that value"* paragraph are corrected
+  in place, both naming what they used to claim.
+- `we:scripts/operations/__tests__/helpers/fake-claude.mjs` now MODELS the real CLI: its `--bg` branch ignores
+  `--session-id` and emits the warning. **This is the root cause of the test blindness** — the shim obligingly
+  echoed back whatever id it was handed, so
+  `we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs`'s round-trip assertion was green against an
+  assumption the real CLI had never honoured.
+- New regression cover: `we:scripts/operations/__tests__/dispatch-liveness-hardening.test.mjs` "hardening 6"
+  (5 cases), plus `agentId` cases on the review and fix dispatch suites and the real-conflict integration test.
+
+### A SECOND, GENUINELY SEPARATE BUG found in the same live pass — and fixed here too (#3606's missed path)
+
+Not the same root cause, checked before concluding it: `we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix`
+passed **no `--append-system-prompt-file` at all** — the one dispatch path in the repo missing it.
+`createDispatchSinks` has always passed `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (so the tick-core fix dispatch was
+covered) and `we:scripts/operations/review-dispatch.mjs` passes its review-side twin (#xy8di3v), but this one
+passed nothing.
+
+`we:skills-src/conveyor/fix-agent-brief.md` opens with *"**This is a TEMPLATE, not a runnable skill.**"* and
+keeps `{{PLACEHOLDERS}}` / `{{LIKE_THIS}}` in its own explanatory prose — both legitimately unsubstituted,
+reported by `fillBrief` as non-fatal unknown tokens by design. So a CORRECTLY filled brief still READS as an
+unfilled template. **Live-confirmed 3/3 on 2026-09-11**: `fix-2127`, `fix-2130` and `fix-2003` each received a
+fully substituted 16.5 KB brief naming their real PR (verified by reading their transcripts — PR #2130 appears
+in the prompt; only `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` remain) and each replied *"I don't see an actual task or
+question in your message — just the fix-agent brief template (#2630) itself"* and did nothing. That is exactly
+#3606's `review-1998/2024/2027` failure recurring on the path the remedy was never wired into.
+
+Fixed by passing `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (the delivery-side file, not the review twin — a fix
+agent IS a `dispatch-lane`-shaped delivery agent: it acquires a lane, works an item, pushes to a PR), with an
+argv-order test. Recorded here rather than reopening the resolved #3606 because it rides this card's PR.
+
+**Live proof, not a theory.** `defaultClaudeProvider` run against the REAL installed CLI returned handle
+`f01e36ec`; `listedSessionIds(claude agents --json)` contained it on the first poll, and did NOT contain the
+minted `77777777-8888-4999-a000-bbbbbbbbbbbb`. A full `we:scripts/operations/review-dispatch.mjs --pr=<N>` run
+from the primary checkout printed an `agentId` that `claude agents --json` resolved to the live `review-<N>`
+session.
+
+**`#3118`'s clause-3 hinge (trigger ii): resolved.** The dispatcher CAN address the session it started — via
+the printed id, not a minted one and not the listing diff the #3030 spike rejected as racy. Stop-then-resume is
+therefore reachable as designed; nothing implements it yet, so this remains a dependency satisfied, not a
+feature delivered.
+
+**Superseded remedy status (`Done when` #3): started, not landed.** A build attempt produced a checkpoint commit
 (`6ec8b639`) on `lane/3331-session-id-probe-salvage`, touching `we:scripts/operations/dispatch-lane-io.mjs`,
 `we:scripts/operations/wake.mjs`, the sink's header comment, and a new
 `we:scripts/operations/__tests__/dispatch-liveness-hardening.test.mjs`. Two agents timed out working it —

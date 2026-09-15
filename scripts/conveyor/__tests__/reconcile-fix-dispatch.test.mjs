@@ -13,6 +13,7 @@ import {
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
+import { DISPATCHED_AGENT_SYSTEM_PROMPT_FILE } from '../../operations/dispatch-lane-io.mjs';
 import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
 
 // A `checkStaleness` stub that never touches git — every test below injects one.
@@ -109,9 +110,12 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(calls).toHaveLength(1);
     expect(calls[0].opts).toEqual({ cwd: '/repo' });
     expect(calls[0].argv).toEqual([
+      // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
-      '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'fix-1764',
+      // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
+      // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
+      '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       '# fix brief for 1764 (item 3438)\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --lane=9 --session=fix-1764 '
       + '--scope=we:scripts/conveyor/reconcile-fix-dispatch.mjs --base=lane/3438-wire-reconcile-pass\n'
@@ -593,5 +597,71 @@ describe('buildResumePrompt — #xu2krte Fork 1', () => {
     const prompt = buildResumePrompt({ pr: 1, itemNum: '1' });
     expect(prompt).not.toContain('undefined');
     expect(prompt).not.toContain('null');
+  });
+});
+
+// ── #3331 — a fresh fix dispatch reports the id `claude --bg` assigned, not the minted one ────────────────────
+
+describe('#3331 — dispatchFix reads its handle back off stdout', () => {
+  /** Verbatim the first line CLI 2.1.269 prints on stdout for a `--bg` spawn. */
+  const BANNER = (id) => `backgrounded · ${id} · fix-1764\n  claude agents             list sessions\n`;
+
+  const dispatch = (spawnAgent) => dispatchFix(
+    { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:scripts/conveyor/reconcile-fix-dispatch.mjs'], lane: 9 },
+    {
+      root: '/repo',
+      readBrief: () => '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}})\n'
+        + 'acquire: node scripts/lane-pool.mjs acquire --lane={{LANE}} --session={{SESSION_SLUG}} '
+        + '--scope={{SCOPE}} --base={{LANE_REF}}',
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent,
+    },
+  );
+
+  it('returns `agentId` from the banner — the minted uuid addresses no session', () => {
+    // Same defect, same blast radius as the review side: `buildAgentArgv` used to pass `--session-id` and
+    // `claude --bg` used to ignore it, so the id this pass printed could never be found by `claude
+    // agents`/`logs`/`stop`, and `stampLiveness` read every fix dispatch as gone.
+    const result = dispatch(() => BANNER('9356543a'));
+    expect(result.agentId).toBe('9356543a');
+    expect(result.sessionId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('and `agentId: null` when the banner cannot be read, rather than a handle that will not be found', () => {
+    expect(dispatch(() => '').agentId).toBeNull();
+  });
+});
+
+// ── #3606 — the fix agent must be TOLD its brief is real, or it self-aborts ───────────────────────────────────
+
+describe('#3606 — dispatchFix always passes the dispatched-agent system prompt', () => {
+  it('emits --append-system-prompt-file, ahead of any extraArgs and the prompt', () => {
+    // THE DEFECT THIS PINS, live-confirmed 3/3 on 2026-09-11. `fix-agent-brief.md` opens with "**This is a
+    // TEMPLATE, not a runnable skill.**" and keeps `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` in its own explanatory
+    // prose (legitimately unsubstituted — `fillBrief` reports them as non-fatal unknown tokens by design), so a
+    // CORRECTLY filled brief still reads as an unfilled template. `fix-2127`, `fix-2130` and `fix-2003` each
+    // received a fully substituted 16.5 KB brief naming their real PR and each replied "I don't see an actual
+    // task or question in your message — just the fix-agent brief template (#2630) itself", doing no work.
+    //
+    // This was the ONE dispatch path missing the remedy: `createDispatchSinks` has always passed this file, and
+    // `review-dispatch.mjs` passes its review-side twin (#xy8di3v), but this function passed nothing.
+    const calls = [];
+    dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-x', scope: ['we:scripts/conveyor/reconcile-fix-dispatch.mjs'], lane: 9 },
+      {
+        root: '/repo',
+        readBrief: () => '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}}) lane {{LANE}} {{SESSION_SLUG}} {{SCOPE}} {{LANE_REF}}',
+        mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+        spawnAgent: (argv) => { calls.push(argv); return ''; },
+        extraArgs: ['--model', 'sonnet'],
+      },
+    );
+    const argv = calls[0];
+    const at = argv.indexOf('--append-system-prompt-file');
+    expect(at).toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe(DISPATCHED_AGENT_SYSTEM_PROMPT_FILE);
+    // Order matters the same way it does for every other dispatch: identity, then operator flags, then prompt.
+    expect(at).toBeLessThan(argv.indexOf('--model'));
+    expect(argv[argv.length - 1]).toContain('fix brief for 1764');
   });
 });
