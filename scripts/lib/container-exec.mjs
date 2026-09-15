@@ -47,6 +47,39 @@
  * other existing heavy-command call site, still runs on the host exactly as before. Wiring a default-on path
  * is deliberately left for a follow-up once `test:unit`/Playwright are proven the same way `check:standards`
  * is proven here (see this file's own header for what remains open).
+ *
+ * ── `test:unit` (vitest) SLICE (#3621 sequencing note, follow-up to the `check:standards`-only POC above) ──
+ * This module now ALSO proves `test:unit`. The header above was right that vitest's own closure (esbuild,
+ * rollup — see `vite`'s dependency tree) carries native `darwin-arm64` bindings that do not resolve mounting
+ * the lane's host-built `node_modules` straight in (a real `MODULE_NOT_FOUND`, confirmed while building this
+ * slice) — the pure-JS shortcut above is genuinely `check:standards`-only, not a general pattern. What DOES
+ * work, measured end-to-end against this exact repo:
+ *   1. Bake a real LINUX-built `node_modules` via `npm ci` inside `node:22-alpine` (see
+ *      `container-exec/Containerfile.test-unit-deps`) — no native-build toolchain needed; every native
+ *      optionalDependency in this lockfile (esbuild, rollup, swc, lightningcss, sharp, `@parcel/watcher`) ships
+ *      a prebuilt `linux-arm64`/`linux-arm64-musl` binary, so `npm ci` completes in ~15-20s with no compiler.
+ *   2. Seed a named `container volume` from that baked `/app/node_modules` ({@link DEFAULT_NODE_MODULES_VOLUME}
+ *      — see `container-exec/build-test-unit-deps.mjs`, the build/seed helper).
+ *   3. At run time, mount the checkout rw at its own path exactly as before, THEN mount the named volume at
+ *      `<cwd>/node_modules` ({@link buildContainerRunArgs}'s `nodeModulesVolume` param) — this SHADOWS just
+ *      that one subtree (proven empirically: a named-volume mount at a path nested under an existing bind
+ *      mount wins for that subtree, and nothing written into it ever touches the host-mounted parent — the
+ *      host's own darwin `node_modules` is never read, written, or even visible inside the guest this way).
+ *   4. `vitest.config.ts` resolves `@frontierui/plugs`/`@frontierui/webtheme` to the SIBLING `frontierui`
+ *      checkout (`resolve(repoRoot, '../frontierui/...')`, `vitest.shared.ts`) — a second real failure mode
+ *      hit while building this slice (`Failed to resolve import "@frontierui/plugs/..."`) until that sibling
+ *      directory was ALSO bind-mounted read-only at its own identical host path ({@link readSiblingRoot} /
+ *      the `extraReadOnlyMounts` param), closing the "sibling-repo mounts aren't included" gap the
+ *      `check:standards`-only POC named as open (scoped here to `frontierui`, the only sibling `vitest.config.ts`
+ *      itself resolves — `plateau-app` is a `vite.config.mts`/dev-server-only reference, not part of
+ *      `test:unit`'s own import graph, so it is deliberately NOT mounted by this slice).
+ * Evidence (measured on this machine, see the PR that introduced this section for the full numbers): the SAME
+ * 35-file / 441-test subset (`blocks/__tests__`) run on the host and inside this container produced IDENTICAL
+ * pass counts. The busy-spin CPU-cap containment result from the `check:standards` POC was independently
+ * reproduced under this exact node_modules-volume + sibling-mount configuration (8 unbounded spinners held to
+ * ~191-204% aggregate host CPU inside a `--cpus 2` container vs. ~800% unconstrained on the host).
+ * NOT proven by this slice: the FULL `test:unit` suite side-by-side (a representative subset was used — see
+ * that PR for why), Playwright, and `--container`/baked-deps still are not wired as any default.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -79,6 +112,41 @@ export function resolveContainerMemory(env = process.env) {
   return typeof env.WE_HEAVY_ADMISSION_CONTAINER_MEMORY === 'string' && env.WE_HEAVY_ADMISSION_CONTAINER_MEMORY
     ? env.WE_HEAVY_ADMISSION_CONTAINER_MEMORY
     : DEFAULT_CONTAINER_MEMORY;
+}
+
+/** The named `container volume` {@link containerfilePath}'s test-unit-deps image seeds with a real LINUX-built
+ *  `node_modules` (see the module header's "test:unit slice" section). Overridable via
+ *  `WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES_VOLUME` — mirrors every other `resolve*` default in this file. */
+export const DEFAULT_NODE_MODULES_VOLUME = 'we-test-unit-node-modules';
+
+/** The image `container-exec/build-test-unit-deps.mjs` builds to produce that baked `node_modules` — kept
+ *  distinct from {@link DEFAULT_CONTAINER_IMAGE} (the lightweight run-time image) because this one carries a
+ *  full `npm ci` layer only the SEED step needs, never the run-time container itself. */
+export const DEFAULT_TEST_UNIT_DEPS_IMAGE = 'we-test-unit-deps:poc';
+
+export function resolveNodeModulesVolume(env = process.env) {
+  return typeof env.WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES_VOLUME === 'string' && env.WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES_VOLUME
+    ? env.WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES_VOLUME
+    : DEFAULT_NODE_MODULES_VOLUME;
+}
+
+export function resolveTestUnitDepsImage(env = process.env) {
+  return typeof env.WE_HEAVY_ADMISSION_TEST_UNIT_DEPS_IMAGE === 'string' && env.WE_HEAVY_ADMISSION_TEST_UNIT_DEPS_IMAGE
+    ? env.WE_HEAVY_ADMISSION_TEST_UNIT_DEPS_IMAGE
+    : DEFAULT_TEST_UNIT_DEPS_IMAGE;
+}
+
+/**
+ * The `frontierui` sibling checkout root `vitest.config.ts` resolves `@frontierui/plugs`/`@frontierui/webtheme`
+ * against (`vitest.shared.ts`'s `resolve(repoRoot, '../frontierui/...')`) — PURE path derivation, no I/O, so
+ * this is unit-testable without a real sibling checkout on disk. `test:unit`'s own import graph never reaches
+ * `plateau-app` (that sibling is a `vite.config.mts`/dev-server-only reference — see the module header), so
+ * this deliberately resolves `frontierui` alone rather than guessing at every sibling the wider repo has.
+ * @param {string} checkoutRoot  a lane or primary checkout root (the SAME `cwd` {@link execContainerized} runs)
+ * @returns {string}  the sibling root's absolute path — NOT checked for existence here (see {@link execContainerized})
+ */
+export function frontieruiSiblingRoot(checkoutRoot) {
+  return join(checkoutRoot, '..', 'frontierui');
 }
 
 /**
@@ -118,18 +186,30 @@ export function readAlternatesPrimaryRoot(checkoutRoot, readFile = (p) => readFi
  * @param {string} opts.cwd            the checkout root the command runs in (mounted rw at this same path)
  * @param {string|null} [opts.alternatesPrimaryRoot]  from {@link readAlternatesPrimaryRoot}; mounted ro at its
  *                                     own path when present, omitted when null
+ * @param {string|null} [opts.nodeModulesVolume]  a named `container volume` (see {@link DEFAULT_NODE_MODULES_VOLUME})
+ *                                     mounted at `<cwd>/node_modules` — SHADOWS the host-darwin node_modules the
+ *                                     `cwd` rw mount above would otherwise expose, with a Linux-built tree instead
+ *                                     (proven empirically: a volume mounted at a path nested under an existing
+ *                                     bind mount wins for that subtree; nothing written to it touches the host).
+ *                                     Omitted (`null`, the default) ⇒ byte-identical to before this param existed.
+ * @param {string[]} [opts.extraReadOnlyMounts]  additional absolute host paths mounted read-only at their own
+ *                                     identical path (e.g. the `frontierui` sibling — see {@link frontieruiSiblingRoot}).
  * @param {string} [opts.image]
  * @param {number} [opts.cpus]
  * @param {string} [opts.memory]
  * @returns {string[]} argv for `execFileSync('container', argv, …)`
  */
 export function buildContainerRunArgs({
-  command, cwd, alternatesPrimaryRoot = null,
+  command, cwd, alternatesPrimaryRoot = null, nodeModulesVolume = null, extraReadOnlyMounts = [],
   image = DEFAULT_CONTAINER_IMAGE, cpus = DEFAULT_CONTAINER_CPUS, memory = DEFAULT_CONTAINER_MEMORY,
 }) {
   const args = ['run', '--rm', '--cpus', String(cpus), '--memory', String(memory)];
   args.push('--volume', `${cwd}:${cwd}:rw`);
   if (alternatesPrimaryRoot) args.push('--volume', `${alternatesPrimaryRoot}:${alternatesPrimaryRoot}:ro`);
+  for (const root of extraReadOnlyMounts) args.push('--volume', `${root}:${root}:ro`);
+  // MUST come after the `cwd` rw mount above — mount ORDER is what makes the shadow work (the more specific
+  // `<cwd>/node_modules` target wins for that subtree over the broader `cwd` bind mount already covering it).
+  if (nodeModulesVolume) args.push('--volume', `${nodeModulesVolume}:${join(cwd, 'node_modules')}`);
   args.push('-w', cwd, image, 'sh', '-c', command);
   return args;
 }
@@ -156,15 +236,31 @@ export function buildContainerRunArgs({
  *                                                injectable for tests
  * @param {(root:string, readFile?:Function)=>(string|null)} [opts.readAlternates]  defaults to
  *                                                {@link readAlternatesPrimaryRoot} — injectable for tests
+ * @param {boolean|string} [opts.nodeModulesVolume]  the `test:unit` slice's opt-in (see the module header):
+ *                                                `true` ⇒ resolve {@link resolveNodeModulesVolume} from `env`;
+ *                                                a string ⇒ use it directly; omitted/falsy (the default) ⇒ no
+ *                                                node_modules shadow, byte-identical to the `check:standards`
+ *                                                -only POC's original behaviour. Truthy also auto-mounts the
+ *                                                `frontierui` sibling read-only WHEN it exists on disk (never
+ *                                                required — a repo without that sibling is unaffected).
+ * @param {(path:string)=>boolean} [opts.exists]  defaults to a real `existsSync` — injectable for tests
  */
 export function execContainerized(command, opts = {}) {
   const cwd = opts.cwd || process.cwd();
   const env = opts.env || process.env;
   const execFile = opts.execFile || ((bin, argv, o) => execFileSync(bin, argv, o));
   const readAlternates = opts.readAlternates || readAlternatesPrimaryRoot;
+  const existsFn = opts.exists || existsSync;
   const alternatesPrimaryRoot = readAlternates(cwd);
+  const nodeModulesVolume = opts.nodeModulesVolume === true ? resolveNodeModulesVolume(env)
+    : (typeof opts.nodeModulesVolume === 'string' && opts.nodeModulesVolume ? opts.nodeModulesVolume : null);
+  const extraReadOnlyMounts = [];
+  if (nodeModulesVolume) {
+    const fui = frontieruiSiblingRoot(cwd);
+    if (existsFn(fui)) extraReadOnlyMounts.push(fui);
+  }
   const args = buildContainerRunArgs({
-    command, cwd, alternatesPrimaryRoot,
+    command, cwd, alternatesPrimaryRoot, nodeModulesVolume, extraReadOnlyMounts,
     image: resolveContainerImage(env), cpus: resolveContainerCpus(env), memory: resolveContainerMemory(env),
   });
   // `stdio: 'inherit'` (plus any caller-supplied opts.stdio override) — same fidelity `runUnderAdmission`'s
@@ -189,9 +285,29 @@ export function containerImageAvailable(image = DEFAULT_CONTAINER_IMAGE, execFil
   } catch { return false; }
 }
 
+/** Whether a named `container volume` (default: {@link DEFAULT_NODE_MODULES_VOLUME}) already exists — mirrors
+ *  {@link containerImageAvailable}'s friendlier-failure-than-a-raw-runtime-error shape for the test:unit
+ *  slice's baked-node_modules volume. */
+export function nodeModulesVolumeAvailable(volume = DEFAULT_NODE_MODULES_VOLUME, execFile = (bin, argv, o) => execFileSync(bin, argv, o)) {
+  try {
+    const out = execFile('container', ['volume', 'list'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    return String(out).split('\n').some((line) => line.trim().split(/\s+/)[0] === volume);
+  } catch { return false; }
+}
+
 /** Path to this POC's own `Containerfile`, so a build helper (or a human) never has to hardcode it twice. */
 export function containerfilePath() {
   return join(dirname(new URL(import.meta.url).pathname), 'container-exec', 'Containerfile');
+}
+
+/** Path to the `test:unit` slice's deps-build `Containerfile` (bakes a Linux `node_modules` via `npm ci`) —
+ *  see the module header's "test:unit slice" section and `container-exec/build-test-unit-deps.mjs`. */
+export function testUnitDepsContainerfilePath() {
+  return join(dirname(new URL(import.meta.url).pathname), 'container-exec', 'Containerfile.test-unit-deps');
+}
+
+export function testUnitDepsContainerfileExists() {
+  return existsSync(testUnitDepsContainerfilePath());
 }
 
 // @test-only-export-ok: introspection helper for this module's own test suite today (proves the POC

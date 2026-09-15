@@ -2920,3 +2920,213 @@ never what any one of them can do to the host once admitted.
    Containerfile) — a real gap if this is ever wired into an unattended dispatch path.
 5. This work landing on `main` while the fuller `run`-mode implementation lives unmerged on
    `lane/mechanical-dispatcher` is a known, accepted duplication risk (see above) — not resolved by this PR.
+
+## Session update (2026-09-14, later the same day) — heavy-command-pool container POC extended to `test:unit`
+
+Same tracking convention as the session update directly above: a progress note, not a new formal item, per
+the operator's own standing direction and this repo's PR-landing precedent (`we:scripts/pr-land.mjs` only
+refuses an empty PR description — #2324). First checked whether the prior PR (`#2206`,
+`lane/3621-heavy-command-pool-container-poc`) had merged before starting: it had not (`gh pr view 2206` — open,
+mergeable), so this slice was built as a lane clone based directly on that PR's own branch, reusing its
+`we:scripts/lib/container-exec.mjs`/`Containerfile` infrastructure rather than duplicating it.
+
+**Why `test:unit` next.** `#2206`'s own report named it explicitly: `test:unit`/Playwright aren't
+containerized, and unlike `check:standards`'s pure-JS dependency closure, `test:unit` (vitest) needed the
+baked-Linux-tree approach because of native/compiled deps. Confirmed before writing any code: scanned
+`we:package-lock.json` for every optionalDependency with a `darwin-arm64`/native shape — esbuild, rollup, swc,
+lightningcss, sharp, `@parcel/watcher`, `node-gyp-build-optional-packages` all appear, and the host's own
+`we:node_modules/@esbuild/` directory holds only `darwin-arm64`, confirming vitest's own transform pipeline
+(esbuild, reached via vite) cannot resolve inside a Linux guest mounting that host tree straight in.
+
+**What was built — see `#3621`'s own 2026-09-14 (later) amendment for the full technical writeup; condensed
+here:**
+
+- `we:scripts/lib/container-exec/Containerfile.test-unit-deps` (new) — bakes a Linux `node_modules` via `npm
+  ci` inside plain `node:22-alpine` (no build toolchain needed — every native dep ships a prebuilt Linux
+  binary for this lockfile).
+- `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new) — builds that image, creates/seeds a named
+  `container volume` from its `/app/node_modules`, and stamps a lockfile-hash marker so a re-run with an
+  unchanged lockfile is a cheap no-op; a `status` mode reports image/volume presence and staleness for a
+  preflight.
+- `we:scripts/lib/container-exec.mjs` — gained `nodeModulesVolume` support on `buildContainerRunArgs`/
+  `execContainerized` (mounts a named volume at `<cwd>/node_modules`, shadowing the checkout's own rw mount for
+  that one subtree only — proven empirically that a more-specific mount wins the shadow and that writes to it
+  never touch the host) plus `frontieruiSiblingRoot`, which auto-mounts the `frontierui` sibling checkout
+  read-only when `nodeModulesVolume` is requested (closing the sibling-mount gap named in `#2206`'s report, for
+  `test:unit`'s own import graph specifically — `plateau-app` is a `vite.config.mts`/dev-server-only reference,
+  confirmed not part of `test:unit`'s closure, so deliberately not mounted).
+- `we:scripts/readiness/heavy-admission.mjs` — the `run` CLI gained a `--container-node-modules` flag (or
+  `WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES=1`), layered on top of the existing `--container` flag, with the
+  same fail-loud-with-actionable-message preflight `#2206` already established for a missing image, mirrored
+  for a missing/stale node_modules volume.
+
+**Real evidence, measured on this machine:**
+
+- **Fidelity**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on the host and inside the
+  container produced IDENTICAL pass counts (35/35 files, 441/441 tests) both times — via the actual wrapper,
+  `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run
+  we:blocks/__tests__`. The FULL suite (447 files / 12007 tests, ~9m48s wall-clock on the host, measured this
+  session) was not re-run inside the container — a representative subset was used instead, per this task's own
+  explicit allowance for a first proof.
+- **Cap enforcement, reproduced a third time**: 8 unbounded busy-spin `node -e` processes inside a `--cpus 2
+  --memory 2g` container held the host-side `com.apple.Virtualization.VirtualMachine` process at ~191-204% CPU
+  (sampled twice during a live 15s run), versus ~800% (8 processes each pinned near 100%) running the identical
+  workload unconstrained on the host — same containment result `#2206` measured for `check:standards`, now
+  reproduced under this slice's own node_modules-volume + sibling-mount configuration.
+- **Failure modes confirmed, not just predicted**: running `test:unit` in-container WITHOUT the node_modules
+  volume reproduces the exact `MODULE_NOT_FOUND`-shaped failure `#3621` predicted (here surfacing as an esbuild
+  transform error plus an unresolved `@frontierui/plugs/...` import) — confirming the shortcut genuinely does
+  not extend from `check:standards` to `test:unit` without this slice's own fix.
+- Unit tests added/extended: new cases in `we:scripts/lib/__tests__/container-exec.test.mjs` (the
+  `nodeModulesVolume`/`frontieruiSiblingRoot` pure logic, plus REAL self-skipping integration tests proving the
+  mount-shadow property against an actual container) and a new
+  `we:scripts/lib/container-exec/__tests__/build-test-unit-deps.test.mjs` for the build script's pure helpers.
+  `node we:scripts/check-standards.mjs` passes clean (0 errors) against this change.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Playwright is still not containerized — a different, likely harder shape again (needs a real browser inside
+   the guest, not just a Linux dependency tree), genuinely unstarted.
+2. The full `test:unit` suite (447 files / 12007 tests) was not run side-by-side in the container — only a
+   representative subset, per this task's stated allowance. A future pass should measure the full-suite
+   wall-clock cost inside the container (the mount I/O penalty `#3621`'s own research flagged may matter more
+   at that scale).
+3. Neither `--container` nor `--container-node-modules` is wired as a DEFAULT anywhere — every existing
+   heavy-command call site still runs on the host exactly as before.
+4. `check:standards`'s own image is still built by hand; only the `test:unit` deps image has a build/seed
+   script. Generalizing image-build automation beyond this one case is unstarted.
+5. The same `lane/mechanical-dispatcher` reconciliation risk `#2206`'s report named is unchanged by this
+   slice — still an accepted, known risk, not resolved here.
+
+### Design note (2026-09-14) — should heavy git operations share `we:heavy-admission.mjs`'s pool with vitest/check:standards? No current call site warrants wiring it; open forward-looking question only
+
+Follow-up to tonight's runaway `git grep` incident (a one-off pathological command, already killed — see
+above). The operator's architectural point, independent of that specific incident: `we:scripts/readiness/heavy-admission.mjs`'s
+shared semaphore (cap 2, `run` CLI mode) already gates `check:standards`/`verify-lane`/`test:unit`. If a
+genuinely heavy git operation (full-repo `gc`/`repack`/`fsck`, a multi-remote `fetch --all`, a `merge-tree`/
+rebase loop across many commits) ever runs un-gated, it stacks CPU load against those same capped operations
+uncoordinated, because git currently has no presence in the pool at all.
+
+**Checked every git call site in `we:scripts/` (excluding `__tests__`) for anything at that weight class.**
+None found:
+- No `git gc`, no `fetch --all`, no full-repo `fsck` anywhere in `we:scripts/`.
+- Every `fetch` call site (`we:scripts/lane-drain.mjs`, `we:scripts/lane-resume.mjs`, `we:scripts/lane-pool.mjs`,
+  `we:scripts/backlog.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/pr-land.mjs`,
+  `we:scripts/conveyor/branch-sync.mjs`, `we:scripts/conveyor/branch-drift.mjs`,
+  `we:scripts/conveyor/validate-and-promote.mjs`, etc.) fetches a single ref/branch with `--quiet`/`--prune` —
+  narrow and cheap, not a multi-remote full fetch.
+- `git merge-tree --write-tree` appears in `we:scripts/lane-pool.mjs`, `we:scripts/prune-landed-lanes.mjs`,
+  `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/rebase-drop-content.mjs`, `we:scripts/lib/rebase-drop-manifest.mjs`,
+  `we:scripts/lib/git-run.mjs`, `we:scripts/conveyor/branch-drift.mjs`, and
+  `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (the last one *describes* the plumbing but doesn't call
+  it). Every real call site does exactly ONE `merge-tree` between two refs (`base` vs one lane/PR ref) —
+  working-tree-free by design, deliberately chosen (per these files' own comments) *because* it's cheap
+  compared to a real checkout+merge. `we:scripts/prune-landed-lanes.mjs` and `we:scripts/merge-ai-prs.mjs`
+  each call it once per candidate branch/PR in a loop, but that's N cheap single-ref probes, not one big
+  multi-commit rebase/merge — not the weight class the operator named.
+- `git rebase` appears in `we:scripts/operations/poc-land.mjs` and `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`
+  — a normal single-branch rebase onto a fresh tip, not a loop across many commits.
+- `we:scripts/conveyor/branch-sync.mjs` (named explicitly in this investigation's brief) fetches one ref and
+  probes with `merge-tree` before ever attempting a real merge — same cheap pattern, not heavy.
+- `we:scripts/lib/isolation-provider.mjs`'s `repack -a -d -f` (confirmed earlier tonight) runs only against a
+  `--depth 1 --no-hardlinks` **shallow** clone built by its own `buildHistorySurgeryCloneArgv` for the
+  history-surgery path — and per its own doc comment, **production wiring is still deliberately deferred to
+  `#3630`**; today it is exercised only by `we:scripts/lib/__tests__/isolation-provider.test.mjs`. Not a live
+  call site at all right now, so doubly not a concern.
+
+**Recommendation:** nothing to wire in today. Every real git call site currently in `we:scripts/` is either
+narrow-scope (single ref) or a single working-tree-free probe explicitly designed to be cheap — none reaches
+the "full-repo gc/repack/fsck, multi-remote fetch, or a rebase/merge loop across many commits" weight class
+the operator described. `git status`/`git diff`-class calls (the overwhelming majority of call sites: dozens
+of `rev-parse`, `show`, `ls-tree`, `log`, `status --porcelain`, etc.) should stay ungated regardless — gating
+those would slow dispatch-critical paths for no CPU-contention benefit. This stays a genuinely open,
+forward-looking design question rather than a build: **if/when** a real heavy git operation lands in
+`we:scripts/` (a full `gc`, a `fetch --all`, a many-commit rebase/merge loop), it should be wrapped through
+`node we:scripts/readiness/heavy-admission.mjs run -- <command>` — the same one-line opt-in pattern the `run`
+CLI mode already offers on `we:heavy-admission.mjs` — rather than inventing a second limiter. No new item
+filed for this; there is nothing to schedule yet, only a rule to apply the next time such a call site is
+actually written.
+
+**A separate, harder limit, worth stating plainly rather than leaving implicit: `we:heavy-admission.mjs`
+cannot catch an ad hoc/interactive git command no matter how many scripted call sites get wired into it.**
+The module is a purely COOPERATIVE, opt-in semaphore — a caller must itself invoke `we:heavy-admission.mjs
+run -- <command>` (or `acquire`/`release`) to participate; there is no OS-level enforcement and nothing
+forces an arbitrary command through it. `we:heavy-admission.mjs`'s own header says this outright about
+`we:guard-bash.mjs`'s adjacent PreToolUse deny: it "only reaches a MECHANICALLY-DISPATCHED agent (one with
+`WE_DISPATCH_KIND` set)" — a `/workflow`/`/batch` parallel lane, or the operator's own interactive session,
+carries no such env var and is unaffected. The identical limit applies here: tonight's runaway `git grep`
+across 12k+ revisions was typed directly by an agent outside any script, so wiring every scripted git call
+site into the pool — even a maximally thorough one — would still not have caught it, and would not catch the
+next one either. "Add git to the shared queue" can only ever cap *scripted* call sites that opt in; it is
+not, and cannot become without a different mechanism (e.g. a PreToolUse-style interception of raw `git`
+invocations), a general governor over every heavy git command any agent might type.
+
+## Session update (2026-09-14, later still) — three forward-looking capacity requirements recorded on `#3621`; live-tested whether `test:unit`'s worker pool respects a container's `--cpus` allocation
+
+Tracked here as a progress note, same convention as the two container-POC entries directly above — see
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md`'s own 2026-09-14 (later
+still) amendment for the full technical writeup; condensed here.
+
+**Why now.** The operator gave real forward-looking direction on the next phase of this work — reserved
+capacity for heavy-command containers separate from lane capacity, per-command internal-parallelism
+correctness inside whatever container allocation a command actually gets, and a resource-aware (not flat)
+admission cap — and asked for it to be recorded precisely, not designed or built yet, plus one concrete,
+checkable-now piece tested for real.
+
+**Three requirements recorded on `#3621`, not designed here:**
+1. A heavy-command container needs its own reserved CPU/memory budget, kept separate from
+   `we:scripts/lib/lane-concurrency.mjs`'s lane cap — two pools, not one shared budget. Neither `#2206` nor
+   `#2211` built this; both ran a single container ad hoc.
+2. A heavy command (`vitest`/`test:unit`, `we:scripts/verify-lane.mjs`) must size its own internal
+   worker/thread pool to fit the container it actually runs in, not assume the host's full core count. Tested
+   live tonight (below) rather than assumed.
+3. `we:scripts/readiness/heavy-admission.mjs`'s cap (currently a flat `DEFAULT_ADMISSION_CAP = 2`, its own
+   header calling it "an EQUAL-COST NAMED SET") should become resource-aware per command — `vitest` plausibly
+   costing more than `check:standards`. Cited as concrete, dated evidence, not hypothetical: a real live bug
+   found and separately being fixed this same session — the cap's slot reentrancy keys ownership by lane PATH
+   STRING, not process identity, so two genuinely different processes verifying the same lane back-to-back
+   (the conveyor's auto-verify plus a manual re-verify) both read as "one slot," meaning real concurrent load
+   was 3 processes while the gate reported a healthy 2/2.
+
+**The one immediately-checkable piece — tested for real, using `#2211`'s already-built container
+infrastructure (a fresh lane, `lane-20`, acquired specifically for this test).** `container run --cpus 2` gives
+a guest where `os.cpus().length` reports **3** (a confirmed off-by-one, N+1, consistent across `--cpus 1`→2 and
+`--cpus 4`→5) but `os.availableParallelism()` correctly reports **2**. THIS repo's own `test:unit` config
+(`we:vitest.shared.ts#maxTestWorkers`) does not call either API — it is a **hardcoded literal `4`**, already
+tuned (by an existing, unrelated `#3650` fix) for the HOST's 12-core budget under a 3-concurrent-invocation
+burst assumption, with zero awareness of whatever container it might run inside. Ran the real 35-file/441-test
+`we:blocks/__tests__` subset inside an actual `--cpus 2 --memory 2g` container via `node
+we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run …` — passed
+35/35 files, 441/441 tests, proving the pipeline works — but confirms `test:unit` would request up to 4 worker
+threads against a container that only has 2 real cores, a genuine 2x oversubscription of that container's own
+allocation. Diagnosed, not fixed, per the operator's own instruction — recorded as a confirmed instance of
+requirement 2 above, left as real follow-up scope once requirement 1's capacity reservation is designed.
+
+## Session update (2026-09-14, continued) — `#3673` (what clears a triggered calibration veto) ratified, all four forks
+
+`#3673` — "Define what clears a triggered calibration veto so a role can graduate," filed and prepared
+earlier this session (`PR #2228`, `preparedDate: "2026-09-14"`) — was ratified by the operator (Nicolas
+Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**, `codifiedIn:
+we:docs/agent/platform-decisions.md#calibration-veto-clearing` — the same "full ruling earns statute"
+posture `#3654` took, since this card's ruling *is* the shape of veto clearing, not a narrow rider under
+an existing anchor.
+
+Ratified, as recommended: **(1)** a documented root-cause finding, naming which
+`we:scripts/lib/jury-core.mjs#deriveFindingDisposition` sub-answer diverged and why, is a mandatory
+precondition before any post-miss trial counts toward clearing — trial volume alone never suffices; **(2)**
+once eligible, a fixed minimum trial count plus at least one trial specifically targeting a case similar in
+kind to the trigger (severity-ambiguous, a deliberately constructed test scenario permitted when a real one
+is scarce) — N dissimilar clean trials never suffice; **(3)** decay alone (elapsed trials or elapsed time,
+with no clean/relevant requirement) never clears the veto by itself — a cooling-off window may narrow which
+trials count, never substitute for the affirmative evidence clauses 1–2 require; **(4)** a human override is
+available only as a documented, reasoned factual reclassification of the trigger event, narrowly scoped to
+identity/evidentiary errors — never a re-answer of the severity judgment itself, and never a blanket
+trust/confidence grant.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3654`/`#3649`'s own deferred-N
+precedent — a specific N is deferred to a follow-on ordinary (batched) finding once real post-clearing trial
+data exists, never a separate ceremony. No `calibrationMiss` field is added to `we:model-probation.json` and
+no clearing-check function is wired here — this card rules on the shape of clearing only. The live PR #2107
+veto on Codex's `advisory-review` role is **not** cleared by this ruling itself: clearing it still needs
+either clause 1's root-cause finding followed by clause 2's similarity-matched trials, or clause 4's narrow
+reclassification override on its own facts.

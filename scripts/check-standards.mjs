@@ -40,6 +40,7 @@ import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { loadAdapters } from './lib/adapters-loader.cjs';
 import { localToday } from './lib/local-date.mjs';
 import { findUtcDaySlices, utcDaySliceMessage } from './lib/utc-day-slice-scan.mjs';
+import { scanInvisibleSourceTree } from './lib/invisible-source-scan.mjs';
 import { scanStdoutFlush, stdoutFlushMessage } from './lib/stdout-flush-scan.mjs';
 import { runWeScan } from './lib/rust-scan-bridge.mjs';
 import {
@@ -960,6 +961,13 @@ try {
   err(`UTC day-slice scan failed: ${e.message}`);
 }
 
+// #2866: backstop for shell writes and the existing scripts/docs source corpus.
+try {
+  for (const finding of scanInvisibleSourceTree(ROOT)) err(finding.message, finding.descriptor);
+} catch (e) {
+  err(`Invisible-character scan failed: ${e.message}`);
+}
+
 // stdout flushed before a process.exit (#3061). `write(big); process.exit()` TRUNCATES to the pipe buffer
 // (~8 KB) whenever a parent CAPTURES stdout — silently, with a zero status. Eight live CLIs carried it, four
 // losing over 99 % of their payload, including this gate. Prose did not stop it: five files had each
@@ -1276,7 +1284,7 @@ try {
         break;
       }
       case 'hashslug': {
-        emit(`${f.file}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`}\` is cited ` +
+        emit(`${f.file}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-….md`}\` is cited ` +
           `outside the at-land rewrite scope (backlog/, docs/agent/, agent-memory-src/) — ` +
           `numberPendingHashes never rewrites it, so it dangles permanently once the item lands with a real ` +
           `NNN (#2821 gate 3). Name the epic/item in prose, or cite its resolved #NNN.`,
@@ -1284,7 +1292,7 @@ try {
         break;
       }
       case 'memoryhash': {
-        const slugText = f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`;
+        const slugText = f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-….md`;
         const why = f.reason === 'dead-landed'
           ? 'the item it names has already LANDED under a real number, so this citation should already ' +
             'read `#NNN` and does not'

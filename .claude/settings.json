@@ -35,6 +35,14 @@
             "command": "node scripts/bootstrap-session.mjs"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-prototype-tracker.mjs --session-start"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -48,6 +56,10 @@
           {
             "type": "command",
             "command": "node scripts/lint-locus-prefix.mjs --pre"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/lint-invisible-characters.mjs"
           },
           {
             "type": "command",

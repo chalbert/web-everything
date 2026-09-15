@@ -15,15 +15,18 @@
  * plumbing without paying the slow, non-deterministic cost of the full fidelity proof on every run.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   DEFAULT_CONTAINER_IMAGE, DEFAULT_CONTAINER_CPUS, DEFAULT_CONTAINER_MEMORY,
+  DEFAULT_NODE_MODULES_VOLUME, DEFAULT_TEST_UNIT_DEPS_IMAGE,
   resolveContainerImage, resolveContainerCpus, resolveContainerMemory,
+  resolveNodeModulesVolume, resolveTestUnitDepsImage, frontieruiSiblingRoot,
   readAlternatesPrimaryRoot, buildContainerRunArgs, execContainerized,
   containerCliAvailable, containerImageAvailable, containerfileExists,
+  nodeModulesVolumeAvailable, testUnitDepsContainerfileExists,
 } from '../container-exec.mjs';
 
 describe('resolveContainerImage/Cpus/Memory — env override, sane fallback (mirrors heavy-admission.mjs#resolveCap)', () => {
@@ -129,6 +132,89 @@ describe('containerCliAvailable / containerImageAvailable — presence probes, i
 
 describe('the POC Containerfile actually exists on disk (this module points a build helper at it)', () => {
   it('containerfileExists is true against the real repo tree', () => expect(containerfileExists()).toBe(true));
+  it('testUnitDepsContainerfileExists is true against the real repo tree', () => expect(testUnitDepsContainerfileExists()).toBe(true));
+});
+
+describe('resolveNodeModulesVolume/resolveTestUnitDepsImage — the test:unit slice\'s own env overrides', () => {
+  it('defaults when unset', () => {
+    expect(resolveNodeModulesVolume({})).toBe(DEFAULT_NODE_MODULES_VOLUME);
+    expect(resolveTestUnitDepsImage({})).toBe(DEFAULT_TEST_UNIT_DEPS_IMAGE);
+  });
+  it('reads the env override', () => {
+    expect(resolveNodeModulesVolume({ WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES_VOLUME: 'custom-vol' })).toBe('custom-vol');
+    expect(resolveTestUnitDepsImage({ WE_HEAVY_ADMISSION_TEST_UNIT_DEPS_IMAGE: 'custom:tag' })).toBe('custom:tag');
+  });
+});
+
+describe('frontieruiSiblingRoot — pure path derivation, mirrors vitest.shared.ts\'s own resolve()', () => {
+  it('resolves to the sibling frontierui checkout root', () => {
+    expect(frontieruiSiblingRoot('/Users/x/workspace/.lanes/web-everything/lane-3')).toBe('/Users/x/workspace/.lanes/web-everything/frontierui');
+  });
+});
+
+describe('buildContainerRunArgs — the test:unit slice\'s extra mounts (node_modules shadow + sibling)', () => {
+  it('mounts a nodeModulesVolume at <cwd>/node_modules, AFTER the cwd rw mount', () => {
+    const args = buildContainerRunArgs({ command: 'true', cwd: '/lane', nodeModulesVolume: 'my-vol' });
+    const cwdIdx = args.indexOf('/lane:/lane:rw');
+    const volArg = `my-vol:/lane/node_modules`;
+    const volIdx = args.indexOf(volArg);
+    expect(volIdx).toBeGreaterThan(-1);
+    expect(volIdx).toBeGreaterThan(cwdIdx);
+  });
+  it('omits the node_modules mount entirely when not requested (byte-identical to before this param existed)', () => {
+    const args = buildContainerRunArgs({ command: 'true', cwd: '/lane' });
+    expect(args.join(' ')).not.toContain('node_modules');
+  });
+  it('adds each extraReadOnlyMounts entry as its own ro volume at its own identical path', () => {
+    const args = buildContainerRunArgs({ command: 'true', cwd: '/lane', extraReadOnlyMounts: ['/sibling/frontierui'] });
+    expect(args.join(' ')).toContain('--volume /sibling/frontierui:/sibling/frontierui:ro');
+  });
+});
+
+describe('execContainerized — the test:unit slice\'s nodeModulesVolume opt-in', () => {
+  it('nodeModulesVolume:true resolves the default volume from env and auto-mounts frontierui WHEN it exists', () => {
+    const calls = [];
+    const execFile = (bin, argv, o) => calls.push({ bin, argv, opts: o });
+    execContainerized('npx vitest run', {
+      cwd: '/lane', env: {}, nodeModulesVolume: true,
+      execFile, readAlternates: () => null, exists: (p) => { expect(p).toBe('/frontierui'); return true; },
+    });
+    expect(calls[0].argv).toEqual(expect.arrayContaining([
+      '--volume', `${DEFAULT_NODE_MODULES_VOLUME}:/lane/node_modules`,
+      '--volume', '/frontierui:/frontierui:ro',
+    ]));
+  });
+  it('never mounts the sibling when it does not exist on disk', () => {
+    const calls = [];
+    const execFile = (bin, argv, o) => calls.push({ bin, argv, opts: o });
+    execContainerized('npx vitest run', {
+      cwd: '/lane', nodeModulesVolume: true, execFile, readAlternates: () => null, exists: () => false,
+    });
+    expect(calls[0].argv.join(' ')).not.toContain('frontierui');
+  });
+  it('a string nodeModulesVolume is used verbatim instead of the resolved default', () => {
+    const calls = [];
+    const execFile = (bin, argv, o) => calls.push({ bin, argv, opts: o });
+    execContainerized('npx vitest run', {
+      cwd: '/lane', nodeModulesVolume: 'explicit-vol', execFile, readAlternates: () => null, exists: () => false,
+    });
+    expect(calls[0].argv).toEqual(expect.arrayContaining(['--volume', 'explicit-vol:/lane/node_modules']));
+  });
+  it('falsy/omitted nodeModulesVolume never mounts node_modules (byte-identical to the check:standards-only POC)', () => {
+    const calls = [];
+    const execFile = (bin, argv, o) => calls.push({ bin, argv, opts: o });
+    execContainerized('node scripts/check-standards.mjs', { cwd: '/lane', execFile, readAlternates: () => null });
+    expect(calls[0].argv.join(' ')).not.toContain('node_modules');
+  });
+});
+
+describe('nodeModulesVolumeAvailable — presence probe, injectable (mirrors containerImageAvailable)', () => {
+  it('finds a matching volume name, is false on no match or a throw', () => {
+    const listing = 'NAME                       TYPE   DRIVER  OPTIONS\nwe-test-unit-node-modules  named  local\n';
+    expect(nodeModulesVolumeAvailable('we-test-unit-node-modules', () => listing)).toBe(true);
+    expect(nodeModulesVolumeAvailable('nonexistent-vol', () => listing)).toBe(false);
+    expect(nodeModulesVolumeAvailable('x', () => { throw new Error('no daemon'); })).toBe(false);
+  });
 });
 
 // ── REAL integration proof — self-skips when the `container` CLI or POC image isn't present (Apple-Silicon
@@ -155,5 +241,42 @@ describe.skipIf(!HAVE_CLI || !HAVE_IMAGE)('REAL container integration — proves
   it('a write inside the container reaches the real host mount (rw fidelity)', () => {
     execFileSync('container', buildContainerRunArgs({ command: 'echo wrote-from-container > from-container.txt', cwd: dir }));
     expect(readFileSync(join(dir, 'from-container.txt'), 'utf8').trim()).toBe('wrote-from-container');
+  });
+});
+
+// ── REAL test:unit-slice integration proof — self-skips unless the deps volume has actually been built (via
+// `build-test-unit-deps.mjs`), so this suite stays green anywhere that hasn't run it (a fresh checkout, CI).
+// The full side-by-side host-vs-container fidelity/CPU-cap proof for `test:unit` (35 files / 441 tests
+// matching exactly, plus the busy-spin containment reproduction) was run manually while building this slice —
+// see the PR that introduced this section for the numbers, mirroring the sibling `check:standards` integration
+// block's own documented limits above. This block proves the SAME node_modules-volume-shadow mechanism end to
+// end against a real container, cheaply — a real host `node_modules` directory of this repo's own actual
+// `vitest`/`esbuild` package must NEVER be reachable inside the guest once nodeModulesVolume is set. ──
+const HAVE_NODE_MODULES_VOLUME = HAVE_CLI && nodeModulesVolumeAvailable();
+
+describe.skipIf(!HAVE_CLI || !HAVE_NODE_MODULES_VOLUME)('REAL test:unit node_modules-volume integration', () => {
+  it('the volume genuinely shadows a host-mounted node_modules — the LINUX-built package.json wins, not the host darwin one', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'container-exec-nm-test-'));
+    try {
+      // Simulate "the host's own node_modules": a directory that would collide with the volume mount target.
+      mkdirSync(join(dir, 'node_modules'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', 'marker.json'), JSON.stringify({ from: 'host-darwin' }), 'utf8');
+      const args = buildContainerRunArgs({ command: 'cat node_modules/vitest/package.json | head -c 40', cwd: dir, nodeModulesVolume: resolveNodeModulesVolume() });
+      const out = execFileSync('container', args, { encoding: 'utf8' });
+      // The REAL vitest package.json (from the baked linux tree) is visible — the host stub directory,
+      // and its marker.json, are fully shadowed (never even readable) for this one subtree.
+      expect(out).toContain('"vitest"');
+      expect(() => execFileSync('container', buildContainerRunArgs({ command: 'cat node_modules/marker.json', cwd: dir, nodeModulesVolume: resolveNodeModulesVolume() }))).toThrow();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('writes into the shadowed node_modules never touch the real host directory (the same host-safety property proven in the mount-shadow spike)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'container-exec-nm-write-test-'));
+    try {
+      mkdirSync(join(dir, 'node_modules'), { recursive: true });
+      const args = buildContainerRunArgs({ command: 'echo guest-write > node_modules/from-guest.txt', cwd: dir, nodeModulesVolume: resolveNodeModulesVolume() });
+      execFileSync('container', args);
+      expect(existsSync(join(dir, 'node_modules', 'from-guest.txt'))).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

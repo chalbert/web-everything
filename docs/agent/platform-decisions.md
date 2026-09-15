@@ -4494,6 +4494,58 @@ composing with (not duplicating)
 auto-fix autonomy is a sibling axis keyed by repo, not by provider/model trust). Full reasoning:
 [#3654](/backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob/).
 
+### A triggered calibration veto clears only through a root-caused, similarity-matched trial bar — decay and trust never substitute for it {#calibration-veto-clearing}
+
+**Ratified 2026-09-14 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
+amendments (`#3673`).** Extends
+[#model-probation-graduation-criteria](#model-probation-graduation-criteria)'s independent calibration
+veto (`#3654` clause 2: a confirmed calibration miss is an INDEPENDENT VETO, never diluted into a blended
+score) with the shape of how a triggered veto is ever lifted — a question that ruling's own "Done when"
+left as an out-of-scope follow-on, not a re-litigation of the veto rule itself. Four clauses; **no
+concrete numeric threshold is fixed by any of them** — each names what a follow-on ordinary (batched)
+finding must propose once real trial-count data exists, never a separate ceremony:
+
+1. **Root-cause precondition — a documented root-cause finding is required before any post-miss trial
+   counts toward clearing.** The finding must name which of `we:scripts/lib/jury-core.mjs`'s
+   `deriveFindingDisposition` sub-answers (`introduced`, `worseThanBase`, `parallelizable`) diverged
+   between reviewers and why (or the equivalent diagnostic for a future non-jury-core review mechanism).
+   Trial volume alone is rejected as gameable without ever diagnosing why the miss happened — a fix whose
+   relevance to the calibration mechanism is plausible but unestablished does not itself count as a
+   root-cause finding, whatever coverage gap it separately closes.
+2. **Trial evidence bar — a fixed minimum count PLUS at least one similarity-matched trial, never count
+   alone.** Once eligible, clearing requires a minimum trial count N and at least one trial specifically
+   targeting a case similar in kind to the trigger (a severity-ambiguous, borderline-blocker-vs-carve-out
+   case); a deliberately constructed test scenario satisfies this when a naturally-occurring one is
+   scarce. N dissimilar clean trials never suffice — the same selection-bias objection
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 1 already applies to
+   initial graduation, reused here by direct analogy. Exact N deferred.
+3. **Decay alone never clears the veto.** A cooling-off/decay window may narrow which trials are eligible
+   to count (for example, only trials run since a relevant fix landed) but never substitutes for the
+   affirmative clean-trial evidence clauses 1–2 require. Elapsed trial count or elapsed time alone, with no
+   clean/relevant requirement, is temporal dilution of the same kind
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 2 already forecloses
+   for a blended composite score.
+4. **Human override only as a narrow, documented factual reclassification — never a trust grant.** An
+   override is available only on identity/evidentiary grounds: the cited finding fails independent
+   verification, the "same bug" framing does not actually hold (the two reviewers were not in fact looking
+   at the same finding), or a bookkeeping error in how the trigger was recorded. Re-answering the
+   disposition sub-judgments themselves — `introduced`/`worseThanBase`/`parallelizable`, or the equivalent
+   severity sub-judgments for a future non-jury-core mechanism — on confidence or trust alone is explicitly
+   out of scope for any override, at any point; doing so case-by-case would let every future miss be argued
+   away on the same substantive grounds the veto exists to catch.
+
+**Not built here, by design.** No `calibrationMiss` (proposed) field is added to `we:model-probation.json` and no
+clearing-check function is wired by this ruling — it rules on the shape of clearing; wiring a concrete
+mechanism is separately-scoped future work. The live PR #2107 veto on Codex's `advisory-review` role is
+not cleared by this ruling itself: clearing it requires either clause 1's root-cause finding followed by
+clause 2's similarity-matched trials, or clause 4's narrow reclassification override on its own facts —
+never the tooling-asymmetry finding alone.
+
+**Lineage:** ratified via `#3673` (2026-09-14), filed under the background mechanical dispatcher epic
+`#3383`, extending [#model-probation-graduation-criteria](#model-probation-graduation-criteria) (`#3654`)
+and grounded in `we:reports/2026-09-14-calibration-veto-clearing-grounding.md`. Full reasoning:
+[#3673](/backlog/3673-define-what-clears-a-triggered-calibration-veto-so-a-role-ca/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
