@@ -428,7 +428,7 @@ for (const it of items.values()) {
     if (p === it.id || blocked.has(p) || !items.has(p) || g1seen.has(p)) continue;
     // `blocked on/by` guard: another #M within ~40 chars to its left = a citation/enumeration
     // ("blocked by #M, #N"), already-anchored — not a fresh ungoverned edge.
-    if (kw.startsWith('blocked') && /#\d{1,3}\b/.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
+    if (kw.startsWith('blocked') && /#\d+\b/.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
     g1seen.add(p);
     const dec = isDecision(p), open = items.get(p)?.status !== 'resolved';
     // both ends resolved → historical lineage, not a live gap: demote to INFO (suppressed from the count).

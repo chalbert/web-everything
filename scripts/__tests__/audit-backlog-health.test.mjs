@@ -6,10 +6,30 @@
  * whole live audit (which reads the real backlog dir and writes `audits/backlog-health-audit.md`).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { missingDoneWhenProof, forkLeansOnUnruled, PROSE_PREREQ, ANY_REF } from '../audit-backlog-health.mjs';
 
 // #3522: exercise the live extractors so G1/D2 cannot silently lose short or long ids.
 describe('PROSE_PREREQ — G1', () => {
+  it.each(['blocked on', 'blocked by'])('recognizes repeated 4-digit citations in a %s enumeration without an extra G1 flag', (phrase) => {
+    // Execute the production G1 block without changing the CLI's exports or auditing live fixtures.
+    const source = readFileSync('scripts/audit-backlog-health.mjs', 'utf8');
+    const g1 = source.slice(source.indexOf('  // G1 edge-gap'), source.indexOf('  // G2 ruling-after-build'));
+    const flags = { G1: [] };
+    runInNewContext(g1, {
+      it: { id: '9999', status: 'open', body: `Requires #2209. ${phrase} #2209, ${phrase} #3512.` },
+      blocked: new Set(),
+      items: new Map([['2209', { status: 'open' }], ['3512', { status: 'open' }]]),
+      PROSE_PREREQ,
+      norm: String,
+      isDecision: () => false,
+      title: () => 'Enumeration regression',
+      flags,
+    });
+    expect(flags.G1.map(flag => flag.ref)).toEqual(['2209']);
+  });
+
   it('hits on 1-2 digit prerequisite ids', () => {
     const body = 'Requires #7 and builds on #39.';
     expect([...body.matchAll(PROSE_PREREQ)].map(m => m[2])).toEqual(['7', '39']);
