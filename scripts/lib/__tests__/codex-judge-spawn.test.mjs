@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   CODEX_CLI,
   CODEX_EFFORT_MAP,
+  CODEX_SPAWN_ENV_ALLOWLIST,
   CodexInvalidSchemaError,
   assertNoCodexTools,
   buildCodexJudgeArgv,
@@ -18,6 +19,7 @@ import {
   parseCodexJudgeOutcome,
   codexLoadedContextTokens,
   codexJudgeSpawn,
+  defaultCodexSpawnEnv,
   requireAllProperties,
   stripNulls,
 } from '../codex-judge-spawn.mjs';
@@ -232,6 +234,30 @@ describe('codexLoadedContextTokens — Codex\'s own usage key names, distinct fr
   });
 });
 
+describe('defaultCodexSpawnEnv — ALLOWLISTED env, not raw process.env (round-2 review, security finding, PR #2115)', () => {
+  it('keeps only the allowlisted keys present in the source env', () => {
+    const out = defaultCodexSpawnEnv({
+      HOME: '/home/x', PATH: '/usr/bin', GITHUB_TOKEN: 'secret-token', ANTHROPIC_API_KEY: 'secret-key',
+    });
+    expect(out).toEqual({ HOME: '/home/x', PATH: '/usr/bin' });
+  });
+
+  it('drops any credential-shaped var not on the allowlist, whatever it is named', () => {
+    const out = defaultCodexSpawnEnv({ AWS_SECRET_ACCESS_KEY: 'x', NPM_TOKEN: 'y', SOME_FUTURE_SECRET: 'z' });
+    expect(out).toEqual({});
+  });
+
+  it('never returns the source object itself', () => {
+    const src = { HOME: '/home/x' };
+    expect(defaultCodexSpawnEnv(src)).not.toBe(src);
+  });
+
+  it('CODEX_SPAWN_ENV_ALLOWLIST names only the vars codex exec needs to run and find its own config', () => {
+    expect(CODEX_SPAWN_ENV_ALLOWLIST).toEqual(expect.arrayContaining(['HOME', 'PATH']));
+    expect(CODEX_SPAWN_ENV_ALLOWLIST).not.toEqual(expect.arrayContaining(['GITHUB_TOKEN']));
+  });
+});
+
 describe('codexJudgeSpawn — exercised over an injected spawn (real temp files, fake process)', () => {
   /** A fake `child_process.spawn` that writes the last-message file (as the real CLI does) and replays JSONL. */
   function fakeSpawn({ stdout, code = 0, writeLastMessage = null }) {
@@ -295,6 +321,26 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
     expect(r.timedOut).toBe(false);
     expect(typeof r.wallMs).toBe('number');
     expect(r.argv).toEqual(expect.arrayContaining(['exec', '--json']));
+  });
+
+  it('spawns with the ALLOWLISTED env by default, never the raw process.env (round-2 review, security finding, PR #2115)', async () => {
+    const priorSecret = process.env.WE_TEST_FIX_2115_SECRET;
+    process.env.WE_TEST_FIX_2115_SECRET = 'do-not-leak-me';
+    try {
+      const { fn, seen } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
+      expect(seen.opts.env).not.toBe(process.env);
+      expect(seen.opts.env.WE_TEST_FIX_2115_SECRET).toBeUndefined();
+    } finally {
+      if (priorSecret === undefined) delete process.env.WE_TEST_FIX_2115_SECRET;
+      else process.env.WE_TEST_FIX_2115_SECRET = priorSecret;
+    }
+  });
+
+  it('still honors an explicit `env` override — the allowlist is only the default', async () => {
+    const { fn, seen } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+    await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, env: { CUSTOM: 'yes' } });
+    expect(seen.opts.env).toEqual({ CUSTOM: 'yes' });
   });
 
   it('refuses a tool-bearing request before ever spawning', async () => {
@@ -407,6 +453,34 @@ describe('#xqa9ttq requireAllProperties — the OpenAI-strict schema transform (
     expect(out.properties.summary.type).toBe('string');
     // `file` was NOT required — probe 4's real response proved OpenAI sends `null` for it, so its type widens.
     expect(out.properties.file.type).toEqual(['string', 'null']);
+  });
+
+  it('widens an optional property\'s `enum` alongside its `type` — a `null` type without a `null` enum member is unsatisfiable (round-2 review, PR #2115)', () => {
+    const shape = {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        verdict: { type: 'string', enum: ['CONFIRMED', 'PLAUSIBLE'] },
+      },
+      required: ['summary'],
+    };
+    const out = requireAllProperties(shape);
+    expect(out.properties.verdict.type).toEqual(['string', 'null']);
+    expect(out.properties.verdict.enum).toEqual(['CONFIRMED', 'PLAUSIBLE', null]);
+    // an already-required enum property is left untouched, exactly like an already-required plain-type one.
+    expect(requireAllProperties({
+      type: 'object',
+      properties: { verdict: { type: 'string', enum: ['a', 'b'] } },
+      required: ['verdict'],
+    }).properties.verdict).toEqual({ type: 'string', enum: ['a', 'b'] });
+  });
+
+  it('does not duplicate `null` in an `enum` that already includes it', () => {
+    const shape = {
+      type: 'object',
+      properties: { note: { type: ['string'], enum: ['a', null] } },
+    };
+    expect(requireAllProperties(shape).properties.note.enum).toEqual(['a', null]);
   });
 
   it('a property literally named `required` does not shadow the schema\'s own `required` array (PR #2115 human review)', () => {

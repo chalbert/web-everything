@@ -575,7 +575,7 @@ export function createDefaultJudge({ provider, providerName = 'claude', cwd, mod
     // injects its own `provider` function bypasses `resolveJudgeProvider` entirely, so this check is the one
     // place that catches "codex + tool-bearing" regardless of HOW the codex provider got here — the same
     // belt-and-braces reasoning `assertNoForbiddenArgv`'s "reachable through judgeSpawn too" note already uses.
-    if (providerName === 'codex' && effective.allowedTools) {
+    if (providerName === 'codex' && Array.isArray(effective.allowedTools) && effective.allowedTools.length > 0) {
       throw new Error(
         'operations: refusing `--provider=codex` with a TOOL-BEARING judge request — the Codex provider is '
         + 'seated as a TOOL-FREE panelist only (#3581). Use the default `claude` provider for a tool-bearing role.',
