@@ -3508,3 +3508,61 @@ Found while investigating the operator's own follow-up question (real spare capa
 **"Nothing runs unless a session starts the conveyor" (`we:3625`'s own scope) was NOT today's dominant root cause** — checked directly: the resident driver was genuinely alive and ticking normally throughout this session's investigation (live lease, fresh heartbeat, real dispatch plans being computed every tick). The driver's occasional down periods earlier this same day/night (already documented elsewhere on this card) are a real, separate instance of that broader gap, but tonight's dominant symptom — real capacity, real computed work, near-zero actual progress — was Root cause 3 above, not an idle/undriven conveyor. `we:3625` stays open, unsliced, unprepared, exactly as before; nothing here should be read as having closed or narrowed it.
 
 No stuck application PR was manually reviewed, resolved, or merged by this session, per the operator's explicit instruction — the mechanism was fixed, not the symptoms.
+
+## Session update (2026-09-15) — delegation infrastructure hardened (codex/gemini direct-task, provider-routing), graduation-data mechanism live, three real production liveness bugs fixed (x09zslx), operations-coverage audit landed a 17-op phased plan
+
+### Delegation infrastructure built and hardened
+
+`we:codex-direct-task.mjs` and `we:gemini-direct-task.mjs` both went through real bug-fix rounds
+tonight — filename-quoting, worktree, and buffer bugs, each caught by independent review rather
+than shipped first-try-clean. Claude-via-Antigravity wiring (`agy --model claude-sonnet-4-6`)
+confirmed real and running on a quota separate from this session's own. `we:scripts/lib/provider-routing.mjs`
+— a deterministic `selectProvider`/`selectSupervisionLevel` — was built by Gemini on its first real
+trial, after an earlier attempt had timed out.
+
+### Graduation-data mechanism
+
+`we:scripts/conveyor/log-delegation-trial.mjs` now logs real trials into `we:scripts/conveyor/run-scorecards.json`.
+Progressive-backdown thresholds were ratified in `backlog/3690`: N=5 clean trials per
+{provider,model,taskType}, with a calibration-miss as a hard veto. Currently no combination has
+graduated — everything dispatched through the delegation path still gets full verification. The
+tracker status page (this one) was published as a live artifact so this stays checkable without
+re-deriving it from raw logs each time.
+
+### Real production bugs found and fixed tonight
+
+This is the epic's actual point, named plainly rather than folded into infrastructure talk:
+
+- **Three independent instances of the same root-cause class** — "liveness is always the real OS
+  process handle, never an inferred state": the driver-watchdog counted dead sessions as live
+  in-flight work (phantom claims that had gone unnoticed for 13+ days), the lease-reaper had the
+  identical bug for lane leases, and the session-reaper had it again for null-pid registry entries.
+  Filed as its own standing principle rather than three separate patches, `x09zslx`.
+- The driver-watchdog never alerted on a full crash — only on stuck-but-alive. Fixed.
+- A repeated advisory-review churn bug on `review:human` PRs burned 6 wasted panel runs on PR
+  #2117 before being caught.
+- A stale-verify-marker bug was blocking manual approval unnecessarily, `#3538`.
+- A false-positive duplicate-PR flag hit an unsplit epic, recurring twice (`#3683`/`x7nb9hn`)
+  before the actual cause was pinned down.
+
+### Operations-coverage plan
+
+A real session audit — Codex and Gemini, cross-checked against each other — covered 471 dispatches
+and found only 11 of 247 grouped tasks had a matching declared operation. One honest finding from
+the audit itself: Gemini's first attempt turned out to be a copy of Codex's output, not an
+independent pass, and was redone before being trusted. The audit landed as a 17-operation phased
+plan (`backlog/x8cq3pp`, PR #2280). Phase 1 (5 read-only operations) is in progress; 3 of the 5 were
+already found to be specced against modules that only exist on this prototype branch, not on
+`main` — adapted in place rather than blocked on that mismatch.
+
+### Ratified decisions
+
+`#3589` — clear-human must wait for a posted advisory review on the current head before merging.
+Closes the exact race that let PR #2011 clear early on luck rather than on an actual review.
+
+### Still open
+
+- Capability-ratings / AI-watch-program work (external benchmark data feeds exploration priority
+  only — explicitly NOT used for graduation decisions).
+- `/wip` skill update to show supervisor-model/delegation-target per running task.
+- Phase 1 of the operations-coverage plan is still landing, not done.
