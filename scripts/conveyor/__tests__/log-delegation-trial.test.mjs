@@ -78,6 +78,15 @@ describe('logDelegationTrial', () => {
     expect(logDelegationTrial(input, memIo())).toMatchObject(input);
   });
 
+  it('rejects secret-shaped taskDescription or findings without writing (independent review finding, PR #2267)', () => {
+    const secret = 'leaked key AKIA1234567890ABCDEF';
+    for (const field of ['taskDescription', 'findings']) {
+      const io = memIo();
+      expect(() => logDelegationTrial({ ...baseRow(), [field]: secret }, io)).toThrow('secret scrub');
+      expect(readStore(io).records).toEqual([]);
+    }
+  });
+
   it('rejects a missing or non-object row clearly', () => {
     for (const row of [undefined, null, 'trial', []]) {
       expect(() => logDelegationTrial(row, memIo())).toThrow('row must be an object');

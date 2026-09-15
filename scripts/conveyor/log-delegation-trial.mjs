@@ -5,6 +5,7 @@
  */
 import { pathToFileURL } from 'node:url';
 import { appendScorecard } from './run-scorecard-store.mjs';
+import { scrubReasons } from '../lib/secret-scrub.mjs';
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
 const enums = {
@@ -30,6 +31,16 @@ export function logDelegationTrial(row, io = {}) {
   }
   if (row.findings !== undefined && row.findings !== null && !isNonEmptyString(row.findings)) {
     throw new Error('log-delegation-trial: findings must be a non-empty string or null');
+  }
+  // Free-text fields must pass the same secret scrub the store already applies to
+  // `deductions[].evidence` — a live independent review of this file (PR #2267) confirmed a
+  // secret-shaped `findings` value reached the committed store unfiltered before this check existed.
+  // Denying here, never redacting, matches run-scorecard-store.mjs's own "deny on a hit" discipline.
+  for (const field of ['taskDescription', 'findings']) {
+    const value = row[field];
+    if (isNonEmptyString(value) && scrubReasons(value).length > 0) {
+      throw new Error(`log-delegation-trial: ${field} failed the secret scrub — denying, never redacting`);
+    }
   }
   for (const field of ['item', 'pr']) {
     if (row[field] !== undefined && row[field] !== null
