@@ -3,9 +3,10 @@ bornAs: xsxz3lk
 kind: story
 size: 3
 parent: "2873"
-status: active
+status: resolved
 dateOpened: "2026-08-02"
 dateStarted: "2026-09-15"
+dateResolved: "2026-09-15"
 tags: [conveyor, self-approval, spec-first]
 scope:
   - we:scripts/lib/
