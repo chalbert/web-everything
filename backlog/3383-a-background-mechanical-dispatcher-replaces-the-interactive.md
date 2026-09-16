@@ -3657,3 +3657,14 @@ built.
   documented earlier in the session, not yet executed).
 - Antigravity `grep_search` crash: still only a soft prompt-level workaround; a real `we:hooks.json`
   PreToolUse hard-block was confirmed feasible but not yet wired in.
+
+## Session update (2026-09-15) — Investigated token-usage breakdown by role; capture already machine-wide, aggregation layer still missing
+
+Investigated whether Claude token usage can be broken down by role (main orchestrating session vs. dispatched subagent vs. operation type). Findings:
+
+- No such breakdown exists today. Scattered pieces exist (per-Codex-dispatch token telemetry, a local OTEL metrics collector for Claude's own usage, per-judge-invocation usage in run records) but nothing stitches them into a role-based view. Backlog #3671 already tracks this gap explicitly (today's hooks can't see an Agent/subagent call at all).
+- Good news: machine-wide *capture* of Claude's own token/cost usage is already live, not something to build. Claude Code's global settings file (updated 2026-09-15 16:02) sets telemetry env vars that apply to every Claude Code session on this machine — interactive, VSCode-extension, dispatched lanes, all of it. The collector (at `we:/Users/nicolasgilbert/.claude/scripts/operations/claude-otel-collector.mjs`, PID 80176 as of writing) is already receiving real data from 100+ session IDs/day into `.operations/claude-otel/<day>.jsonl`. Only numeric token/cost counters cross the wire, never prompt/response content (verified: the collector deliberately refuses to persist the /v1/logs channel that could carry content).
+- Real future-work items, not yet built:
+  1. An aggregation/query layer over the collected data producing an actual role/operation breakdown (main session vs. subagent vs. build/fix/review/etc) — this is the actual missing piece, not the capture itself.
+  2. Known unfixed limitation: per-lane-clone CLAUDE_OTEL_ROOT fragmentation can cause a rollup to silently miss lane-local data — flagged in the collector's own code comments, not yet fixed.
+  3. Accepted-risk note worth carrying forward: the local OTLP receiver has no auth and stores plaintext NDJSON including user-identity attributes — fine for a single-operator machine, but should be revisited if this pattern is ever extended to a shared/multi-operator setup.
