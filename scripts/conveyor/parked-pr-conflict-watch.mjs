@@ -67,6 +67,8 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
@@ -250,7 +252,7 @@ export function buildConflictFindingBody(pr) {
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) {
+export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,mergeable,mergeStateStatus,labels,files'];
   if (repo) argv.push('--repo', repo);
@@ -418,12 +420,15 @@ if (IS_CLI) {
   const verb = argv.find((a) => !a.startsWith('--')) || 'sweep';
   const repo = flag('repo') || null;
   const dryRun = argv.includes('--dry-run');
+  const prsFile = flag('prs-file');
   if (verb !== 'sweep') {
-    writeLineSync(2, `usage: parked-pr-conflict-watch.mjs sweep [--repo=<owner/name>] [--dry-run]`);
+    writeLineSync(2, `usage: parked-pr-conflict-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]`);
     process.exitCode = 2;
   } else {
     try {
-      const results = watchParkedPrConflicts({ repo, dryRun });
+      const results = watchParkedPrConflicts({
+        repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}),
+      });
       for (const r of results) {
         const verb2 = dryRun ? 'would' : r.error ? 'FAILED to' : 'did';
         const what = r.add ? `apply ${CONFLICT_LABEL}${r.commented ? ' + comment' : ''}` : `remove ${r.remove.join(',')}`;
