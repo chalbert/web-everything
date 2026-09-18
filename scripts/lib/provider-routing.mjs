@@ -45,6 +45,17 @@
  *   Per AGENTS.md line 49 and docs/agent/ conventions: docs/agent/platform-decisions.md and any path
  *   under docs/agent/ constitute the repo's statute/governance layer. Touching ANY statute-tier path
  *   forces Claude Opus, never Gemini or Codex, regardless of track record.
+ *
+ * GEMINI/ANTIGRAVITY SCOPE (observational, not enforced — 2026-09-15/16 evidence): dispatch Gemini via
+ * Antigravity for well-scoped EXECUTION work where another agent (Codex or Claude) has already designed
+ * the solution and defined success criteria, not for open-ended design/judgment work. Its one clean,
+ * independently-verified success this session was real merge-conflict resolution on PR #2291 and PR
+ * #2292 (gemini-3.8-flash-low; the conflict, both sides' intent, and correctness were all already known
+ * — see PR #2294's scorecard trials). By contrast its one attempt to DECIDE what to build (the
+ * `stale-state` operation folded into #2292) failed immediately on an internal tool error before
+ * touching a file, and was redone by Codex — there is still no clean trial of it choosing *what* to
+ * build, only of it reconciling an already-known target. This is a documented judgment call for whoever
+ * dispatches work, not a coded gate on `taskType`; re-derive once real build-new-feature trial data exists.
  */
 
 import { isUsableForExploration } from './model-capability-ratings.mjs';
