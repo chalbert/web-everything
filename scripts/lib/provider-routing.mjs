@@ -231,18 +231,18 @@ export function isHighStakesTask(task, context) {
   return implFiles.length >= 3;
 }
 
-/** Check if a scorecard record is clean (no confirmed real-problem outcome). Pure. */
+/** Check if a scorecard record is clean (explicit landed outcome; fail-closed otherwise). Pure. */
 function isCleanRecord(record) {
   if (!record || typeof record !== 'object') return false;
-  if (record.outcome === 'rejected' || record.outcome === 'reworked') return false;
-  return true;
+  return record.outcome === 'landed';
 }
 
-/** Check if a scorecard record was informative (had a confirmed finding from independent review). Pure. */
+/** Check if a scorecard record was informative (had a confirmed real problem from independent review). Pure. */
 function isInformativeRecord(record) {
   if (!record || typeof record !== 'object') return false;
   const isVerified = record.verifiedBy === 'claude-subagent' || record.verifiedBy === 'independent-claude';
   if (!isVerified) return false;
+  if (record.outcome !== 'rejected' && record.outcome !== 'reworked') return false;
   return record.findings !== undefined && record.findings !== null && String(record.findings).trim() !== '';
 }
 
@@ -634,8 +634,9 @@ export function selectProvider(task, context) {
  *   - Unit of trust: exact `{provider, model, taskType}` triple.
  *   - Counts TRAILING consecutive clean streak (most recent first; verified by
  *     'claude-subagent' or 'independent-claude'; 'other'-verified records are skipped).
- *   - Clean record: findings is null or empty, and outcome !== 'rejected'.
- *   - Informative trial: at least one verified trial EVER recorded had confirmed findings.
+ *   - Clean record: outcome === 'landed' (fail-closed; missing/rejected/reworked all count unclean).
+ *   - Informative trial: at least one verified trial EVER recorded had outcome 'rejected' or
+ *     'reworked' with confirmed findings (a 'landed' record's findings text alone never counts).
  *   - Hard veto: any unclean/unresolved record as the MOST RECENT verified trial immediately
  *     forces 'full' supervision, resetting the streak.
  *   - Returns 'spot-check' iff cleanStreak >= minCleanStreak AND (requireInformativeTrial === false

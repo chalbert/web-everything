@@ -620,6 +620,46 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     });
   });
 
+  it('does not count a missing/undefined outcome with real-problem findings as clean (fail-closed)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      ...[1, 2, 3, 4].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+      { ...makeRecord({ ...triple, scoredAt: '2026-09-15T05:00:00.000Z', findings: 'Build failure' }), outcome: undefined },
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+      result: 'fail',
+      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+    });
+  });
+
+  it('does not let narrative findings on a landed record alone satisfy the informative-trial requirement', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [1, 2, 3, 4, 5].map((hour) =>
+      makeRecord({
+        ...triple,
+        scoredAt: `2026-09-15T0${hour}:00:00.000Z`,
+        outcome: 'landed',
+        verifiedBy: 'independent-claude',
+        findings: 'Independent claude -p process verified via 3-way diff; Verdict ACCEPT.',
+      })
+    );
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')).toMatchObject({
+      result: 'fail',
+      dataConsulted: 'hasInformativeTrial=false, required=true',
+    });
+  });
+
   it.each([
     { outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change' },
     { outcome: 'rejected', findings: 'Independent review caught a dropped merge-parent change' },
