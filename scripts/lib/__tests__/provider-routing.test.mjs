@@ -236,6 +236,7 @@ describe('selectProvider — cascade branches', () => {
         taskType: 'bugfix',
         scoredAt: '2026-09-15T04:00:00.000Z',
         verifiedBy: 'independent-claude',
+        outcome: 'reworked',
         findings: 'Deadlock detection race condition in worker loop',
       }),
     ];
@@ -453,7 +454,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
 
   it.each([
     { outcome: 'rejected', findings: null },
-    { outcome: 'landed', findings: 'Unresolved write_to_file failure' },
+    { outcome: 'reworked', findings: 'Unresolved write_to_file failure' },
   ])('vetoes only the taskType with the latest unclean Antigravity trial: %j', (failure) => {
     // An older informative trial bypasses Step 3's thin-history branch; scope exceeds
     // the external fitness envelope so these calls exercise the Claude branch.
@@ -461,7 +462,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
       filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
       estimatedSize: 280,
       scorecards: [
-        makeRecord({ provider: 'antigravity', findings: 'Earlier review finding' }),
+        makeRecord({ provider: 'antigravity', outcome: 'reworked', findings: 'Earlier review finding' }),
         makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', scoredAt: '2026-09-15T03:00:00.000Z', verifiedBy: 'other', ...failure }),
         makeRecord({ provider: 'antigravity', scoredAt: '2026-09-15T02:00:00.000Z' }),
         makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T04:00:00.000Z' }),
@@ -524,12 +525,15 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
   });
 
   it.each(['architectural-decision', 'triage-research'])('requires native Opus for %s regardless of Antigravity history', (taskType) => {
-    for (const findings of [null, 'Unresolved build failure']) {
+    for (const trial of [
+      { outcome: 'landed', findings: null },
+      { outcome: 'reworked', findings: 'Unresolved build failure' },
+    ]) {
       const res = selectProvider({ taskType }, {
         filesTouched: ['scripts/module.mjs'],
         estimatedSize: 20,
         quotaStrained: true,
-        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType, findings })],
+        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType, ...trial })],
       });
       expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
       expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
@@ -577,7 +581,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
       {
         recommendation: RECOMMENDATIONS.BOTH,
         filesTouched: ['scripts/conveyor/drain.mjs', 'scripts/conveyor/__tests__/drain.test.mjs'],
-        scorecards: [makeRecord({ findings: 'Deadlock detection race condition in worker loop' })],
+        scorecards: [makeRecord({ outcome: 'reworked', findings: 'Deadlock detection race condition in worker loop' })],
       },
     ];
     for (const { recommendation, filesTouched, scorecards } of cases) {
@@ -591,9 +595,96 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
 });
 
 describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
+  it('counts explanatory landed accepts toward the clean streak without a hard veto', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change' }),
+      ...[1, 2, 3].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+      ...[2291, 2292].map((pr, index) => makeRecord({
+        ...triple,
+        pr,
+        scoredAt: `2026-09-15T0${index + 4}:00:00.000Z`,
+        outcome: 'landed',
+        verifiedBy: 'independent-claude',
+        findings: 'Independent claude -p process verified via 3-way diff against both merge parents plus two real vitest runs (34/34 targeted, 1822/1822 broader operations suite) before any push. Verdict ACCEPT; pushed to origin/lane/op-runner-activity.',
+      })),
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+    expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('clean');
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+      result: 'pass',
+      dataConsulted: expect.stringContaining('streak=5, threshold=5'),
+    });
+  });
+
+  it('does not count a missing/undefined outcome with real-problem findings as clean (fail-closed)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      ...[1, 2, 3, 4].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+      { ...makeRecord({ ...triple, scoredAt: '2026-09-15T05:00:00.000Z', findings: 'Build failure' }), outcome: undefined },
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+      result: 'fail',
+      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+    });
+  });
+
+  it('does not let narrative findings on a landed record alone satisfy the informative-trial requirement', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [1, 2, 3, 4, 5].map((hour) =>
+      makeRecord({
+        ...triple,
+        scoredAt: `2026-09-15T0${hour}:00:00.000Z`,
+        outcome: 'landed',
+        verifiedBy: 'independent-claude',
+        findings: 'Independent claude -p process verified via 3-way diff; Verdict ACCEPT.',
+      })
+    );
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')).toMatchObject({
+      result: 'fail',
+      dataConsulted: 'hasInformativeTrial=false, required=true',
+    });
+  });
+
+  it.each([
+    { outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change' },
+    { outcome: 'rejected', findings: 'Independent review caught a dropped merge-parent change' },
+    { outcome: 'reworked', findings: null },
+    { outcome: 'rejected', findings: null },
+  ])('vetoes a real-problem outcome and resets the clean streak: %j', (failure) => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      ...[1, 2, 3, 4, 5].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+      makeRecord({ ...triple, scoredAt: '2026-09-15T06:00:00.000Z', verifiedBy: 'independent-claude', ...failure }),
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('veto-fired');
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+      result: 'fail',
+      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+    });
+  });
+
   it('determinism: produces identical output on identical inputs', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: 'caught bug' }),
+      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', outcome: 'reworked', findings: 'caught bug' }),
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }),
     ];
     const r1 = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records);
@@ -603,7 +694,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
   it('streak-not-yet-met case -> returns full supervision', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: 'caught bug' }), // informative
+      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', outcome: 'reworked', findings: 'caught bug' }), // informative
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null }), // clean 3
@@ -635,7 +726,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
   it('streak-met-and-informative case -> returns spot-check supervision', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', findings: 'Independent review caught quoting bug' }), // informative
+      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'Independent review caught quoting bug' }), // informative
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 3
@@ -652,9 +743,9 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     expect(res.auditTrail.every((a) => a.result === 'clean' || a.result === 'pass')).toBe(true);
   });
 
-  it('most-recent-record-has-a-finding case -> returns full supervision (hard veto) even with long prior streak', () => {
+  it('most-recent-record-is-reworked case -> returns full supervision (hard veto) even with long prior streak', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: 'prior finding' }),
+      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', outcome: 'reworked', findings: 'prior finding' }),
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }),
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }),
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null }),
@@ -662,7 +753,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
       makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', findings: null }),
       makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', findings: null }),
       // Most recent trial (08:00) caught a regression
-      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', findings: 'New defect found by independent review' }),
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', outcome: 'reworked', findings: 'New defect found by independent review' }),
     ];
 
     const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, { minCleanStreak: 5 });
@@ -673,7 +764,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
   it('an other-verified record in the middle of a streak neither breaks nor extends it', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', findings: 'prior finding' }), // informative
+      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding' }), // informative
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 2
       // 'other'-verified trial in the middle (e.g. smoke test)
