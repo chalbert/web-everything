@@ -231,13 +231,10 @@ export function isHighStakesTask(task, context) {
   return implFiles.length >= 3;
 }
 
-/** Check if a scorecard record is clean (no confirmed findings and not rejected). Pure. */
+/** Check if a scorecard record is clean (no confirmed real-problem outcome). Pure. */
 function isCleanRecord(record) {
   if (!record || typeof record !== 'object') return false;
-  if (record.findings !== undefined && record.findings !== null && String(record.findings).trim() !== '') {
-    return false;
-  }
-  if (record.outcome === 'rejected') return false;
+  if (record.outcome === 'rejected' || record.outcome === 'reworked') return false;
   return true;
 }
 
