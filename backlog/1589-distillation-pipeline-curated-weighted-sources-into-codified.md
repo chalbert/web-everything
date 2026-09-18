@@ -2,9 +2,10 @@
 kind: story
 size: 5
 parent: "1585"
-status: open
+status: active
 blockedBy: []
 dateOpened: "2026-06-22"
+dateStarted: "2026-09-15"
 preparedDate: "2026-08-15"
 tags: []
 scope:
@@ -142,6 +143,17 @@ against real ledger data (#1592 found it had zero callers outside its own unit t
 - [ ] `we:scripts/__tests__/design-knowledge-distillation.test.mjs` exists and is green, pinning the exact
       `{ total: 4, distilled: 3, pending: 1 }` conformance shape.
 - [ ] `npm run check:standards` — 0 errors, design-knowledge NUDGE reads 3/4 distilled.
+
+## Progress
+
+- 2026-09-15 — Tasks 1–5 done: `we:docs/agent/vision-tiers.md` rubric bumped to `v3` with a
+  `### Distilled guidance (v3)` subsection (axes 1/2/4/5 codified from WCAG SC 1.4.3/1.4.11 via APG, HIG
+  *Layout*, HIG *Typography*, Nielsen #4; axes 3/6/7/8 pending → `#3116`); ledger rows flipped,
+  `uicrit-uist24.trackingItem` → `"3116"`; `we:scripts/__tests__/design-knowledge-distillation.test.mjs`
+  green (14 tests — the four spec assertions plus a check that every `distilledInto` ref resolves to a real
+  v3 paragraph and each pending placeholder is present). Task 6: the conformance function over the live
+  ledger returns `3/4 distilled; pending uicrit-uist24 (#3116)`; the full `check:standards` gate is run by
+  the delivery wrapper, not in-lane.
 
 ## Delivery shape
 
