@@ -43,6 +43,8 @@ import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from
 import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
+import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
+import { createPrReconcileReader } from './pr-status-io.mjs';
 import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
 import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
@@ -170,6 +172,10 @@ export const OPERATIONS = Object.freeze({
   // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
+    sinks: {},
+  }),
+  [PR_RECONCILE_OP]: () => ({
+    declaration: prReconcileOperation({ readPrs: createPrReconcileReader() }),
     sinks: {},
   }),
   [RUNNER_ACTIVITY_OP]: () => ({

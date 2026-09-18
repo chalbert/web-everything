@@ -294,6 +294,27 @@
       "verifiedBy": "claude-subagent",
       "findings": null,
       "retroactive": true
+    },
+    {
+      "v": 1,
+      "outcome": "landed",
+      "scoredAt": "2026-09-18T21:41:55.033Z",
+      "provider": "antigravity",
+      "model": "gemini-3.8-flash-low",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": 3694,
+      "pr": 2288,
+      "handle": null,
+      "taskDescription": "Resolve real merge conflict (PR #2288 op-pr-reconcile vs origin/main: pr-reconcile op registration colliding with runner-activity/dispatch-eligibility op registration in run.mjs + http-adapter.test.mjs)",
+      "taskType": "conflict-resolution",
+      "verifiedBy": "independent-claude",
+      "findings": "Clean union-merge resolution across 2 files (run.mjs, http-adapter.test.mjs); independent claude -p process (distinct session f6d4f411-0252-4de0-a4f0-235e4834b62f, harness env stripped) three-way diffed MERGE against both parents confirming both sides' operations (pr-reconcile; runner-activity + dispatch-eligibility) fully preserved, zero conflict markers, and ran the real verify-lane.mjs gate green (one transient gh-throttle rate-limit flake on first run, confirmed unrelated to the merge and clean on rerun). VERDICT: ACCEPT. Pushed to origin/lane/op-pr-reconcile (ac0547bf3..c305be61a).",
+      "retroactive": false
     }
   ]
 }
