@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   DEFAULT_CONTAINER_IMAGE, DEFAULT_CONTAINER_CPUS, DEFAULT_CONTAINER_MEMORY,
@@ -69,6 +69,14 @@ describe('readAlternatesPrimaryRoot — pure, over an injected readFile (why thi
 });
 
 describe('buildContainerRunArgs — the exact mount shape proven manually while building this POC', () => {
+  it('resolves a relative checkout before building its mount and working directory', () => {
+    const cwd = resolve('relative-lane');
+    const args = buildContainerRunArgs({ command: 'true', cwd: 'relative-lane', nodeModulesVolume: 'my-vol' });
+    expect(args[args.indexOf('--volume') + 1]).toBe(`${cwd}:${cwd}:rw`);
+    expect(args[args.indexOf('-w') + 1]).toBe(cwd);
+    expect(args).toContain(`my-vol:${join(cwd, 'node_modules')}`);
+  });
+
   it('mounts the checkout rw at its own absolute path, sets -w, caps cpus/memory, runs via sh -c', () => {
     const args = buildContainerRunArgs({ command: 'node scripts/check-standards.mjs', cwd: '/lane', cpus: 3, memory: '3g', image: 'img:tag' });
     expect(args).toEqual([
@@ -98,6 +106,20 @@ describe('buildContainerRunArgs — the exact mount shape proven manually while 
 });
 
 describe('execContainerized — the exec seam heavy-admission.mjs#runUnderAdmission injects', () => {
+  it('resolves a relative cwd before path lookups and the container mount argv', () => {
+    const calls = [];
+    const roots = [];
+    const cwd = resolve('relative-lane');
+    execContainerized('true', {
+      cwd: 'relative-lane', env: {},
+      execFile: (bin, argv) => calls.push({ bin, argv }),
+      readAlternates: (root) => { roots.push(root); return null; },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].argv[calls[0].argv.indexOf('--volume') + 1]).toBe(`${cwd}:${cwd}:rw`);
+    expect(roots).toEqual([cwd]);
+  });
+
   it('resolves the alternates root for cwd, builds the argv, and shells out to the container binary with inherited stdio', () => {
     const calls = [];
     const execFile = (bin, argv, o) => calls.push({ bin, argv, opts: o });
@@ -118,6 +140,15 @@ describe('execContainerized — the exec seam heavy-admission.mjs#runUnderAdmiss
 });
 
 describe('containerCliAvailable / containerImageAvailable — presence probes, injectable', () => {
+  it('requires the exact image name and tag, defaulting an omitted tag to latest', () => {
+    const listing = 'NAME    TAG   DIGEST\nfoo-extended  latest  abc123\n';
+    expect(containerImageAvailable('foo', () => listing)).toBe(false);
+    expect(containerImageAvailable('foo:latest', () => listing)).toBe(false);
+    expect(containerImageAvailable('foo-extended:latest', () => listing)).toBe(true);
+    expect(containerImageAvailable('foo:latest', () => 'NAME TAG DIGEST\nfoo latest-extra def456\n')).toBe(false);
+    expect(containerImageAvailable('foo', () => 'NAME TAG DIGEST\nfoo latest abc123\n')).toBe(true);
+  });
+
   it('reports true when the probe succeeds, false when it throws', () => {
     expect(containerCliAvailable(() => 'container CLI version 1.3.1')).toBe(true);
     expect(containerCliAvailable(() => { throw new Error('not found'); })).toBe(false);
