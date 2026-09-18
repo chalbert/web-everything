@@ -2,10 +2,11 @@
 kind: story
 size: 5
 parent: "1585"
-status: active
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-22"
 dateStarted: "2026-09-15"
+dateResolved: "2026-09-18"
 preparedDate: "2026-08-15"
 tags: []
 scope:
