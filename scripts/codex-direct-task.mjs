@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+/* ==================== FOREGROUND ONLY ====================
+ * This script is SYNCHRONOUS: it blocks until the delegated Codex task actually completes.
+ * Invoke it as a normal FOREGROUND Bash call. NEVER use run_in_background: true.
+ * NEVER wrap it in Monitor or a nested wait — there is nothing to watch;
+ * the call itself already returns the final result when it finishes.
+ * ========================================================= */
 /**
  * codex-direct-task.mjs — a PERSONAL, manually-invoked escape hatch: delegate one real coding task to Codex
  * CLI's agentic (tool-bearing) mode, for a Claude Code operator whose own usage is running low.

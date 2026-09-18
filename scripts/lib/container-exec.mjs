@@ -83,7 +83,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 /** The image this POC proved `check:standards` against — `node:22-alpine` plus `git` (alpine's base image
  *  ships no git at all, and `check-standards.mjs` shells out to it for its provenance/surface-classifier
@@ -203,6 +203,8 @@ export function buildContainerRunArgs({
   command, cwd, alternatesPrimaryRoot = null, nodeModulesVolume = null, extraReadOnlyMounts = [],
   image = DEFAULT_CONTAINER_IMAGE, cpus = DEFAULT_CONTAINER_CPUS, memory = DEFAULT_CONTAINER_MEMORY,
 }) {
+  // Direct callers may supply a relative checkout; bind mounts and guest paths must be absolute.
+  cwd = resolve(cwd);
   const args = ['run', '--rm', '--cpus', String(cpus), '--memory', String(memory)];
   args.push('--volume', `${cwd}:${cwd}:rw`);
   if (alternatesPrimaryRoot) args.push('--volume', `${alternatesPrimaryRoot}:${alternatesPrimaryRoot}:ro`);
@@ -246,7 +248,8 @@ export function buildContainerRunArgs({
  * @param {(path:string)=>boolean} [opts.exists]  defaults to a real `existsSync` — injectable for tests
  */
 export function execContainerized(command, opts = {}) {
-  const cwd = opts.cwd || process.cwd();
+  // Resolve before deriving sibling/alternates paths as well as the checkout mount.
+  const cwd = resolve(opts.cwd || process.cwd());
   const env = opts.env || process.env;
   const execFile = opts.execFile || ((bin, argv, o) => execFileSync(bin, argv, o));
   const readAlternates = opts.readAlternates || readAlternatesPrimaryRoot;
@@ -281,7 +284,15 @@ export function containerCliAvailable(execFile = (bin, argv, o) => execFileSync(
 export function containerImageAvailable(image = DEFAULT_CONTAINER_IMAGE, execFile = (bin, argv, o) => execFileSync(bin, argv, o)) {
   try {
     const out = execFile('container', ['image', 'list'], { stdio: ['ignore', 'pipe', 'ignore'] });
-    return String(out).split('\n').some((line) => line.trim().startsWith(image.split(':')[0]) && line.includes(image.split(':')[1] || 'latest'));
+    // The listing has separate NAME and TAG columns; prefixes and tag substrings are different images.
+    const tagIndex = image.lastIndexOf(':');
+    const hasTag = tagIndex > image.lastIndexOf('/');
+    const name = hasTag ? image.slice(0, tagIndex) : image;
+    const tag = (hasTag ? image.slice(tagIndex + 1) : '') || 'latest';
+    return String(out).split('\n').some((line) => {
+      const [listedName, listedTag] = line.trim().split(/\s+/);
+      return listedName === name && listedTag === tag;
+    });
   } catch { return false; }
 }
 
