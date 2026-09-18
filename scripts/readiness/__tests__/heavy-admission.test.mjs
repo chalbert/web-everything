@@ -6,9 +6,10 @@
  *   discipline of proving the atomic fs layer for real, not just its pure decision logic).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   DEFAULT_ADMISSION_CAP, DEFAULT_TIMEOUT_MS, ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, slotPath,
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
@@ -23,6 +24,22 @@ const iso = (ms) => new Date(ms).toISOString();
 let lockRoot;
 beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'heavy-admission-test-')); });
 afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+describe('CLI relative --repo', () => {
+  it('resolves the repo before deriving the shared admission root and owner', () => {
+    const repo = join(lockRoot, '.lanes', 'test-pool', 'lane-1');
+    mkdirSync(repo, { recursive: true });
+    const env = { ...process.env };
+    delete env.LANE_POOL_ROOT;
+    execFileSync(process.execPath, [
+      resolve('scripts/readiness/heavy-admission.mjs'),
+      'acquire', '--repo=.', '--cap=1', '--json',
+    ], { cwd: repo, env, encoding: 'utf8' });
+    const held = heldSlots({ lockRoot: join(lockRoot, '.lanes', '.admission', 'heavy'), cap: 1 });
+    expect(held).toHaveLength(1);
+    expect(held[0].owner).toBe(realpathSync(repo));
+  });
+});
 
 describe('resolveCap — env override, clamped sane', () => {
   it('defaults when unset', () => expect(resolveCap({})).toBe(DEFAULT_ADMISSION_CAP));

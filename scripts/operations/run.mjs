@@ -45,10 +45,13 @@ import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
 import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
 import { createPrReconcileReader } from './pr-status-io.mjs';
+import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
+import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
+import { dispatchEligibilityOperation, DISPATCH_ELIGIBILITY_OP } from './dispatch-eligibility.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
@@ -175,6 +178,10 @@ export const OPERATIONS = Object.freeze({
     declaration: prReconcileOperation({ readPrs: createPrReconcileReader() }),
     sinks: {},
   }),
+  [RUNNER_ACTIVITY_OP]: () => ({
+    declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
   [GATE_HEALTH_OP]: () => ({
     declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
     sinks: {},
@@ -195,6 +202,12 @@ export const OPERATIONS = Object.freeze({
   // #3037 — the first operation whose effect STARTS work instead of finishing it. Its one sink launches a
   // delivery agent and returns an in-flight marker; the matching OBSERVER is registered by the waker
   // (`we:scripts/operations/wake.mjs`), which is the process that polls it. Both live in `dispatch-lane-io.mjs`.
+  [DISPATCH_ELIGIBILITY_OP]: () => ({
+    declaration: dispatchEligibilityOperation({
+      readTick: createTickReader({ recordLiveness: (stamped) => stamped }),
+    }),
+    sinks: {},
+  }),
   [DISPATCH_LANE_OP]: () => ({
     declaration: dispatchLaneOperation({ readTick: createTickReader() }),
     // `WE_DISPATCH_AGENT_ARGS` is read HERE rather than defaulted inside the sink: the permission mode, the
@@ -338,15 +351,19 @@ if (IS_CLI) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
   }
+  // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
+  const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores() : {
+    store: createFileRunStore(), callLog: createFileCallLogStore(),
+  };
   runOperationCli({
     declaration,
     argv: rest,
     registry,
-    store: createFileRunStore(),
+    store: cliStores.store,
     // #3451 — the real, file-backed call-visibility signal. A compute-only operation (gate-health,
     // suggest-next, verify, pr-status) settles in one `driveRun` sweep and never gets a run record; this
     // is the ONLY trace a real CLI invocation of one of those leaves behind.
-    callLog: createFileCallLogStore(),
+    callLog: cliStores.callLog,
     sinks,
     // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
     // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot
