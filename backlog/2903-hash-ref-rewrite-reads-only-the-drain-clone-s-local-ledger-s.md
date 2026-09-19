@@ -2,8 +2,9 @@
 bornAs: x0dk81c
 kind: story
 size: 3
-status: open
+status: active
 dateOpened: "2026-08-03"
+dateStarted: "2026-09-19"
 tags: [drain, jit-numbering, cross-clone, backlog-state]
 relatedTo: ["2288", "2392", "2428"]
 scope:
@@ -124,3 +125,26 @@ rewrite path consult the cross-clone record that already exists.
 Surfaced by a red-team of a rejected proposal to reserve numbers early (the red team correctly killed
 that proposal; this gap was found while tracing why it was unnecessary). Not yet observed in the wild
 — filed from the code path, so A4's audit is what would confirm or clear real damage.
+
+## Implementation audit — 2026-09-19
+
+Audited the available `origin/main` tree at `8b7ca6ed0` (2026-09-19), including all Markdown
+under `backlog/` and `docs/agent/`: 1,272 landed birth hashes, 17 surviving occurrences outside
+`bornAs:` lines on 13 lines. Remote freshness could not be verified: fetch was denied by the
+sandbox and the read-only remote lookup failed DNS resolution.
+
+- Repaired **7 live reference occurrences on 4 lines**: six citations in #3369 (three pairs
+  pointing to #3367 and #3366), plus #3383's stale backlog filename pattern pointing to #3434.
+- Preserved **10 historical/prose/quoted occurrences on 9 lines**: #2412's historical id alias;
+  #2899 and this card's quoted table value; #2910's birth-hash evidence; #3383's explicit birth
+  record; the two hashes in #3580's faithful quotation of #3369; #3652's historical branch name;
+  #3663's birth-hash identifier; and the platform-decisions lineage birth record.
+- Rechecked all four original candidates: #2692's convergence-loop pointer already resolves
+  to #2685; #2431's resolutionNote already contains its numeric id; #2428's deliberately quoted
+  examples already contain numeric ids; #2899 still quotes its original birth hash as table prose.
+  None of these four requires a further edit.
+
+The new regression numbers the blocker in clone A, then numbers a dependent in clone B with
+an empty ledger, resolving its references through `origin/main` while retaining quoted evidence.
+Unresolved references are returned and warned as either visibly `in-flight` or `unresolvable`;
+the latter is potentially dead, not a claim that unfetched work cannot exist.

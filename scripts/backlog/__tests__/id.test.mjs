@@ -7,7 +7,7 @@
  * case where a dependent references an already-numbered blocker by its old hash).
  */
 import { describe, it, expect } from 'vitest';
-import { HASH_RE, BORN_AS_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger, stampBornAs, swapHashes } from '../id.mjs';
+import { HASH_RE, BORN_AS_RE, ID_TOKEN_RE, isHash, isNum, idFromName, slugFromName, normalizeId, nextHash, applyLedger, stampBornAs, swapHashes, mapHashReferences } from '../id.mjs';
 
 describe('id token parsing (#2288)', () => {
   it('idFromName reads a numeric NNN or an xNNNNNN hash off a stem/ref', () => {
@@ -233,5 +233,26 @@ describe('bornAs proof-of-land (#2392)', () => {
     expect(beta).toContain('bornAs: x7k2q9a');       // birth hash SURVIVES numbering (the fix)
     expect(beta).not.toContain('bornAs: 2314');       // never clobbered to its assigned NNN
     expect(beta).toContain('blockedBy: ["2301"]');    // every OTHER hash ref still rewritten
+  });
+});
+
+describe('cross-clone reference syntax (#2903)', () => {
+  it('visits flow/block refs and body pointers while preserving birth records and quoted evidence', () => {
+    const source = [
+      '---', 'bornAs: xblkr01', 'parent: xblkr01', 'blockedBy:', '  - xblkr01',
+      'relatedTo: ["xblkr01"]', 'resolutionNote: "commit #xblkr01"', '---',
+      'See #xblkr01 and `backlog/xblkr01-blocker.md`.', '| bornAs | `xblkr01` |',
+      '```md', 'Example #xblkr01', '```', 'See /backlog/xblkr01/.',
+    ].join('\n');
+    const result = mapHashReferences(source, () => '2201');
+    expect(result).toContain('bornAs: xblkr01');
+    expect(result).toContain('parent: 2201');
+    expect(result).toContain('blockedBy:\n  - 2201');
+    expect(result).toContain('relatedTo: ["2201"]');
+    expect(result).toContain('resolutionNote: "commit #xblkr01"');
+    expect(result).toContain('See #2201 and `backlog/2201-blocker.md`.');
+    expect(result).toContain('| bornAs | `xblkr01` |');
+    expect(result).toContain('Example #xblkr01');
+    expect(result).toContain('See /backlog/2201/.');
   });
 });
