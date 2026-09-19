@@ -15,7 +15,7 @@ tags: [operations, dispatch, multi-provider, model-routing, cost]
 
 we:agent-memory-src/always-set-subagent-model-explicitly.md makes an explicit, right-sized model mandatory on
 every Claude spawn, but the Codex provider (we:scripts/lib/codex-judge-spawn.mjs, in flight on
-`origin/lane/xqa9ttq-review-pr-codex-advisory-seat`, not yet on `main`) pushes `-m` only `if (model !==
+`origin/lane/3704-review-pr-codex-advisory-seat`, not yet on `main`) pushes `-m` only `if (model !==
 undefined)` and no caller supplies one — so every Codex run today silently inherits the CLI default, measured
 live as `gpt-6-astra`, the top rung. This decides whether Codex gets its own pinned ladder and what maps to
 what, on measured evidence rather than name similarity. **Headline finding: the Claude-style three-rung
@@ -262,8 +262,8 @@ first. Implemented as `collectAndClearRolloutQuota` in we:scripts/codex-direct-t
 
 **Implementation note (scope discrepancy, recorded rather than silently resolved).** This card's `scope`
 names we:scripts/lib/codex-judge-spawn.mjs as the file whose `-m`/`--ephemeral` handling motivated this
-decision — that file is real (`#xqa9ttq`, its own header explicitly discusses hardcoding `--ephemeral` and a
-local `CODEX_EFFORT_MAP` copy) but lives only on the unmerged `origin/lane/xqa9ttq-review-pr-codex-advisory-
+decision — that file is real (`#3704`, its own header explicitly discusses hardcoding `--ephemeral` and a
+local `CODEX_EFFORT_MAP` copy) but lives only on the unmerged `origin/lane/3704-review-pr-codex-advisory-
 seat` branch as of this ratification's landing, not on `main` or this lane. The ratified constants
 (`CODEX_MODEL`, `CODEX_TIER_EFFORT`, `resolveCodexEffort`) and the quota mechanism
 (`collectAndClearRolloutQuota`/`readRolloutQuota`/`findRolloutFile`/`parseRolloutQuota`) are implemented on

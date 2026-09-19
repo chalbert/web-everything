@@ -372,6 +372,11 @@ Report the verdict and the run id.
  * @param {Function} [o.spawnFn] - injectable `child_process.spawn`, for tests.
  * @param {Function} [o.execFn] - injectable `child_process.spawnSync`, for `gh`/lane-pool/git calls.
  * @param {(msg:string)=>void} [o.emit] - progress line sink; defaults to a no-op (the caller decides how to surface it).
+ * @param {string[]} o.disallowedTools - REQUIRED, non-empty. `Bash(<prefix>:*)`-shaped deny patterns baked into
+ *   the spawned session's own argv via `--disallowedTools`. No default: this function has no live caller today
+ *   and must never get one without a caller-chosen, role-appropriate list — see the guard inside the function
+ *   body for the full reasoning (it is NOT `review-dispatch.mjs`'s list; that one would break this function's
+ *   own FIX/CI_HEAL/REVIEW roles).
  * @returns {Promise<string>} a status string: `'ok'` / `'no-op (...)'` / `'unverified (...)'` / `'exit<N>'` /
  *   `'timeout(work stashed)'` / `'skipped (<STATE>)'`.
  */
@@ -379,7 +384,33 @@ export async function runAgent({
   prompt, lane, tag, timeoutMs = DEFAULT_AGENT_TIMEOUT_MS, verify,
   repo = REPO, lanesDir = LANES, scratchDir = SCRATCH,
   spawnFn = nodeSpawn, execFn = spawnSync, emit = () => {},
+  disallowedTools,
 }) {
+  // GUARD (2026-09-19): this function hardcodes `--permission-mode bypassPermissions` below with the caller's
+  // full trust — no sandbox, no lane-scoped restriction of its own. It has NO LIVE CALLER TODAY (see this
+  // file's own header: the `converge()` state machine / `PLAN`/`main()` driver is explicitly future work), and
+  // it MUST NEVER get one without an explicit, role-appropriate tool deny list — the standing lesson in
+  // `we:agent-memory-src/scoped-approval-beats-global-bypass.md` (a scoped deny-list beats a global bypass) and
+  // the worked precedent in `we:scripts/operations/review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS`.
+  // DO NOT default this to that list or import it: this function serves THREE different roles (see
+  // `buildFixPrompt`/`buildCiHealPrompt`/`buildReviewPrompt` in this file) with different legitimate `gh`/
+  // `run.mjs` needs — the FIX role calls `gh pr edit --title`, CI_HEAL calls `gh pr checks`/`gh run view`/`gh
+  // run rerun`, and the REVIEW role calls `node scripts/operations/run.mjs review-pr ... --answer=<verdict>` as
+  // ITS OWN sanctioned mechanism — `review-dispatch.mjs`'s wholesale `gh:*`/`run.mjs:*` ban would break every
+  // one of them. Whoever wires a live caller must design a per-role list; this guard only makes skipping that
+  // step impossible.
+  if (
+    !Array.isArray(disallowedTools) || disallowedTools.length === 0
+    || disallowedTools.some((t) => typeof t !== 'string' || !t.trim())
+  ) {
+    throw new TypeError(
+      'runAgent: `disallowedTools` is REQUIRED — a non-empty array of `Bash(<prefix>:*)`-shaped deny patterns '
+      + '(the same shape `we:.claude/settings.json` and `we:scripts/operations/review-dispatch.mjs#'
+      + 'REVIEW_DISPATCH_DISALLOWED_TOOLS` use). This spawns `claude -p --permission-mode bypassPermissions` '
+      + 'with full trust and no sandbox; refusing to do that with zero tool restriction. See this function\'s '
+      + 'own comment for why the list must be role-specific, not copied from review-dispatch.mjs.',
+    );
+  }
   const prId = tag.split('-')[0];
   if (/^\d+$/.test(prId)) {
     const st = execFn('gh', ['pr', 'view', prId, '--json', 'state', '--jq', '.state'],
@@ -398,7 +429,11 @@ export async function runAgent({
   const logFd = openSync(logPath, 'w');
   let child;
   try {
-    child = spawnFn('claude', ['-p', '--permission-mode', 'bypassPermissions', prompt], {
+    child = spawnFn('claude', [
+      '-p', '--permission-mode', 'bypassPermissions',
+      `--disallowedTools=${disallowedTools.join(',')}`,
+      prompt,
+    ], {
       cwd: lanePath, stdio: ['ignore', logFd, logFd], detached: true,
     });
     writeFileSync(claimPath, JSON.stringify({
