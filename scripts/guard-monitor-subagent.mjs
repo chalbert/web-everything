@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * PreToolUse(Monitor) guard: ask before a subagent starts a background watch.
+ * PreToolUse(Monitor) guard: deny subagent background watches with foreground guidance.
+ * An "ask" decision is unreliable in non-interactive contexts and may require an unavailable
+ * human to answer for a background subagent; denial resolves synchronously without a prompt.
  * Defense in depth for SubagentStop events that may not fire. Main-session watches are allowed.
- * Input: hook JSON on stdin. Output: an ask decision, or nothing. Read/parse errors fail OPEN.
+ * Input: hook JSON on stdin. Output: a deny decision, or nothing. Read/parse errors fail OPEN.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +16,8 @@ export function decide(event) {
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      permissionDecision: 'ask',
-      permissionDecisionReason: "Ending this subagent's turn after starting a Monitor watch will not reliably deliver a wake-up notification. Per the pinned rule in root CLAUDE.md, block or poll in the foreground within this turn instead; do not end the turn assuming a background process will wake you. Confirm that Monitor is appropriate before starting this watch.",
+      permissionDecision: 'deny',
+      permissionDecisionReason: "Monitor is denied for subagents: its 'started' acknowledgment does not ensure a completion notification will reach you. Per the pinned rule in root CLAUDE.md, run the gating check as a synchronous foreground command within this turn (for example, until <condition>; do sleep N; done). Do not end the turn assuming a background watch will wake you.",
     },
   };
 }

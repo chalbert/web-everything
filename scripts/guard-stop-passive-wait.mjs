@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Stop/SubagentStop guard (#3383): passive-wait prose AND an unresolved background Bash call
- * (or an unresolved Monitor call for SubagentStop only).
+ * (or any Monitor call for SubagentStop only).
  * Language alone never blocks; harness-tracked Agent/Task calls are excluded. A returned Bash
  * tool_result (including a background-launch acknowledgement) is resolved for this narrow guard;
- * Monitor uses the same tool_use/tool_result pairing, without guessing process liveness or targets.
+ * Monitor immediately acknowledges its start, so pairing does not prove watched-task completion
+ * or notification delivery. Its occurrence plus passive final-message language is the signal.
  * Main-session Stop permits Monitor watches; Agent/Task remain excluded for both events.
  *
  * Read only the supplied agent's transcript, at most 2 MB from its end, following agent-health.mjs's
@@ -28,9 +29,18 @@ export function findUnresolvedBackgroundedBash(transcriptEntries) {
     (block) => block.name === 'Bash' && block.input?.run_in_background === true);
 }
 
-/** Monitor is inherently a background watch; any unmatched call counts. Pure. */
-export function findUnresolvedMonitor(transcriptEntries) {
-  return findUnresolvedToolUse(transcriptEntries, (block) => block.name === 'Monitor');
+/** Monitor's immediate "started" result is not completion; find any call regardless of pairing. Pure. */
+export function findAnyMonitorCall(transcriptEntries) {
+  if (!Array.isArray(transcriptEntries)) return null;
+  for (const entry of transcriptEntries) {
+    const content = entry?.message?.content;
+    if (entry?.type !== 'assistant' || !Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block?.type === 'tool_use' && block.name === 'Monitor' &&
+          typeof block.id === 'string' && block.id) return block;
+    }
+  }
+  return null;
 }
 
 function findUnresolvedToolUse(transcriptEntries, matches) {
@@ -54,10 +64,12 @@ function findUnresolvedToolUse(transcriptEntries, matches) {
 export function shouldBlockStop({ lastAssistantText, transcriptEntries, stopHookActive, hookEventName } = {}) {
   if (stopHookActive === true || !hasPassiveWaitLanguage(lastAssistantText)) return null;
   const pending = findUnresolvedBackgroundedBash(transcriptEntries) ||
-    (hookEventName === 'SubagentStop' && findUnresolvedMonitor(transcriptEntries));
+    (hookEventName === 'SubagentStop' && findAnyMonitorCall(transcriptEntries));
   if (!pending) return null;
-  const tool = pending.name === 'Monitor' ? 'Monitor' : 'background Bash';
-  return `Passive waiting cannot finish this task: your transcript still has an unresolved ${tool} call. Check its status/output directly and wait or poll within this turn; do not assume a notification will arrive. Report a concrete blocker if you cannot continue.`;
+  const evidence = pending.name === 'Monitor'
+    ? 'your transcript shows a Monitor call; its "started" acknowledgment does not prove the watched task is done or that a notification will reach you'
+    : 'your transcript still has an unresolved background Bash call';
+  return `Passive waiting cannot finish this task: ${evidence}. Check its status/output directly and wait or poll within this turn; do not assume a notification will arrive. Report a concrete blocker if you cannot continue.`;
 }
 
 /** Bounded IO, no full-file read. Drop the potentially partial first line; reject all other parse errors. */

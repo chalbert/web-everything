@@ -69,9 +69,10 @@ applies to every "does it work / why is it broken" moment, not just to written t
 
 Test Stop/SubagentStop with distinct parent and subagent JSONL files: SubagentStop prefers
 `agent_transcript_path`, falling back to `transcript_path` only when absent; an unreadable or malformed
-selected file fails open. Keep Monitor cases event-specific: an unmatched Monitor plus passive-wait
-language blocks SubagentStop, while Stop permits it. Agent/Task remain excluded for both events.
-The PreToolUse Monitor guard asks only when `agent_id` identifies a subagent and leaves main-session
+selected file fails open. Keep Monitor cases event-specific: any Monitor call plus passive-wait
+language blocks SubagentStop, even with its immediate "started" result, while Stop permits it.
+Agent/Task remain excluded for both events.
+The PreToolUse Monitor guard denies only when `agent_id` identifies a subagent and leaves main-session
 watches alone. Exercise each script through stdin as well as its pure decision functions; these
 probes verify local decisions and wiring, not whether the upstream harness fires every hook.
 
