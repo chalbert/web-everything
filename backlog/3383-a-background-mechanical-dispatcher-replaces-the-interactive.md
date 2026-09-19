@@ -3134,20 +3134,19 @@ reclassification override on its own facts.
 ## Session update (2026-09-14) — PR #2206's own independent jury review OWED 6 findings, filed; and its care-level shortfall confirms an existing open gap, not a new one
 
 `PR #2206` (`readiness: heavy-command-pool container POC`, the `#3621`-sequenced slice recorded above) passed
-independent jury review with `review:accepted` / `ready-to-merge`, still `OPEN` as of this entry (not yet
-drained onto `main`). Its verdict
+independent jury review with `review:accepted` / `ready-to-merge` and has since merged to `main`
+(2026-09-14). Its verdict
 (`we:.operations/review/review-pr-744615b3-.../chalbert-web-everything-2206-verdict.md`) marked 6 non-blocking
 findings `OWED — file it`, all `_[CONFIRMED]_`:
 
-- **Filed as `we:backlog/xt20eug-...md`** (size 3) — three real correctness bugs in
-  `we:scripts/lib/container-exec.mjs`: `execContainerized` spreads the whole caller `opts` bag (including
-  `opts.env`) into the real `execFileSync` call for the container-launching host process, contradicting its
-  own comment that `env` is not passed into the container; the same function passes a relative `opts.cwd`
-  straight into the `--volume` mount argv without resolving it to an absolute path first, which the container
-  CLI requires; and `containerImageAvailable` does prefix/substring image-name matching (`startsWith`/
-  `includes`) instead of an exact `image:tag` match, so a similarly-named image can wrongly pass availability.
-  The last one was independently caught by two separate jurors at what is the same call site, not two bugs —
-  confirmed by reading the function directly before filing, rather than filing it twice.
+- **Filed as `we:backlog/xt20eug-...md`** (now size 1) — three correctness findings in
+  `we:scripts/lib/container-exec.mjs` were reported; re-checked against current `main`, only ONE is still
+  live. `execContainerized` still spreads the whole caller `opts` bag (including `opts.env`) into the real
+  `execFileSync` call for the container-launching host process, contradicting its own comment that `env` is
+  not passed into the container. The other two are already fixed on `main` by `ad471675e`, with regression
+  tests: the relative `opts.cwd` now resolves to an absolute path before the `--volume` mount argv is built,
+  and `containerImageAvailable` now matches the NAME and TAG columns of the image listing exactly instead of
+  prefix/substring matching (that last one was caught by two jurors at the same call site, one bug not two).
 - **Filed as `we:backlog/xu0gnzj-...md`** (size 2) — `we:scripts/lib/container-exec/Containerfile` pulls its
   base image by mutable tag (`node:22-alpine`), no `@sha256` digest pin, so a later rebuild can silently get a
   different image than the one this POC's own fidelity evidence was measured against.
@@ -3161,16 +3160,16 @@ unlike that precedent, findings 1/3/4/5 here share one file and one root cause c
 
 **The 7th thing the review surfaced was NOT filed as a new item — checked first, and it is already tracked.**
 The verdict recorded PR #2206's care-level scoring as `elevated` (blast-radius + size), for which the dial
-asks 5 lenses; only 5 of the 7 *possible* lenses for a PR at that touch-set (`correctness`, `security`,
-`simplicity`, `codex-correctness`, `antigravity-review`) actually seated, and `standards-conformance` +
-`claim-accuracy` — both real `PANEL_LENSES` members — did not, "because the step list is fixed at
-registration", not anything this run controlled. Before filing this as a new gap, searched `we:backlog/` for
+asks 5 lenses; the verdict reported that `standards-conformance` + `claim-accuracy` — both real
+`PANEL_LENSES` members — did not sit, "because the step list is fixed at registration", not anything this run
+controlled. (The verdict file was not re-read for this entry; do not rely on it for that run's exact seat
+roster.) Before filing this as a new gap, searched `we:backlog/` for
 prior coverage: `#3393` (open, filed 2026-08-29, *"review-pr cannot seat the claim-accuracy lens, because its
 step list is fixed at registration"*) already names this exact structural class, with its own `#3319`
-citation for why. Its opening claim ("exactly two `judge` steps declared") had gone stale — three more named
-seats (`judgeAdvisory`, `codex-correctness`, `judgeAntigravityReview`) were bolted on since it was filed — so
-`#3393` is amended in place with PR #2206 as a fresh confirming instance and the corrected seat count, rather
-than duplicated. **Worth restating plainly for anyone scanning this tracker: this means any `high`- or
+citation for why. Its opening claim ("exactly two `judge` steps declared") was re-checked against current
+`main` and is still accurate (`JUDGE_SEATS` lists `judge` and `judgeSecurity` only), so `#3393` is amended in
+place with PR #2206 as a fresh confirming instance, with no seat-count change, rather than duplicated.
+**Worth restating plainly for anyone scanning this tracker: this means any `high`- or
 `elevated`-care PR can still get fewer lenses than its own dial says it earned, silently, because the record
 only states what ran, not what the touch-set was owed.** `#3393` remains open and unresolved; this entry adds
 evidence, not a fix.

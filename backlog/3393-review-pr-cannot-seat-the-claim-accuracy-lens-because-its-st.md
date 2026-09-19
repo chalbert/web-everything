@@ -69,38 +69,24 @@ owns the engine's registration contract (#3029), not to this card.
    reports a lens set that is not hard-coded to two members.
 3. The run footer stops reporting a STRUCTURAL shortfall for a lens the touch-set earned.
 
-## Confirmed again, still open (2026-09-14) — the opening claim's seat count is now stale; the gap itself is not
+## Confirmed again, still open (2026-09-14) — a second real PR reported the same structural shortfall
 
-**Correction, not a resolve.** This card's opening paragraph says `we:scripts/operations/review-pr.mjs`
-"declares exactly two `judge` steps — `correctness` and `security`". That is no longer accurate: reading the
-live declaration directly (`we:scripts/operations/review-pr.mjs`, current `main`) shows FIVE named seats now
-exist — `judge` (correctness), `judgeSecurity` (#3319), `judgeAdvisory` (`ADVISORY_JUDGE_LENS`, the third
-seat), a `codex-correctness` advisory seat gated by `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY`, and
-`judgeAntigravityReview` (`ANTIGRAVITY_REVIEW_LENS`, the fourth seat, deliberately kept OUT of
-`PANEL_LENSES`/`MANDATORY_LENSES` like the codex-correctness seat). Three more seats were bolted on, one named
-step at a time, exactly the shape this card's own shape-question option (1) describes ("declare all five
-`judge` steps") — except it went past five, into two seats that sit outside `PANEL_LENSES` entirely, and it
-still stopped short: `standards-conformance` and `claim-accuracy`, both real `PANEL_LENSES` members, still
-have no declared step anywhere in the operation.
+**The opening claim is still accurate.** Checked against current `main`: `JUDGE_SEATS` in
+`we:scripts/operations/review-pr.mjs` lists exactly two seats, `judge` (caller-chosen lens, `correctness` in
+practice) and `judgeSecurity`. No third seat, advisory seat, or extra named judge step exists there, so
+`Done when` #1, #2 and #3 above are all still false. This note changes no count on this card.
 
-**Live reproduction, PR #2206 (`readiness: heavy-command-pool container POC`, epic #3383).** An independent
-jury review of that PR (`we:.operations/review/review-pr-744615b3-.../chalbert-web-everything-2206-verdict.md`)
-scored its touch-set care `elevated` (blast-radius + size), which `panelRigorForCareLevel('elevated')` asks 5
-lenses for. Five lenses DID seat — correctness, security, simplicity, codex-correctness, antigravity-review —
-and the verdict recorded the shortfall in the same words this card already uses: *"SHORTFALL: 2 earned
-lens(es) (standards-conformance, claim-accuracy) did not sit... The shortfall is structural — the step list is
-fixed at registration (#3319) — so it is RECORDED here rather than implied away."* Same failure class this
-card names, on a real PR, five weeks after this card was filed and still open. Filed as a fresh confirming
-instance rather than a new card — checked `we:backlog/` for anything else covering this shape first; nothing
-else does. `we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md` carries a short
-session-log pointer to this note for anyone scanning the epic.
+**Fresh evidence, PR #2206 (`readiness: heavy-command-pool container POC`, epic #3383).** The independent jury
+review of that PR scored its touch-set care `elevated` (blast-radius + size). Its verdict recorded the same
+failure class this card names: the earned lenses `standards-conformance` and `claim-accuracy` did not sit,
+because *"the step list is fixed at registration (#3319)"*, and the run stated that shortfall rather than
+implying it away. That is a second real PR, weeks after this card was filed, where a lens the touch-set earned
+had no declared step to run in. (The verdict file was not re-read for this note; only the shortfall wording is
+carried over. Do not rely on this note for that run's exact seat roster.)
 
 **Why this still matters beyond one PR.** The caller declared no `--careLevel` on that run, so nothing checked
-the seated shape against what the touch-set earned (`#3335`'s own declared-shape check only refuses an
-UNDER-declaration; it does not add a seat). Any PR whose derived care level asks for more than the five
-ad-hoc-named seats that exist today — in particular anything that earns `standards-conformance` or
-`claim-accuracy` specifically, which is exactly the class `claim-accuracy` was built to catch (see the PR
-#1680 evidence above) — gets a lighter review than its own care dial says it should, silently, because the
-record only states what ran, never that the run fell short of what was earned. This card's `Done when` #2 is
-now arguably true in letter (five hard-coded seats, not two) but not in spirit: the count grew ad hoc, not
-because #3393 shipped, and #1 and #3 remain false. Not resolved by this note.
+the seated shape against what the touch-set earned (`#3335`'s declared-shape check only refuses an
+UNDER-declaration; it does not add a seat). Any PR whose care level asks for `standards-conformance` or
+`claim-accuracy` gets a lighter review than its own care dial says it should, silently, because the record
+only states what ran. `claim-accuracy` is the lens built for this class (see the PR #1680 evidence above).
+Not resolved by this note.
