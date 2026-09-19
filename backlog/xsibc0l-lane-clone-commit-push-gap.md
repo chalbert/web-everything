@@ -1,5 +1,5 @@
 ---
-kind: task
+kind: decision
 status: open
 dateOpened: "2026-09-18"
 tags:
@@ -8,9 +8,6 @@ tags:
   - commit-durability
   - git-workflow
   - push-gap
-crossRef:
-  url: "#2308"
-  label: "PR #2308"
 ---
 
 # Lane-clone commit push gap
@@ -29,13 +26,13 @@ This is distinct from a false success report (the commit is real, not fabricated
 
 1. **Tracker note append.** An agent was dispatched to append a tracker note. It reported success. The append was confirmed real (not a false report), but only existed in the lane clone's working tree. A second pass discovered the unpushed state, confirmed the work was genuine but unmerged, and re-applied it.
 
-2. **Decision item `xjlc4y3`.** An agent claimed and worked a decision item in lane-58. The item was committed (commit `aea2e38c0`), but the branch was never pushed. The commit existed only in the lane clone. A follow-up investigation found the unpushed branch, confirmed the work was real, and re-filed the item as [we:#2308](../pull/2308).
+2. **Decision item `xjlc4y3`.** An agent claimed and worked a decision item in lane-58. The item was committed (commit `aea2e38c0`), but the branch was never pushed. The commit existed only in the lane clone. A follow-up investigation found the unpushed branch, confirmed the work was real, and re-filed the item as [PR #2308](https://github.com/chalbert/web-everything/pull/2308).
 
 ### Proposed investigation angles
 
 **Not a ruling, but concrete angles to explore:**
 
-- **Lane-lifecycle guard (pattern: [we:#2304](../pull/2304) passive-wait Stop hook).** When a lane is being released/abandoned, should the lane-release path warn or block if the lane has local commits ahead of its remote tracking branch? This would catch the gap at abandonment time — force the agent/human to either push or explicitly acknowledge dropped commits.
+- **Lane-lifecycle guard (pattern: [PR #2304](https://github.com/chalbert/web-everything/pull/2304) passive-wait Stop hook).** When a lane is being released/abandoned, should the lane-release path warn or block if the lane has local commits ahead of its remote tracking branch? This would catch the gap at abandonment time — force the agent/human to either push or explicitly acknowledge dropped commits.
 
 - **Task-completion contract.** Should the standard pattern for any lane-clone edit task explicitly require confirming a real `git push` or PR open before reporting success? The codebase already treats "backgrounded and forgotten" as a violation (see [we:CLAUDE.md](../CLAUDE.md) pinned rule); this would extend that: "committed but unpushed" is similarly incomplete and should not mark the task done.
 
