@@ -666,6 +666,47 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
   it('denies a gsed in-place write into backlog|reports, matching sed (#2108 review r3 coverage gap)', () => {
     denied('gsed -i s/x/y/ backlog/2200-a.md');
   });
+
+  // PR #2108 review finding (backlog#x7k9gep follow-up): perl script text open() writes into backlog|reports
+  it('denies a perl script text open() write into backlog|reports (#2108 review finding)', () => {
+    denied('perl -e \'open(F, ">", "backlog/x.md"); print F "x"\'');
+    denied('perl -e \'open(my $fh, ">>", "reports/r.md") or die; print $fh 1\'');
+    denied('perl -e \'open(F, ">backlog/x.md"); print F 1\'');
+    denied("perl -e \"open F, '>>backlog/x.md'\"");
+    denied('perl -E \'open(F, ">:utf8", "backlog/x.md")\'');
+  });
+
+  it('does NOT deny a perl script that opens for read or merely mentions a backlog|reports path (#2108 review finding)', () => {
+    allowed('perl -e \'open(F, "<", "backlog/x.md"); print <F>\'');
+    allowed('perl -e \'open(F, "backlog/x.md")\'');
+    allowed('perl -e \'print "backlog/x.md"\'');
+    allowed('perl -ne \'print\' backlog/1.md');
+    allowed('perl -e \'open(F, ">", "/tmp/x.txt")\'');
+  });
+
+  it('denies perl -ne and -lane scripts opening backlog|reports for write', () => {
+    denied("perl -ne 'open(O, \">>\", \"backlog/x.md\"); print O $_' in.txt");
+    denied("perl -lane 'open(O, \">\", \"reports/r.md\")' in.txt");
+  });
+
+  it('allows a perl script file or a loop flag without in-place write mentioning backlog', () => {
+    allowed('perl backlog/1.md');
+    allowed("perl -pe 's/x/y/' backlog/1.md");
+  });
+
+  it('fileWriteTargets extracts literal paths from perl open() and returns empty for reads/mentions', () => {
+    expect(fileWriteTargets('perl -e \'open(F, ">", "backlog/x.md"); print F "x"\'')).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets('perl -e \'open(my $fh, ">>", "reports/r.md") or die; print $fh 1\'')).toEqual(['reports/r.md']);
+    expect(fileWriteTargets('perl -e \'open(F, ">backlog/x.md"); print F 1\'')).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets("perl -e \"open F, '>>backlog/x.md'\"")).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets('perl -E \'open(F, ">:utf8", "backlog/x.md")\'')).toEqual(['backlog/x.md']);
+
+    expect(fileWriteTargets('perl -e \'open(F, "<", "backlog/x.md"); print <F>\'')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'open(F, "backlog/x.md")\'')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'print "backlog/x.md"\'')).toEqual([]);
+    expect(fileWriteTargets('perl -ne \'print\' backlog/1.md')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'open(F, ">", "/tmp/x.txt")\'')).toEqual(['/tmp/x.txt']);
+  });
 });
 
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {

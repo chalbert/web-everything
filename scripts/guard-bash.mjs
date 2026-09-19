@@ -1370,6 +1370,48 @@ function sedWriteTargets(scriptText) {
   return out;
 }
 
+/** 3-arg perl open: open(FH, MODE, PATH) or open FH, MODE, PATH, where MODE is a quoted literal starting
+ *  with `>`, `>>`, `+>`, `+>>`, or `+<` (optionally with an encoding layer like `>:utf8`), PATH a quoted literal. */
+const PERL_OPEN_3ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)(?::\S+)?\s*\1\s*,\s*(["'])([^$]*?)\3/g;
+/** 2-arg perl open: open(FH, ">path") / open(FH, ">>path") / open FH, ">> path". Strip leading spaces after mode. */
+const PERL_OPEN_2ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)\s*([^$]*?)\1/g;
+
+/** The string-literal file path(s) a Perl script writes via `open(...)`. Pure.
+ *  Handles 3-arg open(FH, MODE, PATH) and 2-arg open(FH, ">path").
+ *  Only literal paths can be returned; a path from a variable (`$f`), computed paths, or other write primitives
+ *  are out of scope as a known limit. Read modes (`<`, no mode, `-|`) and prints without write opens return nothing. */
+function perlWriteTargets(scriptText) {
+  const out = [];
+  const s = String(scriptText);
+  for (const m of s.matchAll(PERL_OPEN_3ARG)) {
+    const path = m[4].trim();
+    if (path) out.push(path);
+  }
+  for (const m of s.matchAll(PERL_OPEN_2ARG)) {
+    // If followed by a comma after the closing quote, it was the MODE of a 3-arg open, not a 2-arg open.
+    const afterQuote = s.slice(m.index + m[0].length).trimStart();
+    if (afterQuote.startsWith(',')) continue;
+    const path = m[3].trim();
+    if (path) out.push(path);
+  }
+  return out;
+}
+
+/** The perl SCRIPT TEXT(s) a tokenized `args` list passes inline. Pure.
+ *  Takes the argument that follows a single-dash flag cluster ending in `e`/`E` (`-e`, `-E`, `-pe`, `-ne`, `-lane`). */
+function perlScriptTexts(args) {
+  const texts = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.quoted) continue;
+    if (!a.text.startsWith('--') && /^-[A-Za-z]*[eE]$/.test(a.text)) {
+      if (args[i + 1]) { texts.push(args[i + 1].text); i += 1; }
+      continue;
+    }
+  }
+  return texts;
+}
+
 /** The sed/perl SCRIPT TEXT(s) a tokenized `args` list passes INLINE — every `-e`/`--expression` operand, or
  *  (when neither `-e`/`--expression` nor `-f`/`--file` appears at all) the first bare operand, which sed/perl
  *  read as the script itself (`sed 's/x/y/' file`, `sed -n '/pat/p' file`). A `-f`/`--file` script lives in
@@ -1466,15 +1508,14 @@ export function fileWriteTargets(segment) {
   // NO `-i`/`--in-place` — `sed 's/x/y/w backlog/x.md' file` and `sed -n '/pat/w backlog/x.md' file` both
   // genuinely write `backlog/x.md` with no in-place flag anywhere, so the `inPlace`-gated scan above (which
   // only ever reads ARGV FLAGS) misses both entirely. This runs unconditionally — not gated on `inPlace` —
-  // and scans the actual script TEXT via `sedScriptTexts`/`sedWriteTargets` above. Perl has no equivalent
-  // NARROW write directive in its script text — a perl one-liner can only write a file via arbitrary
-  // `open`/`print` code, which is unparseable general-purpose Perl, not a structured directive like sed's
-  // `w` — so this stays sed/gsed-only by design, not an oversight. #2108 review r3 confirmed this is a
-  // real, demonstrated loss of coverage vs. the pre-PR raw-substring scan (which caught a literal
-  // `open(...,">","backlog/x.md")` by accident); tracked as a follow-up rather than fixed here with another
-  // regex, since general Perl write detection needs real parsing — backlog#x7k9gep.
+  // and scans the actual script TEXT via `sedScriptTexts`/`sedWriteTargets` above. Similarly, perl `open()`-with-a-write-mode
+  // literal path is now detected via `perlScriptTexts`/`perlWriteTargets`; computed paths / other write primitives
+  // are a documented limit.
   if (prog === 'sed' || prog === 'gsed') {
     for (const script of sedScriptTexts(args)) out.push(...sedWriteTargets(script));
+  }
+  if (prog === 'perl') {
+    for (const script of perlScriptTexts(args)) out.push(...perlWriteTargets(script));
   }
   if (prog === 'tee') out.push(...fileOperands(args, new Set(['--output-error', '-p'])));
   return out;
