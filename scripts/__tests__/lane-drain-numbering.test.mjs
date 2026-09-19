@@ -101,6 +101,66 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(readFileSync(join(repo, 'backlog/2202-b.md'), 'utf8')).toContain('blockedBy: ["2201"]');
   });
 
+  it('repairs clone B references from clone A bornAs with an empty local ledger (#2903)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xblkr01-blocker.md', '---\nkind: story\n---\n# Blocker\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'blocker lands in clone A');
+    expect(numberPendingHashes(repo).committed).toBe(true);
+    expect(JSON.parse(readFileSync(join(repo, LEDGER_REL), 'utf8'))).toEqual({ xblkr01: '2201' });
+    expect(readFileSync(join(repo, 'backlog/2201-blocker.md'), 'utf8')).toContain('bornAs: xblkr01');
+    const cloneB = mkdtempSync(join(tmpdir(), 'drain-clone-b-'));
+    try {
+      execFileSync('git', ['clone', '-q', repo, cloneB]);
+      const bg = (...args) => execFileSync('git', args, { cwd: cloneB, encoding: 'utf8' });
+      bg('config', 'user.email', 'test@test'); bg('config', 'user.name', 'Test');
+      bg('config', 'commit.gpgsign', 'false');
+      // Pin the shared main tree regardless of the fixture runner's init.defaultBranch.
+      bg('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      writeFileSync(join(cloneB, LEDGER_REL), '{}\n');
+      writeFileSync(join(cloneB, 'backlog/xdep002-dependent.md'),
+        '---\nkind: story\nblockedBy: ["xblkr01"]\nparent: xblkr01\nresolutionNote: "real commit title #xblkr01"\n---\n# Dependent\nSee #xblkr01 and /backlog/xblkr01/.\n| bornAs | `xblkr01` |\n');
+      mkdirSync(join(cloneB, 'docs/agent'), { recursive: true });
+      writeFileSync(join(cloneB, 'docs/agent/rule.md'), 'Build carried by #xblkr01.\n');
+      bg('add', 'backlog', 'docs'); bg('commit', '-qm', 'dependent lands in clone B');
+      const preview = numberPendingHashes(cloneB, { dryRun: true });
+      expect(preview.unresolvedReferences).toEqual([]);
+      expect(JSON.parse(readFileSync(join(cloneB, LEDGER_REL), 'utf8'))).toEqual({});
+      expect(readFileSync(join(cloneB, 'backlog/xdep002-dependent.md'), 'utf8')).toContain('parent: xblkr01');
+      const result = numberPendingHashes(cloneB);
+      expect(result.committed).toBe(true);
+      expect(result.unresolvedReferences).toEqual([]);
+      const dependent = readFileSync(join(cloneB, 'backlog/2202-dependent.md'), 'utf8');
+      expect(dependent).toContain('blockedBy: ["2201"]');
+      expect(dependent).toContain('parent: 2201');
+      expect(dependent).toContain('See #2201 and /backlog/2201/.');
+      expect(dependent).toContain('resolutionNote: "real commit title #xblkr01"');
+      expect(dependent).toContain('| bornAs | `xblkr01` |');
+      expect(dependent).toContain('bornAs: xdep002');
+      expect(readFileSync(join(cloneB, 'docs/agent/rule.md'), 'utf8')).toContain('#2201');
+      expect(bg('status', '--porcelain').trim()).toBe('');
+    } finally { rmSync(cloneB, { recursive: true, force: true }); }
+  });
+
+  it('reports in-flight and unresolvable references separately, including dry-run (#2903)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xflight-in-flight.md', '---\nkind: story\n---\n# Flight\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'in-flight branch');
+    git('branch', 'lane/flight');
+    git('rm', 'backlog/xflight-in-flight.md');
+    write('backlog/xdep002-dependent.md', '---\nkind: story\nblockedBy:\n  - xflight\n  - xdead00\n---\n# Dependent\n');
+    git('add', '.'); git('commit', '-qm', 'dependent lands');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const expected = [
+      { hash: 'xflight', name: 'xdep002-dependent', status: 'in-flight' },
+      { hash: 'xdead00', name: 'xdep002-dependent', status: 'unresolvable' },
+    ];
+    expect(numberPendingHashes(repo, { dryRun: true }).unresolvedReferences).toEqual(expected);
+    expect(numberPendingHashes(repo).unresolvedReferences).toEqual(expected);
+    expect(readFileSync(join(repo, 'backlog/2201-dependent.md'), 'utf8')).toContain('  - xdead00');
+  });
+
   it('keeps the ledger entry when other couples are still queued (cross-lane repair later)', () => {
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
     write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
