@@ -378,6 +378,27 @@
       "verifiedBy": "independent-claude",
       "findings": "Round 1 review requested changes (blast-radius concern); fix was re-armed and re-reviewed; round 2 verdict accepted with no blocking findings. Merged to main at faa7d79c541b9222a35b78e88d40528aa15598c2.",
       "retroactive": true
+    },
+    {
+      "v": 1,
+      "outcome": "landed",
+      "scoredAt": "2026-09-19T02:06:33.687Z",
+      "provider": "antigravity",
+      "model": "gemini-3.8-flash-low",
+      "subjectClass": "work-agent",
+      "dispatchKind": "session-delegation",
+      "rubricVersion": "session-delegation.1",
+      "criteriaEvaluated": 0,
+      "score": null,
+      "deductions": [],
+      "item": 3694,
+      "pr": 2292,
+      "handle": null,
+      "taskDescription": "Resolve real merge conflict (PR #2292 op-stale-state vs origin/main: this lane's stale-state operation import/registration colliding with the already-landed pr-reconcile operation (#2288) in run.mjs + http-adapter.test.mjs, plus an overlapping append to the shared run-scorecards.json trial log)",
+      "taskType": "conflict-resolution",
+      "verifiedBy": "independent-claude",
+      "findings": "Union-merge across 3 files: run.mjs (kept both import pairs, stale-state and pr-reconcile, nothing else changed), http-adapter.test.mjs (merged the pinned readOnly array to include both STALE_STATE_OP and PR_RECONCILE_OP), and run-scorecards.json (interleaved both branches' independently-appended scorecard records with zero loss: 15 ours + 18 theirs - 14 shared base = 19 total, no duplicates). Independent claude -p process (distinct session b4363a7b-e8da-4050-9738-28d251ec28b9, harness env stripped) three-way diffed the resolution against both merge parents, confirmed zero conflict markers and zero dropped/altered records, and ran check:standards (0 errors) plus a scoped vitest pass (156/156 tests green) before the commit; verify-lane.mjs then recorded green for the actual merge commit b7a2d3afd. VERDICT ACCEPT. Pushed to origin/lane/op-stale-state (dd5c373c8..b7a2d3afd). This is the second time this PR conflicted with main tonight; the recurring cause is scripts/operations/run.mjs plus scripts/operations/__tests__/http-adapter.test.mjs acting as a shared hot registry that every new-operation PR (this one, #2288, and others queued behind them) edits at the same import/list location, plus scripts/conveyor/run-scorecards.json being a shared append-only log every conflict-resolution/graduation-trial commit writes to at the same array tail.",
+      "retroactive": false
     }
   ]
 }
