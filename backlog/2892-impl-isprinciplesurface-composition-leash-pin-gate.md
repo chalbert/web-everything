@@ -53,7 +53,7 @@ anchor; mechanical, committee-clearable.
   leash-pin rule `checkLeashPin` in `we:scripts/check-standards-rules.mjs`, wired in `we:scripts/check-standards.mjs`.
 - **Seeded** the first three `@invariant` markers: the composition's union (`isPrincipleSurface`), and in the
   rubric both the `humanRequired` derivation and the per-file-hunks wiring that feeds it. Seeding a marker on the runner's forced-shadow constant is filed as its own
-  follow-on (x997mz7) — each seeding rides its own impl PR per #2839.
+  follow-on (3709) — each seeding rides its own impl PR per #2839.
 - **Fail directions (the reviewable calls).** Statute term: hunks unavailable / binary / deleted / renamed-or-created → FIRES
   (today's whole-file gate); only a whitespace/reflow-only CHANGE BLOCK (heading and fence lines must still match
   one-for-one) and a pure mode change stop firing — a line moved across a heading does not. A one-character typo fix inside a rule body still

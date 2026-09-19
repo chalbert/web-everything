@@ -1,8 +1,9 @@
 ---
+bornAs: xyp1wsl
 kind: epic
 status: open
 scope: ["we:scripts/guard-lane.mjs", "we:scripts/readiness/scope-lease.mjs", "we:scripts/lib/lane-lease.mjs", "we:scripts/lane-pool.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
-relatedTo: ["xezrute", "xjma1x9", "2560", "2679", "2574"]
+relatedTo: ["3600", "3602", "2560", "2679", "2574"]
 dateOpened: "2026-09-07"
 tags: [scope, scope-lease, guard, enforcement]
 ---
