@@ -65,6 +65,7 @@ import {
   ADVISORY_JUDGE_SEAT,
   buildReviewAdvisoryJudgeRequest,
   codexAdvisoryFromEnv,
+  codexAdvisoryFromRun,
   CODEX_ADVISORY_ENV_VAR,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
@@ -2555,6 +2556,16 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
     });
   });
 
+  describe('codexAdvisoryFromRun', () => {
+    it('reads the roster off the saved run: true only when findings carries judgeAdvisory', () => {
+      expect(codexAdvisoryFromRun({ findings: { judgeAdvisory: {} } })).toBe(true);
+      expect(codexAdvisoryFromRun({ findings: { judge: {} } })).toBe(false);
+      expect(codexAdvisoryFromRun({})).toBe(false);
+      expect(codexAdvisoryFromRun(null)).toBe(false);
+      expect(codexAdvisoryFromRun(undefined)).toBe(false);
+    });
+  });
+
   describe('buildReviewAdvisoryJudgeRequest', () => {
     it('carries no allowedTools, no model, and pins providerName to codex', () => {
       const request = buildReviewAdvisoryJudgeRequest({
@@ -2656,6 +2667,50 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
         },
       });
       expect(run.verdict.verdict).toBe('changes');
+    });
+
+    const PREVENTION_ANSWER = {
+      summary: 'one resolved carve-out that names a guard',
+      findings: [{
+        summary: 'a resolved carve-out with an uncaptured prevention guard',
+        disposition: 'carve-out',
+        introduced: false,
+        worseThanBase: false,
+        parallelizable: true,
+        prevention: 'a check:standards rule over the reason table',
+        preventionCaptured: false,
+        impactIfUnfixed: 'broken',
+      }],
+    };
+
+    it('an advisory-lens finding that names an UNCAPTURED prevention guard cannot flip the panel verdict to `prevention-outstanding` either (PR #2117 review)', () => {
+      expect(deriveVerdict({ findings: PREVENTION_ANSWER.findings })).toBe('prevention-outstanding');
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-cannot-prevention-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: PREVENTION_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('prevention-outstanding');
+      expect(run.verdict.findings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+      expect(run.verdict.admittedFindings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+    });
+
+    it('the SAME prevention-shaped finding from a MANDATORY seat DOES yield `prevention-outstanding` - the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-mandatory-does-prevention-block',
+        answers: {
+          [JUDGE_STEPS[0]]: PREVENTION_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('prevention-outstanding');
     });
 
     it('`decideLensFloor` over a 3-seat roster: the advisory seat is counted as advisory, never mandatory', () => {

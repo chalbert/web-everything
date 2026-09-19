@@ -337,6 +337,20 @@ export function codexAdvisoryFromEnv(env = process.env) {
 }
 
 /**
+ * #xqa9ttq (PR #2117 review) - THE ROSTER A SAVED RUN WAS STARTED WITH, read off the RUN, not the ambient environment.
+ * Resuming a saved run must register the declaration the run was started with.
+ * The env var names only how a NEW run should be started.
+ * A run that reached `awaiting-confirm` has answered every judge step, so `findings.judgeAdvisory`
+ * present means the third seat was seated.
+ * @param {object|null|undefined} record - a run record.
+ * @returns {boolean}
+ */
+export function codexAdvisoryFromRun(record) {
+  return Boolean(record && typeof record === 'object' && record.findings && typeof record.findings === 'object'
+    && Object.prototype.hasOwnProperty.call(record.findings, ADVISORY_JUDGE_SEAT.step));
+}
+
+/**
  * WHICH LENSES A RUN WOULD ACTUALLY SEAT, given the caller's `--lens`. Resolves {@link CALLER_CHOSEN_LENS}
  * against `lens` and takes every other seat's literal. PURE.
  *
@@ -1591,6 +1605,8 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
         /** @type {Object<string, Array<object>>} #x6t2z6h — the same per lens, MINUS the findings whose cited file
          *  is not in the net set. This is what the VERDICT reduces; `lensFindings` is what is PUBLISHED. */
         const lensAdmitted = {};
+        // #xqa9ttq (PR #2117 review, CONFIRMED) - what the PANEL REDUCER is handed. Excludes the opt-in advisory Codex seat: derivePanelVerdict's prevention scan is NOT scoped to mandatoryLenses, so an advisory-only prevention-shaped finding would flip the verdict off `accept`, contradicting the seat's advisory-only design. The seat is still PUBLISHED via lensAdmitted/lensVerdicts/findings.
+        const verdictAdmitted = {};
         /** @type {Array<object>} #x6t2z6h — the downgraded ones, kept so `confirm` can name the count. */
         const unverifiableCitations = [];
         let citationScopeEnforced = false;
@@ -1640,6 +1656,7 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           if (!lenses.includes(seat.lens)) lenses.push(seat.lens);
           lensFindings[seat.lens] = [...(lensFindings[seat.lens] ?? []), ...raw];
           lensAdmitted[seat.lens] = [...(lensAdmitted[seat.lens] ?? []), ...scoped.admitted];
+          if (seat.step !== ADVISORY_JUDGE_SEAT.step) verdictAdmitted[seat.lens] = [...(verdictAdmitted[seat.lens] ?? []), ...scoped.admitted];
           summaries.push(`${seat.lens}: ${seatSummary}`);
         }
 
@@ -1656,9 +1673,12 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
         const lensVerdicts = Object.fromEntries(
           lenses.map((lens) => [lens, deriveVerdict({ findings: lensAdmitted[lens] })]),
         );
+        const panelLensVerdicts = Object.fromEntries(
+          lenses.filter((lens) => verdictAdmitted[lens] !== undefined).map((lens) => [lens, deriveVerdict({ findings: verdictAdmitted[lens] })]),
+        );
         const humanRequired = read.humanRequired === true;
         const verdict = derivePanelVerdict({
-          lensVerdicts,
+          lensVerdicts: panelLensVerdicts,
           humanRequired,
           mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
           // REQUIRED by the reducer, never defaulted (#2823 round-3 finding 1): the findings-derived prevention
@@ -1666,7 +1686,8 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           // #x6t2z6h — the ADMITTED set, matching `lensVerdicts` above: a finding whose cited file does not exist
           // in this PR must not withhold the accept through its `prevention` field either, or the downgrade would
           // be undone one gate later.
-          findings: admitted,
+          // It is the verdict basis WITHOUT the advisory Codex seat.
+          findings: buildPanelFindings(verdictAdmitted),
         });
         return {
           verdict,

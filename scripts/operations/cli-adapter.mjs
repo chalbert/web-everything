@@ -563,6 +563,18 @@ export function resolveJudgeProvider(name) {
 }
 
 /**
+ * #xqa9ttq - a codex request never carries a Claude model name; an EMPTY `allowedTools` array is the explicit
+ * tool-free signal and is dropped so the shared guard (`assertSafeJudgeRequest`, which rejects `[]` for every
+ * provider) does not refuse it. Codex-only: the claude path never calls this. Returns a shallow copy.
+ */
+function stripForCodex(request) {
+  if (!request) return request;
+  const { model: _unusedModel, allowedTools, ...rest } = request;
+  if (Array.isArray(allowedTools) && allowedTools.length === 0) return rest;
+  return { ...rest, ...(allowedTools !== undefined ? { allowedTools } : {}) };
+}
+
+/**
  * The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}.
  *
  * IT RETURNS WHAT THE SPAWN COST, not only what the juror said. `judgeSpawn` reports `costUsd`, `sessionId`,
@@ -582,6 +594,7 @@ export function resolveJudgeProvider(name) {
  *   `request.providerName` is set — see the per-request override note below.
  * @param {string|null} [o.cwd] - the lane the juror runs in. Passed only when set, so a tool-free juror is
  *   unaffected and a tool-bearing one hits `assertLaneCwd`'s refusal when nobody supplied a lane (#3151).
+ *   Never forwarded to an effectively-codex request.
  * @param {string|null} [o.model] - an operator override for the model the DECLARATION asked for. Absent by
  *   default: the declared literal is the norm, and an override is a deliberate command-line act. Never merged
  *   onto a request whose EFFECTIVE provider (request-level or factory-level) is `codex` — see below.
@@ -613,8 +626,7 @@ export function createDefaultJudge({
     // `assertNoCodexTools` documents as tool-free. `assertSafeJudgeRequest` is shared with claude and
     // rejects [], so the empty array is dropped for an effectively-codex request ONLY, before the guard runs;
     // claude keeps refusing it.
-    const codexEmptyTools = effectiveProviderName === 'codex' && Array.isArray(request?.allowedTools) && request.allowedTools.length === 0;
-    const declared = codexEmptyTools ? (({ allowedTools: _unused, ...rest }) => rest)(request) : request;
+    const declared = effectiveProviderName === 'codex' ? stripForCodex(request) : request;
     // THE OVERRIDE IS MERGED BEFORE THE GUARD RUNS, NEVER AFTER (#3151). `assertSafeJudgeRequest` is what stops
     // a flag-shaped `model` reaching argv, so asserting the declaration's request and then substituting the
     // operator's value would check one string and spawn another — the guard would be decorative. The CLI
@@ -657,7 +669,10 @@ export function createDefaultJudge({
       runId: effective.runId,
       lens: effective.lens,
       ...(effective.allowedTools ? { allowedTools: effective.allowedTools } : {}),
-      ...(cwd ? { cwd } : {}),
+      // #xqa9ttq (PR #2117 review, CONFIRMED) - a codex request NEVER receives the factory's lane cwd: the
+      // seat is tool-free and diff-only, and `-C <lane>` would load the untrusted PR checkout's AGENTS.md
+      // into it. codexJudgeSpawn then uses its own scratch mkdtemp.
+      ...(cwd && effectiveProviderName !== 'codex' ? { cwd } : {}),
     });
     // NOT a spread of `outcome`: it also carries `argv` (which embeds the whole mandate) and the answer itself.
     // The record keeps the meter, never the material. `normalizeJudgeTelemetry` whitelists again on arrival.

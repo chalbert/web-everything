@@ -96,7 +96,8 @@ export const OPERATIONS = Object.freeze({
   // #xqa9ttq — `codexAdvisory` reads `REVIEW_PR_CODEX_ADVISORY=1` off the environment (`codexAdvisoryFromEnv`,
   // `we:scripts/operations/review-pr.mjs`), OFF by default — see that flag's own docs for why it is an env
   // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
-  // `record-verdict-io.mjs`'s registration below reads the SAME env var.
+  // `record-verdict-io.mjs`'s resume registration now reads the SAVED RUN's roster instead (`codexAdvisoryFromRun`,
+  // PR #2117 review) - the env var only decides how a NEW run is started here.
   // `json` is the ONE operation-table entry that reads its `resolveOperation(name, opts)` opts at all — every
   // other builder below still takes none, and passing the extra argument to a zero-arg arrow is a harmless
   // no-op for them. See `createReviewPrSinks`'s own `json` doc (`we:scripts/operations/review-pr-io.mjs`) for
