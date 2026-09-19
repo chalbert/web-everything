@@ -32,7 +32,7 @@
 
 import { createScaffoldReader, createScaffoldSinks, REPO_ROOT } from './scaffold-io.mjs';
 import {
-  readQueueFile, writeQueueFile, addToQueue, resolveQueuePath, queuePath as queueStorePath,
+  readQueueFile, writeQueueFile, addToQueue, queueHas, resolveQueuePath, queuePath as queueStorePath,
 } from '../conveyor/queue-store.mjs';
 import { resolveRunnerCheckout } from '../conveyor/resolve-runner-checkout.mjs';
 import { FILE_ITEM_QUEUE_EFFECT } from './file-item.mjs';
@@ -76,7 +76,7 @@ export function createFileItemSinks({
     [FILE_ITEM_QUEUE_EFFECT]: async (payload) => {
       const path = resolvePath();
       const before = readQueueFile(path);
-      const already = before.some((e) => String(e.num) === String(payload.num));
+      const already = queueHas(before, payload.num);
       const after = addToQueue(before, payload.num, new Date().toISOString());
       if (!already) writeQueueFile(after, path);
       return { num: payload.num, queued: true, alreadyQueued: already, path };

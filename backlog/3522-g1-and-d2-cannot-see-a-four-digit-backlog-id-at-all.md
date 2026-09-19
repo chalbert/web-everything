@@ -2,10 +2,12 @@
 bornAs: xs10j09
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/audit-backlog-health.mjs"]
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-15"
 tags: [backlog, audit, gates, health, refs]
+deliveryAgent: codex
 ---
 
 # G1 and D2 cannot see a four-digit backlog id at all

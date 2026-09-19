@@ -922,7 +922,7 @@ correctly queued for a human per the then-standing 2026-08-31 never-auto-accept 
 hang, not a mechanism failure. That mystery being hard to solve at all is itself real evidence for the new
 `#3436` item below.
 
-**Mechanical acceptance ratified and shipped (`#3434` / `backlog/xpfuj64-*.md`).** The operator, live, mid
+**Mechanical acceptance ratified and shipped (`#3434` / `backlog/3434-*.md`).** The operator, live, mid
 this same session: "I want the acceptance to be mechanical from the verdict." Ratified in discussion (not
 unilaterally): a genuinely independent clean verdict on `review:pending` now clears mechanically, no human
 step — reversing the 2026-08-31 ruling for that tier specifically; `review:human` stays human-only, confirmed
@@ -1464,6 +1464,11 @@ against.
 ## Working doctrine (2026-09-04, continued): rule 10 — the runner's normal operating mode is tracking `main`
 ## directly; a long-lived divergent branch is a temporary build tool, not the default steady state
 
+> **AMENDED 2026-09-12 — read this section together with "Working doctrine (2026-09-12): rule 10 amended"
+> below.** The operator ruled that N standing POC branches are a wanted, durable delivery mode. The
+> wind-down half of this section no longer holds; its drift/naming/short-lived-fix-lane reasoning does.
+> Kept unedited as the original record.
+
 Set the same night as rule 9 above, after a second, independent finding: `origin/lane/mechanical-dispatcher`
 itself — this epic's own prototype branch — had silently drifted 97 commits behind `origin/main`. The
 branch's own auto-sync loop (the mechanism meant to keep it current, per the `keep-prototype-branch-synced-
@@ -1542,3 +1547,1586 @@ and `we:skills-src/conveyor/runner.mjs`, both with unit + real-CLI-subprocess te
 `claude agents` listing reaped cleanly post-fix; the new tests prove the retry recovers within budget, still
 fails (bounded, not silently) once the budget is exhausted, never retries an already-`No job matching` answer,
 and that the error-summary no longer truncates a real multi-line failure to a bare "Command failed" line.
+
+## Session update (2026-09-12) — mechanical-harness delegation audit across all seven dispatch launch kinds:
+## exactly ONE (`review`) is actually wired; the other six still run their own lifecycle from a brief
+
+A delegation audit of every dispatch launch kind on `origin/lane/mechanical-dispatcher`, verified against tip
+`02d9af300`. The question asked was narrow and checkable: for each launch kind, does the dispatched agent still
+run its own lifecycle commands (`lane-pool acquire`, `open-pr`, `learnings-drop`, …) out of a full prose brief,
+or has that lifecycle moved into a mechanical harness the dispatcher calls directly? This is the concrete state
+of the epic's own founding bullet — "**Subagents only edit code.** Every command they'd otherwise run themselves
+is delegated to the mechanical layer" (see "The target shape" at the top of this card).
+
+**The answer: one of seven.** `review` is fully harnessed — no agent commands in its brief, a direct wrapper call
+to `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as the default path at
+`we:scripts/operations/review-dispatch.mjs:496` and `:542`. The other six all still hand the agent a full brief
+and let it drive its own lifecycle.
+
+| Launch kind | Agent runs lifecycle commands itself? | Wrapper | `we:scripts/guard-bash.mjs` coverage | Verdict |
+|---|---|---|---|---|
+| build | Yes | `we:scripts/operations/deliver-item-wrapper.mjs` exists, **unwired** | verification-only; lifecycle denylist dead | Not integrated |
+| prepare (scope) | Yes | none | verification-only; brief bug fixed | Not integrated |
+| prepare-decision | Yes | none | verification-only; brief bug fixed | Not integrated |
+| investigation | Yes | none | verification-only; never had the bug | Not integrated |
+| fix | Yes | `we:scripts/operations/fix-dispatch-wrapper.mjs` exists, **unwired**, brief still "PROTOTYPE" | verification-only; brief bug fixed; denylist arm blocked by a two-spawner conflict | Not integrated |
+| ci-heal | Yes | none | verification-only; brief bug fixed | Not integrated |
+| review | **No** | `we:scripts/operations/review-dispatch-wrapper.mjs`, wired as default path | N/A by construction | **Fully integrated** |
+
+**Two wrappers exist but nothing calls them.** `we:scripts/operations/deliver-item-wrapper.mjs` (for `build`) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (for `fix`) are both written and both dead code on the dispatch
+path. The `fix` one is not merely un-wired-yet: it is blocked by a real, named conflict — `WE_DISPATCH_KIND=fix`
+is stamped by **two different spawners with incompatible contracts**, so wiring one wrapper behind that single
+env value would mis-harness the other spawner's agents. That conflict has to be resolved before the wrapper can
+be turned on at all; it is not a "just flip the flag" item.
+
+**`guard-bash`'s lifecycle denylist is correctly OFF for all six, and must stay off until each one is wired.**
+The denylist is what would mechanically enforce "the agent doesn't run its own lifecycle commands." Arming it
+today, for any of the six, would deny **step 1 of that kind's own brief** — `lane-pool acquire` — and break the
+dispatch outright. So the current state is self-consistent, not an oversight: the denylist can only be armed for
+a kind *after* that kind's lifecycle has moved into a harness. `guard-bash`'s coverage for the six is
+verification-only today, which is the correct setting for an unwired kind.
+
+**Why this matters for the epic, not just as a status line.** `review` being harnessed is the existence proof
+that the target shape works — the pattern is proven, once, end to end. But the epic's founding claim is about
+*every* command an agent would otherwise run, and six of seven kinds are still the old shape. The `review`
+wrapper is therefore the template to copy, and the remaining work is concrete and enumerable rather than
+open-ended: wire `deliver-item-wrapper` for `build`; resolve the two-spawner `WE_DISPATCH_KIND=fix` conflict and
+then wire `fix-dispatch-wrapper`; author wrappers for `prepare`, `prepare-decision`, `investigation`, `ci-heal`;
+arm `guard-bash`'s lifecycle denylist per kind, each time only after that kind's wrapper is live.
+
+**Related, already filed:** `#3629` (review and fix dispatch should get the same minimal context treatment) and
+`#3627` (dispatched delivery agents should get a minimal hand-crafted brief) both sit next to this finding but
+neither tracks the wiring itself. The self-hosting question this audit immediately raised — whether the
+prototype branch can build these six remaining kinds into ITSELF, via a lane forked from the prototype rather
+than from `main`, without a PR per increment — is filed separately as its own decision card; see the
+"POC-branch delivery mode" decision under this epic.
+
+## Working doctrine (2026-09-12): rule 10 amended — a long-lived divergent branch is a DECLARED delivery
+## mode ("POC branch"), N may stand at once, and landing inside one skips review until graduation
+
+The "POC-branch delivery mode" decision above was ruled by the operator the same day it was filed, and the
+ruling amends rule 10 rather than working around it. The operator's words, verbatim:
+
+> "I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must not be
+> slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+> graduate."
+
+**Before (rule 10 as set 2026-09-04).** "The runner's steady state is tracking `main` directly; a long-lived
+divergent branch is not the default operating mode." A divergent branch was framed as a temporary build tool
+to be wound down; `#3443` was that wind-down; only one such branch was contemplated, and having it at all was
+treated as a state to exit.
+
+**After (rule 10 as amended 2026-09-12).** "A long-lived divergent branch is a DECLARED delivery mode — a
+'POC branch' — not temporary scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one."
+N POC branches may stand concurrently, each a first-class delivery target an item can name
+(`deliveryTarget:`), each graduating to `main` on its own timeline. Landing INSIDE a POC branch skips the
+review gate entirely — the item's own tests/build validation is the only gate; the full review process (a real
+PR to `main`, the escalation gate, the jury/judge panel, `review:human`) applies once, at graduation.
+
+**What was preserved, and why it is not sentiment.** The 97-commit drift incident is real evidence, but of a
+narrower claim than the original rule drew from it: the branch was undeclared, unregistered, and its sync loop
+was failing silently with nothing watching. So the amended rule keeps (a) the runner's own steady state being
+`main` — a POC branch is a *target*, never the runner's default tracking ref; (b) the short-lived
+scratch-lane-off-current-`main` pattern for fixing the delivery machinery itself
+(`#1894`/`#1895`/`#1902`/`#1903`) — "I need a POC branch" is never the answer to "I need to fix the runner";
+(c) the requirement that every POC branch NAME what it is for and who graduates it, now as a registry entry;
+(d) active per-branch drift reconciliation via `we:scripts/conveyor/branch-drift.mjs`, with a drifted branch
+still holding its own items; and (e) build no more machinery than the POC in front of you needs.
+
+**What was deleted.** The claim that divergence is inherently temporary and must be wound down, and the
+assumption of a single branch. `#3443` remains real work — but as that one branch's own graduation, not as a
+wind-down of the mode, and the runner tracking it today is not a violation of anything.
+
+**Where it lives.** `we:skills-src/mechanical-delivery-doctrine/SKILL.md`, rule 10, plus that skill's own
+`description:` line which paraphrases it — edited there first, per the skill's own stated amendment path
+("If a rule itself changes, edit it here first, then note the change on the card"), and noted here second.
+
+**Left for a follow-on, not this ruling:** the build itself — the `poc-branches` registry, the
+`deliveryTarget:` field, the per-branch land lock, and the fast-forward-with-rebase-retry lander. The decision
+card names that item and deliberately builds none of it.
+
+## Session update (2026-09-12, continued) — punch-list of what is genuinely still open after today's
+## mechanical-harness wiring, so a fresh session does not have to re-derive it
+
+Written to survive this conversation, per the operator's own instruction. Every item below was RE-VERIFIED
+against live state, not copied from an earlier draft — verified against `origin/lane/mechanical-dispatcher` tip
+`373f14af1` ("validate-and-promote, the trigger that finally arms the watchdog"), `origin/main` tip
+`b0763ceac`, and the live backlog/PR/issue trackers, all as of 2026-09-12. Where something turned out to
+already be resolved, that is stated explicitly rather than silently dropped.
+
+**What moved since the "one of seven" delegation audit earlier on this card (tip `02d9af300`).** That audit is
+now stale on two of its six "Not integrated" rows — read the table below, not that one, for current state:
+`build` (#3645) and `prepare` (#3641) both went from unwired to wired-by-default in the five commits after it
+(`c081e1650` … `373f14af1`). The registry mechanism itself (`we:scripts/operations/dispatch-provider-registry.mjs`,
+`62f4ce383`) is also new since that audit — it replaces what would otherwise have been a fifth hard-coded
+branch in `we:scripts/operations/dispatch-lane-io.mjs`.
+
+### 1. Dispatch-kind wiring — current state of all seven launch kinds
+
+Re-verified directly against `we:scripts/operations/dispatch-provider-registry.mjs` on the lane tip (it throws
+at import time if it ever drifts from `LAUNCH_KINDS`, so the table below is closer to a compile-time fact than
+a snapshot):
+
+| Kind | State | Evidence |
+|---|---|---|
+| `build` | **Wired, mechanical by default** | `DISPATCH_PROVIDER_REGISTRY.build` → `deliverItemDetachedProvider`; opt-out `WE_BUILD_DISPATCH_MODE=agent` |
+| `prepare` (scope) | **Wired, mechanical by default** | `DISPATCH_PROVIDER_REGISTRY.prepare` → `prepareScopeDetachedProvider`; opt-out `WE_PREPARE_DISPATCH_MODE=agent` |
+| `review` | **Wired** (since before today's later commits) | `we:scripts/operations/review-dispatch.mjs:496`/`:542` → `we:scripts/operations/review-dispatch-wrapper.mjs`, no agent turn in the critical path |
+| `fix` | **Still unwired — blocked, not just undone** | see item 2 below |
+| `prepare-decision` | **Still unwired** | no `we:scripts/operations/dispatch-providers/prepare-decision.mjs` exists; `#3644` (open) is the story |
+| `ci-heal` | **Still unwired** | no `we:scripts/operations/dispatch-providers/ci-heal.mjs` exists; `#3642` (open) is the story |
+| `investigation` | **Still unwired**, and no wrapper exists yet at all (unlike fix/ci-heal/prepare-decision, nobody has even prototyped one) | full-brief agent path only |
+
+**Action for a future session:** `#3640` (fix, blocked — see item 2), `#3642` (ci-heal), `#3644`
+(prepare-decision) are the three remaining stories under the umbrella `#3643`, all `status: open`, all already
+carrying `deliveryTarget: lane/mechanical-dispatcher` (set on `main` via PR #2144, landed today) — so each can
+be picked up as an ordinary POC-branch-targeted build, no further decision needed to start. `investigation`
+has no story yet; file one before building it (needs a wrapper design pass first, the way `#3627`/`#3629`
+did for build/fix/review).
+
+### 2. `fix` dispatch is blocked on a real conflict, not merely unscheduled
+
+`WE_DISPATCH_KIND=fix` is stamped by **two different spawners with two incompatible contracts**:
+`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider` (the live path, running
+`we:skills-src/conveyor/fix-agent-brief.md` v1, which runs its OWN lane acquire / gate / commit / open-pr) and
+`we:scripts/operations/fix-dispatch-wrapper.mjs` (written, unwired, running
+`we:skills-src/conveyor/fix-agent-brief-v2.md` under a wrapper that owns all of that lifecycle instead). One
+env value cannot describe both contracts at once — a `dispatchKind === 'fix'` deny arm in
+`we:scripts/guard-bash.mjs` written for the wrapper's contract would deny the v1 agent's own legitimate step 1.
+This is documented in `we:scripts/guard-bash.mjs` itself (search "A REAL AMBIGUITY TO SETTLE BEFORE ANY `'fix'`
+ARM IS ADDED") and in `we:scripts/operations/fix-dispatch-wrapper.mjs`'s own header.
+
+**Newly found today, same shape:** `prepare` now has the identical collision.
+`we:scripts/operations/prepare-scope-wrapper.mjs` stamps `WE_DISPATCH_KIND=prepare` for its own (wrapped)
+contract, but the pre-existing `WE_PREPARE_DISPATCH_MODE=agent` fallback path also stamps
+`WE_DISPATCH_KIND=prepare` via `we:scripts/operations/dispatch-lane-io.mjs`'s generic
+`String(request.launchKind || 'build')` stamp — same one-value/two-contracts problem, currently undocumented
+anywhere except `we:scripts/operations/prepare-scope-wrapper.mjs`'s own header. **Not yet filed as its own
+item** — worth doing before anyone tries to arm a `we:scripts/guard-bash.mjs` `'prepare'` deny arm and hits the
+same wall `'fix'` already hit.
+
+**Resolution shape, not yet decided:** either a distinct `WE_DISPATCH_KIND` value per contract (e.g.
+`fix-wrapped` vs `fix-agent`, and the equivalent for `prepare`), or a second signal alongside the kind that
+says which contract is in force. Whichever is chosen for `fix` should almost certainly be reused for `prepare`
+rather than re-litigated.
+
+### 3. `we:scripts/guard-bash.mjs`'s lifecycle denylist — confirmed still correctly scoped, and why it must stay that way
+
+Re-read directly (`we:scripts/guard-bash.mjs`, the `dispatchKind === 'delivery'` block). **Only `'delivery'` is
+armed** — the stamp `we:scripts/operations/deliver-item-wrapper.mjs` puts on the minimal build agent it
+spawns. `'prepare'` is NOT armed (see item 2 — same two-contract collision as `fix`, confirmed in
+`we:scripts/operations/prepare-scope-wrapper.mjs`'s own header: "`WE_DISPATCH_KIND: 'prepare'` … NAMED GAP, and
+a gap this item deliberately does NOT close"). `fix`, `prepare-decision`, `ci-heal`, `investigation` are all
+still verification-only (the `#3105` gate only), exactly as before. **This is self-consistent, not drift:**
+arming any of these before its own two-contract collision (if any) is resolved and its wrapper is the sole
+spawner would deny that kind's own agents their legitimate first step. Confirm this table again before arming
+anything new.
+
+### 4. Nothing re-judges whether a predicted scope is a GOOD prediction — still just flagged
+
+`we:scripts/operations/prepare-scope-wrapper.mjs` (line ~47) states this in its own header in so many words:
+"nothing here re-judges whether a WELL-FORMED prediction is a GOOD one." The wrapper checks structural
+well-formedness (did the agent touch only its own backlog file, did it write a `scope:` field at all) but
+nothing scores whether the predicted touch-set is actually close to what the item will really touch. **No
+backlog item exists for this yet** (searched; nothing found). Worth filing as its own story before `prepare`
+dispatch is trusted at volume — a silently bad prediction degrades exactly the scope-lease conflict machinery
+(`#2560`/`#2592`) that predicted scope exists to feed.
+
+### 5. `we:scripts/conveyor/driver-watchdog.mjs` has nothing scheduling it — still just a script
+
+Confirmed: no `we:package.json` script, no cron entry, no launchd plist, no GitHub Actions workflow references
+`we:scripts/conveyor/driver-watchdog.mjs` anywhere in the repo. It is invoked only by hand (`node
+we:scripts/conveyor/driver-watchdog.mjs check|heal`) or, as of `373f14af1`, indirectly by
+`we:scripts/conveyor/validate-and-promote.mjs promote` (which calls `record-good`, arming the watchdog's
+fallback, but never calls the watchdog itself). **A real decision is still owed:** cron/loop trigger on the
+driver's own host, a tick inside the runner's own mechanical passes (the watchdog's header explicitly forbids
+sharing the driver's decision logic, but running the CHECK on a timer from outside the driver process is a
+different question), or accepted as manual-only for now. Until one of those is chosen and wired, the watchdog
+protects nothing unattended.
+
+### 6. `validate-and-promote` / `record-good` / `restart-runner` — unit-tested, never live-fired end to end
+
+Confirmed by reading the test suites directly: `we:scripts/conveyor/__tests__/validate-and-promote.test.mjs` is
+pure decision-table + injected-double tests only (four described sections, no real clone, no real `npm`, no
+real `git reset`, no real `claude`). `we:scripts/operations/__tests__/restart-runner-io-real.test.mjs` is the
+one REAL-mechanism test in this group — real directory trees, a real `ps` shell-out, a real detached child
+process — but its own header states it deliberately never spawns the real supervisor or the real runner, "per
+a standing operator constraint." The `we:scripts/conveyor/validate-and-promote.mjs` CLI does have a
+live-fireable read-only `validate` verb (five checks in a throwaway clone, touches no driver) — that is the
+"one live self-test" this session ran — but nobody has yet run the `promote` verb for real: a live sha, a real
+driver checkout, a real `record-good` write, a real reset, and a real `restart-runner` landing the driver on
+new code. **That end-to-end live run is the next concrete step before trusting this pipeline**, not a code
+change — the code appears complete and is exercised in isolation, just never chained together for real.
+
+### 7. `#3646` / backlog `#3646` — filed, not fixed. Confirmed still open.
+
+`we:skills-src/conveyor/runner.mjs`'s SIGTERM/SIGINT handler cannot fire while the runner is inside a blocking
+`execFileSync` call (one of its own mechanical passes) — Node only dispatches signals on the event loop.
+`we:backlog/3646-*.md` (`status: open`) documents this and names the precedent fix (`#3404`'s move to
+`runQuietHeartbeating` for `we:scripts/conveyor/verify-dispatch.mjs`). PR #2142, which merged today, **only
+filed this card** ("backlog: file runner SIGTERM-mid-blocking-pass limitation under #3383") — it added no
+code. The actual fix (moving whichever of `we:skills-src/conveyor/runner.mjs`'s own mechanical passes still
+use a plain blocking spawn onto the heartbeating pattern) remains unbuilt.
+
+### 8. `#3647` — review-dispatch-wrapper misclassifies a successful review as `blocked-on-infra`. Confirmed still open, unfixed.
+
+`we:backlog/3647-*.md`, `status: open`. Root cause already diagnosed and written down on the card:
+`we:scripts/operations/review-loop-cli.mjs` exits non-zero when a *secondary, non-essential* logging step
+fails (a missed prevention-guard append to `~/.claude/conveyor/learnings/review-loop.jsonl`), even though the
+review itself ran to completion and succeeded (real accept verdict posted, label flipped, PR merged). The
+wrapper's `execFileSync` catch branch cannot currently tell "the review never ran" from "the review ran and
+succeeded but something secondary afterward failed," so it hardcodes `blocked-on-infra` either way. No code
+fix has landed for this — only the diagnosis and the card.
+
+### 9. PR #2113 — needs a real disposition decision, not indefinite open status
+
+Confirmed still `OPEN` against `main` (`gh pr view 2113`): "WE #3629: extract shared minimal-context
+primitives + build the mechanical review-dispatch wrapper." Its content was already merged into
+`lane/mechanical-dispatcher` via a local branch merge back on `5129bd1fd` ("Merge branch 'pr-2113' into
+lane/mechanical-dispatcher") — i.e., the review-dispatch-wrapper code this PR carries is *already living and
+running* on the prototype branch (`02d9af300` wired it as the default `review` path there), while
+`we:scripts/operations/review-dispatch-wrapper.mjs` does **not exist on `main` at all** (confirmed: `git
+ls-tree -r origin/main` has no such file). Since the 2026-09-12 POC-branch ruling, the intended path for
+prototype-branch content reaching `main` is `#3443`'s incremental small-PR graduation (that epic is `status:
+active`, already landing pieces), not a single big PR opened before that ruling existed. **Recommendation, not
+yet decided by the operator:** close #2113 as superseded by the POC-branch content plus #3443's graduation
+path, rather than leaving a stale direct-to-main PR open indefinitely alongside the now-different intended
+landing mechanism. This needs the operator's actual call, not a unilateral close.
+
+### 10. `#3639` — the changeset/"batch" decision. Confirmed still open, unratified.
+
+`we:backlog/3639-*.md`, `kind: decision`, `status: open`, no `preparedDate` set. Extensively researched on the
+card itself (7 forks, a full survey, a "continued" reassessment after the operator supplied the real
+motivating scenario) but per this repo's own rule ("never rule w/o preparedDate"), it is not yet a
+ready-to-ratify decision in the tracked sense even though the prose reads as thorough. Needs either a
+`/prepare` pass to set `preparedDate` formally, or the operator ratifying directly against the "Revised
+recommendation for Fork 7" already on the card.
+
+### 11. The bootstrap gap — named so it is not mistaken for forgotten work
+
+`main`'s own conveyor still cannot spawn delivery agents at all (`#3369`/`#3580`'s decoupling work and the
+dispatcher-on-`main` question are unrelated to and upstream of everything above). Every mechanical-harness
+wiring item in this whole session update lives on `origin/lane/mechanical-dispatcher` only. Graduating any of
+it to `main` is explicitly `#3443`'s job — already `status: active`, already landing incremental PRs (most
+recently PR #2144 today) — and is a separate, ongoing epic, not something this list calls for action on. Named
+here only so a future session does not mistake "none of this runs on `main` yet" for a gap in today's work.
+
+### Already-resolved items worth naming explicitly (so nobody re-opens them)
+
+- **PR #2142** — merged (filed `#3646`, no code fix — see item 7 above; the PR itself is done, the underlying
+  work it filed is not).
+- **The `build`/`prepare` rows of the earlier "one of seven" audit** — superseded by item 1 above; both kinds
+  wired and mechanical-by-default as of `d1c2d8ed6`/`ffbc921ab`+`49c46c3d2`.
+- **The `we:scripts/operations/dispatch-provider-registry.mjs` extraction itself (`62f4ce383`)** — done; a
+  pure refactor, all pre-existing tests pass unchanged, 21 new tests added for the registry.
+- **The driver watchdog's fallback-marker gap** — `we:scripts/conveyor/validate-and-promote.mjs` (`373f14af1`)
+  closes the "nothing ever calls `record-good`" gap the watchdog shipped with; see item 6 for what is still
+  NOT done (a live end-to-end `promote` run).
+
+## Session update (2026-09-12 night, close-out) — five in-flight threads checked against live state before the
+## operator stepped away; two done, one landed live DURING this check, two still genuinely in progress, one
+## real unattended problem found and left exactly as found
+
+Written because the operator is stepping away for the night and asked for a durable, cold-readable record of
+what five parallel threads actually reached — not a transcription of the plan going in. Every claim below was
+re-checked against a live artifact (a lane's own git state, a running process's log, `gh pr view`, `claude
+agents --json`) at write time, not carried over from memory. **State kept changing while this was being
+written** — two things landed mid-check — so timestamps are given where the gap matters instead of a single
+"as of" line for the whole section.
+
+### 1. Codex delivery-agent provider (`CODEX_PROVIDER.spawn()`) — genuinely in progress, substantial, not done
+
+Lane-21 (`3383-codex-delivery-provider`, based on `origin/lane/mechanical-dispatcher`) holds a real, actively-
+being-written implementation: `we:scripts/operations/codex-delivery-provider.mjs` (352 lines, new/untracked)
+plus edits to `we:scripts/operations/deliver-item-run.mjs` and `we:scripts/operations/deliver-item-wrapper.mjs`
+wiring a `--provider=codex|claude-restricted` selector (flag → `DELIVERY_AGENT_PROVIDER` env → default,
+mirroring `we:scripts/operations/run.mjs`'s existing judge-provider seam). **This is explicitly, and correctly
+per the operator's own call, built ahead of `#3581`'s ratified reviewer-first sequencing** — the new file's own
+header states this in so many words ("the operator explicitly chose to build this ahead of that gate — a
+deliberate, informed call, recorded here rather than left to look like an oversight"). Not an oversight; do not
+treat it as one tomorrow.
+
+All three unknowns the old stub named are answered with **live, reproduced evidence**, not assumption — this
+matches the `we:docs/agent/prototype-based-dev.md` discipline (ground the spawn seam in a real run before
+writing the port). The raw probes are on disk in this session's own scratchpad (four numbered probe transcripts
+plus a sandbox-boundary probe), not committed anywhere — worth folding into the file's own header citations if
+not already, since they're the falsifiable record behind the claims:
+- **Write capability + the right flag**: `-c default_permissions=locked -c 'permissions={locked={extends=":workspace",…}}'`,
+  never `-s workspace-write` — `-s` silently defeats the deny map (re-confirms `#3371` Probe 14f) and
+  `codex exec resume` doesn't accept `-s` at all (confirmed against real `--help`).
+- **Blocking/foreground invocation**: a real `execFileSync('codex', argv, {stdio:['ignore','pipe','pipe']})`
+  blocked 8.5s, exited 0, left the file on disk (reproduced 3×, 8.5s/12s/11s). `stdio[0]` must stay `'ignore'`,
+  never inherited/piped, or a positional-prompt-plus-open-stdin spawn hangs forever (documented trap, shared
+  with `we:scripts/lib/codex-judge-spawn.mjs`).
+- **No guard-lane/guard-bash equivalent needed**: Codex's native permission profile already enforces the same
+  two protections `we:scripts/guard-lane.mjs` / `we:scripts/guard-bash.mjs` do, at the OS layer instead.
+
+One `throw` remains in the new file (an explicit refusal path, not an unimplemented stub). **Not yet committed,
+not yet tested against `check:standards`/vitest, not yet landed anywhere.** Whoever picks this up should verify
+the file's own claims hold under the repo's test suite before trusting the header's prose.
+
+### 2. Codex reviewer-seat validation (does the verdict hold up, per `#3581`'s own bar) — set up, not concluded
+
+Lane-22 (`codex-judge-validation`, purpose `codex-judge-validation-3581`, based on `origin/lane/mechanical-
+dispatcher`) is reserved and clean — no diff, no commits. A separate scratch clone (shallow, HEAD at `main`'s
+`6223c75dd` as of ~21:53) was set up as a live-fire workbench. **No persisted verdict-quality write-up was found
+anywhere** (this lane, that scratch clone, or the learnings pool) as of this check — the actual PRs Codex's
+advisory seat would be validated against (`PR #2115`/`#2117`, "wire Codex CLI as a second JudgeProvider" / "seat
+Codex as a real, opt-in THIRD judge") are unchanged since 2026-09-10/11, both still parked (`review:changes`,
+one with a live merge conflict against `main`). **Read plainly: this thread has a workbench but no recorded
+result yet** — don't assume progress here beyond "environment ready," and don't conflate it with item 1 above
+(different lane, different purpose, no shared code between them yet).
+
+### 3. Telemetry instrumentation — DONE, committed and pushed to the prototype branch during this very check
+
+Confirmed landed: `fe2d96ac6` ("WE #3383: unified delivery telemetry — traces, spans and the four golden
+signals"), pushed straight to `origin/lane/mechanical-dispatcher` at **2026-09-12T22:17:09-04:00** — per rule
+10/rule 4, a direct prototype-branch commit needs no PR. Three new files (`we:scripts/operations/telemetry.mjs`
+pure core, `we:scripts/operations/telemetry-store.mjs` NDJSON io shell, `we:scripts/operations/telemetry-cli.mjs`
+report/trace/traces/days reader) plus instrumentation added to all six delivery wrappers
+(`we:scripts/operations/ci-heal-dispatch-wrapper.mjs`, `we:scripts/operations/deliver-item-wrapper.mjs`,
+`we:scripts/operations/fix-dispatch-wrapper.mjs`, `we:scripts/operations/minimal-context-provider.mjs`,
+`we:scripts/operations/prepare-decision-wrapper.mjs`, `we:scripts/operations/prepare-scope-wrapper.mjs`,
+`we:scripts/operations/review-dispatch-wrapper.mjs`) and `we:skills-src/conveyor/runner.mjs`'s own tick loop.
+**Verified provider-agnostic by direct inspection**: grepping `we:scripts/operations/telemetry.mjs` for
+`provider`/`codex`/`claude`/`antigravity` returns nothing that names a CLI — spans are keyed by launch kind,
+never by which CLI ran the phase. **136 tests pass** (`we:scripts/operations/__tests__/telemetry.test.mjs` 114,
+`we:scripts/operations/__tests__/telemetry-wiring.test.mjs` 22), run directly against the lane at commit time.
+This item is finished for tonight; the only thing left is graduating it to `main` under `#3443`'s normal
+incremental path, same as everything else on this branch.
+
+### 4. Decision Docket convention (full fork detail for every prepared item, not just ratified ones) — committed, not yet pushed or landed (progressed DURING this check — was uncommitted prose minutes earlier)
+
+Lane-18 (`decision-docket-doc`) went from an uncommitted working-tree diff to a real commit,
+`7ade8f652` ("docs: codify the Decision Docket convention — full fork detail for every prepared item, not a
+summary row"), while this update was being written. Adds a new `we:docs/agent/backlog-workflow.md` section
+("Publishing the Decision Docket — full fork detail for every prepared item shown, never a summary row")
+stating the rule plainly: every prepared item the Decision Docket lists gets its complete fork breakdown —
+every option, the bold default, and each non-default option's stated rejection reason — never a compact
+summary row, and this bar does **not** vary by section (a "current batch" item and a merely-listed older item
+get the same treatment; shrink the list before thinning the detail). Cross-links backlog item #3562 (the
+standing mechanical pass this binds once built) and amends #3562's own "Why" section to point back at the new
+doc anchor. **Committed, local to lane-18 only as of this check** — not pushed, no PR, not landed yet.
+
+### 5. Codex-delegation memory note — DONE, landed to `main` (landed live DURING this check)
+
+`we:agent-memory-src/delegate-work-to-codex-when-feasible.md` (indexed into `we:agent-memory-src/index-meta.md`),
+capturing the operator's 2026-09-12 framing verbatim (actively look for a point where handing real work to
+Codex becomes genuinely feasible, not just theoretically wired, and treat it as worth pursuing rather than
+waiting to be asked), is now on `main`: `PR #2151` merged at **2026-09-13T02:32:23Z** — after being only a
+local, unpushed commit in lane-20 earlier in this same check (the pattern repeated across two of tonight's
+five threads). **Lane-8 and lane-20 were both acquired under the identical purpose (`delegate-codex-memory`)**
+— lane-20 did the real work and it is now landed; lane-8 is a redundant, unused reservation from the same push
+and should simply be released.
+
+### Corrections to the operator's own settled-context list, verified rather than transcribed
+
+- **The watchdog + validate-and-promote pipeline, corrected in two ways.** First, the citation "item #3514,
+  PR #2147 merged" was **not yet true when this check started** and became true **during it**: `gh pr view 2147`
+  showed `OPEN` for most of this session, then `origin/main` advanced (`d0e16ff7b`, "drain: resolve #3514 on
+  land") and `PR #2147` showed `MERGED` at **2026-09-13T02:19:53Z** — the drain landing what the live-fire build
+  had opened. So the full chain — dispatch → build → PR → (parked, then cleared) → drain-merge — is now
+  genuinely proven for tonight's one permitted item, just later than the brief implied. Second, the pipeline's
+  own pause marker on `wev-driver-live` shows this was a deliberately narrow test, not a broad run: dispatch was
+  paused for every kind except `build` — `pausedKinds: [prepare, prepare-decision, investigate, fix, ci-heal]`,
+  reason recorded verbatim as "epic #3383 first live-fire: ONLY the build kind may dispatch (#3514)", set at
+  `2026-09-12T23:58:15Z`. The recorded last-known-good state confirms a real `validate-and-promote --full`
+  promotion ran too (`76d91cc25` → `9fe6cb932`, recorded `2026-09-13T00:03:31Z`) — the `promote` verb genuinely
+  fired for real, which an earlier section of this same card had listed as still-untested. **Third, and this is
+  new, not a correction of the brief: the driver at `wev-driver-live` is DOWN right now** — see "For tomorrow"
+  below.
+- **The bounded-vs-resident watchdog fix** — confirmed landed, directly on the prototype branch (`39b88e26f`,
+  "the watchdog stops calling a finished --once driver a crash"), no PR, per rule 4 (prototype-only fixes skip
+  ceremony). Also on the branch tonight, same pattern: `9fe6cb932` ("put the validation clone where the
+  constellation says a checkout goes").
+- **`#3649`** — confirmed accurately described: `status: open`, `kind: decision`, `preparedDate: 2026-09-12` set,
+  landed to `main` via `PR #2149` (merged). Genuinely prepared and awaiting ratification, not yet ruled.
+- **`3652` / `PR #2150`** — confirmed: `OPEN`, "file: gh pr checkout bypasses the branch-switch guard on the
+  shared primary checkout." Filed, not fixed, exactly as stated.
+- **"Fix what you find by default" memory** — confirmed:
+  `we:agent-memory-src/prototype-fix-what-you-find-by-default.md`, landed to `main` via `PR #2148` (merged).
+  **"Codex work targets the prototype branch first"**
+  has no separately-named memory file of its own as of this check — it's consistent with the existing
+  `we:agent-memory-src/default-to-prototype-for-mechanical-fixes.md` /
+  `we:agent-memory-src/prototype-is-source-of-truth-for-mechanical-work.md` notes but was not found as its own
+  artifact; treat it as a verbal standing instruction until/unless someone writes it down separately.
+
+### A real, current, unattended problem — not in the brief, found only by reading the watchdog's own log
+
+`we:scripts/conveyor/driver-watchdog.mjs` is genuinely running right now — a shell loop (pid confirmed alive via
+`ps`) polls `wev-driver-live` every 5 minutes, logging to a local watchdog log outside the repo. Every single
+poll since **2026-09-13T00:58Z**, roughly 80 minutes straight through **02:19Z** (the last poll before this
+write-up), reports the same thing: driver state `"down"`, no runner lease held anywhere, reason recorded
+verbatim as "the driver is not running (no runner lease at all). That is a crash, not silent staleness," action
+`"none"`, `"alerted": false`. The runner lock directory is confirmed empty, matching "no lease anywhere." This is
+exactly the gap this card's own punch-list already named earlier tonight (item 5, "nothing schedules the
+watchdog" — now half-closed, since a loop IS scheduling it) plus the still-open alerting gap (`#3398`) — the
+watchdog sees the crash, correctly declines to auto-restart or roll back a checkout under a dead driver (by
+design, per its own header), but nothing pages anyone. **Left exactly as found, not restarted or investigated
+further** — restarting a driver unattended overnight is explicitly the kind of new unsupervised action the
+operator ruled out before stepping away; this is a "check first thing" item, not a "fix silently" one.
+
+### For tomorrow, explicitly
+
+All five threads above were already scoped and authorized before the operator stepped away; nothing new was
+started without one of them as the reason. Nothing here was force-cleared past a `review:human`/parked state.
+Check, in this order:
+
+1. **Restart the driver at `wev-driver-live`** (or confirm someone already has) — it has been down, unalerted,
+   since ~00:04Z, and the paused kinds (`prepare`/`prepare-decision`/`investigate`/`fix`/`ci-heal`) plus a dead
+   runner mean nothing but last night's one already-merged build (`#3514`) actually moved. Decide whether to
+   lift the pause's narrow live-fire scoping now that the one permitted item landed.
+2. **Item 1** (`lane-21`, codex-delivery-provider) — was still being actively written as of the last check;
+   confirm whether it finished, then run `check:standards` + vitest against it before trusting the header's
+   claims, then commit/PR per the normal prototype-fix-or-graduate path.
+3. **Item 2** (`lane-22` plus the separate codex-validate scratch clone) — no recorded verdict yet; this is
+   genuinely still open, not just unwritten-up.
+4. **Item 4** (`lane-18`, Decision Docket doc change) — finished commit as of this check, needs push + PR.
+5. **Item 5** (Codex-delegation memory) — already landed (`PR #2151`); just release the redundant `lane-8` /
+   `lane-20` reservations.
+6. **Stuck-vs-working check**: `claude agents --json` shows a primary-checkout interactive session sitting on
+   `"waiting for dialog open"` — a real stuck-dialog pattern seen repeatedly today, not one of tonight's five
+   threads; worth a look. Several `fix-*`/`review-*` background entries show `state: blocked` but are ~24h+ old
+   debris from unrelated earlier work, consistent with the already-documented stale-`claude agents`-bookkeeping
+   gap — not new, not urgent.
+
+## Follow-up (2026-09-12 night, after the list above) — item 2 (Codex reviewer-seat validation) reached a
+## verdict: the mechanism is clean, the JUDGMENT is not — 4 of 4 real runs came back empty, including one real miss
+
+Item 2 above was left as "workbench ready, no recorded verdict yet." It has since concluded. Everything below
+is read directly off the four persisted completion records the live-fire run itself wrote
+(`review-pr-9c12fca6…` = PR #2107, `review-pr-e64b290a…` = PR #2130, `review-pr-268cdedd…` = PR #2147,
+`review-pr-19d6b92a…` = PR #2043) and their `judge`/`judgeAdvisory` telemetry, not a paraphrase of a summary.
+
+### The live-fire run itself: plumbing proven, judgment not
+
+`--codex-advisory` ran against these 4 real, currently-open PRs, real diffs, confirmed non-degraded reads
+(`degraded: false` on every request). Every one of the four `judgeAdvisory` (Codex, simplicity lens) steps came
+back the same shape: exactly 1 turn, `stopReason: "turn.completed"`, `costUsd: 0`, **zero findings**
+(`findings: []`):
+
+| PR | wall time | reasoning tokens (output) | loaded context tokens (diff-proportional) |
+|----|-----------|---------------------------|--------------------------------------------|
+| #2043 | 7.2s | 76 | 24,625 |
+| #2147 | 9.2s | 103 | 29,101 |
+| #2130 | 11.4s | 108 | 42,651 |
+| #2107 | 12.2s | 180 | 87,103 |
+
+**4 of 4 real runs: empty.** Reasoning effort does not track diff size the way it should: from the smallest
+diff (#2043) to the largest (#2107) the loaded context grew ~3.5x but reasoning output grew only ~2.4x — the
+seat gives proportionally *less* attention as the diff gets bigger, the opposite of what a careful review would
+need.
+
+### The miss that matters: PR #2107
+
+On #2107, Codex's advisory seat's own words: "no concrete simplicity findings survived scrutiny" — a rubber
+stamp. The same diff, same run, reviewed by the Claude correctness juror, produced a `CONFIRMED`,
+`disposition: blocker`, `worseThanBase: true` finding: `commitConvergeRound`
+(`we:scripts/operations/deliver-item-wrapper.mjs`) shells `git commit -F <msgfile> -- <paths>` with no preceding
+`git add`, which throws on any round whose accepted edit adds a brand-new (untracked) file — verified against
+real git, not the test suite's mocked `run` (every existing test for this path mocks `run`, which is why it was
+never caught). Codex looked at the identical diff and found nothing.
+
+### The control probe: the seat itself is not broken
+
+A separate synthetic-diff control probe (a scratch script driving the same real request builder and provider,
+against a contrived diff with an unused dead function and redundant branches — built to be found) confirmed the
+wiring CAN produce a real, correctly-shaped finding when exercised in isolation. So this is not a broken
+integration — it is a real judgment-quality gap on dense, real-world diffs specifically.
+
+### Verdict, per `#3581`'s own bar (Codex must prove itself as reviewer before delivery work trusts it)
+
+**Mechanism: validated.** No recurrence of the earlier false-accept bug, correctly tool-free, cheap, fast.
+**Reviewer judgment: NOT validated.** Four empty accepts in a row — one of them a genuine miss on a confirmed
+blocker — is not evidence of added signal.
+
+This does **not** call into question item 1 above (the Codex delivery-agent provider build) — the operator
+already explicitly, and separately, chose to move that forward ahead of this gate; that call stands as made. It
+**does** leave open a real, unresolved question: should the advisory seat itself be trusted or adjusted (a
+harder mandate? reasoning effort/budget forced to a floor regardless of diff size?) before `#2117`'s pilot is
+treated as proven. Nothing here forces that call tonight — it is a "decide with fresh eyes" item, not a
+"blocked" one.
+
+### Two smaller residuals, for the record
+
+- **A `blocked-on-infra` labeling gap, confirmed by direct inspection.** In
+  `we:scripts/operations/review-dispatch-wrapper.mjs` (prototype branch, `origin/lane/mechanical-dispatcher`),
+  the `blocked-on-infra` classification built when `we:scripts/operations/review-loop-cli.mjs` itself crashes
+  (`classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null }`, no `label`)
+  carries no error detail into `reportDone`, while the sibling `acquireLane`-throw path a few lines above builds
+  `classified` with `label: String((e && e.message) || e).slice(0, 500)` from the same kind of caught error
+  before reporting. Worth aligning so every `blocked-on-infra` path carries its error as a `label`, not just
+  some of them.
+- **Lane-pool reaped a live sibling agent's lease mid-run tonight** — no data lost, but the mechanism that let a
+  live lease get reaped out from under a running sibling is worth checking before trusting it unattended again.
+
+## Follow-up (2026-09-12 night, continued) — item 1 (Codex delivery-agent provider) also finished: `CODEX_PROVIDER`
+## is now real, not a stub, and pushed
+
+Item 1 above ("genuinely in progress, substantial, not done") has since landed on the branch. `e53073fef`
+("WE #3580: CODEX_PROVIDER is real — a write-capable second delivery agent") is pushed to
+`origin/lane/mechanical-dispatcher`: `CODEX_PROVIDER.spawn()` in
+`we:scripts/operations/deliver-item-wrapper.mjs`, previously an honest throwing stub, is now a real
+implementation backed by `we:scripts/operations/codex-delivery-provider.mjs` (352 lines, new). Selectable via
+`--provider=` on `we:scripts/operations/deliver-item-run.mjs`, then `DELIVERY_AGENT_PROVIDER`, then the
+unchanged default — **Claude stays the default; Codex is opt-in only.**
+
+Confirmed against a real `codex exec` invocation (codex-cli 0.153.4), not guessed, per the commit's own header:
+write access rides `-c default_permissions=locked` (never `-s workspace-write`, which was tested and rejected —
+it silently zeroes the permission deny map, and `codex exec resume` accepts no `-s` at all); a real
+`execFileSync` through the production primitive blocked ~10s and exited 0; and — the notable finding — Codex's
+own native OS-level permission profile, measured with no model in the loop, is actually STRONGER than this
+repo's Claude-side `we:scripts/guard-lane.mjs`/`we:scripts/guard-bash.mjs` hooks: a write into the primary
+checkout or a sibling lane both return `Operation not permitted` at the OS layer (`we:scripts/guard-lane.mjs`
+can only match Edit/Write tool calls and cannot stop a shell redirect, and it documents the sibling-lane case
+as an open residual), and the profile has no network at all, so `git push` is structurally impossible for it
+rather than merely denied by a hook. One documented limitation, stated in the code itself: choosing `codex`
+swaps the BUILD agent only — the wrapper's own separate converge-editor step (`runConvergeEdit`) still always
+spawns Claude.
+
+**Read this together with the reviewer-seat finding above, not separately**: the delivery-agent PROVIDER side
+is now real and technically working, opt-in-only, built ahead of `#3581`'s gate by the operator's own already-
+recorded explicit choice. But per the reviewer-judgment finding just above, `#3581`'s gate itself is not yet
+cleared. So the honest state is: **the mechanism for Codex delivery work now exists; whether to actually route
+real delivery work through it is still gated on the unresolved reviewer-judgment question** — not "Codex
+delivery work is ready to use."
+
+## Session update (2026-09-13) — `#3649` (run-quality benchmark / auditor) fully ratified, fork-by-fork
+
+`#3649` — the run-quality auditor that scores a dispatched agent's own transcript against a versioned rubric
+(deductions off an implicit 100%) — was reviewed fork-by-fork across several sessions and is now **resolved**,
+`codifiedIn: we:docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary` (only Fork 5's independence
+restatement earns statute; the rest is `one-off`). All seven forks ratified as recommended: session-end
+trigger; vector-canonical record with a class-level aggregate scalar only (never a per-run headline); stamped
+`rubricVersion`, never re-normalised; a named always-actionable criteria list plus accrual, no numeric par
+band in v1; the subject-class gate (driver/conveyor subjects report-only, always, stamped at launch); the
+risk-assessment-of-the-fix axis (blacklist first); and v1 ships **recording-only**, with the router built but
+disarmed.
+
+**Open follow-up, tracked as its own card so it survives past this session:** the router ships disarmed on
+purpose. Arming it is filed as `3651` ("Arm the run-quality router once v1's rubricVersion has a complete
+run population"), parked `maturityGated` (`adoptionSignal`: one complete run population under a single
+`rubricVersion`), `blockedBy: ["3649"]`. Nothing arms automatically — the next session that finds that
+population exists is the one that un-parks it.
+
+`#3649` itself builds none of the five pieces its ruling names (reader-widening on `#3477`, the rubric, the
+scorecard store, the subject-class stamp, the router) — those are still unfiled follow-on work, distinct from
+the `3651` arm-trigger card above.
+
+## Operator goal, recorded for the record (2026-09-13): point our own interactive build skills at the driver once it's trustworthy
+
+**This is a stated target the operator wants, not a "could do someday" idea — treat it as real backlog intent
+to revisit as the blockers below clear, not something a future session should second-guess away.** The
+operator's own words: "As soon as the driver is ready, I want our skills to point to it for building." Once
+this epic's mechanical dispatcher/driver is validated and trustworthy enough — **quality-proven on real work,
+not just mechanically working** — the repo's own interactive dev workflows under `we:skills-src/` (the skills
+that currently handle building/delivering a backlog item by driving an interactive session —
+`next-backlog-item`, `batch-backlog-items`, `workflow`, and anything else that dispatches build work today)
+should be changed to route their build path through the driver, rather than the driver staying purely a
+separate background/parallel system while the interactive skills keep doing their own thing. This is the
+natural endpoint of this whole epic's target shape (see "The target shape" section above) applied to the
+repo's own tooling, not a new idea.
+
+**Why this isn't done yet — the blockers as of today (2026-09-13):**
+
+1. **The driver has been exercised exactly once in a bounded, supervised test run**, against item `#3604` —
+   it correctly reported the item `"blocked"`, and this was the first time the new unified delivery telemetry
+   (`fe2d96ac6`, "traces, spans and the four golden signals" — see the session update above) was proven live
+   end-to-end rather than only unit-tested. One correct outcome on one item is evidence the mechanism can work,
+   not evidence it reliably does — nowhere near enough real-work volume to trust it as the default build path
+   for the skills operators actually use day to day.
+2. **Codex delivery-provider quality is still completely unvalidated on real work.** `CODEX_PROVIDER` (the
+   write-capable second delivery agent, `e53073fef`, "WE #3580") is technically real and wired, opt-in via
+   `--provider=`/`DELIVERY_AGENT_PROVIDER`, Claude staying the default. But the sibling validation thread in
+   this same file (the "Codex reviewer-seat validation concluded, judgment gap found" follow-up above) found
+   the mechanism clean while the JUDGMENT was not: 4 of 4 real live-fire runs came back with zero findings,
+   including one confirmed miss on a genuine blocker a Claude juror caught in the same diff. That was the
+   reviewer seat specifically, not the delivery-agent build seat, but it is the closest real evidence this repo
+   has on Codex's judgment quality on real diffs, and it is not reassuring. Nothing here should be read as
+   routing default build work through Codex, or through any driver path that leans on Codex judgment, until a
+   comparable live-fire validation exists for the DELIVERY side, not just the reviewer side.
+3. **Provider-selection wiring for `fix`/`ci-heal` kinds — checked directly at the time of this entry, and it
+   is done, on the branch, not yet on `main`.** As of this session's check, `origin/lane/mechanical-dispatcher`
+   already has: `WE #3640` (`20129c38e`, wires `fix` dispatch to
+   `we:scripts/operations/fix-dispatch-wrapper.mjs`'s mechanical arc), `WE #3642` (`00e81eacb`, wires `ci-heal`
+   dispatch to `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`'s mechanical arc), and `161f1bd4d` ("thread
+   the selected delivery provider into the converge round") — which fixed a real gap where
+   `we:scripts/operations/deliver-item-wrapper.mjs`, `we:scripts/operations/fix-dispatch-wrapper.mjs`, and
+   `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` all resolved a provider for the build spawn but never
+   passed it to the converge round, so a Codex-selected build's converge silently ran under Claude with no
+   record of the hand-off. All three commits are dated 2026-09-12 18:22 through 2026-09-13 07:40 (local),
+   pushed to the branch, not yet graduated to `main` per this epic's own "prove on the branch, graduate later"
+   build strategy (see "How to build it" above). So this specific blocker is functionally cleared at the
+   mechanism level — what remains is everything else on this list, especially live-fire proof and a rollout
+   policy, before any of it is trusted to replace an interactive skill's default path.
+4. **No risk/rollout policy exists yet for when the driver should be trusted to run unattended long enough to
+   actually replace interactive workflows.** Nothing in this epic currently states a bar — how many real items,
+   what mix of kinds, what failure rate, what escalation behavior — that would justify flipping a skill's
+   default build path from "drive it yourself, interactively" to "hand it to the driver." Until that bar is
+   named and met, pointing the skills at the driver is a goal to work toward, not a change to make.
+
+**What "done" looks like for this goal, so a future session recognizes it**: the driver has cleared a stated
+rollout bar (once one exists — see blocker 4) on real work across the kinds it needs to cover, and
+`we:skills-src/next-backlog-item`, `we:skills-src/batch-backlog-items`, `we:skills-src/workflow` (and any
+sibling interactive delivery skill) have been changed so their build step calls into the driver instead of
+driving an interactive session's own tool calls turn by turn — at which point the driver stops being a
+separate parallel system and becomes THE way this repo builds.
+
+## Operator goal, recorded for the record (2026-09-13): know this system's real build capacity, and model what new hardware would buy
+
+**This is a stated target the operator wants, not a "could do someday" idea — treat it as real backlog intent
+to revisit as the measurement foundation below matures, not something a future session should second-guess
+away.** The goal: determine the actual build/delivery capacity this system has available on current hardware,
+and model what new/different hardware would buy — specifically, how much additional build work and how many
+more concurrent lanes a given hardware upgrade would support. **This is the actual purpose behind the
+per-process resource telemetry work dated 2026-09-13** (see the host-resource metrics landed this same day,
+`e539e430e`, "telemetry: add host-resource metrics (load avg, mem, cpu count) to runner tick", plus the
+per-process telemetry work in flight alongside it under this same epic) — that work is not telemetry for its
+own sake; it exists to answer this capacity-planning question.
+
+**Future architectural direction (explicitly NOT built yet, just recorded as intent):**
+
+- Split resource capacity into two separate pools with their own budgets: the **command queue** (the
+  mechanical orchestration layer itself — conveyor/driver, drain, dispatch coordination) and the **lanes**
+  (actual build/work agent execution) — rather than treating all resource consumption as one undifferentiated
+  pool.
+- Consider using **macOS containers** (or an equivalent OS-level resource-control mechanism — sandbox-exec
+  resource limits, or a container runtime like OrbStack/Docker Desktop on macOS) to actually ENFORCE how much
+  CPU/memory each pool gets, not just measure it after the fact.
+- The per-process telemetry work (categorizing usage across conveyor/drain/dispatched-agent/vscode/chrome/
+  other, landed the same day as the host-resource metrics above) is the measurement foundation this future
+  capacity-split/enforcement work would build on — it has to exist before a capacity split or an enforcement
+  mechanism can be designed responsibly, since neither can be sized without knowing what actually consumes
+  capacity today.
+
+## Operator goal, recorded for the record (2026-09-13): a "git manager" — a central coordination layer every
+## git/GitHub operation across concurrent conveyor + subagent work routes through
+
+**A distinct, separate concern from the "point interactive build skills at the driver" goal recorded just
+above** — that one is about which system drives a build; this one is about how many independent processes are
+allowed to hit GitHub's API at once and how they share that budget. Recorded here as real, durable operator
+intent to build, in the same terms as this epic's other forward-looking goals — **not** a "could do" idea a
+future session should second-guess away.
+
+**Trigger, live during this very session.** A real GitHub API rate-limit exhaustion happened while this
+session was running: many concurrent conveyor/review/dispatch processes, each making its own independent
+`gh`/GitHub API calls with no shared coordination between them, caused `PR #2162`'s review-clear/drain pass to
+fail non-fatally and retry repeatedly. Nothing today stops N independently-running processes from each
+assuming they have the whole rate-limit budget to themselves.
+
+**The goal, in the operator's own words, in substance**: build a **git manager** — a central coordination
+layer that all git/GitHub operations across concurrent conveyor and subagent work should route through
+("hook all git operation in concurrent conveyor and subagent work ideally"), rather than each process
+independently making raw calls. Two requirements the operator stated directly:
+
+1. **Telemetry.** It must track git/GitHub API call volume and rate-limit consumption over time. This ties
+   directly into the telemetry system already built this session — `we:scripts/operations/telemetry.mjs` /
+   `we:scripts/operations/telemetry-store.mjs` — rather than inventing a second recording mechanism.
+2. **Self-adjusting to the REAL live rate limit, not a guessed static threshold.** It must read the actual
+   rate-limit-remaining/reset signal off real GitHub API responses and throttle dynamically off that live
+   signal. Confirmed earlier this session: GitHub returns rate-limit headers on every call, and the exact
+   header names differ from the Anthropic/OpenAI ones researched earlier in this session. For GitHub
+   specifically: the REST API returns `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset`,
+   `x-ratelimit-used`, and `x-ratelimit-resource` on every response; the GraphQL API returns the same header
+   family AND additionally exposes an in-band `rateLimit` query field (`cost`/`limit`/`remaining`/`resetAt`/
+   `nodeCount`) for point-based accounting a header alone can't give. The SECONDARY/abuse-detection limit (the
+   one that actually fired in the live incident behind this goal — see the near-term-stopgap note below) is
+   separate again: it surfaces as an HTTP 403/429 with an optional `Retry-After` header, not the primary
+   `x-ratelimit-*` family, and is NOT reflected in `gh api rate_limit`'s own primary-quota numbers. A design
+   that only watches the primary headers would miss the exact failure mode that triggered this goal.
+
+**Explicitly not built yet.** No git-manager code, design, or scaffolding exists as of this entry — this is
+operator intent to revisit and design, not a change already in flight.
+
+**Near-term stopgap raised, NOT yet decided/authorized.** A smaller interim step — a shared rate-limit-aware
+retry/backoff wrapper around the existing scattered `gh` calls, short of the full git-manager build — was
+raised as a possible stopgap during this same discussion. That is not yet decided or authorized as a plan;
+record it as raised, not agreed.
+
+**Important finding while writing this entry down: a version of that stopgap already exists, partially,
+in this repo — checked directly, not assumed.** `we:scripts/lib/gh-throttle.mjs` (`#3621`) is a real, already-
+landed module built after this exact class of incident (its own header cites a prior live secondary-rate-limit
+trip: "100 concurrent requests / 900 REST points-per-min / 2000 GraphQL points-per-min... confirmed separate
+from and NOT reflected in the primary 5,000/hr quota"). It gives `gh` calls a concurrency cap (default 6,
+deliberately conservative against GitHub's 100-concurrent secondary ceiling) built on top of
+`we:scripts/readiness/heavy-admission.mjs`'s existing counting semaphore (see the reuse question below), and
+retries a rate-limit-*shaped* failure (via `we:scripts/conveyor/infra-blocked.mjs`'s existing stderr
+classifier) with bounded exponential backoff. Two things matter about it for this goal specifically:
+- It is wired into only **3 of the ~84** `gh`-calling call sites that same incident's own grep found —
+  the conveyor runner's highest-volume paths only, by its own header's admission, not a full migration.
+- It throttles by a **fixed concurrency cap plus reactive retry on a failure already classified as
+  rate-limit-shaped** — it does NOT read the live `x-ratelimit-remaining`/`x-ratelimit-reset` (or GraphQL
+  `rateLimit`) signal proactively. So it does not yet satisfy requirement 2 above (self-adjust to the exact
+  live limit); it is a real, working, narrower stopgap already partially in place, not a full answer to the
+  live-signal requirement, and migrating the remaining ~79 call sites and/or making it header-driven is
+  itself unmigrated, undecided follow-up — separate from, and short of, the full git-manager build.
+
+**Codex readiness for this work, assessed today: not ready.** Codex cannot build any part of the git manager
+right now — its OS sandbox currently blocks it from committing anything at all (a separate bug found today,
+fix in progress, tracked outside this entry). Once that fix is confirmed, the plan discussed is to split the
+git manager's work by risk, not hand the whole thing over:
+- The core coordination/throttling logic — the part everything else depends on — stays with Claude. A bug
+  there could cascade across the whole mechanical system, the same caution already applied to driver/conveyor
+  subjects elsewhere in this epic.
+- Well-scoped, self-contained pieces (a rate-limit-header parser, a telemetry-recording helper, tests) are
+  reasonable first Codex candidates once the sandbox fix is proven — matching the atomic/no-design-judgment
+  selection criteria that worked in the `#3565` trial.
+- The point is reducing Claude token usage where it's safe to do so, not blanket-handing Codex critical
+  infrastructure. None of this is authorized yet — it's the shape of the plan, contingent on the sandbox fix.
+
+**Open question, not yet resolved: does this repo already have the right foundation to build on?** Two
+existing mechanisms may already be relevant, and whether they are the same mechanism or two distinct ones —
+and whether either is a natural foundation for the git manager's own coordination logic rather than building
+from scratch — is being checked separately, right now, as of this entry. Not yet answered:
+- `we:scripts/readiness/heavy-admission.mjs` (`#3461`/`#3456`) — the existing counting concurrency semaphore,
+  used today to gate the heavy verify-gate step, and ALREADY reused (not reimplemented) by
+  `we:scripts/lib/gh-throttle.mjs` above for its own independent `gh`-call pool.
+- The general "operation" engine (`we:scripts/operations/registry.mjs`'s `op()` pattern plus
+  `we:scripts/operations/engine.mjs`), used today for things like `restart-runner`.
+A future session should resolve this open question before starting the git manager's design, not assume
+either mechanism is or isn't the right base.
+
+**A further vision extension, recorded here so the plan stays in one place, not scattered across chat: the
+same wrapper-owned-content principle should cover every GitHub WRITE operation, not just commits.** The
+operator extended the same principle just applied to fixing the Codex sandbox-commit bug (commits are
+mechanically generated, never agent-composed free text) to the git manager's own scope: agents — Claude or
+Codex alike — should never compose raw `gh` write content freely, whether that's a PR body/description, a
+label, or a comment. Instead the wrapper renders that content from a template, fed by structured data the
+agent supplies (what changed, why, findings) — the same shape as the commit-message fix, generalized. This
+closes the same class of risk the commit fix closes: it guarantees standard-compliant formatting, and it
+structurally blocks an agent from doing something wrong or dangerous through a raw `gh` call (a malformed
+body, a wrong label, or worse) — a footgun-first structural fix, not a judgment call left to each agent.
+**Existing precedent already in this repo supports this direction**, checked directly:
+`we:scripts/operations/review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` already denies raw `gh` and
+label-editing tool access to every spawned review session — this is the same discipline, not a new one; it
+would generalize that discipline to build/fix/delivery dispatch's own PR-opening step too, which carries no
+such restriction today. This is a plan/vision addition, not something built in this entry — recorded here so
+a future design pass inherits it rather than re-discovering it.
+
+## Open question flagged, not resolved (2026-09-13) — the #2502 PR-duplication cleanup may be a symptom of an incomplete WE→plateau-app migration for a piece of this epic's own mechanism
+
+While closing out a cluster of duplicate PRs filed against `#2502` (WE #2060 + plateau-app #151, both
+superseded by WE #2073 + plateau-app #152), the operator noted the duplication itself — the SAME fix
+(threading the drain sweep's per-PR head SHA into the journal, adding a head-SHA-churn stuck signal) filed
+independently in both `web-everything` and `plateau-app` under matching branch names/numbers — may not be
+coincidence. It may instead be a symptom of an earlier, uncompleted effort to migrate some piece of this
+epic's own mechanical-dispatch functionality (the drain sweep / stuck-signal detection this cluster touches)
+out of `web-everything` and into `plateau-app`, left half-finished, so work kept landing in both places.
+
+**Not resolved here — flagged for a fresh look later.** The actual placement question — what piece of this
+mechanism belongs in WE vs. in `plateau-app`, and whether a migration is genuinely in flight or was only ever
+attempted — is a real architectural call this cleanup pass deliberately did NOT make. It needs its own
+dedicated decision turn (read both repos' history for the drain-sweep/stuck-signal code, confirm whether a
+migration was ever started or ratified, and rule where this mechanism's canonical home is going forward),
+not a byproduct of closing duplicate PRs. Recorded here, on this epic's own tracker, so whoever picks this up
+next does not have to re-derive the observation from the closed PRs.
+
+### Correction (2026-09-13) — the entry above misnames which PRs actually survived the cleanup
+
+Checked directly against live PR state (`gh pr view <n> --json state,mergedAt`) rather than trusted as
+written: **`WE #2073` and `plateau-app #152` — the two PRs the paragraph above names as the survivors — are
+themselves `CLOSED`, not merged.** The cluster was four duplicate/near-duplicate PRs in total, not two:
+`WE #2060`, `WE #2073`, `WE #2083` (all three `CLOSED`) and `plateau-app #151`/`plateau-app #152` (both
+`CLOSED`). **The PRs that actually survived are `WE #2087`** (`MERGED` 2026-09-08) **and `plateau-app #155`**
+(still `OPEN`, unmerged, as of this correction) — a different pair than the one named above. The substance of
+the open-question section itself (the WE↔plateau-app migration-symptom question) is unaffected; only the
+specific "which PR survived" citation was wrong.
+
+## Session update (2026-09-13) — durable operator intent: extend Codex as a provider beyond build/fix/ci-heal to every declared operation
+
+**Where this stands as of today, proven not just wired.** `#3564` → `PR #2169` ("WE #3564: delivery build")
+went through the real `we:scripts/operations/deliver-item-run.mjs --provider=codex` path (#3580's wiring) and
+came back independently reviewed carrying `review:accepted` with no findings. As of this write-up it is still
+parked — `review:human` per this card's own rule 5/6, the human clearance ceremony hasn't run yet — so it has
+not merged. But that parking is a process gate, not a doubt about the work: the delivery-and-review chain
+itself is now proven end to end for the first time, not merely assembled. (Reproduce directly: `gh pr view
+2169 --json title,labels,state,mergedAt`.)
+
+**A live, real goal, NOT yet built, NOT yet designed, NOT yet scoped — recorded here per this file's own
+"operation manager" convention (see that thread earlier in this file) so a future session doesn't have to
+re-derive it from scratch.** The operator's own stated direction is to extend what Codex can be used for,
+eventually, past the three delivery kinds it is wired into today — `build` (`we:scripts/operations/deliver-item-run.mjs`),
+`fix` (`we:scripts/operations/fix-run.mjs`), `ci-heal` (`we:scripts/operations/ci-heal-run.mjs`), all three
+taking `--provider=codex` per #3580 — to every operation this system declares, i.e. the full `OPERATIONS`
+table in `we:scripts/operations/run.mjs` (built out via `we:scripts/operations/registry.mjs`'s `op()` engine).
+That table already runs well past the three delivery kinds: `review-pr`, `review-prep`, `record-verdict`,
+`verify`, `mutation-check`, `gap-sweep-status`, `restart-runner`, `clear-stuck-session`, `resolve`, `scaffold`,
+`file-item`, `suggest-next`, `pr-status`, `gate-health`, `route-pr-outcome`, `dispatch-lane`, `claim`,
+`explore`, `open-pr`, `stage-pr-view` — none of which have any Codex wiring today, and none of which this
+session has scoped.
+
+**How to approach it — not new doctrine, the same discipline this epic already proved works.** #3564/#3565
+took build/fix/ci-heal from merely "wired" to actually "proven" by validating ONE real case with a real
+independent review before trusting the class — never by assuming three wired operations meant the fourth
+would just work. The same discipline applies here, harder, because the candidate operations don't share one
+shape the way build/fix/ci-heal roughly do: `review-pr`'s juror is tool-bearing and lane-scoped
+(`assertLaneCwd` refuses a spawn with no lane) in a way none of the three proven delivery kinds are;
+`claim`/`resolve` are cheap reads-then-writes that may not need an agent seat at all; `restart-runner` and
+`clear-stuck-session` are already fully mechanical passes today with no agent in the loop to swap a provider
+under. So which operations even HAVE an "agent seat" a provider could be substituted into is itself part of
+the undone design work here, not a given — one atomic operation at a time, a real independent review each
+time, no blind trust that a provider swap proven for one operation transfers to the rest.
+
+### Correction (2026-09-13) — the entry above conflates two separate systems; splitting scope into two tracks
+
+Direct investigation confirms the paragraph above frames the `build`/`fix`/`ci-heal` delivery lifecycle as if
+it belonged to the same `op()`-registered system as the rest of the `OPERATIONS` table it lists. It does not
+— these are two separate layers, not one:
+
+- **`dispatch-lane` IS a real `op()`-registered operation.** It is genuinely declared in
+  `we:scripts/operations/run.mjs`'s `OPERATIONS` table (via `we:scripts/operations/registry.mjs`'s `op()`
+  engine), three steps — read, plan, dispatch — with one `effect` step. That effect is what STARTS a build; it
+  does not complete one. This part of the plan above is accurate.
+- **The actual build/fix/ci-heal delivery lifecycle is a separate, hand-rolled script, not an `op()`
+  declaration.** Lane acquire, agent spawn, gate, converge, PR open — the work
+  `we:scripts/operations/deliver-item-wrapper.mjs` describes — runs via a per-kind provider handoff triggered
+  after `dispatch-lane`'s effect fires. It never touches `we:scripts/operations/registry.mjs` or
+  `we:scripts/operations/step-kinds.mjs`. It predates, and sits entirely outside, the `op()` declaration
+  framework the rest of this entry is describing.
+- **There is, and never has been, a `build` key in `OPERATIONS`.** Confirmed directly by grep of
+  `we:scripts/operations/run.mjs`: every `_OP` entry in the table is `review-pr`, `review-prep`,
+  `record-verdict`, `verify`, `mutation-check`, `gap-sweep-status`, `resolve`, `scaffold`, `file-item`,
+  `suggest-next`, `pr-status`, `gate-health`, `route-pr-outcome`, `dispatch-lane`, `claim`, `open-pr`,
+  `explore`, `stage-pr-view` — no `build`, `fix`, or `ci-heal` entry exists among them, now or ever.
+
+**What this means for the plan.** Today's proven Codex delivery work (`#3564`/`#3565`) already lives in the
+separate delivery-lifecycle layer (`we:scripts/operations/deliver-item-wrapper.mjs`'s per-kind provider
+handoff), which is NOT part of the `op()`-registered set this entry's "extend to every operation" plan
+describes. Extending Codex "to every operation" would only reach the `op()`-registered layer —
+`dispatch-lane`'s own decision step, plus the genuinely `op()`-registered operations (`review-pr`, `claim`,
+`resolve`, `scaffold`, `file-item`, and the rest listed above). It would NOT automatically cover more of the
+actual coding/delivery work, because that work is architecturally a different, separate system.
+
+**Scope, going forward, splits into two explicit tracks — do not conflate them:**
+
+1. **Extending Codex within the `op()`-registered operations themselves** — e.g. a judge/juror seat inside
+   `review-pr`-style operations, and potentially the `dispatch-lane` decision step itself. This is the part
+   the plan above actually describes, and it remains undone, unscoped work.
+2. **The already-proven, separate delivery-lifecycle work** (`we:scripts/operations/deliver-item-wrapper.mjs`'s
+   per-kind provider handoff) that today's real Codex deliveries (`#3564`, `#3565`) actually used. This was
+   never gated by, or part of, the "all operations" plan's stated scope above, and should not be conflated
+   with it going forward — it is a different system with its own provider seam, already proven
+   independently.
+
+## Operator goal, recorded for the record (2026-09-13): every new model/provider release must earn its way out of probation before it gets blocking/gating authority
+
+**This is a stated standing principle the operator wants applied going forward, not a "could do someday" idea
+— treat it as real, durable operator intent, in the same terms as this epic's other recorded operator goals
+above.** It generalizes directly from what this epic is building right now for Codex specifically (see the
+Codex reviewer-seat validation follow-up and the `#3649` ratification, both above, same day): a probation
+state a new model or provider release must sit in before this system trusts it with any authority that can
+block or gate other work.
+
+**The principle, stated plainly:**
+
+- **Every new model or provider release — a new Claude version, a new Codex version, Antigravity, Grok, an
+  open-weight model, or anything else added to this system in the future — goes through the same probation
+  state this epic is building right now, before it is trusted with any blocking/gating authority.** Not just
+  Codex, and not just today's roster: this is a standing gate on every future addition, named in advance so a
+  future session does not have to re-derive it from first principles the way this session had to reconstruct
+  the Codex case.
+- **Probation means three things together, not any one of them alone:**
+  1. **It can do real fix/build/review work.** Probation is not a sandbox that only runs toy tasks — it is
+     seated on genuine work, the same way `CODEX_PROVIDER` (`#3580`) already dispatches real `build`/`fix`/
+     `ci-heal` work and the Codex reviewer seat (`#3581`) already ran against 4 real, currently-open PRs.
+  2. **It is seated as an advisory participant only — never blocking.** Its output can inform a decision but
+     can never itself be the reason something is held, rejected, or gated. This is exactly the shape the
+     Codex reviewer seat already has today (`--codex-advisory`, `judgeAdvisory`) and exactly why the finding
+     above — 4 of 4 empty accepts, including a genuine missed blocker on `#2107` — was safe to learn from
+     rather than a live incident: nothing was ever gated on that seat's verdict.
+  3. **Its real performance is recorded, via `#3649`'s mechanism, not informally remembered.** Every probation
+     run's transcript is scored against `#3649`'s versioned rubric and persisted as a vector-canonical
+     scorecard — the same recording path this epic ratified fork-by-fork this same day, not a second,
+     bespoke tracking scheme invented per provider.
+- **Promotion out of probation is an explicit decision, grounded in the accumulated recorded data — never
+  assumed just because a new version or provider becomes available.** A new Claude release, a new Codex
+  release, or a first-time entrant (Antigravity, Grok, an open-weight model) does not inherit blocking/gating
+  authority by default, by vendor reputation, or by benchmark claims made outside this system. It earns it the
+  same way `#3649`'s own `3651` follow-up already requires for arming the run-quality router itself: a real,
+  named, checkable trigger (here, an operator decision reviewing the accumulated probation data), not a
+  default that fires silently.
+
+**Why this generalizes beyond Codex — the identity-keying requirement.** Codex is the first real instance
+exercising this mechanism, not the whole of it. **The probation state itself, and `#3649`'s recording of it,
+must be keyed by provider *and* model identity together — never hardcoded to one provider, and never
+collapsed to "provider" alone.** `#3649`'s own scorecard schema already carries a `model` field alongside
+`dispatchKind` and the stamped `rubricVersion` (see `meanScore({ rubricVersion, model, effort, dispatchKind })`
+in that card's own worked example) — this principle is the operating rule that field exists to serve: a
+future Claude version, a future Codex version, or a brand-new provider is a **distinct identity** in this
+scheme, starting its own probation record from zero. **A newer model release must never automatically inherit
+an older model's accumulated trust** just because it shares a provider name or a family label — "Codex" is not
+one identity forever; "Codex version X" and "Codex version X+1" are two separate identities under this
+principle, each starting cold. The same holds across a Claude version bump: today's Claude is the trusted
+default delivery provider by virtue of a long track record recorded the old way (informally, pre-`#3649`); a
+future Claude version is not exempt from this same probation-and-record discipline merely for sharing the
+`Claude` name — the identity key is provider+model, not provider alone, and probation applies to a genuinely
+new model identity even from an already-trusted provider.
+
+**Current state, for concreteness, not as the point of this entry.** As of today: Codex is proven-wired for
+real build/fix/ci-heal delivery work (`#3580`) and has one seat already run in advisory-only mode against real
+PRs (`#3581`'s reviewer-seat trial, 4/4 empty, one confirmed miss) — exactly probation-shape, mechanism clean,
+judgment not yet trusted, nothing blocked on its verdict. `#3649`'s recording mechanism is ratified fork-by-
+fork this same session but ships v1 recording-only, router disarmed, arming gated on `#3651`'s own named
+trigger. This entry does not change any of that; it records the general rule those specific facts are the
+first instance of, so the rule outlives this specific Codex episode and applies unprompted to whatever comes
+next.
+
+## Operator goal, recorded for the record (2026-09-13): make the lane-concurrency admission cap resource-aware instead of a flat count
+
+**Real, durable operator intent — not built now, just recorded**, in the same terms as this epic's other
+forward-looking goals above (the capacity-planning split and the git-manager coordination layer) — not a
+"could do someday" idea a future session should second-guess away.
+
+**Trigger, confirmed live today.** `we:scripts/lib/lane-concurrency.mjs`'s host-wide shared pool (default cap
+8, coordinated across all concurrent sessions via `~/workspace/.lanes/web-everything/`) is a flat, count-based
+admission control: it treats every lane as equal weight regardless of what the item actually requires. A real
+proof-run attempt today hit exactly this limit — roughly 40+ of 63 lanes leased host-wide, the shared pool
+saturated, real work blocked purely by lane COUNT, not by any actual measured resource exhaustion (CPU, memory,
+or otherwise).
+
+**The operator's stated view, recorded in substance, verbatim in intent:**
+1. The current flat-count cap is a deliberately crude stopgap against oversaturation, acknowledged as such by
+   the operator — not a permanent design. It exists to keep the host from being overrun, not because a fixed
+   count of 8 is the right unit of capacity.
+2. Once the per-process resource telemetry built earlier today (the `host.process.*` categories in
+   `we:scripts/operations/telemetry.mjs` / `we:scripts/operations/host-process-sample.mjs`, landed at
+   `6305d81dc`) accumulates enough real data on actual load per lane, capacity admission could become
+   resource-aware instead of a flat count — e.g. admitting based on measured/estimated compute load rather than
+   a fixed number of concurrent lanes.
+3. A further idea: estimate a story/item's likely compute cost DURING PREPARATION/scoping — alongside the
+   existing "scope" sizing already done at prepare-time — so a text-only change with no unit tests is
+   recognized as needing much less capacity than a heavy build+test cycle. A future admission system could then
+   weight concurrent admission by this per-item cost estimate, rather than treating every item as the same unit
+   of capacity regardless of what it actually costs to run.
+
+**Distinct from, but connected to, the capacity-planning goal recorded above.** That earlier entry is about
+measuring total hardware capacity and splitting the command-queue pool from the lane pool. This goal is
+narrower and different in kind: it is specifically about making the EXISTING admission mechanism
+(`we:scripts/lib/lane-concurrency.mjs`'s flat cap) smarter, using the real per-process telemetry data already
+being collected plus a per-item cost estimate made at prepare-time — not a question of provisioning
+more/different hardware.
+
+**Explicitly not built yet.** No resource-aware admission logic, no per-item cost-estimation step, and no
+telemetry-driven cap adjustment exist as of this entry — `we:scripts/lib/lane-concurrency.mjs`'s cap is still a
+flat, static count. This is operator intent to revisit once the telemetry above has accumulated enough real
+data to design against, not a change already in flight.
+
+## Session update (2026-09-13, continued) — the Codex delivery pipeline proven end-to-end across three real items, plus two real infrastructure bugs it surfaced and fixed
+
+**Proven, not just wired.** Three real items went through
+`we:scripts/operations/deliver-item-run.mjs --provider=codex` and landed: `#3564` → `PR #2169`, `#3565` →
+`PR #2172`, `#3506` → `PR #2176` — all three `MERGED`, all three carrying a real `Co-Authored-By: Codex`
+trailer on their build commit (`193395f50`, `a528b1486`, `8ccea68d9` respectively — confirmed by
+`git log --grep="Co-Authored-By: Codex"`), and all three came back from an independent review pass with
+`review:accepted`. This is the delivery-agent side of the pipeline the earlier "reviewer-seat judgment gap"
+finding (above) does NOT call into question — that finding was about the advisory REVIEWER seat, not the
+delivery-agent BUILD seat these three items exercised.
+
+**Two real infrastructure bugs found and fixed along the way, both confirmed present on
+`origin/lane/mechanical-dispatcher`:**
+- `56a333e63` — "delivery: fix commitBuildTurn's locus-prefix auto-fix to cover EVERY bare mention, not just
+  touched paths" (`#3383`/`#3565`).
+- `f70b0641e` — "delivery: fix commitBuildTurn/commitConvergeRound crashing on a genuinely new (never-tracked)
+  touched file" (`#3383`/`#3564`) — this is the same untracked-file/`git commit -F` class of bug the earlier
+  Codex-reviewer-seat validation night caught as a miss on `#2107`; it recurred on a real live delivery and got
+  a real fix this time.
+
+**A separate, structural bug in the `deliveryAgent: codex` marker itself was also found and fixed**:
+`f74d16cd2` — "mechanical-dispatcher: fix deliveryAgent: marker invisible when REPO_ROOT is stale" (confirmed
+on the branch) — a lane-acquire ordering bug where the marker read a stale `REPO_ROOT`, making a real
+`deliveryAgent: codex` marker invisible to the dispatcher.
+
+## Session update (2026-09-13, continued) — two new advisory judge seats (Codex correctness, Antigravity), plus the generic model-probation system underneath both of them, plus #3649's recording mechanism actually BUILT (not just ratified)
+
+**Fourth judge seat — Codex correctness-advisory**, `467ffb79f` ("review-pr: add a genuinely NEW fourth judge
+seat — Codex correctness-advisory (#3383)"), extended to the probation default by `df00bd9e9`. Distinct from
+the pre-existing `simplicity` lens seat; structurally non-blocking (advisory only), same shape as every other
+seat this epic has proven out.
+
+**Fifth judge seat — Antigravity advisory-review**, `bbd469c0b` ("review-pr: wire Antigravity in as a genuine
+fifth judge seat"), backed by a new tool-free primitive `63102bde8` ("add we:antigravity-judge-spawn.mjs: a
+tool-free Antigravity CLI judge primitive"). Built tool-free deliberately — `we:backlog/3633`'s known finding
+that Antigravity's own `--sandbox` flag only confines the shell, not Antigravity's own file tools, informed
+keeping this seat advisory/non-delivery-capable rather than write-capable. Same non-blocking pattern as the
+Codex seat; registered in probation.
+
+**The generic model-probation system underneath both new seats**: `f4395e2af` ("mechanical-dispatcher: generic
+{provider,model} probation status + #3649 run-quality recording mechanism (epic #3383)") adds
+`we:scripts/lib/model-probation.mjs`, keyed by `{provider, model}` identity plus role
+(`unvalidated|probation|trusted`) — exactly the identity-keying the operator-goal entry above ("every new
+model/provider release must earn its way out of probation") calls for. Both Codex seats and the new
+Antigravity seat default to live `probation` status under this system, confirmed by the same commit.
+
+**`#3649` itself — ratified fork-by-fork earlier today (`PR #2157`), but its own header noted it "builds none
+of the five pieces its ruling names." That gap is now substantially closed, same commit (`f4395e2af`)**: the
+run-quality recording mechanism is real and has scored actual Codex runs, not test fixtures only. Building it
+surfaced a real gap the ratification itself did not anticipate: **advisory judge seats were running effectively
+ephemeral for scoring purposes** — no durable transcript, nothing for `#3649`'s scorer to read. Codex's side
+of this gap is fixed: `52c8a00ce` ("fix(codex-judge-spawn): persist the judge's raw JSONL transcript so #3649
+can score it (not null)") adds `persistCodexJudgeTranscript`, confirmed wired as the default
+`persistTranscript` in `we:scripts/lib/codex-judge-spawn.mjs`.
+
+**Two pieces of this thread remain genuinely unfinished, checked directly against the branch rather than
+assumed done:**
+- **Antigravity's equivalent transcript-persistence fix has NOT landed.** Grepping
+  `origin/lane/mechanical-dispatcher` for `persistAntigravity`/`AntigravityJudgeTranscript` returns nothing —
+  no commit, no function. The Antigravity seat added this same session (`bbd469c0b`) is exposed to the same
+  ephemeral-transcript gap Codex's seat had, unfixed as of this update.
+- **`appendScorecard` (`we:scripts/conveyor/run-scorecard-store.mjs`) still has zero real callers outside its
+  own test file**, confirmed by grep — every other reference is documentation or the test suite. Wiring it
+  into real dispatch completions (so a real Codex/Antigravity run's score is actually persisted, not just
+  persistable) has not landed. Both of these were reportedly dispatched as follow-on fix work; **no resulting
+  commit or PR was found on `main` or `origin/lane/mechanical-dispatcher` as of this check** — treat both as
+  still pending, not landed, until a fresh session finds the actual commit.
+
+**A third in-flight item from the same thread, also unconfirmed as landed:** the `fix`-kind Codex dispatch
+finding that it is 100% blocked by a sandbox-vs-report-path collision (Codex's sandbox denies reading the
+primary checkout, but the fix-report CLI path resolves there) — a fix was reportedly dispatched for this too.
+No commit or PR addressing a sandbox/report-path collision was found on either branch as of this check. Flag
+for a fresh session to search current state directly (`git log --grep=sandbox -i`, open PR list) rather than
+assume it landed.
+
+## Session update (2026-09-13, continued) — automatic driver-based Codex routing: the MARKERS are proven landed; the actual live-fire dispatch is NOT yet confirmed to have executed
+
+**What is confirmed landed**: two PRs merged straight to `main` (content-only backlog edits, no lane/
+mechanical-dispatcher involved) set real `deliveryAgent: codex` markers on three existing backlog items,
+intended as live-fire targets for automatic (non-manual) driver-initiated Codex routing:
+- `PR #2181` (merged) — marks `#3428` and `#2866` `deliveryAgent: codex`.
+- `PR #2183` (merged) — marks `#3360` `deliveryAgent: codex`, adds a `scope` to `#3428`.
+
+Both confirmed present on `origin/main` by direct file read: all three backlog files (`#3360`, `#3428`,
+`#2866`) carry `deliveryAgent: codex` in their frontmatter as of this check.
+
+**What is NOT confirmed**: whether the driver has actually picked any of these up and completed a real
+automatic dispatch. As of this check — `status: open` on all three items on `origin/main`, no build commit
+for any of them found anywhere, `gh pr list --search "3360"` / `--search "3428"` return no PR touching either
+item's actual work, no `codex` process running host-wide, and no lane reservation referencing either item
+number. **This is a correction to how this milestone should be read going forward**: the markers making
+`#3360`/`#3428` eligible for automatic routing are real and landed; a completed, real, driver-initiated
+end-to-end proof run for either item is not yet evidenced by repo state at the time of this check. A fresh
+session should re-verify directly (`gh pr list --search "3360"`, `--search "3428"`, `gh pr view` on any hit,
+and the backlog files' own `status` field) before treating automatic routing as proven, rather than carrying
+forward an optimistic assumption. (Real driver-initiated Codex deliveries — with real `Co-Authored-By: Codex`
+commits — ARE proven for `#3564`/`#3565`/`#3506` via manual `--provider=codex`, per the session update above;
+that is a separate, already-confirmed claim from the *automatic*, marker-driven routing this section is about.)
+
+## Session update (2026-09-13, continued) — new decision filed and prepared: graduation criteria for exiting probation
+
+`3654` — "Define graduation criteria for a model/provider to exit probation status" — was filed via
+`PR #2185` (merged) and JIT-numbered to `#3654` on land. A `/prepare` pass then ran against it and merged via
+`PR #2187` ("prepare #3654: graduation criteria for a model/provider to exit probation"), confirmed by reading
+the PR body directly. Four forks were framed and `preparedDate` stamped — **ready to ratify, not yet ratified**:
+
+1. **Volume/mix**: a minimum trial count plus at least one genuinely informative (failure/edge-case) trial,
+   not count alone — exact N deliberately deferred, consistent with `#3649` Fork 4's own precedent.
+2. **What's measured**: success rate as a floor, plus a confirmed severity-calibration miss as an independent,
+   necessary-but-not-sufficient veto.
+3. **Per-role vs. global**: the bar scales with the role's eventual authority (`advisory-review` lightest,
+   `delivery` moderate, a future blocking/gating role strictest).
+4. **Per-provider vs. uniform**: one uniform floor for every `{provider, model}` identity — no identity buys
+   an easier bar by reputation; a project may optionally tighten (never loosen) per identity.
+
+Each fork was attacked by a separately-dispatched skeptic sub-agent (all four `SURVIVES-WITH-AMENDMENT`) and
+cleared by a fresh-context two-confusion screen, per the PR body. This item directly answers the "no
+graduation criteria exist yet" gap the probation system above was built without.
+
+## Session update (2026-09-13, continued) — cross-session coordination, provider-evaluation filings, stray-session hygiene, and the POC-branch CI gap
+
+**Cross-session coordination with a peer session (`webeverything-85`)**: a real file-conflict risk was found
+and reconciled on `we:scripts/operations/dispatch-lane-io.mjs` / `we:scripts/operations/review-dispatch.mjs` —
+both `PR #2130` ("WE #3331: read a --bg dispatch's REAL session id back off stdout") and `PR #2003` ("WE
+#3331: graduate the session-identity fix from lane/mechanical-dispatcher") touch the same two files under the
+same `#3331` card, confirmed by diffing both PRs' file lists directly. **Both remain genuinely `OPEN` as of
+this check** — the reconciliation is a plan, not yet executed; whoever lands one of these next should check
+the other for the same edit first. Separately, `we:scripts/lib/codex-judge-spawn.mjs` work was clarified as
+duplicate (not conflicting) effort with the peer session, not a second real conflict.
+
+**Three provider-evaluation items filed for later work, all via one PR (`PR #2179`, confirmed `OPEN`,
+unmerged as of this check):**
+- `3660` — probe Cursor as an additional dispatch provider.
+- `3661` — probe Grok (top-tier subscription) as a bulk high-volume dispatch provider.
+- `3662` — probe open-weight PAYG models (DeepSeek, Qwen) as a bulk high-volume dispatch provider.
+
+**Stray-session/orphaned-watcher hygiene**: the behavioral memory fix landed —
+`we:agent-memory-src/no-stray-sessions-or-orphaned-watchers.md`, `PR #2174`, confirmed `MERGED`. A follow-on
+design-only safety-net item, `3655` ("design a stray-resource monitoring safety net"), was filed via
+`PR #2177`, confirmed still `OPEN`/unmerged as of this check.
+
+**`clear-stuck-session` mechanized and wired into the reaper**, both confirmed present on
+`origin/lane/mechanical-dispatcher`: `81d5c9745` ("operations: add clear-stuck-session — mechanize the GH
+#77683 zombie-session workaround") and `2142bd0c0` ("conveyor: session-reaper mechanizes the #77683 repair via
+clear-stuck-session"). A docs follow-up pointing stuck-session cleanup at the new mechanized path instead of
+the old manual workaround (`PR #2170`) is filed but confirmed still `OPEN`, unmerged.
+
+**POC-branch CI gap — filed AND landed.** `3653` ("allow GitHub Actions CI to be enabled for POC branches,
+not just main") was filed and merged via `PR #2171`, then JIT-numbered to `#3653` on land (confirmed:
+`git log` shows `cbd4ac3e7 drain: JIT-number 3653→#3653 at land`). This closes the gap where PRs on
+`lane/mechanical-dispatcher` never got real GitHub Actions CI.
+
+**Duplicate/escalated PR resolutions, checked directly rather than transcribed:**
+- The `#2502` cluster — see the "Correction" subsection above; the real surviving PRs are `WE #2087`
+  (`MERGED`) and `plateau-app #155` (`OPEN`), not the pair the original entry named.
+- `frontier-ui #2755` (`#45` vs. `#47`) — both PRs are duplicates of the same native Go SSR renderer
+  foundation work and, confirmed directly against the `frontierui` repo, **both remain `OPEN` as of this
+  check** — record this as "duplication identified, not yet resolved on either PR," not as already landed.
+- `#3331` `#2130` vs. `#2003` — the same pair covered under "cross-session coordination" above; both `OPEN`,
+  reconciliation not yet executed.
+
+## Session update (2026-09-13, continued) — Codex fix/ci-heal sandbox bug fixed + `#3649` scorecard wired to all four real call sites; Antigravity seated as a fifth judge (not yet trialed); a genuine, still-unresolved `#3654` numbering collision between `main` and the prototype branch
+
+Everything below was re-verified directly against `git log`/`git show`/`gh pr view` at the time of this
+update, not transcribed from an earlier summary — several claims that looked landed going in turned out to
+still be in flight, and are corrected accordingly rather than recorded as done.
+
+### Confirmed landed
+
+**Codex fix/ci-heal sandbox-vs-report-path bug fixed, `#3649`'s scorecard wired to all 4 real dispatch call
+sites — `a0d328fb1`, on `origin/lane/mechanical-dispatcher`.** Two bugs, both closed in one commit: (1) every
+Codex `fix`/`ci-heal` dispatch was blocked before the agent could even check in `started`, because
+`we:scripts/operations/fix-dispatch-wrapper.mjs`'s report-CLI path pointed at the primary checkout while the
+Codex sandbox's own deny-list blocked reading that whole root — fixed by staging the report CLI's dependency
+closure into the agent's own lane at dispatch time; (2) `appendScorecard` (`we:scripts/conveyor/run-scorecard-store.mjs`)
+had zero real callers, so `we:scripts/conveyor/run-scorecards.json` stayed empty for every genuine dispatch —
+fixed by wiring `recordCodexRunScorecard` into all four real call sites
+(`we:scripts/operations/deliver-item-wrapper.mjs#CODEX_PROVIDER`,
+`we:scripts/operations/fix-dispatch-wrapper.mjs#FIX_CODEX_PROVIDER`,
+`we:scripts/operations/ci-heal-dispatch-wrapper.mjs#CI_HEAL_CODEX_PROVIDER`,
+`we:scripts/lib/codex-judge-spawn.mjs#codexJudgeSpawn`). Verified live, not just unit-tested: a real fix-kind
+Codex dispatch against real, untouched PR #2032 produced a real `started` check-in and a genuine,
+non-synthetic `we:scripts/conveyor/run-scorecards.json` row.
+
+**Antigravity judge-transcript persistence fixed — `042ae4f62`, mirroring Codex's own equivalent fix
+(`52c8a00ce`).** `we:scripts/lib/antigravity-judge-spawn.mjs` now persists its raw stream-json transcript
+instead of leaving it `null`, so `#3649`'s scorer can actually read it. Confirmed present on
+`origin/lane/mechanical-dispatcher`.
+
+**Antigravity wired as a genuine fifth judge seat — `bbd469c0b`, plus its standalone primitive `63102bde8`.**
+Mirrors the Codex correctness-advisory seat exactly: a new `judgeAntigravityReview` step on its own
+`antigravity-review` lens (disjoint from every existing lens set by construction), opt-in via
+`REVIEW_PR_ANTIGRAVITY_REVIEW`, registered on `probation` for `{provider: antigravity, model: gemini-3.1-pro,
+role: advisory-review}` — **the commit's own text states this identity "has zero prior review trials,"
+unlike Codex's seat which had build-side trials first.** Read literally: the seat is wired, not yet exercised.
+**No real Antigravity review trial has run as of this check** — no scorecard row, no PR review referencing it
+was found anywhere in the repo. Anyone picking this up should not assume a first trial has happened; it is
+still an open action item, not a completed one.
+
+### A genuine, real numbering collision — confirmed by reading both branches directly, still unresolved
+
+`#3654` currently means two different things depending which branch you read, and this is a real divergence,
+not a stale false alarm:
+
+- On `origin/main`: `we:backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob.md` —
+  "Define graduation criteria for a model/provider to exit probation status," `status: open`,
+  `preparedDate: "2026-09-13"`. Confirmed real, safe, and complete: four forks, each attacked by a separately
+  dispatched skeptic sub-agent (all four `SURVIVES-WITH-AMENDMENT`), cleared by a fresh-context screen —
+  **ready to ratify, not yet ratified.** (This is the same item already recorded above under "new decision
+  filed and prepared"; nothing about it needed correcting.)
+- On `origin/lane/mechanical-dispatcher`: `we:backlog/3654-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher.md`
+  — a different card entirely ("Codex model routing: pin a Codex model per rung, or keep inheriting"),
+  assigned that same number by the branch's own independent JIT-numbering heal
+  (`f4395e2af`'s commit message: `we:scripts/backlog-renumber-collisions.mjs` resolved a 3635/3636/3637
+  collision to 3654/3655/3656 locally, against a `main` merge-base that was already stale by the time `main`'s
+  own drain separately numbered the graduation-criteria item `#3654`).
+
+**Both files exist, under the same number, on their respective branches, right now.** This has not been
+healed — see "still not done" below; the merge that would surface and resolve this collision (main wins,
+per the newly-adopted tiebreaker below) has not happened yet.
+
+**Correction: the standing "main always wins a numbering collision" rule is not yet actually written down.**
+No file at `we:agent-memory-src/backlog-numbering-must-resolve-against-main.md` (or any equivalent) exists on
+`main`, on `origin/lane/mechanical-dispatcher`, or anywhere else in this repo's history as of this check —
+confirmed by direct search. Treat this as a **decided-in-conversation-but-not-yet-authored** rule: the
+principle behind it is now explicit here on this tracker (main wins; a lane's own JIT-heal must ultimately
+defer to it), but the durable agent-memory artifact still needs to be written by whoever next touches this.
+Do not carry forward an assumption that it already exists.
+
+### Two small bugs filed, PR still open — correcting a "landed" assumption
+
+`3657` ("`we:scripts/lane-pool.mjs#ensureDeps` leaks `npm ci`'s inherited stdout into an acquire's
+captured lane path") and `3656` ("`dispatchFix` leaks its acquired lane when the finding-scratch-file write
+throws early") — both found live while fixing `a0d328fb1` above, both filed as backlog cards, no fix attempted
+in the same PR. **`PR #2188` is confirmed `OPEN`, not merged**, as of this check (`gh pr view 2188`). Filing
+happened; landing has not.
+
+### Checked and confirmed still in flight — not recorded as done
+
+- **`#3521` automatic Codex-routing proof-run.** A marker commit (`d8ff48145`, "mark #3521 deliveryAgent:
+  codex") is pushed to its own small branch, `origin/lane/mark-3521-deliveryagent-codex`, based on current
+  `main` — **not** part of `lane/mechanical-dispatcher`. No PR exists for that branch (`gh pr list --search
+  "3521"` returns nothing touching it), and no further dispatch, PR, or run record for `#3521` was found
+  anywhere. The marker is in place; the actual automatic-routing run it sets up has not been observed to
+  complete.
+- **Antigravity's first real review trial** — see above: wired, on probation, zero trials recorded.
+- **Cursor / Grok / open-weight-PAYG provider research** — still filing-only, exactly as already recorded
+  above under "Three provider-evaluation items filed." Re-confirmed directly from each commit's own message
+  (`b467e029c`, `0fcf8fc52`): *"Filing only, per the operator's explicit request; no build or deep research
+  performed."* No CLI capability was actually probed for any of the three candidates; `PR #2179` carrying all
+  three remains `OPEN`.
+- **A git-manager slice for `gh pr create`/`open-pr` specifically** — not built. Direct inspection of
+  `we:scripts/operations/open-pr-io.mjs` and `we:scripts/pr-land.mjs` (the actual `gh pr create` call site)
+  shows no `we:scripts/lib/gh-throttle.mjs` wiring and no new self-calibrating, live-rate-limit-header-driven
+  logic added there. What exists there today predates this session: `we:scripts/pr-land.mjs`'s own `#2659`
+  infra-blocked path (classifies a post-push `gh pr create` failure and auto-retries with backoff via the
+  conveyor tick, not a live `x-ratelimit-*` reader) and the separately-landed `we:scripts/lib/gh-throttle.mjs`
+  (`#3621`, a concurrency cap plus reactive retry, wired into only ~3 of the repo's ~84 `gh`-calling sites,
+  not `open-pr`/`pr-land` among them). The full git-manager vision recorded earlier in this file is still just
+  that — a vision, not a build; nothing changed on that front this session.
+- **A full merge of current `origin/main` into `lane/mechanical-dispatcher`** — not completed, not pushed.
+  `git merge-base lane/mechanical-dispatcher origin/main` still resolves to `4261ef224`, ~15 merged PRs behind
+  current `main` (through and including `PR #2189`'s tracker update). Worth flagging for whoever picks this up
+  next: two lanes (`lane-1`, `lane-3`) are currently leased under the purpose `merge-mechanical-dispatcher-main`
+  (acquired ~18:55 EDT this same evening), but as checked directly, both sit on plain `main`, far behind, with
+  no merge attempted and no commits toward it — and the PIDs recorded on their leases are no longer running.
+  This reads as a stale or abandoned start, not active in-progress work; confirm before assuming it is being
+  handled.
+
+## Operator note, recorded for the record (2026-09-13): value confirmed in #3621's container-based resource isolation, but active work is explicitly deferred until judge/provider integration graduates
+
+**The statement, in the operator's own terms:** containers will likely be useful for resource management, but
+it is a larger piece of work, so it should wait until the current judge/provider integration work
+(Codex/Antigravity/model-probation) graduates — i.e. defer per `#3621`'s own already-researched recommended
+sequencing. **This is not a ratification** and does not stamp a `preparedDate` — `#3621` stays `open`/
+unprepared, per this repo's "never take an unprepared decision" doctrine. This entry only records stated
+operator intent/sequencing so it is not lost, the same discipline this tracker has used for every other
+operator statement recorded above tonight.
+
+**This confirms #3621's own most recent amendment rather than adding a new judgment on top of it.** `#3621`'s
+2026-09-11 "LIVE test" amendment already concluded, in its own "Recommended sequencing" section: "the
+operator's stated preference — wait until Codex and Gemini are hooked up — is well supported by the evidence,
+because the Codex work gains nothing from waiting for containers. If anything starts in parallel sooner, it
+should be the heavy-command container pool, not per-lane containers." Tonight's operator statement restates
+and confirms that same sequencing rather than introducing a different one.
+
+**Ties to `#3654`'s graduation criteria.** The "judge/provider integration work" this defers behind is this
+same epic's model-probation system (`we:scripts/lib/model-probation.mjs`) plus its two new advisory seats
+(Codex correctness, Antigravity) — see the session updates above. `#3654` ("Define graduation criteria for a
+model/provider to exit probation status") has had all four of its forks ratified per `PR #2195` — confirmed
+`OPEN`, **not yet merged to `main`** as of this check; do not assume it has landed. Once that PR merges and
+the probation system has real graduation criteria to operate against, active work on `#3621` becomes in-scope
+again per this sequencing.
+
+**If anything on this axis starts before graduation, it should be the heavy-command container pool, not
+per-lane containers** — `#3621`'s own distinction, restated here because it is the one piece of the container
+idea this deferral does not cover: it needs no auth/billing change, answers `#3621`'s founding incident
+(`#3594`'s busy-spin) directly, and would produce the throughput measurement data the core-split amendment
+still lacks.
+
+## Session update (2026-09-13, continued) — `#3654` (graduation criteria for exiting probation) ratified, all four forks
+
+`#3654` — "Define graduation criteria for a model/provider to exit probation status," filed and prepared
+earlier this session (see the "new decision filed and prepared" update above) — was ratified by the operator
+(Nicolas Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**,
+`codifiedIn: we:docs/agent/platform-decisions.md#model-probation-graduation-criteria` — unlike `#3649`, this
+card's full ruling earns statute (it *is* the shape of the graduation bar), not a narrow rider under an
+existing anchor.
+
+Ratified, as recommended: **(1)** a minimum trial count plus at least one genuinely informative trial (a
+confirmed miss or a documented cross-reviewer disagreement), never count alone; **(2)** success rate as a
+floor, with a confirmed calibration miss an independent veto regardless of accept rate, never diluted into a
+blended composite; **(3)** the bar scales with the role's eventual authority (`advisory-review` lightest,
+`delivery` moderate, a future gating role strictest, not yet built); **(4)** one uniform floor for every
+`{provider, model}` identity — no identity buys an easier bar on reputation, though a project may tighten
+(never loosen) per identity as an optional config choice.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3649` Fork 4's own precedent — a
+specific N per role is deferred to a follow-on ordinary (batched) finding once real trial-count data exists,
+never a separate ceremony. No graduation-check function is written and no threshold is wired into
+`we:model-probation.mjs` here — this card rules on the shape of the bar only; wiring it is still unfiled
+future work, distinct from this ratification.
+
+## Session update (2026-09-14) — heavy-command-pool container POC started, per operator direction
+
+Tracked here as a progress note rather than a new formal backlog item, per the operator's own explicit
+instruction ("we can maybe track on the prototype progress unless need formal item to be filed"). Checked
+first whether this repo's PR-landing convention requires a formal item: it does not — `we:scripts/pr-land.mjs`
+only refuses an EMPTY PR description (#2324), and recent precedent (`PR #2131`, "fix: throttle
+we:review-set-label.mjs's last bare execFileSync call (#3631 slice)") lands a real, tested code change that
+references an EXISTING item by number without filing a new one. This slice does the same: it references
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md` directly (an amendment was
+also added there, dated the same day) rather than opening a sibling item.
+
+**Why this slice, now, despite #3621's own per-lane-container deferral still standing.** #3621's 2026-09-11
+amendment corrected an earlier framing and drew a real distinction the operator's brief for this task also
+draws: per-lane containers remain gated on a real, unresolved auth/billing question (switching dispatched
+sessions from OAuth/keychain to `ANTHROPIC_API_KEY` metered billing) — that deferral is UNCHANGED and still
+applies. The heavy-command-pool slice is different: it needs no auth/billing change at all (`check:standards`
+and `test:unit` need no credentials), it was #3621's own amendment's explicit recommendation for "if anything
+starts in parallel sooner," and it answers a real, currently-live problem this same night: the heavy-admission
+semaphore (`we:scripts/readiness/heavy-admission.mjs`, `DEFAULT_ADMISSION_CAP = 2`) is a purely COOPERATIVE
+counting semaphore with no resource boundary behind it — it throttles how many heavy commands run at once,
+never what any one of them can do to the host once admitted.
+
+**What was built — a working first slice, `check:standards` only, proven with real evidence, not a mock.**
+
+- `we:scripts/lib/container-exec.mjs` (new) — builds the `container run --cpus N --memory Ng` argv and runs a
+  command inside a real Apple `container` instance. The checkout is bind-mounted read-write at its own
+  absolute path; when the checkout has a git-alternates primary root (a `--reference`-cloned lane, the normal
+  shape `we:scripts/lane-pool.mjs` produces), that primary is ALSO mounted read-only at its own identical
+  absolute path — without this, `git merge-base origin/main HEAD` and similar calls inside the container fail,
+  which was the first real failure mode hit while building this (git's alternates file records an absolute
+  host path that otherwise does not exist inside the guest).
+- `we:scripts/lib/container-exec/Containerfile` (new) — `node:22-alpine` plus `git` (alpine's base ships
+  none, and `we:scripts/check-standards.mjs` shells out to it). Deliberately does NOT bake a linux-arm64 `node_modules`
+  the way #3621's own fuller research measured: `check:standards`'s actual npm closure (`gray-matter`,
+  `markdown-it`) is pure JS with no native binding, so the lane's own host-built (darwin) `node_modules`
+  mounts straight in and just works. This is a real, narrower, cheaper path than #3621 measured for the FULL
+  suite — but it is NOT proven for `test:unit` (vitest/esbuild/rollup carry real native darwin bindings in
+  this lane's tree; #3621's own `MODULE_NOT_FOUND` finding almost certainly still applies there without the
+  baked-linux-tree approach that item already measured).
+- `we:scripts/readiness/heavy-admission.mjs` — gained a general-purpose `run` CLI mode
+  (`node we:scripts/readiness/heavy-admission.mjs run [--container] -- <cmd…>`, `runUnderAdmission`) that this
+  repo's `main` did not yet have (a fuller version of the same idea exists only on the separate, still-unmerged
+  `lane/mechanical-dispatcher` integration branch, per #3383's own earlier finding — the two will need
+  reconciling, likely a straightforward union, whenever that branch merges to `main`; flagged here rather than
+  silently duplicated). `--container` (or `WE_HEAVY_ADMISSION_CONTAINER=1`) is OPT-IN ONLY: it swaps the
+  command's execution from host `execSync` to `we:scripts/lib/container-exec.mjs#execContainerized`; every existing caller,
+  and `run` without the flag, is byte-for-byte unchanged.
+
+**Real evidence, measured on this machine tonight:**
+
+- **Fidelity**: `check:standards` run inside the container and on the host, back-to-back against the SAME repo
+  state, produced the IDENTICAL error count (3 errors — real, pre-existing, unrelated stranded-backlog-hash
+  issues live on `main` right now) and the identical error messages. The one output difference was a single
+  warning swap (`fui:`/`plateau:` sibling-checkout-absent vs. a block-export-shape warning) caused by this POC
+  not yet mounting the `frontierui`/`plateau-app` sibling checkouts — a named, understood scope gap, not a
+  correctness bug.
+- **Cap enforcement, reproducing #3621's own busy-spin containment method**: 8 unbounded `while :; do :;
+  done` spinners inside a `--cpus 2 --memory 2g` container held the host-side
+  `com.apple.Virtualization.VirtualMachine` process at ~190-205% CPU throughout the run (sampled 3x during a
+  live run) — on this 12-core host, the SAME shape ran unconstrained reaches ~800% per #3621's own prior
+  measurement. The cap is real, not aspirational.
+- **End-to-end via the actual wrapper**: `node we:scripts/readiness/heavy-admission.mjs run --container --
+  node we:scripts/check-standards.mjs` correctly acquired a real admission slot (this host's cap was genuinely
+  saturated by other live lane activity during this session — a real, not staged, demonstration of the
+  capacity pressure this whole item exists to address), ran the command inside the container, and propagated
+  its real nonzero exit code back out.
+- Unit tests added: `we:scripts/lib/__tests__/container-exec.test.mjs` (pure argv/mount-derivation logic, plus
+  a self-skipping REAL integration block that only runs when the `container` CLI and this POC's image are
+  actually present) and new cases in `we:scripts/readiness/__tests__/heavy-admission.test.mjs` for
+  `runUnderAdmission`/`shellQuoteWord`/the injectable container-exec seam.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Only `check:standards` is proven. `test:unit` and the Playwright visual-capture pass are NOT wired or
+   proven — `test:unit` in particular needs the baked-linux-tree approach #3621 already measured (~14s `npm
+   ci` in-image), not the bind-the-host-`node_modules` shortcut this slice uses.
+2. `--container` is not wired as the DEFAULT anywhere — `we:scripts/verify-lane.mjs`'s own gate execution, and every
+   other existing heavy-command call site, still runs on the host exactly as before this PR. Turning it on by
+   default (even for `check:standards` alone) is a deliberate follow-up decision, not made here.
+3. The `frontierui`/`plateau-app` sibling-checkout mounts are not included, so `check:standards`'s
+   cross-repo reference-resolution gates degrade to "skipped" inside the container today.
+4. No image-build automation exists yet (a human/agent runs `container build` by hand per this PR's
+   Containerfile) — a real gap if this is ever wired into an unattended dispatch path.
+5. This work landing on `main` while the fuller `run`-mode implementation lives unmerged on
+   `lane/mechanical-dispatcher` is a known, accepted duplication risk (see above) — not resolved by this PR.
+
+## Session update (2026-09-14, later the same day) — heavy-command-pool container POC extended to `test:unit`
+
+Same tracking convention as the session update directly above: a progress note, not a new formal item, per
+the operator's own standing direction and this repo's PR-landing precedent (`we:scripts/pr-land.mjs` only
+refuses an empty PR description — #2324). First checked whether the prior PR (`#2206`,
+`lane/3621-heavy-command-pool-container-poc`) had merged before starting: it had not (`gh pr view 2206` — open,
+mergeable), so this slice was built as a lane clone based directly on that PR's own branch, reusing its
+`we:scripts/lib/container-exec.mjs`/`Containerfile` infrastructure rather than duplicating it.
+
+**Why `test:unit` next.** `#2206`'s own report named it explicitly: `test:unit`/Playwright aren't
+containerized, and unlike `check:standards`'s pure-JS dependency closure, `test:unit` (vitest) needed the
+baked-Linux-tree approach because of native/compiled deps. Confirmed before writing any code: scanned
+`we:package-lock.json` for every optionalDependency with a `darwin-arm64`/native shape — esbuild, rollup, swc,
+lightningcss, sharp, `@parcel/watcher`, `node-gyp-build-optional-packages` all appear, and the host's own
+`we:node_modules/@esbuild/` directory holds only `darwin-arm64`, confirming vitest's own transform pipeline
+(esbuild, reached via vite) cannot resolve inside a Linux guest mounting that host tree straight in.
+
+**What was built — see `#3621`'s own 2026-09-14 (later) amendment for the full technical writeup; condensed
+here:**
+
+- `we:scripts/lib/container-exec/Containerfile.test-unit-deps` (new) — bakes a Linux `node_modules` via `npm
+  ci` inside plain `node:22-alpine` (no build toolchain needed — every native dep ships a prebuilt Linux
+  binary for this lockfile).
+- `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new) — builds that image, creates/seeds a named
+  `container volume` from its `/app/node_modules`, and stamps a lockfile-hash marker so a re-run with an
+  unchanged lockfile is a cheap no-op; a `status` mode reports image/volume presence and staleness for a
+  preflight.
+- `we:scripts/lib/container-exec.mjs` — gained `nodeModulesVolume` support on `buildContainerRunArgs`/
+  `execContainerized` (mounts a named volume at `<cwd>/node_modules`, shadowing the checkout's own rw mount for
+  that one subtree only — proven empirically that a more-specific mount wins the shadow and that writes to it
+  never touch the host) plus `frontieruiSiblingRoot`, which auto-mounts the `frontierui` sibling checkout
+  read-only when `nodeModulesVolume` is requested (closing the sibling-mount gap named in `#2206`'s report, for
+  `test:unit`'s own import graph specifically — `plateau-app` is a `vite.config.mts`/dev-server-only reference,
+  confirmed not part of `test:unit`'s closure, so deliberately not mounted).
+- `we:scripts/readiness/heavy-admission.mjs` — the `run` CLI gained a `--container-node-modules` flag (or
+  `WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES=1`), layered on top of the existing `--container` flag, with the
+  same fail-loud-with-actionable-message preflight `#2206` already established for a missing image, mirrored
+  for a missing/stale node_modules volume.
+
+**Real evidence, measured on this machine:**
+
+- **Fidelity**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on the host and inside the
+  container produced IDENTICAL pass counts (35/35 files, 441/441 tests) both times — via the actual wrapper,
+  `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run
+  we:blocks/__tests__`. The FULL suite (447 files / 12007 tests, ~9m48s wall-clock on the host, measured this
+  session) was not re-run inside the container — a representative subset was used instead, per this task's own
+  explicit allowance for a first proof.
+- **Cap enforcement, reproduced a third time**: 8 unbounded busy-spin `node -e` processes inside a `--cpus 2
+  --memory 2g` container held the host-side `com.apple.Virtualization.VirtualMachine` process at ~191-204% CPU
+  (sampled twice during a live 15s run), versus ~800% (8 processes each pinned near 100%) running the identical
+  workload unconstrained on the host — same containment result `#2206` measured for `check:standards`, now
+  reproduced under this slice's own node_modules-volume + sibling-mount configuration.
+- **Failure modes confirmed, not just predicted**: running `test:unit` in-container WITHOUT the node_modules
+  volume reproduces the exact `MODULE_NOT_FOUND`-shaped failure `#3621` predicted (here surfacing as an esbuild
+  transform error plus an unresolved `@frontierui/plugs/...` import) — confirming the shortcut genuinely does
+  not extend from `check:standards` to `test:unit` without this slice's own fix.
+- Unit tests added/extended: new cases in `we:scripts/lib/__tests__/container-exec.test.mjs` (the
+  `nodeModulesVolume`/`frontieruiSiblingRoot` pure logic, plus REAL self-skipping integration tests proving the
+  mount-shadow property against an actual container) and a new
+  `we:scripts/lib/container-exec/__tests__/build-test-unit-deps.test.mjs` for the build script's pure helpers.
+  `node we:scripts/check-standards.mjs` passes clean (0 errors) against this change.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Playwright is still not containerized — a different, likely harder shape again (needs a real browser inside
+   the guest, not just a Linux dependency tree), genuinely unstarted.
+2. The full `test:unit` suite (447 files / 12007 tests) was not run side-by-side in the container — only a
+   representative subset, per this task's stated allowance. A future pass should measure the full-suite
+   wall-clock cost inside the container (the mount I/O penalty `#3621`'s own research flagged may matter more
+   at that scale).
+3. Neither `--container` nor `--container-node-modules` is wired as a DEFAULT anywhere — every existing
+   heavy-command call site still runs on the host exactly as before.
+4. `check:standards`'s own image is still built by hand; only the `test:unit` deps image has a build/seed
+   script. Generalizing image-build automation beyond this one case is unstarted.
+5. The same `lane/mechanical-dispatcher` reconciliation risk `#2206`'s report named is unchanged by this
+   slice — still an accepted, known risk, not resolved here.
+
+### Design note (2026-09-14) — should heavy git operations share `we:heavy-admission.mjs`'s pool with vitest/check:standards? No current call site warrants wiring it; open forward-looking question only
+
+Follow-up to tonight's runaway `git grep` incident (a one-off pathological command, already killed — see
+above). The operator's architectural point, independent of that specific incident: `we:scripts/readiness/heavy-admission.mjs`'s
+shared semaphore (cap 2, `run` CLI mode) already gates `check:standards`/`verify-lane`/`test:unit`. If a
+genuinely heavy git operation (full-repo `gc`/`repack`/`fsck`, a multi-remote `fetch --all`, a `merge-tree`/
+rebase loop across many commits) ever runs un-gated, it stacks CPU load against those same capped operations
+uncoordinated, because git currently has no presence in the pool at all.
+
+**Checked every git call site in `we:scripts/` (excluding `__tests__`) for anything at that weight class.**
+None found:
+- No `git gc`, no `fetch --all`, no full-repo `fsck` anywhere in `we:scripts/`.
+- Every `fetch` call site (`we:scripts/lane-drain.mjs`, `we:scripts/lane-resume.mjs`, `we:scripts/lane-pool.mjs`,
+  `we:scripts/backlog.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/pr-land.mjs`,
+  `we:scripts/conveyor/branch-sync.mjs`, `we:scripts/conveyor/branch-drift.mjs`,
+  `we:scripts/conveyor/validate-and-promote.mjs`, etc.) fetches a single ref/branch with `--quiet`/`--prune` —
+  narrow and cheap, not a multi-remote full fetch.
+- `git merge-tree --write-tree` appears in `we:scripts/lane-pool.mjs`, `we:scripts/prune-landed-lanes.mjs`,
+  `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/rebase-drop-content.mjs`, `we:scripts/lib/rebase-drop-manifest.mjs`,
+  `we:scripts/lib/git-run.mjs`, `we:scripts/conveyor/branch-drift.mjs`, and
+  `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (the last one *describes* the plumbing but doesn't call
+  it). Every real call site does exactly ONE `merge-tree` between two refs (`base` vs one lane/PR ref) —
+  working-tree-free by design, deliberately chosen (per these files' own comments) *because* it's cheap
+  compared to a real checkout+merge. `we:scripts/prune-landed-lanes.mjs` and `we:scripts/merge-ai-prs.mjs`
+  each call it once per candidate branch/PR in a loop, but that's N cheap single-ref probes, not one big
+  multi-commit rebase/merge — not the weight class the operator named.
+- `git rebase` appears in `we:scripts/operations/poc-land.mjs` and `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`
+  — a normal single-branch rebase onto a fresh tip, not a loop across many commits.
+- `we:scripts/conveyor/branch-sync.mjs` (named explicitly in this investigation's brief) fetches one ref and
+  probes with `merge-tree` before ever attempting a real merge — same cheap pattern, not heavy.
+- `we:scripts/lib/isolation-provider.mjs`'s `repack -a -d -f` (confirmed earlier tonight) runs only against a
+  `--depth 1 --no-hardlinks` **shallow** clone built by its own `buildHistorySurgeryCloneArgv` for the
+  history-surgery path — and per its own doc comment, **production wiring is still deliberately deferred to
+  `#3630`**; today it is exercised only by `we:scripts/lib/__tests__/isolation-provider.test.mjs`. Not a live
+  call site at all right now, so doubly not a concern.
+
+**Recommendation:** nothing to wire in today. Every real git call site currently in `we:scripts/` is either
+narrow-scope (single ref) or a single working-tree-free probe explicitly designed to be cheap — none reaches
+the "full-repo gc/repack/fsck, multi-remote fetch, or a rebase/merge loop across many commits" weight class
+the operator described. `git status`/`git diff`-class calls (the overwhelming majority of call sites: dozens
+of `rev-parse`, `show`, `ls-tree`, `log`, `status --porcelain`, etc.) should stay ungated regardless — gating
+those would slow dispatch-critical paths for no CPU-contention benefit. This stays a genuinely open,
+forward-looking design question rather than a build: **if/when** a real heavy git operation lands in
+`we:scripts/` (a full `gc`, a `fetch --all`, a many-commit rebase/merge loop), it should be wrapped through
+`node we:scripts/readiness/heavy-admission.mjs run -- <command>` — the same one-line opt-in pattern the `run`
+CLI mode already offers on `we:heavy-admission.mjs` — rather than inventing a second limiter. No new item
+filed for this; there is nothing to schedule yet, only a rule to apply the next time such a call site is
+actually written.
+
+**A separate, harder limit, worth stating plainly rather than leaving implicit: `we:heavy-admission.mjs`
+cannot catch an ad hoc/interactive git command no matter how many scripted call sites get wired into it.**
+The module is a purely COOPERATIVE, opt-in semaphore — a caller must itself invoke `we:heavy-admission.mjs
+run -- <command>` (or `acquire`/`release`) to participate; there is no OS-level enforcement and nothing
+forces an arbitrary command through it. `we:heavy-admission.mjs`'s own header says this outright about
+`we:guard-bash.mjs`'s adjacent PreToolUse deny: it "only reaches a MECHANICALLY-DISPATCHED agent (one with
+`WE_DISPATCH_KIND` set)" — a `/workflow`/`/batch` parallel lane, or the operator's own interactive session,
+carries no such env var and is unaffected. The identical limit applies here: tonight's runaway `git grep`
+across 12k+ revisions was typed directly by an agent outside any script, so wiring every scripted git call
+site into the pool — even a maximally thorough one — would still not have caught it, and would not catch the
+next one either. "Add git to the shared queue" can only ever cap *scripted* call sites that opt in; it is
+not, and cannot become without a different mechanism (e.g. a PreToolUse-style interception of raw `git`
+invocations), a general governor over every heavy git command any agent might type.
+
+## Session update (2026-09-14, later still) — three forward-looking capacity requirements recorded on `#3621`; live-tested whether `test:unit`'s worker pool respects a container's `--cpus` allocation
+
+Tracked here as a progress note, same convention as the two container-POC entries directly above — see
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md`'s own 2026-09-14 (later
+still) amendment for the full technical writeup; condensed here.
+
+**Why now.** The operator gave real forward-looking direction on the next phase of this work — reserved
+capacity for heavy-command containers separate from lane capacity, per-command internal-parallelism
+correctness inside whatever container allocation a command actually gets, and a resource-aware (not flat)
+admission cap — and asked for it to be recorded precisely, not designed or built yet, plus one concrete,
+checkable-now piece tested for real.
+
+**Three requirements recorded on `#3621`, not designed here:**
+1. A heavy-command container needs its own reserved CPU/memory budget, kept separate from
+   `we:scripts/lib/lane-concurrency.mjs`'s lane cap — two pools, not one shared budget. Neither `#2206` nor
+   `#2211` built this; both ran a single container ad hoc.
+2. A heavy command (`vitest`/`test:unit`, `we:scripts/verify-lane.mjs`) must size its own internal
+   worker/thread pool to fit the container it actually runs in, not assume the host's full core count. Tested
+   live tonight (below) rather than assumed.
+3. `we:scripts/readiness/heavy-admission.mjs`'s cap (currently a flat `DEFAULT_ADMISSION_CAP = 2`, its own
+   header calling it "an EQUAL-COST NAMED SET") should become resource-aware per command — `vitest` plausibly
+   costing more than `check:standards`. Cited as concrete, dated evidence, not hypothetical: a real live bug
+   found and separately being fixed this same session — the cap's slot reentrancy keys ownership by lane PATH
+   STRING, not process identity, so two genuinely different processes verifying the same lane back-to-back
+   (the conveyor's auto-verify plus a manual re-verify) both read as "one slot," meaning real concurrent load
+   was 3 processes while the gate reported a healthy 2/2.
+
+**The one immediately-checkable piece — tested for real, using `#2211`'s already-built container
+infrastructure (a fresh lane, `lane-20`, acquired specifically for this test).** `container run --cpus 2` gives
+a guest where `os.cpus().length` reports **3** (a confirmed off-by-one, N+1, consistent across `--cpus 1`→2 and
+`--cpus 4`→5) but `os.availableParallelism()` correctly reports **2**. THIS repo's own `test:unit` config
+(`we:vitest.shared.ts#maxTestWorkers`) does not call either API — it is a **hardcoded literal `4`**, already
+tuned (by an existing, unrelated `#3650` fix) for the HOST's 12-core budget under a 3-concurrent-invocation
+burst assumption, with zero awareness of whatever container it might run inside. Ran the real 35-file/441-test
+`we:blocks/__tests__` subset inside an actual `--cpus 2 --memory 2g` container via `node
+we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run …` — passed
+35/35 files, 441/441 tests, proving the pipeline works — but confirms `test:unit` would request up to 4 worker
+threads against a container that only has 2 real cores, a genuine 2x oversubscription of that container's own
+allocation. Diagnosed, not fixed, per the operator's own instruction — recorded as a confirmed instance of
+requirement 2 above, left as real follow-up scope once requirement 1's capacity reservation is designed.
+
+## Session update (2026-09-14, continued) — `#3673` (what clears a triggered calibration veto) ratified, all four forks
+
+`#3673` — "Define what clears a triggered calibration veto so a role can graduate," filed and prepared
+earlier this session (`PR #2228`, `preparedDate: "2026-09-14"`) — was ratified by the operator (Nicolas
+Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**, `codifiedIn:
+we:docs/agent/platform-decisions.md#calibration-veto-clearing` — the same "full ruling earns statute"
+posture `#3654` took, since this card's ruling *is* the shape of veto clearing, not a narrow rider under
+an existing anchor.
+
+Ratified, as recommended: **(1)** a documented root-cause finding, naming which
+`we:scripts/lib/jury-core.mjs#deriveFindingDisposition` sub-answer diverged and why, is a mandatory
+precondition before any post-miss trial counts toward clearing — trial volume alone never suffices; **(2)**
+once eligible, a fixed minimum trial count plus at least one trial specifically targeting a case similar in
+kind to the trigger (severity-ambiguous, a deliberately constructed test scenario permitted when a real one
+is scarce) — N dissimilar clean trials never suffice; **(3)** decay alone (elapsed trials or elapsed time,
+with no clean/relevant requirement) never clears the veto by itself — a cooling-off window may narrow which
+trials count, never substitute for the affirmative evidence clauses 1–2 require; **(4)** a human override is
+available only as a documented, reasoned factual reclassification of the trigger event, narrowly scoped to
+identity/evidentiary errors — never a re-answer of the severity judgment itself, and never a blanket
+trust/confidence grant.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3654`/`#3649`'s own deferred-N
+precedent — a specific N is deferred to a follow-on ordinary (batched) finding once real post-clearing trial
+data exists, never a separate ceremony. No `calibrationMiss` field is added to `we:model-probation.json` and
+no clearing-check function is wired here — this card rules on the shape of clearing only. The live PR #2107
+veto on Codex's `advisory-review` role is **not** cleared by this ruling itself: clearing it still needs
+either clause 1's root-cause finding followed by clause 2's similarity-matched trials, or clause 4's narrow
+reclassification override on its own facts.

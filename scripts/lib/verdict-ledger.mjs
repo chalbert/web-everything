@@ -312,6 +312,9 @@ export const ACTOR_PROVES = 'sanctioned-path';
  * @property {string} source - which writer appended this row.
  * @property {string} writer - `host:pid:kind`, the appending process.
  * @property {boolean} [unlocked] - present and `true` only when the append could not take the writer lock.
+ * @property {'shadow'} [mode] - a prediction, permitted ONLY on non-bearing `observed` rows.
+ * @property {boolean} [wouldClear] - the shadow intent; never a disposition. Shadow rows also carry
+ *   `applied: false` and `mutated: false`.
  */
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -352,14 +355,14 @@ function oneLine(value, max = 500) {
  * @param {{repo: string, pr: number|string, verdict: string, at: string, reason?: string,
  *   headSha?: string|null, reviewedDiff?: string|null, reviewedContribution?: string|null,
  *   declaredActor?: string, session?: string, channel?: string, independence?: string|null,
- *   source: string, writer?: string, findingCount?: number|null}} o
+ *   source: string, writer?: string, findingCount?: number|null, mode?: 'shadow', wouldClear?: boolean}} o
  * @returns {VerdictRecord}
  */
 export function buildVerdictRecord({
   repo, pr, verdict, at, reason = '',
   headSha = null, reviewedDiff = null, reviewedContribution = null,
   declaredActor = '', session = '', channel = '', independence = null,
-  source, writer = '', findingCount = null,
+  source, writer = '', findingCount = null, mode, wouldClear,
 } = {}) {
   if (typeof repo !== 'string' || !REPO_RE.test(repo)) {
     throw new TypeError(`verdict-ledger: \`repo\` must be <owner/name>, got ${JSON.stringify(repo)}`);
@@ -406,6 +409,12 @@ export function buildVerdictRecord({
     writer: oneLine(writer || processWriterId(), 128),
   };
   if (Number.isInteger(findingCount) && findingCount >= 0) record.findingCount = findingCount;
+  if (mode !== undefined || wouldClear !== undefined) {
+    if (mode !== 'shadow' || verdict !== VERDICTS.OBSERVED || typeof wouldClear !== 'boolean') {
+      throw new TypeError('verdict-ledger: shadow predictions require observed, mode: shadow and boolean wouldClear');
+    }
+    Object.assign(record, { mode, wouldClear, applied: false, mutated: false });
+  }
   return record;
 }
 
@@ -426,6 +435,11 @@ export function validateVerdictRecord(raw) {
   if (!Number.isInteger(raw.pr) || raw.pr <= 0) errors.push(`bad \`pr\`: ${JSON.stringify(raw.pr)}`);
   if (!VERDICT_VALUES.includes(raw.verdict)) errors.push(`bad \`verdict\`: ${JSON.stringify(raw.verdict)}`);
   if (typeof raw.at !== 'string' || !ISO_RE.test(raw.at)) errors.push(`bad \`at\`: ${JSON.stringify(raw.at)}`);
+  const shadow = raw.mode !== undefined || raw.wouldClear !== undefined;
+  if (shadow && (raw.mode !== 'shadow' || raw.verdict !== VERDICTS.OBSERVED
+    || typeof raw.wouldClear !== 'boolean' || raw.applied !== false || raw.mutated !== false)) {
+    errors.push('shadow predictions must be observed, with boolean wouldClear, applied: false and mutated: false');
+  }
   if (errors.length) return { valid: false, errors, record: null };
 
   const coverage = raw.coverage && typeof raw.coverage === 'object' ? raw.coverage : {};
@@ -458,6 +472,7 @@ export function validateVerdictRecord(raw) {
   };
   if (Number.isInteger(raw.findingCount) && raw.findingCount >= 0) record.findingCount = raw.findingCount;
   if (raw.unlocked === true) record.unlocked = true;
+  if (shadow) Object.assign(record, { mode: 'shadow', wouldClear: raw.wouldClear, applied: false, mutated: false });
   return { valid: true, errors: [], record };
 }
 
@@ -741,6 +756,47 @@ export function summarizeAgreement(rows) {
   };
 }
 
+/**
+ * Shadow intent vs the NEXT human outcome, in ledger append order (#3217). This is a different measurement
+ * from summarizeAgreement's live label drift, and deliberately provides no enforce-readiness predicate.
+ * A human outcome is a `clear-human` ceremony, or an accepted/changes verdict attributed to the explicitly
+ * selected `humanActor`. Declared identity proves only the sanctioned path (ACTOR_PROVES), not personhood.
+ * Repeated scheduled predictions replace the pending prediction for that repo/PR; each human outcome consumes
+ * it once. Earlier human verdicts cannot validate later predictions. No content-equivalence claim is made.
+ */
+export function summarizeShadowAgreement(records, { humanActor = '' } = {}) {
+  const pending = new Map();
+  const rows = [];
+  let superseded = 0;
+  for (const raw of Array.isArray(records) ? records : []) {
+    const { valid, record: r } = validateVerdictRecord(raw);
+    if (!valid) continue;
+    const key = `${r.repo}#${r.pr}`;
+    if (r.mode === 'shadow') {
+      if (pending.has(key)) superseded += 1;
+      pending.set(key, r);
+      continue;
+    }
+    const human = r.verdict === VERDICTS.CLEAR_HUMAN
+      || (humanActor && r.actor.declared === humanActor
+        && [VERDICTS.ACCEPTED, VERDICTS.CHANGES].includes(r.verdict));
+    if (!human || !pending.has(key)) continue;
+    const prediction = pending.get(key);
+    pending.delete(key);
+    rows.push({
+      repo: r.repo, pr: r.pr, shadowAt: prediction.at, humanAt: r.at,
+      wouldClear: prediction.wouldClear, humanVerdict: r.verdict, humanClears: r.clears,
+      status: prediction.wouldClear === r.clears ? AGREEMENT.AGREE : AGREEMENT.DISAGREE,
+    });
+  }
+  return {
+    total: rows.length,
+    agree: rows.filter((r) => r.status === AGREEMENT.AGREE).length,
+    disagree: rows.filter((r) => r.status === AGREEMENT.DISAGREE).length,
+    unmatched: [...pending.values()], superseded, rows,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // IO SHELL — the machine-global home, the locked append, the read. Everything above this line is pure.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -887,6 +943,17 @@ function main(argv) {
     writeAllSync(1, `${listLedgerRepos().join('\n')}\n`);
     process.exit(0);
   }
+  if (sub === 'shadow-agreement') {
+    if (!REPO_RE.test(repo)) {
+      process.stderr.write('verdict-ledger shadow-agreement: --repo=<owner/name> is required\n');
+      process.exit(2);
+    }
+    const summary = summarizeShadowAgreement(readVerdictLedger(repo), {
+      humanActor: typeof flags['human-actor'] === 'string' ? flags['human-actor'] : '',
+    });
+    writeAllSync(1, `${JSON.stringify(summary, null, flags.json ? 0 : 2)}\n`);
+    process.exit(0);
+  }
   if (sub === 'show') {
     if (!REPO_RE.test(repo)) {
       process.stderr.write('verdict-ledger show: --repo=<owner/name> is required\n');
@@ -910,7 +977,7 @@ function main(argv) {
     writeAllSync(1, `${JSON.stringify(folded, null, flags.json ? 0 : 2)}\n`);
     process.exit(0);
   }
-  process.stderr.write('usage: verdict-ledger <show --repo=<owner/name> [--json] | path [--repo=…] | repos>\n');
+  process.stderr.write('usage: verdict-ledger <show --repo=<owner/name> [--json] | shadow-agreement --repo=<owner/name> [--human-actor=<name>] [--json] | path [--repo=…] | repos>\n');
   process.exit(2);
 }
 

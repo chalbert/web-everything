@@ -320,3 +320,33 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
     });
   });
 });
+
+// #2447 — `graduatedTo` rides the manifest so review/label surfaces can show a dedup-resolve's basis. It is
+// presentation-only, so a malformed value is DROPPED by the builder rather than failing validation (a banner must
+// never block a land).
+describe('lane manifest — graduatedTo (#2447)', () => {
+  const repos = [{ repo: 'we', ref: 'lane/2403-x' }];
+
+  it('round-trips through the PR-body carrier', () => {
+    const m = buildManifest({ item: 2403, repos, graduatedTo: '6b5874f7' });
+    expect(m.graduatedTo).toBe('6b5874f7');
+    expect(validateManifest(m).ok).toBe(true);
+    expect(extractManifestFromBody(embedManifestInBody('body', m)).graduatedTo).toBe('6b5874f7');
+    expect(parseManifest(serializeManifest(m)).graduatedTo).toBe('6b5874f7');
+  });
+
+  it('omits absent / none / empty / non-string values, keeping a plain manifest byte-identical', () => {
+    const plain = buildManifest({ item: 2403, repos });
+    expect('graduatedTo' in plain).toBe(false);
+    for (const graduatedTo of ['none', 'NONE', '', '  ', 42, {}, ['6b5874f7'], null]) {
+      const m = buildManifest({ item: 2403, repos, graduatedTo });
+      expect('graduatedTo' in m).toBe(false);
+      expect(serializeManifest(m)).toBe(serializeManifest(plain));
+      expect(validateManifest(m).ok).toBe(true);
+    }
+  });
+
+  it('collapses a multi-line value to one line', () => {
+    expect(buildManifest({ item: 2403, repos, graduatedTo: ' 6b5874f7\n(review-core) ' }).graduatedTo).toBe('6b5874f7 (review-core)');
+  });
+});

@@ -6,6 +6,7 @@
  *   lexical scope. Everything here READS.
  */
 import { execFileSync } from 'node:child_process';
+import { countStandDownComments } from '../conveyor/stand-down.mjs';
 
 /** How long a `gh` call may take before it is abandoned. A kill lands as a throw, never as an empty list. */
 export const GH_TIMEOUT_MS = 60 * 1000;
@@ -32,11 +33,11 @@ export const LIST_LIMIT = 200;
  * rather than assessing optimistically. The checks are fetched per-head separately, because `gh pr list`
  * cannot return check runs keyed to a sha.
  */
-export function listArgv({ repo, pr = 0 }) {
-  const fields = 'number,title,labels,mergeable,headRefOid';
+export function listArgv({ repo, pr = 0, state = 'open', limit = LIST_LIMIT }) {
+  const fields = 'number,title,labels,mergeable,headRefOid' + (state === 'all' ? ',state' : '');
   return pr > 0
     ? ['pr', 'view', String(pr), '--repo', repo, '--json', fields]
-    : ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', String(LIST_LIMIT), '--json', fields];
+    : ['pr', 'list', '--repo', repo, '--state', state, '--limit', String(limit), '--json', fields];
 }
 
 /**
@@ -92,15 +93,44 @@ export function labelNames(labels) {
  * exact alarm the operation exists to raise, and the next person to see a false `unchecked` would learn to
  * ignore a true one.
  */
-export function createPrReader({ run = execFileSync } = {}) {
+export function createPrReader({ run = execFileSync, reconcile = false } = {}) {
   return ({ repo, pr = 0 }) => {
-    const raw = gh(listArgv({ repo, pr }), { run });
-    const parsed = JSON.parse(raw || (pr > 0 ? '{}' : '[]'));
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    let limit = LIST_LIMIT;
+    let rows;
+    do {
+      const raw = gh(listArgv({ repo, pr, state: reconcile ? 'all' : 'open', limit }), { run });
+      const parsed = JSON.parse(reconcile ? raw : raw || (pr > 0 ? '{}' : '[]'));
+      if (reconcile && (pr > 0 ? !parsed?.number : !Array.isArray(parsed))) {
+        throw new Error('pr-reconcile: unreadable PR listing');
+      }
+      rows = Array.isArray(parsed) ? parsed : [parsed];
+      if (reconcile && rows.some((r) => !Number.isInteger(r?.number) || r.number <= 0)) {
+        throw new Error('pr-reconcile: unidentified PR in listing');
+      }
+      if (!reconcile || pr > 0 || rows.length < limit) break;
+      // gh paginates internally up to --limit. Grow until it proves the listing is complete;
+      // the open-only status reader keeps its existing, explicitly reported cap.
+      limit *= 2;
+    } while (true);
 
     const prs = rows.filter((r) => r && r.number != null).map((r) => {
       const headSha = String(r.headRefOid ?? '');
+      let detail = {};
+      if (reconcile) {
+        const parsed = JSON.parse(gh(commentsArgv({ repo, pr: r.number }), { run }));
+        if (!Array.isArray(parsed.comments)) throw new Error('pr-reconcile: unreadable comments');
+        const comments = parsed.comments.map((c) => {
+          if (typeof c?.body !== 'string') throw new Error('pr-reconcile: unreadable comment body');
+          return { body: c.body, createdAt: String(c.createdAt ?? ''), url: String(c.url ?? '') };
+        });
+        detail = {
+          state: String(r.state ?? '').toLowerCase(),
+          comments,
+          standDownEvidence: comments.filter((c) => countStandDownComments([c]) > 0),
+        };
+      }
       return {
+        ...detail,
         number: Number(r.number),
         title: String(r.title ?? ''),
         labels: labelNames(r.labels),
@@ -112,6 +142,16 @@ export function createPrReader({ run = execFileSync } = {}) {
 
     // A listing that came back FULL may have been cut off — `gh` does not say. Reported rather than assumed
     // either way: the reader's job is to state what it knows, and `assessPrs` turns it into a finding.
-    return { repo, prs, truncated: pr === 0 && rows.length >= LIST_LIMIT };
+    return { repo, prs, truncated: !reconcile && pr === 0 && rows.length >= LIST_LIMIT };
   };
+}
+
+/** Read the actual comment bodies; labels alone miss durable conveyor stand-downs. */
+export function commentsArgv({ repo, pr }) {
+  return ['pr', 'view', String(pr), '--repo', repo, '--json', 'comments'];
+}
+
+/** Same reader, all states and comments, with an exhaustive listing instead of a capped snapshot. */
+export function createPrReconcileReader({ run = execFileSync } = {}) {
+  return createPrReader({ run, reconcile: true });
 }

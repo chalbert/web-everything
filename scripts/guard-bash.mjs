@@ -18,6 +18,8 @@
  *     `run_in_background` param OR a shell `&`/nohup. Backgrounding the suite run then yielding is the exact
  *     #2833 subagent stall (the lane sits mid-flight, produces nothing, never errors). Run it synchronously in
  *     the foreground; no override.
+ *   • a BACKGROUNDED codex-direct-task.mjs / gemini-direct-task.mjs invocation — both scripts are
+ *     synchronous by contract (see their FOREGROUND ONLY banners). No override (#3383).
  *   • a backlog item-mutation (claim/scaffold/…) run in a lane clone whose HEAD is BEHIND origin/main —
  *     a stale checkout runs stale `scripts/` against a stale backlog view (observed 2026-07-07: a lane
  *     19 commits behind ran the pre-#2288 "next free NNN" allocator and minted a colliding/low-gap
@@ -331,6 +333,27 @@ const VERIFICATION_OPERATION = OPERATIONS_OVER_VERIFICATION.length
 export function isVerificationRun(command) {
   const c = String(command || '');
   return VERIFICATION_RUN.test(c) || (VERIFICATION_OPERATION !== null && VERIFICATION_OPERATION.test(c));
+}
+
+/** Recognize the actual Node script operand, never an echoed/commented filename or a substring. Pure. */
+export function isDirectTaskInvocation(command) {
+  return parseSegments(heredocScan(String(command || '')).text).segments.some((segment) => {
+    let head = canonicalCommand(segment);
+    // canonicalCommand peels env/exec wrappers, but leaves these background launchers intact.
+    while (/^(?:nohup|setsid)\s+/.test(head)) {
+      head = canonicalCommand(head.replace(/^(?:nohup|setsid)\s+(?:--\s+)?/, ''));
+    }
+    const words = headWords(head).map((word) => word.text);
+    if (words[0] !== 'node') return false;
+    const script = words[1] === '--' ? words[2] : words[1];
+    return /(?:^|\/)(?:codex|gemini)-direct-task\.mjs$/.test(script || '');
+  });
+}
+
+/** Whole-command check: retain both the shell background operator and the Bash tool parameter. Pure. */
+export function backgroundedDirectTaskReason(command, runInBackground = false) {
+  if (!isDirectTaskInvocation(command) || !isBackgrounded(command, runInBackground)) return null;
+  return 'codex-direct-task.mjs and gemini-direct-task.mjs are SYNCHRONOUS: they already block until the delegated Codex/Antigravity task completes. Their FOREGROUND ONLY banner comments forbid backgrounding and Monitor/nested waits. Invoke as a normal FOREGROUND Bash call and wait for it to return; backgrounding has no legitimate use and there is no override.';
 }
 
 // A TRUNCATING PIPE on an operation's `--json` (2026-09-06). `--json` emits the whole payload — every
@@ -2321,6 +2344,8 @@ export function decide(command, ctx = {}) {
   // verification-set run before anything else.
   const bg = backgroundedVerificationReason(command, ctx.runInBackground);
   if (bg) return bg;
+  const directTask = backgroundedDirectTaskReason(command, ctx.runInBackground);
+  if (directTask) return directTask;
   // #3105 — same whole-command timing as the check above: a dispatched agent's own gate call must be caught
   // before the per-segment split, since the property being checked (is this a verification-set invocation at
   // all) does not depend on which segment of a chained command it sits in.

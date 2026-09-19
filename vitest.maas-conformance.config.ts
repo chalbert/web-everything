@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { maxTestWorkers } from './vitest.shared';
 
 /**
  * The opt-in .NET execution-conformance suite (backlog #549 — fork-1 option B).
@@ -14,5 +15,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['blocks/renderers/module-service/conformance/dotnet/**/*.test.ts'],
+    // #x1jcikc: same worker ceiling as the other two vitest configs (see vitest.shared.ts#maxTestWorkers).
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        maxThreads: maxTestWorkers,
+        minThreads: 1,
+      },
+    },
   },
 });

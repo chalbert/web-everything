@@ -288,6 +288,24 @@ stale, and the un-ratified wait is getting more expensive, not less:
   either fork branch). Ratifying this item is what unblocks that queue; leaving it un-ratified is the
   status quo cost, not a neutral hold.
 
+## #2456 closing evidence (2026-09-18) — the operating window is in
+
+[#2456](/backlog/2456-review-the-drain-daemon-s-first-weeks-of-operating-evidence/)'s closing review
+(~67 days, 62,008 passes, 1,605 merges) is the multi-week evidence the 2026-07-11 defer was waiting for. It
+leaves Fork 1 unchanged and raises the cost of waiting:
+
+- **The co-located interim works in practice.** The daemon/console ran as a plateau-app `tools/` module for 9
+  weeks, 405 h of it continuously, with no placement-caused friction. Its own code has **stopped growing** (+995
+  lines in ~9 weeks, after the +2,137 day-1 burst).
+- **The engine core keeps growing in WE:** 6,776 → **7,931 lines** since the 2026-08-15 re-measure above, still
+  keyed by the same 3-name `CONSTELLATION_REPO_NAMES`. The statute violation this decision resolves grows by
+  about 1,150 lines a month while the decision waits.
+- **No graduation trigger is visible** in the evidence: no fourth repo, and no engine/plateau-app CI divergence.
+  The staged default's timing logic still holds.
+
+This is the evidence side of the ratification. The operating window neither argues for a separate repo nor
+for waiting longer.
+
 ## Delegation
 
 Neither the fork nor the staged rollout carves a new buildable child — the actual extraction/move is

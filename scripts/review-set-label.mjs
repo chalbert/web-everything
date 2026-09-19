@@ -53,15 +53,16 @@
  * `we:scripts/lib/review-escalation.mjs` (`REVIEW_LABELS`, `hasReviewLabel`) — it never re-hardcodes the
  * label strings.
  */
-import { execFileSync } from 'node:child_process';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
 // #x9xqexm's base-independent third marker. Independent concerns.
 import {
-  REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
+  REVIEW_PR_CHANNEL, REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
   buildReviewedContributionMarker, buildClearedHumanMarker, READY_TO_MERGE_LABEL,
   // #3007 — the SAME two digests the markers carry, taken raw so the ledger row records the witnesses
   // themselves rather than re-deriving them from the rendered comment. One computation, two consumers.
@@ -83,8 +84,27 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
 import { computeNetDiffText } from './merge-ai-prs.mjs';
+import { parseDelegationMarker } from './lib/delegation-marker.mjs';
+import { isDelegationTripleGraduated } from './conveyor/delegation-trial-gate.mjs';
+import { readStore } from './conveyor/run-scorecard-store.mjs';
+import { logDelegationTrial } from './conveyor/log-delegation-trial.mjs';
 import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// #3631 slice — the LAST bare `execFileSync` in this file's own gh-adjacent write path. This exec closure is
+// `computeNetDiffText`'s injected exec, and today it is only ever invoked with `cmd==='git'` (a fetch/diff/
+// merge-base against `origin`, never a `gh` call — the label reads/writes above already route through
+// `createGhProvider()`'s own throttled default, wired earlier under #3621). It was still a hand-rolled, fully
+// generic `(cmd, args, opts) => execFileSync(cmd, args, opts)` passthrough with NO throttle/backoff awareness at
+// all, unlike every other subprocess seam in this file. `execFileSyncThrottled` is the EXACT byte-for-byte
+// transparent drop-in for that shape (`we:scripts/lib/gh-throttle.mjs` — the same function
+// `we:scripts/conveyor/ci-queue-watch.mjs#defaultListRuns` already defaults to): it special-cases `file==='gh'`
+// through the semaphore+backoff wrapper and falls straight through to a real `execFileSync(file, args, opts)`
+// for anything else, so swapping it in here changes NOTHING about today's git-only behaviour while closing the
+// gap for good — a future caller of `computeNetDiffText` that ever threads a `gh` call through this same
+// closure (or a copy-paste of it elsewhere) inherits the throttle for free instead of re-introducing the bare
+// call. See `we:backlog/3631-migrate-remaining-gh-cli-call-sites-to-the-gh-throttle-wrapp.md` for the tracked
+// item this is one slice of.
+import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
 import { classifyPrLiveness, inertPrMessage } from './lib/pr-liveness.mjs';
@@ -435,6 +455,70 @@ export function checkBodyFileLocation(abs, roots) {
 export const bodyFileRoots = (cwd = process.cwd(), tmp = tmpdir()) => [cwd, tmp, '/tmp'];
 
 /**
+ * #3690 — PR #2313's SECOND review bounce: appending to a TRACKED store is not publishing a trial.
+ * An uncommitted row in the reviewer's checkout can disappear on reset and never informs another
+ * checkout's graduation/dedupe reads. Mirror lane-drain.mjs's quietGit/publishMain convention: commit
+ * ONLY the scorecard path, then publish its exact SHA through push-if-green.mjs (scoped gate, ff-only, #2073).
+ * Guard HEAD BEFORE committing; the push helper's own branch refusal would be too late to prevent a
+ * bookkeeping commit on a lane ref. Resolve the helper from THIS module, but target the injected repo.
+ * Acceptance has already succeeded. Every git/publish failure returns evidence for the caller's loud
+ * recovery warning, never an exception that could turn a completed accept into a failed verdict.
+ */
+export function publishDelegationTrialCommit({ provider, model, taskType, pr, cwd } = {}) {
+  let committed = false;
+  let stage = 'could not resolve repo root';
+  const firstLine = (e) => String((e && (e.stderr || e.message)) || e).trim().split('\n')[0];
+  try {
+    const options = { cwd: cwd ?? process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+    const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], options).trim();
+    options.cwd = repoRoot;
+    stage = 'could not resolve HEAD';
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], options).trim();
+    if (branch !== 'main') {
+      return { committed: false, pushed: false, reason: `HEAD is "${branch}", not "main" — the scorecard row must land on shared main, never a lane branch; commit skipped` };
+    }
+    stage = 'could not fetch origin/main';
+    execFileSync('git', ['fetch', 'origin', 'main', '--quiet'], options);
+    stage = 'could not compare main to origin/main';
+    const local = execFileSync('git', ['rev-parse', 'main'], options).trim();
+    let remote = null;
+    try { remote = execFileSync('git', ['rev-parse', 'origin/main'], options).trim(); } catch { /* no tracking ref yet — nothing to compare */ }
+    if (remote && local !== remote) {
+      return { committed: false, pushed: false, reason: `local main (${local.slice(0, 8)}) differs from origin/main (${remote.slice(0, 8)}) — refusing to publish on diverged history; commit skipped` };
+    }
+    stage = 'git commit failed';
+    const message = `conveyor: log ${provider}/${model} ${taskType} trial for PR #${pr} (#3690)`;
+    execFileSync('git', ['commit', '-m', message, '--', 'scripts/conveyor/run-scorecards.json'], options);
+    committed = true;
+    stage = 'could not resolve committed HEAD';
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], options).trim();
+    stage = 'push-if-green.mjs failed';
+    const pushIfGreen = join(dirname(fileURLToPath(import.meta.url)), 'push-if-green.mjs');
+    // appendScorecard/logDelegationTrial already fully validate the row (schema, enums, secret scrub),
+    // throwing before this function is reached: this gate cannot be protecting against a bad row.
+    // The commit is pathspec-scoped to this one non-code JSON file (the "commits only the scorecard"
+    // test proves it); no build consumer depends on it in a way a full lint/test run adds coverage for.
+    // The only residual gate risk is regression in this commit/push code path, run-scorecard-store.mjs,
+    // or log-delegation-trial.mjs, directly and fully exercised by these three suites. Every PR,
+    // including this change, still runs FULL test:unit && check:standards in CI before merge.
+    // This is a separate best-effort, non-fatal, post-merge single-file side-effect publish, not a code merge.
+    const gate = 'npm run test:unit -- scripts/__tests__/review-set-label.test.mjs scripts/conveyor/__tests__/run-scorecard-store.test.mjs scripts/conveyor/__tests__/log-delegation-trial.test.mjs';
+    const out = execFileSync(process.execPath, [pushIfGreen, `--repo=${repoRoot}`, `--sha=${sha}`, `--gate=${gate}`, '--json'], { ...options, env: { ...process.env, MAIN_PUSH_OK: '1' } });
+    const parsed = JSON.parse(out.trim());
+    return { committed, pushed: !!parsed.pushed, reason: parsed.detail || parsed.reason };
+  } catch (e) {
+    // publishMain's non-zero-exit convention: the refusal is still JSON on stdout, not stderr.
+    if (committed) {
+      try {
+        const parsed = JSON.parse(String(e?.stdout || '').trim());
+        return { committed, pushed: !!parsed.pushed, reason: parsed.detail || parsed.reason || `${stage}: ${firstLine(e)}` };
+      } catch { /* no JSON result — report the subprocess failure below */ }
+    }
+    return { committed, pushed: false, reason: `${stage}: ${firstLine(e)}` };
+  }
+}
+
+/**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
  * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→write→re-read arc
  * against `gh`; only three things differ and they arrive as config (exactly the deltas #2644 names):
@@ -501,6 +585,10 @@ export function runReviewLabelCli({
   // Injected so the WRITE ARC — above all the #2964 ordering below — is assertable without `gh`,
   // which it never was: the suite could only reach this function's pure helpers and its refusals.
   provider = createGhProvider(),
+  readTrialStore = readStore,
+  logTrialFn = logDelegationTrial,
+  publishTrialFn = publishDelegationTrialCommit,
+  trialLogIo = {},
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
   // injected emitter too. Without this the guards print past an in-process caller's collector (#3061); the
@@ -613,6 +701,7 @@ export function runReviewLabelCli({
   let headRefName = '';
   let prState = '';
   let prBody = '';
+  let prTitle = '';
   let prCreatedAt = '';
   try {
     const parsed = provider.readPrState(repo, pr);
@@ -625,6 +714,7 @@ export function runReviewLabelCli({
     // #2844 — the PR body carries the `authored-by-actor` stamp pr-land wrote at open. Same gh call, one more
     // json field, no extra hop — the same "ride the existing read" pattern #2953 used for `state`.
     prBody = typeof parsed.body === 'string' ? parsed.body : '';
+    prTitle = typeof parsed.title === 'string' ? parsed.title : '';
     // #3067 — and its open date, on that same call. A stamp missing from a PR opened AFTER the regime began was
     // STRIPPED; one missing from an older PR was never written. Until this was read, both looked identical and
     // both were tolerated.
@@ -751,7 +841,9 @@ export function runReviewLabelCli({
     try {
       // `exec` MUST be execFileSync-shaped — `(cmd, argsArray, opts)`. Passing a shell-exec here is the exact
       // caller bug #2952 exists to make diagnosable: it throws a TypeError inside the try and degrades to an
-      // unscored basis, which here silently costs the fingerprint.
+      // unscored basis, which here silently costs the fingerprint. `execFileSyncThrottled` (#3631 slice) keeps
+      // that exact shape and exact throw/return contract for the `cmd==='git'` calls this closure actually makes
+      // — see the import site's header for why it is wired here anyway.
       //
       // NO EXPLICIT `cwd` HERE: THIS READS THE PROCESS'S OWN CWD, AND EVERY CALLER MUST GUARANTEE THAT IS THE
       // NAMED REPO'S CHECKOUT (PR #1087 review note 2; #3202). The original reasoning was that the CLI is
@@ -768,7 +860,7 @@ export function runReviewLabelCli({
       // `cwd` on this one call would not be enough — the `--body-file` allowlist is rooted at `process.cwd()`
       // too, so the process's location is the contract, not any single read's.
       const net = computeNetDiffText({
-        exec: (cmd, args, opts) => execFileSync(cmd, args, opts),
+        exec: execFileSyncThrottled,
         rev: headRefName,
         fetchExtraRefs: headRefName ? [headRefName] : [],
       });
@@ -925,6 +1017,39 @@ export function runReviewLabelCli({
   const acceptanceAlreadyLive = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
   const steps = { comment: postComment, swap: applySwap };
   for (const step of writeOrder({ acceptanceAlreadyLive })) { steps[step](); }
+
+  // #3690 v1 deliberately records outcome:'landed'/findings:null for a CLEAN accept here.
+  // A prior changes round must already have been fixed to reach this accept. Distinguishing clean on
+  // round 1 from reworked then landed needs this PR's verdict-ledger.mjs history: separate follow-up,
+  // out of scope here. Both real acceptance writes have completed before any trial is recorded.
+  if (to === 'accepted' && normalizeChannel(channelArg) === REVIEW_PR_CHANNEL) {
+    try {
+      const delegation = parseDelegationMarker(prBody);
+      const trialStore = delegation ? readTrialStore(trialLogIo) : null;
+      const alreadyLogged = (trialStore?.records ?? []).some((row) =>
+        row.dispatchKind === 'session-delegation' && row.pr === Number(pr));
+      if (delegation && !alreadyLogged && !isDelegationTripleGraduated(delegation, trialStore)) {
+        const logged = logTrialFn({
+          provider: delegation.provider,
+          model: delegation.model,
+          taskType: delegation.taskType,
+          taskDescription: prTitle || `PR #${pr}`,
+          outcome: 'landed',
+          verifiedBy: 'independent-claude',
+          findings: null,
+          pr: Number(pr),
+        }, trialLogIo);
+        if (logged === null) throw new Error('could not write trial to the scorecard store');
+        const publishResult = publishTrialFn({ ...delegation, pr: Number(pr) });
+        if (!publishResult.committed || !publishResult.pushed) {
+          const location = publishResult.committed ? 'a local commit' : "this checkout's working tree";
+          process.stderr.write(`review-set-label: delegation trial row WRITTEN LOCALLY BUT NOT ON SHARED HISTORY (#3690, non-fatal) — ${publishResult.reason} — the row is only in ${location}; commit+push scripts/conveyor/run-scorecards.json by hand (push the existing commit if already committed) or it may be lost.\n`);
+        }
+      }
+    } catch (e) {
+      process.stderr.write(`review-set-label: delegation trial append failed (#3690, non-fatal) — ${String((e && e.message) || e).split('\n')[0]}\n`);
+    }
+  }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — re-read the labels so the printed result reflects the
   // true post-swap state (tolerant: fall back to a locally-derived set if the re-read fails).
