@@ -17,6 +17,7 @@ import {
   acquireSlotBlocking, admissionStatus,
   runUnderAdmission, shellQuoteWord,
 } from '../heavy-admission.mjs';
+import { readLockEntry } from '../file-locks.mjs';
 
 const T0 = Date.parse('2026-09-03T12:00:00.000Z');
 const iso = (ms) => new Date(ms).toISOString();
@@ -129,6 +130,13 @@ describe('tryAcquireSlot / releaseOwnedSlot / heldSlots — cap independent slot
     const soonAfter = T0 + 1000;
     const r = tryAcquireSlot({ lockRoot, cap, owner: 'B', nowMs: soonAfter, nowIso: iso(soonAfter) });
     expect(r.ok).toBe(false);
+  });
+
+  it('forwards its own computed selfPid — not the raw omitted pid parameter — into the stored lock entry (#3679)', () => {
+    const cap = 1;
+    tryAcquireSlot({ lockRoot, cap, owner: 'A', nowMs: T0, nowIso: iso(T0) }); // pid intentionally omitted
+    const entry = readLockEntry(lockRoot, slotPath(0));
+    expect(entry.pid).toBe(process.pid); // BUG forwarded the raw (defaulted-null) `pid` param, so entry.pid was `null`
   });
 
   it('release is idempotent for an owner holding nothing', () => {
