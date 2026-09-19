@@ -341,6 +341,10 @@ when the sidecar is absent. Task metadata prefers the sidecar description, then 
 otherwise null; raw prompts are never a fallback. Descriptions are capped at 200 characters, including
 an ellipsis when truncated. Explicit child paths must resolve inside `PROJECTS_DIR` after symlink
 resolution; outside paths (including sibling-prefix collisions) are rejected and counted in `skipped`.
+The resolver compares against the physical project-store root while preserving `PROJECTS_DIR` for
+diagnostics. ID-search candidates use the same containment check; escaping symlinks are skipped before
+choosing the newest valid hit. Regression fixtures must include a deliberately symlinked store root:
+realpath-normalized temporary roots alone mask mismatches between logical and physical paths.
 Missing children and malformed transcript rows are counted explicitly.
 
 The local sidecar is `.operations/agent-usage/<day>.jsonl`, covered by the existing `.operations/`

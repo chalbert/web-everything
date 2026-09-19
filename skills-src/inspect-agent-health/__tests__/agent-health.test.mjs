@@ -13,7 +13,7 @@
  *   printed (review's terminal-escape-injection finding).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -70,6 +70,67 @@ describe('resolveTranscript — confine explicit paths after resolving symlinks'
   });
   it('preserves id-only lookup within the store', () => {
     expect(resolveTranscript({ target: 'safe' })).toEqual({ file: inside, ambiguous: 0 });
+  });
+  it.each(['bare id', 'broken output symlink'])('skips an escaping id-search candidate for a %s', (kind) => {
+    const sentinel = 'OUTSIDE_STORE_SENTINEL';
+    writeFileSync(outside, sentinel);
+    symlinkSync(outside, join(projects, 'fixture', 'session', 'subagents', 'agent-planted.jsonl'));
+    let target = 'planted';
+    if (kind === 'broken output symlink') {
+      target = join(dir, 'planted.output');
+      symlinkSync(join(dir, 'missing.jsonl'), target);
+    }
+    const resolved = resolveTranscript({ target });
+    const content = resolved.file ? readFileSync(resolved.file, 'utf8') : JSON.stringify(resolved);
+    expect(content).not.toContain(sentinel);
+    expect(resolved).toEqual({ error: expect.stringContaining('no transcript found') });
+  });
+  it('skips the newest escaping id-search hit and uses the older legitimate hit', () => {
+    const newer = join(projects, 'fixture', 'newer-session', 'subagents');
+    mkdirSync(newer, { recursive: true });
+    writeFileSync(outside, 'OUTSIDE_STORE_SENTINEL');
+    symlinkSync(outside, join(newer, 'agent-safe.jsonl'));
+    utimesSync(inside, 1000, 1000);
+    utimesSync(outside, 2000, 2000);
+    const resolved = resolveTranscript({ target: 'safe' });
+    expect(readFileSync(resolved.file, 'utf8')).not.toContain('OUTSIDE_STORE_SENTINEL');
+    expect(resolved).toEqual({ file: inside, ambiguous: 0 });
+  });
+  it('allows an id-search candidate symlink whose destination stays inside the store', () => {
+    symlinkSync(inside, join(projects, 'fixture', 'session', 'subagents', 'agent-linked.jsonl'));
+    expect(resolveTranscript({ target: 'linked' })).toEqual({ file: inside, ambiguous: 0 });
+  });
+  it('handles a missing project store without throwing and retains its original path in errors', () => {
+    rmSync(projects, { recursive: true });
+    expect(resolveTranscript({ target: 'safe' })).toEqual({ error: `no Claude project store at ${projects}` });
+    expect(resolveTranscript({ target: outside })).toEqual({
+      error: `Transcript path "${outside}" resolved outside PROJECTS_DIR (${projects}): ${outside}`,
+    });
+  });
+});
+
+describe('resolveTranscript — symlinked PROJECTS_DIR', () => {
+  it('resolves explicit paths and ids through a symlinked project store', async () => {
+    const realStore = join(realpathSync(dir), 'real-store');
+    const projects = join(dir, 'projects');
+    const subagents = join(realStore, 'fixture', 'session', 'subagents');
+    mkdirSync(subagents, { recursive: true });
+    const inside = join(subagents, 'agent-safe.jsonl');
+    writeLines(inside, [assistantEntry([])]);
+    symlinkSync(realStore, projects, 'dir');
+    // Deliberately import with the symlink spelling, never its realpath.
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    const { PROJECTS_DIR, resolveTranscript } = await import('../agent-health.mjs');
+    expect(PROJECTS_DIR).toBe(projects);
+    expect(PROJECTS_DIR).not.toBe(realpathSync(projects));
+    expect(resolveTranscript({ target: join(projects, 'fixture', 'session', 'subagents', 'agent-safe.jsonl') }))
+      .toEqual({ file: inside });
+    expect(resolveTranscript({ target: inside })).toEqual({ file: inside });
+    expect(resolveTranscript({ target: 'safe' })).toEqual({ file: inside, ambiguous: 0 });
+    const outside = join(dir, 'outside.jsonl');
+    writeFileSync(outside, 'outside');
+    expect(resolveTranscript({ target: outside }).error).toContain(`outside PROJECTS_DIR (${projects})`);
   });
 });
 
