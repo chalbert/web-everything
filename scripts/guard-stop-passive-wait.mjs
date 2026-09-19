@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * Stop/SubagentStop guard (#3383): passive-wait prose AND an unresolved background Bash call.
+ * Stop/SubagentStop guard (#3383): passive-wait prose AND an unresolved background Bash call
+ * (or an unresolved Monitor call for SubagentStop only).
  * Language alone never blocks; harness-tracked Agent/Task calls are excluded. A returned Bash
  * tool_result (including a background-launch acknowledgement) is resolved for this narrow guard;
- * it does not attempt to infer process liveness or Monitor targets from prose/task-id guesses.
+ * Monitor uses the same tool_use/tool_result pairing, without guessing process liveness or targets.
+ * Main-session Stop permits Monitor watches; Agent/Task remain excluded for both events.
  *
  * Read only the supplied agent's transcript, at most 2 MB from its end, following agent-health.mjs's
  * bounded-tail discipline. Missing/invalid input or transcript fails OPEN. Never scan other sessions.
@@ -22,6 +24,16 @@ export function hasPassiveWaitLanguage(text) {
 
 /** Raw Claude transcript message.content blocks only; nested progress/child transcripts are not ours. */
 export function findUnresolvedBackgroundedBash(transcriptEntries) {
+  return findUnresolvedToolUse(transcriptEntries,
+    (block) => block.name === 'Bash' && block.input?.run_in_background === true);
+}
+
+/** Monitor is inherently a background watch; any unmatched call counts. Pure. */
+export function findUnresolvedMonitor(transcriptEntries) {
+  return findUnresolvedToolUse(transcriptEntries, (block) => block.name === 'Monitor');
+}
+
+function findUnresolvedToolUse(transcriptEntries, matches) {
   if (!Array.isArray(transcriptEntries)) return null;
   const uses = [];
   const results = new Set();
@@ -31,7 +43,7 @@ export function findUnresolvedBackgroundedBash(transcriptEntries) {
     for (const block of content) {
       if (entry.type === 'user' && block?.type === 'tool_result') results.add(block.tool_use_id);
       if (entry.type === 'assistant' && block?.type === 'tool_use' &&
-          block.name === 'Bash' && block.input?.run_in_background === true &&
+          matches(block) &&
           typeof block.id === 'string' && block.id) uses.push(block);
     }
   }
@@ -39,10 +51,13 @@ export function findUnresolvedBackgroundedBash(transcriptEntries) {
 }
 
 /** Both signals are required. Give the harness's already-active stop-hook continuation an exit. */
-export function shouldBlockStop({ lastAssistantText, transcriptEntries, stopHookActive } = {}) {
-  if (stopHookActive === true || !hasPassiveWaitLanguage(lastAssistantText) ||
-      !findUnresolvedBackgroundedBash(transcriptEntries)) return null;
-  return 'Passive waiting cannot finish this task: your transcript still has an unresolved background Bash call. Check its status/output directly and wait or poll within this turn; do not assume a notification will arrive. Report a concrete blocker if you cannot continue.';
+export function shouldBlockStop({ lastAssistantText, transcriptEntries, stopHookActive, hookEventName } = {}) {
+  if (stopHookActive === true || !hasPassiveWaitLanguage(lastAssistantText)) return null;
+  const pending = findUnresolvedBackgroundedBash(transcriptEntries) ||
+    (hookEventName === 'SubagentStop' && findUnresolvedMonitor(transcriptEntries));
+  if (!pending) return null;
+  const tool = pending.name === 'Monitor' ? 'Monitor' : 'background Bash';
+  return `Passive waiting cannot finish this task: your transcript still has an unresolved ${tool} call. Check its status/output directly and wait or poll within this turn; do not assume a notification will arrive. Report a concrete blocker if you cannot continue.`;
 }
 
 /** Bounded IO, no full-file read. Drop the potentially partial first line; reject all other parse errors. */
@@ -76,18 +91,18 @@ if (IS_CLI) {
     const message = event.last_assistant_message;
     const lastAssistantText = typeof message === 'string' ? message : message?.content;
     if (!hasPassiveWaitLanguage(lastAssistantText)) process.exit(0);
-    // The official hooks reference documents `transcript_path` as a common field on every event,
-    // including SubagentStop, with no separate field for a subagent's own transcript — and does not
-    // state whether that path is the subagent's own or the parent's for a SubagentStop event. This
-    // guard does not invent an unconfirmed field name to resolve that; it reads whatever
-    // `transcript_path` names for the event that fired, which fails open on read/parse trouble either
-    // way (see the catch below) and is real evidence of an unresolved background Bash call in
-    // whichever transcript the harness handed us — parent or subagent.
-    const transcriptPath = event.transcript_path;
+    // Official hooks reference, "SubagentStop input" (confirmed 2026-09-18):
+    // https://code.claude.com/docs/en/hooks.md
+    // "The transcript_path is the main session's transcript, while agent_transcript_path is the
+    // subagent's own transcript stored in a nested subagents/ folder."
+    // Prefer the subagent's own file; older versions without that field fall back to transcript_path.
+    // A read/parse error still fails open below, without scanning the parent's file instead.
+    const transcriptPath = hookEventName === 'SubagentStop'
+      ? (event.agent_transcript_path ?? event.transcript_path) : event.transcript_path;
     const transcriptEntries = readTranscriptTail(transcriptPath).filter((entry) =>
       (!entry?.sessionId || entry.sessionId === event.session_id) &&
       (!entry?.agentId || entry.agentId === event.agent_id));
-    const reason = shouldBlockStop({ lastAssistantText, transcriptEntries, stopHookActive: event.stop_hook_active });
+    const reason = shouldBlockStop({ lastAssistantText, transcriptEntries, stopHookActive: event.stop_hook_active, hookEventName });
     if (reason) {
       console.log(JSON.stringify({
         decision: 'block',

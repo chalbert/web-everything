@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
-  MAX_TRANSCRIPT_BYTES, hasPassiveWaitLanguage, findUnresolvedBackgroundedBash,
+  MAX_TRANSCRIPT_BYTES, hasPassiveWaitLanguage, findUnresolvedBackgroundedBash, findUnresolvedMonitor,
   shouldBlockStop, readTranscriptTail,
 } from '../guard-stop-passive-wait.mjs';
 
@@ -45,8 +45,31 @@ describe('guard-stop-passive-wait — both signals are required (#3383)', () => 
     expect(shouldBlockStop({ lastAssistantText: 'The tests passed. Work is complete.', transcriptEntries: [use(), result()] })).toBeNull();
     expect(shouldBlockStop({ lastAssistantText: 'A real blocker needs your input.', transcriptEntries: [use()] })).toBeNull();
   });
-  it.each(['Agent', 'Task', 'Monitor'])('does not guess that pending %s is untracked Bash work', (name) => {
-    expect(shouldBlockStop({ lastAssistantText: passive, transcriptEntries: [use(name)] })).toBeNull();
+  it.each(['Agent', 'Task', 'Monitor'])('Stop permits pending %s', (name) => {
+    expect(shouldBlockStop({ hookEventName: 'Stop', lastAssistantText: passive, transcriptEntries: [use(name)] })).toBeNull();
+  });
+  it.each(['Agent', 'Task'])('SubagentStop still permits harness-tracked %s', (name) => {
+    expect(shouldBlockStop({ hookEventName: 'SubagentStop', lastAssistantText: passive, transcriptEntries: [use(name)] })).toBeNull();
+  });
+  it('only SubagentStop blocks passive waiting on an unresolved Monitor, without a background flag', () => {
+    const event = { lastAssistantText: passive, transcriptEntries: [use('Monitor', {})] };
+    expect(shouldBlockStop({ ...event, hookEventName: 'SubagentStop' })).toMatch(/unresolved Monitor call/);
+    expect(shouldBlockStop({ ...event, hookEventName: 'Stop' })).toBeNull();
+    expect(shouldBlockStop(event)).toBeNull();
+    expect(shouldBlockStop({ ...event, hookEventName: 'SubagentStop', stopHookActive: true })).toBeNull();
+    expect(shouldBlockStop({ ...event, hookEventName: 'SubagentStop', lastAssistantText: 'I need your input.' })).toBeNull();
+  });
+  it('pairs Monitor results by ID across the window, including parallel calls', () => {
+    const monitor = use('Monitor', {});
+    const parallel = use('Monitor', {}, 'call-2');
+    expect(findUnresolvedMonitor([monitor, parallel, result()])?.id).toBe('call-2');
+    for (const transcriptEntries of [[monitor, result()], [result(), monitor], [monitor, parallel, result(), result('call-2')]]) {
+      expect(shouldBlockStop({ hookEventName: 'SubagentStop', lastAssistantText: passive, transcriptEntries })).toBeNull();
+    }
+    expect(findUnresolvedMonitor([{ type: 'progress', data: monitor }])).toBeNull();
+    expect(findUnresolvedMonitor([use('Monitor', {}, '')])).toBeNull();
+    expect(findUnresolvedMonitor(null)).toBeNull();
+    expect(findUnresolvedBackgroundedBash([monitor])).toBeNull();
   });
   it('pairs by id across the entire window, including parallel calls and later resolved tools', () => {
     const parallel = use();
@@ -105,10 +128,39 @@ describe('guard-stop-passive-wait — real CLI boundary and bounded transcript I
     expectAllow({ ...envelope, last_assistant_message: 'Finished: all checks passed.' });
     expectAllow({ ...envelope, stop_hook_active: true });
   });
-  it('reads transcript_path for SubagentStop the same way as Stop — the docs name no separate agent-transcript field', () => {
+  it('prefers agent_transcript_path for SubagentStop, even when the parent has no pending work', () => {
+    const event = { ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1' };
+    const ownPath = transcript('own.jsonl', [{ ...use(), sessionId: 'session-1', agentId: 'agent-1' }]);
+    expect(run({ ...event, transcript_path: resolvedPath, agent_transcript_path: ownPath }).status).toBe(2);
+    expectAllow({ ...event, transcript_path: pendingPath, agent_transcript_path: resolvedPath });
+  });
+  it('keeps Stop on transcript_path even if agent_transcript_path is supplied', () => {
+    expectAllow({ ...envelope, transcript_path: resolvedPath, agent_transcript_path: pendingPath });
+    expect(run({ ...envelope, transcript_path: pendingPath, agent_transcript_path: resolvedPath }).status).toBe(2);
+  });
+  it('falls back to transcript_path when SubagentStop has no agent_transcript_path', () => {
     expectAllow({ ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1', transcript_path: resolvedPath });
     expect(run({ ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1', transcript_path: pendingPath }).status).toBe(2);
     expectAllow({ ...envelope, hook_event_name: 'SubagentStop', transcript_path: join(temp, 'missing-agent.jsonl') });
+  });
+  it('fails open on unreadable or malformed agent transcripts without falling back to the parent', () => {
+    const bad = join(temp, 'bad-agent.jsonl');
+    writeFileSync(bad, JSON.stringify(use()) + '\n{malformed\n');
+    for (const agent_transcript_path of [join(temp, 'absent-agent.jsonl'), temp, bad]) {
+      expectAllow({ ...envelope, hook_event_name: 'SubagentStop', agent_transcript_path });
+    }
+  });
+  it('blocks Monitor only through SubagentStop and resolves it on a matching result', () => {
+    const monitorPath = transcript('monitor.jsonl', [use('Monitor', {})]);
+    const monitorResolvedPath = transcript('monitor-resolved.jsonl', [use('Monitor', {}), result()]);
+    expectAllow({ ...envelope, transcript_path: monitorPath });
+    const event = { ...envelope, hook_event_name: 'SubagentStop', transcript_path: resolvedPath, agent_transcript_path: monitorPath };
+    const output = run(event);
+    expect(output.status).toBe(2);
+    expect(JSON.parse(output.stdout).reason).toMatch(/unresolved Monitor call/);
+    expectAllow({ ...event, agent_transcript_path: monitorResolvedPath });
+    expectAllow({ ...event, stop_hook_active: true });
+    expectAllow({ ...event, last_assistant_message: 'I need your input.' });
   });
   it('ignores explicitly foreign session/agent entries and nested child progress', () => {
     const path = transcript('foreign.jsonl', [
