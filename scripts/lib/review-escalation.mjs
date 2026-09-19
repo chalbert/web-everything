@@ -13,7 +13,10 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { createHash } from 'node:crypto';
-import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, isEngineTierPath, basenameOf } from './gate-config.mjs';
+import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, isEngineTierPath, basenameOf, STATUTE_PATHS, isStatutePath, isDeclarativeLeashPath, principleSurfaceTriggers, isPrincipleSurface, statuteAnchorEditKind } from './gate-config.mjs';
+// #2892 — the statute predicate and the leash-path term now live beside `isPrincipleSurface` in gate-config.mjs (the
+// composition needs them and this module imports IT); re-exported so every existing importer is unchanged.
+export { isStatutePath, isDeclarativeLeashPath };
 import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
 
@@ -68,21 +71,6 @@ export const REVIEW_LABEL_META = {
  *  the contract → a human-gated spec change (not an edit buried in this file). The names/shape stay for every
  *  existing caller; only the source of the numbers moved. */
 export const DEFAULT_THRESHOLDS = POLICY_THRESHOLDS;
-
-/** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. Editing the cite-able cluster
- *  rules is a governance change a human must ratify, so (like the policy-tier trust chain) it forces
- *  `review:human`, not just an agent panel. Kept as its own set so it drives BOTH escalation (blast-radius,
- *  below) AND the human gate (scoreEscalation). */
-const STATUTE_PATHS = [
-  /^docs\/agent\/platform-decisions\.md$/,   // the statute layer (cite-able cluster rules)
-  /^docs\/agent\/.*statute/i,                // any statute doc
-];
-
-/** Does this repo-relative path edit the statute layer (→ a human must ratify)? Pure. (#2412) */
-export function isStatutePath(path) {
-  const p = String(path || '');
-  return STATUTE_PATHS.some((re) => re.test(p));
-}
 
 /** High-blast-radius path patterns (#2171). A diff touching any of these is escalation-worthy on its own —
  *  these files change how the system itself behaves, so a bad merge there is far costlier than a leaf edit.
@@ -333,10 +321,10 @@ export const isGateSelfPath = isPolicyCorePath;
  * readiness deny-list); this is the half of that tier for which a HUMAN is essential: the machine-diffable
  * contract, the roster, and the invariant / conformance suites. Those files ARE the encoded policy, so there is
  * no behaviour-preserving edit to them. The other half — the derivation CODE (`isPolicyDerivationPath`) — still
- * escalates but routes to the sized independent committee. Re-exported here under the leash name so callers read
- * the rubric's vocabulary; the roster and the classification live in gate-config.mjs.
+ * escalates but routes to the sized independent committee. `isDeclarativeLeashPath` (the leash name callers read the
+ * rubric's vocabulary by) is defined beside `isPrincipleSurface` in gate-config.mjs and re-exported at the top of this
+ * module (#2892); the roster and the classification live there too.
  */
-export const isDeclarativeLeashPath = isPolicySpecPath;
 export { isPolicyDerivationPath, isPolicySpecPath, isEngineTierPath };
 
 /**
@@ -561,6 +549,87 @@ function unquoteGitPath(s) {
 }
 
 /**
+ * #2892 — git's C-quoting of a path in a `diff --git` header (`core.quotePath`): a path with a `"`, a backslash, a
+ * control byte or any non-ASCII byte is wrapped in `"` with `\"`, `\\`, `\n`-style escapes and `\NNN` octal per
+ * UTF-8 byte; any other path is written bare. The inverse of `unquoteGitPath`.
+ */
+function gitQuotePath(path) {
+  const simple = { 0x07: 'a', 0x08: 'b', 0x09: 't', 0x0a: 'n', 0x0b: 'v', 0x0c: 'f', 0x0d: 'r', 0x22: '"', 0x5c: '\\' };
+  let out = '';
+  let quoted = false;
+  for (const b of Buffer.from(String(path), 'utf8')) {
+    if (Object.prototype.hasOwnProperty.call(simple, b)) { out += `\\${simple[b]}`; quoted = true; }
+    else if (b < 0x20 || b === 0x7f || b >= 0x80) { out += `\\${b.toString(8).padStart(3, '0')}`; quoted = true; }
+    else out += String.fromCharCode(b);
+  }
+  return quoted ? `"${out}"` : out;
+}
+
+/**
+ * #2892 — split a whole-PR unified diff (`computeNetDiffText`'s shape) into per-file sections. Pure. A `diff --git `
+ * line at column 0 can only open a section — every hunk line begins with ` `, `+`, `-`, `@` or `\` — so the split
+ * cannot be fooled by file CONTENT. Each section is indexed by its exact HEADER LINE, and by its `rename to` target
+ * when it has one; it is deliberately NOT keyed by a path recovered from the header. A recovered path has to guess
+ * which of `a/`/`b/`/no prefix produced it, and a guessed key can be forged by a DIFFERENT file whose real path
+ * happens to spell that guess (`a/docs/…` under a no-prefix producer). Matching by expected header instead makes the
+ * lookup exact: see {@link fileHunksResolver}.
+ * @param {string|null|undefined} diffText
+ * @returns {{byHeader: Map<string,string>, byRenameTo: Map<string,string>}} header line / rename target → the section text
+ */
+export function indexDiffSections(diffText) {
+  const byHeader = new Map();
+  const byRenameTo = new Map();
+  if (typeof diffText !== 'string' || diffText === '') return { byHeader, byRenameTo };
+  const lines = diffText.split('\n');
+  const flush = (start, end) => {
+    if (start < 0) return;
+    const section = lines.slice(start, end);
+    const text = section.join('\n');
+    if (!byHeader.has(section[0])) byHeader.set(section[0], text);
+    for (const line of section) {
+      if (line.startsWith('@@')) break;
+      if (line.startsWith('rename to ')) { const to = unquoteGitPath(line.slice('rename to '.length)); if (!byRenameTo.has(to)) byRenameTo.set(to, text); }
+    }
+  };
+  let start = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].startsWith('diff --git ')) { flush(start, i); start = i; }
+  }
+  flush(start, lines.length);
+  return { byHeader, byRenameTo };
+}
+
+/**
+ * #2892 — the `diffHunks(f)` of the rubric: a function from a basis file (numstat DISPLAY spelling) to THAT file's
+ * own diff section, or `null` when it cannot be provided — no diff text at all (`null` = NOT COMPUTED), or no
+ * section for the file (an own-delta-only path the cumulative hunks do not cover). `null` is what the content
+ * triggers read as "unavailable" and resolve fail-closed (statute) / additive (marker).
+ *
+ * THE LOOKUP IS BY EXACT HEADER. For plain path `P` the section is the one whose header line is exactly
+ * `diff --git a/P b/P` (git's default prefixes) or `diff --git P P` (`diff.noprefix`), in git's C-quoted spelling
+ * when `P` needs it and in the raw one (`core.quotePath=false`) — or the section that renames INTO `P`. A file's
+ * header can only equal its own expected header: prefixed headers always begin `a/`, and a no-prefix header repeats
+ * ONE path on both sides, so neither producer can forge the other's key, and a decoy file at `a/P` (real path) has
+ * header `a/P a/P`, never `a/P b/P`. There is no first-wins tie to lose.
+ * @param {string|null|undefined} diffHunks the whole-PR diff text, or `null`
+ * @returns {(file:string) => string|null}
+ */
+export function fileHunksResolver(diffHunks) {
+  if (typeof diffHunks !== 'string') return () => null;
+  const { byHeader, byRenameTo } = indexDiffSections(diffHunks);
+  return (file) => {
+    const p = plainDiffPath(file);
+    if (typeof p !== 'string' || !p) return null;
+    for (const [l, r] of [[`a/${p}`, `b/${p}`], [p, p]]) {
+      for (const header of new Set([`diff --git ${gitQuotePath(l)} ${gitQuotePath(r)}`, `diff --git ${l} ${r}`])) {
+        if (byHeader.has(header)) return byHeader.get(header);
+      }
+    }
+    return byRenameTo.get(p) ?? null;
+  };
+}
+
+/**
  * #3317 — union two changed-file lists, cumulative first, first-seen order preserved, duplicates dropped.
  * Non-string entries are dropped (a malformed list can neither crash the scorer nor smuggle in a `[object
  * Object]` path). Pure, internal — the ONE place the "a self-declared base may only ADD" rule is realized.
@@ -637,18 +706,43 @@ export function scoreEscalation({
   // #3317 — these read `basisFiles` (⊇ the cumulative set they read before), so the gate they realize is
   // unchanged where it already fired and only ever fires in MORE cases, never fewer.
   const gateBasis = basisFiles;
-  const leashFiles = gateBasis.filter(isDeclarativeLeashPath);
+  // #2892 — the human gate is the PRINCIPLE SURFACE (#2840, `#human-is-principle-surface-not-path`), evaluated per
+  // changed file against that file's own slice of the base-vs-head hunks. The two path OR-terms this replaces
+  // (`isDeclarativeLeashPath`, `isStatutePath`) are now two of its three TRIGGERS: the leash path is the one
+  // surviving PATH term (unconditional — a `POLICY_SPEC` file fires whatever its hunks say), the statute term
+  // narrowed from "any touch of the doc" to "a rule-text edit" (whitespace / reflow no longer fires), and a NEW
+  // content term fires on an edit to a `@principle`/`@invariant` block already present in base. A statute doc
+  // whose hunks are unavailable FAILS CLOSED to today's whole-file gate (see `isStatuteAnchorEdit`), so no input
+  // this cannot read can quietly clear a change the old gate held. A trust-chain file that is NOT a principle
+  // surface this diff still ESCALATES (blast-radius above / `gateDerivation` below) — to the committee.
+  // @invariant human-gate-reads-each-files-own-hunks (#human-is-principle-surface-not-path) — a file is judged against ITS OWN diff section, never the PR's whole text
+  const fileHunksOf = fileHunksResolver(diffHunks);
+  const surfaces = gateBasis.map((f) => { const hunks = fileHunksOf(f); return { file: f, hunks, triggers: principleSurfaceTriggers(f, hunks) }; });
+  const filesWith = (trigger) => surfaces.filter((x) => x.triggers.includes(trigger));
+  const leashFiles = filesWith('leash-path').map((x) => x.file);
+  const statuteFiles = filesWith('statute-anchor').map((x) => x.file);
+  const markedFiles = filesWith('marked-invariant').map((x) => x.file);
   const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
-  const statuteFiles = gateBasis.filter(isStatutePath);
-  // The STATUTE term is UNCHANGED by this narrowing (#2771 Fork A): every statute touch still forces a human,
-  // exactly as before. Only the first term moved — from the whole policy tier to its declarative-leash half.
-  const humanRequired = leashFiles.length > 0 || statuteFiles.length > 0;
+  // @invariant human-gate-is-principle-surface (#human-is-principle-surface-not-path) — humanRequired fires ONLY when isPrincipleSurface says so; never re-add a bare path term
+  const humanRequired = gateBasis.some((f) => isPrincipleSurface(f, fileHunksOf(f)));
+
+  // The additive marker term cannot read a file it has no diff section for — the whole diff was not computed, or the
+  // cumulative hunks do not cover an own-delta-only path. Name those files on the verdict rather than letting "no
+  // marked edit" and "could not look" read the same (see `isMarkedInvariantEdit`).
+  const unreadable = surfaces.filter((x) => x.hunks === null).map((x) => x.file);
+  if (unreadable.length) signals.hunksUnavailable = unreadable;
   if (leashFiles.length) { signals.gateSelf = leashFiles; reasons.push(`gate-self (${leashFiles.join(', ')}) — declarative leash, human review required`); }
   // The derivation half keeps its own signal + reason so the PR still ESCALATES on a stacked basis where the
   // file is in `humanBasisFiles` but not in the own-delta `changedFiles` that fed the blast-radius signal above.
   // Its token's clearance is `agent` in the contract, so the panel may CLEAR it — that is the whole narrowing.
   if (derivationFiles.length) { signals.gateDerivation = derivationFiles; reasons.push(`gate-derivation (${derivationFiles.join(', ')}) — gate derivation code, independent committee review`); }
-  if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
+  if (statuteFiles.length) {
+    signals.statute = statuteFiles;
+    // Name WHAT was edited (an anchored rule heading vs rule body vs a section it could not read) so the human clearing the label knows where to look.
+    const kinds = filesWith('statute-anchor').map((x) => `${x.file}: ${statuteAnchorEditKind(x.file, x.hunks)}`);
+    reasons.push(`statute (${kinds.join(', ')}) — statute rule text edited, human review required`);
+  }
+  if (markedFiles.length) { signals.markedInvariant = markedFiles; reasons.push(`principle-surface (${markedFiles.join(', ')}) — a marked @principle/@invariant assertion already in base was edited, human review required`); }
 
   // #3343 — DID THE BASIS EVEN NARROW TO THIS PR? `basisNarrowed:false` means the caller's cumulative file set
   // is the un-narrowed base-TIP diff (`resolveNetDiffBasis`'s merge-base lookup fell through and its ancestry
