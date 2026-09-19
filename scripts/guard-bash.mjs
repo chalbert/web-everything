@@ -1344,14 +1344,15 @@ function fileOperands(args, optsWithArg = new Set()) {
  *  a trailing `w <file>` flag on an `s///` command (`s/x/y/w file`, `s/x/y/gw file`), and a standalone
  *  address-command (`/pat/w file`, `3,5w file`) with no `s` at all. Either way sed opens `<file>` and writes
  *  to it on a match — a real write the flag-only scan above (in-place / tee operands) never looks at, because
- *  it only inspects ARGV flags, never the script TEXT. Not full sed grammar (no `{...}` blocks, no `;`-aware
- *  splitting) — good enough to catch both shapes above without chasing sed's whole command language. */
+ *  it only inspects ARGV flags, never the script TEXT. Command boundaries include blocks and semicolons;
+ *  this is a conservative write scan, not a full sed parser. */
 const SED_SUB_W = /s(.)(?:\\.|(?!\1).)*?\1(?:\\.|(?!\1).)*?\1[a-zA-Z0-9]*w[ \t]+(\S.*)$/;
 // #2108 review r3 — the address form also writes via a NEGATED address (`/pat/!w file`, `3,5!w file`),
 // via GNU's `first~step` extension (`0~3w file`), and via the uppercase `W` command (writes only the
 // pattern space's FIRST line, GNU sed) — none of which the original lowercase-only, negation-blind regex
 // recognized, so a real write through any of those three shapes silently bypassed the guard.
-const SED_ADDR_W = /^[ \t]*(?:\$|\d+~\d+|\d+(?:,(?:\d+|\$))?|\/(?:\\.|[^\/\\])*\/(?:,\/(?:\\.|[^\/\\])*\/)?)[ \t]*!?[ \t]*[wW][ \t]+(\S.*)$/;
+const SED_ADDRESS = String.raw`(?:\$|\d+(?:~\d+)?|\/(?:\\.|[^\/\\])*\/[IM]*)`;
+const SED_ADDR_W = new RegExp(String.raw`(?:^|[;{])[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?)?[ \t]*!?[ \t]*[wW][ \t]+(\S.*)$`);
 
 /** The file(s) one sed SCRIPT TEXT writes via an embedded `w` — see `SED_SUB_W`/`SED_ADDR_W` above. Pure.
  *  Scanned per PHYSICAL LINE (`-e` script fragments join on `\n`, same as sed itself reads them) since `w`
@@ -1463,6 +1464,16 @@ function sedScriptTexts(args) {
  *      be noticed, because nothing downstream is watching it.
  *  So the scratch filter belongs at the CALL SITE, not in the path scan. */
 export function fileWriteTargets(segment) {
+  // Keep every existing target, and add the canonical command view used by reason().
+  // This unwraps shell groups; resolved option words also recognize glued empty quotes
+  // (`-i''` / `-i""`). Quoting does not stop sed/perl from interpreting an argv option.
+  return [...new Set([
+    rawFileWriteTargets(segment),
+    rawFileWriteTargets(canonicalCommand(segment), true),
+  ].flat())];
+}
+
+function rawFileWriteTargets(segment, resolvedOptions = false) {
   const out = [];
   const toks = shellTokens(segment);
   if (!toks.length) return out;
@@ -1485,7 +1496,8 @@ export function fileWriteTargets(segment) {
   const args = [];
   for (let i = 1; i < rest.length; i++) {
     if (rest[i].op) { i += 1; continue; }                          // skip the operator AND its target
-    args.push(rest[i]);
+    const arg = rest[i];
+    args.push(resolvedOptions && arg.text.startsWith('-') ? { ...arg, quoted: false } : arg);
   }
   const flags = args.filter((a) => !a.quoted && a.text.startsWith('-') && a.text.length > 1).map((a) => a.text);
   const has = (...names) => flags.some((f) => names.includes(f) || names.some((n) => f.startsWith(n + '=')));
@@ -1494,7 +1506,7 @@ export function fileWriteTargets(segment) {
     // `-i.bak`, `-pi`, `-i -pe` (the flags need not share ONE cluster). `-M<module>` is perl's module load,
     // never an in-place switch, so it is excluded rather than letter-scanned.
     const inPlace = flags.some((f) => /^--in-place\b/.test(f)
-      || (!f.startsWith('--') && !f.startsWith('-M') && /^-[A-Za-z]+(?:\.[\w-]+)?$/.test(f) && f.includes('i')));
+      || (!f.startsWith('--') && !f.startsWith('-M') && /^-[A-Za-z0-9]+(?:\.[\w-]+)?$/.test(f) && f.includes('i')));
     if (inPlace) {
       // The script can arrive as an explicit flag argument (`-e '<code>'`) or as the first bare operand
       // (`sed -i s/x/y/ <files…>`) — either way it is NOT a written path, and everything else is.

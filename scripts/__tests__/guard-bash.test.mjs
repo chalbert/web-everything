@@ -602,6 +602,37 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
   const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
   const allowed = (c) => expect(reason(c), c).toBeNull();
 
+  it.each([
+    "sed -i'' -e 's/x/y/' backlog/a.md",
+    'sed -i"" -e \'s/x/y/\' backlog/a.md',
+    "perl -0pi -e 's/x/y/' reports/a.md",
+    "perl -0pi.bak -e 's/x/y/' reports/a.md",
+    '(sed -i s/x/y/ backlog/a.md)',
+    '{ sed -i s/x/y/ backlog/a.md; }',
+    "sed -n 'w backlog/x.md' f",
+    "sed -n 'p;w backlog/x.md' f",
+    "sed -n '{w backlog/x.md\n}' f",
+    "sed -n '1,/x/w backlog/x.md' f",
+    "sed -n '/re/,$w backlog/x.md' f",
+    "sed -n '/re/,+2w backlog/x.md' f",
+    "sed -n '/re/I w backlog/x.md' f",
+  ])('denies the confirmed write regression: %s', (command) => {
+    denied(command);
+    expect(fileWriteTargets(command).some((path) => /^(backlog|reports)\//.test(path))).toBe(true);
+  });
+
+  it.each([
+    'grep foo backlog/a.md',
+    "sed -n 's/x/y/p' backlog/a.md",
+    'cat reports/a.md',
+    "(sed -n 's/x/y/p' backlog/a.md)",
+    "{ sed -n 'p' reports/a.md; }",
+    "perl -0p -e 's/x/y/' reports/a.md",
+  ])('allows read-only mentions after the regression fixes: %s', (command) => {
+    allowed(command);
+    expect(fileWriteTargets(command)).toEqual([]);
+  });
+
   it('still denies a REAL sed/perl in-place edit or tee write into backlog|reports (unchanged from before)', () => {
     denied('sed -i s/x/y/ backlog/2200-a.md');
     denied("sed -i '' s/x/y/ backlog/2200-a.md"); // BSD empty in-place suffix
