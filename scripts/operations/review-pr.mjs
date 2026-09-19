@@ -221,6 +221,11 @@ import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 // the band ordering the comparison is made on; both are pure, and neither is restated here.
 import { buildShapePlan } from '../review-core-cli.mjs';
 import { CARE_LEVELS, CARE_LEVEL_ORDER, REVIEW_PR_CHANNEL } from '../lib/review-escalation.mjs';
+// #3383 — `renderAdvisoryNote`'s comment opens with this SAME literal `we:scripts/conveyor/reconcile-core.mjs`'s
+// round-cap check counts back off the PR's own comment thread (`countAdvisoryComments`,
+// `we:scripts/conveyor/advisory-round-count.mjs`). Build and count share ONE marker so they can never drift —
+// see that file's own header for the `#2117`/`#2298` incident this closes.
+import { ADVISORY_NOTE_MARKER } from '../conveyor/advisory-round-count.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -1136,7 +1141,7 @@ export function renderAdvisoryNote({ read, verdict } = {}) {
     : `Net basis: \`${read.netBasis.base ?? '?'}..${read.netBasis.rev ?? '?'}\`${renderRevProvenance(read.netBasis)} — `
       + `${read.netChangedFiles.length} net changed file(s) vs current main (#2450), not \`gh pr diff\`'s three-dot list.`;
   return [
-    '**⚠️ THIS IS AN ADVISORY REVIEW, NOT A RECORDED VERDICT.** This PR carries `review:human`. The independent',
+    `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`. The independent`,
     'AI review below ran automatically, before the required human review ceremony — it has neither accepted nor',
     'bounced this PR. No label was changed and no decision was recorded.',
     '',
