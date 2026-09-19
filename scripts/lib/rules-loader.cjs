@@ -20,7 +20,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const MarkdownIt = require('markdown-it');
+// #2892 — `markdown-it` is required LAZILY (inside `makeRenderer`), not at module load. `extractAnchors` below is a
+// pure, dependency-free line grammar, and the trust-chain gate (`gate-config.mjs#isPrincipleSurface`) reads it on
+// the hook / drain hot path; it must not pay for — or depend on — the markdown renderer to answer "is this line an
+// anchored rule heading?". The renderer paths (`loadRules`, `renderRootDoc`) are unchanged.
 
 const ROOT = path.resolve(__dirname, '..', '..');
 
@@ -89,6 +92,7 @@ function extractAnchors(src) {
 // markdown-it whose `### heading {#id}` and `## Heading (#1321)` both emit a real heading `id` — explicit
 // anchor wins, else the GitHub slug — so every rendered heading is a fragment target.
 function makeRenderer() {
+  const MarkdownIt = require('markdown-it');
   const md = new MarkdownIt({ html: true, linkify: true, typographer: false });
   md.core.ruler.push('rules_heading_anchors', (state) => {
     const tokens = state.tokens;

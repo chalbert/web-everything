@@ -74,6 +74,7 @@ import {
   findGitHookAllFlags,
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
+  checkLeashPin,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 // #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
@@ -96,7 +97,9 @@ import {
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
 } from './lib/citation-check.mjs';
-import { TRUST_CHAIN } from './lib/gate-config.mjs';
+import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
+// #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
+import { scoreEscalation } from './lib/review-escalation.mjs';
 import { scanDiffBranchCoverage } from './lib/diff-branch-coverage.mjs';
 import { isHash } from './backlog/id.mjs';
 
@@ -2289,6 +2292,22 @@ try {
       for (const hit of findGitHookAllFlags(readFileSync(abs, 'utf8'))) err(gitHookAllFlagError(`.githooks/${name}`, hit));
     }
   }
+}
+
+// ── 17c. Leash pin (#2892 — enforces #2840 trigger 3; guards #2838's flip-edit safeguard) ──────
+// No declarative-leash (`POLICY_SPEC`) file may be dropped from the human gate — checked against the roster AND
+// against the real `scoreEscalation`, so neither a reclassification nor a rubric edit can quietly hand the
+// contract (and with it the shadow→enforce flip) to an agent panel. Pure rule + its rationale live in
+// check-standards-rules.mjs (`checkLeashPin`); this only wires the real roster, rubric and filesystem in.
+{
+  const pin = checkLeashPin({
+    specBasenames: POLICY_SPEC_BASENAMES,
+    roster: TRUST_CHAIN,
+    isHumanGated: (path, hunks) => scoreEscalation({ changedFiles: [path], diffHunks: hunks }).humanRequired,
+    homeExists: (rel) => existsSync(join(ROOT, rel)),
+  });
+  for (const e of pin.errors) err(e.message, e.descriptor);
+  for (const w of pin.warnings) warn(w.message, w.descriptor);
 }
 
 // ── 17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ────────

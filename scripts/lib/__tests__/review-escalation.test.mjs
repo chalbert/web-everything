@@ -565,13 +565,17 @@ describe('#2890 — diffHunks (base-vs-head diff CONTENT) is accepted and thread
     const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, diffHunks: hunks });
     expect(r.diffHunks).toBe(hunks);
   });
-  it('does NOT itself change escalate/humanRequired/reasons/signals — #2890 is plumbing, not a detector', () => {
+  it('a hunk text with NO section for the file changes nothing about the verdict (it FAILS CLOSED to the no-hunks result) — #2892 made hunks a detector input, but only a per-file section is read', () => {
+    // #2890 shipped this as "pure plumbing". #2892 is the detector that reads it, so the general claim no longer
+    // holds; what still must hold is that hunk text that does not describe THIS file cannot move the verdict.
     const hunks = '@@ -1,2 +1,2 @@\n-### Some Rule {#some-rule}\n+### Some Other Rule {#some-rule}\n';
     const withHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], diffHunks: hunks });
     const withoutHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'] });
     expect(withHunks.escalate).toBe(withoutHunks.escalate);
     expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
     expect(withHunks.reasons).toEqual(withoutHunks.reasons);
+    // Both calls could not read a section for the file, and both SAY so — the signals are identical.
+    expect(withoutHunks.signals.hunksUnavailable).toEqual(['docs/agent/platform-decisions.md']);
     expect(withHunks.signals).toEqual(withoutHunks.signals);
   });
   it('anything that is NOT a string collapses to null — a caller that regresses to passing the raw result OBJECT lands on the safe side', () => {
