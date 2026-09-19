@@ -230,13 +230,29 @@ export const CODEX_SPAWN_ENV_ALLOWLIST = Object.freeze([
  * A caller that genuinely needs the child to see more passes its own `env` to `codexJudgeSpawn` explicitly;
  * this is only the DEFAULT.
  *
+ * SCRATCH HOME MITIGATION (security review finding, PR #2115):
+ * Giving the child a scratch `HOME` (the per-call temp workDir) ensures `~/.aws`, `~/.ssh`, `~/.config/gh`,
+ * etc. do not resolve under `~`, while pointing `CODEX_HOME` at the operator's real Codex config dir so Codex
+ * still finds its auth. This is NOT confinement: the read-only sandbox does not stop absolute-path reads of the
+ * host filesystem; this only removes the `~`-relative ones; a true read confinement does not exist for this
+ * provider and untrusted diffs are still a residual risk.
+ *
  * @param {Record<string,string|undefined>} [sourceEnv] - injectable for tests; defaults to the real `process.env`.
+ * @param {object} [opts]
+ * @param {string} [opts.scratchHome] - optional scratch dir to point HOME at; computes CODEX_HOME before overriding HOME.
  * @returns {Record<string,string>} a NEW object containing only the allowlisted keys present in `sourceEnv`.
  */
-export function defaultCodexSpawnEnv(sourceEnv = process.env) {
+export function defaultCodexSpawnEnv(sourceEnv = process.env, { scratchHome } = {}) {
   const out = {};
   for (const key of CODEX_SPAWN_ENV_ALLOWLIST) {
     if (sourceEnv[key] !== undefined) out[key] = sourceEnv[key];
+  }
+  if (typeof scratchHome === 'string' && scratchHome.length > 0) {
+    const codexHome = sourceEnv.CODEX_HOME || (sourceEnv.HOME ? join(sourceEnv.HOME, '.codex') : undefined);
+    out.HOME = scratchHome;
+    if (codexHome !== undefined) {
+      out.CODEX_HOME = codexHome;
+    }
   }
   return out;
 }
@@ -505,9 +521,10 @@ export function codexLoadedContextTokens(usage = {}) {
  * @param {string|null} [opts.cwd] - a scratch directory. Defaults to a fresh `mkdtemp` — NEVER a lane, and
  *   never the caller's own cwd, since a tool-free juror has nothing to protect a shared tree from but still
  *   has no reason to load one's doctrine either (probe 9).
- * @param {Record<string,string>} [opts.env] - defaults to `defaultCodexSpawnEnv()`, an ALLOWLISTED subset of
- *   the parent's own environment, NOT the raw `process.env` — see that function's own header (round-2 review
- *   finding, #xqa9ttq). A caller that genuinely needs the child to see more passes its own `env` explicitly.
+ * @param {Record<string,string>} [opts.env] - defaults (when null/omitted) to `defaultCodexSpawnEnv(process.env, { scratchHome: <the per-call temp workDir> })`,
+ *   an ALLOWLISTED subset of the parent's own environment, NOT the raw `process.env` — see that function's own
+ *   header (round-2 review finding, #xqa9ttq). A caller that genuinely needs the child to see more passes its own
+ *   `env` explicitly.
  * @param {string} [opts.cli]
  * @param {number} [opts.timeoutMs] - PARENT-IMPOSED wall; Codex has no CLI timeout flag (`#3371` probe 6).
  * @param {Function} [opts.spawnFn]
@@ -527,7 +544,7 @@ export async function codexJudgeSpawn({
   effort,
   allowedTools = null,
   cwd = null,
-  env = defaultCodexSpawnEnv(),
+  env = null,
   cli = CODEX_CLI,
   timeoutMs = JUDGE_TIMEOUT_MS,
   spawnFn = nodeSpawn,
@@ -548,6 +565,7 @@ export async function codexJudgeSpawn({
   assertNoCodexTools(allowedTools);
 
   const workDir = mkTempDir(join(tmpdir(), 'codex-judge-'));
+  const childEnv = env ?? defaultCodexSpawnEnv(process.env, { scratchHome: workDir });
   const spawnCwd = cwd || workDir;
   const schemaFile = join(workDir, 'schema.json');
   const outputLastMessageFile = join(workDir, 'last-message.txt');
@@ -563,7 +581,7 @@ export async function codexJudgeSpawn({
     result = await new Promise((resolve, reject) => {
       let child;
       try {
-        child = spawnFn(cli, argv, { cwd: spawnCwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+        child = spawnFn(cli, argv, { cwd: spawnCwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (e) {
         reject(new Error(`codex-judge-spawn: could not start \`${cli}\`: ${e.message}`));
         return;

@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   CODEX_CLI,
   CODEX_EFFORT_MAP,
@@ -256,6 +257,22 @@ describe('defaultCodexSpawnEnv — ALLOWLISTED env, not raw process.env (round-2
     expect(CODEX_SPAWN_ENV_ALLOWLIST).toEqual(expect.arrayContaining(['HOME', 'PATH']));
     expect(CODEX_SPAWN_ENV_ALLOWLIST).not.toEqual(expect.arrayContaining(['GITHUB_TOKEN']));
   });
+
+  it('with a scratchHome, HOME points at the scratch dir and CODEX_HOME at the source\'s real Codex dir (~-relative reads of ~/.aws etc. no longer resolve to the real home)', () => {
+    expect(defaultCodexSpawnEnv({ HOME: '/home/x', PATH: '/usr/bin', GITHUB_TOKEN: 's' }, { scratchHome: '/tmp/scratch' }))
+      .toEqual({ HOME: '/tmp/scratch', PATH: '/usr/bin', CODEX_HOME: '/home/x/.codex' });
+  });
+
+  it('an explicit source CODEX_HOME wins', () => {
+    expect(defaultCodexSpawnEnv({ HOME: '/home/x', CODEX_HOME: '/opt/codex' }, { scratchHome: '/tmp/s' }))
+      .toEqual({ HOME: '/tmp/s', CODEX_HOME: '/opt/codex' });
+  });
+
+  it('no HOME and no CODEX_HOME in source -> result has HOME \'/tmp/s\' and NO CODEX_HOME key', () => {
+    const out = defaultCodexSpawnEnv({}, { scratchHome: '/tmp/s' });
+    expect(out).toEqual({ HOME: '/tmp/s' });
+    expect('CODEX_HOME' in out).toBe(false);
+  });
 });
 
 describe('codexJudgeSpawn — exercised over an injected spawn (real temp files, fake process)', () => {
@@ -335,6 +352,16 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
       if (priorSecret === undefined) delete process.env.WE_TEST_FIX_2115_SECRET;
       else process.env.WE_TEST_FIX_2115_SECRET = priorSecret;
     }
+  });
+
+  it('the default child env has a SCRATCH HOME (the temp workDir), not the operator\'s real HOME, and CODEX_HOME still points at the real Codex config dir', async () => {
+    const { fn, seen } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+    await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
+    expect(seen.opts.env.HOME).toBe(seen.opts.cwd);
+    if (process.env.HOME !== undefined) {
+      expect(seen.opts.env.HOME).not.toBe(process.env.HOME);
+    }
+    expect(seen.opts.env.CODEX_HOME).toBe(process.env.CODEX_HOME || (process.env.HOME ? join(process.env.HOME, '.codex') : undefined));
   });
 
   it('still honors an explicit `env` override — the allowlist is only the default', async () => {

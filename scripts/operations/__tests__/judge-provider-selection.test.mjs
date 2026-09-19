@@ -133,6 +133,23 @@ describe('createDefaultJudge — providerName selection end to end (no injected 
     })).rejects.toThrow(/TOOL-FREE panelist only/);
   });
 
+  it('providerName: \'codex\' with an EXPLICITLY EMPTY allowedTools array is tool-free, not tool-bearing (PR #2115 review: [] is truthy in JS)', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'codex' });
+    const returned = await judgeFn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: [],
+    });
+    expect(returned).toBeDefined();
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+  });
+
+  it('the SAME empty allowedTools array stays REFUSED for the default claude provider - the codex normalisation must not weaken the shared guard', async () => {
+    const judgeFn = createDefaultJudge({ provider: async () => ({ value: {}, costUsd: 0 }) });
+    await expect(judgeFn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: [], cwd: '/tmp/x',
+    })).rejects.toThrow(/non-empty array/);
+  });
+
   // PR #2115 human review (CONFIRMED, correctness): the two tests above only ever pass a SYNTHETIC tool-free or
   // hand-built tool-bearing request — neither proves anything about `review-pr.mjs`'s REAL judge steps, which
   // are `review-pr`'s only current caller of this dispatch's `--judge-provider`/`--provider` threading

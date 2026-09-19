@@ -157,6 +157,9 @@ export function reviewBriefPath(root = REPO_ROOT) {
  *  every-declared-placeholder-must-have-a-value refusal never fires for the ordinary, opt-out case. */
 export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
 
+/** #xqa9ttq (PR #2115 review, CONFIRMED) - judge providers that are TOOL-FREE ONLY (#3581) and so can never serve review-pr's judge steps, every one of which is tool-bearing (REVIEW_JUROR_TOOLS, by ratified design). */
+export const TOOL_FREE_ONLY_JUDGE_PROVIDERS = Object.freeze(['codex']);
+
 /** Any run of separators a placeholder name might be typo'd with, canonicalized — same shape as `dispatch-
  *  lane.mjs#canonicalPlaceholder`, scoped to this brief's own three names. */
 export function canonicalReviewPlaceholder(name) {
@@ -372,15 +375,9 @@ export function planReviewDispatch({ pr, repo } = {}) {
  *   `JUDGE_PROVIDER_NAMES`; defaults to `'claude'`, today's behaviour, unchanged — this is OPT-IN. Note what
  *   this does NOT do: it never makes the DISPATCHED SESSION ITSELF (a tool-bearing `claude --bg` agent) run on
  *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` could spawn underneath it would ever be
- *   eligible (#3581: Codex is tool-free-only). CORRECTION (PR #2115 human review): this dispatch's OWN real
- *   judge steps (`review-pr.mjs`'s `judge`/`judgeSecurity`, built by `buildReviewJudgeRequest`) are
- *   UNCONDITIONALLY tool-bearing (`REVIEW_JUROR_TOOLS` — the tools ARE the finding mechanism, by ratified
- *   design, #3158/#3319), so `judgeProvider: 'codex'` reaching THIS dispatch's review-pr judge steps always
- *   throws `createDefaultJudge`'s tool-bearing refusal (`we:scripts/operations/cli-adapter.mjs`) — there is no
- *   tool-free judge step here for it to select today. This flag still exists because it is generic dispatch
- *   plumbing (`review-loop-cli.mjs --provider=` is not specific to review-pr's declaration), so it is left
- *   wired rather than removed, but do not read its presence as proof review-pr can already run a Codex-backed
- *   judge — it cannot, until a tool-free lens exists for it to seat.
+ *   eligible (#3581: Codex is tool-free-only). `codex` is now REFUSED here before anything is read or spawned
+ *   (see {@link TOOL_FREE_ONLY_JUDGE_PROVIDERS}), as review-pr's real judge steps are tool-bearing and would be
+ *   refused at the first judge step. `claude` is the only accepted value today.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
@@ -402,6 +399,13 @@ export function dispatchReview({
   // minutes into a real dispatch instead of at the command line that requested it.
   if (!JUDGE_PROVIDER_NAMES.includes(judgeProvider)) {
     throw new Error(`review-dispatch: \`judgeProvider\` must be one of ${JUDGE_PROVIDER_NAMES.join('|')}, got ${JSON.stringify(judgeProvider)}`);
+  }
+  if (TOOL_FREE_ONLY_JUDGE_PROVIDERS.includes(judgeProvider)) {
+    throw new Error(
+      `review-dispatch: \`judgeProvider: ${JSON.stringify(judgeProvider)}\` is refused - it is a TOOL-FREE-only provider (#3581) and every judge step review-pr runs is tool-bearing, `
+      + 'so a dispatched review would be refused at its first judge step. Use the default `claude`. '
+      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag.',
+    );
   }
   const planned = planReviewDispatch({ pr, repo });
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
