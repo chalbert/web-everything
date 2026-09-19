@@ -223,6 +223,26 @@ describe('processSnapshotMetrics — shapes the snapshot into the telemetry samp
     expect(m.attributes.command.length).toBeLessThan(longCommand.length);
   });
 
+  // PR #2220 review (security): argv is durable — the `command` attribute must never carry a credential.
+  it('masks credential-shaped argv values BEFORE the attribute is built, and control characters with them', () => {
+    const rows = [
+      { pid: 601, pcpu: 9, rssKb: 300 * 1024, command: 'node tool.mjs --token=abc123SECRET' },
+      { pid: 602, pcpu: 9, rssKb: 300 * 1024, command: "curl -H 'Authorization: Bearer abc123SECRET' https://x.test" },
+      { pid: 603, pcpu: 9, rssKb: 300 * 1024, command: 'psql postgres://admin:abc123SECRET@db/app' },
+      { pid: 604, pcpu: 9, rssKb: 300 * 1024, command: 'node evil.mjs \u001b]0;pwned\u0007' },
+      // A secret straddling the truncation cut must be masked whole, not half-kept.
+      { pid: 605, pcpu: 9, rssKb: 300 * 1024, command: `${'x'.repeat(475)} --token=abc123SECRET` },
+    ];
+    const metrics = processSnapshotMetrics(buildProcessSnapshot(rows)).filter((m) => m.name === 'host.process.entry.cpu_pct');
+    expect(metrics).toHaveLength(5);
+    for (const m of metrics) {
+      expect(m.attributes.command).not.toContain('abc123SECRET');
+      expect(m.attributes.command).not.toContain('SECRET');
+      expect(m.attributes.command).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    }
+    expect(metrics.find((m) => m.attributes.pid === 601).attributes.command).toBe('node tool.mjs --token=[REDACTED]');
+  });
+
   it('is total on a bare/junk snapshot object', () => {
     for (const junk of [undefined, null, {}]) {
       expect(() => processSnapshotMetrics(junk)).not.toThrow();

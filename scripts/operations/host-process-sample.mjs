@@ -55,6 +55,8 @@
 
 import { execFileSync } from 'node:child_process';
 
+import { redactCommandLine } from './command-redact.mjs';
+
 /** The THREE project-specific categories that stay fixed at collection time, unchanged from the original
  *  design — these are THIS SYSTEM's own processes, always worth a named total regardless of how big or small
  *  any one tick's sample is. Mirrors `telemetry.mjs#METRIC_NAMES`'s own `host.process.<category>.*` list for
@@ -236,7 +238,10 @@ const MAX_COMMAND_LENGTH = 480;
  *     `host.process.entry.cpu_pct`/`.mem_bytes` — never a per-PID or per-command metric NAME, which would
  *     blow up `METRIC_NAMES`'s closed vocabulary; the real identity (`pid`, `command`) travels in
  *     `attributes` instead, the same "low-cardinality name, high-cardinality detail in attributes" rule
- *     `telemetry.mjs`'s own header already establishes for `dispatch.tokens.*`.
+ *     `telemetry.mjs`'s own header already establishes for `dispatch.tokens.*`. The `command` attribute is
+ *     passed through `command-redact.mjs#redactCommandLine` before it is built (credential-shaped argv values
+ *     masked, control characters replaced) and only THEN truncated — argv is where secrets live, and this
+ *     file is durable.
  *   • the `belowFloor` remainder → 2 metrics, `host.process.below_floor_remainder.cpu_pct`/`.mem_bytes` —
  *     clearly labeled as a remainder (unlike the old `other`, which read as a category), carrying
  *     `processCount` so a reader can see how many small processes it represents.
@@ -254,7 +259,10 @@ export function processSnapshotMetrics(snapshot) {
   }
   for (const p of Array.isArray(s.processes) ? s.processes : []) {
     if (!p || typeof p !== 'object') continue;
-    const command = String(p.command ?? '').slice(0, MAX_COMMAND_LENGTH);
+    // REDACT FIRST, THEN TRUNCATE — a secret straddling the length cut would otherwise be left half-visible.
+    // The full argv is durable (the NDJSON is retained across days and shared across lane clones), so
+    // credential-shaped values and control characters never reach disk — see `command-redact.mjs`.
+    const command = redactCommandLine(p.command).slice(0, MAX_COMMAND_LENGTH);
     const attrs = { pid: Number.isFinite(p.pid) ? p.pid : null, command };
     out.push({ name: 'host.process.entry.cpu_pct', value: Number.isFinite(p.cpuPct) ? p.cpuPct : 0, unit: 'percent', attributes: attrs });
     out.push({ name: 'host.process.entry.mem_bytes', value: Number.isFinite(p.memBytes) ? p.memBytes : 0, unit: 'bytes', attributes: attrs });

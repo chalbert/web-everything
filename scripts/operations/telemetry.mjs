@@ -75,7 +75,10 @@
  * PURE. No fs, no clock, no process, no randomness, no network, no child_process. Every input is passed in.
  * A caller that needs a clock or an id generator injects one — which is also what makes every function here
  * unit-testable against plain objects with zero disk.
+ * (The one sibling import, `command-redact.mjs`, is itself pure — no fs/clock/process — so the claim holds.)
  */
+
+import { redactCommandLine } from './command-redact.mjs';
 
 // ── VOCABULARIES (closed sets — the aggregation contract) ─────────────────────────────────────────────
 
@@ -861,93 +864,135 @@ export const DEFAULT_SUBSTANTIAL_MEM_BYTES = 200 * 1024 * 1024;
  * stable identity across the window, matching how `host-process-sample.mjs`'s own fixed-category matchers
  * already key on command, not pid. `pids` on each group lists every distinct pid observed, so "one process that
  * restarted 3 times" is still distinguishable from "3 processes running concurrently" if a reader needs that.
+ * The label is the command line passed through `command-redact.mjs#redactCommandLine` again at READ time, so
+ * lines stored before redaction existed (or by a caller that skipped it) are still masked in any report.
  *
- * THE REMAINDER STAYS HONEST: `belowThresholdRemainder` sums BOTH (a) any stored `entry` sample this function's
- * own threshold judged not substantial, and (b) every `host.process.below_floor_remainder.*` sample in the
- * window (the collection-time floor's own remainder) — so `substantial` entries + `belowThresholdRemainder` +
- * the three fixed categories (already reported by `goldenSignals`'s `saturation.gauges`, untouched by this
- * function) still account for the whole machine, the same honesty invariant the original `other` bucket
- * existed to uphold.
+ * THE MEAN IS WINDOW-NORMALISED, PER TICK (the arithmetic that makes the report reconcile with the machine).
+ * A row only exists for a tick where its process cleared the storage floor, and several rows can share one
+ * command on one tick (N Electron helpers with an identical command line, each its own pid). So, per group:
+ *   1. rows are SUMMED per tick — N concurrent same-command processes contribute their combined load, not
+ *      an average of them;
+ *   2. that per-tick sum is divided by `windowTicks`, the count of DISTINCT ticks in the window that recorded
+ *      any `host.process.*` sample — a tick where the group was absent counts as zero, not as "no data".
+ * The same divisor is applied to `belowThresholdRemainder`. Per tick the machine is exactly
+ * `fixed categories + substantial entries + below-floor remainder`, so the mean of each part over the SAME
+ * `windowTicks` sums to the mean of the whole — the report's total is a true window mean, comparable to
+ * `host.cpu.load1`. A tick is identified by its `tick` attribute; the runner restarts numbering at 0, so a
+ * number LOWER than the previous one (in event order) starts a new run and is counted as a new tick, not
+ * merged with the earlier run's. A sample with no `tick` attribute falls back to its `timestamp`.
+ *
+ * THE REMAINDER STAYS HONEST: `belowThresholdRemainder` sums, per tick, BOTH (a) any stored `entry` row this
+ * function's own threshold judged not substantial, and (b) that tick's `host.process.below_floor_remainder.*`
+ * sample (the collection-time floor's own remainder) — BEFORE averaging, so a stricter threshold never mixes a
+ * single process row into a mean with a whole tick's aggregate. `substantial` entries + `belowThresholdRemainder`
+ * + the three fixed categories (already reported by `goldenSignals`'s `saturation.gauges`, untouched by this
+ * function) therefore still account for the whole machine, the same honesty invariant the original `other`
+ * bucket existed to uphold. Any process that was substantial on some ticks and merely below-floor on others
+ * has the latter ticks in the remainder — never lost, never double counted.
  * @param {object[]} events already-read telemetry events (see `telemetry-store.mjs#readAll`/`readDay`)
  * @param {{cpuThresholdPct?: number, memThresholdBytes?: number}} [opts]
  * @returns {{substantial: Array<{label: string, pids: number[], meanCpuPct: number, meanMemBytes: number,
  *   maxCpuPct: number, maxMemBytes: number, samples: number}>,
  *   belowThresholdRemainder: {meanCpuPct: number, meanMemBytes: number, samples: number},
- *   cpuThresholdPct: number, memThresholdBytes: number}}
+ *   windowTicks: number, cpuThresholdPct: number, memThresholdBytes: number}}
+ *   `samples` on a group / the remainder is the number of DISTINCT TICKS it appeared in (out of `windowTicks`);
+ *   `maxCpuPct`/`maxMemBytes` are the peak PER-TICK sum for the group.
  */
 export function summarizeHostProcesses(events, {
   cpuThresholdPct = DEFAULT_SUBSTANTIAL_CPU_PCT, memThresholdBytes = DEFAULT_SUBSTANTIAL_MEM_BYTES,
 } = {}) {
-  const list = (Array.isArray(events) ? events : []).filter((e) => !!e && typeof e === 'object' && e.event === 'metric');
+  const list = (Array.isArray(events) ? events : []).filter((e) => !!e && typeof e === 'object' && e.event === 'metric'
+    && typeof e.name === 'string' && e.name.startsWith('host.process.'));
+
+  // Assign every process sample a tick id (see the docblock's restart handling), and record every tick seen.
+  const tickIds = new Set();
+  const attrsOf = (m) => ((m.attributes && typeof m.attributes === 'object') ? m.attributes : {});
+  let epoch = 0;
+  let lastTick = null;
+  const tickOf = new Map(); // metric -> tick id
+  for (const m of list) {
+    const t = attrsOf(m).tick;
+    let id;
+    if (Number.isFinite(t)) {
+      if (lastTick !== null && t < lastTick) epoch += 1;
+      lastTick = t;
+      id = `${epoch}:${t}`;
+    } else {
+      id = `ts:${m.timestamp ?? ''}`;
+    }
+    tickOf.set(m, id);
+    tickIds.add(id);
+  }
+  const windowTicks = tickIds.size;
 
   // Pair each tick+pid's cpu_pct/mem_bytes lines back into one row — mirrors how `processSnapshotMetrics`
   // wrote them (two lines, same `attributes.pid`/`attributes.tick`, one name each).
   const byKey = new Map();
   for (const m of list) {
-    if (typeof m.name !== 'string' || !m.name.startsWith('host.process.entry.')) continue;
-    const attrs = (m.attributes && typeof m.attributes === 'object') ? m.attributes : {};
-    const key = `${attrs.tick ?? ''}:${attrs.pid ?? ''}:${attrs.command ?? ''}`;
-    const row = byKey.get(key) || { pid: attrs.pid ?? null, command: String(attrs.command ?? ''), cpuPct: 0, memBytes: 0 };
+    if (!m.name.startsWith('host.process.entry.')) continue;
+    const attrs = attrsOf(m);
+    const tick = tickOf.get(m);
+    const key = `${tick}:${attrs.pid ?? ''}:${attrs.command ?? ''}`;
+    const row = byKey.get(key) || { tick, pid: attrs.pid ?? null, command: String(attrs.command ?? ''), cpuPct: 0, memBytes: 0 };
     const v = Number.isFinite(m.value) ? m.value : 0;
     if (m.name.endsWith('.cpu_pct')) row.cpuPct = v;
     if (m.name.endsWith('.mem_bytes')) row.memBytes = v;
     byKey.set(key, row);
   }
 
-  const groups = new Map(); // label (command) -> accumulator
-  let remCpuSum = 0;
-  let remMemSum = 0;
-  let remSamples = 0;
+  const groups = new Map(); // label -> { pids:Set, perTick: Map<tick, {cpu, mem}> }
+  const remainderByTick = new Map(); // tick -> {cpu, mem}
+  const addTo = (map, tick, cpu, mem) => {
+    const cur = map.get(tick) || { cpu: 0, mem: 0 };
+    cur.cpu += cpu;
+    cur.mem += mem;
+    map.set(tick, cur);
+  };
   for (const row of byKey.values()) {
     const substantial = row.cpuPct > cpuThresholdPct || row.memBytes > memThresholdBytes;
     if (substantial) {
-      const label = row.command || (row.pid == null ? '(unknown process)' : `pid ${row.pid}`);
-      const g = groups.get(label) || {
-        label, pids: new Set(), cpuSum: 0, memSum: 0, samples: 0, maxCpuPct: 0, maxMemBytes: 0,
-      };
+      const command = redactCommandLine(row.command);
+      const label = command || (row.pid == null ? '(unknown process)' : `pid ${row.pid}`);
+      const g = groups.get(label) || { pids: new Set(), perTick: new Map() };
       if (row.pid != null) g.pids.add(row.pid);
-      g.cpuSum += row.cpuPct;
-      g.memSum += row.memBytes;
-      g.samples += 1;
-      g.maxCpuPct = Math.max(g.maxCpuPct, row.cpuPct);
-      g.maxMemBytes = Math.max(g.maxMemBytes, row.memBytes);
+      addTo(g.perTick, row.tick, row.cpuPct, row.memBytes);
       groups.set(label, g);
     } else {
-      remCpuSum += row.cpuPct;
-      remMemSum += row.memBytes;
-      remSamples += 1;
+      addTo(remainderByTick, row.tick, row.cpuPct, row.memBytes);
     }
   }
 
-  // Fold in the collection-time floor's OWN remainder too — see the docblock's "the remainder stays honest".
+  // Fold in each tick's collection-time floor remainder — see the docblock's "the remainder stays honest".
   for (const m of list) {
-    if (m.name === 'host.process.below_floor_remainder.cpu_pct' && Number.isFinite(m.value)) {
-      remCpuSum += m.value;
-      remSamples += 1;
-    } else if (m.name === 'host.process.below_floor_remainder.mem_bytes' && Number.isFinite(m.value)) {
-      remMemSum += m.value;
-    }
+    if (!Number.isFinite(m.value)) continue;
+    if (m.name === 'host.process.below_floor_remainder.cpu_pct') addTo(remainderByTick, tickOf.get(m), m.value, 0);
+    else if (m.name === 'host.process.below_floor_remainder.mem_bytes') addTo(remainderByTick, tickOf.get(m), 0, m.value);
   }
 
-  const substantial = [...groups.values()]
-    .map((g) => ({
-      label: g.label,
+  const total = (perTick, field) => { let n = 0; for (const v of perTick.values()) n += v[field]; return n; };
+  const peak = (perTick, field) => { let n = 0; for (const v of perTick.values()) n = Math.max(n, v[field]); return n; };
+  const norm = (n) => (windowTicks ? n / windowTicks : 0);
+
+  const substantial = [...groups.entries()]
+    .map(([label, g]) => ({
+      label,
       pids: [...g.pids].sort((a, b) => a - b),
-      meanCpuPct: g.samples ? g.cpuSum / g.samples : 0,
-      meanMemBytes: g.samples ? g.memSum / g.samples : 0,
-      maxCpuPct: g.maxCpuPct,
-      maxMemBytes: g.maxMemBytes,
-      samples: g.samples,
+      meanCpuPct: norm(total(g.perTick, 'cpu')),
+      meanMemBytes: norm(total(g.perTick, 'mem')),
+      maxCpuPct: peak(g.perTick, 'cpu'),
+      maxMemBytes: peak(g.perTick, 'mem'),
+      samples: g.perTick.size,
     }))
     .sort((a, b) => b.meanCpuPct - a.meanCpuPct || b.meanMemBytes - a.meanMemBytes);
 
   return {
     substantial,
     belowThresholdRemainder: {
-      meanCpuPct: remSamples ? remCpuSum / remSamples : 0,
-      meanMemBytes: remSamples ? remMemSum / remSamples : 0,
-      samples: remSamples,
+      meanCpuPct: norm(total(remainderByTick, 'cpu')),
+      meanMemBytes: norm(total(remainderByTick, 'mem')),
+      samples: remainderByTick.size,
     },
+    windowTicks,
     cpuThresholdPct,
     memThresholdBytes,
   };

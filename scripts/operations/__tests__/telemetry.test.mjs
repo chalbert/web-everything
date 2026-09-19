@@ -25,6 +25,7 @@ import {
   createTelemetryRecorder, dayKey, readGitResource, resetResourceCache, resourceAttributes,
   setActiveRecorder, spanAround, spanAroundAsync, telemetryDir, telemetryEnabled,
 } from '../telemetry-store.mjs';
+import { buildProcessSnapshot, processSnapshotMetrics } from '../host-process-sample.mjs';
 import {
   daysInWindow, eventTime, fmtBytes, fmtMs, renderReport, renderTrace, renderTraces, runTelemetryCli, withinWindow,
 } from '../telemetry-cli.mjs';
@@ -965,6 +966,33 @@ describe('the read CLI', () => {
     expect(beforeProcessTable).not.toContain('host.process.');
   });
 
+  // PR #2220 review (security): a crafted process title must not be able to drive the operator's terminal.
+  it('renderReport strips control/escape characters from a process label and masks credential-shaped argv', () => {
+    const { store, now } = loaded();
+    const evil = 'node x.mjs \u001b[2J\u001b]0;pwned\u0007 --api-key=hunter2Trombone';
+    for (const [name, value, unit] of [['host.process.entry.cpu_pct', 30, 'percent'], ['host.process.entry.mem_bytes', 5e6, 'bytes']]) {
+      store.append(`${JSON.stringify({
+        v: 1, event: 'metric', name, kind: 'runner', value, unit, timestamp: '2026-09-12T10:00:00.000Z',
+        traceId: null, attributes: { pid: 9, command: evil, tick: 1 }, resource: {},
+      })}\n`, '2026-09-12');
+    }
+    let text = '';
+    runTelemetryCli(['report'], { store, now, out: (s) => { text += s; } });
+    expect(text).toContain('node x.mjs');
+    expect(text).not.toMatch(/[\u001b\u0007]/);
+    expect(text).not.toContain('hunter2Trombone');
+    // Direct renderReport with a HAND-BUILT hostProcesses (the seam a caller could bypass summarize with).
+    const direct = renderReport({
+      ...goldenSignals([]), corrupt: 0,
+      hostProcesses: {
+        substantial: [{ label: evil, pids: [9], meanCpuPct: 30, meanMemBytes: 5e6, maxCpuPct: 30, maxMemBytes: 5e6, samples: 1 }],
+        belowThresholdRemainder: { meanCpuPct: 0, meanMemBytes: 0, samples: 0 }, windowTicks: 1, cpuThresholdPct: 2, memThresholdBytes: 200 * 1024 * 1024,
+      },
+    }, { hours: 24 });
+    expect(direct).not.toMatch(/[\u001b\u0007]/);
+    expect(direct).not.toContain('hunter2Trombone');
+  });
+
   it('report says so plainly when no per-process samples landed in the window', () => {
     const { store, now } = loaded();
     let text = '';
@@ -1128,6 +1156,142 @@ describe('summarizeHostProcesses — the reporting/query layer that decides whic
     }
     const s = summarizeHostProcesses([]);
     expect(s).toMatchObject({ substantial: [], belowThresholdRemainder: { samples: 0 } });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// PR #2220 review findings (correctness): the report's per-process means must be WINDOW means that reconcile
+// with the machine — normalised per TICK, not per stored row — and the remainder must never mix a single
+// process row into a mean with a whole tick's aggregate.
+describe('summarizeHostProcesses — window-normalised arithmetic (the report reconciles with the machine)', () => {
+  const MB = 1024 * 1024;
+  const at = (t) => new Date(Date.UTC(2026, 8, 12, 10, t)).toISOString();
+  const metric = (name, value, unit, attributes, t) => ({
+    v: 1, event: 'metric', name, kind: 'runner', value, unit, timestamp: at(t), traceId: null, attributes, resource: {},
+  });
+  /** Run REAL `ps`-shaped rows through the real collection functions, one snapshot per tick, exactly as the
+   *  runner would have — so the stored shape under test is the shape production writes. */
+  function collect(ticks, rowsFor) {
+    const events = [];
+    const whole = []; // per tick: the true whole-machine sums, computed straight from the input rows
+    for (let t = 0; t < ticks; t += 1) {
+      const rows = rowsFor(t);
+      whole.push({ cpu: rows.reduce((n, r) => n + r.pcpu, 0), mem: rows.reduce((n, r) => n + r.rssKb * 1024, 0) });
+      for (const m of processSnapshotMetrics(buildProcessSnapshot(rows))) {
+        events.push(metric(m.name, m.value, m.unit, { ...m.attributes, tick: t }, t));
+      }
+    }
+    return { events, whole };
+  }
+  const small = (n) => Array.from({ length: n }, (_, i) => ({ pid: 5000 + i, pcpu: 0.5, rssKb: 10 * 1024, command: `/usr/libexec/daemon${i}` }));
+
+  it('a process substantial on ONE tick of ten is averaged over ten ticks, not reported as a steady load', () => {
+    const { events } = collect(10, (t) => [
+      ...small(20),
+      ...(t === 3 ? [{ pid: 900, pcpu: 40, rssKb: 50 * 1024, command: 'git gc --aggressive' }] : []),
+    ]);
+    const s = summarizeHostProcesses(events);
+    expect(s.windowTicks).toBe(10);
+    const git = s.substantial.find((g) => g.label === 'git gc --aggressive');
+    expect(git.meanCpuPct).toBeCloseTo(4); // 40 over ONE tick of ten — not 40
+    expect(git.samples).toBe(1);
+    expect(git.maxCpuPct).toBe(40);
+  });
+
+  it('N concurrent same-command pids SUM within a tick (4 x 3% is 12% while present), then average over the window', () => {
+    const helpers = [1, 2, 3, 4].map((i) => ({ pid: 700 + i, pcpu: 3, rssKb: 50 * 1024, command: 'Electron Helper --type=renderer' }));
+    const { events } = collect(10, (t) => [...small(5), ...(t === 0 ? helpers : [])]);
+    const g = summarizeHostProcesses(events).substantial.find((x) => x.label.startsWith('Electron Helper'));
+    expect(g.pids).toEqual([701, 702, 703, 704]);
+    expect(g.maxCpuPct).toBeCloseTo(12);      // the per-tick peak is the SUM of the four
+    expect(g.meanCpuPct).toBeCloseTo(1.2);    // 12 on one tick of ten
+    // …and the four helpers on EVERY tick: 12% steady, not the 3% a per-row mean would report.
+    const steady = collect(10, () => helpers);
+    expect(summarizeHostProcesses(steady.events).substantial[0].meanCpuPct).toBeCloseTo(12);
+  });
+
+  it('RECONCILES: fixed categories + substantial entries + remainder equals the mean whole-machine sum, per tick', () => {
+    const { events, whole } = collect(12, (t) => [
+      { pid: 11, pcpu: 11, rssKb: 200 * 1024, command: 'node /w/skills-src/conveyor/runner.mjs' },
+      ...small(30),
+      ...(t % 4 === 0 ? [1, 2, 3].map((i) => ({ pid: 800 + i, pcpu: 6, rssKb: 400 * 1024, command: 'Code Helper (Plugin)' })) : []),
+      ...(t === 5 ? [{ pid: 950, pcpu: 55, rssKb: 90 * 1024, command: 'git repack' }] : []),
+      ...(t >= 8 ? [{ pid: 960, pcpu: 1, rssKb: 900 * 1024, command: 'Big Idle App' }] : []),
+    ]);
+    const s = summarizeHostProcesses(events);
+    const g = goldenSignals(events).saturation.gauges;
+    const fixedCpu = ['conveyor', 'drain', 'dispatched_agents'].reduce((n, c) => n + (g[`host.process.${c}.cpu_pct`]?.mean || 0), 0);
+    const fixedMem = ['conveyor', 'drain', 'dispatched_agents'].reduce((n, c) => n + (g[`host.process.${c}.mem_bytes`]?.mean || 0), 0);
+    const reportedCpu = fixedCpu + s.substantial.reduce((n, x) => n + x.meanCpuPct, 0) + s.belowThresholdRemainder.meanCpuPct;
+    const reportedMem = fixedMem + s.substantial.reduce((n, x) => n + x.meanMemBytes, 0) + s.belowThresholdRemainder.meanMemBytes;
+    expect(reportedCpu).toBeCloseTo(whole.reduce((n, w) => n + w.cpu, 0) / whole.length, 6);
+    expect(reportedMem).toBeCloseTo(whole.reduce((n, w) => n + w.mem, 0) / whole.length, 0);
+    // A stricter threshold only MOVES load between the parts; the total must not change.
+    const stricter = summarizeHostProcesses(events, { cpuThresholdPct: 20, memThresholdBytes: 800 * MB });
+    const strictCpu = fixedCpu + stricter.substantial.reduce((n, x) => n + x.meanCpuPct, 0) + stricter.belowThresholdRemainder.meanCpuPct;
+    expect(strictCpu).toBeCloseTo(reportedCpu, 6);
+    expect(stricter.substantial.map((x) => x.label)).toEqual(['git repack', 'Big Idle App']);
+  });
+
+  it('the rendered report\'s `— total —` row is the true window mean (mutation guard: a per-row mean or a missing-tick omission reddens it)', () => {
+    const { events, whole } = collect(10, (t) => [
+      { pid: 11, pcpu: 10, rssKb: 100 * 1024, command: 'node /w/skills-src/conveyor/runner.mjs' },
+      ...small(20),
+      ...(t === 0 ? [1, 2, 3, 4].map((i) => ({ pid: 700 + i, pcpu: 3, rssKb: 30 * 1024, command: 'Electron Helper' })) : []),
+      ...(t === 6 ? [{ pid: 900, pcpu: 40, rssKb: 30 * 1024, command: 'git gc' }] : []),
+    ]);
+    const text = renderReport({ ...goldenSignals(events), hostProcesses: summarizeHostProcesses(events), corrupt: 0 }, { hours: 24 });
+    const m = /— total —\s+([\d.]+)%/.exec(text);
+    expect(m).not.toBeNull();
+    const expected = whole.reduce((n, w) => n + w.cpu, 0) / whole.length;
+    expect(Number(m[1])).toBeCloseTo(expected, 1);
+    // n= is shown as ticks-present out of ticks-in-window, so a one-tick spike is visibly a one-tick spike.
+    expect(text).toMatch(/git gc\s+4\.0%.*1\/10 ticks/);
+  });
+
+  it('a STRICTER threshold does not mix single process rows into a mean with whole-tick aggregates (remainder is per tick)', () => {
+    // 10 ticks: each stores a 100% below-floor AGGREGATE plus one 3% entry row. Stricter threshold 5 pushes the
+    // 3% row into the remainder — true per-tick remainder is 103, not (10*100 + 10*3) / 20 = 51.5.
+    const events = [];
+    for (let t = 0; t < 10; t += 1) {
+      events.push(metric('host.process.below_floor_remainder.cpu_pct', 100, 'percent', { processCount: 300, tick: t }, t));
+      events.push(metric('host.process.below_floor_remainder.mem_bytes', 1000 * MB, 'bytes', { processCount: 300, tick: t }, t));
+      events.push(metric('host.process.entry.cpu_pct', 3, 'percent', { pid: 42, command: 'helper', tick: t }, t));
+      events.push(metric('host.process.entry.mem_bytes', 250 * MB, 'bytes', { pid: 42, command: 'helper', tick: t }, t));
+    }
+    const s = summarizeHostProcesses(events, { cpuThresholdPct: 5, memThresholdBytes: 500 * MB });
+    expect(s.substantial).toHaveLength(0);
+    expect(s.belowThresholdRemainder.meanCpuPct).toBeCloseTo(103);
+    expect(s.belowThresholdRemainder.meanMemBytes).toBeCloseTo(1250 * MB, 0);
+    expect(s.belowThresholdRemainder.samples).toBe(10); // ticks, not rows
+  });
+
+  it('a runner restart (tick numbering falls back to 0) counts as NEW ticks, not merged with the earlier run', () => {
+    const events = [];
+    const runs = [[0, 1, 2], [0, 1]];
+    let clock = 0;
+    for (const run of runs) {
+      for (const t of run) {
+        events.push(metric('host.process.below_floor_remainder.cpu_pct', 10, 'percent', { processCount: 1, tick: t }, clock));
+        events.push(metric('host.process.entry.cpu_pct', 30, 'percent', { pid: 1, command: 'svc', tick: t }, clock));
+        events.push(metric('host.process.entry.mem_bytes', 1 * MB, 'bytes', { pid: 1, command: 'svc', tick: t }, clock));
+        clock += 1;
+      }
+    }
+    const s = summarizeHostProcesses(events);
+    expect(s.windowTicks).toBe(5);
+    expect(s.substantial[0]).toMatchObject({ label: 'svc', samples: 5 });
+    expect(s.substantial[0].meanCpuPct).toBeCloseTo(30);
+  });
+
+  it('masks credential-shaped argv in the group label even for lines stored BEFORE redaction existed', () => {
+    const events = [
+      metric('host.process.entry.cpu_pct', 30, 'percent', { pid: 7, command: 'node tool.mjs --token=abc123SECRET', tick: 1 }, 1),
+      metric('host.process.entry.mem_bytes', 1 * MB, 'bytes', { pid: 7, command: 'node tool.mjs --token=abc123SECRET', tick: 1 }, 1),
+    ];
+    const [g] = summarizeHostProcesses(events).substantial;
+    expect(g.label).toBe('node tool.mjs --token=[REDACTED]');
+    expect(JSON.stringify(summarizeHostProcesses(events))).not.toContain('abc123SECRET');
   });
 });
 

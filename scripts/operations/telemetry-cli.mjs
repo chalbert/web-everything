@@ -23,6 +23,7 @@ import { pathToFileURL } from 'node:url';
 
 import { createFileTelemetryStore, dayKey } from './telemetry-store.mjs';
 import { goldenSignals, groupByTrace, summarizeHostProcesses } from './telemetry.mjs';
+import { redactCommandLine } from './command-redact.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The day keys a rolling window of `hours` can possibly touch — at most two for any window under 24h, and
@@ -165,7 +166,7 @@ export function renderReport(signals, { hours }) {
   L.push('HOST PROCESSES — who is actually consuming it (mean over the window)');
   const FIXED_CATEGORY_ORDER = ['conveyor', 'drain', 'dispatched_agents'];
   const g = signals.saturation.gauges;
-  const hp = signals.hostProcesses || { substantial: [], belowThresholdRemainder: { meanCpuPct: 0, meanMemBytes: 0, samples: 0 }, cpuThresholdPct: 2, memThresholdBytes: 200 * 1024 * 1024 };
+  const hp = signals.hostProcesses || { substantial: [], belowThresholdRemainder: { meanCpuPct: 0, meanMemBytes: 0, samples: 0 }, windowTicks: 0, cpuThresholdPct: 2, memThresholdBytes: 200 * 1024 * 1024 };
   const anyFixedSamples = FIXED_CATEGORY_ORDER.some((cat) => g[`host.process.${cat}.cpu_pct`]);
   const anyProcessSamples = anyFixedSamples || hp.substantial.length > 0 || hp.belowThresholdRemainder.samples > 0;
   if (!anyProcessSamples) {
@@ -193,8 +194,11 @@ export function renderReport(signals, { hours }) {
         cpuTotal += p.meanCpuPct;
         memTotal += p.meanMemBytes;
         const pidTag = p.pids.length === 1 ? `pid ${p.pids[0]}` : `${p.pids.length} pids`;
-        const label = p.label.length > 60 ? `${p.label.slice(0, 59)}…` : p.label;
-        L.push(`      ${label.padEnd(60)} ${Number(p.meanCpuPct).toFixed(1).padStart(6)}% ${fmtBytes(p.meanMemBytes).padStart(10)}  (${pidTag}, n=${p.samples})`);
+        // Redact + strip control characters HERE too (summarizeHostProcesses already does, but a caller can hand
+        // renderReport a hand-built `hostProcesses`, and an escape sequence must never reach the terminal).
+        const safe = redactCommandLine(p.label);
+        const label = safe.length > 60 ? `${safe.slice(0, 59)}…` : safe;
+        L.push(`      ${label.padEnd(60)} ${Number(p.meanCpuPct).toFixed(1).padStart(6)}% ${fmtBytes(p.meanMemBytes).padStart(10)}  (${pidTag}, ${p.samples}/${hp.windowTicks} ticks)`);
       }
     }
     // The remainder — CLEARLY LABELED as such (unlike the old `other`, which read as a category of its own).
