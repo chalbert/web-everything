@@ -409,3 +409,14 @@ target day files. Keep this unscored operational log separate from the committed
 Tests under `scripts/operations/__tests__/agent-usage-report.test.mjs` create temporary project trees and
 redirect the store. They exercise missing sidecars/children, full reads beyond the health helper's tail
 budget, shell false positives, model changes, day rotation, reruns, corrupt rows and the actual CLI.
+
+### Cross-clone numbering regression
+
+`lane-drain-numbering.test.mjs` must exercise two separate repositories: a blocker numbered in
+clone A, then a dependent landed in clone B with an empty local ledger. The shared `origin/main`
+`bornAs` record supplies the fallback; local-ledger persistence alone cannot prove this path.
+Unknown references report `in-flight` when a provisional item is visible in the checkout or a
+local/remote branch tree, otherwise `unresolvable` (potentially dead, not proven dead: refs may be
+unfetched). Dry-run returns the same diagnostics without changing numbering state. The fallback
+visits explicit reference syntax, preserving bare birth-hash prose and `resolutionNote` quotes;
+the older local-ledger blind-rewrite behavior is unchanged.
