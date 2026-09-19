@@ -283,7 +283,9 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
     const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
     await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go', expectedWithinMinutes: 90 });
     expect(calls[0].file).toBe('claude');
-    expect(calls[0].argv.slice(0, 3)).toEqual(['--bg', '--session-id', 'sess-z9']);
+    // #3331 — no `--session-id`: `claude --bg` discards it. The minted id survives only as the FALLBACK
+    // handle when the spawn's stdout carries no `backgrounded · <id>` line, which this stub's `''` is.
+    expect(calls[0].argv.slice(0, 3)).toEqual(['--bg', '-n', 'conveyor-3037']);
     expect(calls[0].opts).toMatchObject({ timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL' });
   });
 
