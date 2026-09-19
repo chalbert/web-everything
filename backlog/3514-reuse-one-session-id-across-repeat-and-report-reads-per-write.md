@@ -2,9 +2,10 @@
 bornAs: x5c8zep
 kind: story
 size: 1
-status: open
+status: resolved
 scope: ["we:scripts/measure-judge-spawn.mjs"]
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-12"
 tags: [cost, prompt-caching, measurement, operations]
 crossRef: { url: /backlog/3369-decouple-agent-dispatch-from-the-claude-cli-introduce-a-mult/, label: "#3369 names this file among four spawn call sites" }
 relatedReport: reports/2026-09-06-backlog-split-analysis.md
@@ -46,3 +47,19 @@ edge. A sweep confirmed no other open item claims this file.
    hit rate, stamped with the existing conditions block; a run with `N>1` reports a non-zero cache read where
    today it reports none.
 2. The conditions discipline is preserved — no figure is printable without the block that produced it.
+
+## Progress
+
+- 2026-09-12 — **Built.** `we:scripts/measure-judge-spawn.mjs` now derives ONE session id per arm from the
+  run's `measuredAtUtc` stamp and hands it to every `--repeat` iteration (`--no-session-persistence` stays, so
+  reuse resumes nothing). Both ids are recorded in the conditions block. Per arm, the summary (human and
+  `--json`) adds `cacheReadTokens`, `cacheWriteTokens`, `readsPerWrite` (Σ read / Σ write, null when nothing
+  was written) and `cacheHitRate` (Σ read / Σ loaded context, null when nothing was loaded), with both
+  definitions stamped into the block. In human output the conditions block now prints FIRST, so no per-run
+  figure appears before the block that produced it (Done-when 2). Tests:
+  `we:scripts/__tests__/measure-judge-spawn.test.mjs`. It runs the real script against a fake CLI whose cache
+  is keyed by session id, so going back to a fresh id per iteration makes it fail.
+- 2026-09-12 — **Done-when 1 checked on a real run** (repeat=2, treatment arm only, haiku, CLI 2.1.270, HEAD
+  `e6cc0e952`, $0.0152): run 1 read 0 / wrote 5155; run 2 read 5155 / wrote 0. Reads per write 1, hit rate
+  49.9%. These numbers only count alongside that run's conditions block, so re-run the script rather than
+  quoting them.

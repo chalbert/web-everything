@@ -17,6 +17,7 @@ import {
   makeOwner, tryAcquireNumberingLock, releaseNumberingLockIfOwned, withNumberingLock, withLandWriteLock,
   acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus,
   drainLeasePathFor, localRepoSlug,
+  POC_LAND_LOCK_PATH, pocLandLockPathFor, withPocLandLock,
 } from '../drain-lock.mjs';
 
 const T0 = Date.parse('2026-07-10T12:00:00.000Z');
@@ -262,5 +263,65 @@ describe('drain lease PER-REPO key (#3440 — one project\'s daemon never blocks
       localRepoSlug({ cwd: '/some/checkout', exec });
       expect(seenCwd).toBe('/some/checkout');
     });
+  });
+});
+
+
+// ── #3637 — the PER-POC-BRANCH land lock ────────────────────────────────────────────────────────────────────
+
+describe('#3637 — the per-POC-branch land lock', () => {
+  it('keys a distinct lock dir per branch AND per repo, and never aliases the drain\'s own two locks', () => {
+    expect(pocLandLockPathFor('lane/a', 'org/repo')).not.toBe(pocLandLockPathFor('lane/b', 'org/repo'));
+    expect(pocLandLockPathFor('lane/a', 'org/one')).not.toBe(pocLandLockPathFor('lane/a', 'org/two'));
+    expect(pocLandLockPathFor('lane/a')).toContain(POC_LAND_LOCK_PATH);
+    expect(pocLandLockPathFor('lane/a')).not.toBe(NUMBERING_LOCK_PATH);
+    expect(pocLandLockPathFor('lane/a')).not.toBe(DRAIN_LEASE_PATH);
+  });
+
+  it('treats `origin/x` and `x` as the SAME branch, so two spellings never split the lock', () => {
+    expect(pocLandLockPathFor('origin/lane/a', 'org/repo')).toBe(pocLandLockPathFor('lane/a', 'org/repo'));
+  });
+
+  it('refuses a nameless branch rather than locking a key that means nothing', () => {
+    expect(() => pocLandLockPathFor('')).toThrow(/needs a branch name/);
+    expect(() => pocLandLockPathFor(null)).toThrow(/needs a branch name/);
+  });
+
+  it('does NOT degrade to running unlocked on contention — the one contract difference from withLandWriteLock', () => {
+    const owner = makeOwner('poc-land');
+    // A foreign holder, live.
+    // A LIVE foreign holder: stamped at the real clock, since withPocLandLock reads the real one and would
+    // otherwise reclaim a T0-dated lease as long expired.
+    tryAcquireNumberingLock(root, 'someone:else:poc-land', { lockPath: pocLandLockPathFor('lane/a', 'org/repo'), nowMs: Date.now() });
+    let ran = false;
+    const out = withPocLandLock(() => { ran = true; return 'wrote'; }, {
+      branch: 'lane/a', repoKey: 'org/repo', lockRoot: root, waitMs: 0, sleep: () => {}, owner,
+    });
+    expect(ran).toBe(false);
+    expect(out).toMatchObject({ ran: false, held: false, contended: true, result: undefined });
+  });
+
+  it('withNumberingLock KEEPS its never-hang fallback — #2288/#2683 behaviour is unchanged', () => {
+    tryAcquireNumberingLock(root, 'someone:else:numbering', { nowMs: T0 });
+    // `now: () => T0` below keeps the holder live from withNumberingLock's point of view.
+    let ran = false;
+    const out = withNumberingLock(() => { ran = true; return 'numbered'; }, {
+      lockRoot: root, owner: makeOwner('numbering'), waitMs: 0, sleep: () => {}, now: () => T0,
+    });
+    expect(ran).toBe(true);
+    expect(out).toMatchObject({ ran: true, held: false, contended: true, result: 'numbered' });
+  });
+
+  it('RELEASES the branch lock afterwards, so the next lander gets in', () => {
+    const first = withPocLandLock(() => 'a', { branch: 'lane/a', repoKey: 'org/repo', lockRoot: root, sleep: () => {} });
+    expect(first).toMatchObject({ ran: true, held: true });
+    expect(readLockEntry(root, pocLandLockPathFor('lane/a', 'org/repo'))).toBeNull();
+    const second = withPocLandLock(() => 'b', { branch: 'lane/a', repoKey: 'org/repo', lockRoot: root, waitMs: 0, sleep: () => {}, owner: makeOwner('poc-land-2') });
+    expect(second).toMatchObject({ ran: true, held: true, result: 'b' });
+  });
+
+  it('releases the branch lock even when the landing THROWS — a crash never wedges the branch', () => {
+    expect(() => withPocLandLock(() => { throw new Error('boom'); }, { branch: 'lane/a', repoKey: 'org/repo', lockRoot: root, sleep: () => {} })).toThrow(/boom/);
+    expect(readLockEntry(root, pocLandLockPathFor('lane/a', 'org/repo'))).toBeNull();
   });
 });

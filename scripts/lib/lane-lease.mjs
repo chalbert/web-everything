@@ -133,8 +133,18 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs, { excludeLane = null } =
  *  `workerSession` (#2997 r2) is the session id of the agent that will actually WORK this lane — deliberately
  *  a DIFFERENT field from `ownerSession`, which records only whoever RAN `acquire`. OMITTED unless a caller
  *  positively claims occupancy (`acquire --adopt` / `adopt`), so an ordinary acquire's marker stays
- *  byte-identical to today. See `isForeignOccupancy` for why the two cannot be the same field. */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved, holder, workerSession }) {
+ *  byte-identical to today. See `isForeignOccupancy` for why the two cannot be the same field.
+ *  `base` (#3637) is the REF THIS LANE WAS FORKED FROM — `acquire --base=<ref>`'s own argument. Before this it
+ *  survived an acquire only in the `--json` payload and one stderr line, so anything downstream that needed to
+ *  know a lane was based on something other than `main` had to be told separately or lost it (blocker 3 of
+ *  `#3637`'s survey). A POC-targeted lane MUST carry it: `we:scripts/lane-pool.mjs` does
+ *  `checkout -B <repo.branch> <baseRef>`, so the lane's content comes from the POC branch while its LOCAL
+ *  BRANCH is still named `main` — the local branch name cannot be used to infer the target, and this field is
+ *  what can. Deliberately a BRANCH NAME (or any ref), NOT the hex-SHA `base` that
+ *  `we:scripts/readiness/lane-manifest.mjs` validates: those are two different facts about two different
+ *  artifacts (a lease vs. a PR-body manifest) that merely share a word. OMITTED when absent, so a base-less
+ *  acquire's marker stays byte-identical to today; a reader keys on `laneBaseRef`. */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved, holder, workerSession, base }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
     pid: pid ?? null, ownerSession: ownerSession ?? null,
@@ -154,7 +164,18 @@ export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_L
     // #2560 — advisory predicted file-scope, included ONLY when a non-empty array (omit-when-empty keeps a
     // scope-less acquire's marker byte-identical to today). A defensive copy so the caller can't alias in.
     ...(Array.isArray(predictedScope) && predictedScope.length ? { predictedScope: [...predictedScope] } : {}),
+    // #3637 — the ref this lane was forked from (`acquire --base=<ref>`). Included ONLY when a non-empty
+    // string, same omit-when-absent discipline as every field above it.
+    ...(typeof base === 'string' && base.trim() ? { base: base.trim() } : {}),
   };
+}
+
+/** #3637 — the ref this lane was forked from, or `null` (an ordinary `--base`-less acquire, or a marker
+ *  written before this field existed). The signal a POC-targeted lane carries its delivery target by, since
+ *  `we:scripts/lane-pool.mjs`'s `checkout -B` leaves the lane's LOCAL branch named `main` regardless of what
+ *  it was based on. Pure. */
+export function laneBaseRef(lease) {
+  return lease && typeof lease.base === 'string' && lease.base.trim() ? lease.base.trim() : null;
 }
 
 /**

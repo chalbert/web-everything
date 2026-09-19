@@ -339,7 +339,7 @@ describe('classifySubmit — refused and could-not-run are different facts', () 
   it('splits the home\'s vocabulary by what the caller should DO about it', () => {
     const outcomeFor = (reason) => classifySubmit({ status: 3, stdout: JSON.stringify({ reason }) }).outcome;
     // A guard answered — editing the request or the lane is the fix.
-    for (const reason of ['bad-ref', 'empty-body', 'no-such-src', 'behind', 'conflict', 'check-red', 'locus-prefix',
+    for (const reason of ['bad-delegation', 'bad-ref', 'empty-body', 'no-such-src', 'behind', 'conflict', 'check-red', 'locus-prefix',
       // the #2833 guard's own vocabulary, from `lib/lane-verify.mjs` — the reasons this operation exists for
       'verify-unfinished', 'verify-red', 'verify-corrupt', 'unverified', 'untracked', 'red-ci-gated']) {
       expect({ reason, outcome: outcomeFor(reason) }).toEqual({ reason, outcome: 'refused' });

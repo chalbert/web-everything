@@ -7,7 +7,9 @@
       "source": "Nielsen Norman Group — 10 Usability Heuristics for User Interface Design",
       "kind": "guideline",
       "credibilityWeight": 0.75,
-      "distilledInto": null,
+      "distilledInto": [
+        "we:docs/agent/vision-tiers.md#design-critique-rubric-ratified-1034 v3 axis 5 (Consistency / token use)"
+      ],
       "trackingItem": "1589"
     },
     {
@@ -15,7 +17,10 @@
       "source": "Apple Human Interface Guidelines",
       "kind": "guideline",
       "credibilityWeight": 0.75,
-      "distilledInto": null,
+      "distilledInto": [
+        "we:docs/agent/vision-tiers.md#design-critique-rubric-ratified-1034 v3 axis 2 (Spacing & rhythm)",
+        "we:docs/agent/vision-tiers.md#design-critique-rubric-ratified-1034 v3 axis 4 (Typographic scale)"
+      ],
       "trackingItem": "1589"
     },
     {
@@ -23,7 +28,9 @@
       "source": "W3C WAI-ARIA Authoring Practices Guide (APG)",
       "kind": "standard",
       "credibilityWeight": 0.9,
-      "distilledInto": null,
+      "distilledInto": [
+        "we:docs/agent/vision-tiers.md#design-critique-rubric-ratified-1034 v3 axis 1 (Contrast & legibility)"
+      ],
       "trackingItem": "1589"
     },
     {
@@ -32,7 +39,7 @@
       "kind": "peer-reviewed",
       "credibilityWeight": 1.0,
       "distilledInto": null,
-      "trackingItem": "1589"
+      "trackingItem": "3116"
     }
   ]
 }

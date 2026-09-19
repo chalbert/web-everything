@@ -1,0 +1,175 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  This survey's decision item (a not-yet-landed, hash-keyed item at prepare time — see this topic's own
+  <code>relatedReport</code> for its identity) asks whether a dispatched background agent's own transcript
+  should be reviewed for <em>how it ran</em>, and scored. The operator's framing is a <strong>benchmark, not a
+  checklist</strong>: every dispatched run starts at an implicit 100%, and the pass's job is to identify what
+  prevented <em>this specific</em> execution from scoring it — hesitation and waffling before acting, redundant
+  or inefficient commands, bad code produced, test failures tailed off rather than addressed. Findings then
+  split by risk: low-risk ones auto-apply, larger ones are filed for human review.
+</p>
+
+<h2>Finding 1 — the gap is real, and it is precisely the run <em>path</em></h2>
+<p>
+  Five adjacent mechanisms exist and none of them is this. <code>we:skills-src/inspect-agent-health/agent-health.mjs</code>
+  classifies <em>liveness</em> only (<code>ACTIVE</code> / <code>BLOCKED_ON_CHILD</code> /
+  <code>BLOCKED_ON_TOOL</code> / <code>IDLE_OR_STALLED</code>). <code>we:scripts/conveyor/hiccup-classify.mjs</code>
+  classifies <em>blocking delivery hiccups</em> off tick state. <code>we:scripts/operations/review-pr.mjs</code>
+  reviews the <em>diff</em> — its op declaration takes exactly <code>pr</code> and <code>repo</code>, and its
+  judge shape asks for "one sentence on the diff as a whole". The learnings pool collects whatever a session
+  chose to <em>self-report</em>. The driver watchdog watches the <em>driver process</em>. So a run can be
+  <code>ACTIVE</code> throughout, produce zero hiccups, and land a green PR while having burned an hour
+  re-reading one file and silently dropping a failing spec — and every existing guard passes it.
+</p>
+
+<h2>Finding 2 — the field already names the mechanism: trajectory evaluation</h2>
+<p>
+  The 2026 agent-evaluation literature calls scoring the <em>path</em> (tool-call sequence, inputs and outputs,
+  intermediate reasoning, retries) rather than the final answer <strong>trajectory evaluation</strong>, and names
+  the operator's criteria independently: <em>Redundant Tool Calls</em>, <em>Tool Frequency</em>,
+  <em>Task Relevance</em>, <em>Execution Efficiency</em>. It states the case in the same terms the operator did —
+  an agent that reaches the right answer through a wildly inefficient path "still represents a production
+  failure", which final-answer evaluation structurally cannot see. That is independent corroboration that
+  reviewing the diff can never substitute for reviewing the run.
+</p>
+<p>
+  <strong>But the standard form differs in one load-bearing way.</strong> Published trajectory evaluations get
+  their comparability from a <strong>fixed task set</strong>. Here every run is a different backlog item of a
+  different size, dispatched to a different model at a different effort tier. So this is <em>not</em> a benchmark
+  in the SWE-bench / MCP-Bench sense, and the design must not silently inherit their comparability.
+</p>
+
+<h2>Finding 3 — three mature deduction-scoring systems, and each settles one of the operator's sub-questions</h2>
+<ul>
+  <li>
+    <strong>Lighthouse</strong> — the 0–100 Performance score is a <em>weighted average of per-metric scores</em>:
+    the per-metric numbers are the record, the headline is derived. Weights have changed across major versions,
+    and the project's own guidance is that a cross-version comparison is meaningless, because a score can move
+    because the algorithm changed rather than the subject. History is <strong>never re-normalised</strong>. This
+    settles two questions at once: the deduction vector is canonical and the scalar is derived (a scalar cannot
+    be decomposed back into a vector), and a rubric change mints a new version rather than rewriting the past.
+  </li>
+  <li>
+    <strong>FOQA</strong> (aviation Flight Operational Quality Assurance) — every flight is scored against
+    parameter thresholds by <em>exceedance detection</em>. Thresholds sit in a zone <em>approaching</em> a limit,
+    so routine flights register exceedances as a matter of course; and decisively, <strong>a singular exceedance
+    may not trigger corrective action at all</strong> — mitigation follows the <em>aggregate</em> exceedance rate
+    crossing a predetermined threshold. This is the mature answer to "is 100% realistic": a scoring system over
+    real operations that treats a perfect score as neither expected nor the trigger for action.
+  </li>
+  <li>
+    <strong>Chess engine accuracy</strong> — every move is graded against the engine's best and averaged into a
+    0–100 accuracy with named bands. <strong>90–100% is grandmaster-level, and grandmasters routinely score
+    below 100.</strong> A system that flagged every inaccuracy as actionable would be unusable.
+  </li>
+</ul>
+
+<h2>Finding 4 — the risk dial and its approval gate are already ratified in this repo</h2>
+<p>
+  <code>assessMissingOperationConfidence</code> (<code>we:scripts/conveyor/hiccup-classify.mjs</code>) already
+  returns <code>{selfClears, batched, escalate}</code>: an operation blacklist is checked first and independently
+  (→ <code>escalate</code>), any flagged confidence criterion (<code>securityRisk</code>,
+  <code>dataLeakRisk</code>, <code>performance</code>, <code>blastRadius</code>,
+  <code>baselineCorrectness</code>) yields <code>batched</code>, and a clean call <code>selfClears</code>. That
+  <em>is</em> "low-risk auto-applies, higher-risk gets filed". The transport is equally reusable:
+  <code>fileHiccup</code> (<code>we:scripts/conveyor/hiccup-sink.mjs</code>) writes an
+  <code>approvalPending</code> entry into the same pool rather than a parallel store,
+  <code>we:scripts/conveyor/hiccup-approve.mjs</code> clears it, and one line of
+  <code>we:scripts/conveyor/learnings-harvest.mjs</code> holds a gated entry out of clustering entirely.
+</p>
+<p>
+  What does <strong>not</strong> transfer is the <em>axis</em> that decision #3422 ratified alongside it. Its axis
+  is "did the tick get blocked", and a run-quality finding on a <em>successful</em> run is non-blocking by that
+  definition — which #3422 rules goes "file the card only, no fix proposed, straight through with no gate". That
+  is the opposite of auto-applying a fix. Reuse the mechanism; reject the axis.
+</p>
+
+<h2>Finding 5 — the learnings pool cannot hold a scorecard, so the score needs its own store</h2>
+<p>
+  <code>we:scripts/conveyor/learnings-drop.mjs</code>'s <code>ALLOWED_KEYS</code> is an allow-list enforced by
+  <code>validateEntry</code> — an un-allow-listed key is <strong>rejected</strong>, not dropped — and
+  <code>FIELD_CAPS</code> caps <code>summary</code> at 240 characters and <code>suggestion</code> at 400. A
+  per-criterion deduction vector fits neither. Findings can route through the pool; the score cannot live there.
+</p>
+<p>
+  The store has an exact in-repo precedent. <code>we:scripts/check-app-conformance.mjs</code> computes a rounded
+  percentage and <strong>defaults to 100 when nothing was measured</strong> — structurally the same
+  "starts at 100%" premise — then appends one row per run to a burndown JSON and reads the series back. The
+  alternative hanger, <code>we:scripts/operations/run-record.mjs</code>, is per-run and already carries
+  <code>costUsd</code>, <code>durationMs</code>, <code>numTurns</code> and <code>loadedContextTokens</code>, but
+  its telemetry allow-list forbids a drive-by field and
+  <code>we:scripts/operations/step-timings-report.mjs</code> states the standing posture directly: a distribution
+  or trend over those rows is "a separate card, not a reason to grow this one".
+</p>
+
+<h2>Finding 6 — the subject might itself be a live driver, and that gates everything before risk does</h2>
+<p>
+  A conveyor runner or driver is itself a transcript-producing process — one that holds a queue, dispatches other
+  work, and is <em>still running</em> while its transcript is read. Auto-applying a fix to or around such a
+  process on an external judge's say-so is a second, less careful path to precisely the danger the existing
+  watchdog and validate-and-promote design was built to prevent: that design records last-known-good rather than
+  inferring it, requires a long quiet period <em>and</em> no in-flight work <em>and</em> a live lease before it
+  acts, and heals by recorded rollback plus an existing restart operation.
+</p>
+<p>
+  The repo has already ruled the neighbouring case. Decision #2077's rider, codified under
+  <code>#pr-flow-rollout-mechanism</code>, states the invariant that a run's own executing tooling is never
+  modified in the checkout a live run executes it from, and cites uniform external prior art: GitHub Actions pins
+  a run's workflow definition at run start, Jenkins pins shared-library versions per run, and merge bots run from
+  a deployment outside the tree they land. Tooling changes ride the normal queue and take effect on the
+  <em>next</em> run. The two rules key on different tests — #2077 on the edit's <em>touch-set</em>, this one on
+  the <em>subject class</em> that produced the transcript — so they compose rather than duplicate.
+</p>
+
+<h2>Finding 7 — the shared-code-is-shared-failure rule is written down and machine-asserted</h2>
+<p>
+  The driver watchdog's own header states the rule it exists to obey: it must not share the driver's own decision
+  logic, because "a watchdog that asked the driver's own planner 'is there eligible work?' would answer 'no' for
+  precisely the same wrong reason the driver did — shared code is shared failure." Its test suite asserts the
+  import graph with an exact-equality assertion rather than a negative one, so the allow-list cannot be widened
+  silently. The technique is a house pattern in this repo, not a one-off. A run-quality scorer inherits the same
+  reflexivity — a dispatched run's quality is partly a property of the dispatcher — so the reader and scorer
+  should obey the rule while the router, which merely files and applies, need not.
+</p>
+
+<h2>Finding 8 — the scope is smaller than the original framing assumed</h2>
+<p>
+  Decision #3475 (resolved, codified at <code>#automated-session-introspection</code>) already ratifies a detached
+  judge pass over a real transcript on every terminating session, at three triggers, emitting into the existing
+  learnings pool. A dispatched lane agent is a top-level session rather than an Agent-tool subagent, so of those
+  triggers the reaper and <code>SessionEnd</code> reach it. <strong>That is the reader.</strong> What a
+  criteria-expansion of #3475 cannot give you is a score, a rubric version, a trend, a subject-class gate, or an
+  auto-apply path — because #3475 ratified a destination whose schema structurally excludes all five. So the
+  honest scope is a rubric, a scorecard store, a subject-class gate and a risk router layered onto an existing
+  reader, not a new mechanism.
+</p>
+<p>
+  One concrete gap must be closed by whatever is built: no dispatch record stores a transcript path. What is
+  stored is the dispatcher-minted session handle, from which the transcript reconstructs as a
+  <em>session-level</em> file — and the existing transcript resolver probes only the nested subagents directory,
+  so it would miss a dispatched lane agent today.
+</p>
+
+<h2>Finding 9 — the criteria do not need inventing</h2>
+<p>
+  They can be derived from what this repo has already written down: the twelve rules of its mechanical-delivery
+  doctrine (a bespoke prompt where a declared operation exists; a concluded external limitation accepted without
+  checking; symptom relief mistaken for a fix; hand-dispatching what the conveyor already covers), the pinned
+  rule against ending a turn on a passive wait, the two syntactic transcript patterns already specified for a
+  fleet scanner, and 267 durable agent-memory notes. The <em>form</em> has a precedent too:
+  <code>we:scripts/lib/review-core.mjs</code> holds a frozen one-sentence-per-lens expectation map where "the
+  wording IS the commitment", alongside a concrete "go looking for these shapes, in roughly this order of past
+  frequency" hunt brief. And <code>summarizeEntry</code> in the agent-health tool already decomposes one
+  transcript line into text, thinking, tool-use and tool-result blocks — which is hesitation, redundant commands
+  and ignored failures, already parsed.
+</p>
+
+<h2>Naming</h2>
+<p>
+  "Observer" is already taken three times over in this repo, all for polling <em>dispatch state</em>. The concept
+  surveyed here is therefore named the <strong>run-quality auditor</strong>, producing a <strong>run
+  scorecard</strong> — reusing "scorecard" deliberately, since an existing grammar scorecard is the same noun for
+  the same thing.
+</p>
+{% endraw %}

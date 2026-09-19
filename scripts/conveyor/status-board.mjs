@@ -27,11 +27,21 @@
  *   ⛔  blocked     — cleared but waiting on another item to land
  *   ·  waiting     — cleared but not launchable now (no free lane)
  *   ⚠  attention   — a health warning, or a cleared id that is not a ready build-queue row
+ *   🛑  stood-down  — a conveyor fix agent explicitly gave up on this PR (#3296); terminal for the reconciler,
+ *                    a human is the intended next step — distinct from an ordinary ⏸ review-park
  *
  * #2660 — an `infra-blocked` lane (an outside dependency is degraded, the conveyor auto-retrying) reads
  *   DISTINCT from a review-park (⏸) and a stall (a ⚠ health warning): its own ⊘ marker, the failure CLASS +
  *   retry attempt + next-retry countdown on its RUNNING row, and — so a widespread outage reads as ONE event,
  *   not N alarms — a single collapsed OUTAGE banner that groups every lane down on the SAME cause.
+ *
+ * #3296 — a STOOD-DOWN PR reads DISTINCT from an ordinary review-park too, and for the mirror-image reason: a
+ *   stand-down changes NO label (`stand-down.mjs`'s own contract — the PR is left exactly as the reviewer left
+ *   it), so without this the board's only signal is whatever `review:*` label the PR already carried, and a PR
+ *   a fixer already gave up on reads byte-identical to one merely awaiting its first ordinary review pass. An
+ *   operator scanning labels/board output alone could miss that the automatic loop has stopped trying and a
+ *   human is the one being asked. So a stood-down PR gets its OWN `🛑` marker and its own board section, carved
+ *   OUT of the generic NEEDS YOU bucket rather than folded into it.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -54,13 +64,16 @@ export const MARKERS = Object.freeze({
   blocked: '⛔',
   waiting: '·',
   attention: '⚠',
+  standDown: '🛑', // #3296 — a fix agent explicitly gave up; distinct from an ordinary review-park (⏸)
 });
 
 /** #2660 — how the text mirror tells the operator to nudge a retry by hand (the resume affordance). The board
  *  (plateau-app) carries the operable Resume button; the mirror is read-only, so it names the path in words. */
 const RESUME_HINT = 'lane board ▸ Resume, or the next tick auto-retries';
 
-/** The review-park labels a PR can carry — a hard human-only gate that surfaces in NEEDS YOU. */
+/** The review-park labels a PR can carry — a hard human-only gate that surfaces in NEEDS YOU (or, when the PR
+ *  also carries the durable stand-down marker — #3296, `pr.stoodDown` — in its own STOOD DOWN section instead;
+ *  a stand-down changes no label, so the split happens on `stoodDown`, not on which of these labels is present). */
 const REVIEW_LABELS = ['review:human', 'review:pending', 'review:changes'];
 
 const arr = (x) => (Array.isArray(x) ? x : []);
@@ -162,10 +175,15 @@ export function renderBoard(state) {
     queueRows.push({ num: n, marker: 'attention', why: 'cleared-but-not-ready · not a ready build-queue row' });
   }
 
-  // ── NEEDS YOU: parked PRs (a human-only review gate) with the exact action. ──
-  const parked = prs
+  // ── NEEDS YOU: parked PRs (a human-only review gate) with the exact action. #3296 — a PR carrying the
+  //    durable stand-down marker is split OUT into its own bucket first: it is still a review-labeled PR (a
+  //    stand-down changes no label), but it needs a DIFFERENT thing from the operator — takeover, not an
+  //    ordinary /review pass — so it must never be folded into the generic parked list. ──
+  const parkedAll = prs
     .map((p) => ({ p, label: reviewLabelOf(p?.labels) }))
     .filter((x) => x.label);
+  const standDown = parkedAll.filter((x) => x.p?.stoodDown);
+  const parked = parkedAll.filter((x) => !x.p?.stoodDown);
 
   // ── Header counts (each maps to a section; documented so a glance is unambiguous). ──
   const running = laneRows.length; // every active lane is running work (its sub-state shows as a marker below)
@@ -173,7 +191,9 @@ export function renderBoard(state) {
   // cleared items waiting to launch (ready / blocked / no-lane / not-ready) — the preparing (unshaped) rows are
   // still rendered in QUEUE but counted under `preparing`, never double-counted here.
   const queued = queueRows.filter((r) => r.marker !== 'preparing').length;
-  const needsYou = parked.length; // parked PRs awaiting /review
+  // Both buckets need the operator — the header's ONE needs-you count stays the honest total; the two SECTIONS
+  // below are where the distinction (ordinary review vs a fixer that stood down) actually shows up.
+  const needsYou = parked.length + standDown.length;
   const total = freeSlots + running; // pool size = free lanes + occupied lanes
 
   const header =
@@ -229,7 +249,7 @@ export function renderBoard(state) {
         extra = ` (${i.cause} · retry ${Number.isFinite(i.attempt) ? i.attempt : '?'}${tail})`;
       } else if (l.marker === 'parked') {
         const pr = prByNum.get(numKey(l.num));
-        if (pr?.prNumber != null) extra = ` (PR #${pr.prNumber})`;
+        if (pr?.prNumber != null) extra = ` (PR #${pr.prNumber}${pr.stoodDown ? ' · stood down' : ''})`;
       }
       lines.push(`  lane-${String(l.lane).padEnd(3)} ${MARKERS[l.marker]} ${who} ${LANE_STATE_WORD[l.marker]}${extra}`);
     }
@@ -239,6 +259,19 @@ export function renderBoard(state) {
   if (queueRows.length) {
     const lines = ['QUEUE'];
     for (const r of queueRows) lines.push(`  ${hash(r.num).padEnd(8)} ${MARKERS[r.marker]} ${r.why}`);
+    blocks.push(lines.join('\n'));
+  }
+
+  // ── STOOD DOWN — NEEDS YOU: #3296 — its own section, ahead of the generic NEEDS YOU below, since a fixer
+  //    having already given up is the more consequential of the two "needs a human" facts on the board. The
+  //    action named is `/finish` (takeover), never `/review` — `stand-down.mjs`'s own comment states that
+  //    stand-down is terminal for the reconciler and a human is the intended next step, not another review pass. ──
+  if (standDown.length) {
+    const lines = ['STOOD DOWN — NEEDS YOU'];
+    for (const { p, label } of standDown) {
+      const who = p.num != null ? hash(p.num) : `PR #${p.prNumber}`;
+      lines.push(`  ${who.padEnd(8)} ${MARKERS.standDown} PR #${p.prNumber} ${label} · a fix agent stood down → /finish ${p.prNumber}`);
+    }
     blocks.push(lines.join('\n'));
   }
 

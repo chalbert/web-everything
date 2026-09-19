@@ -12,6 +12,7 @@ scope:
   - "we:scripts/lib/judge-panel.mjs"
 scopeRationale: "The measurement is a new sibling script next to we:skills-src/jury/panel-fanout.mjs, importing panelJurors/panelFanout/jurorMandate/JUROR_SHAPE from that shim (read-only — production mandate text is not edited, see 'Decided design') and judgePanel directly from we:scripts/lib/judge-panel.mjs for the stripped-mandate arm. we:skills-src/jury/subject-jury.workflow.js is NOT touched: the measurement bypasses the harness entirely and calls the shim's own exports the same way #3057's own equivalence run did (a hand-built payload, not a harness invocation)."
 tags: [plateau-loop, jury, judge, panel, prompt, measurement, capture-only]
+deliveryAgent: codex
 ---
 
 # Re-run the #3057 equivalence at production juror settings, and A/B the mandate Return-line

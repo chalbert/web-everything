@@ -10,6 +10,7 @@ scope:
   - we:skills-src/jury/__tests__/red-team-data-grounding.test.mjs
   - we:skills-src/jury/SKILL.md
 tags: []
+deliveryAgent: codex
 ---
 
 # Data-grounding lens: check design claims against real data availability

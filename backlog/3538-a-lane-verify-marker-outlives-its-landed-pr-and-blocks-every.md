@@ -2,8 +2,9 @@
 bornAs: xjdwz4z
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-15"
 tags: []
 scope:
   - we:scripts/verify-lane.mjs
