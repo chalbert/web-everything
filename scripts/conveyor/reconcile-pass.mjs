@@ -256,6 +256,7 @@ if (IS_CLI) {
     result = runReconcilePass({
       repo: typeof flags.repo === 'string' ? flags.repo : null,
       ...(typeof flags['prs-file'] === 'string' ? { readPrs: () => readPrsFromFile(flags['prs-file']) } : {}),
+      ...(typeof flags['agents-file'] === 'string' ? { readAgents: () => readPrsFromFile(flags['agents-file']) } : {}),
     });
   } catch (e) {
     process.stderr.write(`✗ reconcile pass could not read state: ${String((e && e.message) || e).split('\n')[0]}\n`);

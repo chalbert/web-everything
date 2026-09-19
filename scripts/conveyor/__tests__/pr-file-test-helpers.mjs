@@ -90,10 +90,17 @@ export function prFileContract({ name, load, reader, run, fields, reconcile = fa
         // Use its dedup branch for zero-gh CLI proof; candidate fidelity is exercised above.
         const prs = progress ? fixture.map((pr) => ({ ...pr, labels: [{ name: 'review:changes' }] })) : fixture;
         writeFileSync(path, JSON.stringify(prs));
-        const fromFile = await cli([`--prs-file=${path}`], prs);
+        const agentsPath = `${path}.agents.json`;
+        const agentsArgs = reconcile ? [`--agents-file=${agentsPath}`] : [];
+        if (reconcile) writeFileSync(agentsPath, '[]');
+        const fromFile = await cli([...agentsArgs, `--prs-file=${path}`], prs);
         expect(fromFile.calls.filter(([cmd]) => cmd === 'gh')).toEqual([]);
         expect(fromFile.throttled).toEqual([]);
-        const standalone = await cli([], prs);
+        const standalone = await cli(agentsArgs, prs);
+        if (reconcile) {
+          expect(fromFile.calls.filter(([cmd]) => cmd === 'claude')).toEqual([]);
+          expect(standalone.calls.filter(([cmd]) => cmd === 'claude')).toEqual([]);
+        }
         expect(standalone.result).toEqual(fromFile.result);
         expect(standalone.throttled).toEqual([['gh',
           ['pr', 'list', '--state', 'open', '--limit', '200', '--json', fields, '--repo', 'ignored/repo'], expect.any(Object)]]);
