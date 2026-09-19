@@ -16,6 +16,27 @@
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
 import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
 import { scrubPublish } from './lib/secret-scrub.mjs';
+// #3637 — the POC-branch registry's own `deliveryTarget:` predicate, so the gate and the scoped per-item
+// lint validate that field with the ONE function the dispatcher also uses (never a second copy of the rule).
+import { validateDeliveryTarget } from './lib/poc-branches.mjs';
+
+/** #2866: literal invisible characters are forbidden even in Markdown prose and fixtures.
+ * Use visible Unicode escapes to document/test them. Offsets use zero-based UTF-16 code units.
+ * Callers supply repository-relative, normalized paths; binary assets are not source text.
+ */
+export function scanInvisibleCharacters(docs) {
+  const names = { '\u200b': 'U+200B (zero-width space)', '\ufeff': 'U+FEFF (BOM / zero-width no-break space)',
+    '\u00a0': 'U+00A0 (non-breaking space)' };
+  return docs.flatMap(({ file, content }) => {
+    if (!/^(scripts|docs)\//.test(file)) return [];
+    return [...content.matchAll(/[\u200b\ufeff\u00a0]/g)].map((hit) => ({
+      message: `${file}: forbidden ${names[hit[0]]} at offset ${hit.index} (zero-based UTF-16); ` +
+        'remove it, use an ordinary space, or write a visible Unicode escape (#2866).',
+      descriptor: { kind: 'invisible-character', fix: 'model', file, offset: hit.index,
+        line: content.slice(0, hit.index).split('\n').length },
+    }));
+  });
+}
 
 // ── Definition-of-green THRESHOLD registry (#2786) ─────────────────────────────────────────────
 // check-standards.conformance.test.mjs proves no definition-of-green knob escapes
@@ -841,7 +862,7 @@ export function findUnquotedColonScalars(content) {
 // run file-driven (a malformed-YAML item is skipped by the loader, so it isn't in the item array at all),
 // so each caller runs `findUnquotedColonScalars(content)` over the raw file itself. Also excludes the
 // digest-length nudge (validateBacklogItem owns it) and the blockedBy cycle walk (a graph-level check).
-export function lintBacklogItemRendering({ item, body }) {
+export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
   const errors = [];
   const warnings = [];
   const id = item.id;
@@ -964,6 +985,21 @@ export function lintBacklogItemRendering({ item, body }) {
         `"TBD"-style) — a live choice left OUTSIDE a \`## Fork N\` is an un-prepared fork in disguise (#1935). Promote it to ` +
         `its own \`## Fork N\` with a bold default (research it now), fold it into an existing fork's default, or drop it as ` +
         `not-actually-a-choice. See docs/agent/backlog-workflow.md → "no live choice may sit outside a Fork N".`);
+  }
+
+  // #3637 Fork 3 — `deliveryTarget:` must name a DECLARED POC branch (or be absent / `main`).
+  //
+  // WHY IT IS CHECKED HERE, in the shared rule module, rather than only in the dispatcher: an unknown branch
+  // caught at FILING time is a one-line fix by the person who typed it; the same mistake caught at dispatch
+  // time is a refused launch hours later, with a lane already assigned. The card's own words: "validated
+  // against the registry at filing time (an unknown branch is a filing refusal, not a runtime surprise)".
+  // `pocRegistry` is injected by the caller (both the whole-repo gate and the scoped per-item lint read the
+  // real one) so this stays a pure function of its inputs; omitted ⇒ the check is SKIPPED rather than
+  // failing every item, because "the caller did not supply a registry" must never read as "no branch is
+  // registered".
+  if (item.deliveryTarget != null && pocRegistry) {
+    const verdict = validateDeliveryTarget(pocRegistry, item.deliveryTarget);
+    if (!verdict.ok) errors.push(`Backlog item "${id}" ${verdict.error}`);
   }
 
   return { errors, warnings };

@@ -109,6 +109,10 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
 import { classifyReap, reapPlan, prStatesFromList, itemNumFromSession } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
+// #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
+// `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
+// lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
+import { cleanLaneLitter } from './lib/lane-litter.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -531,13 +535,16 @@ function ensureDeps(dir) {
 // off-limits to `refresh`/`provision`'s `reset --hard` AND to another session's `acquire`, until `release`
 // (or TTL-reclaim). See scripts/lib/lane-lease.mjs for the pure decision logic.
 const LEASE_MARKER = (dir) => join(dir, '.git', LEASE_FILENAME);
-function readLease(dir) {
+function readLease(dir, onReadError = () => {}) {
   const file = LEASE_MARKER(dir);
-  if (!existsSync(file)) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('lease marker must contain a JSON object');
+    return parsed;
+  } catch (error) {
+    // Status must distinguish absent markers from unreadable evidence. Other callers retain
+    // their existing lease semantics; the diagnostic is not a synthetic lease.
+    if (error.code !== 'ENOENT') onReadError(error);
     return null; // a corrupt marker is treated as no live lease (isLeaseStale also fails-open)
   }
 }
@@ -727,7 +734,8 @@ function laneStatus(repo, n) {
   const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const behind = tryGit(['rev-list', '--count', `HEAD..origin/${repo.branch}`], dir);
-  const lease = readLease(dir);
+  let readError;
+  const lease = readLease(dir, (error) => { readError = error.message; });
   return {
     lane: n,
     path: dir,
@@ -740,6 +748,7 @@ function laneStatus(repo, n) {
     // #2275 — surface the hold so a picker can filter (and a human sees who owns a lane). `leased` is only
     // true for a LIVE lease; a stale marker reads as free (reclaimable), matching acquire's own logic.
     lease: lease || null,
+    ...(readError ? { readError } : {}),
     leased: lease ? !isLeaseStale(lease, Date.now(), ttlMsFromFlags()) : false,
   };
 }
@@ -888,6 +897,12 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
       // #2350 — `acquire --reserve` stamps a PERMANENT reserved lease: `isLeaseStale` short-circuits it to
       // never-stale, so refresh/provision (even --force) never reset it and auto-pick never couples onto it.
       reserved: !!flags.reserve,
+      // #3637 — persist `--base=<ref>` (omitted when absent, so an ordinary acquire's marker is unchanged).
+      // Before this the base survived acquire ONLY in the `--json` payload and one stderr line, so a lane
+      // forked from a POC branch had nothing durable saying so — and the local branch name cannot say it
+      // either, because `checkout -B <repo.branch> <baseRef>` below leaves the lane on a branch named `main`
+      // whatever it was based on. `laneBaseRef` is the reader.
+      base: typeof flags.base === 'string' ? flags.base : undefined,
     }),
     null, 2,
   ) + '\n';
@@ -1460,6 +1475,13 @@ function cmdRelease(repo) {
       );
       continue;
     }
+    // #3568 — before dropping the lease, reap the KNOWN-SAFE scratch litter `delivery-agent-brief.md` tells
+    // every delivery agent to write inside its lane (`.commit-msg.txt`, `.pr-body.md`, …). This is what makes
+    // the released lane immediately re-acquirable rather than reading DIRTY on the very next `status`/auto-pick
+    // — the root cause of the 2026-09-07 incident this card documents (46 of 48 lanes DIRTY with only this
+    // litter, the other 2 clean-but-ahead — the whole pool read 0 of 48 acquirable at once). Any
+    // non-allowlisted dirty state (real uncommitted work) is left completely untouched by this call.
+    cleanLaneLitter(dir);
     rmSync(LEASE_MARKER(dir), { force: true });
     // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
     // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's

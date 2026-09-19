@@ -27,17 +27,37 @@
  *
  * So the scratch root is a sibling of `.lanes/` at the WORKSPACE level: `<workspace>/.operations/explore/`.
  * {@link workspaceRootOf} is IMPORTED from the guard rather than re-derived, so the region this writes into and
- * the region the guard allows are one definition and cannot drift apart. It is transient session scratch, which
- * is where clause 1 of
+ * the region the guard allows are one definition and cannot drift apart. It is session scratch, which is where
+ * clause 1 of
  * [#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
  * puts it; nothing durable is stored there and no parallel state store comes into existence (#2612) — the run
  * record remains the only bookkeeping, and the report text is folded ONTO it by the observer.
  *
- * IT IS SCRATCH BY NATURE AND NOT YET BY LIFECYCLE, which is a real gap rather than a turn of phrase (PR
- * review, nit 11): a run's directory is created here and NOTHING removes one — no sink, no observer, no waker
- * pass, no CLI. Every committee leaves its reports behind. That is a few markdown files per run, so it is
- * filed (#x7w2z4u) rather than solved inside the operation that noticed it; what must not happen meanwhile is
- * a reader taking the word *transient* as a promise something keeps.
+ * ── WHO RECLAIMS IT, AND WHEN (#2304) ───────────────────────────────────────────────────────────────────────
+ *
+ * THE WAKER DOES, on every pass, once the run is `complete`. `we:scripts/operations/wake.mjs` calls
+ * {@link reclaimExploreScratch} after it has advanced the parked runs, so a committee the pass itself finished is
+ * reclaimed in that same pass, and one finished by an operator's `--resume` is reclaimed on the next tick. The
+ * waker was the only candidate that already runs on a timer and already reads every run record; a sink or
+ * observer cannot do it, because neither is called again once the run has moved past them.
+ *
+ * THE UNIT IS THE RUN'S DIRECTORY, NEVER ONE SEAT'S FILE. A re-dispatched seat writes a NEW report beside its
+ * superseded predecessor (the handle is in the name — see {@link panelistReportPath}), and that predecessor is
+ * evidence until the run is finished with. So nothing is removed per seat, and a run directory is removed only
+ * when ALL of these hold, checked in this order:
+ *   1. its name is a valid run id and it is a real directory (a symlink is not followed, and not removed);
+ *   2. THIS checkout's run store holds a record for it — the scratch root is WORKSPACE-level and every checkout's
+ *      runs share it, while a store is per-checkout, so a directory with no record here is most likely another
+ *      checkout's live committee. It is left alone, which also means a run whose record was deleted by hand
+ *      (the {@link ABANDON_HINT} exit) leaves its directory behind for a person to remove;
+ *   3. the record is an `explore` run holding NO `in-flight` effect entry — the one refusal that must never be
+ *      wrong, since deleting a directory a running investigator is about to write into turns a slow committee
+ *      into a lost one;
+ *   4. the engine calls it `complete`. A run wedged on a terminal refusal is not, and keeps its reports.
+ *
+ * Every report's text is already on the record by then (bounded at {@link REPORT_RECORD_CHARS}), so what a
+ * reclaim loses is only the tail of a report the record truncated — the reason the truncation note says the file
+ * lasts until the run completes, rather than promising it forever.
  *
  * ── HOW A PANELIST IS KNOWN TO BE DONE ──────────────────────────────────────────────────────────────────────
  *
@@ -61,7 +81,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,13 +89,17 @@ import { fileURLToPath } from 'node:url';
 import { laneGuardDecision, resolveReal, workspaceRootOf } from '../guard-lane.mjs';
 import { assertPublishableContent } from '../backlog/guarded-write.mjs';
 import { localToday } from '../lib/local-date.mjs';
+import { runStatus } from './engine.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
+import { createRegistry } from './registry.mjs';
 import { isValidRunId } from './run-record.mjs';
 import {
   DEFAULT_EXPECTED_WITHIN_MINUTES,
+  EXPLORE_OP,
   FILE_STORY_EFFECT,
   INVESTIGATE_EFFECT,
   PUBLISH_RESEARCH_EFFECT,
+  exploreOperation,
 } from './explore.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -213,6 +237,90 @@ export function panelistReportPath(runId, panelist, handle, { root = REPO_ROOT, 
 }
 
 /**
+ * Why a run directory was LEFT in place by {@link reclaimExploreScratch}. Closed, so a test can assert which
+ * guard held rather than only that nothing was removed.
+ */
+export const SCRATCH_KEPT = Object.freeze({
+  NO_RECORD: 'no-record',
+  NOT_EXPLORE: 'not-explore',
+  IN_FLIGHT: 'in-flight',
+  NOT_COMPLETE: 'not-complete',
+});
+
+/**
+ * The run-id-named REAL directories directly under the scratch root. A missing root is `[]` (no committee has
+ * run yet); a symlink or a stray file is not listed, so it is never followed and never removed.
+ *
+ * @param {string} scratchRoot
+ * @returns {string[]}
+ */
+export function defaultListRunDirs(scratchRoot) {
+  if (!existsSync(scratchRoot)) return [];
+  return readdirSync(scratchRoot)
+    .filter((name) => {
+      if (!isValidRunId(name)) return false;
+      // An entry removed between the listing and this stat is simply not listed, rather than failing the pass.
+      try { return lstatSync(join(scratchRoot, name)).isDirectory(); } catch { return false; }
+    })
+    .sort();
+}
+
+/** A registry holding only the `explore` declaration — all {@link reclaimExploreScratch} needs `runStatus` for. */
+function exploreRegistry() {
+  const registry = createRegistry();
+  registry.register(exploreOperation());
+  return registry;
+}
+
+/**
+ * RECLAIM EVERY FINISHED COMMITTEE'S SCRATCH DIRECTORY — the lifecycle the header's *WHO RECLAIMS IT* section
+ * describes, and the only thing in the repo that removes one. Called once per waker pass.
+ *
+ * FAIL-SOFT PER DIRECTORY, like the pass that calls it: an unreadable record or a failed removal is collected
+ * and the rest are still considered. A throw from LISTING the root is left to the caller, which reports it.
+ *
+ * @param {object} o
+ * @param {{read: Function}} o.store - THIS checkout's run store.
+ * @param {object} [o.registry] - resolves `explore` for `runStatus`; defaults to one holding just that.
+ * @param {string} [o.root]
+ * @param {Record<string, string|undefined>} [o.env]
+ * @param {(scratchRoot: string) => string[]} [o.listRunDirs]
+ * @param {(dir: string) => void} [o.removeDir]
+ * @returns {{scratchRoot: string, reclaimed: string[], kept: {runId: string, reason: string}[], errors: {runId: string, error: string}[]}}
+ */
+export function reclaimExploreScratch({
+  store,
+  registry = exploreRegistry(),
+  root = REPO_ROOT,
+  env = process.env,
+  listRunDirs = defaultListRunDirs,
+  removeDir = (dir) => rmSync(dir, { recursive: true, force: true }),
+} = {}) {
+  const scratchRoot = exploreScratchRoot(root, env);
+  const out = { scratchRoot, reclaimed: [], kept: [], errors: [] };
+  for (const runId of listRunDirs(scratchRoot)) {
+    // Re-checked even though the default lister filters: the id becomes a path segment handed to a recursive
+    // remove, and an injected lister is not trusted with that.
+    if (!isValidRunId(runId)) continue;
+    const keep = (reason) => out.kept.push({ runId, reason });
+    try {
+      const run = store.read(runId);
+      if (!run) { keep(SCRATCH_KEPT.NO_RECORD); continue; }
+      if (run.op !== EXPLORE_OP) { keep(SCRATCH_KEPT.NOT_EXPLORE); continue; }
+      // BEFORE the status check, and not implied by it: this is the refusal the lifecycle exists around, so it
+      // does not lean on the engine's rule that an in-flight entry holds the cursor.
+      if ((run.effects || []).some((e) => e.status === 'in-flight')) { keep(SCRATCH_KEPT.IN_FLIGHT); continue; }
+      if (runStatus(run, { registry }) !== 'complete') { keep(SCRATCH_KEPT.NOT_COMPLETE); continue; }
+      removeDir(panelistReportDir(runId, { root, env }));
+      out.reclaimed.push(runId);
+    } catch (e) {
+      out.errors.push({ runId, error: String(e?.message ?? e).split('\n')[0] });
+    }
+  }
+  return out;
+}
+
+/**
  * THE WHOLE PROMPT one panelist is started with: the declaration's brief, plus the destination. PURE.
  *
  * WHY THE DESTINATION IS APPENDED HERE rather than built into the brief. The path contains the RUN ID, which is
@@ -307,10 +415,18 @@ export function isPreSpawnRefusal(error) {
  * the condition that refusal exists for does not arise. Copying it across would have refused every `explore`
  * run started from a lane, which is where agent-driven runs actually happen.
  *
+ * THE PROVIDER PORT (#3579) — the SAME port `dispatch-lane-io.mjs#createDispatchSinks` names, applied to the
+ * panelist spawn: `provider` takes a request independent of any CLI's argv/output ({sessionId, runId, panelist,
+ * cwd, prompt, extraArgs}) and returns a durable handle. {@link defaultClaudeProvider} is ONE implementation,
+ * composing {@link buildInvestigatorArgv} with `spawnAgent`; see that file's own header for the full contract.
+ *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd a panelist starts in: the checkout it investigates.
- * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
+ * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`. Feeds
+ *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT spawner/scaffolder go through.
+ * @param {(request: object) => (string|Promise<string>)} [o.provider] - the PORT. Defaults to
+ *   {@link defaultClaudeProvider} closed over `spawnAgent`.
  * @param {() => string} [o.mintSessionId]
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
@@ -321,6 +437,7 @@ export function createExploreSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
+  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
   scaffoldItem = (args) => defaultScaffoldItem(args, { exec, root }),
   writeText = (path, text) => writeFileSync(path, text, 'utf8'),
   readTextIfPresent = (path) => (existsSync(path) ? readFileSync(path, 'utf8') : null),
@@ -353,16 +470,20 @@ export function createExploreSinks({
           + `${String((e && e.message) || e).split('\n')[0]}. No agent was started.`,
         );
       }
-      const argv = buildInvestigatorArgv({
-        sessionId,
-        runId: ctx.runId,
-        payload,
-        prompt: composeInvestigationPrompt(payload?.brief, reportPath),
-        extraArgs,
-      });
+      let handle;
       try {
-        spawnAgent(argv, { cwd: root });
+        handle = await provider({
+          sessionId,
+          runId: ctx.runId,
+          panelist: payload?.panelist,
+          cwd: root,
+          prompt: composeInvestigationPrompt(payload?.brief, reportPath),
+          extraArgs,
+        });
       } catch (e) {
+        // A validation failure `buildInvestigatorArgv` already proved happened before any process existed
+        // carries `.notApplied` — rethrow it as-is rather than reclassifying it as indeterminate.
+        if (e && e.notApplied) throw e;
         if (isPreSpawnRefusal(e)) {
           throw notApplied(`claude could not be started (${String(e.code)}) — no investigator exists`, { sessionId });
         }
@@ -377,7 +498,7 @@ export function createExploreSinks({
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
       return inFlight({
-        handle: sessionId,
+        handle: handle != null ? String(handle) : sessionId,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });
     },
@@ -399,6 +520,28 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
   return exec('claude', argv, {
     encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
   });
+}
+
+/**
+ * THE DEFAULT provider port implementation (#3579) — Claude's own, mirroring
+ * `dispatch-lane-io.mjs#defaultClaudeProvider`. Translates the port's CLI-independent request into
+ * {@link buildInvestigatorArgv}'s shape, hands the resulting argv to `spawnAgent`, and answers with the
+ * pre-minted `sessionId` as the durable handle — matching the pre-#3579 behaviour exactly.
+ *
+ * @param {{sessionId:string, runId:string, panelist?:string, cwd:string, prompt:string, extraArgs?:string[]}} request
+ * @param {{spawnAgent?: Function}} [io]
+ * @returns {string}
+ */
+export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts) } = {}) {
+  const argv = buildInvestigatorArgv({
+    sessionId: request.sessionId,
+    runId: request.runId,
+    payload: { panelist: request.panelist },
+    prompt: request.prompt,
+    extraArgs: request.extraArgs,
+  });
+  spawnAgent(argv, { cwd: request.cwd });
+  return request.sessionId;
 }
 
 /** `claude agents --json` — ACTIVE sessions only. `--all` would list completed ones too, so a finished
@@ -735,7 +878,7 @@ export function reportResult({ panelist, lens, reportPath, body, endedCleanly })
     lens,
     reportPath,
     report: truncated
-      ? `${full.slice(0, REPORT_RECORD_CHARS)}\n\n[…truncated on the run record at ${REPORT_RECORD_CHARS} characters; the whole report is at ${reportPath}]`
+      ? `${full.slice(0, REPORT_RECORD_CHARS)}\n\n[…truncated on the run record at ${REPORT_RECORD_CHARS} characters; the whole report is at ${reportPath} until the run completes and a waker pass reclaims its scratch directory]`
       : full,
     bytes: full.length,
     truncated,

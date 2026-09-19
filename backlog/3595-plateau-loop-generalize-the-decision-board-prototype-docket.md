@@ -11,7 +11,7 @@ tags: [plateau-loop, decision-board, console, constellation-placement]
 
 # Plateau Loop: generalize the Decision Board prototype (docket, ratification ledger, queue view) into a plateau-app console feature
 
-The Decision Board Artifact pages (we:backlog/3277, we:backlog/3560, we:backlog/3562, we:backlog/x7wehz2) are an interim WE-side prototype for the conveyor's own operational use: a leverage-ranked decision docket, a db-capability ratification ledger, and a live queue/capacity view, published as a hand-refreshed Artifact page. Per we:docs/agent/platform-decisions.md#constellation-placement (WE holds zero implementation) and the open Plateau Loop epic (we:backlog/2445 / we:backlog/2505), the durable home for these mechanics is a real plateau-app console feature, not a permanent WE Artifact page. Tracks that migration; does not block or replace the WE-side prototype.
+The Decision Board Artifact pages (we:backlog/3277, we:backlog/3560, we:backlog/3562, we:backlog/3685) are an interim WE-side prototype for the conveyor's own operational use: a leverage-ranked decision docket, a db-capability ratification ledger, and a live queue/capacity view, published as a hand-refreshed Artifact page. Per we:docs/agent/platform-decisions.md#constellation-placement (WE holds zero implementation) and the open Plateau Loop epic (we:backlog/2445 / we:backlog/2505), the durable home for these mechanics is a real plateau-app console feature, not a permanent WE Artifact page. Tracks that migration; does not block or replace the WE-side prototype.
 
 ## Origin (operator, 2026-09-07, verbatim)
 
@@ -36,7 +36,7 @@ Decision Board's mechanics to its scope.
   `prepare-decision` lane agents for the top 5 unprepared, and publishes the Decision Board's
   **"prepared to decide"** section with full fork content (options, tradeoffs, bold default, confidence)
   — never a summary.
-- **we:backlog/x7wehz2** (open PR https://github.com/chalbert/web-everything/pull/1985, not yet
+- **we:backlog/3685** (open PR https://github.com/chalbert/web-everything/pull/1985, not yet
   merged/numbered) — the Decision Board's **"decided history"** section: a permanent, append-only,
   Artifact `db`-capability-backed ledger of ratified decisions (`decisions/<id>/rulings/<id>`: actor,
   timestamp, choice, rationale), written directly from a button/form on the published page.
@@ -74,13 +74,13 @@ So: **no new plateau-app-side filing, no `locus:` field** — this item joins th
 epic tree in WE's backlog, same as its ~40 siblings, and the real build (when scoped) lands in plateau-app
 via the standard cross-repo landing (#500) exactly as those siblings' `graduatedTo` fields show.
 
-## Why `blockedBy` the three landed WE items, not `x7wehz2`
+## Why `blockedBy` the three landed WE items, not `3685`
 
-we:backlog/x7wehz2 is not yet merged (PR #1985, branch `lane/x7wehz2-decision-ledger-artifact`) and so
+we:backlog/3685 is not yet merged (PR #1985, branch `lane/3685-decision-ledger-artifact`) and so
 does not exist as a resolvable id in this backlog yet — `check:standards`'s `blockedBy` graph check
 (we:scripts/check-standards.mjs) hard-errors on an edge that doesn't resolve to a real item. Once #1985
 lands and is JIT-numbered, add its number to this item's `blockedBy` array (a one-line follow-up), per
-this repo's own convention for a filed-but-unlanded sibling (we:backlog/x7wehz2's own body left the same
+this repo's own convention for a filed-but-unlanded sibling (we:backlog/3685's own body left the same
 kind of forward note for its then-unlanded sibling, we:backlog/3562).
 
 ## Cross-references added to the 4 existing Decision Board cards
@@ -88,7 +88,7 @@ kind of forward note for its then-unlanded sibling, we:backlog/3562).
 - we:backlog/3277, we:backlog/3560, we:backlog/3562 — each now carries a short pointer to this item
   (`3595`, this filing's own bornAs id — swap for the real `#NNN` once JIT-numbered at land) so nobody
   building the Artifact prototype mistakes it for the permanent home.
-- we:backlog/x7wehz2 (PR #1985) — not editable from this lane (unmerged, on another agent's own lane
+- we:backlog/3685 (PR #1985) — not editable from this lane (unmerged, on another agent's own lane
   branch); flagged instead via a PR comment on #1985 asking the same cross-reference be added before or
   after merge.
 
@@ -103,7 +103,7 @@ kind of forward note for its then-unlanded sibling, we:backlog/3562).
 
 ## Done when
 
-1. **Executable** — TODO: once we:backlog/3277, we:backlog/3560, we:backlog/3562 (and we:backlog/x7wehz2)
+1. **Executable** — TODO: once we:backlog/3277, we:backlog/3560, we:backlog/3562 (and we:backlog/3685)
    have landed and the Decision Board prototype has run for real operator decisions, this item is
    `/prepare`d into a concrete plateau-app build scope (which console surface, which of the three
    mechanics generalize first) rather than left as a placeholder — the literal command depends on that

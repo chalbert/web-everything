@@ -164,7 +164,7 @@ export function quoteScalar(value) {
  * Validate a `codifiedIn` value for the #911 resolve gate. Returns an error string to refuse the
  * resolve, or `null` if the value is an acceptable statute pointer. Accepts the `one-off` sentinel
  * (a narrow call that establishes no reusable rule, analogous to `graduatedTo: none`) or a guideline
- * path — a `docs/…​.md` file, optionally with an `#anchor` into the named rule. A bare anchor, an
+ * path — a `docs/….md` file, optionally with an `#anchor` into the named rule. A bare anchor, an
  * empty string, or `undefined` is refused with the actionable next step.
  * @param {string|undefined} value
  * @returns {string|null}

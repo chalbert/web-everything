@@ -54,6 +54,28 @@ Only two things genuinely stop and wait for a person:
 > `review-escalation.mjs` and in a #2851 anchor, and in neither place a driver reads mid-loop — so it was
 > re-derived from feel, twice, wrongly. It is stated here because *here* is where the driver is.
 
+## Session-delegation trial logging
+
+When opening work delegated to another provider, the orchestrating session passes
+`--delegation=codex:gpt-6-astra:bugfix` (substitute the actual provider, model and task type) to
+`pr-land.mjs`. The PR body carries the explicit `delegation` marker alongside the author stamp;
+commits and labels cannot recover this metadata reliably. Omitting the flag leaves ordinary work
+unmarked. Malformed flags fail before publishing; an existing marker is preserved on re-runs.
+
+After the declared `review-pr` operation completes an `accepted` label swap and comment,
+`review-set-label.mjs` records a session-delegation trial only for a valid, unambiguous marker whose
+exact triple has not met #3690's bar. The gate reads the live scorecard store: five trailing clean
+Claude-verified trials plus an earlier informative finding; other verifiers neither count nor break
+the streak. Other channels and label targets do not log. Logging failures are non-fatal.
+
+V1 records `outcome: landed` and `findings: null` at acceptance. It does not distinguish a first-round
+clean accept from an accept after repairs; consulting verdict-ledger history is separate follow-up work.
+Only accepted PRs with author-supplied delegation markers are auto-logged: rejected or abandoned
+delegated tasks leave no row and cannot count against the streak. This survivorship bias means the
+graduation signal sees only work that eventually succeeded, never work that failed outright. It is a
+known v1 scope limit, not a bug; tracked as follow-up alongside the round-history distinction, with no
+structural fix required for PR #2313.
+
 ## Spawning a reviewer that is actually independent
 
 **A subagent is not a second actor.** It inherits the parent's `CLAUDE_CODE_SESSION_ID`, so the repo's
@@ -109,6 +131,41 @@ juror that judged it**, which is true by construction once the jurors are headle
 own headless, tool-bearing spawn is a real but separate change —
 [#3159](../../backlog/3159-give-the-revision-round-editor-its-own-tool-bearing-headless.md).
 
+### Prefer `review-dispatch.mjs` — reach for the bare pattern below only when it cannot cover the case
+
+`we:scripts/operations/review-dispatch.mjs` already solves this exact problem for the common case: it spawns a
+review session with the same independence property (a fresh, non-inherited session id — a random UUID rather
+than a derived one, handed to `claude --bg --session-id=<uuid>`) and needs **no permission bypass at all**. It
+achieves that by baking a hardcoded `--disallowedTools` deny list (`REVIEW_DISPATCH_DISALLOWED_TOOLS`: the whole
+`gh` CLI, `review-set-label.mjs`, `apply-review-request.mjs`, `run.mjs`) into the dispatched session's own argv,
+*ahead of* any caller-supplied flags, then runs under an ordinary (non-bypass) permission mode — `dontAsk`, per
+`we:docs/agent/dispatcher-runbook.md`'s own confirmed guidance for `--bg`:
+
+```bash
+WE_DISPATCH_AGENT_ARGS='["--permission-mode","dontAsk"]' \
+  node scripts/operations/review-dispatch.mjs --pr=<n> --repo=chalbert/web-everything
+```
+
+This is strictly safer than the bare pattern below — zero bypass, a harness-enforced deny list the model's own
+judgment is never consulted on — and it is now the DEFAULT way to spawn an independent reviewer whenever the
+review can run on its fixed, mechanized rubric: `review-loop-cli.mjs`'s own two-juror pass (correctness +
+security), reduced to a verdict, auto-bounced or auto-cleared per the ratified policy
+(`skills-src/review/review-agent-brief.md`).
+
+**What it genuinely does not cover, and why the bare pattern below still exists.** `review-dispatch.mjs`'s brief
+is fixed — it has no placeholder for a driver-authored mandate. The *Writing the mandate* section below (attack
+priority order, the author's recurring defect, a named mutation instruction) is exactly the kind of
+per-PR-specific judgment a fixed, mechanically-instantiated brief cannot carry, and neither can its `--model`/
+`--effort` be tuned per dispatch the way the bare pattern's explicit `--model opus --effort high` can. When a
+review genuinely needs that — not the routine case — the bare pattern is the tool, and it now MUST carry its own
+explicit deny list rather than running with zero restriction (see step 3 below): mirror
+`REVIEW_DISPATCH_DISALLOWED_TOOLS`'s intent via `--disallowedTools`, the same harness-enforced mechanism
+`review-dispatch.mjs` already relies on — though NOT the identical list (see the note on step 3 for why this
+reviewer's own documented `gh pr view` reads mean a wholesale `gh` deny would break its own workflow, unlike
+`review-dispatch.mjs`'s brief, which never calls `gh` directly at all). See
+`we:agent-memory-src/scoped-approval-beats-global-bypass.md` for why a scoped deny-list beats a global bypass in
+general — this is that lesson applied here, not a new one.
+
 The three lines below are the ACTING case — three SEPARATE properties, and it is worth not fusing them; an
 earlier version of this page wrote them as one requirement and was wrong about two:
 
@@ -137,8 +194,25 @@ node --input-type=module -e '
 #    Edit/Write — must have the reviewer adopt the lane itself, now running under its own (derived)
 #    CLAUDE_CODE_SESSION_ID: `node scripts/lane-pool.mjs adopt --lane=<n>`. Only after that call does
 #    guard-lane.mjs record the reviewer's OWN session as the occupant and start refusing every other one.
+#
+#    THE DENY LIST IS NOT OPTIONAL. `--permission-mode bypassPermissions` with zero `--disallowedTools` has no
+#    safety net but lane isolation — see "Prefer review-dispatch.mjs" above. This list is NARROWER than
+#    `review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` (which denies `gh` wholesale) because THIS
+#    reviewer's own mandate legitimately runs read-only `gh pr view`/`gh pr checks` (see "Writing the mandate"
+#    and the "Triage the previous round" guidance below) — `review-dispatch.mjs`'s brief never calls `gh`
+#    directly at all, so it can afford the wholesale ban and this fallback cannot. What it denies instead is
+#    every MUTATING gh verb (merge, edit, submitting a formal review, closing, and the raw `gh api` escape
+#    hatch that reaches the same PUT-a-merge/label endpoint under a different name — the exact shape
+#    `review-dispatch.mjs`'s own r1 self-review (#3433) found reachable through an under-scoped deny list) plus
+#    the two scripts that stage a self-clear. If a specific mandate genuinely needs one of these, say so in the
+#    mandate and narrow the deny list deliberately — do not just drop it. Confirmed live (2026-09-19): this
+#    whole invocation is fully scriptable with no TTY — see `we:docs/agent/dispatcher-runbook.md`'s corrected
+#    note on the `--bg`-only TTY requirement.
 cd <that lane> && CLAUDE_CODE_SESSION_ID=<derived> \
-  claude -p --session-id <derived> --model opus --effort high --permission-mode bypassPermissions < mandate.txt
+  claude -p --session-id <derived> --model opus --effort high \
+  --permission-mode bypassPermissions \
+  --disallowedTools="Bash(gh pr merge:*),Bash(gh pr edit:*),Bash(gh pr review:*),Bash(gh pr close:*),Bash(gh api:*),Bash(gh release:*),Bash(node scripts/review-set-label.mjs:*),Bash(node scripts/apply-review-request.mjs:*),Bash(node scripts/operations/run.mjs:*)" \
+  < mandate.txt
 ```
 
 `--effort` is set here, explicitly, for the same reason `--model` is: a review verdict is judgment-shaped
@@ -177,6 +251,32 @@ against them.
 
 **Watch for the vacuous test.** Assertions inside an `if` that never runs, or a loop over an empty list, pass
 silently. So does a bare `return` used as a conditional skip — use `ctx.skip()`, which reports as skipped.
+
+## Explain PR holds before dispatching
+
+Run `node scripts/operations/run.mjs pr-reconcile --repo=chalbert/web-everything --json`
+before dispatching a review or asking for a human-approval pass. Read `verdict.prs`: one row per PR,
+sorted by number, across open, merged and closed states. The scope is every PR in the named repo
+(a superset of conveyor work, so missing labels cannot hide a hold); `--pr=N` narrows it.
+`requiredCheck` reports the head-keyed `test` check used by the conveyor; `--requiredCheck=<name>`
+selects another named check. This is not discovery of GitHub branch-protection rules.
+
+`heldBy` is a summary, with precedence human → stand-down → conflict → dependency → advisory-pending
+→ none; `holds` retains every detected reason and its evidence and unblock action. Current labels
+`review:human`, `review:pending`, `review:changes`, and `blocked` are recognized. Comment evidence
+includes the canonical conveyor stand-down marker and explicit hold statements (the drain's
+`held — a review hold (...) stands` wording, human-review requirements, pending advisory review,
+conflict and dependency statements). Quoted text and arbitrary mentions of label names are not holds.
+Ordinary comment holds use the latest explicit hold/clear statement per category; an acceptance label
+alone cannot date or override a comment-only hold. Stand-down markers remain terminal until removed, as the conveyor defines.
+Closed/merged PRs report `heldBy: none`; their labels/comments remain visible as history.
+
+Every hold carries a label or comment excerpt. Mergeability is reported independently: without a
+recorded conflict hold it does not invent label/comment evidence. Unknown prose is preserved in
+`comments` for the reading agent to interpret; this deterministic report is not a natural-language judge.
+Diff `verdict` between calls: it contains no observation timestamps (the shared CLI envelope still
+carries its normal run identity). This operation explains holds; it never clears, labels, or merges.
+Choosing between rival PRs remains the reading agent's judgment.
 
 ## When to stand down instead of iterating
 

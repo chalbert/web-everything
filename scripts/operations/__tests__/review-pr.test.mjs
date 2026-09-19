@@ -57,6 +57,9 @@ import {
   assertSeatSpentOnMandatoryLens,
   assertDeclaredShapeHolds,
   renderEarnedShortfall,
+  // #3540 — the shared record-decision core and the record-verdict vocabulary mapping.
+  planRecordDecision,
+  confirmAnswerFor,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -170,6 +173,25 @@ async function atConfirmDrainingAdvisory({ registry, input, answer = CLEAN_ANSWE
   }
   expect(runStatus(run, { registry })).toBe('awaiting-confirm');
   return { run, requests, request: requests[JUDGE_STEPS[0]] };
+}
+
+/**
+ * #3540 — DRIVE PAST `confirm` THROUGH `stageVerdict`'s WRITE_UP EFFECT, stopping with `record`'s OWN effects
+ * DECLARED but not yet applied. `record`'s tests want to inspect exactly that shape, and #3540 split the
+ * write-up out ahead of `record` — so reaching `record`'s declared effects now needs `stageVerdict`'s ONE local
+ * effect actually applied (a real, harmless local write) before a further `advance` can reach `record` at all.
+ */
+async function driveToRecordDeclared({
+  run, registry, answer = 'accept', store = createMemoryRunStore(), writeUpSink = async () => ({ ok: true }),
+}) {
+  let current = advance(run, { registry, resume: { value: answer } });
+  current = advance(current, { registry }); // declares `stageVerdict`'s WRITE_UP effect
+  store.write(current);
+  const staged = await applyPendingEffects(current, { sinks: { [REVIEW_EFFECTS.WRITE_UP]: writeUpSink }, store });
+  current = advance(staged.run, { registry }); // resolves `stageVerdict`, cursor → `record`
+  current = advance(current, { registry }); // declares `record`'s effects
+  store.write(current);
+  return current;
 }
 
 const BASE_INPUT = { pr: 1234, repo: 'chalbert/web-everything' };
@@ -663,19 +685,21 @@ describe('the gate-self invariant', () => {
     expect(thrown).toBeTruthy();
     expect(String(thrown.message)).toMatch(/gate-self: review:human is human-ceremony-only/);
     expect(String(thrown.message)).toMatch(/decideSetLabel/);
-    // `record` ITSELF declared nothing, so there is nothing OF ITS OWN to apply and nothing half-done — the
+    // #3540 — THE REFUSAL NOW FIRES AT `stageVerdict`, one step earlier than before the split (it runs
+    // `planRecordDecision`, the SAME guard `record` also calls). `stageVerdict` ITSELF declared nothing, so
+    // there is nothing OF ITS OWN to apply and nothing half-done — `record` is never even reached — and the
     // run's `effects` array still carries the earlier `advise` step's own (unrelated) advisory-note entry
     // (#xlw02hw), which is not what this invariant is about.
-    expect(answered.effects.filter((e) => e.step === 'record')).toEqual([]);
+    expect(answered.effects.filter((e) => e.step === 'stageVerdict' || e.step === 'record')).toEqual([]);
   });
 
   it('still allows a `changes` bounce on a gate-self PR — a bounce lands nothing', async () => {
     const { registry } = registryFor({ labels: ['review:human'] });
     const { run } = await atConfirmDrainingAdvisory({ registry, input: BASE_INPUT, answer: BLOCKING_ANSWER, id: 'run-gs5' });
-    const answered = advance(run, { registry, resume: { value: 'changes' } });
-    const declared = advance(answered, { registry });
-    const types = declared.effects.filter((e) => e.step === 'record').map((e) => e.type);
-    expect(types).toEqual([REVIEW_EFFECTS.WRITE_UP, REVIEW_EFFECTS.LABEL, REVIEW_EFFECTS.LEDGER, REVIEW_EFFECTS.NOTICE]);
+    const declared = await driveToRecordDeclared({ run, registry, answer: 'changes' });
+    expect(declared.effects.filter((e) => e.step === 'stageVerdict').map((e) => e.type)).toEqual([REVIEW_EFFECTS.WRITE_UP]);
+    expect(declared.effects.filter((e) => e.step === 'record').map((e) => e.type))
+      .toEqual([REVIEW_EFFECTS.LABEL, REVIEW_EFFECTS.LEDGER, REVIEW_EFFECTS.NOTICE]);
     const label = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL);
     expect(label.payload.to).toBe('changes');
     // A bounce never removes the human gate.
@@ -784,14 +808,15 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     // tell that the second seat's bill was silently dropped from the operator's picture.
     expect(text).toContain('judge spend: $0.9198 over 2 juror(s)');
 
-    // NOTHING WAS RECORDED BY `record`: cursor unchanged, the confirm answer still `accept`, and `record`
-    // itself declared no effects. `record`'s own stepIndex is 6 now that `advise` (#xlw02hw) sits between
+    // NOTHING WAS RECORDED: cursor unchanged, the confirm answer still `accept`, and the refusing step declared
+    // no effects. #3540 moved that refusal from `record` to `stageVerdict` (the SAME `planRecordDecision` guard,
+    // called one step earlier) — `stageVerdict`'s own stepIndex is 6, since `advise` (#xlw02hw) sits between
     // `reduce` and `confirm` — and this `humanRequired` run's `effects` array already carries the EARLIER
     // `advise` step's own advisory-note entry, which this invariant is not about.
     const record = store.read('run-refuse');
     expect(record.cursor).toBe(6);
     expect(record.findings.confirm).toBe('accept');
-    expect(record.effects.filter((e) => e.step === 'record')).toEqual([]);
+    expect(record.effects.filter((e) => e.step === 'stageVerdict' || e.step === 'record')).toEqual([]);
     expect(record.effects.map((e) => e.step)).toEqual(['advise']);
   });
 
@@ -869,19 +894,22 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
 
 // ── THE DECLARED EFFECTS: ORDER, IDEMPOTENCY, AND REPLAY ──────────────────────────────────────────────────
 describe('the record step', () => {
-  it('declares the four effects in the safe order, with the classification each was given', () => {
+  it('declares the write-up on `stageVerdict` and the remaining three on `record`, in the safe order', async () => {
     const { registry } = registryFor({});
     const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-eff' });
-    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+    const declared = await driveToRecordDeclared({ run, registry });
 
-    expect(declared.effects.map((e) => [e.index, e.type, e.idempotent])).toEqual([
-      [0, REVIEW_EFFECTS.WRITE_UP, true],   // local, deterministic bytes → safe to redo
-      [1, REVIEW_EFFECTS.LABEL, false],     // posts a durable comment → never replayed on a guess
-      [2, REVIEW_EFFECTS.LEDGER, false],    // #3007 Phase 1 writes in SHADOW; the flag stays fail-closed
-      [3, REVIEW_EFFECTS.NOTICE, true],     // reports only → a duplicate line is the whole cost
+    // `stageVerdict`'s effect is APPLIED already (the drive helper applies it to reach `record` at all);
+    // `record`'s three are DECLARED but not applied — the shape a real drive leaves them in before a `gh`-
+    // capable sink runs. `[e.index, e.type, e.idempotent]` still orders correctly WITHIN each step.
+    expect(declared.effects.map((e) => [e.step, e.index, e.type, e.idempotent])).toEqual([
+      ['stageVerdict', 0, REVIEW_EFFECTS.WRITE_UP, true],  // local, deterministic bytes → safe to redo
+      ['record', 0, REVIEW_EFFECTS.LABEL, false],          // posts a durable comment → never replayed on a guess
+      ['record', 1, REVIEW_EFFECTS.LEDGER, false],         // #3007 Phase 1 writes in SHADOW; the flag stays fail-closed
+      ['record', 2, REVIEW_EFFECTS.NOTICE, true],          // reports only → a duplicate line is the whole cost
     ]);
-    // The remote write is never first, and the ledger row never precedes the label it vouches for.
-    expect(declared.effects[1].payload.addLabel).toBe('review:accepted');
+    // The remote write is never first (within `record`), and the ledger row never precedes the label it vouches for.
+    expect(declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL).payload.addLabel).toBe('review:accepted');
   });
 
   it('`abstain` declares ZERO effects and completes the run without writing anything', () => {
@@ -895,20 +923,19 @@ describe('the record step', () => {
   it('a replayed `record` step posts NO duplicate comment', async () => {
     const { registry } = registryFor({});
     const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-replay' });
-    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
-
     const store = createMemoryRunStore();
-    store.write(declared);
     const calls = [];
     const sinkFor = (type, behaviour = () => ({ ok: true })) => async (payload, ctx) => {
       calls.push({ type, key: ctx.key });
       return behaviour(payload, ctx);
     };
-    // The LEDGER row fails the first time — AFTER the comment+label effect landed. That is #2964's half-done
-    // state, and the replay must finish the act rather than restart it.
+    // `stageVerdict`'s WRITE_UP is applied ON THE WAY to `record`'s declared effects — tracked through the SAME
+    // `calls` array so "posted exactly once" still covers it, even though it is no longer one of `record`'s own.
+    const declared = await driveToRecordDeclared({ run, registry, store, writeUpSink: sinkFor(REVIEW_EFFECTS.WRITE_UP) });
+    // The LEDGER row fails the first time — AFTER the label effect landed. That is #2964's half-done state, and
+    // the replay must finish the act rather than restart it.
     let ledgerAttempts = 0;
     const sinks = {
-      [REVIEW_EFFECTS.WRITE_UP]: sinkFor(REVIEW_EFFECTS.WRITE_UP),
       [REVIEW_EFFECTS.LABEL]: sinkFor(REVIEW_EFFECTS.LABEL),
       [REVIEW_EFFECTS.LEDGER]: sinkFor(REVIEW_EFFECTS.LEDGER, () => {
         ledgerAttempts += 1;
@@ -920,24 +947,24 @@ describe('the record step', () => {
 
     const first = await applyPendingEffects(declared, { sinks, store });
     expect(first.error).toBeTruthy();
-    expect(first.applied).toEqual(['run-replay#6#0', 'run-replay#6#1']);
+    // `record`'s own effects are now [LABEL, LEDGER, NOTICE] at indices 0-2 (index 7 is `record`'s stepIndex —
+    // `stageVerdict` sits at 6). Only LABEL (index 0) lands before LEDGER (index 1) fails.
+    expect(first.applied).toEqual(['run-replay#7#0']);
 
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(second.error).toBeNull();
     // THE ASSERTION: the label/comment sink ran exactly ONCE across both passes.
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.LABEL)).toHaveLength(1);
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.WRITE_UP)).toHaveLength(1);
-    expect(second.skipped).toEqual(['run-replay#6#0', 'run-replay#6#1']);
+    expect(second.skipped).toEqual(['run-replay#7#0']);
   });
 
   it('REFUSES to replay the label effect when its outcome is unknown', async () => {
     const { registry } = registryFor({});
     const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-indet' });
-    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
     const store = createMemoryRunStore();
-    store.write(declared);
+    const declared = await driveToRecordDeclared({ run, registry, store });
     const sinks = {
-      [REVIEW_EFFECTS.WRITE_UP]: async () => ({ ok: true }),
       // A plain throw = INDETERMINATE: the single home may already have posted the comment.
       [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh timed out'); },
       [REVIEW_EFFECTS.LEDGER]: async () => ({ ok: true }),
@@ -946,6 +973,64 @@ describe('the record step', () => {
     const first = await applyPendingEffects(declared, { sinks, store });
     expect(first.error).toBeTruthy();
     await expect(applyPendingEffects(first.run, { sinks, store })).rejects.toThrow(/outcome is UNKNOWN/);
+  });
+});
+
+// ── #3540 — `stageVerdict`: THE WRITE-UP, STAGED WITH NO `gh` ────────────────────────────────────────────────
+describe('#3540 the stageVerdict step stages the write-up alone, ahead of the label swap', () => {
+  it('declares exactly one effect — the write-up — and it is idempotent', async () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sv1' });
+    const answered = advance(run, { registry, resume: { value: 'accept' } });
+    const declared = advance(answered, { registry });
+    const staged = declared.effects.filter((e) => e.step === 'stageVerdict');
+    expect(staged.map((e) => [e.type, e.idempotent])).toEqual([[REVIEW_EFFECTS.WRITE_UP, true]]);
+  });
+
+  it('`abstain` declares nothing at `stageVerdict` either', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sv-abs' });
+    const answered = advance(run, { registry, resume: { value: 'abstain' } });
+    // `stageVerdict` declares `[]` and resolves INLINE (no suspend, `step-kinds.mjs`'s effect case) — cursor
+    // moves straight to `record`, which does the same for the same `abstain` answer.
+    const done = advanceWhileRunning(answered, { registry });
+    expect(done.effects.filter((e) => e.step === 'stageVerdict' || e.step === 'record')).toEqual([]);
+    expect(runStatus(done, { registry })).toBe('complete');
+  });
+
+  it('stages the SAME bytes `record`\'s label swap later posts — one pure derivation, not two', async () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sv2' });
+    const declared = await driveToRecordDeclared({ run, registry });
+    const staged = declared.effects.find((e) => e.step === 'stageVerdict' && e.type === REVIEW_EFFECTS.WRITE_UP);
+    const label = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL);
+    expect(label.payload.bodyFile).toBe(staged.payload.bodyFile);
+  });
+
+  it('refuses `accept` on a review:human PR at `stageVerdict`, BEFORE any write-up is staged', async () => {
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const { run } = await atConfirmDrainingAdvisory({ registry, input: BASE_INPUT, id: 'run-sv3' });
+    const answered = advance(run, { registry, resume: { value: 'accept' } });
+    expect(() => advance(answered, { registry })).toThrow(/gate-self: review:human is human-ceremony-only/);
+  });
+});
+
+describe('#3540 planRecordDecision and confirmAnswerFor — the shared pure core', () => {
+  it('confirmAnswerFor maps record-verdict\'s vocabulary to review-pr\'s, and clear-human to nothing', () => {
+    expect(confirmAnswerFor('accepted')).toBe('accept');
+    expect(confirmAnswerFor('changes')).toBe('changes');
+    expect(confirmAnswerFor('clear-human')).toBeNull();
+    expect(confirmAnswerFor('anything-else')).toBeNull();
+  });
+
+  it('planRecordDecision returns { abstain: true } and nothing else for an abstain answer', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-plan-abs' });
+    const view = projectReads(
+      { ...run, findings: { ...run.findings, confirm: 'abstain' } },
+      ['input.pr', 'input.repo', 'input.actor', 'input.reason', 'verdict', 'findings.read', 'findings.confirm'],
+    );
+    expect(planRecordDecision(view)).toEqual({ abstain: true });
   });
 });
 
@@ -969,7 +1054,7 @@ describe('the derived command line', () => {
     // lens shows up in `--help` the moment it is declared, with no second list to remember.
     expect(spec.usage).toContain(`[--lens=${PANEL_LENSES.join('|')}, default correctness]`);
     expect(spec.usage).not.toContain('--lens=<string>');
-    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → advise(effect) → confirm(confirm) → record(effect)');
+    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → advise(effect) → confirm(confirm) → stageVerdict(effect) → record(effect)');
   });
 
   // #3094 — `--aim` IS DERIVED, NOT HAND-ADDED. It appears in `--help` because it is declared on the operation;
@@ -1116,10 +1201,10 @@ describe('the juror\'s cost survives the run (the adapter used to drop it)', () 
 });
 
 describe('the durable comment states ONE provenance (#2898)', () => {
-  it('tells the single home the surface, so its attribution matches the operation\'s own footer', () => {
+  it('tells the single home the surface, so its attribution matches the operation\'s own footer', async () => {
     const { registry } = registryFor({});
     const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-chan' });
-    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+    const declared = await driveToRecordDeclared({ run, registry });
     const label = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL);
     expect(label.payload.channel).toBe(REVIEW_PR_CHANNEL);
     expect(REVIEW_PR_CHANNEL).toContain('review-pr');
@@ -1299,10 +1384,10 @@ describe('#3319 the security lens runs on every PR', () => {
     expect(run.verdict.summary).toBe(`${SECURITY_LENS}: one blocker | ${SECURITY_LENS}: nothing blocking`);
   });
 
-  it('the ledger row names every seat, so a two-juror verdict is not filed as a one-juror one', () => {
+  it('the ledger row names every seat, so a two-juror verdict is not filed as a one-juror one', async () => {
     const { registry } = registryFor({});
     const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-ledger' });
-    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+    const declared = await driveToRecordDeclared({ run, registry });
     const ledger = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LEDGER);
     expect(ledger.payload.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS]);
     expect(ledger.payload.lensVerdicts).toEqual({ [DEFAULT_LENS]: 'accept', [SECURITY_LENS]: 'accept' });

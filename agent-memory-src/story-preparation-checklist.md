@@ -1,6 +1,6 @@
 ---
 name: story-preparation-checklist
-description: What a story must carry before anyone builds it — scope+consumers, size, testable acceptance, decided design, interfaces/protocol, tasks, delivery shape, AND independent review of the preparation itself before it's build-ready
+description: What a story must carry before anyone builds it — scope+consumers, size, testable acceptance, decided design, interfaces/protocol, tasks, delivery shape, independent review, AND staleness stamp (preparedDate + preparedAgainstSha)
 metadata:
   type: feedback
 ---
@@ -98,7 +98,14 @@ level (High / Medium / Low) and a named risk list against it — the same headle
 review this repo already requires for code (`we:docs/agent/delivery-loop.md`), run against the card instead
 of a diff. Do not start a build against a card that only has the first half.
 
-**How to apply (items 1–8):** manual discipline until it becomes the `prepare-story` operation (epic #3099). Its
+**10. Stamp `preparedDate` + `preparedAgainstSha` once the rest of the checklist is satisfied (items 1–9).**
+Run `node scripts/backlog.mjs prepare-stamp <NNN>` in the lane to write both fields into the card's
+frontmatter. This anchors the commit against which preparation was verified (#3108). Downstream builders
+and dispatchers can then mechanically check whether any of the card's declared `scope:` files have changed
+since prep by running `node scripts/readiness/prep-staleness.mjs --item=<NNN>`. Do not stamp a story until
+its preparation has passed independent review (item 9).
+
+**How to apply (items 1–8, 10):** manual discipline until it becomes the `prepare-story` operation (epic #3099). Its
 first slice — a script flagging importers missing from a `scope:` — was built, reviewed twice and **stood
 down** (#3098): in a repo whose scripts shell each other rather than import, a static ESM import scan reads
 the wrong graph, and its confident all-clear was baseless 74% of the time it fired. So item 1 above is done

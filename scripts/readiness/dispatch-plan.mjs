@@ -35,6 +35,25 @@
  *   • otherwise (disjoint) — assign the next free   → launch { num, lane }     (rank order fills free lanes until
  *     lane; once the free lanes run out              the slots run out).
  *                                                    → held "no free lane"      (disjoint but nowhere to run).
+ *                                                    → held "capacity-cap"      (disjoint, a free lane physically
+ *                                                       exists, but launching it would exceed `maxConcurrentLanes`
+ *                                                       — see below; a DIFFERENT reason from "no free lane" on
+ *                                                       purpose, since the fix differs: raise the cap or wait, vs.
+ *                                                       free a lane).
+ *
+ * CONCURRENCY CEILING (#xupukxa, live incident 2026-09-07 — freeing one lane cascaded into 42 concurrent lane
+ * dispatches, 1-min load average 34.95 on a 12-core host). `maxConcurrentLanes` (default from
+ * {@link ../lib/lane-concurrency.mjs resolveMaxConcurrentLanes}, `WE_MAX_CONCURRENT_LANES` env-overridable) caps
+ * `freeLanes` against the ALREADY-ACTIVE lease count via {@link ../lib/lane-concurrency.mjs capToConcurrency}
+ * BEFORE any assignment: `room = maxConcurrentLanes - leases.length`, so this dispatcher's OWN build launches
+ * never alone exceed the ceiling. A SEPARATE, new admission point from
+ * {@link ./heavy-admission.mjs} (#3461/#3456) — that caps concurrent HEAVY COMMANDS running INSIDE an
+ * already-dispatched lane, never whether a lane is dispatched at all; this caps lane dispatch itself, upstream
+ * of heavy-admission entirely. `tick-core.mjs#planTick` applies the SAME shared cap to its OWN
+ * prepare/fix/ci-heal spawns (against `leases.length` PLUS this tick's admitted build launches), so the two
+ * independent lane-consuming decisions share one budget rather than each maxing out the free-lane pool alone —
+ * see its own header for that half. Defaults to unlimited (`Infinity`) when omitted, so every existing direct
+ * caller of the pure core (tests included) keeps its prior unrestricted behavior unless it opts in.
  *
  * AUTO-PREPARE, NOT A SERIAL FLOOR (the corrected design, ruled 2026-07-22 — Nicolas). An UNSCOPED item (scope
  * ABSENT or EMPTY `[]`) is NEVER dispatched to build — not even alone into an idle pool. Building blind is exactly
@@ -60,6 +79,8 @@
 import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
+import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
+import { driftDefaults } from '../lib/poc-branches.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -107,9 +128,19 @@ import { writeLineSync } from '../lib/write-all-sync.mjs';
  *  dispatch, and the branch's own out-of-band one) piling MORE changes onto the same hot files while nothing
  *  reconciles them, until the eventual merge becomes unresolvable. HOLDS — it never auto-reconciles the branch;
  *  it only pauses NEW same-scope dispatch until a fresh sweep clears it. The operator gloss is
- *  {@link BRANCH_DRIFT_BLOCKED_HINT}. */
+ *  {@link BRANCH_DRIFT_BLOCKED_HINT}.
+ *
+ *  `dispatch-paused` (#3609): a MANUAL/EMERGENCY kill-switch, distinct from every reason above — those are all
+ *  properties of the ITEM (its own readiness, scope, or a scope conflict); this is a deliberate OPERATOR
+ *  override that holds every item that would otherwise have launched, regardless of what it is or what scope it
+ *  touches. Set/cleared via `we:scripts/readiness/dispatch-pause.mjs` (`set|clear|status`); checked last, only
+ *  at the point an item would actually be assigned a lane — an item held for any OTHER reason (blocked,
+ *  needs-slice, needs-decision, unshaped-no-scope, an overlap, already-done, branch-drift-blocked) keeps that
+ *  more specific reason, since the pause changes nothing about why THAT item wasn't launching anyway. Never
+ *  touches an already-running lane — this pure core has no lease/lane-release knowledge at all. The operator
+ *  gloss is {@link DISPATCH_PAUSED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -141,6 +172,17 @@ export const ALREADY_DONE_HINT = 'a merged PR already appears to close this out 
  *  found a conflict/ceiling breach against the SAME scope this item wants to touch; reconcile the branch (or
  *  wait for the next sweep to clear it), then re-dispatch. */
 export const BRANCH_DRIFT_BLOCKED_HINT = 'a dispatched-work branch is unreconciled over this scope — reconcile it, then re-dispatch';
+
+/** The operator-facing gloss for a `dispatch-paused` hold (#3609) — surfaced beside the token so a held item
+ *  always tells the operator WHAT to do: clear the manual pause (`node scripts/readiness/dispatch-pause.mjs
+ *  clear`) once the emergency has passed; already-running lanes were never touched. */
+export const DISPATCH_PAUSED_HINT = 'manual dispatch-pause is set — clear it (dispatch-pause.mjs clear) to resume new launches';
+
+/** The operator-facing gloss for a `capacity-cap` hold (#xupukxa) — surfaced beside the token so a held item
+ *  always tells the operator WHY it differs from `no free lane`: a lane physically exists, but launching it
+ *  would exceed `maxConcurrentLanes`. Nothing to reconcile or clear — either raise `WE_MAX_CONCURRENT_LANES`
+ *  (a deliberate, per-machine judgment call) or wait for an active lane to free up. */
+export const CAPACITY_CAP_HINT = 'a free lane exists but launching it would exceed the concurrent-lane cap — raise WE_MAX_CONCURRENT_LANES or wait for a lane to free up';
 
 /**
  * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
@@ -180,14 +222,20 @@ export const ALREADY_DONE_AGE_GATE_ENV = 'WE_DISPATCH_PLAN_ALREADY_DONE_AGE_MS';
  */
 /** The default drift-watched branch + its own live scope (#3464) — the SAME repo-qualified form `scope:`
  *  frontmatter and lease scopes already use, so it compares directly via `scopesOverlap`. Matches
- *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — kept as
- *  separate constants (not imported) because the IO shell only needs the SCOPE the branch is presumed to carry
- *  unreconciled changes in, not the branch-drift module's git-plumbing internals. Overridable via
+ *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — and since #3637
+ *  both are DERIVED from the same registry rather than separately declared here, so the two can no longer
+ *  drift apart (they had, silently, which is what made this a latent bug). Overridable via
  *  `--drift-scope=<repo:path,...>` for a future second long-lived branch, or `--no-drift-check` to skip the
  *  check entirely (mirrors `--no-ground-truth`). */
-export const DEFAULT_DRIFT_BRANCH = 'lane/mechanical-dispatcher';
-export const DEFAULT_DRIFT_TARGET = 'main';
-export const DEFAULT_DRIFT_SCOPE = Object.freeze(['we:scripts/conveyor/', 'we:skills-src/conveyor/']);
+// #3637 — all three now DERIVE from `we:scripts/lib/poc-branches.json`, the single place a POC branch is
+// declared, instead of being a second independent copy of `branch-drift.mjs`'s own constants. That duplication
+// was a latent bug (a change to one never reached the other) that #3637's survey found and named. `--drift-*`
+// still overrides every one of them, and the "future second long-lived branch" the comment above anticipated
+// is now simply a second registry entry.
+const DRIFT_DEFAULTS = driftDefaults();
+export const DEFAULT_DRIFT_BRANCH = DRIFT_DEFAULTS.branch;
+export const DEFAULT_DRIFT_TARGET = DRIFT_DEFAULTS.target;
+export const DEFAULT_DRIFT_SCOPE = DRIFT_DEFAULTS.scope;
 
 export function isStaleEnoughForGroundTruth(item, nowMs, ageGateMs = ALREADY_DONE_AGE_GATE_MS) {
   const at = Date.parse(String(item?.dateStarted || item?.dateOpened || ''));
@@ -213,6 +261,8 @@ function hasOpenBlockers(item) {
  *   leases: Array<{lane:(string|number), scope:string[]}>,
  *   freeLanes: Array<string|number>,
  *   driftBlockedScope?: string[]|null,
+ *   maxConcurrentLanes?: number,
+ *   dispatchPaused?: boolean,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
  *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
@@ -236,27 +286,51 @@ function hasOpenBlockers(item) {
  *                   IO shell's drift check itself fails). A scoped item overlapping this holds
  *                   `branch-drift-blocked`, checked ahead of the lease/rival overlap gates — see
  *                   {@link BRANCH_DRIFT_BLOCKED_HINT}.
+ *   • `maxConcurrentLanes` — (#xupukxa) the global lane-dispatch concurrency ceiling; `freeLanes` is trimmed
+ *                   against `leases.length` via {@link ../lib/lane-concurrency.mjs capToConcurrency} before any
+ *                   assignment. Defaults to `Infinity` (unlimited — today's pre-#xupukxa behavior) when
+ *                   omitted; the IO shell resolves a real default via
+ *                   {@link ../lib/lane-concurrency.mjs resolveMaxConcurrentLanes}. An item that would otherwise
+ *                   launch but is trimmed away by this holds `capacity-cap`, distinct from `no free lane`.
+ *   • `dispatchPaused` — (#3609) the MANUAL/EMERGENCY dispatch-pause lever's current state
+ *                   (`we:scripts/readiness/dispatch-pause.mjs#isDispatchPaused`). When true, every item that
+ *                   would otherwise be assigned a lane holds `dispatch-paused` instead — checked at the very
+ *                   last step, so it never relabels an item already held for a MORE specific reason. Defaults
+ *                   to `false` (unpaused — today's pre-#3609 behavior) when omitted.
  * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, trace = false } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
     .map((l) => ({ lane: l.lane ?? null, scope: normScope(l.scope) }));
-  const free = [...(Array.isArray(freeLanes) ? freeLanes : [])]; // consumed front-to-back, rank order
+  // #xupukxa — trim the free-lane list against the concurrency ceiling BEFORE any assignment, using the
+  // ALREADY-ACTIVE lease count this function already computed above. `overflow` is non-empty exactly when a
+  // physical free lane exists but the ceiling withheld it — the signal that distinguishes `capacity-cap` from
+  // a genuine `no free lane` below.
+  const { admitted, overflow } = capToConcurrency(freeLanes, { activeCount: activeLeases.length, cap: maxConcurrentLanes });
+  const free = [...admitted]; // consumed front-to-back, rank order
+  const capacityLimited = overflow.length > 0;
   const driftScope = normScope(driftBlockedScope); // [] when absent/null — scopesOverlap against [] is always false
 
   const launch = [];
   const held = [];
+  const admission = [];
   const launched = []; // { num, lane, scope } — SCOPED items launched THIS tick, for the rival-pair check
 
   // ── ONE pass over the queue in rank order. An unscoped item is NEVER launched (auto-prepare, not a serial
   //    floor): it is held `unshaped-no-scope` for the /conveyor skill to prepare its scope upstream. ──
   for (const item of items) {
     const num = item.num;
+    const gates = [];
+    if (trace) admission.push({ num, gates });
+    const blocked = (name, condition, observed) => {
+      if (trace) gates.push({ name, pass: !condition, observed });
+      return condition;
+    };
 
     // 0. GROUND TRUTH (#3457/#3460) — a real merged PR already closes this item out. Checked FIRST, ahead of
     //    every other branch: `blocked`, `needs-slice`, `needs-decision` and the scope/overlap reads below are
@@ -267,7 +341,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    simply trusts what it was handed, same as every other enrichment field on `item`. HOLDS, never
     //    auto-resolves — see `ALREADY_DONE_HINT` and `we:scripts/operations/dispatch-lane-io.mjs`'s
     //    `filterAlreadyDoneCandidates` docblock for why a false positive here must stay recoverable.
-    if (item.alreadyDonePr) {
+    if (blocked('already-done', !!item.alreadyDonePr, item.alreadyDonePr ?? null)) {
       held.push({ num, reason: 'already-done' });
       continue;
     }
@@ -277,7 +351,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    emits only READY items (isReady requires every blockedBy resolved), so their openBlockers is always
     //    []. It is kept as defense-in-depth for DIRECT core use (a future shell that feeds an unfiltered queue)
     //    and is pinned by the unit tests below. Checked FIRST for every item, scoped or not.
-    if (hasOpenBlockers(item)) {
+    if (blocked('blockedBy', hasOpenBlockers(item), { openBlockers: item.openBlockers ?? [], blockedBy: item.blockedBy ?? [] })) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
@@ -292,7 +366,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    blockers clear. `isGroupingKind` (scripts/check-standards-rules.mjs) is the single source of truth
     //    for the grouping-kind set, shared with conveyor-state.mjs, so a future grouping kind needs one
     //    update, not several scattered `kind === 'epic'` checks.
-    if (isGroupingKind(item.kind)) {
+    if (blocked('grouping-kind', isGroupingKind(item.kind), item.kind ?? null)) {
       held.push({ num, reason: 'needs-slice' });
       continue;
     }
@@ -304,7 +378,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    prepare/present TRIGGER: the /conveyor skill reads this hold (and `state.decisions`) and routes by the
     //    decision's prepared state — UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks.
     //    A BLOCKED decision is still `blocked` (checked first): it can't be prepared until its blockers clear.
-    if (item.kind === 'decision') {
+    if (blocked('decision-kind', item.kind === 'decision', item.kind ?? null)) {
       held.push({ num, reason: 'needs-decision' });
       continue;
     }
@@ -316,7 +390,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    file header): [] is not a meaningful "touches nothing" build, so it is treated identically to absent.
     //    Keying on the NORMALIZED scope's emptiness catches all four (undefined / non-array / [] / all-blank).
     const scope = normScope(item.scope);
-    if (scope.length === 0) {
+    if (blocked('scope', scope.length === 0, scope)) {
       held.push({ num, reason: 'unshaped-no-scope' });
       continue;
     }
@@ -326,14 +400,14 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    them is exactly what turned #3464's own incident into an unresolvable conflict. Hold until a fresh
     //    `branch-drift.mjs sweep` clears it. Checked before the lease/rival gates — same "blanket hold, not a
     //    lane-scheduling concern" precedence as the checks above.
-    if (driftScope.length > 0 && scopesOverlap(scope, driftScope)) {
+    if (blocked('branch-drift', driftScope.length > 0 && scopesOverlap(scope, driftScope), { scope, driftScope })) {
       held.push({ num, reason: 'branch-drift-blocked' });
       continue;
     }
 
     // 5. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
     const leaseHit = activeLeases.find((l) => scopesOverlap(scope, l.scope));
-    if (leaseHit) {
+    if (blocked('scope-overlap-lease', !!leaseHit, { scope, lease: leaseHit ?? null })) {
       held.push({ num, reason: `overlaps lane-${leaseHit.lane}` });
       continue;
     }
@@ -342,13 +416,24 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     //    one holds on the lane its rival took. A higher rival that did NOT launch is absent here, so it never
     //    spuriously blocks a lower item — the hold is only against work that is actually starting.
     const rival = launched.find((r) => scopesOverlap(scope, r.scope));
-    if (rival) {
+    if (blocked('scope-overlap-rival', !!rival, { scope, rival: rival ?? null })) {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
       continue;
     }
-    // 7. Disjoint — launch it on the next free lane, or hold for want of one.
-    if (free.length === 0) {
-      held.push({ num, reason: 'no free lane' });
+    // 6.5. MANUAL DISPATCH-PAUSE (#3609) — the item is otherwise launchable (every gate above passed); a
+    //    deliberate operator kill-switch holds it here instead of assigning a lane. Checked LAST, only at the
+    //    point a lane would actually be handed out, so it never relabels an item already held for a more
+    //    specific reason above (blocked / needs-slice / needs-decision / unshaped-no-scope / branch-drift-blocked
+    //    / an overlap) — pausing changes nothing about why those items weren't launching anyway.
+    if (blocked('dispatch-paused', dispatchPaused, dispatchPaused)) {
+      held.push({ num, reason: 'dispatch-paused' });
+      continue;
+    }
+    // 7. Disjoint — launch it on the next free lane, or hold for want of one. `capacity-cap` (#xupukxa) fires
+    //    instead of `no free lane` when a physical free lane exists but the concurrency ceiling withheld it —
+    //    a DIFFERENT reason on purpose, since the remedy differs (raise the cap / wait vs. free a lane).
+    if (blocked('lane-capacity', free.length === 0, { freeLanes: [...free], capacityLimited })) {
+      held.push({ num, reason: capacityLimited ? 'capacity-cap' : 'no free lane' });
       continue;
     }
     const lane = free.shift();
@@ -356,7 +441,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
     launched.push({ num, lane, scope });
   }
 
-  return { launch, held };
+  return { launch, held, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -372,10 +457,15 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<{num:*}>} the cleared rows, rank order preserved
  */
-export function selectClearedRows(rows, clearedKeys, norm) {
+export function selectClearedRows(rows, clearedKeys, norm, observe = null) {
   const cleared = clearedKeys instanceof Set ? clearedKeys : new Set(clearedKeys);
   const key = typeof norm === 'function' ? norm : (x) => String(x);
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && cleared.has(key(r.num)));
+  return (Array.isArray(rows) ? rows : []).filter((r) => {
+    if (!r) return false;
+    const pass = cleared.has(key(r.num));
+    observe?.(r.num, { name: 'queue-membership', pass, observed: { cleared: pass } });
+    return pass;
+  });
 }
 
 /**
@@ -390,12 +480,17 @@ export function selectClearedRows(rows, clearedKeys, norm) {
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<*>} the cleared ids with no ready row, original spelling preserved
  */
-export function clearedNotReady(clearedEntries, readyRows, norm) {
+export function clearedNotReady(clearedEntries, readyRows, norm, observe = null) {
   const key = typeof norm === 'function' ? norm : (x) => String(x);
   const ready = new Set((Array.isArray(readyRows) ? readyRows : []).map((r) => key(r?.num)));
   return (Array.isArray(clearedEntries) ? clearedEntries : [])
     .map((e) => (e && typeof e === 'object' ? e.num : e))
-    .filter((n) => n != null && String(n) !== '' && !ready.has(key(n)));
+    .filter((n) => {
+      if (n == null || String(n) === '') return false;
+      const pass = ready.has(key(n));
+      observe?.(n, { name: 'readiness', pass, observed: { inReadyBuildQueue: pass } });
+      return !pass;
+    });
 }
 
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
@@ -461,10 +556,16 @@ async function main(argv) {
   }
   const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
   const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
-  const rows = selectClearedRows(bqRows, cleared, normNum);
+  const selection = new Map();
+  const observeSelection = (num, gate) => {
+    const key = normNum(num);
+    if (!selection.has(key)) selection.set(key, { num: key, gates: [] });
+    selection.get(key).gates.push(gate);
+  };
+  const rows = selectClearedRows(bqRows, cleared, normNum, observeSelection);
   // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never
   // silently dropped (#2613 review, required 2b).
-  const notReady = clearedNotReady(sidecar, bqRows, normNum);
+  const notReady = clearedNotReady(sidecar, bqRows, normNum, observeSelection);
   let byNum = new Map();
   try {
     const { createRequire } = await import('node:module');
@@ -558,6 +659,10 @@ async function main(argv) {
       const branch = typeof flags['drift-branch'] === 'string' ? flags['drift-branch'] : DEFAULT_DRIFT_BRANCH;
       const target = typeof flags['drift-target'] === 'string' ? flags['drift-target'] : DEFAULT_DRIFT_TARGET;
       const scope = typeof flags['drift-scope'] === 'string' ? flags['drift-scope'].split(',').filter(Boolean) : [...DEFAULT_DRIFT_SCOPE];
+      // #3637 — no branch to check (an EMPTY POC-branch registry and no `--drift-branch=`) means there is
+      // nothing carrying unreconciled drift, so there is nothing to hold on. Skip rather than shelling out
+      // with a `null` branch name and relying on the fail-open catch to clean it up.
+      if (!branch) throw new Error('no POC branch registered and no --drift-branch given — nothing to check');
       const out = execSync('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       const verdict = JSON.parse(out);
       if (verdict?.status === 'blocked') driftBlockedScope = scope;
@@ -566,7 +671,23 @@ async function main(argv) {
     }
   }
 
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope });
+  // 3.6 MANUAL DISPATCH-PAUSE (#3609) — read the operator's advisory pause marker. FAIL-OPEN on any error
+  //     (module missing, unreadable/corrupt file) — an absent/unreadable pause signal must never itself hold
+  //     dispatch; only an explicit `paused:true` marker does. Skippable via `--no-pause-check` (mirrors
+  //     `--no-ground-truth` / `--no-drift-check`).
+  let dispatchPaused = false;
+  if (!flags['no-pause-check']) {
+    try {
+      const { isDispatchPaused } = await import('./dispatch-pause.mjs');
+      dispatchPaused = isDispatchPaused();
+    } catch (e) {
+      log(`  ⚠ dispatch-pause check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
+    }
+  }
+
+  // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
+  const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -577,6 +698,14 @@ async function main(argv) {
     plan.held.push(pr ? { num, reason: 'already-done', alreadyDonePr: pr } : { num, reason: 'cleared-but-not-ready' });
   }
 
+  // Membership/readiness evidence comes from the selection above, including cleared
+  // entries which never reached the pure build planner.
+  plan.selection = [...selection.values()];
+  const notReadyKeys = new Set(notReady.map(normNum));
+  plan.cleared = sidecar.map((entry) => ({
+    num: normNum(entry.num),
+    ready: !notReadyKeys.has(normNum(entry.num)),
+  }));
   if (flags.json) {
     // Drain synchronously before exit — `process.stdout.write` is async to a pipe and the `process.exit(0)`
     // below would drop the unflushed tail, truncating this JSON for an `execFileSync`/pipe consumer (exactly
@@ -587,7 +716,8 @@ async function main(argv) {
   } else {
     log(
       `dispatch plan: ${plan.launch.length} launch · ${plan.held.length} held ` +
-        `(${queue.length} queued · ${leases.length} lease(s) · ${freeLanes.length} free lane(s))`,
+        `(${queue.length} queued · ${leases.length} lease(s) · ${freeLanes.length} free lane(s) · ` +
+        `cap ${maxConcurrentLanes} concurrent lane(s))`,
     );
     for (const l of plan.launch) log(`  ▶ #${l.num} → lane-${l.lane}`);
     for (const h of plan.held) {
@@ -599,7 +729,9 @@ async function main(argv) {
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
               : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
-                : '';
+              : h.reason === 'capacity-cap' ? ` (${CAPACITY_CAP_HINT})`
+                : h.reason === 'dispatch-paused' ? ` (${DISPATCH_PAUSED_HINT})`
+                  : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }

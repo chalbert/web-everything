@@ -120,6 +120,7 @@ import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwi
 // xsbyo56 — the PARSE half of #2324's escalation-reason block, reused (not re-implemented) so the #2832
 // held-reconcile comment can name the SPECIFIC file(s) a park already scored, not just the hold label.
 import { parseEscalationReason } from './review-detail.mjs';
+import { deriveResolutionBasis, graduatedToFromBody, renderResolutionBasisBanner } from './lib/review-render.mjs'; // #2447 — the graduatedTo resolution-basis banner (presentation only; never gates)
 import { extractManifestFromBody, manifestAuditLine, asItemId, isItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.mjs'; // #2681 — the RED-MAIN dispatch-freeze the sole writer consults (stop-the-line while main is red)
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
@@ -131,6 +132,9 @@ import { deliveredItemNumsFromPr } from './lib/open-pr-items.mjs'; // #3441 — 
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
 import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.mjs';
+// #3215 — the drain applies holds of its own (a fresh park, a #2409 stale-acceptance re-park); this is the
+// same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
+import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -1309,6 +1313,16 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       const read = (typeof readOf === 'function' ? readOf(repo, p.number) : null) || {};
       p.commits = read.commits || [];
       const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label) });
+      // #2502 — the tip commit's SHA, threaded onto every emitted verdict and, via the `{...v}` spread used to
+      // build `remaining`/`plan.ready`/`plan.deferred`, onto each of the six result buckets a caller (the
+      // drain-daemon stuck detector) actually reads: toMerge/merged/skipped/parked/deferred/failed — NOT
+      // rebased/healed/pendingRebased, which stay plain PR-number arrays (out of this item's scope). Already
+      // in hand — no new `gh` call. The LAST element is the tip because `gh pr view --json commits` returns
+      // GitHub's PullRequest.commits connection, which is chronological (oldest-first) by API contract, not an
+      // incidental ordering — the same assumption `isAiGeneratedPr` above already leans on implicitly (it
+      // never re-sorts `pr.commits` either).
+      const tipOid = p.commits.length ? p.commits[p.commits.length - 1]?.oid : null;
+      v.headSha = typeof tipOid === 'string' && tipOid ? tipOid : null;
       // #3308 (round-2 correctness fix) — the PASS-WIDE half of the relief valve, recorded HERE because it is the
       // only place it is knowable. The scoped `=<pr#>` form stamps `v.reliefWaived` down in the escalation loop,
       // but that whole loop is gated on `REVIEW_ESCALATION = label && !escalationRelief.passWide` — so under a BARE
@@ -1326,6 +1340,9 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       v.headRef = p.headRefName;
       attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
       v.prLabels = p.labels || [];
+      // #2447 — the body's own `graduatedTo:` note, extracted now so the escalation pass (which no longer holds `p`)
+      // can derive the resolution basis without keeping the whole body on every verdict. `null` for nearly all PRs.
+      v.bodyGraduatedTo = graduatedToFromBody(p.body);
       verdicts.push(v);
     }
   }
@@ -1345,6 +1362,7 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
   v.stackParents = m && Array.isArray(m.stackParents) ? m.stackParents.map(asItemId) : [];
   v.manifestRefs = m && Array.isArray(m.repos) ? m.repos.map((r) => r && r.ref).filter(Boolean) : [];
   v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+  v.manifestGraduatedTo = m && typeof m.graduatedTo === 'string' ? m.graduatedTo : null; // #2447 — resolution-basis source
   const local = typeof isLocalRepo === 'function' ? isLocalRepo(repo) : false;
   v.base = manifestBaseForRepo(m, local ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(repo));
   v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
@@ -1659,7 +1677,7 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
       // ALSO waits on a real blockedBy/stackParents edge, or that fails closed on degraded/truncated/incomplete
       // (which MAY clear on a re-fetch), is NOT flagged — the watch keeps polling.
       const heldCoupleOnly = blockWait.length === 0 && stackWait.length === 0 && blindWait.length === 0 && coupleDeferred && (c.coupleDeferReason === 'held' || c.coupleHumanTerminal === true);
-      deferred.push({ num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}) });
+      deferred.push({ num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}), headSha: c.headSha ?? null });
     }
   }
   // Numeric items (landed NNNs) sort by number ascending, as before. A hash item has no numeric order yet
@@ -1886,6 +1904,20 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
  */
 export function drainReasonMarker(kind) { return `<!-- drain-${kind}-reason -->`; }
 
+/**
+ * #2447 — put the graduatedTo RESOLUTION BASIS banner (`renderResolutionBasisBanner`) ahead of a park/skip reason, so
+ * the durable PR comment on a backlog-only dedup-resolve says "no code change — deliverable already landed in <sha>"
+ * before anyone reads the reason or the file list. No basis (every other PR) or no reason ⇒ the reason is returned
+ * UNCHANGED, so the rendered comment — and `hasDrainReasonComment`'s dedupe on it — stay byte-identical. Pure.
+ * @param {string|null|undefined} reasonText
+ * @param {object|null|undefined} basis — a `deriveResolutionBasis` result.
+ * @returns {string|null|undefined}
+ */
+export function withResolutionBasis(reasonText, basis) {
+  const banner = renderResolutionBasisBanner(basis);
+  return banner && reasonText ? `${banner}\n\n${reasonText}` : reasonText;
+}
+
 /** Build the comment body for a park/skip/land reason. Pure.
  *  `kind` — 'park' (review-escalation parked it), 'skip' (a real conflict / red check), or 'land' (xnsk54v
  *  follow-up — the drain is about to MERGE a manifest-carrying PR; this records what it acted on BEFORE the
@@ -1954,6 +1986,42 @@ export const LAND_REASON = 'landing — recording the acted-on manifest escalati
  *  `blockedBy`, so passing the whole verdict is safe — its extra keys are ignored. Collapses the identical
  *  park/skip/land call sites into one. */
 const auditLineFor = (x) => x.hasManifest ? manifestAuditLine(x) : undefined;
+
+/**
+ * #3215 — RECORD, THROUGH THE LEDGER'S SINGLE OWNER, A HOLD THE DRAIN APPLIES ON ITS OWN.
+ *
+ * `review-set-label.mjs` already writes the review-seam verdict through `buildVerdictRecord`/`appendVerdict`;
+ * this is the SAME format, the SAME two calls, for the OTHER seam the ledger did not yet cover — a fresh park
+ * or a #2409 stale-acceptance re-park the drain applies with no reviewer in the loop. Without this, every
+ * drain-applied hold is `unledgered` (`we:scripts/review-ledger-check.mjs`), and a Phase-2 gate reading only
+ * the ledger would merge straight past a hold that never made it in — "the hold that didn't hold" (#2750,
+ * #2820, #2745) re-opened from the other side.
+ *
+ * `applyLabel` is the SAME label string `decideReviewGate` returned (`REVIEW_LABELS.pending` /
+ * `REVIEW_LABELS.human`) — never a hand-picked verdict. `labelVerdictOf` is the one place a label becomes a
+ * {@link VERDICTS} member, the SAME function `review-ledger-check`'s comparator uses to read a PR's live
+ * label, so this row can never disagree with what the checker itself would derive from the label the drain
+ * just applied.
+ *
+ * FAIL-SOFT, same posture as `review-set-label.mjs`'s Phase-1 write: a ledger miss must never block the drain
+ * pass. The label write is the thing that holds the PR; this only makes that hold legible to the ledger.
+ *
+ * @param {{repo: string, pr: number|string, applyLabel: string, reason?: string, headSha?: string|null}} o
+ * @returns {{ok: boolean, errors: string[]}}
+ */
+export function recordDrainVerdict({ repo, pr, applyLabel, reason = '', headSha = null } = {}) {
+  const verdict = labelVerdictOf([applyLabel]);
+  if (!verdict) return { ok: false, errors: [`no VERDICTS member for label ${JSON.stringify(applyLabel)}`] };
+  try {
+    const appended = appendVerdict(buildVerdictRecord({
+      repo, pr, verdict, at: new Date().toISOString(), reason, headSha,
+      declaredActor: 'drain', source: 'merge-ai-prs',
+    }));
+    return appended.ok ? { ok: true, errors: [] } : { ok: false, errors: appended.errors };
+  } catch (e) {
+    return { ok: false, errors: [String((e && e.message) || e).split('\n')[0]] };
+  }
+}
 
 /**
  * #2333 — should a PARK stamp its escalation reason as a PR comment (#2313)? ONLY for a NON-human
@@ -3910,6 +3978,17 @@ async function runCli() {
       // are always CUMULATIVE while `changedFiles` may be de-inflated to `v.base…head`; the verdict's
       // `diffHunksBasisFiles` (= `humanBasisFiles`, same basis as the hunks) is what a detector pairs them with.
       const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks, basisNarrowed });
+      // #2447 — the graduatedTo RESOLUTION BASIS, off the same file set + diff text the score just read (no extra
+      // `gh` call). Backlog-only is judged on the CUMULATIVE basis (`humanBasisFiles`) so a de-inflated stacked
+      // base can never make a code-carrying PR claim "no code change". Presentation only: it feeds the park/skip
+      // comment, the verdict log line and the JSON report — never `decideReviewGate`, a label, or a merge.
+      v.resolutionBasis = deriveResolutionBasis({
+        manifest: v.manifestGraduatedTo ? { graduatedTo: v.manifestGraduatedTo } : null,
+        diffText: netDiffText?.text || null,
+        bodyGraduatedTo: v.bodyGraduatedTo,
+        changedFiles: Array.isArray(humanBasisFiles) ? humanBasisFiles : changedFiles,
+        crossRepo: v.crossRepo,
+      });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later
@@ -3954,7 +4033,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons, headSha: v.headSha ?? null });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
         continue;
       }
@@ -4004,7 +4083,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons, headSha: v.headSha ?? null });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
         continue;
       }
@@ -4161,6 +4240,13 @@ async function runCli() {
         // producer- and drain-applied verdicts can never drift on what "already labelled" means.
         if (gate.applyLabel && !DRY_RUN) {
           if (shouldApplyReviewLabel(gate.applyLabel, v.prLabels)) {
+            // #3215 — the ledger is written FIRST, before the `gh` transport call, same ordering rationale as
+            // `review-set-label.mjs`'s Phase-1 write: this hold is already DECIDED (the gate verdict above is
+            // final), so a `gh` failure below must not un-form it — only the durable record of it. Fail-soft:
+            // `recordDrainVerdict` never throws, and a miss costs `review-ledger-check`'s `unledgered` count,
+            // never this park.
+            const ledgered = recordDrainVerdict({ repo: v.repo || localSlug, pr: v.num, applyLabel: gate.applyLabel, reason: v.reason, headSha: v.headSha ?? null });
+            if (!ledgered.ok && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} verdict-ledger append (#3215, drain hold, non-fatal) — ${ledgered.errors.join('; ')}\n`);
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // #xmnl36p — A CLEARANCE REVOCATION IS NEVER SILENT, and this is the ONE path that guarantees it.
@@ -4195,7 +4281,7 @@ async function runCli() {
             // timestamped comment. Only for a manifest-carrying PR (an orphan/impl PR has nothing body-sourced
             // to record — its comment stays byte-identical to before). Does not change the verdict/label already
             // decided above; it only records what was acted on, so a later body edit is tamper-evident.
-            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
+            const posted = postDrainReasonComment(v.repo, v.num, 'park', withResolutionBasis(v.reason, v.resolutionBasis), auditLineFor(v));
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
             // This branch OWNS the durable `park` comment for an agent-reviewable park — whether it was posted now
             // or `postDrainReasonComment` deduped it against an identical one from a prior pass, the record exists.
@@ -4270,7 +4356,7 @@ async function runCli() {
         v.reviewParked = durableRecorded;
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${parkReasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
@@ -4332,14 +4418,14 @@ async function runCli() {
       if (!(v.certifyLabel || v.aiGenerated)) continue;
       // xnsk54v follow-up — mirror the park path: record the acted-on manifest values into the durable skip
       // comment for a manifest-carrying PR (tamper-evidence), leaving orphan/impl skip comments unchanged.
-      const posted = postDrainReasonComment(v.repo, v.num, 'skip', v.reason, auditLineFor(v));
+      const posted = postDrainReasonComment(v.repo, v.num, 'skip', withResolutionBasis(v.reason, v.resolutionBasis), auditLineFor(v));
       if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} skip reason stamped on PR\n`);
     }
   }
 
   if (!AS_JSON) {
     // @merge-gate-exempt human-readable one-line-per-verdict log only (no control flow); a held PR prints as `· skip` with its hold reason, which is correct
-    for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} ${repoTag(v.repo)}${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
+    for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} ${repoTag(v.repo)}${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}${v.resolutionBasis ? `\n      📦 graduatedTo: ${v.resolutionBasis.graduatedTo} — no code change, deliverable already landed in ${v.resolutionBasis.ref}` : ''}\n`);
     process.stderr.write(`${DRY_RUN ? 'DRY-RUN: ' : ''}${toMerge.length} AI PR(s) to merge${label ? ` (label "${label}")` : ''}, ${skipped.length} skipped.\n`);
   }
 
@@ -4465,7 +4551,7 @@ async function runCli() {
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
             continue;
           }
-          merged.push({ num: c.num, repo: c.repo }); progressed = true;
+          merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null }); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
           // #2393 — a WE-carrier merge (the PR carrying its OWN manifest = the resolve carrier + where `bornAs`
           // is stamped) PROVES the couple landed this run: record its item so a descendant that stackParents on
@@ -4497,7 +4583,7 @@ async function runCli() {
             pendingRebased.push(c.num);
             if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(c.repo)}${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
           } else {
-            failedMerges.push({ num: c.num, repo: c.repo, detail });
+            failedMerges.push({ num: c.num, repo: c.repo, detail, headSha: c.headSha ?? null });
             if (!AS_JSON) process.stderr.write(`  ✗ ${repoTag(c.repo)}${c.num} merge failed: ${detail}\n`);
           }
         }
@@ -4719,7 +4805,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 

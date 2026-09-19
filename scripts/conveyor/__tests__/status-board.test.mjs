@@ -257,3 +257,63 @@ describe('infra-blocked (#2660) — outside-dependency outage', () => {
     expect(board).not.toContain('auto-retry exhausted');
   });
 });
+
+// ── #3296 — a stood-down PR (a fix agent explicitly gave up) reads DISTINCT from an ordinary review-park:
+//    its own 🛑 marker, its own "STOOD DOWN — NEEDS YOU" section, and `/finish` (takeover) instead of `/review`
+//    — carved OUT of the generic NEEDS YOU bucket, never folded into it (the real gap this closes, #3296). ──
+describe('stood-down PRs (#3296) — a real /finish-me signal, distinct from ordinary review-park', () => {
+  const cleanState = (prs, lanes = []) => ({
+    lanes, queue: [], clearedNotReady: [], unshaped: [], freeSlots: 6, prs,
+    daemon: { resident: true, parked: [] }, idle: {}, health: { verdict: 'ok', stalled: [], errors: [] },
+  });
+
+  it('a stood-down PR renders in its OWN section with the 🛑 marker and the /finish action', () => {
+    const board = renderBoard(cleanState([
+      { num: '2223', prNumber: 2223, state: 'OPEN', ci: 'pending', labels: ['review:changes'], stoodDown: true },
+    ]));
+    expect(board).toContain('STOOD DOWN — NEEDS YOU');
+    expect(board).toContain(`${MARKERS.standDown} PR #2223 review:changes · a fix agent stood down → /finish 2223`);
+  });
+
+  it('a stood-down PR is EXCLUDED from the generic NEEDS YOU section (never double-counted there)', () => {
+    const board = renderBoard(cleanState([
+      { num: '2223', prNumber: 2223, state: 'OPEN', ci: 'pending', labels: ['review:changes'], stoodDown: true },
+    ]));
+    expect(board).not.toMatch(/\nNEEDS YOU\n/);
+  });
+
+  it('a MIX of one stood-down PR and one ordinary parked PR renders BOTH sections, each with only its own row', () => {
+    const board = renderBoard(cleanState([
+      { num: '2223', prNumber: 2223, state: 'OPEN', ci: 'pending', labels: ['review:changes'], stoodDown: true },
+      { num: '2531', prNumber: 612, state: 'OPEN', ci: 'pass', labels: ['review:human'], stoodDown: false },
+    ]));
+    expect(board).toContain('STOOD DOWN — NEEDS YOU');
+    expect(board).toContain(`${MARKERS.standDown} PR #2223`);
+    expect(board).toContain('NEEDS YOU');
+    expect(board).toContain(`${MARKERS.parked} PR #612 review:human → /review 612`);
+    // neither section's row leaks into the other.
+    const standDownBlock = board.split('STOOD DOWN — NEEDS YOU')[1].split('\n\n')[0];
+    expect(standDownBlock).not.toContain('#612');
+  });
+
+  it('the header needs-you count is the HONEST total across both buckets', () => {
+    const board = renderBoard(cleanState([
+      { num: '2223', prNumber: 2223, state: 'OPEN', ci: 'pending', labels: ['review:changes'], stoodDown: true },
+      { num: '2531', prNumber: 612, state: 'OPEN', ci: 'pass', labels: ['review:human'], stoodDown: false },
+    ]));
+    expect(board).toContain('2 needs-you');
+  });
+
+  it('a clean board with no stood-down PR renders no STOOD DOWN section', () => {
+    const board = renderBoard(cleanState([{ num: '2531', prNumber: 612, state: 'OPEN', ci: 'pass', labels: ['review:human'], stoodDown: false }]));
+    expect(board).not.toContain('STOOD DOWN');
+  });
+
+  it('a stood-down PR still on an active lane shows "stood down" on its RUNNING row too', () => {
+    const board = renderBoard(cleanState(
+      [{ num: '2531', prNumber: 612, state: 'OPEN', ci: 'pass', labels: ['review:changes'], stoodDown: true }],
+      [{ lane: 2, num: '2531', session: 'conveyor-2531', lease: ['we:src/y.ts'], breach: [] }],
+    ));
+    expect(board).toContain(`${MARKERS.parked} #2531 review-parked (PR #612 · stood down)`);
+  });
+});

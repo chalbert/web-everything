@@ -4,6 +4,11 @@ kind: task
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:scripts/review-set-label.mjs
+  - we:scripts/lib/review-independence.mjs
+  - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/lib/__tests__/review-independence.test.mjs
 ---
 
 # STAMP_LOST is documented as refused but no code path refuses it, so an author can self-clear

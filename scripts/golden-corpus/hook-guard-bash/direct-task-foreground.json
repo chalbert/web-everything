@@ -1,0 +1,9 @@
+{
+  "id": "direct-task-foreground",
+  "cmd": "node scripts/gemini-direct-task.mjs --task=\"x\"",
+  "ctx": {},
+  "basis": "#3383 — foreground direct-task invocation is legitimate",
+  "expect": {
+    "reason": null
+  }
+}

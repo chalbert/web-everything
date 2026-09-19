@@ -289,7 +289,7 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
     // #2200 depends on #2199; both open → only the blocker is ready this pass.
     const { ready, deferred } = planLabelDrain([cand(2, 2200, [2199]), cand(1, 2199, [])]);
     expect(ready.map((c) => c.num)).toEqual([1]);
-    expect(deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+    expect(deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199], headSha: null }]);
   });
 
   it('a blockedBy item NOT in the candidate set is treated as already landed (ready)', () => {
@@ -314,7 +314,7 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
   it('a hash-keyed blockedBy DEFERS while its blocker is open, then FREES once the blocker leaves the set', () => {
     const deferredPass = planLabelDrain([cand(2, 'x5lail9', ['xiea3rt']), cand(1, 'xiea3rt', [])]);
     expect(deferredPass.ready.map((c) => c.num)).toEqual([1]);
-    expect(deferredPass.deferred).toEqual([{ num: 2, item: 'x5lail9', waitOn: ['xiea3rt'] }]);
+    expect(deferredPass.deferred).toEqual([{ num: 2, item: 'x5lail9', waitOn: ['xiea3rt'], headSha: null }]);
 
     // the caller's cascade removes a merged item between passes (mirrors the real for(;;) loop) — freeing it.
     const freedPass = planLabelDrain([cand(2, 'x5lail9', ['xiea3rt'])]);
@@ -372,7 +372,7 @@ describe('merge-ai-prs — #2683 extraOpenItems (the --only fast drain orders li
 
     const gated = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: [2199] });
     expect(gated.ready).toEqual([]);
-    expect(gated.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+    expect(gated.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199], headSha: null }]);
   });
 
   it('FREES the target once its blocker is no longer an open sibling (blocker landed)', () => {
@@ -385,12 +385,12 @@ describe('merge-ai-prs — #2683 extraOpenItems (the --only fast drain orders li
     // open sibling in extraOpenItems flips it back to "still open → defer" (proof source 2).
     const gated = planLabelDrain([sc(5, 'xchild0', [2201])], { extraOpenItems: [2201] });
     expect(gated.ready).toEqual([]);
-    expect(gated.deferred).toEqual([{ num: 5, item: 'xchild0', waitOn: [2201] }]);
+    expect(gated.deferred).toEqual([{ num: 5, item: 'xchild0', waitOn: [2201], headSha: null }]);
   });
 
   it('extraOpenItems tolerates a Set, hash ids, and null entries', () => {
     const gated = planLabelDrain([cand(2, 'x5lail9', ['xiea3rt'])], { extraOpenItems: new Set(['xiea3rt', null]) });
-    expect(gated.deferred).toEqual([{ num: 2, item: 'x5lail9', waitOn: ['xiea3rt'] }]);
+    expect(gated.deferred).toEqual([{ num: 2, item: 'x5lail9', waitOn: ['xiea3rt'], headSha: null }]);
   });
 });
 
@@ -410,7 +410,7 @@ describe('merge-ai-prs — #xq985wu decouple merge-ordering from the ready-to-me
     // of `ready-to-merge` so it is NOT a candidate. Its item is fed via the label-blind open-PR set.
     const gated = planLabelDrain([cand(2, 2200, [2199])], { extraOpenItems: new Set([2199, 2200]) });
     expect(gated.ready).toEqual([]);
-    expect(gated.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+    expect(gated.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199], headSha: null }]);
   });
 
   it('AC1 mirror: the SAME dependent is READY once the blocker is absent from BOTH the candidate list AND extraOpenItems (truly landed)', () => {
@@ -436,7 +436,7 @@ describe('merge-ai-prs — #xq985wu decouple merge-ordering from the ready-to-me
     expect(withSuperset.deferred).toEqual(baseline.deferred);
     // and the concrete partition is unchanged: the blocker (#1) + the disjoint sibling (#3) land; #2 defers.
     expect(withSuperset.ready.map((c) => c.num)).toEqual([1, 3]);
-    expect(withSuperset.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+    expect(withSuperset.deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199], headSha: null }]);
   });
 
   // AC3 — the wiring. `orderExtraOpenItems` is sourced from the label-blind full-open context (`openPrContext`)
@@ -524,7 +524,7 @@ describe('merge-ai-prs — #999/xq985wu liveness: blockWait honors landed-proof 
   it('F2 control: an open blocker with no landed-proof still DEFERS the dependent', () => {
     const plan = planLabelDrain([cand(2, 200, [100])], { extraOpenItems: new Set([100, 200]) });
     expect(plan.ready).toEqual([]);
-    expect(plan.deferred).toEqual([{ num: 2, item: 200, waitOn: [100] }]);
+    expect(plan.deferred).toEqual([{ num: 2, item: 200, waitOn: [100], headSha: null }]);
   });
 
   // Cascade-level test — the seam NO original AC touched. Faithfully simulates the real cascade's freeing
@@ -582,7 +582,7 @@ describe('merge-ai-prs — #2393 proof-of-land stackParents gate (planLabelDrain
     // child (#2 stackParents [parent]) + parent (#1). Pass 1: parent open ⇒ child NOT proven ⇒ deferred.
     const p1 = planLabelDrain([sc(2, 'xchild0', ['xparen0']), sc(1, 'xparen0', [])]);
     expect(p1.ready.map((c) => c.num)).toEqual([1]);
-    expect(p1.deferred).toEqual([{ num: 2, item: 'xchild0', waitOn: ['xparen0'] }]);
+    expect(p1.deferred).toEqual([{ num: 2, item: 'xchild0', waitOn: ['xparen0'], headSha: null }]);
 
     // the caller merged the parent's WE carrier this pass (adds it to landedThisPass) + removed it from the set.
     const p2 = planLabelDrain([sc(2, 'xchild0', ['xparen0'])], { landedThisPass: new Set(['xparen0']) });
@@ -601,7 +601,7 @@ describe('merge-ai-prs — #2393 proof-of-land stackParents gate (planLabelDrain
     // a provisional hash we cannot positively prove landed defers the descendant (the stowaway guard).
     const absent = planLabelDrain([sc(5, 'xchild0', ['xghost0'])]);
     expect(absent.ready).toEqual([]);
-    expect(absent.deferred).toEqual([{ num: 5, item: 'xchild0', waitOn: ['xghost0'] }]);
+    expect(absent.deferred).toEqual([{ num: 5, item: 'xchild0', waitOn: ['xghost0'], headSha: null }]);
   });
 
   it('a parent bornAs-proven on main (provenOnMain) frees the child even when absent from the candidate set', () => {

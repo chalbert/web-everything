@@ -3,9 +3,11 @@ bornAs: x47hwpw
 kind: story
 size: 2
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-15"
 tags: []
+deliveryAgent: codex
 ---
 
 # mutation-check operation has zero skill coverage — no session is told it exists

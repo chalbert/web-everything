@@ -2918,6 +2918,53 @@ Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
 ---
 
+### A long-lived divergent branch is a declared "POC branch" delivery mode — landing inside it skips review; the full review runs once, at graduation {#poc-branch-declared-delivery-mode}
+
+**Ratified 2026-09-12 (operator, in conversation; #3637, amending epic #3383's own doctrine rule 10).** A
+long-lived divergent branch is a **DECLARED delivery mode** — a **"POC branch"** — not temporary scaffolding
+that must be wound down. What is forbidden is an **UNDECLARED, unreconciled** one. The operator's own words,
+verbatim: *"I do want N POC as new feature. then goal is to be able to delivery quickly into a POC, so we must
+not be slow by the same slow PR process, otherwise there is not benefit. real review will happen when the POC
+graduate."* Four clauses:
+
+1. **N POC branches may stand concurrently.** Each is a first-class delivery target an item declares
+   (`deliveryTarget: <branch>`), validated against a registry at filing time; each graduates to `main` on its
+   own timeline. This is a **durable, cross-cutting rule**, not a one-epic quirk scoped to `#3383` — any
+   epic/session may declare and use a POC branch as a delivery mode.
+2. **Landing INSIDE a POC branch skips the review gate entirely.** The item's own tests/build validation
+   (`we:scripts/operations/run.mjs verify` / `we:scripts/verify-lane.mjs`) is the **only** gate — no judge
+   panel, no escalation label, no per-landing review pass of any shape, not even a cheap direct-diff
+   `converge` pass. A landing tax of any shape, however small, is exactly the latency the operator ruled out.
+3. **The full review process runs once, undiluted, at graduation.** Moving a POC branch's content to `main`
+   goes through the FULL existing process, unchanged — a real PR to `main`,
+   [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)'s gate, the jury/judge panel, and `review:human`
+   where the diff touches gate machinery or the statute file. Nothing about landing INSIDE a POC branch
+   touches graduation.
+4. **What the original (narrower) framing got right, and still holds:** (a) the runner's own steady state is
+   still tracking `main` — a POC branch is a delivery TARGET for items that declare it, never the default
+   tracking ref; (b) build no more machinery than the POC in front of you actually needs; (c) every POC
+   branch must NAME what it is for and who graduates it — a registry entry: branch, graduation target, scope,
+   graduation item — an **unnamed** divergent branch is still exactly the failure mode that cost a ~40-minute
+   manual reconciliation and 15 hand-resolved conflicts when `origin/lane/mechanical-dispatcher` drifted 97
+   commits behind `main` behind a silently-failing auto-sync loop; (d) drift is still actively reconciled per
+   branch, never tolerated (`we:scripts/conveyor/branch-drift.mjs`) — a drifted branch still holds its own
+   items.
+
+**What this amendment DELETES from the prior rule.** The claim that a divergent branch is inherently "a
+temporary build tool, not the default steady state" that must be wound down, and the assumption that there is
+only ever one such branch at a time.
+
+**Lineage:** #3637 (ratified 2026-09-12, operator, in conversation; `bornAs: x7ppgg6`), amending epic
+`#3383`'s own operating doctrine rule 10 — the before/after and full design (transport, completion signal,
+registry shape) sit on `#3637` itself and in `we:skills-src/mechanical-delivery-doctrine/SKILL.md` (rule 10),
+which carries the epic-scoped operational detail and cites this anchor as the canonical statute. Composes
+with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the mechanism this rule exempts a POC landing
+from, and the one graduation still uses undiluted) and
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (tests/build validation is the
+deterministic gate that survives; judgment is deferred, not skipped).
+
+---
+
 ### PR ci-lifecycle state is a total, deterministic label function — no state read from a label's absence {#ci-lifecycle-total-label-function}
 
 **Ratified 2026-07-10 (#2281).** The **directive** (a 2026-07-04 user call, settled statute): a PR's lifecycle status is always reflected by a **deterministically-applied label**, never inferred from the *absence* of one. Today three ci-lifecycle states break this — a `--no-wait` open PR is left **unlabelled** (`we:scripts/pr-land.mjs:577-579`), a red required check is left **unlabelled** (`we:scripts/pr-land.mjs:603`), and **blocked-ness carries no label at all** (it lives only in the uncommitted `we:.lane-manifest.json`, re-derived per drain pass at `we:scripts/merge-ai-prs.mjs:756-758`). **Scope:** this governs the **ci-lifecycle dimension** (checks / blocked) — a *different axis* from the `ready-to-merge` **landing-gate**, whose absence-semantics (#2183 F1 "the signal is a PR label"; #2138 F4 "a local queued token") are **preserved, not overridden**; the two compose. **Fork 1 (granularity) — ratified (b) total coverage:** every ci-lifecycle state carries a deterministic label — `checking` (in-flight) / `ci:failed` (red) / `blocked` (manifest `blockedBy` open) / `ready-to-merge` (green) — and **exactly one** is present on every open AI PR. The labels are set by **generalizing the existing CI-truth reconcile pass** (`reconcileGreenLabels`, `we:scripts/merge-ai-prs.mjs:702-718`, already run every drain pass + `--watch` interval) from green-only to *all* lifecycle labels — a self-healing sweep, **not** a per-check-tick write path in `pr-land`. The lighter **(a) terminal-only** (leave "checks-in-flight" bare) was the directive-author's available *relaxation* but was **declined**: it reads one state from absence (the directive's exact prohibition), and it fails its own "bare ⟺ in-flight" totality claim anyway — a check going red *after* `pr-land` exits strands a **bare terminal** PR, and the fix for that is the very reconcile-pass generalization (b) needs, so (a)'s only advantage (less label churn) collapses. **Fork 2 (names) — ratified `ci:failed` + bare `blocked`:** `ci:failed` names the *deterministic* red-check fact and opens a `ci:*` state family (`checking` may namespace as `ci:running`); `blocked` stays **bare** to match its true lifecycle sibling, the also-bare `ready-to-merge` landing-gate label (the lifecycle family's precedent is *no* namespace, not `review:*`'s). Rejected: `needs-fix` (reads as human judgment, not "`test` is red") and `blocked:deps` (YAGNI — the manifest `blockedBy` is the only block source that exists). **Composition (codified, not re-decided):** lifecycle labels are **mutually exclusive among themselves** and **orthogonal to `review:*`** (a PR can be `blocked` + `review:pending`) — already how the code composes `ready-to-merge` + `review:*` (`we:scripts/pr-land.mjs:625-630`). **Build arm (successor, agent-ready — #2421):** generalize the reconcile transition table to `lifecycleLabelFromCiTruth` + mint the new labels idempotently in the existing `gh label create` loop (`we:scripts/merge-ai-prs.mjs:870-881`) + extend the transition-table tests (`we:scripts/__tests__/pr-land.test.mjs`, `we:scripts/__tests__/merge-ai-prs.test.mjs`). Relates #2199 (the on-green `ready-to-merge` precedent this generalizes), #2216 (the reconcile pass that makes (b) cheap and (a) unsound), #2262 (the `review:*` mint step the new labels join), #2183 F1 / #2138 F4 (the landing-gate absence-semantics preserved).
@@ -3594,6 +3641,22 @@ trust-chain (engine = agent-clearable on a converged independent panel) and #248
 and [#agent-convergence-independent-validation](#agent-convergence-independent-validation) (independence rests on a
 distinct validator, never peer/self agreement).
 
+**Rider — the independence invariant extends to an automated run-quality judge's own findings, on a non-PR
+path (#3649, ratified 2026-09-13).** #3649's run-quality auditor scores a dispatched agent's transcript and can
+auto-apply low-risk fixes for a **bounded one-off work agent** — but when the reviewed subject is itself a
+**conveyor/driver-class process** (a runner or driver that queues, dispatches, or supervises other work as
+part of its own operation), the auditor is **report-only, always**, regardless of how low-risk a finding
+looks: it emits findings and a score and hands them off, never applying a fix directly. This is not a
+stricter rival rule but an **entailment** of this anchor's clause-3 independence invariant, reached by a
+different route: an auditor auto-applying its own finding against a live driver would be the same
+self-approval hole clause 3 closes (judge and approver of the same change), reached through an automated-judge
+path instead of a PR. `subjectClass` is stamped on the dispatch record at launch time and read back, never
+re-derived from the transcript afterward; a transcript with no dispatch record is driver-class by default
+(fail-closed). Composes with, and does not subsume, [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)'s
+`#2077` rider (`RUN_TOOLING` touch-set test): the two key on different tests — this rider on the **subject
+class** that produced the transcript, `#2077` on the **edit's touch-set** — and an auto-applied fix must clear
+both. Lineage: [#3649](/backlog/3649-run-quality-benchmark-score-a-dispatched-agent-s-own-transcr/).
+
 ---
 
 ### "Which trust tier owns X" defaults to a contract-split — engine-tier the impl, policy-tier a `*.contract.json` for the definition {#contract-split-for-tier-ownership}
@@ -3814,6 +3877,67 @@ this rule leans on rests on a distinct fresh validator, unchanged by this ruling
 [#review-human-declarative-leash-only](#review-human-declarative-leash-only) (#2771 — defines what stays
 `review:human`; this rule never touches that boundary, it only removes the human step from the tier that was
 never `review:human` to begin with).
+
+---
+
+### `clear-human` refuses unless an independent advisory review has already posted for the PR's current head {#clear-human-requires-current-head-advisory-review}
+
+**Ratified 2026-09-14 by the operator (Nicolas Gilbert) (#3589).** PR #2011 (`WE #3174`, a ratify+codify
+touching the declarative-leash/statute surface) was parked `review:human` by the escalation rubric; the
+operator said "I approve 2011", the session ran `we:scripts/review-set-label.mjs --to=clear-human` (the
+sanctioned #2895 ceremony), and the drain landed it **before** the independent `advise` step's (#3453)
+advisory-note comment had posted — the one clearance, of five that same night, where the operator's own
+approval outran the mechanism. **This was a race, not a design choice: nothing in `clear-human`'s
+preconditions ever checked whether that advisory note existed.** Two rulings close it:
+
+1. **Scope — every `clear-human` clearance, no sub-scoping.** `review:human` is already the narrow,
+   high-blast-radius tier by ratified design ([#review-human-declarative-leash-only](#review-human-declarative-leash-only),
+   #2771/#2840): a statute-anchor edit, an edit to an already-present `@principle`/`@invariant` marker, or the
+   declarative-leash path floor. There is no larger population within that tier to protect against by
+   sub-scoping a narrower incident-shaped subset — the leash-contract / gate-config / conformance-suite files
+   the tier also catches are at least as sensitive as a statute-anchor prose edit.
+2. **Mechanism — a precondition, not a relabel.** `clear-human`'s decision function
+   (`decideSetLabel`'s `clear-human` target, `we:scripts/review-set-label.mjs`) MUST gain ONE more guard,
+   the same shape as its existing `--actor`/`--reason` honesty-tax checks: it refuses unless the PR already
+   carries the `advise` step's advisory-note comment for its **current** head. An absent note refuses with
+   the fix named — dispatch `we:scripts/operations/review-dispatch.mjs --pr=<n>` (or wait for the next
+   conveyor tick, which already auto-dispatches `advise` for every `needs-review` PR), then retry. Nothing
+   about `advise`, `we:scripts/operations/review-dispatch.mjs`, or the conveyor's existing dispatch cadence
+   is meant to change — this is specified as a refusal-with-actionable-fix, never a synchronous
+   dispatch-and-block: blocking a CLI call for the minutes a real independent review takes would be exactly
+   the passive-wait shape this repo's own agents are barred from sitting on. The clearing operator (or
+   session) keeps full authority to clear over real findings — the note only has to have **posted**, not be
+   acted on — because the incident was about ordering, never about overruling the operator. **This guard is
+   RULED here; no implementation of it exists anywhere in the codebase** — see the Residual paragraph and
+   Lineage below for exactly what code this ratification obligates and where that obligation is tracked.
+
+**Config posture (not a third ratified fork — a config dimension, both values legitimate end-states):** the
+precondition is gated by a `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style env var (name TBD at build
+time, the existing `WE_MERGE_BREAK_GLASS` convention, `we:scripts/merge-ai-prs.mjs`), **operational default
+ON.** The night of the incident, 4 of 5 `clear-human` clearances already had the advisory note land first —
+"on" asks nothing new of the common case and only makes the ordering that already usually holds guaranteed;
+an operator in genuinely time-sensitive incident response is one flag away from the old fast path.
+
+**Residual — build status lives on the follow-on item, not this rule (#2854):** `we:scripts/review-set-label.mjs`'s
+`decideSetLabel` carries no advisory-note check of any kind, coarse or exact, until the follow-on item below
+ships it — this anchor rules what `clear-human` must do, it does not claim any of it runs. That build owes
+two things, in order: first, the guard clause itself (an absent-note refusal); second, an exact "is this the
+CURRENT head's note" test, which depends on `renderAdvisoryNote` (`we:scripts/operations/review-pr.mjs`)
+gaining a durable per-head marker (an `<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker`
+in `we:scripts/lib/review-escalation.mjs`). The ratified, accepted interim shape — usable between those two
+steps landing — is a coarser "does any advisory comment exist" proxy: a PR force-pushed after its note would
+pass it on stale grounds, a real but narrower gap than having no guard clause at all. Neither the guard nor
+the marker is built in this ratifying PR (see Lineage) — this decisions-only PR ships zero code.
+
+**Lineage:** ratified by #3589 (operator, 2026-09-14; bornAs `3589`, prepared 2026-09-14 — Screen pass +
+review jury charter, filed on PR #2011's own incident). Cites [#review-human-declarative-leash-only](#review-human-declarative-leash-only)
+(#2771/#2840 — the `review:human` trigger set this rule's scope leans on being already narrow) and
+[#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (#3434 —
+the sibling `review:pending` tier this rule does not touch; `clear-human`'s human-only ceremony stays
+human-only). Implementation follow-on: the guard clause in `we:scripts/review-set-label.mjs`, the
+`advisory-sha` marker in `we:scripts/operations/review-pr.mjs`, and the config toggle — filed as `3692`
+("Gate `clear-human` on a posted advisory review for the current head"), `blockedBy` nothing (ratified in
+the same lane it was filed from), numbered on land.
 
 ---
 
@@ -4333,6 +4457,155 @@ Full reasoning, prior-art survey, the skeptic pass and the two-confusion screen:
 [parked-pr-conflict-auto-resolution](/reports/2026-09-06-parked-pr-conflict-auto-resolution-research/). Composes
 with [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) (the
 one-spawn-implementation statute this item's Fork 1 and Fork 4 both implement within, not alongside).
+**Extended by `#3556` — see below.**
+
+### A bare-branch merge conflict from `we:scripts/conveyor/branch-sync.mjs`'s escalation is resolved the same way — dispatch a reconciliation agent, never a bespoke script — with a mechanism adapted for having no PR {#branch-sync-conflict-dispatched-not-scripted}
+
+**Ratified 2026-09-07** — the operator ratified `#3556`'s prepared card: all four of its own bolded
+recommended-default forks, with one amendment to Fork 3. Extends
+[#parked-pr-conflict-dispatched-not-scripted](#parked-pr-conflict-dispatched-not-scripted) (`#3544`) from a
+PR-scoped conflict to a bare-branch conflict with no PR, no reviewer, and no comment thread to key state off
+of — composes with that statute rather than replacing it. Four clauses:
+
+1. **Fork 1 — same one declared spawn implementation, fresh dispatch only.** `#3556`'s dispatch calls
+   `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` / `#defaultSpawnAgent` directly — the exact
+   primitives `#3544`'s own Fork 1 already established as the one spawn implementation — with no
+   `resumeSessionId`: a branch-wide drift has no "original builder" session the way a single authored PR
+   does, so the resume branch `#3544` added is simply never exercised here.
+2. **Fork 2 — the dispatched agent takes its own lane, exactly like every other dispatch.** Not a new fork;
+   standing doctrine (`we:docs/agent/backlog-workflow.md`, "Work in a lane, not the primary checkout") already
+   settles it, unconditionally, with no primary-checkout carve-out for this dispatch kind either.
+3. **Fork 3 — dispatch is capped at once per distinct conflict signature, and the cap is a CONFIGURABLE
+   product setting, not a bare hardcoded constant.** `we:branch-sync.mjs`'s own existing durable state
+   (`we:.git/branch-sync-state.json` or a sibling file it owns) is extended with a `dispatchedFor: <signature>`
+   marker; a later escalation carrying the identical signature is terminal for auto-dispatch and falls through
+   to the existing human-alert path, upgraded to note an auto-fix was already attempted. Unlike `#3544`'s
+   PR-based flow (which shares the durable, comment-derived `NEGOTIATION_ROUND_CAP` across every bounce
+   cause), a branch-sync dispatch has no PR to carry a durable attempt count and no visible per-attempt audit
+   trail, so it owns its own cap — read from a new env-override constant rather than an inline literal:
+   `Number(process.env.WE_BRANCH_SYNC_DISPATCH_RETRY_CAP || 1)`, following this repo's established
+   env-override convention (default baked in, overridable via `process.env`, e.g.
+   `we:skills-src/batch-backlog-items/workflow-progress.mjs`'s `STALL_S`). Default stays `1` — heavier than a
+   single-PR fix-agent retry, with no per-attempt comment trail to audit — but is now a product setting an
+   operator can raise once real usage data says otherwise, with no code edit.
+4. **Fork 4 — a new, small, generic brief, never a forced reuse of the PR-shaped brief.**
+   `we:skills-src/conveyor/branch-sync-fix-brief.md`, filled only with `{{BRANCH}}`/`{{BASE}}`/`{{REPO_DIR}}`
+   tokens through the same `we:scripts/operations/dispatch-lane.mjs#fillBrief` mechanism every other brief
+   already uses — `we:fix-agent-brief.md` assumes a `{{PR_NUM}}`/`{{ITEM_NUM}}`/`{{SCOPE}}` that don't exist
+   for a branch-wide drift, so it is the wrong shape here, not the reusable one.
+
+**Landing-target note.** `we:scripts/conveyor/branch-sync.mjs` already lives on `main` (confirmed
+byte-identical against `origin/lane/mechanical-dispatcher` at ratification time) — mechanical-delivery-doctrine
+rule 4's ceremony-free direct-push path does not apply merely because the feature *operates on* the prototype
+branch; this build lands on `main` through the normal lane → PR → independent-review pipeline.
+
+**Lineage:** ratified via `#3556` (2026-09-07), filed under the background mechanical dispatcher epic `#3383`,
+extending [#parked-pr-conflict-dispatched-not-scripted](#parked-pr-conflict-dispatched-not-scripted) (`#3544`).
+Full reasoning: [#3556](/backlog/3556-auto-dispatch-a-reconciliation-agent-when-we-branch-sync-mjs/).
+
+### A model/provider graduates out of probation on a selection-bias-proof trial bar with an independent calibration veto, scaled by role authority, under one uniform floor {#model-probation-graduation-criteria}
+
+**Ratified 2026-09-13 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
+amendments (`#3654`).** Extends the already-ratified probation mechanism
+(`we:scripts/lib/model-probation.mjs`, epic `#3383`; PR #2182: every new `{provider, model}` identity
+starts `unvalidated`→`probation` before any blocking/gating authority, promotion is always an explicit
+human decision grounded in accumulated data, never automatic, never inherited by a model upgrade) with
+the shape of the bar that decision itself left undefined. Four clauses; **no concrete numeric threshold
+is fixed by any of them** — each names what a follow-on ordinary (batched) finding must propose once
+real trial-count data exists per role, never a separate ceremony:
+
+1. **Volume/mix — a minimum trial count PLUS at least one informative trial, never count alone.** A
+   trial is "informative" only for a checkable event — a confirmed miss the agent should have caught, or
+   a documented cross-reviewer disagreement over severity — never a vibe call. A pure count is rejected
+   as provably gameable by selection bias — the `advisory-review` role's own recorded trial history
+   already clears a pure-count bar despite carrying a confirmed missed blocker inside it (`#2107`, PR
+   #2182; the live record and its evidentiary detail live on `#3654`, not restated here).
+2. **What's measured — success rate is a floor; a confirmed calibration miss is an INDEPENDENT VETO,
+   never diluted into a blended score.** Raw accept/reject rate alone is rejected as blind by
+   construction to the one failure mode already observed (a PR can go `review:accepted` while the same
+   agent, unsupervised, would have waved through something dangerous). A single composite score blending
+   success, calibration and cost is rejected **as the gate** for the same reason — it would let volume
+   mathematically dilute a real miss — though publishing such a composite purely as an informational
+   trend metric alongside the veto is not foreclosed.
+3. **Per-role, never one global bar — the bar scales with the role's eventual authority.**
+   `advisory-review` (structurally non-gating, per `NEVER_BLOCKING_ROLES`) earns the lightest bar;
+   `delivery` (unattended code lands) a moderate bar; any future blocking/gating reviewer role would earn
+   the strictest bar, should one come to exist. Proportionality between evidence required and authority
+   granted is the ratified default; only the *shape* (scale by authority) is ratified now, any tier's
+   specific N is deferred exactly as clauses 1–2 defer theirs. (Whether such a role exists yet, and what
+   still needs building, is tracked on `#3654` itself, not restated here.)
+4. **One uniform FLOOR for every `{provider, model}` identity; no identity buys an easier bar on
+   reputation.** Directly grounded in PR #2182's own text: promotion never inherits authority "by vendor
+   reputation, or by benchmark claims made outside this system." A project MAY still configure a
+   *stricter* bar for a provider class it independently distrusts — an optional per-project tightening,
+   not a rival branch — consistent with
+   [#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate)'s already-ratified "a
+   repo may tighten a scored signal to a gate as config" precedent. Differentiation across identities
+   happens only through the *data* each identity accumulates against the one shared floor, never through
+   a differently defined bar.
+
+**Not built here, by design.** No graduation-check function is written and no threshold is wired into
+`we:model-probation.mjs` by this ruling — it rules on the shape of the bar; wiring a concrete threshold
+is separately-scoped future work, proposed only once a real trial-count distribution exists per role.
+
+**Lineage:** ratified via `#3654` (2026-09-13), filed under the background mechanical dispatcher epic
+`#3383`, grounded in `we:reports/2026-09-12-run-quality-benchmark-for-dispatched-agent-runs.md` and
+composing with (not duplicating)
+[#agent-convergence-independent-validation](#agent-convergence-independent-validation) (`#2398`: staged
+auto-fix autonomy is a sibling axis keyed by repo, not by provider/model trust). Full reasoning:
+[#3654](/backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob/).
+
+### A triggered calibration veto clears only through a root-caused, similarity-matched trial bar — decay and trust never substitute for it {#calibration-veto-clearing}
+
+**Ratified 2026-09-14 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
+amendments (`#3673`).** Extends
+[#model-probation-graduation-criteria](#model-probation-graduation-criteria)'s independent calibration
+veto (`#3654` clause 2: a confirmed calibration miss is an INDEPENDENT VETO, never diluted into a blended
+score) with the shape of how a triggered veto is ever lifted — a question that ruling's own "Done when"
+left as an out-of-scope follow-on, not a re-litigation of the veto rule itself. Four clauses; **no
+concrete numeric threshold is fixed by any of them** — each names what a follow-on ordinary (batched)
+finding must propose once real trial-count data exists, never a separate ceremony:
+
+1. **Root-cause precondition — a documented root-cause finding is required before any post-miss trial
+   counts toward clearing.** The finding must name which of `we:scripts/lib/jury-core.mjs`'s
+   `deriveFindingDisposition` sub-answers (`introduced`, `worseThanBase`, `parallelizable`) diverged
+   between reviewers and why (or the equivalent diagnostic for a future non-jury-core review mechanism).
+   Trial volume alone is rejected as gameable without ever diagnosing why the miss happened — a fix whose
+   relevance to the calibration mechanism is plausible but unestablished does not itself count as a
+   root-cause finding, whatever coverage gap it separately closes.
+2. **Trial evidence bar — a fixed minimum count PLUS at least one similarity-matched trial, never count
+   alone.** Once eligible, clearing requires a minimum trial count N and at least one trial specifically
+   targeting a case similar in kind to the trigger (a severity-ambiguous, borderline-blocker-vs-carve-out
+   case); a deliberately constructed test scenario satisfies this when a naturally-occurring one is
+   scarce. N dissimilar clean trials never suffice — the same selection-bias objection
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 1 already applies to
+   initial graduation, reused here by direct analogy. Exact N deferred.
+3. **Decay alone never clears the veto.** A cooling-off/decay window may narrow which trials are eligible
+   to count (for example, only trials run since a relevant fix landed) but never substitutes for the
+   affirmative clean-trial evidence clauses 1–2 require. Elapsed trial count or elapsed time alone, with no
+   clean/relevant requirement, is temporal dilution of the same kind
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 2 already forecloses
+   for a blended composite score.
+4. **Human override only as a narrow, documented factual reclassification — never a trust grant.** An
+   override is available only on identity/evidentiary grounds: the cited finding fails independent
+   verification, the "same bug" framing does not actually hold (the two reviewers were not in fact looking
+   at the same finding), or a bookkeeping error in how the trigger was recorded. Re-answering the
+   disposition sub-judgments themselves — `introduced`/`worseThanBase`/`parallelizable`, or the equivalent
+   severity sub-judgments for a future non-jury-core mechanism — on confidence or trust alone is explicitly
+   out of scope for any override, at any point; doing so case-by-case would let every future miss be argued
+   away on the same substantive grounds the veto exists to catch.
+
+**Not built here, by design.** No `calibrationMiss` (proposed) field is added to `we:model-probation.json` and no
+clearing-check function is wired by this ruling — it rules on the shape of clearing; wiring a concrete
+mechanism is separately-scoped future work. The live PR #2107 veto on Codex's `advisory-review` role is
+not cleared by this ruling itself: clearing it requires either clause 1's root-cause finding followed by
+clause 2's similarity-matched trials, or clause 4's narrow reclassification override on its own facts —
+never the tooling-asymmetry finding alone.
+
+**Lineage:** ratified via `#3673` (2026-09-14), filed under the background mechanical dispatcher epic
+`#3383`, extending [#model-probation-graduation-criteria](#model-probation-graduation-criteria) (`#3654`)
+and grounded in `we:reports/2026-09-14-calibration-veto-clearing-grounding.md`. Full reasoning:
+[#3673](/backlog/3673-define-what-clears-a-triggered-calibration-veto-so-a-role-ca/).
 
 ---
 

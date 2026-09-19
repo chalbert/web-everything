@@ -39,13 +39,32 @@ describe('delivery-agent-brief.md — step 8 msgfile site', () => {
   });
 });
 
+describe('review-agent-system-prompt.md — the review-side standing rule (#xy8di3v)', () => {
+  const text = read('../../review/review-agent-system-prompt.md');
+
+  it('names the job-scratch directory (and /tmp) as a write hazard', () => {
+    expect(text).toMatch(/job-scratch directory/);
+    expect(text).toMatch(/`\/tmp`/);
+    expect(text).toMatch(/~\/\.claude\/jobs\/<session-id>\/tmp\//);
+  });
+
+  it('directs ephemeral writes into the lane clone instead', () => {
+    expect(text).toMatch(/lane clone you acquire in your own\s+first step/);
+  });
+});
+
 describe('review-agent-brief.md — the review-side twin of the rule', () => {
   const text = read('../../review/review-agent-brief.md');
 
   it('states the same job-scratch/tmp rule directly in its own prose', () => {
     expect(text).toMatch(/job-scratch directory/);
     expect(text).toMatch(/`\/tmp`/);
-    expect(text).toMatch(/does not pass `systemPromptFile`/);
+  });
+
+  it('points at the standing system prompt as the source of the "real, not a template" doctrine (#xy8di3v — '
+    + 'review dispatch now carries one, so the brief no longer claims it does not)', () => {
+    expect(text).toMatch(/--append-system-prompt-file/);
+    expect(text).toMatch(/review-agent-system-prompt\.md/);
   });
 
   it('directs ephemeral writes into the lane clone acquired in step 1', () => {

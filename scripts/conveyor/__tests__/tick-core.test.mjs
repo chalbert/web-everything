@@ -38,6 +38,9 @@ import {
   DEFAULT_PREPARE_TTL_TICKS,
   DEFAULT_FIX_RETRY_CAP,
   DEFAULT_CI_HEAL_RETRY_CAP,
+  advanceHeldStall,
+  DEFAULT_STALL_TICKS,
+  buildDecisionTrace,
 } from '../tick-core.mjs';
 import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
 
@@ -1035,6 +1038,226 @@ describe('planTick — composes the tick and threads nextState', () => {
   });
 });
 
+describe('buildDecisionTrace — plain-language per-tick "why" (2026-09-14, #3521 decision-trace v1)', () => {
+  it('traces a dispatched build with its lane', () => {
+    const trace = buildDecisionTrace({ spawnBuilds: [{ num: 10, lane: 4 }] });
+    expect(trace).toEqual([{ kind: 'dispatch', num: 10, lane: 4, text: 'dispatched #10 to lane-4: build' }]);
+  });
+  it('traces a suppressed (already-dispatching) build as a skip', () => {
+    const trace = buildDecisionTrace({ suppressedBuilds: [{ num: 11, lane: 5, by: 'num' }] });
+    expect(trace).toEqual([{ kind: 'skip', num: 11, text: 'skipped #11: already dispatching (matched a live guard by num)' }]);
+  });
+  it('traces a `held` note as a skip carrying the exact same reason text', () => {
+    const trace = buildDecisionTrace({ notes: [{ kind: 'held', num: 3521, reason: 'overlaps lane-2', text: '⏸ #3521 — overlaps lane-2' }] });
+    expect(trace).toEqual([{ kind: 'skip', num: 3521, reason: 'overlaps lane-2', text: 'skipped #3521: overlaps lane-2' }]);
+  });
+  it('reuses a `stalled` note VERBATIM (never re-derives the self-diagnosed stall text)', () => {
+    const stalledNote = { kind: 'stalled', num: 3521, reason: 'overlaps lane-2', ticks: 3, text: '🛑 #3521 stuck 3 consecutive ticks on: overlaps lane-2 — self-diagnosed stall, needs attention' };
+    const trace = buildDecisionTrace({ notes: [stalledNote] });
+    expect(trace).toEqual([{ kind: 'stall', num: 3521, reason: 'overlaps lane-2', ticks: 3, text: stalledNote.text }]);
+  });
+  it('traces prepare-scope, prepare-decision, fix, and ci-heal dispatches', () => {
+    const trace = buildDecisionTrace({
+      spawnPrepareScope: [{ num: 1 }],
+      spawnPrepareDecision: [{ num: 2 }],
+      spawnFixes: [{ num: 3, pr: 30 }],
+      spawnCiHeals: [{ num: 4, pr: 40 }],
+    });
+    expect(trace).toEqual([
+      { kind: 'dispatch', num: 1, text: 'dispatched #1: auto-prepare scope (unshaped item)' },
+      { kind: 'dispatch', num: 2, text: 'dispatched #2: prepare decision forks' },
+      { kind: 'dispatch', num: 3, pr: 30, text: 'dispatched fix for PR #30 (#3): review:changes bounce' },
+      { kind: 'dispatch', num: 4, pr: 40, text: 'dispatched CI-heal for PR #40 (#4): red/BEHIND regression' },
+    ]);
+  });
+  it('is empty for an empty/malformed decisions object — never throws', () => {
+    expect(buildDecisionTrace({})).toEqual([]);
+    expect(buildDecisionTrace(null)).toEqual([]);
+  });
+});
+
+describe('buildDecisionTrace — verbose mode (2026-09-14, #3521 decision-trace v1 follow-up)', () => {
+  it('non-verbose (default): a needs-slice/needs-decision/unshaped-no-scope held candidate is NOT traced', () => {
+    const trace = buildDecisionTrace({ notes: [] }, { verbose: false, allHeld: [{ num: 5, reason: 'needs-slice' }] });
+    expect(trace).toEqual([]);
+  });
+  it('verbose: the SAME excluded-reason candidate IS traced, tagged verbose:true', () => {
+    const trace = buildDecisionTrace({ notes: [] }, { verbose: true, allHeld: [{ num: 5, reason: 'needs-slice' }] });
+    expect(trace).toEqual([{ kind: 'skip', num: 5, reason: 'needs-slice', verbose: true, text: 'skipped #5: needs-slice' }]);
+  });
+  it('verbose: never double-reports a candidate already traced via its terse `held` note', () => {
+    const trace = buildDecisionTrace(
+      { notes: [{ kind: 'held', num: 3521, reason: 'overlaps lane-2', text: '⏸ #3521 — overlaps lane-2' }] },
+      { verbose: true, allHeld: [{ num: 3521, reason: 'overlaps lane-2' }] },
+    );
+    expect(trace).toEqual([{ kind: 'skip', num: 3521, reason: 'overlaps lane-2', text: 'skipped #3521: overlaps lane-2' }]);
+  });
+  it('verbose: an `overlaps lane-N` stall gets the real lane row (session/lease/breach) attached', () => {
+    const stalledNote = { kind: 'stalled', num: 3521, reason: 'overlaps lane-2', ticks: 3, text: '🛑 stuck' };
+    const lanes = [{ lane: 2, num: null, session: 'fix-decision-docket-2193', lease: ['we:scripts/operations/run-record.mjs'], breach: [] }];
+    const trace = buildDecisionTrace({ notes: [stalledNote] }, { verbose: true, lanes });
+    expect(trace[0].lane).toEqual({
+      lane: 2, heldBySession: 'fix-decision-docket-2193', leaseScope: ['we:scripts/operations/run-record.mjs'], breach: [],
+    });
+  });
+  it('non-verbose: a stall entry carries NO lane detail, even when a matching lane row exists', () => {
+    const stalledNote = { kind: 'stalled', num: 3521, reason: 'overlaps lane-2', ticks: 3, text: '🛑 stuck' };
+    const lanes = [{ lane: 2, session: 'fix-decision-docket-2193', lease: [], breach: [] }];
+    const trace = buildDecisionTrace({ notes: [stalledNote] }, { verbose: false, lanes });
+    expect(trace[0]).not.toHaveProperty('lane');
+  });
+});
+
+describe('planTick — config.verbose wiring (2026-09-14, #3521 decision-trace v1 follow-up)', () => {
+  it('defaults to non-verbose when config.verbose is absent', () => {
+    const out = planTick({
+      state: { queue: [{ num: 5 }], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 5, reason: 'needs-slice' }] },
+      freeLanes: [],
+      bookkeeping: { tick: 0 },
+    });
+    expect(out.decisions.decisionTrace.some((t) => t.verbose)).toBe(false);
+  });
+  it('config.verbose: true surfaces the verbose-only entries', () => {
+    const out = planTick({
+      state: { queue: [{ num: 5 }], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 5, reason: 'needs-slice' }] },
+      freeLanes: [],
+      bookkeeping: { tick: 0 },
+      config: { verbose: true },
+    });
+    expect(out.decisions.decisionTrace).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'skip', num: 5, reason: 'needs-slice', verbose: true }),
+    ]));
+  });
+});
+
+describe('planTick — decisionTrace is wired onto every tick (2026-09-14, #3521 decision-trace v1)', () => {
+  it('a real held #3521 produces BOTH the ordinary held note and a matching skip trace entry', () => {
+    const out = planTick({
+      state: { queue: [{ num: 3521 }], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 3521, reason: 'overlaps lane-2' }] },
+      freeLanes: [],
+      bookkeeping: { tick: 0 },
+    });
+    expect(out.decisions.decisionTrace).toEqual(expect.arrayContaining([
+      { kind: 'skip', num: 3521, reason: 'overlaps lane-2', text: 'skipped #3521: overlaps lane-2' },
+    ]));
+  });
+});
+
+describe('advanceHeldStall — the durable, tick-to-tick held-stall counter (2026-09-14, #3521/lane-2 incident)', () => {
+  it('starts a fresh item at 1 tick, below threshold — not yet stalled', () => {
+    const { nextHeldStall, stalled } = advanceHeldStall({}, [{ num: 3521, reason: 'overlaps lane-2' }], 3);
+    expect(nextHeldStall).toEqual({ '3521': { reason: 'overlaps lane-2', ticks: 1 } });
+    expect(stalled).toEqual([]);
+  });
+
+  it('increments while the SAME reason persists, and crosses the threshold on the Nth tick', () => {
+    let held = {};
+    let out;
+    for (let i = 0; i < 3; i += 1) {
+      out = advanceHeldStall(held, [{ num: 3521, reason: 'overlaps lane-2' }], 3);
+      held = out.nextHeldStall;
+    }
+    expect(held['3521'].ticks).toBe(3);
+    expect(out.stalled).toEqual([{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }]);
+  });
+
+  it('resets to 1 when the reason CHANGES — a different rival is a different episode, not a continuation', () => {
+    const prev = { '3521': { reason: 'overlaps lane-2', ticks: 5 } };
+    const { nextHeldStall, stalled } = advanceHeldStall(prev, [{ num: 3521, reason: 'overlaps lane-5' }], 3);
+    expect(nextHeldStall['3521']).toEqual({ reason: 'overlaps lane-5', ticks: 1 });
+    expect(stalled).toEqual([]);
+  });
+
+  it('drops an item that cleared (no longer among heldEntries) — no lingering phantom stall', () => {
+    const prev = { '3521': { reason: 'overlaps lane-2', ticks: 5 } };
+    const { nextHeldStall, stalled } = advanceHeldStall(prev, [], 3);
+    expect(nextHeldStall).toEqual({});
+    expect(stalled).toEqual([]);
+  });
+
+  it('tolerates a missing/malformed prevHeldStall (fresh start, never throws)', () => {
+    expect(() => advanceHeldStall(null, [{ num: 1, reason: 'no free lane' }], 3)).not.toThrow();
+    expect(() => advanceHeldStall(undefined, [], 3)).not.toThrow();
+  });
+
+  it('defaults the threshold to DEFAULT_STALL_TICKS when not given', () => {
+    let held = {};
+    let out;
+    for (let i = 0; i < DEFAULT_STALL_TICKS; i += 1) {
+      out = advanceHeldStall(held, [{ num: 1, reason: 'no free lane' }]);
+      held = out.nextHeldStall;
+    }
+    expect(out.stalled).toEqual([{ num: 1, reason: 'no free lane', ticks: DEFAULT_STALL_TICKS }]);
+  });
+});
+
+describe('planTick — self-diagnosed stall (2026-09-14, #3521/lane-2 incident): a held item wedged on the same reason for N ticks running gets its own explicit `stalled` note + structured decisions.stalled, and the counter is threaded durably via nextState.heldStall', () => {
+  it('reproduces the incident: #3521 held `overlaps lane-2` for 3 straight ticks fires a self-reported stall', () => {
+    const state = { queue: [{ num: 3521 }], lanes: [], prs: [] };
+    const plan = { launch: [], held: [{ num: 3521, reason: 'overlaps lane-2' }] };
+    let bookkeeping = { tick: 0 };
+    let out;
+    for (let i = 0; i < 3; i += 1) {
+      out = planTick({ state, plan, freeLanes: [], bookkeeping });
+      bookkeeping = out.nextState;
+    }
+    expect(out.decisions.stalled).toEqual([{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }]);
+    expect(out.decisions.notes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'stalled', num: 3521, reason: 'overlaps lane-2', ticks: 3 }),
+    ]));
+    // The counter is a real, threaded bookkeeping field — not recomputed from scratch each call.
+    expect(out.nextState.heldStall).toEqual({ '3521': { reason: 'overlaps lane-2', ticks: 3 } });
+  });
+
+  it('does NOT fire before the threshold — tick 1 and 2 show the ordinary `held` note only, no `stalled` note', () => {
+    const state = { queue: [{ num: 3521 }], lanes: [], prs: [] };
+    const plan = { launch: [], held: [{ num: 3521, reason: 'overlaps lane-2' }] };
+    const out = planTick({ state, plan, freeLanes: [], bookkeeping: { tick: 0 } });
+    expect(out.decisions.stalled).toEqual([]);
+    expect(out.decisions.notes.some((n) => n.kind === 'stalled')).toBe(false);
+    expect(out.decisions.notes.some((n) => n.kind === 'held' && n.num === 3521)).toBe(true);
+  });
+
+  it('a custom config.stallTicks lowers/raises the threshold', () => {
+    const state = { queue: [{ num: 7 }], lanes: [], prs: [] };
+    const plan = { launch: [], held: [{ num: 7, reason: 'no free lane' }] };
+    const out = planTick({ state, plan, freeLanes: [], bookkeeping: { tick: 0 }, config: { stallTicks: 1 } });
+    expect(out.decisions.stalled).toEqual([{ num: 7, reason: 'no free lane', ticks: 1 }]);
+  });
+
+  it('clearing the hold (the item now launches) resets the durable counter — no stale carry-over', () => {
+    const state = { queue: [{ num: 3521, buildQueued: true }], lanes: [], prs: [] };
+    let bookkeeping = { tick: 0 };
+    let out;
+    for (let i = 0; i < 3; i += 1) {
+      out = planTick({ state, plan: { launch: [], held: [{ num: 3521, reason: 'overlaps lane-2' }] }, freeLanes: [], bookkeeping });
+      bookkeeping = out.nextState;
+    }
+    expect(out.decisions.stalled).toHaveLength(1); // stalled at tick 3, as above
+    // Now the overlap clears and #3521 launches — the stall state must not linger.
+    out = planTick({ state, plan: { launch: [{ num: 3521, lane: 4 }], held: [] }, freeLanes: [4], bookkeeping });
+    expect(out.decisions.stalled).toEqual([]);
+    expect(out.nextState.heldStall).toEqual({});
+  });
+
+  it('excludes reasons that already have their own dedicated lifecycle note (needs-slice/needs-decision/unshaped-no-scope) — mirrors HELD_NOTE_EXCLUDED_REASONS', () => {
+    const state = { queue: [{ num: 42 }], lanes: [], prs: [] };
+    let bookkeeping = { tick: 0 };
+    let out;
+    for (const reason of HELD_NOTE_EXCLUDED_REASONS) {
+      bookkeeping = { tick: 0 };
+      for (let i = 0; i < 5; i += 1) {
+        out = planTick({ state, plan: { launch: [], held: [{ num: 42, reason }] }, freeLanes: [], bookkeeping });
+        bookkeeping = out.nextState;
+      }
+      expect(out.decisions.stalled).toEqual([]);
+    }
+  });
+});
+
 describe('planTick — waiting-for-capacity notes (#3461 admission queue)', () => {
   it('surfaces one note per waiting entry, resolving num off state.lanes by lane', () => {
     const out = planTick({
@@ -1139,5 +1362,157 @@ describe('computeTickCounts — the structured tallies behind buildStatusLine (#
 
   it('is total on no inputs at all', () => {
     expect(computeTickCounts()).toEqual({ building: 0, preparing: 0, fixing: 0, healing: 0, queued: 0, parked: 0, verdict: 'ok' });
+  });
+});
+
+describe('planTick — maxConcurrentLanes (#xupukxa, live incident 2026-09-07: 19 builds + 23 prepare-scope in one tick)', () => {
+  it('omitted config — unlimited, byte-for-byte the pre-#xupukxa behavior', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }, { num: 21 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5, 6],
+      bookkeeping: { tick: 0 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope.map((s) => s.num).sort()).toEqual([20, 21]);
+  });
+
+  it('a tight cap trims prepare/decision spawns AFTER admitting builds, sharing one budget', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }, { num: 21 }, { num: 22 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5, 6, 7],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 2 }, // 1 build admitted; room left for prepares = 2 - 0 (prior active) - 1 (build) = 1
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope).toHaveLength(1);
+    expect(out.decisions.notes.filter((n) => n.kind === 'capacity-cap').length).toBeGreaterThan(0);
+  });
+
+  it('caps builds themselves when the plan alone would exceed the ceiling (defense-in-depth vs. a stale/race plan)', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }, { num: 12, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }, { num: 11, lane: 5 }, { num: 12, lane: 6 }] },
+      freeLanes: [4, 5, 6],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 2 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }, { num: 11, lane: 5 }]);
+    expect(out.decisions.suppressedBuilds).toEqual(
+      expect.arrayContaining([{ num: 12, lane: 6, by: 'capacity-cap' }]),
+    );
+    expect(out.decisions.notes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'capacity-cap', num: 12 })]),
+    );
+  });
+
+  it('counts already-active lanes (state.lanes) against the cap, not just this tick’s new spawns', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], lanes: [{ lane: 1, num: 1 }, { lane: 2, num: 2 }], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [3],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 2 }, // already 2 active — no room left for the prepare
+    });
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(true);
+  });
+
+  it('a cap comfortably above demand changes nothing observable', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 50 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 5 }]);
+    expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(false);
+  });
+});
+
+describe('planTick — manual dispatch-pause (#3609): holds ALL new prepare/fix/ci-heal spawns, never touches in-flight work', () => {
+  const changesPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', labels: ['review:changes'] });
+  const redPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] });
+
+  it('omitted / false — unchanged from today (spawns everything it normally would)', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], decisions: [{ num: 30, prepared: false }], lanes: [], prs: [changesPr(99, 40), redPr(98, 41)] },
+      plan: { launch: [] },
+      freeLanes: [4, 5, 6, 7],
+      bookkeeping: { tick: 0, launchedNums: [40, 41] },
+    });
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 4 }]);
+    expect(out.decisions.spawnPrepareDecision).toEqual([{ num: 30, lane: 5 }]);
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 6 }]);
+    expect(out.decisions.spawnCiHeals).toEqual([{ pr: 98, num: 41, lane: 7, reason: 'red-ci' }]);
+  });
+
+  it('paused — every new prepare/fix/ci-heal spawn is held; build launches are ALSO empty because dispatch-plan.mjs already emptied plan.launch', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], decisions: [{ num: 30, prepared: false }], lanes: [], prs: [changesPr(99, 40), redPr(98, 41)] },
+      // dispatch-plan.mjs's own IO shell already read the SAME pause marker and emptied `plan.launch`,
+      // relabeling what would have launched `dispatch-paused` — mirrored here as the realistic composed input.
+      plan: { launch: [], held: [{ num: 10, reason: 'dispatch-paused' }] },
+      freeLanes: [4, 5, 6, 7],
+      bookkeeping: { tick: 0, launchedNums: [40, 41] },
+      dispatchPaused: true,
+      dispatchPausedReason: 'operator emergency pause',
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.spawnPrepareDecision).toEqual([]);
+    expect(out.decisions.spawnFixes).toEqual([]);
+    expect(out.decisions.spawnCiHeals).toEqual([]);
+    // the aggregate note carries the operator's own reason.
+    expect(out.decisions.notes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'dispatch-paused', text: expect.stringContaining('operator emergency pause') })]),
+    );
+    // the per-item `plan.held` row still surfaces too (mirrors dispatch-plan.mjs's own CLI text).
+    expect(out.decisions.notes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'held', num: 10, reason: 'dispatch-paused' })]),
+    );
+  });
+
+  it('paused with no reason given — the aggregate note still fires, without a parenthetical', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [4],
+      bookkeeping: { tick: 0 },
+      dispatchPaused: true,
+    });
+    const note = out.decisions.notes.find((n) => n.kind === 'dispatch-paused');
+    expect(note).toBeTruthy();
+    expect(note.text).toBe('⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick');
+  });
+
+  it('NEVER touches an already-running lane/guard — a live fix-guard entry retires normally (claim/TTL) while paused', () => {
+    // A live fix-guard entry from a PRIOR tick (before the pause was set) whose PR no longer carries
+    // review:changes (resolved) must still retire normally — guard RETIREMENT is a property of in-flight work,
+    // not of new dispatch, so pausing must not freeze it.
+    const out = planTick({
+      state: { queue: [], unshaped: [], lanes: [], prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: [] }] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, fixGuards: [{ pr: 99, num: 40, lane: 3, spawnedTick: 0, claimed: true }] },
+      dispatchPaused: true,
+    });
+    expect(out.decisions.retireGuards.fix.some((r) => r.pr === 99)).toBe(true);
+    expect(out.nextState.fixGuards).toEqual([]); // retired — the label cleared, not held hostage by the pause
+  });
+
+  it('fixAttempts / ciHealAttempts pass through UNCHANGED while paused (no new attempt is spawned to count)', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [], lanes: [], prs: [changesPr(99, 40), redPr(98, 41)] },
+      plan: { launch: [] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0, launchedNums: [40, 41], fixAttempts: { 99: 1 }, ciHealAttempts: { 98: 1 } },
+      dispatchPaused: true,
+    });
+    expect(out.nextState.fixAttempts).toEqual({ 99: 1 });
+    expect(out.nextState.ciHealAttempts).toEqual({ 98: 1 });
   });
 });

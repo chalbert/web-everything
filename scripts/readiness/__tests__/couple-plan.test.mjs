@@ -6,6 +6,8 @@
  *   (skip only on positive proof of a clean fast-forward; rebase otherwise) is provable here.
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import {
   isSha, normSha, planCoupleOpen, decideWeReCi,
 } from '../couple-plan.mjs';
@@ -69,6 +71,39 @@ describe('planCoupleOpen — overlap-open order + WE stack-base', () => {
 });
 
 describe('decideWeReCi — guarded skip-vs-rebase', () => {
+  it.each([
+    [A.slice(0, 7), A, A],
+    [A, A.slice(0, 7), A],
+    [A, A, A.slice(0, 7)],
+    [A.slice(0, 7), A.slice(0, 12), A],
+    ['A'.repeat(64), '  AAAAAAA  ', 'a'.repeat(32)],
+  ])('accepts compatible abbreviations: base=%s landed=%s main=%s', (stackedBaseSha, landedImplSha, mainTipSha) => {
+    const v = decideWeReCi({ stackedBaseSha, landedImplSha, mainTipSha });
+    expect(v.verdict).toBe('ff-skip');
+    expect(v.skipReCi).toBe(true);
+    expect(v.reason).not.toMatch(/squash-merge|re-stack|advanced past/i);
+  });
+
+  it('does not let an abbreviated landed sha hide conflicting base and main suffixes', () => {
+    const v = decideWeReCi({ stackedBaseSha: A, landedImplSha: A.slice(0, 7), mainTipSha: `${A.slice(0, 7)}${B.slice(7)}` });
+    expect(v.verdict).toBe('rebase');
+    expect(v.reason).toMatch(/advanced past/i);
+  });
+
+  it.each(['', 'a'.repeat(6), 'a'.repeat(65), 'aaaaaag', null, 1234567])('rejects invalid hashes even when other inputs share their prefix: %s', (bad) => {
+    for (const key of ['stackedBaseSha', 'landedImplSha', 'mainTipSha']) {
+      expect(decideWeReCi({ stackedBaseSha: A, landedImplSha: A, mainTipSha: A, [key]: bad }).verdict).toBe('rebase');
+    }
+  });
+
+  it('prints ff-skip through the CLI for an abbreviated stacked base', () => {
+    const output = execFileSync(process.execPath, [
+      resolve('scripts/readiness/couple-plan.mjs'),
+      `--stacked-base=${A.slice(0, 7)}`, `--landed-impl=${A}`, `--main-tip=${A}`,
+    ], { encoding: 'utf8' });
+    expect(JSON.parse(output)).toMatchObject({ verdict: 'ff-skip', skipReCi: true });
+  });
+
   it('FF-SKIP only on a provable clean fast-forward: landed impl == stacked base == main', () => {
     const v = decideWeReCi({ stackedBaseSha: A, landedImplSha: A, mainTipSha: A });
     expect(v.verdict).toBe('ff-skip');

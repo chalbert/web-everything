@@ -22,8 +22,12 @@
  *   • The PURE core ({@link planTick} and every helper above the shell banner) has NO fs / git / `Date` /
  *     child_process / gh — the state read, the plan, the free lanes, the bookkeeping, and the clock (`now`) are
  *     all passed IN. It is unit-tested directly (scripts/conveyor/__tests__/tick-core.test.mjs) with plain
- *     objects, no git/network. The one import — `normNum` from {@link ./queue-store.mjs} — is the SAME id
- *     normalizer the state read and dispatcher key on, so this core can never disagree with them on item identity.
+ *     objects, no git/network. Two imports, both pure: `normNum` from {@link ./queue-store.mjs} — the SAME id
+ *     normalizer the state read and dispatcher key on, so this core can never disagree with them on item
+ *     identity — and {@link ../lib/lane-concurrency.mjs} — the SAME concurrency-ceiling helper
+ *     `dispatch-plan.mjs` uses for its own build launches (#xupukxa), so the two lane-consuming decisions this
+ *     core makes (prepare/fix/ci-heal spawns) share one budget with dispatch-plan's builds rather than each
+ *     independently maxing out the free-lane pool.
  *   • The IO SHELL (the `main()` CLI, gated on the main-module check) gathers the read-only inputs by shelling
  *     the existing readiness scripts — `conveyor-state.mjs --json`, `dispatch-plan.mjs --json`, and
  *     `lane-pool.mjs list --acquirable --json` for the free lanes — reads the conveyor's bookkeeping from STDIN
@@ -132,12 +136,135 @@
  */
 
 import { normNum } from './queue-store.mjs';
+import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
 
 /** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
  *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
  *  `state.decisions`, `unshaped-no-scope` from the prepare-spawn notes (`auto-preparing-scope` / `prepare-no-lane`).
  *  The held-reason note loop below skips these so an item is never double-reported under two note kinds. */
 export const HELD_NOTE_EXCLUDED_REASONS = Object.freeze(['needs-slice', 'needs-decision', 'unshaped-no-scope']);
+
+/**
+ * SELF-DIAGNOSED STALL DETECTION (2026-09-14, live incident: #3521 held `overlaps lane-2` for 85+ minutes across
+ * many ticks with no progress and NOTHING in the tick's own output naming how long or flagging it as abnormal —
+ * a human had to manually re-derive the held reason's age by hand to tell "real contention" apart from "a stuck
+ * signal nobody would otherwise notice"). The existing `held` note (just above) already answers "why not, THIS
+ * tick" — it does NOT answer "for how long has this been true, and should that itself be alarming". This is
+ * that second, durable axis: the SAME num held on the SAME reason for `stallTicks` consecutive ticks is the
+ * driver diagnosing ITS OWN lack of progress, not an external inspector interpreting raw history after the
+ * fact (see {@link advanceHeldStall}).
+ */
+export const DEFAULT_STALL_TICKS = 3;
+
+/**
+ * Advance the durable per-item held-stall counter by ONE tick's observation. PURE — the caller (`planTick`)
+ * reads `prevHeldStall` from `bookkeeping` (threaded tick-to-tick exactly like `buildGuards`/`fixAttempts`
+ * above) and this returns the next state to persist, plus the list of entries that have now crossed the
+ * threshold. An item is "stalled" when it has been held on the EXACT SAME reason for `stallTicks` consecutive
+ * ticks running — a CHANGED reason (e.g. `overlaps lane-2` → `overlaps lane-5`) or the item clearing (no
+ * longer in `heldEntries`) resets its counter, mirroring {@link advanceBreachCount}'s rising-edge discipline
+ * in `../readiness/scope-lease-collect.mjs` (a different held item is a different episode, not a continuation).
+ * @param {Object<string,{reason:string, ticks:number}>|null|undefined} prevHeldStall  prior tick's durable state.
+ * @param {Array<{num:*, reason:string}>} heldEntries  THIS tick's held items (already reason-filtered by the caller).
+ * @param {number} [stallTicks]  consecutive-tick threshold to call it stalled.
+ * @returns {{nextHeldStall:Object<string,{reason:string,ticks:number}>, stalled:Array<{num:*,reason:string,ticks:number}>}}
+ */
+/** Parse the lane number out of an `overlaps lane-<n>` held reason, or null for any other reason shape. */
+function laneNumFromOverlapReason(reason) {
+  const m = /^overlaps lane-(\d+)$/.exec(String(reason || ''));
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * The tick's PLAIN-LANGUAGE DECISION TRACE (2026-09-14, #3521/lane-2 incident, v1 scope: this driver's OWN
+ * dispatch/skip/stall decisions only — not every subsystem). Answers "why did the conveyor do that" as a flat,
+ * human-readable list a person (or another agent) can read straight through, instead of re-deriving it from
+ * scattered logs the way root-causing #3521 required. PURE — a projection over this SAME tick's already-computed
+ * decision arrays; it invents no new inputs and reuses the self-diagnosed stall notes verbatim as one of its
+ * "why" reasons.
+ *
+ * VERBOSE (opt-in, `opts.verbose`, live-toggleable via `driver-verbose.mjs` — never a firehose of unrelated
+ * internals, bounded to the SAME dispatch/skip/stall surface as the terse trace): adds (1) every CANDIDATE that
+ * was held this tick, including the reasons the terse trace deliberately omits because they already have their
+ * own lifecycle note elsewhere (`needs-slice`/`needs-decision`/`unshaped-no-scope`, passed in as `opts.allHeld`
+ * — the UNFILTERED `plan.held`) — "why was THIS one passed over" for every candidate, not only the ones that
+ * already got a terse entry; and (2) for a `overlaps lane-<n>` stall, the actual lane row from `opts.lanes`
+ * (`state.lanes`, already an input every `planTick` call has) — who really holds it (`session`), its effective
+ * lease scope, and any breach — instead of just repeating the one-line reason string.
+ * @param {object} d  the tick's (about-to-be-returned) `decisions` object.
+ * @param {{verbose?:boolean, allHeld?:Array<{num:*,reason:string}>, lanes?:Array<object>}} [opts]
+ * @returns {Array<{kind:'dispatch'|'skip'|'stall', num:*, text:string}>}
+ */
+export function buildDecisionTrace(d, { verbose = false, allHeld = [], lanes = [] } = {}) {
+  const dec = d && typeof d === 'object' ? d : {};
+  const trace = [];
+  for (const s of Array.isArray(dec.spawnBuilds) ? dec.spawnBuilds : []) {
+    trace.push({ kind: 'dispatch', num: s.num, lane: s.lane ?? null, text: `dispatched #${s.num} to lane-${s.lane ?? '?'}: build` });
+  }
+  for (const s of Array.isArray(dec.spawnPrepareScope) ? dec.spawnPrepareScope : []) {
+    trace.push({ kind: 'dispatch', num: s.num, text: `dispatched #${s.num}: auto-prepare scope (unshaped item)` });
+  }
+  for (const s of Array.isArray(dec.spawnPrepareDecision) ? dec.spawnPrepareDecision : []) {
+    trace.push({ kind: 'dispatch', num: s.num, text: `dispatched #${s.num}: prepare decision forks` });
+  }
+  for (const s of Array.isArray(dec.spawnFixes) ? dec.spawnFixes : []) {
+    trace.push({ kind: 'dispatch', num: s.num, pr: s.pr ?? null, text: `dispatched fix for PR #${s.pr ?? '?'} (#${s.num}): review:changes bounce` });
+  }
+  for (const s of Array.isArray(dec.spawnCiHeals) ? dec.spawnCiHeals : []) {
+    trace.push({ kind: 'dispatch', num: s.num, pr: s.pr ?? null, text: `dispatched CI-heal for PR #${s.pr ?? '?'} (#${s.num}): red/BEHIND regression` });
+  }
+  for (const s of Array.isArray(dec.suppressedBuilds) ? dec.suppressedBuilds : []) {
+    trace.push({ kind: 'skip', num: s.num, text: `skipped #${s.num}: already dispatching (matched a live guard by ${s.by})` });
+  }
+  // The terse `held` reasons already surfaced as notes this tick (never double-counted against the verbose
+  // pass below — that pass only adds reasons NOT already covered here).
+  const terseHeldReasons = new Set();
+  for (const n of Array.isArray(dec.notes) ? dec.notes : []) {
+    if (n.kind === 'held') {
+      terseHeldReasons.add(`${n.num}::${n.reason}`);
+      trace.push({ kind: 'skip', num: n.num, reason: n.reason, text: `skipped #${n.num}: ${n.reason}` });
+    } else if (n.kind === 'stalled') {
+      // The `stalled` note's text is reused VERBATIM (never re-derived), so the trace and the tick's own notes
+      // can never say something different about the same fact.
+      const entry = { kind: 'stall', num: n.num, reason: n.reason, ticks: n.ticks, text: n.text };
+      if (verbose) {
+        const laneNum = laneNumFromOverlapReason(n.reason);
+        const laneRow = laneNum != null ? (Array.isArray(lanes) ? lanes : []).find((l) => Number(l?.lane) === laneNum) : null;
+        if (laneRow) {
+          entry.lane = {
+            lane: laneRow.lane, heldBySession: laneRow.session ?? null,
+            leaseScope: Array.isArray(laneRow.lease) ? laneRow.lease : [],
+            breach: Array.isArray(laneRow.breach) ? laneRow.breach : [],
+          };
+        }
+      }
+      trace.push(entry);
+    }
+  }
+  if (verbose) {
+    for (const h of Array.isArray(allHeld) ? allHeld : []) {
+      if (!h || h.num == null || !h.reason) continue;
+      if (terseHeldReasons.has(`${h.num}::${h.reason}`)) continue; // already traced above — never double-report
+      trace.push({ kind: 'skip', num: h.num, reason: h.reason, verbose: true, text: `skipped #${h.num}: ${h.reason}` });
+    }
+  }
+  return trace;
+}
+
+export function advanceHeldStall(prevHeldStall, heldEntries, stallTicks = DEFAULT_STALL_TICKS) {
+  const prev = prevHeldStall && typeof prevHeldStall === 'object' ? prevHeldStall : {};
+  const nextHeldStall = {};
+  const stalled = [];
+  for (const h of Array.isArray(heldEntries) ? heldEntries : []) {
+    if (!h || h.num == null || !h.reason) continue;
+    const key = String(h.num);
+    const prior = prev[key];
+    const ticks = prior && prior.reason === h.reason ? (Number(prior.ticks) || 0) + 1 : 1;
+    nextHeldStall[key] = { reason: h.reason, ticks };
+    if (ticks >= stallTicks) stalled.push({ num: h.num, reason: h.reason, ticks });
+  }
+  return { nextHeldStall, stalled };
+}
 
 // ── PURE CORE (no fs / git / Date / child_process / gh — every input is passed IN) ───────────────────────────
 
@@ -400,7 +527,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * @param {{ unshaped?:object[], decisions?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0 } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, trace = false, dispatchPaused = false } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -409,11 +536,20 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
   const consumedLanes = [];
   const notes = [];
 
+  const admission = [];
   const plan = (num, kind, sink) => {
     const key = normNum(num);
-    if (guardNums.has(key)) return; // live prepare-guard entry → already in flight
-    if (openPrForNum(prs, num)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
-    if (lanes.length === 0) { notes.push({ kind: 'prepare-no-lane', num, text: `no free lane to auto-prepare #${num}` }); return; }
+    const gates = [];
+    if (trace) admission.push({ num, kind, gates });
+    const blocked = (name, condition, observed) => {
+      if (trace) gates.push({ name, pass: !condition, observed });
+      return condition;
+    };
+    if (blocked('dispatch-paused', dispatchPaused, dispatchPaused)) return;
+    if (blocked('prepare-guard', guardNums.has(key), { num: key, guards: [...guardNums] })) return; // live prepare-guard entry → already in flight
+    const existingPr = openPrForNum(prs, num);
+    if (blocked('existing-PR', !!existingPr, existingPr ?? null)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
+    if (blocked('prepare-lane-capacity', lanes.length === 0, [...lanes])) { notes.push({ kind: 'prepare-no-lane', num, text: `no free lane to auto-prepare #${num}` }); return; }
     const lane = lanes.shift();
     consumedLanes.push(lane);
     guardNums.add(key); // a decision and a scope item never share a num, but stay safe against a duplicate row
@@ -425,7 +561,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
   for (const d of Array.isArray(decisions) ? decisions : []) {
     if (d?.num != null && d.prepared !== true) plan(d.num, 'prepare-decision', decisionSpawns);
   }
-  return { scopeSpawns, decisionSpawns, newGuards, consumedLanes, notes };
+  return { scopeSpawns, decisionSpawns, newGuards, consumedLanes, notes, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -848,12 +984,19 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *   prRearmCounts?: object,              // DURABLE per-PR re-arm-comment counts { [pr]: n } — the restart-surviving retry-cap floor (#2643); the IO shell derives it via `countRearmComments`
  *   admission?: { cap?:number, waiting?:Array<{owner:string, lane?:*, num?:*, requestedAt?:string}> },  // #3461 — the heavy-command admission-queue `status` read; each `waiting` entry surfaces as a `waiting-for-capacity` note
  *   liveAgentSessions?: Array<{name?:string}>|Array<string>,  // #3403 — the restart-surviving BUILD-guard floor: `claude agents --json` rows (or plain names), fed through {@link durableBuildNums}
- *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number },
+ *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number, maxConcurrentLanes?:number },
  *   now?: number|null, lastOperatorTurn?: number|null,
+ *   dispatchPaused?: boolean,          // #3609 — the manual/emergency dispatch-pause lever's current state
+ *   dispatchPausedReason?: string|null,// (dispatch-pause.mjs#isDispatchPaused / readPauseState), read by the IO
+ *                                      // shell. When true, ALL NEW prepare/fix/ci-heal spawns are held this
+ *                                      // tick (build launches are already held upstream — dispatch-plan.mjs
+ *                                      // empties `plan.launch` to `dispatch-paused` holds when paused, so
+ *                                      // `plan.launch` naturally arrives empty here too); already-running
+ *                                      // lanes/guards/watchers are entirely untouched.
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedReason = null } = {}) {
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
@@ -862,6 +1005,18 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     ciHealTtlTicks: config.ciHealTtlTicks ?? DEFAULT_CI_HEAL_TTL_TICKS,
     ciHealRetryCap: config.ciHealRetryCap ?? DEFAULT_CI_HEAL_RETRY_CAP,
     idleWindowMs: config.idleWindowMs ?? DEFAULT_IDLE_WINDOW_MS,
+    // #xupukxa — the SAME concurrency ceiling dispatch-plan.mjs applies to its own build launches, applied
+    // here to prepare/fix/ci-heal spawns (step 3 below) so all four spawn kinds share one budget. Defaults to
+    // `Infinity` (unlimited — today's pre-#xupukxa behavior), mirroring dispatch-plan.mjs's own pure-core
+    // default: every existing direct caller of this core (unit tests included) keeps its prior unrestricted
+    // behavior unless it opts in. The IO shell resolves and passes a real default via
+    // `resolveMaxConcurrentLanes` for every live tick.
+    maxConcurrentLanes: config.maxConcurrentLanes ?? Infinity,
+    stallTicks: config.stallTicks ?? DEFAULT_STALL_TICKS,
+    // Live-toggleable, tick-granularity verbose mode (`driver-verbose.mjs`) — resolved by the IO shell each
+    // tick (it owns the marker read + countdown) and passed in as a plain boolean, same as every other config
+    // knob here; the pure core has no fs of its own.
+    verbose: config.verbose === true,
   };
   const tick = Number(bookkeeping.tick) || 0;
   const { queue = [], unshaped = [], needsSlice = [], decisions = [], lanes = [], prs = [], health = {}, infraBlocked = [] } = state;
@@ -920,7 +1075,19 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const buildLive = [...build.live, ...durableBuildGuards];
 
   // 2. FILTER plan.launch through the live build guard (num OR lane), then record a guard per new build.
-  const launched = filterLaunches(plan.launch, buildLive);
+  const guardFiltered = filterLaunches(plan.launch, buildLive);
+  // #xupukxa — DEFENSE IN DEPTH: dispatch-plan.mjs already caps `plan.launch` against the concurrency ceiling
+  // using its OWN, separately-read active-lease count; re-cap here against `lanes.length` (THIS tick's own
+  // active-lane read) so a stale plan or a lease-count race between the two subprocess reads can never let
+  // builds alone exceed the ceiling — the same ceiling step 3 below also holds prepare/fix/ci-heal spawns to.
+  // A build trimmed here is NOT suppressed by the guard (it never got a chance to race a lane); tagged
+  // `by: 'capacity-cap'` in `suppressed` so it reads distinctly from a real guard suppression, and surfaced as
+  // its own note below rather than silently dropped.
+  const buildBudget = capToConcurrency(guardFiltered.spawn, { activeCount: lanes.length, cap: cfg.maxConcurrentLanes });
+  const launched = {
+    spawn: buildBudget.admitted,
+    suppressed: [...guardFiltered.suppressed, ...buildBudget.overflow.map((l) => ({ num: l.num, lane: l.lane, by: 'capacity-cap' }))],
+  };
   const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, spawnedTick: tick }));
   const liveBuildGuards = [...buildLive, ...newBuildGuards];
 
@@ -949,8 +1116,28 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   ]);
   let availableLanes = (Array.isArray(freeLanes) ? freeLanes : []).filter((l) => !takenLanes.has(String(l)));
 
-  // 4. PREPARE spawns (scope + decision) — union re-dispatch gate, lane exclusion; consume lanes.
-  const prep = planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick });
+  // 3.5 #xupukxa — trim `availableLanes` to whatever room is left under the SAME concurrency ceiling, counting
+  //     both lanes already active BEFORE this tick (`lanes.length`) and this tick's own admitted build launches
+  //     (`launched.spawn.length`, capped in step 2 above). Prepare/fix/ci-heal spawns below draw from this
+  //     ONE trimmed pool in priority order, so the four spawn kinds combined can never push the tick's total
+  //     lane consumption past `cfg.maxConcurrentLanes` — the exact gap the live incident exposed (19 builds +
+  //     23 prepare-scope agents, each independently maxing out whatever free lanes the OTHER had not yet taken).
+  const capacityBudget = capToConcurrency(availableLanes, {
+    activeCount: lanes.length + launched.spawn.length,
+    cap: cfg.maxConcurrentLanes,
+  });
+  availableLanes = capacityBudget.admitted;
+  // `notes` is declared further down (step 9) — stash these here and splice them in there, rather than reorder
+  // the whole function around one early-arriving note kind.
+  const capacityCapNotes = capacityBudget.overflow.map((l) =>
+    ({ kind: 'capacity-cap', lane: l, text: `⏸ lane-${l} available but withheld — concurrent-lane cap (${cfg.maxConcurrentLanes}) reached` }));
+
+  // 4. PREPARE spawns (scope + decision) — union re-dispatch gate, lane exclusion; consume lanes. #3609 — a
+  //    manual dispatch-pause holds these too, not just `plan.launch` (which dispatch-plan.mjs already empties
+  //    to `dispatch-paused` holds when paused): these spawns are computed straight off `state.unshaped` /
+  //    `state.decisions` / `state.prs`, never off `plan.launch`, so this tick's OWN `dispatchPaused` input —
+  //    not a re-read of `plan.held` — is what gates them. Already-live guards are untouched either way.
+  const prep = planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick, trace: true, dispatchPaused });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
   const livePrepareGuards = [...prepare.live, ...prep.newGuards];
@@ -964,7 +1151,11 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   ]));
 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
-  const fixPlan = planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
+  //    #3609 — held by the same manual dispatch-pause as step 4; `fixAttempts` passes through UNCHANGED (no new
+  //    attempt is spawned to count) rather than being recomputed by `planFixSpawns`.
+  const fixPlan = dispatchPaused
+    ? { spawns: [], newGuards: [], fixAttempts, consumedLanes: [], notes: [] }
+    : planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
   const fixConsumed = new Set(fixPlan.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !fixConsumed.has(String(l)));
@@ -972,7 +1163,10 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 6b. CI-HEAL spawns — conveyor-launched PRs gone RED / BEHIND after a green open (#2666). The SIBLING of the
   //     fix loop: same entry + counter + cap shape, CI-regression trigger, and the heal repairs ONLY CI — never the
   //     review label. Uses the lanes the builds/prepares/fixes did not take, gated by in-flight test + retry cap.
-  const ciHealPlan = planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
+  //    #3609 — held by the same manual dispatch-pause as steps 4/6; `ciHealAttempts` passes through UNCHANGED.
+  const ciHealPlan = dispatchPaused
+    ? { spawns: [], newGuards: [], ciHealAttempts, consumedLanes: [], notes: [] }
+    : planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
   const liveCiHealGuards = [...ciHeal.live, ...ciHealPlan.newGuards];
 
   // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs. Each armed entry
@@ -985,7 +1179,20 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
 
   // 9. Surface notes — the deterministic, no-agent surfaces (§3d epics, §3e prepared decisions) + guard TTL
   //    re-dispatch warnings, gathered so the skill posts them without re-deriving.
-  const notes = [];
+  const notes = [...capacityCapNotes];
+  // #3609 — ONE aggregate note for the manual dispatch-pause (rather than per-spawn-kind notes each spawn
+  // planner would otherwise emit): the individual `plan.held` items already carry their own per-num
+  // `dispatch-paused` note below, so this note covers only what those DON'T — the tick's own prepare/fix/
+  // ci-heal spawns, which never had a `plan.held` row to begin with (see steps 4/6/6b above).
+  if (dispatchPaused) {
+    notes.push({ kind: 'dispatch-paused', text: `⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick${dispatchPausedReason ? ` (${dispatchPausedReason})` : ''}` });
+  }
+  // #xupukxa — a build trimmed by the SAME concurrency ceiling (step 2) is surfaced too, not just the
+  // available-lane withholding above: an operator watching the status line otherwise sees a ready build
+  // silently vanish rather than being told why.
+  for (const s of launched.suppressed) {
+    if (s.by === 'capacity-cap') notes.push({ kind: 'capacity-cap', num: s.num, text: `⏸ #${s.num} — capacity-cap (concurrent-lane cap ${cfg.maxConcurrentLanes} reached)` });
+  }
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
   for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
   // #3454 — an UNCLAIMED TTL (dispatch-lane.mjs's own in-flight guard refused it pre-flight, or it died before
@@ -1012,9 +1219,22 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // HELD_NOTE_EXCLUDED_REASONS) — so a held item is never reported under two note kinds. Mirrors dispatch-plan.mjs's
   // own CLI text (`⏸ #<num> — <reason>`) so the tick's own output answers "why not" without a human separately
   // running `dispatch-plan.mjs --json` by hand.
+  const heldEntries = [];
   for (const h of Array.isArray(plan.held) ? plan.held : []) {
     if (!h || h.num == null || HELD_NOTE_EXCLUDED_REASONS.includes(h.reason)) continue;
     notes.push({ kind: 'held', num: h.num, reason: h.reason, text: `⏸ #${h.num} — ${h.reason}` });
+    heldEntries.push({ num: h.num, reason: h.reason });
+  }
+  // SELF-DIAGNOSED STALL (2026-09-14, #3521/lane-2 incident — see {@link advanceHeldStall}'s header). The tick
+  // diagnoses ITS OWN lack of progress here: the same item held on the same reason `cfg.stallTicks` ticks
+  // running gets an explicit `stalled` note (and a structured `decisions.stalled` entry below) — a fact the
+  // driver reports about itself, not something an external inspector has to reconstruct from raw tick history.
+  const heldStall = advanceHeldStall(bookkeeping.heldStall, heldEntries, cfg.stallTicks);
+  for (const s of heldStall.stalled) {
+    notes.push({
+      kind: 'stalled', num: s.num, reason: s.reason, ticks: s.ticks,
+      text: `🛑 #${s.num} stuck ${s.ticks} consecutive ticks on: ${s.reason} — self-diagnosed stall, needs attention`,
+    });
   }
   // HEALTH — the stall scan is LIVE now (#2616 populates the lane→num map on `acquire --item`), so `state.health`
   // flags a genuinely stalled lane instead of always reading `ok`. Surface each stalled lane as an actionable note
@@ -1072,22 +1292,45 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     queue, lanes, prs, health, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
 
-  return {
-    decisions: {
-      counts,
-      spawnBuilds: launched.spawn,
-      suppressedBuilds: launched.suppressed,
-      spawnPrepareScope: prep.scopeSpawns,
-      spawnPrepareDecision: prep.decisionSpawns,
-      spawnFixes: fixPlan.spawns,
-      spawnCiHeals: ciHealPlan.spawns,
-      armWatchers: watch.arm,
-      retireGuards: { build: build.retired, prepare: prepare.retired, fix: fix.retired, ciHeal: ciHeal.retired },
-      idleStop: idle.stop,
-      idle,
-      statusLine,
-      notes,
+  const decisionsOut = {
+    // Carry the planner's evidence verbatim; a reporter must never reconstruct its gates.
+    admission: {
+      queue,
+      cleared: Array.isArray(plan.cleared) ? plan.cleared : null,
+      selection: Array.isArray(plan.selection) ? plan.selection : [],
+      held: Array.isArray(plan.held) ? plan.held : [],
+      planned: Array.isArray(plan.launch) ? plan.launch : [],
+      traces: Array.isArray(plan.admission) ? plan.admission : [],
+      prepare: prep.admission ?? [],
     },
+    counts,
+    spawnBuilds: launched.spawn,
+    suppressedBuilds: launched.suppressed,
+    spawnPrepareScope: prep.scopeSpawns,
+    spawnPrepareDecision: prep.decisionSpawns,
+    spawnFixes: fixPlan.spawns,
+    spawnCiHeals: ciHealPlan.spawns,
+    armWatchers: watch.arm,
+    retireGuards: { build: build.retired, prepare: prepare.retired, fix: fix.retired, ciHeal: ciHeal.retired },
+    idleStop: idle.stop,
+    idle,
+    statusLine,
+    notes,
+    // Structured (not re-parsed from a `stalled`-kind note's text) — the SAME "give the supervisor a real
+    // field, not text to grep" discipline `counts` already applies (#3398's own comment, just above).
+    stalled: heldStall.stalled,
+  };
+  // #3521 decision-trace (v1) — a plain-language "why", built from what's already computed above; never a
+  // second source of truth for any of it (see {@link buildDecisionTrace}). `allHeld` is the UNFILTERED
+  // `plan.held` (before the terse loop's HELD_NOTE_EXCLUDED_REASONS drop) — only verbose mode reads it.
+  decisionsOut.decisionTrace = buildDecisionTrace(decisionsOut, {
+    verbose: cfg.verbose,
+    allHeld: Array.isArray(plan.held) ? plan.held : [],
+    lanes,
+  });
+
+  return {
+    decisions: decisionsOut,
     nextState: {
       tick: tick + 1,
       buildGuards: liveBuildGuards,
@@ -1098,6 +1341,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       ciHealAttempts: ciHealPlan.ciHealAttempts,
       watched: watch.nextWatched,
       launchedNums,
+      heldStall: heldStall.nextHeldStall,
     },
   };
 }
@@ -1131,6 +1375,16 @@ async function main(argv) {
   }
   const fail = (m) => { process.stderr.write(`✗ ${m}\n`); process.exit(1); };
 
+  // Verbose-mode "timing breakdown per sub-step" (#3521 decision-trace v1, follow-up) — an HONEST measurement
+  // of the IO shell's OWN sub-steps (never a synthetic/invented internal), so verbose mode can show where a
+  // tick's wall-clock actually went. `time()` wraps a step; `timings` collects `{label: ms}` for the tick's own
+  // `main()` reads (state, plan, lane-pool list, admission status, the PR-comment-reads loop as one aggregate).
+  const timings = {};
+  const time = (label, fn) => {
+    const t0 = Date.now();
+    try { return fn(); } finally { timings[label] = (timings[label] || 0) + (Date.now() - t0); }
+  };
+
   const runJson = (cmd, args, what) => {
     let out;
     try {
@@ -1160,6 +1414,10 @@ async function main(argv) {
       lastOperatorTurn = parsed.lastOperatorTurn ?? null;
     }
   }
+  // #xupukxa — resolve the concurrency ceiling from env exactly like dispatch-plan.mjs's own IO shell, unless
+  // the caller's piped-in bookkeeping already named one explicitly (an operator override rides through
+  // `config.maxConcurrentLanes` on STDIN same as any other config knob).
+  if (config.maxConcurrentLanes == null) config.maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
 
   const stateArgs = ['--json'];
   const planArgs = ['--json'];
@@ -1171,11 +1429,11 @@ async function main(argv) {
     stateArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
     planArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
   }
-  const state = runJson('node', [STATE_CLI, ...stateArgs], 'conveyor-state');
-  const plan = runJson('node', [PLAN_CLI, ...planArgs], 'dispatch-plan');
+  const state = time('stateReadMs', () => runJson('node', [STATE_CLI, ...stateArgs], 'conveyor-state'));
+  const plan = time('planReadMs', () => runJson('node', [PLAN_CLI, ...planArgs], 'dispatch-plan'));
 
   // Free lane ids — the same acquirable picker dispatch-plan's shell uses (ascending, deterministic assignment).
-  const paths = runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list');
+  const paths = time('lanePoolListMs', () => runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list'));
   const freeLanes = (Array.isArray(paths) ? paths : [])
     .map((p) => { const m = /lane-(\d+)\/?$/.exec(String(p)); return m ? Number(m[1]) : null; })
     .filter((n) => n != null)
@@ -1218,8 +1476,8 @@ async function main(argv) {
     const prViewArgs = ['pr', 'view', String(p.prNumber), '--json', 'comments'];
     if (typeof flags.repo === 'string') { prViewArgs.push(`--repo=${flags.repo}`); }
     try {
-      const raw = execFileSync('gh', prViewArgs,
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+      const raw = time('prCommentReadsMs', () => execFileSync('gh', prViewArgs,
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }));
       const comments = JSON.parse(raw)?.comments;
       if (wantsRearm) prRearmCounts[p.prNumber] = countRearmComments(comments);
       if (wantsCiHeal) prCiHealCounts[p.prNumber] = countCiHealComments(comments);
@@ -1233,11 +1491,42 @@ async function main(argv) {
   if (typeof flags.repo === 'string') { admissionArgs.push(`--repo=${flags.repo}`); }
   let admission = {};
   try {
-    const raw = execFileSync('node', [ADMISSION_CLI, ...admissionArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+    const raw = time('admissionStatusMs', () => execFileSync('node', [ADMISSION_CLI, ...admissionArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 }));
     admission = JSON.parse(raw);
   } catch { /* best-effort — see comment above */ }
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn });
+  // #3609 — the manual/emergency dispatch-pause marker (best-effort direct import, matching the durable-floor
+  // reads above). FAILS OPEN: a missing module or unreadable/corrupt marker leaves `dispatchPaused` false —
+  // dispatch-plan.mjs's own IO shell already reads the SAME marker independently for `plan.launch`, so a
+  // failure here only affects THIS tick's own prepare/fix/ci-heal spawns, never silently re-arms builds.
+  let dispatchPaused = false;
+  let dispatchPausedReason = null;
+  if (!flags['no-pause-check']) {
+    try {
+      const { readPauseState } = await import('../readiness/dispatch-pause.mjs');
+      const pauseState = readPauseState();
+      dispatchPaused = pauseState.paused === true;
+      dispatchPausedReason = pauseState.reason || null;
+    } catch { /* leave unpaused — fail open, same contract as readPauseState's own try/catch */ }
+  }
+
+  // #3521 decision-trace v1 follow-up (2026-09-14) — the LIVE-TOGGLEABLE verbose marker (`driver-verbose.mjs`).
+  // Re-read (and its own bounded `--ticks=N` window advanced) every tick, exactly like the dispatch-pause marker
+  // just above — a human or another agent can flip a currently-running driver loud without restarting it.
+  // FAILS OPEN: a missing module or unreadable/corrupt marker leaves verbose OFF (the terse default never
+  // silently becomes noisy from a read failure).
+  if (config.verbose == null) {
+    try {
+      const { readAndAdvanceVerboseState } = await import('../readiness/driver-verbose.mjs');
+      config.verbose = readAndAdvanceVerboseState() === true;
+    } catch { config.verbose = false; }
+  }
+
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedReason });
+  // Verbose-mode timing breakdown (#3521 decision-trace v1 follow-up) — an IO-shell-observed fact, not something
+  // the pure core computes; attached only here, after the tick already ran, so a timing read can never affect
+  // the decision itself.
+  if (config.verbose) out.decisions.timings = timings;
   writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }

@@ -107,7 +107,7 @@ let __ppmTmpSeq = 0; // monotonic suffix for unique tmp files (harvest webp + pe
 // Encode an on-disk image file (png/jpg/tiff/webp — whatever cwebp accepts) to WebP q90. The
 // gallery-harvest path (#397) feeds operator-provided screenshots through this, same encoder/quality
 // as the live-capture path, so harvested + captured shots are byte-comparable in the same corpus.
-function imageFileToWebp(inputPath) {
+export function imageFileToWebp(inputPath) {
   const out = join(tmpdir(), `design-ref-harvest-${process.pid}-${__ppmTmpSeq++}.webp`);
   try {
     execFileSync('cwebp', ['-q', '90', '-quiet', inputPath, '-o', out]);
@@ -824,11 +824,23 @@ export function clusterByHamming(items, threshold) {
   return [...groups.values()];
 }
 
-// Decode a corpus webp to its dHash via `dwebp -scale 9 8 -ppm`. Returns null when dwebp is absent or
-// the decode fails — the perceptual pass then degrades to exact-only.
-function shotDHash(webpPath) {
-  const out = join(tmpdir(), `design-ref-phash-${process.pid}-${__ppmTmpSeq++}.ppm`);
+// Decode ANY raster file (webp, png, or anything cwebp accepts) to its dHash via `dwebp -scale 9 8
+// -ppm`. Non-webp input is routed through imageFileToWebp first — the generalization a target-registry
+// (#2806) or visual-comparator caller will need for a Playwright PNG, which dwebp cannot read directly;
+// this diff exports the generalized function but wires no such caller yet. Returns null when dwebp/cwebp
+// are absent or the decode fails — the perceptual pass then degrades to exact-only.
+export function fileDHash(imagePath) {
+  const isWebp = String(imagePath).toLowerCase().endsWith('.webp');
+  let webpPath = imagePath;
+  let tmpWebp = null;
+  let out = null;
   try {
+    if (!isWebp) {
+      tmpWebp = join(tmpdir(), `design-ref-filedhash-${process.pid}-${__ppmTmpSeq++}.webp`);
+      writeFileSync(tmpWebp, imageFileToWebp(imagePath));
+      webpPath = tmpWebp;
+    }
+    out = join(tmpdir(), `design-ref-phash-${process.pid}-${__ppmTmpSeq++}.ppm`);
     execFileSync('dwebp', ['-scale', '9', '8', '-ppm', webpPath, '-o', out], { stdio: 'ignore' });
     const { width, height, pixels } = ppmToGray(readFileSync(out));
     if (width !== 9 || height !== 8) return null;
@@ -836,8 +848,15 @@ function shotDHash(webpPath) {
   } catch {
     return null;
   } finally {
-    try { rmSync(out); } catch {}
+    if (out) { try { rmSync(out); } catch {} }
+    if (tmpWebp) { try { rmSync(tmpWebp); } catch {} }
   }
+}
+
+// Decode a corpus webp to its dHash — the always-already-webp case, kept as its own name at the call
+// site below for readability. Delegates to fileDHash (webp input takes its no-conversion branch).
+function shotDHash(webpPath) {
+  return fileDHash(webpPath);
 }
 
 // ---- dedup (exact sha256 + perceptual near-dup pass) -----------------------

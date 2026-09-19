@@ -69,6 +69,16 @@ Rules:
   goal-directed work counts (a subagent on a specific task, a PR actually awaiting
   review/merge/CI). If a steady-state process is doing something concrete and current,
   report THAT specific activity, not the process's mere existence/health.
+- Conveyor/driver breakout: when the mechanical conveyor/driver has active or
+  recently-finished activity to report, break it out into separate Doing rows by step
+  kind — `prepare`, `prepare-decision`, `build`, `fix`, `ci-heal`, `review` — instead of
+  folding it into one generic aggregate row (e.g. a single "driver run" row). Give
+  anything that stood down or got refused its own distinct `stuck/refused` row rather
+  than merging it into a kind's row. This still obeys the general rules above: one row
+  per item (a kind with multiple concurrent instances gets one row per instance, not one
+  row per kind), no invented work, and pull the kind and status only from actual known
+  state (conveyor/telemetry status output, `ListAgents`) — never guess a kind that isn't
+  evidenced.
 - Next rows: only steps already planned/agreed in this session — not new suggestions or
   ideas you're generating now.
 - `Done`, `Doing`, and `Next` are always printed, in that order, even when empty — an

@@ -483,7 +483,7 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // so a PR THIS run just stamped is stripped even if the live label read failed OPEN to `[]` (#984 minor 1).
     expect(src).toMatch(/const holdDecision = decideHoldReadyStrip\(verdict\.label, currentLabels, \{ labelApplied \}\)/);
     expect(src).toMatch(/if \(holdDecision\.strip\)/);
-    expect(src).toMatch(/'--remove-label', READY_TO_MERGE_LABEL/);
+    expect(src).toMatch(/forge\.removeLabel\(prNum, READY_TO_MERGE_LABEL\)/);
     // The pre-#984 round-1 guard (strip gated SOLELY on this-run's applyLabel via a forked predicate) stays gone.
     expect(src).not.toMatch(/isReviewHoldLabel\(verdict\.label\) && labelApplied/);
   });
@@ -651,6 +651,29 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/function syncPrimaryMain/);
     expect(src).toMatch(/'pull', '--ff-only', '--autostash'/);
     expect(src).toMatch(/NOT fast-forwarded/);
+  });
+  // #3585 — every bare `gh` call in runCli now goes through the `forge` port (`createGhLandProvider`,
+  // scripts/lib/forge-land-provider.mjs). Pin the real call sites, source-level, the same technique this
+  // describe block already uses elsewhere — the port's OWN test only proves its argv literals are correct in
+  // isolation, not that pr-land.mjs actually calls them.
+  it('#3585: every runCli gh call site is wired to the forge port, not a bare literal', () => {
+    expect(src).not.toMatch(/execFileSync\('gh'/); // no bare gh exec left in this file at all
+    expect(src).toMatch(/const forge = createGhLandProvider\(\{ cwd: REPO \}\)/);
+    expect(src).toMatch(/forge\.listOpenByHead\(REF\)/);
+    expect(src).toMatch(/forge\.create\(createParams\)/);
+    expect(src).toMatch(/forge\.viewPr\(prNum, 'body'\)/);
+    expect(src).toMatch(/forge\.viewPr\(prNum, 'labels'\)/);
+    expect(src).toMatch(/forge\.viewPr\(prNum, 'mergeable,mergeStateStatus'\)/);
+    expect(src).toMatch(/forge\.editBody\(prNum, updated\)/);
+    expect(src).toMatch(/forge\.editBody\(prNum, reconciled\.body\)/);
+    expect(src).toMatch(/forge\.addLabel\(prNum, LABEL\)/);
+    expect(src).toMatch(/forge\.addLabel\(prNum, verdict\.label\)/);
+    expect(src).toMatch(/forge\.addLabel\(prNum, parkLabel\)/);
+    expect(src).toMatch(/forge\.removeLabel\(prNum, READY_TO_MERGE_LABEL\)/);
+    expect(src).toMatch(/forge\.requiredChecks\(prNum\)/);
+    expect(src).toMatch(/forge\.ensureLabel\(LABEL, \{/);
+    expect(src).toMatch(/forge\.ensureLabel\(verdict\.label, \{/);
+    expect(src).toMatch(/forge\.ensureLabel\(parkLabel, \{/);
   });
 });
 

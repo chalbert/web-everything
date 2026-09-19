@@ -336,15 +336,15 @@ describe('transcriptMentionsItem — ANCHORED item-id match (no #26-masks-#2611 
 });
 
 describe('shapePrs — gh pr list → the in-flight PR shape', () => {
-  it('maps num(from headRef)/prNumber/state/ci/labels/mergeStateStatus', () => {
+  it('maps num(from headRef)/prNumber/state/ci/labels/mergeStateStatus/stoodDown', () => {
     const prs = shapePrs([
       { number: 658, state: 'OPEN', headRefName: 'lane/2611-conveyor-state', statusCheckRollup: [{ conclusion: 'SUCCESS' }], labels: [{ name: 'review:human' }], mergeStateStatus: 'BEHIND' },
     ]);
-    expect(prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'], mergeStateStatus: 'BEHIND' }]);
+    expect(prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'], mergeStateStatus: 'BEHIND', stoodDown: false }]);
   });
   it('tolerates a bare-string label array and a missing rollup', () => {
     expect(shapePrs([{ number: 1, headRefName: 'lane/5-x', labels: ['a'] }])[0]).toEqual({
-      num: '5', prNumber: 1, state: '', ci: 'none', labels: ['a'], mergeStateStatus: '',
+      num: '5', prNumber: 1, state: '', ci: 'none', labels: ['a'], mergeStateStatus: '', stoodDown: false,
     });
   });
   it('carries mergeStateStatus through raw so the CI-heal BEHIND branch can read it (#2738)', () => {
@@ -354,6 +354,23 @@ describe('shapePrs — gh pr list → the in-flight PR shape', () => {
   it('null list → []', () => expect(shapePrs(null)).toEqual([]));
   it('#xaa7r2n — a retried PR headRef (attempt-tag letter) still resolves num, not null', () => {
     expect(shapePrs([{ number: 1851, headRefName: 'lane/3441b-resolve-on-land-extractor', state: 'OPEN' }])[0].num).toBe('3441');
+  });
+  // #3296 — `stoodDown` is derived from the PR's own comments via `countStandDownComments`, the SAME durable
+  // marker `reconcile-core.mjs`'s `planReconcile` reads to refuse re-dispatching a fixer at this PR.
+  it('#3296 a PR whose comments carry the durable STAND_DOWN_MARKER → stoodDown: true', () => {
+    const pr = shapePrs([
+      { number: 2223, headRefName: 'lane/3383-x', labels: [{ name: 'review:changes' }], comments: [
+        { body: 'ordinary comment' },
+        { body: '🛑 conveyor fix — stood down, human judgment needed\n\nfoo' },
+      ] },
+    ])[0];
+    expect(pr.stoodDown).toBe(true);
+  });
+  it('#3296 a PR with ordinary comments (no stand-down marker) → stoodDown: false', () => {
+    expect(shapePrs([{ number: 1, headRefName: 'lane/1-x', comments: [{ body: 'lgtm' }] }])[0].stoodDown).toBe(false);
+  });
+  it('#3296 a PR with no comments at all → stoodDown: false (never throws)', () => {
+    expect(shapePrs([{ number: 1, headRefName: 'lane/1-x' }])[0].stoodDown).toBe(false);
   });
 });
 
@@ -581,7 +598,7 @@ describe('assembleConveyorState — the whole tick picture', () => {
     expect(s.queue[0]).toEqual({ num: '2611', rank: 1, buildQueued: true, openBlockers: [], scope: null, kind: null, epicState: null, prepared: false, preparedDate: null });
     expect(s.lanes).toEqual([{ lane: 1, num: '2611', session: 'sess-1', lease: ['we:scripts/readiness/conveyor-state.mjs'], breach: [] }]);
     expect(s.freeSlots).toBe(2);
-    expect(s.prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'], mergeStateStatus: '' }]);
+    expect(s.prs).toEqual([{ num: '2611', prNumber: 658, state: 'OPEN', ci: 'pass', labels: ['review:human'], mergeStateStatus: '', stoodDown: false }]);
     expect(s.daemon).toEqual({ resident: true, lastPass: inputs.daemonReport.lastPass, parked: inputs.daemonReport.parkedNow });
     expect(s.idle).toEqual({ lastMerge: '2026-07-22T14:00:00Z', lastQueueAdd: '2026-07-22T14:30:00Z', now });
     expect(s.health).toEqual({ verdict: 'ok', stalled: [], degradedInfra: [], errors: [] });
