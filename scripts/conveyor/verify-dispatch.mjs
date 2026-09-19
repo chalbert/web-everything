@@ -287,10 +287,16 @@ async function main(argv) {
         // a marker write (a spawn error, an unexpected non-{0,2} exit) counts as one, and is logged, never
         // fatal to the rest of this pass — one bad lane must not block dispatching the others.
         const status = Number.isFinite(e && e.status) ? e.status : null;
-        // A timeout kill reports a SIGNAL, never a status — that combination only happens here when OUR OWN
-        // ceiling fired (verify-lane.mjs has no signal handling of its own to race it). `timedOutPhase` says
-        // which of the two ceilings it was.
-        const timedOut = status === null && !!(e && e.signal);
+        // Trust `e.timedOutPhase` directly — it is `spawnGateBounded`'s OWN authoritative record of whether
+        // ONE OF OUR TWO TIMERS actually fired, set only inside its own `onTimeout` handler. A prior version
+        // of this check re-derived "timed out" from the exit shape alone (`status === null && signal present`)
+        // — but that shape is NOT unique to our own kill: an external actor (an operator's `kill -9`, an OS
+        // OOM-kill, a host restart) killing the spawned `verify-lane.mjs` process produces the exact same
+        // `status:null, signal:<sig>` pair, and the re-derived check would then misattribute that external
+        // kill as "exceeded the queue/gate ceiling" — misleading during exactly the incident investigation
+        // this ceiling exists to support (found in review, epic #3383). Functionally harmless either way (the
+        // lane lands in `failures` and gets retried next tick regardless), but the LABEL must be accurate.
+        const timedOut = !!(e && e.timedOutPhase);
         if (timedOut) {
           const phase = e.timedOutPhase || 'gate';
           const ceilingMs = phase === 'queue' ? QUEUE_PHASE_CEILING_MS : VERIFY_DISPATCH_TIMEOUT_MS;
