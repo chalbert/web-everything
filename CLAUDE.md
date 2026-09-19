@@ -14,6 +14,12 @@ before ending a turn. If you must stop mid-task, say so explicitly — never imp
 coming. Full rationale + evidence:
 [`agent-memory-src/subagent-must-not-end-turn-on-passive-wait.md`](agent-memory-src/subagent-must-not-end-turn-on-passive-wait.md).
 
+The concrete case that has caused this exact violation to recur tonight is dispatching
+`scripts/codex-direct-task.mjs` and `scripts/gemini-direct-task.mjs`: BOTH are already synchronous
+and block until the delegated model's task completes. Run them as normal foreground Bash calls,
+never with `run_in_background: true` and never wrapped in Monitor or a nested wait — there is
+nothing to watch; the call itself already returns the final result.
+
 *(Pinned here, not in `AGENTS.md`/`docs/agent/`, because those are pull-based — a fresh subagent has
 no reason to open them unless told. This file is the one thing confirmed to auto-load into every
 session **and** every Agent-tool subagent's context regardless of cwd — main checkout, lane clone, or

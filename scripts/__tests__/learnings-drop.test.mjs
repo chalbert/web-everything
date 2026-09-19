@@ -8,7 +8,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   KINDS, ALLOWED_KEYS, FIELD_CAPS, PROPOSED_FIX_CAP, scrubReasons, isHighEntropyToken, validateEntry, appendEntry,
   resolveDropboxPath, poolDir, normalizeTs, OPTIONAL_HICCUP_KEYS,
@@ -96,10 +98,13 @@ describe('validateEntry — schema is the privacy boundary', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.join(' ')).toMatch(/disallowed field/i);
   });
-  it('exposes exactly the generalized-lesson keys plus the #3421 optional hiccup keys', () => {
+  it('exposes exactly the generalized-lesson keys plus the #3421 hiccup keys and the #3016 grounding keys', () => {
     // blocking / proposedFix / approvalPending are OPTIONAL and hiccup-only (see the #3421 describe block
     // below) — their presence in the allow-list does not widen what a non-blocking entry may carry.
-    expect(ALLOWED_KEYS).toEqual(['kind', 'summary', 'area', 'suggestion', 'blocking', 'proposedFix', 'approvalPending']);
+    // quotedTurn / transcript are the OPTIONAL grounding pair (see the #3016 describe block below).
+    expect(ALLOWED_KEYS).toEqual([
+      'kind', 'summary', 'area', 'suggestion', 'blocking', 'proposedFix', 'approvalPending', 'quotedTurn', 'transcript',
+    ]);
   });
   it('rejects an unknown kind, a missing field, and a non-object', () => {
     expect(validateEntry({ ...good, kind: 'bug' }).ok).toBe(false);
@@ -361,6 +366,69 @@ describe('validateEntry — the #3421 blocking/proposedFix/approvalPending field
       expect(record.approvalPending).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('validateEntry — the #3016 grounding pair (quotedTurn + transcript: OPTIONAL, both or neither, uncapped)', () => {
+  const grounded = {
+    ...good,
+    quotedTurn: 'please stop re-running the whole suite for a README edit',
+    transcript: '/home/u/.claude/projects/-home-u-we/0b1c2d3e.jsonl',
+  };
+
+  it('accepts a grounded entry and carries both fields into `clean`, quote verbatim', () => {
+    const r = validateEntry({ ...grounded, quotedTurn: '  please stop re-running\n the whole suite  ' });
+    expect(r.ok).toBe(true);
+    expect(r.clean.quotedTurn).toBe('  please stop re-running\n the whole suite  ');
+    expect(r.clean.transcript).toBe(grounded.transcript);
+  });
+
+  it('an ungrounded entry keeps the plain clean shape — no stray grounding keys', () => {
+    expect(Object.keys(validateEntry(good).clean)).not.toContain('quotedTurn');
+    expect(Object.keys(validateEntry(good).clean)).not.toContain('transcript');
+  });
+
+  it('the quote is UNCAPPED — a multi-thousand-char turn is accepted (#2978 Fork 3)', () => {
+    expect(validateEntry({ ...grounded, quotedTurn: 'the operator said '.repeat(400) }).ok).toBe(true);
+  });
+
+  it('rejects half a pair, in either direction', () => {
+    const { transcript, ...quoteOnly } = grounded;
+    const { quotedTurn, ...pointerOnly } = grounded;
+    expect(validateEntry(quoteOnly).errors.join(' ')).toMatch(/go together/);
+    expect(validateEntry(pointerOnly).errors.join(' ')).toMatch(/go together/);
+  });
+
+  it('rejects a quote too short to tie the note to any particular moment', () => {
+    expect(validateEntry({ ...grounded, quotedTurn: 'yes do it' }).ok).toBe(false);
+    expect(validateEntry({ ...grounded, quotedTurn: '   \n  ' }).ok).toBe(false);
+    expect(validateEntry({ ...grounded, quotedTurn: 42 }).ok).toBe(false);
+  });
+
+  it('rejects a pointer that is relative, not a .jsonl, multi-line, or not a string', () => {
+    for (const transcript of ['projects/x.jsonl', '/abs/transcript.txt', '/abs/a.jsonl\n/abs/b.jsonl', '', true]) {
+      expect(validateEntry({ ...grounded, transcript }).ok, JSON.stringify(transcript)).toBe(false);
+    }
+  });
+
+  it('the CLI carries --quoted-turn/--transcript into the pool line (real call path)', () => {
+    const pool = mkdtempSync(join(tmpdir(), 'learnings-drop-cli-'));
+    try {
+      const cli = join(dirname(fileURLToPath(import.meta.url)), '..', 'conveyor', 'learnings-drop.mjs');
+      const run = (...extra) => spawnSync(process.execPath, [cli, '--kind=friction', `--summary=${good.summary}`,
+        `--area=${good.area}`, `--suggestion=${good.suggestion}`, '--session=cli-grounded', '--json', ...extra],
+      { encoding: 'utf8', env: { ...process.env, LEARNINGS_POOL: pool, LEARNINGS_DROPBOX: '' } });
+      const ok = run(`--quoted-turn=${grounded.quotedTurn}`, `--transcript=${grounded.transcript}`);
+      expect(ok.status, ok.stderr).toBe(0);
+      const line = JSON.parse(readFileSync(join(pool, 'cli-grounded.jsonl'), 'utf8').trim());
+      expect(line).toMatchObject({ quotedTurn: grounded.quotedTurn, transcript: grounded.transcript });
+      // Half a pair on the CLI fails loudly — it is not silently dropped into an ungrounded entry.
+      const half = run(`--quoted-turn=${grounded.quotedTurn}`);
+      expect(half.status).toBe(1);
+      expect(half.stdout).toMatch(/go together/);
+    } finally {
+      rmSync(pool, { recursive: true, force: true });
     }
   });
 });

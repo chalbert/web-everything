@@ -38,12 +38,17 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { mkdirSync, writeFileSync, renameSync, appendFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { defaultFetchOpenPrs } from '../../scripts/conveyor/open-pr-fetch.mjs';
 import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
 import { runGhSync } from '../../scripts/lib/gh-throttle.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+import { localDateString } from '../../scripts/lib/local-date.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -94,6 +99,16 @@ export function tickSurface(out) {
       ciHeals: Array.isArray(d.spawnCiHeals) ? d.spawnCiHeals : [],
     },
     armWatchers: Array.isArray(d.armWatchers) ? d.armWatchers : [],
+    // 2026-09-14 (#3521/lane-2 incident) — the tick core's SELF-DIAGNOSED stall list (see `advanceHeldStall` /
+    // `tick-core.mjs`): items held on the exact same reason for `stallTicks` consecutive ticks. Projected
+    // through verbatim so both the human-readable `emit` text and the durable external status file (below)
+    // carry it — a driver that is stuck now says so itself, instead of a human having to notice the absence
+    // of progress across many raw ticks the way this incident required.
+    stalled: Array.isArray(d.stalled) ? d.stalled : [],
+    // 2026-09-14 (#3521 decision-trace v1) — the tick core's plain-language "why" for its OWN dispatch/skip/
+    // stall decisions this tick (see `buildDecisionTrace` / `tick-core.mjs`). Projected through so the durable
+    // trace sidecar (below) can log it without re-deriving anything.
+    decisionTrace: Array.isArray(d.decisionTrace) ? d.decisionTrace : [],
   };
 }
 
@@ -272,128 +287,146 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // repo's own investigation found nothing tracking it over time). Purely informative — no dispatch gate
     // reads its verdict, unlike branch-drift's `blocked` above.
     runQuiet('conveyor/ci-queue-watch.mjs', ['sweep']);
-    // #xw0odtv — sweeps every OPEN PR for a review-parked (review:human/pending/uncleared-changes) hold that
-    // has drifted into a REAL merge conflict (mergeable === CONFLICTING) against main, applying an informative
-    // `merge-status:conflicting` label + a one-time comment (self-clearing once the conflict resolves). Distinct
-    // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
-    // population) — see that file's own header for the full gap this closes.
-    runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
-    // #3568 — reaps known-safe scratch litter (`.commit-msg.txt`, `.pr-body.md`, …) from every UNLEASED lane
-    // whose entire dirty state matches only that allowlist, reusing the SAME `we:scripts/lib/lane-litter.mjs`
-    // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix
-    // or accumulated through any path other than a normal release. See that file's own header for the full
-    // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
-    runQuiet('conveyor/lane-pool-health-watch.mjs');
-    // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
-    // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
-    // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
-    // build/prepare/fix/ci-heal guards it needs NO session-ephemeral bookkeeping of its own; it can just be
-    // re-run every tick, safely, the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are.
-    // `operations/review-dispatch.mjs` (#3279) existed and worked standalone, but nothing called it
-    // automatically — this closes that gap.
-    //
-    // DOUBLE-DISPATCH IS ALREADY GUARDED, UPSTREAM, NOT HERE. `reconcile-core.mjs`'s own liveness read binds a
-    // live session to a PR (cwd → HEAD sha) and refuses (`live-process`) BEFORE the `review` dispatch decision
-    // is ever reached — so a review already in flight for a PR simply does not appear in next tick's plan.
-    //
-    // SEQUENTIAL, mirroring `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state:
-    // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
-    // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
-    // rest of the tick, or the tick itself).
-    let plan = null;
+    // One snapshot for the four PR-list consumers. Scope it to this invocation, including failure cleanup.
+    let prsFile = null;
     try {
-      const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json'];
-      if (typeof repo === 'string' && repo) reconcileArgs.push(`--repo=${repo}`);
-      const reconcileOut = execFileSync('node', reconcileArgs, {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
-      });
-      plan = JSON.parse(reconcileOut);
-    } catch (e) {
-      process.stderr.write(`⚠ mechanical pass conveyor/reconcile-pass.mjs failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-    }
-    // #x5v8yy9 review finding — kept as its OWN try/catch, separate from the `reconcile-pass.mjs` call above:
-    // this block's own failures (the `gh repo view` slug resolution, or a per-PR dispatch/tag call) used to
-    // share that call's catch and log as "mechanical pass conveyor/reconcile-pass.mjs failed" even though
-    // `reconcile-pass.mjs` itself had already succeeded — misattributing the failing step to an operator
-    // reading `runner.log`.
-    try {
-      if (plan) {
-        const reviewsOwed = (Array.isArray(plan.dispatch) ? plan.dispatch : []).filter((d) => d && d.kind === 'review');
-        // x5v8yy9 — every PR this pass has an OPINION about, informatively tagged, EXCLUDING only `nothing-owed`
-        // (reviewed/queued/landed, or a genuinely signal-free PR). `owed-elsewhere` is NOT excluded — it covers
-        // real conveyor PRs stuck `needs-human`/`ci-red`/`conflicted`, not just unrelated ones (see
-        // `selectStatusCandidates`'s own docblock for the PR #1920 staleness incident this fixes).
-        const statusCandidates = selectStatusCandidates(reviewsOwed, plan.refusals);
-        if (reviewsOwed.length || statusCandidates.length) {
-          // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
-          // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
-          // do, so the common empty-plan tick never pays for an extra `gh` call.
-          // Throttled (#3621) — `we:scripts/lib/gh-throttle.mjs#runGhSync`, a byte-for-byte transparent
-          // `execFileSync('gh', args, opts)` replacement gated through the shared `gh`-call concurrency
-          // semaphore with rate-limit backoff. This is the runner's own direct `gh` call (not a script it
-          // shells), paid only when review work is actually owed this tick.
-          const repoSlug = typeof repo === 'string' && repo
-            ? repo
-            : runGhSync(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-              encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-            }).trim();
-          for (const d of reviewsOwed) {
-            // #x5v8yy9 review finding — `dispatched` gates the round-tag call below. Before this fix,
-            // `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
-            // attempt itself threw and no session was ever spawned — so `review-round:<N>` kept advancing every
-            // tick regardless of whether a review actually happened, misleading anyone reading the label.
-            let dispatched = false;
-            try {
-              execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
-                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
-              dispatched = true;
-            } catch (e) {
-              process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+      let prsArgs = [];
+      try {
+        const prs = defaultFetchOpenPrs({ repo });
+        prsFile = join(tmpdir(), `conveyor-open-prs-${randomUUID()}.json`);
+        writeFileSync(prsFile, JSON.stringify(prs), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        prsArgs = [`--prs-file=${prsFile}`];
+      } catch (e) {
+        // No flag means today's independent discovery remains available in every consumer.
+        process.stderr.write(`⚠ mechanical pass open-pr-fetch failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
+      }
+      // #xw0odtv — sweeps every OPEN PR for a review-parked (review:human/pending/uncleared-changes) hold that
+      // has drifted into a REAL merge conflict (mergeable === CONFLICTING) against main, applying an informative
+      // `merge-status:conflicting` label + a one-time comment (self-clearing once the conflict resolves). Distinct
+      // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
+      // population) — see that file's own header for the full gap this closes.
+      runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep', ...prsArgs]);
+      // #3568 — reaps known-safe scratch litter (`.commit-msg.txt`, `.pr-body.md`, …) from every UNLEASED lane
+      // whose entire dirty state matches only that allowlist, reusing the SAME `we:scripts/lib/lane-litter.mjs`
+      // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix
+      // or accumulated through any path other than a normal release. See that file's own header for the full
+      // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
+      runQuiet('conveyor/lane-pool-health-watch.mjs');
+      // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
+      // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
+      // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
+      // build/prepare/fix/ci-heal guards it needs NO session-ephemeral bookkeeping of its own; it can just be
+      // re-run every tick, safely, the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are.
+      // `operations/review-dispatch.mjs` (#3279) existed and worked standalone, but nothing called it
+      // automatically — this closes that gap.
+      //
+      // DOUBLE-DISPATCH IS ALREADY GUARDED, UPSTREAM, NOT HERE. `reconcile-core.mjs`'s own liveness read binds a
+      // live session to a PR (cwd → HEAD sha) and refuses (`live-process`) BEFORE the `review` dispatch decision
+      // is ever reached — so a review already in flight for a PR simply does not appear in next tick's plan.
+      //
+      // SEQUENTIAL, mirroring `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state:
+      // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
+      // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
+      // rest of the tick, or the tick itself).
+      let plan = null;
+      try {
+        const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json', ...prsArgs];
+        if (typeof repo === 'string' && repo) reconcileArgs.push(`--repo=${repo}`);
+        const reconcileOut = execFileSync('node', reconcileArgs, {
+          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
+        });
+        plan = JSON.parse(reconcileOut);
+      } catch (e) {
+        process.stderr.write(`⚠ mechanical pass conveyor/reconcile-pass.mjs failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+      }
+      // #x5v8yy9 review finding — kept as its OWN try/catch, separate from the `reconcile-pass.mjs` call above:
+      // this block's own failures (the `gh repo view` slug resolution, or a per-PR dispatch/tag call) used to
+      // share that call's catch and log as "mechanical pass conveyor/reconcile-pass.mjs failed" even though
+      // `reconcile-pass.mjs` itself had already succeeded — misattributing the failing step to an operator
+      // reading `runner.log`.
+      try {
+        if (plan) {
+          const reviewsOwed = (Array.isArray(plan.dispatch) ? plan.dispatch : []).filter((d) => d && d.kind === 'review');
+          // x5v8yy9 — every PR this pass has an OPINION about, informatively tagged, EXCLUDING only `nothing-owed`
+          // (reviewed/queued/landed, or a genuinely signal-free PR). `owed-elsewhere` is NOT excluded — it covers
+          // real conveyor PRs stuck `needs-human`/`ci-red`/`conflicted`, not just unrelated ones (see
+          // `selectStatusCandidates`'s own docblock for the PR #1920 staleness incident this fixes).
+          const statusCandidates = selectStatusCandidates(reviewsOwed, plan.refusals);
+          if (reviewsOwed.length || statusCandidates.length) {
+            // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
+            // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
+            // do, so the common empty-plan tick never pays for an extra `gh` call.
+            // Throttled (#3621) — `we:scripts/lib/gh-throttle.mjs#runGhSync`, a byte-for-byte transparent
+            // `execFileSync('gh', args, opts)` replacement gated through the shared `gh`-call concurrency
+            // semaphore with rate-limit backoff. This is the runner's own direct `gh` call (not a script it
+            // shells), paid only when review work is actually owed this tick.
+            const repoSlug = typeof repo === 'string' && repo
+              ? repo
+              : runGhSync(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+                encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+              }).trim();
+            for (const d of reviewsOwed) {
+              // #x5v8yy9 review finding — `dispatched` gates the round-tag call below. Before this fix,
+              // `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
+              // attempt itself threw and no session was ever spawned — so `review-round:<N>` kept advancing every
+              // tick regardless of whether a review actually happened, misleading anyone reading the label.
+              let dispatched = false;
+              try {
+                execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
+                  { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+                dispatched = true;
+              } catch (e) {
+                process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+              }
+              if (!dispatched) continue; // no session was spawned — never advance the round label for this PR
+              // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
+              // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
+              // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
+              // that. Best-effort: a failed tag write never blocks a review from actually being dispatched.
+              try {
+                execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
+                  { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+              } catch (e) {
+                process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+              }
             }
-            if (!dispatched) continue; // no session was spawned — never advance the round label for this PR
-            // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
-            // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
-            // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
-            // that. Best-effort: a failed tag write never blocks a review from actually being dispatched.
-            try {
-              execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
-                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-            } catch (e) {
-              process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-            }
-          }
-          // PURELY INFORMATIVE (`review-status-tag.mjs`) — "is a reviewer or a fixer actually working this PR
-          // right now, or is a live session stuck". Covers PRs NOT being freshly dispatched this tick too (an
-          // already-live session, or one that just finished and needs its stale label cleared).
-          for (const c of statusCandidates) {
-            try {
-              execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
-                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-            } catch (e) {
-              process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            // PURELY INFORMATIVE (`review-status-tag.mjs`) — "is a reviewer or a fixer actually working this PR
+            // right now, or is a live session stuck". Covers PRs NOT being freshly dispatched this tick too (an
+            // already-live session, or one that just finished and needs its stale label cleared).
+            for (const c of statusCandidates) {
+              try {
+                execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
+                  { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+              } catch (e) {
+                process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+              }
             }
           }
         }
+      } catch (e) {
+        process.stderr.write(`⚠ mechanical pass review-reconcile dispatch failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
       }
-    } catch (e) {
-      process.stderr.write(`⚠ mechanical pass review-reconcile dispatch failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+      // #xs19sz9 — sweeps every OPEN PR for TWO OR MORE PRs delivering the SAME backlog item number (reusing
+      // `we:scripts/lib/open-pr-items.mjs#deliveredItemNumsFromPr`, the readiness ranker's own "which item does
+      // this PR deliver" extractor) and posts a `review:changes` finding on each one via
+      // `we:scripts/conveyor/reconcile-finding.mjs` — never picking a keeper (that needs a real diff read, proven
+      // by the 2026-09-05 incident this pass was born from). Dedup: a PR already carrying `review:changes` is
+      // skipped (the label's own presence is the durable marker, same idea as the conflict-watch line above,
+      // reusing an existing label instead of minting a new one). See that file's own header for the full design.
+      runQuiet('conveyor/duplicate-pr-watch.mjs', ['sweep', ...prsArgs]);
+      // we:3550 — sweeps every OPEN, review-parked PR (review:pending/review:changes/review:human) for the
+      // general neglect axis neither sibling watch above catches: no `review-<pr>`/`fix-<pr>` agent session has
+      // EVER been dispatched for it, and it has sat past a configurable threshold (default 24h,
+      // WE_PR_NEGLECT_THRESHOLD_HOURS), read off GitHub's own issue-events label timeline — no new state store.
+      // Posts a `review:changes` finding via reconcile-finding.mjs, same as the line above. Dedup: a PR already
+      // `review:changes` is skipped (that re-check is the separate follow-on we:3596, out of scope here). See
+      // that file's own header for the full design, ratified in we:3549.
+      runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep', ...prsArgs]);
+    } finally {
+      if (prsFile) {
+        try { unlinkSync(prsFile); } catch { /* best-effort temp-file cleanup */ }
+      }
     }
-    // #xs19sz9 — sweeps every OPEN PR for TWO OR MORE PRs delivering the SAME backlog item number (reusing
-    // `we:scripts/lib/open-pr-items.mjs#deliveredItemNumsFromPr`, the readiness ranker's own "which item does
-    // this PR deliver" extractor) and posts a `review:changes` finding on each one via
-    // `we:scripts/conveyor/reconcile-finding.mjs` — never picking a keeper (that needs a real diff read, proven
-    // by the 2026-09-05 incident this pass was born from). Dedup: a PR already carrying `review:changes` is
-    // skipped (the label's own presence is the durable marker, same idea as the conflict-watch line above,
-    // reusing an existing label instead of minting a new one). See that file's own header for the full design.
-    runQuiet('conveyor/duplicate-pr-watch.mjs', ['sweep']);
-    // we:3550 — sweeps every OPEN, review-parked PR (review:pending/review:changes/review:human) for the
-    // general neglect axis neither sibling watch above catches: no `review-<pr>`/`fix-<pr>` agent session has
-    // EVER been dispatched for it, and it has sat past a configurable threshold (default 24h,
-    // WE_PR_NEGLECT_THRESHOLD_HOURS), read off GitHub's own issue-events label timeline — no new state store.
-    // Posts a `review:changes` finding via reconcile-finding.mjs, same as the line above. Dedup: a PR already
-    // `review:changes` is skipped (that re-check is the separate follow-on we:3596, out of scope here). See
-    // that file's own header for the full design, ratified in we:3549.
-    runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep']);
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
@@ -410,10 +443,81 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
   };
 }
 
+/** The durable EXTERNAL status file's filename, under `.conveyor/` in the driven checkout — the same
+ *  session-local, gitignored sidecar convention every other `.conveyor/*.json` state file in this repo uses
+ *  (`queue.json`, `dispatch-pause.json`, …). See {@link writeDriverStatus}. */
+export const DRIVER_STATUS_FILENAME = 'driver-status.json';
+
+/**
+ * Write the tick's surface to a durable file OUTSIDE the runner's own stdout, so "is the driver stuck?" is
+ * answerable from a SEPARATE process (a human, another agent, `scripts/conveyor/driver-status.mjs`) without
+ * grepping `runner.log` or waiting on a notification (2026-09-14, #3521/lane-2 incident — the driver ran for
+ * 85+ minutes with its only record of the stall sitting in a log nobody was polling). Overwritten every tick;
+ * atomic (temp file + rename) so a concurrent reader never observes a half-written file. Best-effort — a write
+ * failure (e.g. a read-only checkout) is swallowed: the status file is a CONVENIENCE, never something the tick
+ * loop itself depends on to keep running.
+ * @param {string} path  the resolved `.conveyor/driver-status.json` path.
+ * @param {{tick:number}} ctx
+ * @param {object} surface  this tick's {@link tickSurface} projection.
+ */
+export function writeDriverStatus(path, ctx, surface) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const body = JSON.stringify(
+      {
+        tick: ctx.tick,
+        at: new Date().toISOString(),
+        statusLine: surface.statusLine || '',
+        stalled: Array.isArray(surface.stalled) ? surface.stalled : [],
+        dispatch: surface.dispatch,
+      },
+      null,
+      2,
+    ) + '\n';
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, body);
+    renameSync(tmp, path);
+  } catch (e) {
+    process.stderr.write(`⚠ driver-status write failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+  }
+}
+
+/**
+ * Append this tick's plain-language decision trace (see `buildDecisionTrace` / `tick-core.mjs`) to a durable,
+ * DAY-SHARDED JSONL sidecar — `<traceDir>/<YYYY-MM-DD>.jsonl`, ONE line per trace entry, mirroring the existing
+ * `.operations/telemetry/<date>.jsonl` day-sharding convention already in this repo so the trace's own growth is
+ * naturally bounded to a day's worth of ticks per file instead of one ever-growing log. A DELIBERATELY SEPARATE
+ * sidecar rather than piggybacking on `.operations/telemetry/` (2026-09-14): that store has an active
+ * test-pollution/fragmentation fix in flight elsewhere at the time this was built, so writing into it here would
+ * risk colliding with that in-progress change; once it lands, folding this trace into the shared store is the
+ * natural next step (this file's whole schema is a flat, appendable line — nothing here depends on a private
+ * format). Best-effort, same as {@link writeDriverStatus} — a write failure never gates the tick.
+ * @param {string} traceDir  the resolved `.conveyor/decision-trace/` directory.
+ * @param {{tick:number}} ctx
+ * @param {Array<object>} entries  this tick's `surface.decisionTrace`.
+ */
+export function appendDecisionTrace(traceDir, ctx, entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  try {
+    mkdirSync(traceDir, { recursive: true });
+    const at = new Date();
+    // #2747 — the day-shard is the OPERATOR's calendar day (`localDateString`), not the runtime's UTC day.
+    const day = localDateString(at);
+    const lines = entries.map((e) => JSON.stringify({ tick: ctx.tick, at: at.toISOString(), ...e })).join('\n') + '\n';
+    appendFileSync(join(traceDir, `${day}.jsonl`), lines);
+  } catch (e) {
+    process.stderr.write(`⚠ decision-trace write failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+  }
+}
+
 /** Build the real `emit` effect: print the tick's status line + notes, and the dispatch/watch decisions the
- *  judgment layer executes (the runner spends no model context, so it surfaces them — #2701 clause 3). */
-function makeCliEmit({ json = false } = {}) {
+ *  judgment layer executes (the runner spends no model context, so it surfaces them — #2701 clause 3). Also
+ *  writes the durable external status file every tick (see {@link writeDriverStatus}) and appends the tick's
+ *  decision trace (see {@link appendDecisionTrace}), both regardless of `json`. */
+function makeCliEmit({ json = false, statusPath = null, traceDir = null } = {}) {
   return (surface, ctx) => {
+    if (statusPath) writeDriverStatus(statusPath, ctx, surface);
+    if (traceDir) appendDecisionTrace(traceDir, ctx, surface.decisionTrace);
     if (json) { process.stdout.write(JSON.stringify({ tick: ctx.tick, ...surface }) + '\n'); return; }
     const { dispatch } = surface;
     const counts = `${dispatch.builds.length} build · ${dispatch.prepareScope.length + dispatch.prepareDecision.length} prepare · ${dispatch.fixes.length} fix · ${dispatch.ciHeals.length} heal · ${surface.armWatchers.length} watch`;
@@ -481,6 +585,12 @@ async function main(argv) {
   // Runner lives in skills-src/conveyor/; the tick core + the deterministic passes live in scripts/.
   const SCRIPTS_DIR = join(HERE, '..', '..', 'scripts');
   const TICK_CORE = join(SCRIPTS_DIR, 'conveyor', 'tick-core.mjs');
+  // The checked-out repo root this runner is driving — resolved by SCRIPT LOCATION (never CWD), the same
+  // convention `queue-scope.mjs` documents for its own sidecar, so a child process's own cwd can never point
+  // the status file / trace dir at a different checkout than the one actually running.
+  const REPO_ROOT = join(HERE, '..', '..');
+  const STATUS_PATH = join(REPO_ROOT, '.conveyor', DRIVER_STATUS_FILENAME);
+  const TRACE_DIR = join(REPO_ROOT, '.conveyor', 'decision-trace');
 
   const repo = typeof flags.repo === 'string' ? flags.repo : null;
   const json = !!flags.json;
@@ -490,7 +600,7 @@ async function main(argv) {
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = () => ({
     tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
-    emit: makeCliEmit({ json }),
+    emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
     mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     intervalMs,

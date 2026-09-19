@@ -7,6 +7,7 @@ status: open
 scope: ["plateau-app:src/backlog-view/proof-tiers.ts", "plateau-app:src/backlog-view/proof-tiers.test.ts"]
 dateOpened: "2026-09-07"
 tags: []
+deliveryAgent: codex
 ---
 
 # Harden the proof-tiers evidence-link sanitizer against protocol-relative/open-redirect URLs

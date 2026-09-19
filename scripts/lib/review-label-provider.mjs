@@ -44,7 +44,8 @@ import { runGhSync } from './gh-throttle.mjs';
 
 /** The `--json` fields the label arc reads about a PR. Named once so a second adapter supplies the same shape
  *  rather than guessing at it, and so a stub in a test cannot drift from what the real one returns. */
-export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt']);
+export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt', 'title']);
+// `title` supplies delegation trial descriptions on this same call, with no extra hop.
 // `createdAt` (#3067) rides the SAME call — one more json field, no extra hop, the pattern #2844 used for
 // `body` and #2953 for `state`. It is what turns a MISSING `authored-by-actor` stamp from an assumption into a
 // checkable comparison: a PR opened after `STAMP_REGIME_START` and now lacking a stamp had one STRIPPED, while

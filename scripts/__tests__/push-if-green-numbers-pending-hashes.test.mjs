@@ -152,8 +152,8 @@ describe('push-if-green.mjs wiring (#2073 + this fix) — the numbering step act
     expect(src.slice(failIdx, closeIdx)).toMatch(/\},\s*\n\s*3,\s*\n\s*$/);
   });
 
-  it('skips numbering in --dry-run (no mutation) and only runs it for the main-line branch being published', () => {
-    expect(src).toMatch(/if\s*\(!DRY_RUN\s*&&\s*BRANCH === 'main'\)\s*\{\s*\n\s*const numbering = await numberPendingHashesBeforePush/);
+  it('skips numbering in --dry-run and --sha, and only runs it for the main-line branch being published', () => {
+    expect(src).toMatch(/if\s*\(!DRY_RUN\s*&&\s*BRANCH === 'main'\s*&&\s*!HAS_SHA\)\s*\{\s*\n\s*const numbering = await numberPendingHashesBeforePush/);
   });
 
   it('documents the incident this closes, for the next reader', () => {

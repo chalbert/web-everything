@@ -11,6 +11,7 @@ scope:
   - we:scripts/__tests__/review-core-cli.test.mjs
   - we:scripts/workflows/review-parked-prs.mjs
   - we:scripts/lib/review-core.mjs
+deliveryAgent: codex
 ---
 
 # netChangedFiles never reaches the mechanized review panel — the CLI seam drops it

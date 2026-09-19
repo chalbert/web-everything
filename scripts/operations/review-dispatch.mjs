@@ -120,6 +120,11 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, parseBackgroundedId, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
+// #xqa9ttq — the single source of truth for the `claude`/`codex` juror-provider enum, shared with
+// `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
+// cannot silently drift out of step with what `review-loop-cli.mjs` (which the dispatched session runs)
+// actually accepts.
+import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 
 /** The review-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
  *  (`#xy8di3v`, extending `#3418`/`#xqyyoje`'s fix to the review-dispatch path). Passed via
@@ -150,10 +155,16 @@ export function reviewBriefPath(root = REPO_ROOT) {
   return join(root, 'skills-src', 'review', 'review-agent-brief.md');
 }
 
-/** The three `{{PLACEHOLDER}}` tokens the review brief declares. Mirrors `we:scripts/operations/
+/** The `{{PLACEHOLDER}}` tokens the review brief declares. Mirrors `we:scripts/operations/
  *  dispatch-lane.mjs#BRIEF_PLACEHOLDERS`'s NAMING convention (a small, closed, named list) without importing
- *  that file's machinery — see the file header for why this operation owns its own, smaller copy. */
-export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG']);
+ *  that file's machinery — see the file header for why this operation owns its own, smaller copy.
+ *  `JUDGE_PROVIDER` (#xqa9ttq) is ALWAYS filled, even when nobody asked for anything but the default: see
+ *  `dispatchReview`'s own `judgeProvider = 'claude'` default — never blank, so `fillReviewBrief`'s
+ *  every-declared-placeholder-must-have-a-value refusal never fires for the ordinary, opt-out case. */
+export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
+
+/** #xqa9ttq (PR #2115 review, CONFIRMED) - judge providers that are TOOL-FREE ONLY (#3581) and so can never serve review-pr's judge steps, every one of which is tool-bearing (REVIEW_JUROR_TOOLS, by ratified design). */
+export const TOOL_FREE_ONLY_JUDGE_PROVIDERS = Object.freeze(['codex']);
 
 /** Any run of separators a placeholder name might be typo'd with, canonicalized — same shape as `dispatch-
  *  lane.mjs#canonicalPlaceholder`, scoped to this brief's own three names. */
@@ -295,19 +306,35 @@ export function fillReviewBrief(template, values = {}) {
  * mutated) — so a stale checkout never silently dispatches. A fetch failure (offline) is fail-soft, matching
  * `we:scripts/lib/main-staleness.mjs`'s own philosophy: we cannot tell if it's stale, so we do not block on it.
  *
+ * #3637 — THE STALENESS TARGET IS NOW A PARAMETER, not the literal `main`. A checkout sitting on a POC
+ * branch (`#3637`'s delivery mode) is behind `origin/main` BY CONSTRUCTION and would be refused here forever,
+ * which that card's survey named as "the single most likely thing to silently block the bootstrap on day
+ * one". The question this guard actually wants to ask is "is this checkout behind ITS OWN delivery target",
+ * and `checkMainStaleness` already accepts a `base` — it was only ever this wrapper that hardcoded the
+ * default. `base` defaults to `'main'`, so every existing caller behaves byte-identically.
+ *
+ * (For the record, and checked rather than assumed: NEITHER of this guard's two callers — this file's
+ * `dispatchReview` and `we:scripts/conveyor/reconcile-fix-dispatch.mjs` — is on the POC landing path.
+ * `we:scripts/operations/poc-land.mjs` opens no PR and dispatches no review, and
+ * `we:scripts/operations/dispatch-lane.mjs` does not call this at all. The parameter exists so a FUTURE
+ * dispatcher running from a POC-branch checkout has the right question available, not because today's lander
+ * trips it.)
+ *
  * @param {string} root
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
  *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
+ * @param {{base?: string}} [o] - `base` is the delivery target to measure staleness against (default `main`).
  */
-export function assertMainNotStale(root, checkStaleness = (r) => checkMainStaleness({
-  autoFf: false, run: (args) => gitRun(args, { cwd: r }),
-})) {
-  const st = checkStaleness(root);
+export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {}) {
+  const check = checkStaleness ?? ((r) => checkMainStaleness({
+    base, autoFf: false, run: (args) => gitRun(args, { cwd: r }),
+  }));
+  const st = check(root);
   if (st && st.action === 'warn') {
     throw new Error(
-      `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/main — refusing to `
+      `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
       + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). Sync '
-      + '(git pull --ff-only) or dispatch from a fresh clone of origin/main and retry.',
+      + `(git pull --ff-only) or dispatch from a fresh clone of origin/${base} and retry.`,
     );
   }
   return st;
@@ -349,6 +376,14 @@ export function planReviewDispatch({ pr, repo } = {}) {
  * @param {string[]} [o.extraArgs] - forwarded to `buildAgentArgv`, exactly like `dispatch-lane-io.mjs`'s own.
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [o.checkStaleness] - injectable staleness
  *   check (#3439) — see `assertMainNotStale`.
+ * @param {string} [o.judgeProvider] - #xqa9ttq — which `JudgeProvider` the dispatched session's OWN
+ *   `review-loop-cli.mjs` invocation (brief step 2) is told to pass `--provider=<this>`. One of
+ *   `JUDGE_PROVIDER_NAMES`; defaults to `'claude'`, today's behaviour, unchanged — this is OPT-IN. Note what
+ *   this does NOT do: it never makes the DISPATCHED SESSION ITSELF (a tool-bearing `claude --bg` agent) run on
+ *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` could spawn underneath it would ever be
+ *   eligible (#3581: Codex is tool-free-only). `codex` is now REFUSED here before anything is read or spawned
+ *   (see {@link TOOL_FREE_ONLY_JUDGE_PROVIDERS}), as review-pr's real judge steps are tool-bearing and would be
+ *   refused at the first judge step. `claude` is the only accepted value today.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
@@ -358,15 +393,29 @@ export function dispatchReview({
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   checkStaleness,
+  judgeProvider = 'claude',
 } = {}) {
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
   // `checkStaleness` undefined here falls straight through to that function's own default — no need to
   // duplicate it.
   assertMainNotStale(root, checkStaleness);
+  // #xqa9ttq — validated HERE, before the brief is ever filled: an unrecognised name would otherwise reach
+  // `review-loop-cli.mjs`'s own `--provider` parse INSIDE the dispatched session, where the refusal happens
+  // minutes into a real dispatch instead of at the command line that requested it.
+  if (!JUDGE_PROVIDER_NAMES.includes(judgeProvider)) {
+    throw new Error(`review-dispatch: \`judgeProvider\` must be one of ${JUDGE_PROVIDER_NAMES.join('|')}, got ${JSON.stringify(judgeProvider)}`);
+  }
+  if (TOOL_FREE_ONLY_JUDGE_PROVIDERS.includes(judgeProvider)) {
+    throw new Error(
+      `review-dispatch: \`judgeProvider: ${JSON.stringify(judgeProvider)}\` is refused - it is a TOOL-FREE-only provider (#3581) and every judge step review-pr runs is tool-bearing, `
+      + 'so a dispatched review would be refused at its first judge step. Use the default `claude`. '
+      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag.',
+    );
+  }
   const planned = planReviewDispatch({ pr, repo });
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
-    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug,
+    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
   });
   const sessionId = String(mintSessionId());
   // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
@@ -394,7 +443,7 @@ export function dispatchReview({
   const agentId = parseBackgroundedId(stdout);
   return {
     sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
-    unknownTokens,
+    unknownTokens, judgeProvider,
   };
 }
 
@@ -410,7 +459,12 @@ if (IS_CLI) {
     // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
     // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
     // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
-    const result = dispatchReview({ pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv() });
+    // #xqa9ttq — `--judge-provider` is OPTIONAL; `dispatchReview`'s own `judgeProvider = 'claude'` default
+    // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
+    // case, not a gap.
+    const result = dispatchReview({
+      pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
+    });
     // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
     // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
     // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
@@ -420,9 +474,10 @@ if (IS_CLI) {
       1,
       (result.agentId
         ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
-          + `${result.repo}#${result.pr}\n`
+          + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
           + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
-        : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr}, `
+        : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
+          + `(judge provider: ${result.judgeProvider}), `
           + 'but could NOT read its id off `claude --bg`\'s output\n'
           + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
       + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),

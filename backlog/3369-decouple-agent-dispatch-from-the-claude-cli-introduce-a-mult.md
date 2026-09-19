@@ -48,10 +48,10 @@ Read from source, not recalled, on 2026-08-27:
   idea `claude` exists. `createDefaultJudge` (`we:scripts/operations/cli-adapter.mjs:464`) is the ONE place
   that wires that neutral contract to `judgeSpawn`. **This is the cheapest, lowest-risk entry point**: a
   second provider only has to satisfy `judge(request) → outcome`, not reproduce the harder background-dispatch
-  machinery `#3331`/`#xnukacf`/`#x4iwn55` are still hardening for Claude itself.
+  machinery `#3331`/`#3367`/`#3366` are still hardening for Claude itself.
 - **The dispatcher (delivery agents, not judges) is a harder target**, and deliberately NOT where this epic
   starts: it needs liveness matching, session addressing, and resume-vs-relaunch — all still being built for
-  Claude alone (`#3331`, `#xnukacf`, `#x4iwn55`). Adding a second provider to that surface before it is solid
+  Claude alone (`#3331`, `#3367`, `#3366`). Adding a second provider to that surface before it is solid
   for one provider would double an unsolved problem.
 
 ## Two real candidates, researched 2026-08-27 (not assumed)
@@ -89,7 +89,7 @@ should be built on the search evidence alone.
    `we:scripts/lib/judge-panel.mjs`, gated behind explicit opt-in (an env flag or a lens declaration) so
    today's single-provider behaviour is the unchanged default. This is where goal 1 (diverse review) and
    goal 3 (cheap tier for a suitable task) start paying off.
-4. **The dispatcher (delivery-agent) surface** — blocked on `#3331`/`#xnukacf`/`#x4iwn55` landing for Claude
+4. **The dispatcher (delivery-agent) surface** — blocked on `#3331`/`#3367`/`#3366` landing for Claude
    first, and on step 3 proving the adapter pattern works for one real provider. This is where goal 2 (a
    second subscription's usage window) is actually realized; do not start it earlier.
 

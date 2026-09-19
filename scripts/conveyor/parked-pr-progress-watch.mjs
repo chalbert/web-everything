@@ -54,6 +54,8 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { REVIEW_LABELS, REVIEW_HOLD_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
@@ -236,7 +238,7 @@ export function buildNeglectFindingBody({ pr, headRefName, holdLabel, parkedHour
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) {
+export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,labels'];
   if (repo) argv.push('--repo', repo);
@@ -365,12 +367,15 @@ if (IS_CLI) {
   const verb = argv.find((a) => !a.startsWith('--')) || 'sweep';
   const repo = flag('repo') || null;
   const dryRun = argv.includes('--dry-run');
+  const prsFile = flag('prs-file');
   if (verb !== 'sweep') {
-    writeLineSync(2, `usage: parked-pr-progress-watch.mjs sweep [--repo=<owner/name>] [--dry-run]`);
+    writeLineSync(2, `usage: parked-pr-progress-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]`);
     process.exitCode = 2;
   } else {
     try {
-      const results = watchNeglectedPrs({ repo, dryRun });
+      const results = watchNeglectedPrs({
+        repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}),
+      });
       for (const r of results) {
         const verb2 = dryRun ? 'would flag' : r.error ? 'FAILED to flag' : 'flagged';
         const hoursText = Number.isFinite(r.parkedHours) ? ` (parked ~${Math.round(r.parkedHours)}h)` : '';
