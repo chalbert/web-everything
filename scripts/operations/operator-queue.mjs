@@ -1,5 +1,6 @@
 /** @file Read-only operator queue: surface human review only when every readiness gate passes. */
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_REPOS = ['chalbert/web-everything', 'chalbert/frontierui', 'chalbert/plateau-app'];
@@ -80,4 +81,12 @@ export function main(args = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+/** True when this module is the CLI entry, even if argv[1] was typed via a symlink or a doubled slash (`$TMPDIR//x`). */
+export function isCliEntry(argv1 = process.argv[1], moduleUrl = import.meta.url) {
+  if (!argv1) return false;
+  let resolved = argv1;
+  try { resolved = realpathSync(argv1); } catch { /* not on disk — compare the raw spelling */ }
+  return moduleUrl === pathToFileURL(resolved).href;
+}
+
+if (isCliEntry()) main();
