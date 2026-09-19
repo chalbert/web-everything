@@ -59,9 +59,22 @@ This is about a **delivery agent** the runner spawned (`claude --bg`), not the r
 2. **Never `kill <pid>`.** It ends the OS process but does not deregister the session — something resurrects it
    under a new pid minutes later, which has raced a legitimate second dispatch onto the same lane and produced
    a real double-dispatch (#3383, 2026-08-31 session).
-3. **Use `claude stop <id>`** instead — it deregisters the session for real; every stop issued through it has
-   stayed stopped.
-4. **Mechanized composition:** `we:scripts/operations/dispatch-abort.mjs` shells the safe sequence —
+3. **A row with no live `pid` where `claude stop <id>`/`claude rm <id>` also fail or silently no-op is the
+   known Claude Code CLI bug GH #77683 — not a transient failure to retry, and not something to fix by hand.**
+   Use the mechanized operation instead of chasing it manually or moving `~/.claude/jobs/<id>/` aside yourself:
+   ```bash
+   node scripts/operations/run.mjs clear-stuck-session --session=<id>
+   # or, to resolve whichever session is bound to a PR:
+   node scripts/operations/run.mjs clear-stuck-session --pr=<n>
+   ```
+   It replays `reconcile-core.mjs`'s own `assessLiveness` verdict (never a second liveness check), requires a
+   real human `confirm` because the move touches `~/.claude`, not this repo, and quarantines the job directory
+   rather than deleting it. Full writeup, including the manual jobs-directory move as the FALLBACK for if this
+   operation itself is unavailable or fails: `we:agent-memory-src/stuck-claude-sessions-known-issue-workaround.md`.
+4. **`claude stop <id>` still works, and is the right tool, on a session that just needs stopping** — one that
+   isn't hitting the #77683 zombie bug above (i.e., `stop`/`rm` actually succeed against it). It deregisters the
+   session for real; every stop issued through it in that case has stayed stopped.
+5. **Mechanized composition:** `we:scripts/operations/dispatch-abort.mjs` shells the safe sequence —
    ```bash
    node scripts/operations/dispatch-abort.mjs --abort=<runId> --key=<effectKey> [--status=failed] [--note="..."] [--force]
    ```
@@ -69,14 +82,14 @@ This is about a **delivery agent** the runner spawned (`claude --bg`), not the r
    liveness check passes on its own merits, without needing `--force`. Use `--force` only when you already know
    by other means the agent is gone (e.g. `claude agents --json` itself is unreadable) — it skips the liveness
    check.
-5. **A genuinely fresh scratch clone needs trust before a dispatch into it will work.**
+6. **A genuinely fresh scratch clone needs trust before a dispatch into it will work.**
    `we:scripts/bootstrap-session.mjs`'s `trustableDirs()` only ever trusts the primary checkout and lane-pool
    lanes, never an ad-hoc scratch clone — a dispatched agent spawned into an untrusted one stalls on a
    permission-prompt dialog with nobody there to answer it. Grant trust first:
    ```bash
    node scripts/operations/dispatch-abort.mjs --trust=<path-to-scratch-clone>
    ```
-6. `dispatch-abort.mjs` deliberately does **not** release a lane the aborted dispatch may have partially
+7. `dispatch-abort.mjs` deliberately does **not** release a lane the aborted dispatch may have partially
    acquired — that's a separate judgment call (was the tree actually clean?). Release it by hand once you've
    checked: `node scripts/lane-pool.mjs release --lane=<n> --force`.
 
@@ -119,7 +132,7 @@ This is about a **delivery agent** the runner spawned (`claude --bg`), not the r
   lesson this whole area keeps re-teaching: a scoped deny-list beats a global bypass, and `we:scripts/operations/
   review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` is this repo's own worked example of the safer
   alternative — reach for it before a bare `bypassPermissions` invocation.
-- **A fresh scratch clone must be trusted before it's dispatched into** — see step 5 above. This isn't an env
+- **A fresh scratch clone must be trusted before it's dispatched into** — see step 6 above. This isn't an env
   var, but it's the other precondition that silently stalls a `--bg` dispatch the same way a missing
   permission mode does, so check both together before a real run.
 
