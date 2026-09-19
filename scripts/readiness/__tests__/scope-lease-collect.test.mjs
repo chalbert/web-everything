@@ -16,6 +16,7 @@ import {
   breachSig,
   advanceBreachCount,
   backlogItemsFromObserved,
+  isDivergedHistory,
   GHOST_GRACE_MS,
 } from '../scope-lease-collect.mjs';
 import { liveScopePicture } from '../scope-lease-live.mjs';
@@ -218,6 +219,48 @@ describe('collectSnapshot — pool rows → the observer lease shape', () => {
 
   it('tolerates a pool status with no lanes', () => {
     expect(collectSnapshot({ poolStatus: {}, observedForLane: () => [] })).toEqual([]);
+  });
+});
+
+describe('isDivergedHistory — both-ahead-and-behind detector (2026-09-14, #3521/lane-2 incident)', () => {
+  it('is diverged when both ahead and behind are positive', () => {
+    expect(isDivergedHistory(138, 20)).toBe(true);
+    expect(isDivergedHistory(1, 1)).toBe(true);
+  });
+  it('is NOT diverged when either side is zero — a clean ancestor relationship', () => {
+    expect(isDivergedHistory(0, 20)).toBe(false); // straight-line behind only (never reset forward, no own work)
+    expect(isDivergedHistory(5, 0)).toBe(false); // straight-line ahead only (the normal "fresh reset + edits" shape)
+    expect(isDivergedHistory(0, 0)).toBe(false); // exactly on origin/main
+  });
+  it('never fabricates a flag from missing/unreadable counts (NaN ⇒ not diverged)', () => {
+    expect(isDivergedHistory(NaN, 20)).toBe(false);
+    expect(isDivergedHistory(138, NaN)).toBe(false);
+    expect(isDivergedHistory(undefined, undefined)).toBe(false);
+  });
+});
+
+describe('collectSnapshot — historyDiverged stamping (2026-09-14, #3521/lane-2 incident)', () => {
+  const poolStatus = { lanes: [{ lane: 2, leased: true, lease: { session: 's' }, path: '/p' }] };
+
+  it('stamps historyDiverged: true when the injected checker says the lane is diverged', () => {
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:scripts/operations/run-record.mjs'],
+      divergedForLane: () => true,
+    });
+    expect(leases[0].historyDiverged).toBe(true);
+  });
+  it('omits historyDiverged (not `false`) when the checker says clean', () => {
+    const leases = collectSnapshot({
+      poolStatus,
+      observedForLane: () => ['we:src/a.ts'],
+      divergedForLane: () => false,
+    });
+    expect(leases[0]).not.toHaveProperty('historyDiverged');
+  });
+  it('omits historyDiverged when no checker is injected — exact back-compat', () => {
+    const leases = collectSnapshot({ poolStatus, observedForLane: () => ['we:src/a.ts'] });
+    expect(leases[0]).not.toHaveProperty('historyDiverged');
   });
 });
 

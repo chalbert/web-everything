@@ -5,6 +5,7 @@ size: 2
 status: open
 dateOpened: "2026-09-06"
 tags: []
+deliveryAgent: codex
 relatedTo: ["3267"]
 scope:
   - we:skills-src/review/

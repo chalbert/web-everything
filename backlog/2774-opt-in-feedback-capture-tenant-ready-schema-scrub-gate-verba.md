@@ -3,9 +3,11 @@ bornAs: xhwesfo
 kind: story
 size: 5
 parent: "2610"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/", "we:scripts/lib/", "plateau:src/backlog-view/"]
 dateOpened: "2026-07-28"
+dateStarted: "2026-09-19"
+dateResolved: "2026-09-19"
 tags: []
 ---
 

@@ -27,7 +27,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createRegistry } from './registry.mjs';
-import { createFileRunStore, newRunId } from './run-store.mjs';
+import { createFileRunStore, createMemoryRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
@@ -39,12 +39,21 @@ import { createReviewPrepReader, createReviewPrepSinks } from './review-prep-io.
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
+import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from './graduation-progress-report.mjs';
+import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
+import { staleStateOperation, STALE_STATE_OP } from './stale-state.mjs';
+import { createStaleStateReader } from './stale-state-io.mjs';
+import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
+import { createPrReconcileReader } from './pr-status-io.mjs';
+import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
+import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
+import { dispatchEligibilityOperation, DISPATCH_ELIGIBILITY_OP } from './dispatch-eligibility.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
@@ -163,12 +172,28 @@ export const OPERATIONS = Object.freeze({
   // reviewer could only run it by hand-writing the wiring. Same no-sinks reasoning as `suggest-next`.
   // #xewnork — did a check actually RUN on the head that is there now? Read-only, same no-sinks reasoning as
   // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
+  [STALE_STATE_OP]: () => ({
+    declaration: staleStateOperation({ readState: createStaleStateReader() }),
+    sinks: {},
+  }),
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
     sinks: {},
   }),
+  [PR_RECONCILE_OP]: () => ({
+    declaration: prReconcileOperation({ readPrs: createPrReconcileReader() }),
+    sinks: {},
+  }),
+  [RUNNER_ACTIVITY_OP]: () => ({
+    declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
   [GATE_HEALTH_OP]: () => ({
     declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
+    sinks: {},
+  }),
+  [GRADUATION_PROGRESS_REPORT_OP]: () => ({
+    declaration: graduationProgressReportOperation({ readScorecards: createScorecardReader() }),
     sinks: {},
   }),
   // #xrpo1 — the gap: no operation reached `deriveReviewDisposition` (`we:scripts/lib/review-core.mjs`), so a
@@ -183,6 +208,12 @@ export const OPERATIONS = Object.freeze({
   // #3037 — the first operation whose effect STARTS work instead of finishing it. Its one sink launches a
   // delivery agent and returns an in-flight marker; the matching OBSERVER is registered by the waker
   // (`we:scripts/operations/wake.mjs`), which is the process that polls it. Both live in `dispatch-lane-io.mjs`.
+  [DISPATCH_ELIGIBILITY_OP]: () => ({
+    declaration: dispatchEligibilityOperation({
+      readTick: createTickReader({ recordLiveness: (stamped) => stamped }),
+    }),
+    sinks: {},
+  }),
   [DISPATCH_LANE_OP]: () => ({
     declaration: dispatchLaneOperation({ readTick: createTickReader() }),
     // `WE_DISPATCH_AGENT_ARGS` is read HERE rather than defaulted inside the sink: the permission mode, the
@@ -246,7 +277,8 @@ export const OPERATIONS = Object.freeze({
 });
 
 /**
- * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model` become a juror's spawn options (#3151).
+ * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model`/`--provider` become a juror's spawn
+ * options (#3151, extended for `--provider` by #xqa9ttq).
  *
  * EXPORTED SO THE TEST DRIVES THIS FUNCTION AND NOT A COPY OF IT. The first cut inlined the arrow below and the
  * suite re-created the same expression, so the precedence was ASSERTED, never EXERCISED: deleting the flags
@@ -254,17 +286,22 @@ export const OPERATIONS = Object.freeze({
  * `env || cwd` would silently make `--cwd` lose to a stale environment variable and reopen #3151 with the gate
  * still green. One copy, imported by both.
  *
+ * `--provider` FOLLOWS THE SAME FLAG-WINS-ENV-FALLBACK SHAPE as `--cwd`, via `JUDGE_PROVIDER` — an operator who
+ * wants every juror in a session to default to Codex without typing `--provider=codex` on each command sets
+ * the env var once, exactly the workflow `JUDGE_LANE_CWD` already supports for the lane.
+ *
  * @param {object} [o]
- * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD` from.
+ * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD`/`JUDGE_PROVIDER` from.
  * @param {(o: object) => Function} [o.factory] - the judge builder, injected so a test can supply the spawn.
- * @returns {(flags: {cwd: (string|null), model: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
+ * @returns {(flags: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
  */
 export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge } = {}) {
   // THE FLAG WINS, and the env var is the fallback — the explicit act beats the ambient one. `|| null` on both,
   // never a fallback to this process's directory: see the `makeJudge` note at the call site.
-  return ({ cwd, model } = {}) => factory({
+  return ({ cwd, model, provider } = {}) => factory({
     cwd: cwd || env.JUDGE_LANE_CWD || null,
     model: model || null,
+    providerName: provider || env.JUDGE_PROVIDER || 'claude',
   });
 }
 
@@ -326,15 +363,20 @@ if (IS_CLI) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
   }
+  // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
+  // stale-state promises zero filesystem writes, including engine bookkeeping.
+  const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores()
+    : name === STALE_STATE_OP ? { store: createMemoryRunStore(), callLog: undefined }
+    : { store: createFileRunStore(), callLog: createFileCallLogStore() };
   runOperationCli({
     declaration,
     argv: rest,
     registry,
-    store: createFileRunStore(),
+    store: cliStores.store,
     // #3451 — the real, file-backed call-visibility signal. A compute-only operation (gate-health,
     // suggest-next, verify, pr-status) settles in one `driveRun` sweep and never gets a run record; this
     // is the ONLY trace a real CLI invocation of one of those leaves behind.
-    callLog: createFileCallLogStore(),
+    callLog: cliStores.callLog,
     sinks,
     // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
     // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot

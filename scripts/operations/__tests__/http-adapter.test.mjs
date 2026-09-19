@@ -42,7 +42,9 @@ import { OPERATIONS, resolveOperation } from '../run.mjs';
 import { reviewPrOperation, REVIEW_PR_OP, REVIEW_EFFECTS } from '../review-pr.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import { GATE_HEALTH_OP } from '../gate-health.mjs';
+import { GRADUATION_PROGRESS_REPORT_OP } from '../graduation-progress-report.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
+import { DISPATCH_ELIGIBILITY_OP } from '../dispatch-eligibility.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
 import { RESOLVE_OP } from '../resolve.mjs';
@@ -54,7 +56,10 @@ import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
 import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
 import { PR_STATUS_OP } from '../pr-status.mjs';
+import { PR_RECONCILE_OP } from '../pr-reconcile.mjs';
+import { RUNNER_ACTIVITY_OP } from '../runner-activity.mjs';
 import { ROUTE_PR_OUTCOME_OP } from '../route-pr-outcome.mjs';
+import { STALE_STATE_OP } from '../stale-state.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import { GAP_SWEEP_STATUS_OP } from '../gap-sweep-status.mjs';
 import {
@@ -293,6 +298,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     [SUGGEST_NEXT_OP]: 'suggest-next.mjs',
     [GATE_HEALTH_OP]: 'gate-health.mjs',
     [DISPATCH_LANE_OP]: 'dispatch-lane.mjs',
+    [DISPATCH_ELIGIBILITY_OP]: 'dispatch-eligibility.mjs',
     // backlog/xzdi27a-* — `review-prep`'s judge+effect steps make it NOT read-only (see the pinned list two
     // tests below), so it needs no import-graph purity of its own; it is listed here only so THIS map keeps
     // covering every registered operation (the assertion immediately below).
@@ -332,11 +338,16 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // `registry.mjs` and `step-kinds.mjs`, and every `gh` call lives in `pr-status-io.mjs` behind the
     // injected reader. It reads PRs; it can act on none of them.
     [PR_STATUS_OP]: 'pr-status.mjs',
+    // #3694 — READ-ONLY and genuinely so: both steps are `compute`, imports are `registry.mjs`/`step-kinds.mjs` and pure `pr-status.mjs` helpers, and every `gh` call lives in `pr-status-io.mjs` behind the injected reader.
+    [PR_RECONCILE_OP]: 'pr-reconcile.mjs',
+    [RUNNER_ACTIVITY_OP]: 'runner-activity.mjs',
     // #xrpo1 — READ-ONLY and genuinely so: both steps are `compute`, the declaring module imports only
     // `registry.mjs` and `step-kinds.mjs`, and the `deriveReviewDisposition`/`parseEscalationReason` calls
     // live in `route-pr-outcome-io.mjs` behind the injected reader — see that file's header for why the call
     // could not live in the declaration and stay on this list.
     [ROUTE_PR_OUTCOME_OP]: 'route-pr-outcome.mjs',
+    // READ-ONLY and genuinely so: both steps are `compute`; the declaring module imports only `registry.mjs`/`step-kinds.mjs`, and all pid/lease/claim/run-store reads live in `stale-state-io.mjs` behind the injected `readState` reader.
+    [STALE_STATE_OP]: 'stale-state.mjs',
     [MUTATION_CHECK_OP]: 'mutation-check.mjs',
     // #xrrpfo7 — `claim`'s sibling at the close of the lifecycle, and NOT read-only for the same reason
     // `claim` is not: its `write` step splices the card. Listed here for map coverage; its own suite pins
@@ -358,6 +369,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // reaches nothing that can act — both effects' sinks live in `file-item-io.mjs`, which reuses
     // `scaffold-io.mjs`'s own guarded write sink and adds only a `queue-store.mjs` sink beside it.
     [FILE_ITEM_OP]: 'file-item.mjs',
+    // #3690/#xd9xwtn — READ-ONLY and genuinely so: both steps are `compute`, the declaring module imports
+    // only `registry.mjs` and `step-kinds.mjs`, and the `readStore()` call lives in
+    // `graduation-progress-report-io.mjs` behind the injected `readScorecards` reader.
+    [GRADUATION_PROGRESS_REPORT_OP]: 'graduation-progress-report.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
@@ -367,7 +382,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)

@@ -45,7 +45,7 @@
  * `resolveDefaultGate` is pure — no fs, no child_process, no clock. It takes an injectable `runGit` (mirroring
  * `test-selection.mjs`'s own convention) so tests drive it deterministically.
  */
-import { selectTests } from '../readiness/test-selection.mjs';
+import { decideSelection, selectTests } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
 
 /** The historical, always-safe fallback gate: the full unit suite plus the repo health gate. */
@@ -92,6 +92,27 @@ export function canScopeCheckStandards(changedFiles) {
  * @returns {{ command: string, decision: import('../readiness/test-selection.mjs').SelectionDecision & {changedFiles: string[]|null} }}
  */
 export function resolveDefaultGate({ base = 'origin/main', runGit, env = process.env } = {}) {
+  // The committed diff cannot account for staged or unstaged tracked edits (#3389).
+  // Like an unresolvable diff, dirty or unknown status must keep BOTH halves unscoped.
+  let statusReason;
+  try {
+    if (runGit(['status', '--porcelain', '--untracked-files=no']).trim()) {
+      statusReason = 'tracked working tree is dirty — full gate (committed diff omits uncommitted edits)';
+    }
+  } catch {
+    statusReason = 'could not read tracked working tree status — full gate (never shrink on unknown status)';
+  }
+  if (statusReason) {
+    return {
+      command: FULL_GATE,
+      decision: {
+        changedFiles: null,
+        ...decideSelection({ changedFiles: [], flagEnabled: false }),
+        reasons: [statusReason],
+      },
+    };
+  }
+
   const selectionEnv = { ...env };
   if (selectionEnv.WE_DIFF_TEST_SELECTION === undefined) selectionEnv.WE_DIFF_TEST_SELECTION = '1';
   const decision = selectTests({ base, runGit, env: selectionEnv });

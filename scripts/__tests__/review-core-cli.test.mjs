@@ -3,12 +3,16 @@
  *   (#2435): `parseFlags`, `reduceReview` (the reduction that collapses the drain's 5× inline `node -e` calls
  *   into one testable fn), and `buildMandateText`. The stdin/--file/print I/O is the CLI's boundary; the
  *   derivations are decided in these pure helpers and unit-tested here against fixtures — no spawning, no
- *   shelling out.
+ *   shelling out (one exception: #2447's resolution-basis block also spawns the real `comment` entrypoint).
  *
  *   These assert the GLUE (which lib fn fires for which input, and how the results compose) — the derivations
  *   themselves are proved in `scripts/lib/__tests__/review-core.test.mjs`; we only pin that the CLI wires them.
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   parseFlags, reduceReview, buildMandateText, buildComment, deriveDispositionLenient, buildShapePlan,
 } from '../review-core-cli.mjs';
@@ -394,5 +398,36 @@ describe('#3335 buildShapePlan — the shape a touch-set earns', () => {
     const empty = buildShapePlan({ changedFiles: [] });
     expect(empty.careLevel).toBe('none');
     expect(empty.changedFiles).toEqual([]);
+  });
+});
+
+// #2447 — the `comment` subcommand renders the graduatedTo resolution-basis banner. Pinned both on the pure glue and
+// through the REAL CLI entrypoint (spawned with `--file`), since a reviewer reaches the banner through the CLI.
+describe('buildComment / `comment` — the graduatedTo resolution basis (#2447)', () => {
+  const body = 'Dedup-resolve: the deliverable already landed.\n\ngraduatedTo: 6b5874f7\n';
+
+  it('derives the banner from raw carriers for a backlog-only resolve, and omits it for a code resolve', () => {
+    const graduated = buildComment({ findings: [], body, changedFiles: ['backlog/2403-x.md'] });
+    expect(graduated).toContain('no code change — deliverable already landed in `6b5874f7`');
+    const code = buildComment({ findings: [], body, changedFiles: ['backlog/2403-x.md', 'scripts/x.mjs'] });
+    expect(code).not.toContain('Resolution basis');
+  });
+
+  it('a supplied resolutionBasis wins over the raw carriers (including an explicit null)', () => {
+    expect(buildComment({ findings: [], resolutionBasis: null, body, changedFiles: ['backlog/2403-x.md'] })).not.toContain('Resolution basis');
+    expect(buildComment({ findings: [], resolutionBasis: { graduatedTo: 'f6384ac5', ref: 'f6384ac5' } })).toContain('`graduatedTo: f6384ac5`');
+  });
+
+  it('the real CLI renders it, and --graduated-to overrides the JSON value', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rcc-2447-'));
+    try {
+      const file = join(dir, 'result.json');
+      writeFileSync(file, JSON.stringify({ findings: [], verdict: 'accept', graduatedTo: 'none', changedFiles: ['backlog/2403-x.md'] }));
+      const cli = resolve(process.cwd(), 'scripts/review-core-cli.mjs');
+      const plain = execFileSync('node', [cli, 'comment', `--file=${file}`], { encoding: 'utf8' });
+      expect(plain).not.toContain('Resolution basis'); // graduatedTo: none names no deliverable
+      const out = JSON.parse(execFileSync('node', [cli, 'comment', `--file=${file}`, '--graduated-to=6b5874f7', '--json'], { encoding: 'utf8' }));
+      expect(out.markdown).toContain('`graduatedTo: 6b5874f7` — no code change — deliverable already landed in `6b5874f7`');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

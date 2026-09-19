@@ -4,7 +4,7 @@
  * real subprocess, no real filesystem), mirroring `we:scripts/conveyor/__tests__/parked-pr-conflict-watch.test.mjs`'s
  * own shape.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   hasLabelNamed,
@@ -299,4 +299,24 @@ describe('watchDuplicatePrs — IO shell over injected fakes (no gh/subprocess)'
     expect(results[1].posted).toBe(true);
     expect(posted).toHaveLength(1);
   });
+});
+
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal(), execFileSync: vi.fn(),
+}));
+vi.mock('../../lib/gh-throttle.mjs', async () => {
+  const { execFileSync } = await import('node:child_process');
+  return {
+    execFileSyncThrottled: vi.fn((file, args, opts) => execFileSync(file, args, opts)),
+    runGhSync: vi.fn((args, opts) => execFileSync('gh', args, opts)),
+  };
+});
+vi.mock('../../lib/write-all-sync.mjs', () => ({ writeAllSync: vi.fn(), writeLineSync: vi.fn() }));
+
+import { prFileContract } from './pr-file-test-helpers.mjs';
+prFileContract({
+  name: 'duplicate-pr-watch', load: () => import('../duplicate-pr-watch.mjs'),
+  reader: 'defaultListOpenPrs', run: 'watchDuplicatePrs',
+  fields: 'number,headRefName,title,body,labels,files',
 });
