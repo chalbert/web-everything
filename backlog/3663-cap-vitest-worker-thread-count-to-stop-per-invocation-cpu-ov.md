@@ -20,6 +20,14 @@ copies as an unresolved twin (byte-identical bodies, confirmed by diff). No work
 either copy, so both are closed here (see `#3650`'s own resolution note) rather than picking one survivor —
 `graduatedTo: none` records that honestly. Re-file the underlying idea fresh if it is still wanted.
 
+**Correction — the work did land**, as `ab7ac270c` ("Cap vitest worker/thread count to stop per-invocation CPU oversubscription") —
+`we:vitest.shared.ts#maxTestWorkers` (4) is applied in all four scoped files exactly as described. Discovered
+resolved-but-unmarked while merging `origin/lane/mechanical-dispatcher` into WE PR #2156 (`#3383`/`#xw0odtv`):
+this card's own `bornAs` hash (`x1jcikc`) was independently re-numbered on two diverged branches — this repo's
+own history as `#3650` (see that card), the merge target's as this `#3635` — a duplicate JIT-mint discovered
+only when the two branches' histories finally met. Resolving both here rather than deleting either, per the
+backlog's own audit-trail rule.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.

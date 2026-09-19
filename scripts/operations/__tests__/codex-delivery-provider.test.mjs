@@ -169,6 +169,77 @@ describe('buildCodexDeliveryArgv — the resume shape', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #3635 Fork 1 — "Every Codex invocation names its model explicitly."
+//
+// This provider was ALREADY compliant on behaviour: it has always pushed `-m` unconditionally, so unlike the
+// judge seat it was never riding `codex exec`'s implicit default. What it carried instead was a hand-copied
+// `'gpt-6-astra'` literal — a THIRD copy of a ratified constant, whose own header called the duplication out
+// as a real follow-up. These freeze both halves: the pin is emitted on every path, and it is the SHARED
+// constant, so a re-ratification of the model cannot land on one copy and silently miss this one.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#3635 — the delivery agent names its model explicitly, from the one ratified source', () => {
+  const ROUTING = () => import('../../lib/codex-model-routing.mjs');
+
+  it('emits -m with the ratified pin on the FRESH-SPAWN path', () => {
+    const argv = buildCodexDeliveryArgv({ prompt: 'BUILD', cwd: LANE, denyPaths: DENY });
+    const at = argv.indexOf('-m');
+    expect(at).toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe('gpt-6-astra');
+    expect(argv.filter((a) => a === '-m')).toHaveLength(1);
+  });
+
+  it('emits the SAME -m on the RESUME path — a continuation cannot drift onto another model', () => {
+    const argv = buildCodexDeliveryArgv({ prompt: 'F', cwd: LANE, denyPaths: DENY, resumeThreadId: 'tid' });
+    expect(argv[argv.indexOf('-m') + 1]).toBe('gpt-6-astra');
+  });
+
+  it('emits an explicit -c model_reasoning_effort on BOTH paths — effort is pinned, never inherited', () => {
+    for (const opts of [{}, { resumeThreadId: 'tid' }]) {
+      const argv = buildCodexDeliveryArgv({ prompt: 'P', cwd: LANE, denyPaths: DENY, ...opts });
+      expect(argv, JSON.stringify(opts))
+        .toEqual(expect.arrayContaining(['-c', `model_reasoning_effort=${CODEX_DELIVERY_EFFORT}`]));
+    }
+  });
+
+  it('CODEX_DELIVERY_MODEL is an ALIAS of the shared constant, not a second declaration of the literal', async () => {
+    const { CODEX_MODEL } = await ROUTING();
+    expect(CODEX_DELIVERY_MODEL).toBe(CODEX_MODEL);
+  });
+
+  it('the accepted effort vocabulary is DERIVED from the shared map, not retyped', async () => {
+    const { CODEX_EFFORT_MAP } = await ROUTING();
+    expect(CODEX_DELIVERY_EFFORT_LEVELS).toEqual(Object.keys(CODEX_EFFORT_MAP));
+    // The unclamped top three are genuinely accepted, not just listed.
+    for (const level of ['xhigh', 'max', 'ultra']) {
+      expect(CODEX_DELIVERY_EFFORT_LEVELS, level).toContain(level);
+    }
+  });
+
+  it('the default effort is the ratified `sonnet` rung, resolved rather than retyped', async () => {
+    const { resolveCodexEffort, CODEX_TIER_EFFORT } = await ROUTING();
+    expect(CODEX_DELIVERY_EFFORT).toBe(resolveCodexEffort({ tier: 'sonnet' }));
+    expect(CODEX_DELIVERY_EFFORT).toBe(CODEX_TIER_EFFORT.sonnet);
+  });
+
+  it('REGRESSION — no reachable input omits -m', () => {
+    for (const opts of [{}, { model: undefined }, { resumeThreadId: 'tid' }, { effort: 'ultra' }]) {
+      const argv = buildCodexDeliveryArgv({ prompt: 'P', cwd: LANE, denyPaths: DENY, ...opts });
+      expect(argv, JSON.stringify(opts)).toContain('-m');
+    }
+  });
+
+  it('still refuses a flag-shaped or empty model rather than falling back to the implicit default', () => {
+    for (const bad of ['--evil', '-x', '', '   ', null, 42]) {
+      expect(
+        () => buildCodexDeliveryArgv({ prompt: 'P', cwd: LANE, denyPaths: DENY, model: bad }),
+        JSON.stringify(bad),
+      ).toThrow(/plain non-empty string/);
+    }
+  });
+});
+
 describe('parseCodexThreadId', () => {
   // The literal event shape observed on the wire, verbatim from a real run's stdout.
   const LIVE = '{"type":"thread.started","thread_id":"01a09890-c29f-7ce1-ab81-3d3a6ea6c68d"}\n'

@@ -25,6 +25,7 @@ vi.mock('../../conveyor/run-quality-record.mjs', () => ({ recordCodexRunScorecar
 import {
   CODEX_CLI,
   CODEX_EFFORT_MAP,
+  CODEX_MODEL,
   CodexInvalidSchemaError,
   assertNoCodexToolAllowlist,
   buildCodexJudgeArgv,
@@ -66,6 +67,8 @@ describe('buildCodexJudgeArgv — the argv translation, per #3371\'s table', () 
       '--skip-git-repo-check',
       '--ephemeral',
       '-C', '/tmp/scratch',
+      // #3635 Fork 1 — the pin is part of the BASELINE argv now, not an optional tail.
+      '-m', CODEX_MODEL,
     ]);
     expect(argv.join(' ')).not.toContain('--json-schema');
     expect(argv.join(' ')).not.toContain('--append-system-prompt');
@@ -86,13 +89,72 @@ describe('buildCodexJudgeArgv — the argv translation, per #3371\'s table', () 
     }
   });
 
-  it('adds -m <model> only when a model is given', () => {
-    expect(buildCodexJudgeArgv(base)).not.toContain('-m');
-    expect(buildCodexJudgeArgv({ ...base, model: 'gpt-5-codex' })).toEqual(expect.arrayContaining(['-m', 'gpt-5-codex']));
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // #3635 Fork 1, RATIFIED — "Every Codex invocation names its model explicitly."
+  //
+  // THE DEFECT THESE REPLACE. The two tests that used to sit here asserted the OPPOSITE contract: `adds -m
+  // <model> only when a model is given` PINNED the omission (`expect(buildCodexJudgeArgv(base)).not
+  // .toContain('-m')`). Since no caller in the repo ever passed `model`, that assertion was a green test
+  // guarding the exact hole #3635 was opened to close — the judge seat riding `codex exec`'s implicit
+  // default, which resolves server-side and is recorded nowhere.
+  //
+  // These assert the real argv, not merely that the call survives.
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  it('ALWAYS emits -m, with the ratified pin, when the caller names no model', () => {
+    const argv = buildCodexJudgeArgv(base);
+    const at = argv.indexOf('-m');
+    expect(at, 'the judge seat must never ride the CLI\'s implicit default').toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe(CODEX_MODEL);
+    // The pin is the RATIFIED value, not merely "some string" — a rename of the constant that silently
+    // changed the model would still have to face this.
+    expect(CODEX_MODEL).toBe('gpt-6-astra');
+  });
+
+  it('emits -m exactly ONCE — the pin is a default, never appended on top of a caller\'s model', () => {
+    expect(buildCodexJudgeArgv(base).filter((a) => a === '-m')).toHaveLength(1);
+    expect(buildCodexJudgeArgv({ ...base, model: 'gpt-5.6-sol' }).filter((a) => a === '-m')).toHaveLength(1);
+  });
+
+  it('an explicit model still WINS over the pin — this is a default, not a hardcode', () => {
+    const argv = buildCodexJudgeArgv({ ...base, model: 'gpt-5.6-sol' });
+    expect(argv[argv.indexOf('-m') + 1]).toBe('gpt-5.6-sol');
+    expect(argv).not.toContain(CODEX_MODEL);
+  });
+
+  it('trims a padded model rather than sending whitespace as the operand', () => {
+    const argv = buildCodexJudgeArgv({ ...base, model: '  gpt-5.6-sol  ' });
+    expect(argv[argv.indexOf('-m') + 1]).toBe('gpt-5.6-sol');
+  });
+
+  it('REGRESSION — no reachable input makes buildCodexJudgeArgv omit -m', () => {
+    // The old contract's own inputs: omitted, and explicitly `undefined`. Both must now carry the pin.
+    for (const opts of [base, { ...base, model: undefined }, { ...base, effort: 'high' }]) {
+      expect(buildCodexJudgeArgv(opts), JSON.stringify(opts)).toContain('-m');
+    }
   });
 
   it('refuses a model shaped like a flag', () => {
+    // Load-bearing: `-x` as `-m`'s operand would be parsed by `codex` as a FLAG, silently changing the
+    // command instead of failing it.
     expect(() => buildCodexJudgeArgv({ ...base, model: '-x' })).toThrow(/plain non-empty string/);
+  });
+
+  it('refuses an empty or non-string model rather than falling back to the implicit default', () => {
+    for (const bad of ['', '   ', null, 42, {}]) {
+      expect(() => buildCodexJudgeArgv({ ...base, model: bad }), JSON.stringify(bad))
+        .toThrow(/plain non-empty string/);
+    }
+  });
+
+  it('the pin is the SHARED ratified constant, not a third local copy of the literal', async () => {
+    // The whole point of #3635's follow-up: one source, so a re-ratification cannot miss a call site.
+    const routing = await import('../codex-model-routing.mjs');
+    const direct = await import('../../codex-direct-task.mjs');
+    const delivery = await import('../../operations/codex-delivery-provider.mjs');
+    expect(CODEX_MODEL).toBe(routing.CODEX_MODEL);
+    expect(direct.CODEX_MODEL).toBe(routing.CODEX_MODEL);
+    expect(delivery.CODEX_DELIVERY_MODEL).toBe(routing.CODEX_MODEL);
   });
 
   it('maps effort through CODEX_EFFORT_MAP, via -c model_reasoning_effort=…', () => {
@@ -102,9 +164,21 @@ describe('buildCodexJudgeArgv — the argv translation, per #3371\'s table', () 
     }
   });
 
-  it('clamps xhigh/max DOWN to high — Codex has no level above it', () => {
-    expect(CODEX_EFFORT_MAP.xhigh).toBe('high');
-    expect(CODEX_EFFORT_MAP.max).toBe('high');
+  it('does NOT clamp xhigh/max/ultra — the map is an identity over every real level', () => {
+    // SUPERSEDES `clamps xhigh/max DOWN to high — Codex has no level above it`. That premise was measured and
+    // refuted by #3635's 2026-09-12 follow-up: `gpt-6-astra`'s catalogued `supported_reasoning_levels` are
+    // `low·medium·high·xhigh·max·ultra`, and a live `codex exec -c model_reasoning_effort=<level>` ping at
+    // each of the top three completed normally. The clamp was silently DOWNGRADING an explicit request.
+    for (const level of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+      expect(CODEX_EFFORT_MAP[level], level).toBe(level);
+    }
+  });
+
+  it('sends the UNCLAMPED level through to the argv, not just through the map', () => {
+    for (const level of ['xhigh', 'max', 'ultra']) {
+      expect(buildCodexJudgeArgv({ ...base, effort: level }), level)
+        .toEqual(expect.arrayContaining(['-c', `model_reasoning_effort=${level}`]));
+    }
   });
 
   it('refuses an unrecognised effort rather than passing it through silently', () => {
