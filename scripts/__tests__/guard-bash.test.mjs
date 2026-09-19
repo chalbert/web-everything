@@ -12,6 +12,7 @@ import {
   siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
+  isDirectTaskInvocation, backgroundedDirectTaskReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
@@ -20,6 +21,54 @@ import {
 } from '../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+describe('guard-bash — backgrounded direct tasks are denied (#3383)', () => {
+  it('isDirectTaskInvocation matches either exact script operand, not a mention or a different script', () => {
+    for (const command of [
+      'node scripts/codex-direct-task.mjs',
+      'node scripts/codex-direct-task.mjs --task="x"',
+      'node scripts/gemini-direct-task.mjs',
+      'node scripts/gemini-direct-task.mjs --task="x" --dir=/tmp/work',
+      'node /absolute/path/scripts/codex-direct-task.mjs --task="x"',
+      'node "/absolute/path with spaces/gemini-direct-task.mjs" --task="x"',
+      'cd /tmp && node scripts/codex-direct-task.mjs',
+      'nohup node scripts/codex-direct-task.mjs',
+    ]) expect(isDirectTaskInvocation(command), command).toBe(true);
+    for (const command of [
+      'node scripts/codex-judge-spawn.mjs --task="x"',
+      'node scripts/my-codex-direct-task.mjs',
+      'node scripts/codex-direct-task.mjs.bak',
+      'node scripts/other.mjs scripts/codex-direct-task.mjs',
+      'echo "node scripts/codex-direct-task.mjs --task=x"',
+      '# node scripts/gemini-direct-task.mjs --task=x',
+      'echo done # node scripts/codex-direct-task.mjs',
+      'cat <<\'EOF\'\nnode scripts/codex-direct-task.mjs\nEOF',
+    ]) expect(isDirectTaskInvocation(command), command).toBe(false);
+  });
+  it('backgroundedDirectTaskReason fires only when BOTH a direct task AND backgrounded', () => {
+    for (const script of ['codex', 'gemini']) {
+      const command = `node scripts/${script}-direct-task.mjs --task="x"`;
+      expect(backgroundedDirectTaskReason(command, true)).toMatch(/SYNCHRONOUS/);
+      for (const background of [`${command} &`, `nohup ${command}`, `setsid ${command}`, `${command}; disown`]) {
+        expect(backgroundedDirectTaskReason(background)).toMatch(/FOREGROUND/);
+      }
+      expect(backgroundedDirectTaskReason(command)).toBeNull();
+      expect(backgroundedDirectTaskReason(command, false)).toBeNull();
+      expect(backgroundedDirectTaskReason(`${command} > log 2>&1 && echo done`)).toBeNull();
+      expect(backgroundedDirectTaskReason(`${command} &> log || echo failed`)).toBeNull();
+    }
+    expect(backgroundedDirectTaskReason('sleep 60 &')).toBeNull();
+    expect(backgroundedDirectTaskReason('npm run dev &')).toBeNull();
+    expect(backgroundedDirectTaskReason('node scripts/codex-judge-spawn.mjs', true)).toBeNull();
+  });
+  it('decide denies the tool-param and shell-background forms and allows foreground', () => {
+    const command = 'node scripts/codex-direct-task.mjs --task="x"';
+    expect(decide(command, { runInBackground: true })).toMatch(/FOREGROUND/);
+    expect(decide('node scripts/gemini-direct-task.mjs --task="x" &')).toMatch(/SYNCHRONOUS/);
+    expect(decide(command)).toBeNull();
+    expect(decide('node scripts/gemini-direct-task.mjs --task="x"')).toBeNull();
+  });
+});
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
   it('isVerificationRun matches the verification set (verify-lane / check:standards / test:unit), not a mention', () => {

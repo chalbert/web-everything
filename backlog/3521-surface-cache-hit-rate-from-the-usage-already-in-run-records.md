@@ -2,10 +2,12 @@
 bornAs: xzdzg3j
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/operations/run-record.mjs"]
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-15"
 tags: [cost, observability, operations, prompt-caching]
+deliveryAgent: codex
 relatedReport: reports/2026-09-06-token-optimisation-research.md
 ---
 

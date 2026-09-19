@@ -12,13 +12,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import {
   VERDICTS, VERDICT_VALUES, VERDICT_LEDGER_VERSION, VERDICT_LEDGER_KIND, ACTOR_PROVES,
   AGREEMENT, DISAGREE_DIRECTION,
   buildVerdictRecord, validateVerdictRecord, serializeVerdictRecord, parseVerdictLog,
   verdictClears, verdictLabel, verdictForLabelTarget, labelVerdictOf, foldVerdictLedger, ledgerCoversHead,
-  compareLedgerToLabels, summarizeAgreement,
+  compareLedgerToLabels, summarizeAgreement, summarizeShadowAgreement,
   NON_BEARING, verdictBears,
   appendVerdict, readVerdictLedger, foldRepo, verdictLedgerPath, verdictLedgerDir, defaultVerdictLedgerDir,
   listLedgerRepos,
@@ -39,6 +40,76 @@ const BEARING_VERDICTS = VERDICT_VALUES.filter((v) => !NON_BEARING.includes(v));
 /** A minimal valid record, with overrides. */
 const rec = (over = {}) => buildVerdictRecord({
   repo: REPO, pr: 1, verdict: VERDICTS.ACCEPTED, at: AT, source: 'test', ...over,
+});
+
+const shadow = (over = {}) => rec({ verdict: VERDICTS.OBSERVED, mode: 'shadow', wouldClear: true, ...over });
+
+describe('#3217 shadow records remain observations', () => {
+  it('retains the shadow marker and prediction, deriving clears as false even if forged', () => {
+    expect(validateVerdictRecord({ ...shadow(), clears: true }).record).toMatchObject({
+      verdict: 'observed', clears: false, mode: 'shadow', wouldClear: true, applied: false, mutated: false,
+    });
+    expect(verdictClears(shadow().verdict)).toBe(false);
+    expect(verdictBears(shadow().verdict)).toBe(false);
+  });
+
+  it.each([
+    { verdict: VERDICTS.ACCEPTED }, { verdict: VERDICTS.CHANGES }, { mode: 'enforce' },
+    { wouldClear: 'true' }, { applied: true }, { mutated: true }, { mode: undefined },
+  ])('rejects an ambiguous or applied shadow row: %j', (over) => {
+    expect(validateVerdictRecord({ ...shadow(), ...over }).valid).toBe(false);
+  });
+
+  it('refuses building a shadow clearance', () => {
+    expect(() => shadow({ verdict: VERDICTS.ACCEPTED })).toThrow(/shadow predictions/);
+  });
+
+  it.each([VERDICTS.ACCEPTED, VERDICTS.CHANGES])('does not supersede a real %s or change its holds', (verdict) => {
+    const real = rec({ verdict });
+    const before = foldVerdictLedger([real]).get(1);
+    const folded = foldVerdictLedger([real, shadow(), shadow({ wouldClear: false })]);
+    expect(folded.get(1)).toMatchObject({ current: real, clears: before.clears, outstandingHolds: before.outstandingHolds });
+    expect(compareLedgerToLabels({ pr: 1, labels: [verdictLabel(verdict)], folded: folded.get(1) }).status).toBe('agree');
+    expect(reviewRoundsFromVerdictLedger(folded.get(1).history, 1)).toBe(1);
+  });
+
+  it('does not admit a shadow-only PR into live label drift comparisons', () => {
+    expect(buildRows({ prs: [{ number: 1, labels: [] }], folded: foldVerdictLedger([shadow()]) })).toEqual([]);
+  });
+});
+
+describe('#3217 shadow-vs-human agreement', () => {
+  it.each([
+    [true, VERDICTS.ACCEPTED, 'agree'], [true, VERDICTS.CHANGES, 'disagree'],
+    [false, VERDICTS.ACCEPTED, 'disagree'], [false, VERDICTS.CHANGES, 'agree'],
+  ])('compares wouldClear=%s against %s as %s', (wouldClear, verdict, status) => {
+    const summary = summarizeShadowAgreement([
+      shadow({ wouldClear }), rec({ verdict, declaredActor: 'nic' }),
+    ], { humanActor: 'nic' });
+    expect(summary.total).toBe(1);
+    expect(summary[status]).toBe(1);
+    expect(summary.rows[0]).toMatchObject({ repo: REPO, pr: 1, wouldClear, humanVerdict: verdict, status });
+    expect(summary.unmatched).toEqual([]);
+  });
+
+  it('defaults only to the explicit human ceremony, not any agent acceptance', () => {
+    const rows = [shadow(), rec({ declaredActor: 'agent' })];
+    expect(summarizeShadowAgreement(rows)).toMatchObject({ total: 0, unmatched: [shadow()] });
+    expect(summarizeShadowAgreement([...rows, rec({ verdict: VERDICTS.CLEAR_HUMAN })])).toMatchObject({ total: 1, agree: 1 });
+  });
+
+  it('joins by both repo and PR, never using a human verdict preceding the prediction', () => {
+    const rows = [rec({ verdict: VERDICTS.CLEAR_HUMAN }), shadow(),
+      rec({ pr: 2, verdict: VERDICTS.CLEAR_HUMAN }),
+      rec({ repo: 'other/repo', verdict: VERDICTS.CLEAR_HUMAN })];
+    expect(summarizeShadowAgreement(rows)).toMatchObject({ total: 0, unmatched: [shadow()] });
+  });
+
+  it('counts repeated predictions and human outcomes only once per matched pair', () => {
+    const rows = [shadow({ wouldClear: false }), shadow(), rec({ verdict: VERDICTS.CLEAR_HUMAN }),
+      rec({ verdict: VERDICTS.CLEAR_HUMAN }), shadow({ pr: 2 })];
+    expect(summarizeShadowAgreement(rows)).toMatchObject({ total: 1, agree: 1, superseded: 1, unmatched: [shadow({ pr: 2 })] });
+  });
 });
 
 describe('#3007 schema — versioned, closed, and total over the label targets', () => {
@@ -466,6 +537,15 @@ describe('#3007 IO — the machine-global home, the locked append, the tolerant 
     expect(folded.get(20).history).toHaveLength(2);
     expect(folded.get(21).clears).toBe(false);
     expect(listLedgerRepos()).toEqual(['chalbert-web-everything']);
+  });
+
+  it('reads persisted shadow/human evidence through the offline agreement CLI', () => {
+    expect(appendVerdict(shadow()).ok).toBe(true);
+    expect(appendVerdict(rec({ verdict: VERDICTS.CHANGES, declaredActor: 'nic' })).ok).toBe(true);
+    expect(readVerdictLedger(REPO)[0]).toMatchObject({ mode: 'shadow', wouldClear: true, clears: false });
+    const out = execFileSync(process.execPath, ['scripts/lib/verdict-ledger.mjs', 'shadow-agreement',
+      `--repo=${REPO}`, '--human-actor=nic', '--json'], { encoding: 'utf8', env: process.env });
+    expect(JSON.parse(out)).toMatchObject({ total: 1, agree: 0, disagree: 1, unmatched: [] });
   });
 
   it('each append is exactly one newline-terminated line (so one write is one record)', () => {

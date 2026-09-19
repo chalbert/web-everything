@@ -15,10 +15,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveDefaultGate, canScopeCheckStandards, FULL_GATE } from '../verify-lane-gate.mjs';
 
-/** A synthetic git runner: `merge-base` resolves to a fixed sha; `diff --name-only` returns the configured
+/** A synthetic git runner: `status` returns tracked status; `merge-base` resolves to a fixed sha; `diff --name-only` returns the configured
  *  changed-file list. Mirrors test-selection.test.mjs's injectable-runGit convention — no real git process. */
-function fakeGit(changedFiles) {
+function fakeGit(changedFiles, trackedStatus = '') {
   return (args) => {
+    if (args[0] === 'status') {
+      expect(args).toEqual(['status', '--porcelain', '--untracked-files=no']);
+      return trackedStatus;
+    }
     if (args[0] === 'merge-base') return 'deadbeef';
     if (args[0] === 'diff') return changedFiles.join('\n');
     throw new Error(`unexpected git invocation in test: ${args.join(' ')}`);
@@ -94,7 +98,10 @@ describe('resolveDefaultGate (#3372) — verify-lane default gate wired to diff-
   });
 
   it('FAIL-SAFE (both halves): a git failure (no computable diff) falls back to the FULL suite, never silently shrinks or scopes', () => {
-    const throwingGit = () => { throw new Error('no such ref'); };
+    const throwingGit = (args) => {
+      if (args[0] === 'status') return '';
+      throw new Error('no such ref');
+    };
     const { command, decision } = resolveDefaultGate({ runGit: throwingGit, env: {} });
     expect(decision.mode).toBe('full');
     expect(decision.changedFiles).toBe(null);
@@ -105,6 +112,32 @@ describe('resolveDefaultGate (#3372) — verify-lane default gate wired to diff-
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit([]), env: {} });
     expect(decision.mode).toBe('full');
     expect(decision.changedFiles).toEqual([]);
+    expect(command).toBe(FULL_GATE);
+  });
+
+  it.each([' M src/components/widget.ts\n', 'M  src/components/widget.ts\n'])(
+    'FAIL-SAFE (both halves): dirty tracked status %j forces FULL_GATE despite a shrinkable committed diff (#3389)',
+    (trackedStatus) => {
+      const { command, decision } = resolveDefaultGate({
+        runGit: fakeGit(['docs/readme.md'], trackedStatus),
+        env: {},
+      });
+      expect(decision.mode).toBe('full');
+      expect(decision.selectedFiles).toEqual([]);
+      expect(decision.changedFiles).toBe(null);
+      expect(command).toBe(FULL_GATE);
+    },
+  );
+
+  it('FAIL-SAFE (both halves): unreadable tracked status forces FULL_GATE despite a shrinkable committed diff', () => {
+    const cleanGit = fakeGit(['docs/readme.md']);
+    const runGit = (args) => {
+      if (args[0] === 'status') throw new Error('cannot read status');
+      return cleanGit(args);
+    };
+    const { command, decision } = resolveDefaultGate({ runGit, env: {} });
+    expect(decision.mode).toBe('full');
+    expect(decision.changedFiles).toBe(null);
     expect(command).toBe(FULL_GATE);
   });
 });

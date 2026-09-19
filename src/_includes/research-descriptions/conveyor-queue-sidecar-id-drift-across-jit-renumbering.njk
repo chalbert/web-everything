@@ -1,0 +1,98 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3605-jit-renumbering-never-re-keys-the-conveyor-queue-sidecar-so/">#3605</a> records a live
+failure. Entries in the conveyor's session-local cleared-set sidecar (<code>.conveyor/queue.json</code>) are
+still keyed by an item's pre-land birth hash after the drain JIT-numbered that item on land. Every consumer
+matches sidecar ids against current numeric ids only, so a genuinely ready item is held as
+<code>cleared-but-not-ready</code> and never dispatches. The card leaves one question open: <strong>should
+the hash→number translation happen when the rename occurs, or when the stale id is read?</strong> This survey
+covers how often the drift happens, which code reads the sidecar, what this repo already does for the same
+identity problem elsewhere, and how well-known systems handle a renamed key.</p>
+
+<h2>Finding 1 — a stale hash entry is the normal lifecycle, not an edge case</h2>
+
+<p>A new card is filed under a birth hash and numbered only when its filing PR lands
+(<code>scripts/lane-drain.mjs</code>'s <code>numberPendingHashes</code>, which commits
+<code>drain: JIT-number &lt;hash&gt;→#&lt;NNN&gt; at land</code> at line 768). The <code>file-item</code>
+operation's queue sink (<code>scripts/operations/file-item-io.mjs:76-82</code>) clears the card for the
+conveyor <em>at filing time</em>, so the id it stores is necessarily the hash. Any card queued at filing
+therefore ends up with a stale sidecar entry the moment it lands. The CLI's own docblock
+(<code>scripts/conveyor/queue.mjs:20-23</code>) already describes the drift and tells the operator to
+<code>remove</code> and re-<code>add</code> by hand. #3567's fix was exactly that manual step.</p>
+
+<h2>Finding 2 — every sidecar reader lacks the fallback, and there are more readers than the card lists</h2>
+
+<table>
+<thead><tr><th>Reader</th><th>Match</th><th>Effect of a stale hash</th></tr></thead>
+<tbody>
+<tr><td><code>scripts/readiness/dispatch-plan.mjs:453</code> <code>selectClearedRows</code></td><td><code>normNum</code> only</td><td>item never enters the launch set</td></tr>
+<tr><td><code>scripts/readiness/dispatch-plan.mjs:471</code> <code>clearedNotReady</code></td><td><code>normNum</code> only</td><td>item is held as <code>cleared-but-not-ready</code>, indefinitely</td></tr>
+<tr><td><code>scripts/readiness/conveyor-state.mjs:97</code> (<code>shapeQueue</code>) and <code>:463</code> (<code>deriveClearedNotReady</code>)</td><td><code>normNum</code> only</td><td>the tick picture's <code>buildQueued</code> reads false, so the skill's queue-empty test miscounts (not named in the card)</td></tr>
+<tr><td><code>scripts/conveyor/queue.mjs:95</code> <code>readinessOf</code> (the card places this in <code>queue-store.mjs</code>; it is actually in <code>queue.mjs</code>)</td><td><code>normNum</code> only</td><td>a spurious "not currently ready" warning on add</td></tr>
+<tr><td><code>scripts/conveyor/queue-store.mjs:110</code> <code>removeFromQueue</code> / <code>:84</code> <code>queueHas</code></td><td><code>normNum</code> only</td><td><code>remove &lt;NNN&gt;</code> cannot remove the hash entry</td></tr>
+</tbody>
+</table>
+
+<p>The data needed for a fallback is already loaded. <code>src/_data/backlog.js:357</code> spreads every
+frontmatter field (<code>...data</code>) into each loader item, so <code>bornAs</code> is present on the items
+<code>dispatch-plan.mjs</code> already loads for scope enrichment (lines 546-555). That load currently happens
+<em>after</em> the matching at lines 542-545, so a consumer-side fix has to reorder the two steps.</p>
+
+<h2>Finding 3 — the repo already resolves old hashes at read time in three places</h2>
+
+<ul>
+<li><code>scripts/conveyor/queue.mjs:65-88</code> <code>kindOf</code>: matches the filename id first, then falls
+back to a <code>bornAs:</code> match, so that a card cleared under its birth hash still resolves after it
+lands with a number.</li>
+<li><code>scripts/backlog.mjs:1214-1224</code> <code>resolveParent</code>: maps a raw hash that has no file on disk
+to its landed number via <code>landedNumberFor</code> (<code>scripts/lane-drain.mjs:785</code>).</li>
+<li><code>scripts/conveyor/lease-reaper.mjs:161</code> <code>matchLaneRef</code>: accepts both the digit form and
+the hash form of an item id, in one grammar that every consumer shares.</li>
+</ul>
+
+<p>The repo's one precedent for renaming at write time is the drain's own <code>applyLedger</code> blind
+rewrite (<code>scripts/lane-drain.mjs:704</code>). It is confined to <em>tracked</em> files on purpose. The
+doctrine in <code>docs/agent/backlog-workflow.md</code> (line 916) names <code>bornAs</code>-on-main "the sole
+cross-clone landed proof," which makes it the durable alias a read-time resolver should use.</p>
+
+<h2>Finding 4 — the "no way to find the sidecar" premise is overstated</h2>
+
+<p>The capture argues that a rename inside <code>numberPendingHashes</code> "has no reliable way to know which
+checkout(s) hold a live" sidecar. That was true before #3478. Today
+<code>scripts/conveyor/resolve-runner-checkout.mjs</code> finds the one live runner's checkout from its
+machine-global lock plus <code>lsof</code>, and both <code>scripts/conveyor/queue-work.mjs:67</code> and
+<code>file-item-io.mjs</code> already write to the sidecar it returns. Because the drain daemon is a local KeepAlive job on
+the same machine (<code>docs/agent/platform-decisions.md#drain-daemon-self-hosting-boundary</code>, #2501), a write-time rename <em>can</em> reach the sidecar that matters in the common case. It still misses four
+cases: no runner is live at land time (<code>file-item-io</code> falls back to its own script-location sidecar),
+the runner lock is ambiguous, the hash entries that are already stale today, and a hash an operator types after
+land. Each of these still needs a read-time resolver, so write-time renaming can supplement read-time resolution
+but cannot replace it.</p>
+
+<h2>Finding 5 — external prior art frames the same axis</h2>
+
+<ul>
+<li><strong>Rename at write time.</strong> SQL <code>ON UPDATE CASCADE</code> rewrites every referencing row when
+a key changes. This is sound only when the engine can enumerate all referencing rows, which is precisely what an
+untracked, per-checkout sidecar prevents.</li>
+<li><strong>Keep the old name as an alias and resolve on read.</strong> HTTP 301/308 permanent redirects (RFC 9110)
+keep the old URI working. The spec suggests that clients able to edit links re-link to the new target, but it
+does not require the server to find every stale bookmark. GitHub repository renames work the same way: old URLs
+and git remotes keep resolving, and updating the remote is recommended, not required. <code>git log
+--follow</code> detects renames at read time rather than storing them.</li>
+<li><strong>Resolve on read, then write back ("read repair").</strong> Dynamo-style stores such as Cassandra repair
+stale replicas during reads. This is safe there because each write carries a timestamp or version, so a repair
+cannot overwrite a newer write. <code>scripts/conveyor/queue-store.mjs:154-158</code> says outright that its writer
+is unversioned and last-write-wins, "acceptable for a session-local single-operator sidecar". A dispatch tick
+that writes back would add a second writer and break that stated assumption.</li>
+</ul>
+
+<h2>What this means for the decision</h2>
+
+<p>The prepared item makes two cuts. <strong>Where</strong> the translation happens: at the consumers via
+<code>bornAs</code> (recommended), at renumber time, or both. <strong>Who may persist</strong> the canonical id: no
+one except an operator's own add or remove (recommended), the dispatch tick through read repair, or an explicit
+sweep verb. Whether each consumer gets its own fallback or all of them share one canonicalization step at the
+sidecar read boundary is left to the build, and the build should choose the shared step so the readers cannot
+disagree. The item carries the code sketch.</p>
+{% endraw %}

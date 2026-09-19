@@ -41,7 +41,7 @@ import { withStepFinish, withStepStart } from './run-record.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
 import { createDispatchObservers, defaultListAgents, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
-import { createExploreObservers } from './explore-io.mjs';
+import { createExploreObservers, reclaimExploreScratch } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -183,9 +183,13 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
  * @param {object|Map} opts.observers
  * @param {(op: string) => {registry: object, sinks: object}} opts.resolveFor
  * @param {string|Date} [opts.now]
- * @returns {Promise<{scanned: number, parked: number, runs: object[], errors: object[]}>}
+ * @param {(o: {store: object}) => {reclaimed: string[], errors: object[]}} [opts.reclaim] - the scratch
+ *   housekeeping run AFTER every parked run is handled, so a run this pass completed is reclaimed in it. The CLI
+ *   passes `explore-io.mjs#reclaimExploreScratch` (#2304); omitted, nothing is reclaimed. A throw is reported in
+ *   `errors`, like every other fault in a pass.
+ * @returns {Promise<{scanned: number, parked: number, runs: object[], errors: object[], reclaimed: string[]}>}
  */
-export async function wakePass({ store, observers, resolveFor, now = new Date() } = {}) {
+export async function wakePass({ store, observers, resolveFor, now = new Date(), reclaim = null } = {}) {
   // FAIL-SOFT AT THE FRONT DOOR TOO (PR #1186 review, NB-4). The header promises per-run fail-soft and the
   // scan sat outside every `try`, so a store whose `list` throws took the whole pass down. It is still a real
   // fault — the caller sees it in `errors` and the CLI exits non-zero — but it is reported in the same shape
@@ -200,7 +204,7 @@ export async function wakePass({ store, observers, resolveFor, now = new Date() 
     // fix wrapped the call and left the use outside it (PR #1186 round 2, NB2-2).
     if (!Array.isArray(ids)) throw new TypeError(`store.list() returned ${typeof ids}, not an array`);
   } catch (e) {
-    return { scanned: 0, parked: 0, runs, errors: [{ error: String(e?.message ?? e) }] };
+    return { scanned: 0, parked: 0, runs, errors: [{ error: String(e?.message ?? e) }], reclaimed: [] };
   }
 
   for (const id of ids) {
@@ -220,7 +224,18 @@ export async function wakePass({ store, observers, resolveFor, now = new Date() 
     }
   }
 
-  return { scanned: ids.length, parked, runs, errors };
+  const reclaimed = [];
+  if (reclaim) {
+    try {
+      const swept = reclaim({ store });
+      reclaimed.push(...(swept?.reclaimed || []));
+      errors.push(...(swept?.errors || []).map((x) => ({ runId: x.runId, error: `scratch reclaim: ${x.error}` })));
+    } catch (e) {
+      errors.push({ error: `scratch reclaim: ${String(e?.message ?? e)}` });
+    }
+  }
+
+  return { scanned: ids.length, parked, runs, errors, reclaimed };
 }
 
 /**
@@ -250,8 +265,14 @@ export function stuckPast(pass, hours = STUCK_ESCALATION_HOURS) {
 
 /** One pass as operator-facing lines. PURE. Quiet when there is nothing parked — this runs on a timer. */
 export function renderPass(pass) {
-  if (!pass.parked && !pass.errors.length) return [`wake: ${pass.scanned} run(s) scanned, none parked on a dispatch.`];
-  const lines = [`wake: ${pass.scanned} run(s) scanned, ${pass.parked} parked.`];
+  const reclaimed = pass.reclaimed || [];
+  const reclaimLine = reclaimed.length
+    ? [`  reclaimed the explore scratch directory of ${reclaimed.length} completed run(s): ${reclaimed.join(', ')}`]
+    : [];
+  if (!pass.parked && !pass.errors.length) {
+    return [`wake: ${pass.scanned} run(s) scanned, none parked on a dispatch.`, ...reclaimLine];
+  }
+  const lines = [`wake: ${pass.scanned} run(s) scanned, ${pass.parked} parked.`, ...reclaimLine];
   for (const r of pass.runs) {
     const bits = [
       r.resolved.length ? `resolved ${r.resolved.map((x) => `${x.key}→${x.status}`).join(', ')}` : '',
@@ -443,6 +464,8 @@ if (IS_CLI) {
         const { registry, sinks } = resolveOperation(op);
         return { registry, sinks };
       },
+      // THE ONLY RECLAIMER of an explore committee's panelist reports — see `explore-io.mjs`'s header.
+      reclaim: ({ store }) => reclaimExploreScratch({ store }),
     })
       .then((pass) => {
         writeAllSync(1, `${renderPass(pass).join('\n')}\n`);

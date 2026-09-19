@@ -562,10 +562,10 @@ function prepareHold() {
 }
 
 /**
- * prepare-stamp <NNN> — write `status: open` + `preparedDate: <today>` into the item's frontmatter (the
- * one flag readiness ranks as `✓ ready to ratify`). Authored IN the lane and landed via the one PR — never
- * a primary-tree splice: like the other item-file mutations it is blocked from a primary cwd (guard-bash
- * #2302) and allowed in a `.lanes/` clone. Idempotent (status:open is a no-op on an already-open item).
+ * prepare-stamp <NNN> — write `status: open` + `preparedDate: <today>` + `preparedAgainstSha: <sha>` into the
+ * item's frontmatter (the one flag readiness ranks as `✓ ready to ratify`). Authored IN the lane and landed via
+ * the one PR — never a primary-tree splice: like the other item-file mutations it is blocked from a primary cwd
+ * (guard-bash #2302) and allowed in a `.lanes/` clone. Idempotent (status:open is a no-op on an already-open item).
  */
 function prepareStamp() {
   const file = resolveFile(positional[0]);
@@ -576,9 +576,11 @@ function prepareStamp() {
   if (after == null) die(`#${idFromName(file)} — could not splice frontmatter (no frontmatter block?)`);
   const today = localToday();
   after = setFrontmatterField(after, 'preparedDate', `"${today}"`, { after: ['status', 'dateStarted', 'dateOpened'] });
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: DIR, encoding: 'utf8' }).trim();
+  after = setFrontmatterField(after, 'preparedAgainstSha', `"${sha}"`, { after: ['preparedDate'] });
   writeBacklogMd(abs, rel, after);
-  ok({ verb: 'prepare-stamp', num: idFromName(file), preparedDate: today },
-    `${GRN}✓ prepare-stamped${RST} #${idFromName(file)} ${DIM}→ preparedDate ${today} (status: open; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
+  ok({ verb: 'prepare-stamp', num: idFromName(file), preparedDate: today, preparedAgainstSha: sha },
+    `${GRN}✓ prepare-stamped${RST} #${idFromName(file)} ${DIM}→ preparedDate ${today}, preparedAgainstSha ${sha.slice(0, 8)} (status: open; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
 }
 
 /** prepare-release <NNN> — drop the prepare-hold (the preparer's clear point once the one lane→PR lands).
@@ -1311,7 +1313,7 @@ switch (verb) {
       `  ${GRN}queue${RST} <NNN...> [--lane=<ref>] [--session=<slug>]   mark ready-to-merge (#2138 Fork 4); claim/release refuse a queued item until the drain lands it\n` +
       `  ${GRN}unqueue${RST} <NNN...>            clear the ready-to-merge mark (the drain's clear point at landing)\n` +
       `  ${GRN}prepare-hold${RST} <NNN> [--session=<slug>] [--lease=<min>]   HARD local hold while preparing a fork in a lane (#2219 (b)); --select skips + claim refuses it (vs the soft reserve)\n` +
-      `  ${GRN}prepare-stamp${RST} <NNN>         write status:open + preparedDate=<today> into the item (in-lane, landed via the one PR; blocked from a primary cwd)\n` +
+      `  ${GRN}prepare-stamp${RST} <NNN>         write status:open + preparedDate=<today> + preparedAgainstSha=<sha> into the item (in-lane, landed via the one PR; blocked from a primary cwd)\n` +
       `  ${GRN}prepare-release${RST} <NNN>       drop the prepare-hold (clear point once the lane PR lands)\n` +
       `  (add --json for machine output)`);
     process.exit(verb ? 1 : 0);

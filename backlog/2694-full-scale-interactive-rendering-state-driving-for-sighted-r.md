@@ -11,6 +11,7 @@ scope:
   - we:skills-src/design-committee/SKILL.md
 scopeRationale: "Doc/skill-only fold of a proven-by-hand technique into the existing build-ui method, the same shape as the sibling we:backlog/2708 (identical parent, identical file pair, size 3, resolved). we:.claude/skills is a symlink to we:skills-src (verified: readlink .claude/skills -> ../skills-src), so editing we:skills-src is the only skills-side edit — no separate we:.claude/skills edit, and no code/tooling: there is no existing generic mock-screenshot script this would extend (plateau-app:tests/visual/capture.mjs and plateau-app:tests/visual/render-baselines.mjs capture already-built app ROUTES, not self-contained pre-build mock HTML files, and have no state-driving hook)."
 tags: []
+deliveryAgent: codex
 ---
 
 # Full-scale interactive rendering + state-driving for sighted review

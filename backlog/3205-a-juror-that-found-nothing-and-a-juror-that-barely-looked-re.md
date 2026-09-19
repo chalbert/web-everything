@@ -5,6 +5,7 @@ size: 3
 status: open
 dateOpened: "2026-08-20"
 tags: []
+deliveryAgent: codex
 ---
 
 # A juror that found nothing and a juror that barely looked reduce to the same accept
