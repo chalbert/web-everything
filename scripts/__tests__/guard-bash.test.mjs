@@ -740,6 +740,85 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
   });
 });
 
+// #2108 review r4 — table-driven differential coverage. Every command below was DENIED on `main` (the raw
+// CORPUS_MD text match) and really writes into backlog|reports, so it must stay denied; the read-only
+// twins in the second table must stay allowed (the whole point of #3390).
+describe('guard-bash — sed/tee/perl write-shape tables + ReDoS bound (#2108 review r4)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+
+  it.each([
+    // in-place suffix spellings — the suffix is ANY text glued to `-i`
+    'sed -i~ s/x/y/ backlog/a.md',
+    'sed -i_bak s/x/y/ backlog/a.md',
+    'sed -i.bak.1 s/x/y/ backlog/a.md',
+    "sed -i.orig -e 's/x/y/' backlog/a.md",
+    'sed -Ei s/x/y/ backlog/a.md',
+    'sed -ni s/x/y/p backlog/a.md',
+    'gsed -i~ s/x/y/ reports/a.md',
+    "perl -i.bak.1 -pe 's/x/y/' backlog/a.md",
+    "perl -i~ -pe 's/x/y/' backlog/a.md",
+    "perl -0777 -pi -e 's/x/y/' backlog/a.md",
+    'tee -p backlog/a.md',
+    'tee --output-error=warn backlog/a.md',
+  ])('denies an in-place/tee write spelling: %s', denied);
+
+  it.each([
+    // sed write shapes the structured scan cannot parse — the fail-closed script-text scan catches them
+    "sed -n '\\,a,w reports/x.md' f", // custom-delimiter address
+    "sed 's/[/]/b/w reports/x.md' f", // delimiter inside a bracket expression
+    "sed -n 's/a/b/gw reports/x.md' f",
+    "sed -e'w backlog/x.md' f", // script attached to -e
+    "sed -ne'w backlog/x.md' f",
+    "sed -n -e p -e'w backlog/x.md' f",
+    "sed -n 'y/a/b/;w backlog/x.md' f",
+    "sed -n 'e echo hi > backlog/a.md' f", // the `e` command runs a shell
+    "sed -i '' 's/x/y/w backlog/a.md' /tmp/scratch.md", // BSD `-i ''`: the script is NOT the empty operand
+    "sed -l 80 -n 'w backlog/x.md' f",
+  ])('denies a sed script-text write: %s', denied);
+
+  it.each([
+    "perl -e'open(F,\">backlog/x.md\")'", // attached -e
+    "perl -ne'open(O,\">>backlog/x.md\")' f",
+    "perl -e 'system(\"echo hi > backlog/a.md\")'",
+    "perl -e 'rename(\"/tmp/x\",\"backlog/a.md\")'",
+    "perl -MFile::Copy=cp -e 'cp(\"/tmp/x\",\"backlog/a.md\")'",
+    "perl -e '$f=\"backlog/a.md\"; open(F,\">\",$f)'", // path held in a variable
+    "perl -e 'open(F,\">\",\"backlog/\".\"x.md\")'", // path built by concatenation
+    "perl -e 'open(F,\">\",q(backlog/x.md))'",
+    "perl -e 'system(\"cp /tmp/x backlog/a.md\")'",
+  ])('denies a perl script-text write the literal-open() scan cannot parse: %s', denied);
+
+  it.each([
+    "sed -n 's/backlog\\/x.md/y/' f", // mentions a corpus path in the PATTERN, writes nothing
+    "sed -n '/reports\\/x.md/p' f",
+    "sed -n 'p' backlog/a.md",
+    "sed -ne'p' backlog/a.md",
+    "sed -n 's/a/b/w /tmp/scratch.md' backlog/a.md", // w target is scratch; backlog is only READ
+    "sed -i '' 's/x/y/' /tmp/scratch.md",
+    'sed -i~ s/x/y/ /tmp/scratch.md',
+    "perl -Ilib -e 'print 1' backlog/a.md", // `-Ilib` is an include dir, not `-i`
+    "perl -Mfeature=say -e 'say 1' backlog/a.md",
+    "perl -ne'print' backlog/a.md",
+    "perl -e 'open(F,\"<\",\"backlog/x.md\"); print <F>'",
+    "perl -e 'print \"see backlog/x.md\"'",
+    "perl -e 'open(F,\">\",\"/tmp/x.txt\")'",
+    'tee -p /tmp/scratch.md',
+  ])('still allows a read-only / scratch-only invocation: %s', allowed);
+
+  it('scans a pathologically long escaped sed script in bounded time (SED_SUB_W was exponential)', () => {
+    for (const cmd of [
+      `sed 's/${'\\'.repeat(200)}' f`,
+      `sed -n 's/${'\\.'.repeat(60)}/x/g' backlog/x.md`,
+      `sed -n '/${'\\/'.repeat(200)}' f`,
+    ]) {
+      const t = performance.now();
+      reason(cmd);
+      expect(performance.now() - t, cmd.slice(0, 40)).toBeLessThan(250);
+    }
+  });
+});
+
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
   const blockedMerge = (c) => expect(decide(c), c).toMatch(/assertMayMerge/);
   const allowed = (c) => expect(decide(c), c).toBeNull();
