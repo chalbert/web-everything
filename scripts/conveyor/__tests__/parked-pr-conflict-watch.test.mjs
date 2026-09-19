@@ -3,7 +3,7 @@
  * `planConflictLabelChange` + IO-shell tests over injected fakes (no `gh` process anywhere in this file),
  * mirroring `we:scripts/conveyor/__tests__/review-status-tag.test.mjs`'s own shape.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   CONFLICT_LABEL,
@@ -556,4 +556,24 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPos
     expect(capturedArgv).toContain('--reason=conflict');
     expect(capturedArgv).toContain('--repo=o/n');
   });
+});
+
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal(), execFileSync: vi.fn(),
+}));
+vi.mock('../../lib/gh-throttle.mjs', async () => {
+  const { execFileSync } = await import('node:child_process');
+  return {
+    execFileSyncThrottled: vi.fn((file, args, opts) => execFileSync(file, args, opts)),
+    runGhSync: vi.fn((args, opts) => execFileSync('gh', args, opts)),
+  };
+});
+vi.mock('../../lib/write-all-sync.mjs', () => ({ writeAllSync: vi.fn(), writeLineSync: vi.fn() }));
+
+import { prFileContract } from './pr-file-test-helpers.mjs';
+prFileContract({
+  name: 'parked-pr-conflict-watch', load: () => import('../parked-pr-conflict-watch.mjs'),
+  reader: 'defaultListParkedPrs', run: 'watchParkedPrConflicts',
+  fields: 'number,headRefName,mergeable,mergeStateStatus,labels,files',
 });
