@@ -58,7 +58,20 @@
  * does — but releasing an unrelated lane before dispatching a review still costs the caller nothing and
  * removes one more unit of pool pressure at exactly the moment a fresh lane is needed.
  *
- * IMPURE: reads the brief template off disk, mints a UUID, and spawns one `claude --bg` process — through
+ * DISPATCH CHECKOUT GUARDS AND FRESH-CLONE FALLBACK. A lane checkout is always refused FIRST: acquiring
+ * another lane from inside one nests checkouts. Staleness is a separate guard: spawning from behind
+ * origin/<base> would load this checkout's stale cwd-relative review-loop-policy.mjs (#3439). Instead of
+ * refusing that dispatch, both dispatchReview and reconcile-fix-dispatch now clone origin/<base> into
+ * review-dispatch-scratch-* under the OS temp directory, run npm ci there, and dispatch from that root.
+ * This is the default, including dirty/diverged primary trees: no pull, reset, or working-tree mutation is
+ * performed on the primary. Fresh and offline checks keep using the supplied root (offline is fail-soft).
+ * Clone/install cost is paid per stale invocation; either failure aborts dispatch and removes the unused
+ * scratch checkout. Pre-spawn failures also clean up. Once spawning is attempted, KEEP the scratch clone:
+ * defaultSpawnAgent passes cwd to claude and buildAgentArgv uses --bg, whose session outlives the call and
+ * may keep reading files there. Even a spawn error can mean a session started. The labeled directory can
+ * be garbage-collected after those sessions finish; no automatic lifetime tracking is added here.
+ *
+ * IMPURE: may clone/install dependencies, reads the brief template, mints a UUID, and spawns `claude --bg` — through
  * INJECTED handles (mirroring `we:scripts/operations/dispatch-abort.mjs` and `dispatch-lane-io.mjs`), so the
  * whole thing is testable with no real subprocess and no real session.
  *
@@ -107,7 +120,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -283,8 +297,8 @@ export function fillReviewBrief(template, values = {}) {
  * import path, silently re-running pre-fix behavior with no error. THE CHOICE THIS RECORDS (item #3439's #2):
  * the dispatched review's code keeps coming from the DISPATCHING checkout at spawn time — today's actual
  * behavior — rather than the lane it later acquires (that would need the agent to re-invoke itself from
- * inside its own freshly-acquired lane, a bigger change this item does not make). Made LOUD instead: refuse
- * outright whenever `origin/main` is ahead, diverged or not — no auto fast-forward here (unlike `we:scripts/
+ * inside its own freshly-acquired lane, a bigger change this item does not make). By default this CHECK still
+ * throws whenever `origin/main` is ahead, diverged or not — no auto fast-forward here (unlike `we:scripts/
  * check-readiness.mjs`'s read-only ranker, this checkout may carry uncommitted work a caller does not expect
  * mutated) — so a stale checkout never silently dispatches. A fetch failure (offline) is fail-soft, matching
  * `we:scripts/lib/main-staleness.mjs`'s own philosophy: we cannot tell if it's stale, so we do not block on it.
@@ -303,17 +317,20 @@ export function fillReviewBrief(template, values = {}) {
  * dispatcher running from a POC-branch checkout has the right question available, not because today's lander
  * trips it.)
  *
+ * Dispatchers use throwOnStale:false to handle ONLY action:'warn' via withFreshDispatchCheckout; unrelated
+ * errors propagate and the lane guard remains a separate unconditional refusal before this check.
+ *
  * @param {string} root
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
  *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
- * @param {{base?: string}} [o] - `base` is the delivery target to measure staleness against (default `main`).
+ * @param {{base?: string, throwOnStale?: boolean}} [o] - delivery target and check-only mode.
  */
-export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {}) {
+export function assertMainNotStale(root, checkStaleness, { base = 'main', throwOnStale = true } = {}) {
   const check = checkStaleness ?? ((r) => checkMainStaleness({
     base, autoFf: false, run: (args) => gitRun(args, { cwd: r }),
   }));
   const st = check(root);
-  if (st && st.action === 'warn') {
+  if (st && st.action === 'warn' && throwOnStale) {
     throw new Error(
       `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
       + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). Sync '
@@ -321,6 +338,59 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {})
     );
   }
   return st;
+}
+
+/** Remove only a scratch checkout allocated by the fallback, never the caller's primary root. */
+export function defaultCleanupCheckout(dir) {
+  rmSync(dir, { recursive: true, force: true });
+}
+
+/** Clone the origin URL, NOT the dispatching checkout (which may contain unpublished/dirty work).
+ * --no-local also makes local-path origins use git transport instead of copying their working tree/objects.
+ * Full history keeps the review tools' merge-base/ancestry queries available. Partial clones are cleaned here
+ * because a failed clone cannot return its directory to the caller for cleanup. */
+export function defaultCloneFreshCheckout(root, {
+  base = 'main', exec = execFileSync, cleanupCheckout = defaultCleanupCheckout,
+} = {}) {
+  const origin = String(exec('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' })).trim();
+  if (!origin) throw new Error('review-dispatch: origin has no clone URL');
+  const dir = mkdtempSync(join(tmpdir(), 'review-dispatch-scratch-'));
+  try {
+    exec('git', ['clone', '--no-local', '--branch', base, '--', origin, dir], {
+      cwd: root, stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    return dir;
+  } catch (error) {
+    cleanupCheckout(dir);
+    throw error;
+  }
+}
+
+/** package-lock.json is authoritative; npm ci also installs the dev dependencies used by review tooling. */
+export function defaultInstallDeps(dir, { exec = execFileSync } = {}) {
+  exec('npm', ['ci', '--include=dev'], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
+}
+
+/** Shared synchronous fallback for review and fix dispatch. The callback marks the checkout retained just
+ * BEFORE a possible spawn: defaultSpawnAgent/--bg can start a session even if its launcher later throws.
+ * Before that boundary, every exit (including a no-work pass) cleans up the unused checkout.
+ * fallbackOnStale:false preserves the assertion for callers/tests that explicitly disable fallback. */
+export function withFreshDispatchCheckout({
+  root, base = 'main', checkStaleness, fallbackOnStale = true,
+  cloneFreshCheckout = defaultCloneFreshCheckout,
+  installDeps = defaultInstallDeps,
+  cleanupCheckout = defaultCleanupCheckout,
+}, dispatch) {
+  const st = assertMainNotStale(root, checkStaleness, { base, throwOnStale: !fallbackOnStale });
+  if (st?.action !== 'warn') return dispatch(root, () => {});
+  const scratch = cloneFreshCheckout(root, { base, cleanupCheckout });
+  let retained = false;
+  try {
+    installDeps(scratch);
+    return dispatch(scratch, () => { retained = true; });
+  } finally {
+    if (!retained) cleanupCheckout(scratch);
+  }
 }
 
 /**
@@ -359,6 +429,11 @@ export function planReviewDispatch({ pr, repo } = {}) {
  * @param {string[]} [o.extraArgs] - forwarded to `buildAgentArgv`, exactly like `dispatch-lane-io.mjs`'s own.
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [o.checkStaleness] - injectable staleness
  *   check (#3439) — see `assertMainNotStale`.
+ * @param {string} [o.base] - origin branch to check and clone (default main).
+ * @param {boolean} [o.fallbackOnStale] - defaults true; false retains the stale-checkout refusal.
+ * @param {Function} [o.cloneFreshCheckout] - (root, {base, cleanupCheckout}) => scratch directory.
+ * @param {Function} [o.installDeps] - install dependencies in the scratch directory.
+ * @param {Function} [o.cleanupCheckout] - remove an unused scratch directory before any spawn attempt.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
@@ -367,33 +442,38 @@ export function dispatchReview({
   mintSessionId = () => randomUUID(),
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
-  checkStaleness,
+  checkStaleness, base = 'main', fallbackOnStale = true,
+  cloneFreshCheckout = defaultCloneFreshCheckout,
+  installDeps = defaultInstallDeps,
+  cleanupCheckout = defaultCleanupCheckout,
 } = {}) {
   assertNotALaneCheckout(root);
-  // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
-  // `checkStaleness` undefined here falls straight through to that function's own default — no need to
-  // duplicate it.
-  assertMainNotStale(root, checkStaleness);
-  const planned = planReviewDispatch({ pr, repo });
-  const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
-    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug,
+  return withFreshDispatchCheckout({
+    root, base, checkStaleness, fallbackOnStale, cloneFreshCheckout, installDeps, cleanupCheckout,
+  }, (dispatchRoot, retainCheckout) => {
+    const planned = planReviewDispatch({ pr, repo });
+    const { prompt, unknownTokens } = fillReviewBrief(readBrief(dispatchRoot), {
+      PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug,
+    });
+    const sessionId = String(mintSessionId());
+    // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
+    // buildAgentArgv, exactly like dispatch-lane-io.mjs's own" but the call below never referenced it — every
+    // caller-supplied flag (a `--permission-mode`, a `--model` override) was silently dropped. Fixed by actually
+    // passing it through, matching `we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`'s own call.
+    // #3433 — the mandatory deny list comes FIRST, ahead of any caller-supplied `extraArgs`: it is baked into
+    // every dispatch regardless of what an operator's WE_DISPATCH_AGENT_ARGS sets, not something a caller opts
+    // into. See `REVIEW_DISPATCH_DISALLOWED_TOOLS`'s own header for what it denies and why.
+    const argv = buildAgentArgv({
+      sessionId,
+      payload: { prompt, sessionSlug: planned.sessionSlug },
+      systemPromptFile: dispatchRoot === root ? REVIEW_DISPATCH_SYSTEM_PROMPT_FILE
+        : join(dispatchRoot, 'skills-src', 'review', 'review-agent-system-prompt.md'),
+      extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
+    });
+    retainCheckout();
+    spawnAgent(argv, { cwd: dispatchRoot });
+    return { sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens };
   });
-  const sessionId = String(mintSessionId());
-  // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
-  // buildAgentArgv, exactly like dispatch-lane-io.mjs's own" but the call below never referenced it — every
-  // caller-supplied flag (a `--permission-mode`, a `--model` override) was silently dropped. Fixed by actually
-  // passing it through, matching `we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`'s own call.
-  // #3433 — the mandatory deny list comes FIRST, ahead of any caller-supplied `extraArgs`: it is baked into
-  // every dispatch regardless of what an operator's WE_DISPATCH_AGENT_ARGS sets, not something a caller opts
-  // into. See `REVIEW_DISPATCH_DISALLOWED_TOOLS`'s own header for what it denies and why.
-  const argv = buildAgentArgv({
-    sessionId,
-    payload: { prompt, sessionSlug: planned.sessionSlug },
-    systemPromptFile: REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
-    extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
-  });
-  spawnAgent(argv, { cwd: root });
-  return { sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens };
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));

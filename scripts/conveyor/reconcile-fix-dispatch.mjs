@@ -48,6 +48,12 @@
  * dispatch entry for that PR again. This is exactly `review-dispatch.mjs`'s own safety net — it carries no
  * separate in-flight ledger either.
  *
+ * STALE DISPATCH ROOTS use review-dispatch.mjs's shared fresh-clone + npm ci fallback, including dirty or
+ * diverged primary trees. Lane roots still refuse before checking staleness. Planning reads, briefs and
+ * spawn cwd use the fresh root; scratch is conservatively retained once handed to dispatch/resume, which
+ * may spawn a background session. Passes that exit before either handoff clean up the unused clone.
+ * See that helper for costs and lifetime limits.
+ *
  * A ONE-SHOT PASS, LIKE ITS SIBLINGS. Read `reconcile-pass.mjs`'s plan, dispatch every `kind:'fix'` entry it
  * offers, report, exit. Wired into `we:skills-src/conveyor/runner.mjs`'s mechanical passes (#3438) alongside
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
@@ -64,7 +70,9 @@ import {
   defaultSpawnAgent, findItem, normalizeHandle, parseBackgroundedId, resumeSucceeded, REPO_ROOT,
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
-import { assertMainNotStale } from '../operations/review-dispatch.mjs';
+import {
+  withFreshDispatchCheckout, defaultCloneFreshCheckout, defaultInstallDeps, defaultCleanupCheckout,
+} from '../operations/review-dispatch.mjs';
 import { BRIEF_REQUIRED_BY_KIND, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
@@ -441,66 +449,82 @@ export function dispatchFix(planned, {
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.
  * @param {Function} [o.tryResume] - injectable, defaults to the real {@link tryResumeFix}.
+ * @param {string} [o.base] - origin branch to check and clone (default main).
+ * @param {boolean} [o.fallbackOnStale] - defaults true; false retains the stale-checkout refusal.
+ * @param {Function} [o.cloneFreshCheckout] - same injectable clone/install/cleanup handles as dispatchReview.
+ * @param {Function} [o.installDeps]
+ * @param {Function} [o.cleanupCheckout]
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
  */
 export function runReconcileFixDispatch({
   root = REPO_ROOT,
   repo = null,
   findItemFn = findItem,
-  loadItems = () => defaultLoadItems(root),
-  pickFreeLanes = () => freeLaneNumbers({ root }),
+  loadItems,
+  pickFreeLanes,
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
-  checkStaleness,
+  checkStaleness, base = 'main', fallbackOnStale = true,
+  cloneFreshCheckout = defaultCloneFreshCheckout,
+  installDeps = defaultInstallDeps,
+  cleanupCheckout = defaultCleanupCheckout,
 } = {}) {
-  assertMainNotStale(root, checkStaleness);
-  const reconciled = reconcile({ repo });
-  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems);
+  assertNotALaneCheckout(root);
+  return withFreshDispatchCheckout({
+    root, base, checkStaleness, fallbackOnStale, cloneFreshCheckout, installDeps, cleanupCheckout,
+  }, (root, retainCheckout) => {
+    loadItems ??= () => defaultLoadItems(root);
+    pickFreeLanes ??= () => freeLaneNumbers({ root });
+    const reconciled = reconcile({ repo });
+    const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems);
 
-  const lanes = [...pickFreeLanes()];
-  const dispatched = [];
-  for (const entry of planned) {
-    // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
-    // is even eligible (tryResumeFix itself returns `resumed: false, resumeAttempt: null` immediately for any
-    // other kind, at no lane cost either way).
-    //
-    // PR #1972 review finding (correctness) — this call must be its OWN try/catch, isolated from the
-    // dispatch try/catch below: `tryResumeFix` does real IO (`claude agents --json --all`, a real `git
-    // rev-parse HEAD` via `resolveHead`) the file's own docblocks already document as a real observed source
-    // of flakiness (#3331's listing lag). Left unguarded, a throw here would abort the WHOLE pass (every
-    // OTHER planned entry in this tick, including unrelated ordinary dispatches that would have succeeded)
-    // rather than refusing just this one entry — the same per-entry isolation `dispatch(...)` below already
-    // gets, now extended to cover this earlier call site too.
-    let resumeAttempt = null;
-    if (entry.isConflict) {
-      let attempt;
-      try {
-        attempt = tryResume(entry, { root });
-      } catch (e) {
-        refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
+    const lanes = [...pickFreeLanes()];
+    const dispatched = [];
+    for (const entry of planned) {
+      // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
+      // is even eligible (tryResumeFix itself returns `resumed: false, resumeAttempt: null` immediately for any
+      // other kind, at no lane cost either way).
+      //
+      // PR #1972 review finding (correctness) — this call must be its OWN try/catch, isolated from the
+      // dispatch try/catch below: `tryResumeFix` does real IO (`claude agents --json --all`, a real `git
+      // rev-parse HEAD` via `resolveHead`) the file's own docblocks already document as a real observed source
+      // of flakiness (#3331's listing lag). Left unguarded, a throw here would abort the WHOLE pass (every
+      // OTHER planned entry in this tick, including unrelated ordinary dispatches that would have succeeded)
+      // rather than refusing just this one entry — the same per-entry isolation `dispatch(...)` below already
+      // gets, now extended to cover this earlier call site too.
+      let resumeAttempt = null;
+      if (entry.isConflict) {
+        let attempt;
+        try {
+          retainCheckout();
+          attempt = tryResume(entry, { root });
+        } catch (e) {
+          refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
+          continue;
+        }
+        if (attempt.resumed) {
+          dispatched.push(attempt.result);
+          continue; // no lane ever popped for this entry
+        }
+        resumeAttempt = attempt.resumeAttempt;
+      }
+
+      if (lanes.length === 0) {
+        refusals.push({ pr: entry.pr, kind: 'no-lane', why: `no free lane to dispatch a fix agent for PR #${entry.pr}` });
         continue;
       }
-      if (attempt.resumed) {
-        dispatched.push(attempt.result);
-        continue; // no lane ever popped for this entry
+      const lane = lanes.shift();
+      try {
+        retainCheckout();
+        dispatched.push(dispatch({ ...entry, lane }, { root, extraArgs: agentArgsFromEnv(), resumeAttempt }));
+      } catch (e) {
+        refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
       }
-      resumeAttempt = attempt.resumeAttempt;
     }
 
-    if (lanes.length === 0) {
-      refusals.push({ pr: entry.pr, kind: 'no-lane', why: `no free lane to dispatch a fix agent for PR #${entry.pr}` });
-      continue;
-    }
-    const lane = lanes.shift();
-    try {
-      dispatched.push(dispatch({ ...entry, lane }, { root, extraArgs: agentArgsFromEnv(), resumeAttempt }));
-    } catch (e) {
-      refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
-    }
-  }
-
-  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length };
+    return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length };
+  });
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));

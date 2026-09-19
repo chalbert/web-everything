@@ -93,6 +93,18 @@ temporary git repo to verify gate arguments and green/red handling without recur
 suite. Exercise real subprocesses and git transport. Emit gate chatter in the fixture too: a CLI's
 machine-readable JSON stdout must remain parseable when its child gate prints output.
 
+### Review/fix dispatch scratch fallback
+
+Stale review and reconcile-fix dispatches clone `origin/<base>` and run `npm ci --include=dev` in a
+`review-dispatch-scratch-*` temp directory. Inject `checkStaleness`, `cloneFreshCheckout`, `installDeps`,
+and `cleanupCheckout` to test this without git/network/npm; assert brief reads and spawn cwd use the
+fresh directory. Dirty/diverged primary trees also fall back; lane roots must refuse before any of
+these handles run. Fresh/offline checks keep the original root. `fallbackOnStale: false` retains the
+old staleness refusal for explicit callers. Keep scratch after a possible background spawn (even a
+launcher error): `defaultSpawnAgent` passes cwd to `claude --bg`, so launcher return does not prove
+the session has finished using it. Unused scratch is cleaned; retained directories can be removed
+after their sessions finish.
+
 ### Passive-wait hook regression probes
 
 Test Stop/SubagentStop with distinct parent and subagent JSONL files: SubagentStop prefers

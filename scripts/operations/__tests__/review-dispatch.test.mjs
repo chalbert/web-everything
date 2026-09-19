@@ -7,9 +7,11 @@
  * covers for the shared `buildAgentArgv`/`defaultSpawnAgent` machinery this file reuses verbatim).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { existsSync } from 'node:fs';
 
 import {
+  defaultCloneFreshCheckout, defaultInstallDeps, defaultCleanupCheckout,
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
   REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
@@ -278,9 +280,9 @@ describe('assertMainNotStale', () => {
       .toThrow(/12 commit\(s\) behind origin\/main/);
   });
 
-  it('refuses a DIVERGED checkout the same way — being behind at all is disqualifying, not just non-fast-forwardable', () => {
-    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 3, ahead: 2, dirty: false, warning: 'stub' })))
-      .toThrow(/3 commit\(s\) behind/);
+  it('returns dirty/diverged staleness in check-only mode so dispatch can use a fresh clone', () => {
+    const stale = { action: 'warn', behind: 3, ahead: 2, dirty: true, warning: 'stub' };
+    expect(assertMainNotStale('/repo', () => stale, { throwOnStale: false })).toEqual(stale);
   });
 
   it('does not refuse when the staleness check is offline (fail-soft, matching main-staleness.mjs itself)', () => {
@@ -301,27 +303,134 @@ describe('assertMainNotStale', () => {
   });
 });
 
-describe('dispatchReview — refuses to spawn from a stale checkout (#3439)', () => {
-  it('refuses before reading the brief or spawning, when behind origin/main', () => {
-    let readBriefCalls = 0;
-    expect(() => dispatchReview({
+describe('dispatchReview — fresh scratch fallback', () => {
+  const scratch = '/tmp/review-dispatch-scratch-test';
+  const stale = { action: 'warn', behind: 9, ahead: 0, dirty: false, warning: 'stub' };
+  function harness(st = stale) {
+    const calls = [];
+    const options = {
       pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
-      readBrief: () => { readBriefCalls += 1; return REAL_TEMPLATE_STUB; },
-      spawnAgent: () => { throw new Error('must not be called'); },
-      checkStaleness: () => ({ action: 'warn', behind: 9, ahead: 0, dirty: false, warning: 'stub' }),
-    })).toThrow(/9 commit\(s\) behind origin\/main/);
-    expect(readBriefCalls).toBe(0);
+      checkStaleness: vi.fn((root) => { calls.push(['check', root]); return st; }),
+      cloneFreshCheckout: vi.fn((root, { base }) => { calls.push(['clone', root, base]); return scratch; }),
+      installDeps: vi.fn((dir) => { calls.push(['install', dir]); }),
+      cleanupCheckout: vi.fn((dir) => { calls.push(['cleanup', dir]); }),
+      readBrief: vi.fn((root) => { calls.push(['brief', root]); return REAL_TEMPLATE_STUB; }),
+      mintSessionId: vi.fn(() => { calls.push(['mint']); return 'new-session'; }),
+      spawnAgent: vi.fn((_argv, { cwd }) => { calls.push(['spawn', cwd]); return ''; }),
+    };
+    return { calls, options };
+  }
+
+  it.each([
+    ['clean behind', stale],
+    ['dirty behind', { ...stale, dirty: true }],
+    ['diverged', { ...stale, ahead: 2 }],
+    ['dirty and diverged', { ...stale, ahead: 2, dirty: true }],
+  ])('automatically clones, installs, fills and spawns from fresh origin/main: %s', (_name, st) => {
+    const { calls, options } = harness(st);
+    expect(dispatchReview(options)).toMatchObject({ sessionId: 'new-session', pr: 1234 });
+    expect(calls).toEqual([
+      ['check', '/repo'], ['clone', '/repo', 'main'], ['install', scratch],
+      ['brief', scratch], ['mint'], ['spawn', scratch],
+    ]);
+    const argv = options.spawnAgent.mock.calls[0][0];
+    expect(argv[argv.indexOf('--append-system-prompt-file') + 1])
+      .toBe(`${scratch}/skills-src/review/review-agent-system-prompt.md`);
+    expect(argv).toContain('--bg');
+    expect(options.cleanupCheckout).not.toHaveBeenCalled(); // the background session still uses cwd
   });
 
-  it('proceeds to spawn when the checkout is fresh', () => {
-    const calls = [];
-    dispatchReview({
-      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
-      readBrief: () => REAL_TEMPLATE_STUB,
-      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
-      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
-      checkStaleness: FRESH,
+  it('clones the requested base instead of always main', () => {
+    const { options } = harness();
+    dispatchReview({ ...options, base: 'delivery/poc' });
+    expect(options.cloneFreshCheckout).toHaveBeenCalledWith('/repo', {
+      base: 'delivery/poc', cleanupCheckout: options.cleanupCheckout,
     });
-    expect(calls).toHaveLength(1);
+  });
+
+  it('unconditionally refuses lane roots before staleness, clone, install or spawn', () => {
+    const { calls, options } = harness();
+    expect(() => dispatchReview({ ...options, root: '/some/path/lane-69' })).toThrow(/lane checkout/);
+    expect(calls).toEqual([]);
+    expect(options.cloneFreshCheckout).not.toHaveBeenCalled();
+  });
+
+  it.each([['fresh', { fresh: true, behind: 0 }], ['ahead only', { fresh: true, behind: 0, ahead: 2 }],
+    ['offline', { offline: true }]])('dispatches directly without clone/install/cleanup when %s', (_name, st) => {
+    const { calls, options } = harness(st);
+    dispatchReview(options);
+    expect(calls).toEqual([['check', '/repo'], ['brief', '/repo'], ['mint'], ['spawn', '/repo']]);
+  });
+
+  it('can explicitly disable fallback while retaining the stale assertion', () => {
+    const { calls, options } = harness();
+    expect(() => dispatchReview({ ...options, fallbackOnStale: false })).toThrow(/9 commit.*behind origin/);
+    expect(calls).toEqual([['check', '/repo']]);
+  });
+
+  it('does not reinterpret unrelated check errors as staleness', () => {
+    const { options } = harness();
+    options.checkStaleness.mockImplementation(() => { throw new Error('check failed'); });
+    expect(() => dispatchReview(options)).toThrow('check failed');
+    expect(options.cloneFreshCheckout).not.toHaveBeenCalled();
+  });
+
+  it('propagates clone failure without installing or spawning', () => {
+    const { options } = harness();
+    options.cloneFreshCheckout.mockImplementation(() => { throw new Error('clone failed'); });
+    expect(() => dispatchReview(options)).toThrow('clone failed');
+    expect(options.installDeps).not.toHaveBeenCalled();
+    expect(options.spawnAgent).not.toHaveBeenCalled();
+    expect(options.cleanupCheckout).not.toHaveBeenCalled(); // clone helper owns partial-clone cleanup
+  });
+
+  it.each(['installDeps', 'readBrief', 'mintSessionId'])('cleans the unused scratch when %s fails', (step) => {
+    const { options } = harness();
+    options[step].mockImplementation(() => { throw new Error('pre-spawn failed'); });
+    expect(() => dispatchReview(options)).toThrow('pre-spawn failed');
+    expect(options.cleanupCheckout.mock.calls).toEqual([[scratch]]);
+    expect(options.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('retains scratch even on a spawn error: the background session may already exist', () => {
+    const { options } = harness();
+    options.spawnAgent.mockImplementation(() => { throw new Error('launcher timed out'); });
+    expect(() => dispatchReview(options)).toThrow('launcher timed out');
+    expect(options.cleanupCheckout).not.toHaveBeenCalled();
+  });
+});
+
+describe('scratch IO defaults — fake subprocesses', () => {
+  it('reads origin then clones that URL and selected branch, never the primary checkout', () => {
+    const exec = vi.fn().mockReturnValueOnce('https://example.test/repo.git\n').mockReturnValueOnce('');
+    const dir = defaultCloneFreshCheckout('/primary', { base: 'delivery/poc', exec });
+    try {
+      expect(dir).toMatch(/review-dispatch-scratch-/);
+      expect(exec.mock.calls).toEqual([
+        ['git', ['remote', 'get-url', 'origin'], { cwd: '/primary', encoding: 'utf8' }],
+        ['git', ['clone', '--no-local', '--branch', 'delivery/poc', '--', 'https://example.test/repo.git', dir],
+          { cwd: '/primary', stdio: ['ignore', 'ignore', 'pipe'] }],
+      ]);
+    } finally { defaultCleanupCheckout(dir); }
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('removes a partially created clone when git fails', () => {
+    let dir;
+    const exec = vi.fn().mockReturnValueOnce('https://example.test/repo.git').mockImplementationOnce((_bin, args) => {
+      dir = args.at(-1);
+      throw new Error('clone failed');
+    });
+    expect(() => defaultCloneFreshCheckout('/primary', { exec })).toThrow('clone failed');
+    expect(dir).toMatch(/review-dispatch-scratch-/);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('runs lockfile installation with dev dependencies in scratch', () => {
+    const exec = vi.fn();
+    defaultInstallDeps('/scratch', { exec });
+    expect(exec).toHaveBeenCalledWith('npm', ['ci', '--include=dev'], {
+      cwd: '/scratch', stdio: ['ignore', 'ignore', 'pipe'],
+    });
   });
 });

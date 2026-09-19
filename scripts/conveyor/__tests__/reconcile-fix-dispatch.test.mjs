@@ -7,7 +7,7 @@
  * `we:scripts/operations/__tests__/review-dispatch.test.mjs`'s own style for the sibling operation this file's
  * `dispatchFix` composition was mirrored from.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   dispatchFix, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
@@ -535,14 +535,63 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     expect(result.dispatched).toHaveLength(1);
   });
 
-  it('refuses to run at all from a stale checkout (#3439), never reading reconcile-pass\'s plan', () => {
-    let reconcileCalls = 0;
+  it.each([false, true])('falls back before planning and spawns fixes in scratch (dirty/diverged=%s)', (dirty) => {
+    const scratch = '/tmp/review-dispatch-scratch-fix';
+    const calls = [];
+    const cleanupCheckout = vi.fn();
+    const result = runReconcileFixDispatch({
+      root: '/repo', base: 'delivery/poc',
+      checkStaleness: () => ({ action: 'warn', behind: 3, ahead: dirty ? 2 : 0, dirty }),
+      cloneFreshCheckout: (root, { base }) => { calls.push(['clone', root, base]); return scratch; },
+      installDeps: (dir) => calls.push(['install', dir]),
+      cleanupCheckout,
+      reconcile: () => {
+        calls.push(['reconcile']);
+        return { dispatch: [{ kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-fix' }], refusals: [] };
+      },
+      findItemFn: findItemStub, loadItems: () => [], pickFreeLanes: () => [7],
+      dispatch: (planned, opts) => dispatchFix(planned, {
+        ...opts,
+        readBrief: (root) => { calls.push(['brief', root]); return REAL_TEMPLATE_STUB; },
+        mintSessionId: () => 'sid',
+        spawnAgent: (_argv, { cwd }) => calls.push(['spawn', cwd]),
+      }),
+    });
+    expect(result.dispatched).toHaveLength(1);
+    expect(result.refusals).toEqual([]);
+    expect(calls).toEqual([
+      ['clone', '/repo', 'delivery/poc'], ['install', scratch], ['reconcile'],
+      ['brief', scratch], ['spawn', scratch],
+    ]);
+    expect(cleanupCheckout).not.toHaveBeenCalled();
+  });
+
+  it('refuses lane roots before checking or cloning', () => {
+    const checkStaleness = vi.fn(() => ({ action: 'warn', behind: 3 }));
+    const cloneFreshCheckout = vi.fn();
+    expect(() => runReconcileFixDispatch({ root: '/repo/lane-3', checkStaleness, cloneFreshCheckout }))
+      .toThrow(/lane checkout/);
+    expect(checkStaleness).not.toHaveBeenCalled();
+    expect(cloneFreshCheckout).not.toHaveBeenCalled();
+  });
+
+  it('cleans scratch when the pass has no fixes to dispatch', () => {
+    const cleanupCheckout = vi.fn();
+    runReconcileFixDispatch({
+      root: '/repo', checkStaleness: () => ({ action: 'warn', behind: 3 }),
+      cloneFreshCheckout: () => '/scratch', installDeps: () => {}, cleanupCheckout,
+      reconcile: reconcileStub([]), pickFreeLanes: () => [],
+    });
+    expect(cleanupCheckout).toHaveBeenCalledWith('/scratch');
+  });
+
+  it('can disable fallback and refuse staleness before reading the plan', () => {
+    const reconcile = vi.fn();
     expect(() => runReconcileFixDispatch({
-      root: '/repo',
-      reconcile: () => { reconcileCalls += 1; return { dispatch: [], refusals: [], notes: [] }; },
+      root: '/repo', reconcile, fallbackOnStale: false,
       checkStaleness: () => ({ action: 'warn', behind: 3 }),
     })).toThrow(/behind origin\/main/);
-    expect(reconcileCalls).toBe(0);
+    expect(reconcile).not.toHaveBeenCalled();
   });
 });
 
