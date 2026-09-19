@@ -4,7 +4,7 @@ size: 5
 priority: high
 parent: "x4v2xe4"
 status: open
-relatedTo: ["3070", "3609", "x9rppp9", "xjsj7pg", "xaypr56"]
+relatedTo: ["3070", "3609", "x9rppp9", "xjsj7pg", "xaypr56", "xc1u3pi", "x1ojdxq"]
 scope: ["we:scripts/operations/land-advance.mjs", "we:scripts/operations/land-advance-io.mjs", "we:scripts/land-advance-hook.mjs", "we:skills-src/conveyor/runner.mjs", "we:.claude/settings.json", "we:scripts/operations/__tests__/land-advance.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -40,6 +40,13 @@ The operator's ask (2026-09-19): "queue next work mechanically as others land", 
 - **A PR merging on GitHub** → no local event exists. A webhook could only wake something local, and a wake is never a trusted order.
 
 The events are wake signals only. `land-advance` re-derives everything from GitHub, the lanes and the run records on each call, which is how [#event-driven-land-is-wake-only](../docs/agent/platform-decisions.md#event-driven-land-is-wake-only) says a wake must be treated. That is also why it is safe to fire twice.
+
+## What the trigger runs, beyond dispatch
+
+`land-advance` is the one place a completion event fans out to mechanical consumers. Two are filed as their own slices so this one stays small:
+
+- **The Decision Docket refresh** (#xc1u3pi): read-only, needs no lane and no session, so it does not count against the worker budget. It is the cheapest consumer and the best first proof that the trigger fires at all; build it against a manual call first and wire it here once the trigger exists.
+- **Provider routing** (#x1ojdxq): the provider and supervision level for every dispatch this operation makes come from that slice's router wiring, never from a brief. Until it lands, this operation dispatches exactly as `dispatch-lane` does today.
 
 ## Idempotence and safety
 

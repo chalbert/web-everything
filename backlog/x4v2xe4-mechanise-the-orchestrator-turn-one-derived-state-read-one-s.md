@@ -9,7 +9,7 @@ tags: []
 
 # Mechanise the orchestrator turn: one derived state read, one set of operations, shared by sessions and the runner
 
-Umbrella for turning the per-turn checks a live session re-derives by hand (what landed, what is owed, what needs the operator, stale labels, finished sessions, lane capacity, job records, handoff) into declared operations that the session, the runner and a completion trigger all call. Slice 1 is the completion trigger; slices 2-8 close the cheap gaps; one decision rules whether session and runner are one system.
+Umbrella for turning the per-turn checks a live session re-derives by hand (what landed, what is owed, what needs the operator, stale labels, finished sessions, lane capacity, job records, handoff) into declared operations that the session, the runner and a completion trigger all call. Slice 1 is the completion trigger; slices 2-11 close the cheap gaps and take three model judgments (provider choice, docket refresh, which decisions matter) off the session; one decision rules whether session and runner are one system.
 
 **The operator's ask (2026-09-19 19:00):** "explore using hooks better to mechanise most of the turn checks — what landed, what is next, review, conflicts — and eventually the underlying system of this session should be compatible with the runner, and both could add work and handle stuff in the exact same way." Priority added at 19:05: "queuing next work mechanically as others land" ships first.
 
@@ -43,17 +43,32 @@ Hooks are the WHEN, operations are the WHAT. A hook fires on a harness event ins
 
 **Irreducible judgment (J), stays with a model or the operator:** the readiness discussion and choosing what to build, review verdicts, ratifying decisions, clearing a stood-down agent, resolving a semantic merge conflict, picking the keeper of duplicate PRs.
 
+## Three more candidates the operator added during the exploration
+
+Found and measured live on 2026-09-19 after the twelve above. Same test applied (hook, operation, or judgment):
+
+| Check | Class | What exists | Gap and slice |
+|---|---|---|---|
+| Refresh and publish the Decision Docket as state changes | O (a `land-advance` consumer) | the generator and pure renderer (`we:scripts/gen-decision-docket.mjs`); #3562 and #3277 own the standing pass and the publish operation | nothing triggers a refresh and publishing needs a session: #xc1u3pi |
+| Choose the dispatch provider (Codex, Gemini, Claude) | O (+ optional warn-level H backstop) | `we:scripts/lib/provider-routing.mjs`, complete and pure, **zero real callers** | wire it in, derive `taskType` from the dispatch kind (the mapping is not 1:1), record the provider actually used: #x1ojdxq |
+| Which open decisions bear on the work in flight | O; `/wip` and `/status` print it | decision records via `we:scripts/lib/decision-docket-data.mjs` | a `decisions-in-flight` operation sharing the docket's record source; the commands print it: #x8i6rsg |
+
+Each is model judgment today that should not be: the model decides whether to delegate, which decisions matter, and when to refresh a page.
+
 ## Slices, in delivery order
 
 1. **#x994927** — land-advance: one operation (verify capacity, plan under scope and lane rules, dispatch only what fits), triggered by a completion event. **First, at the operator's request.** Plan-only by default; see its paused-conveyor flag.
 2. **#x9rppp9** — reap finished-but-alive review, fix and ci-heal sessions. **Not a hard prerequisite of slice 1** (reconcile fails safe), but slice 1's review and fix half is inert for any PR whose finished session still lists alive; land it second.
-3. **#xn4cgvr** — `dispatch-task`: the job record emitted by the dispatch itself.
-4. **#xeaxqvw** — lane availability counts correctly.
-5. **#xmgv6bx** — diagnose and fix the stale `ci:failed` label.
-6. **#xjsj7pg** — review and fix dispatch under the shared ceiling.
-7. **#xcqg649** — the turn-digest operation.
-8. **#xf02nzj** — deliver the digest by hook, and derive the handoff (blocked by #xcqg649).
-9. **#xaypr56** — the decision: one system or two? Independent of the slices; it shapes how far slices 7 and 8 and the runner's own loop are simplified afterwards.
+3. **#x1ojdxq** — provider routing wired in from fixed criteria. The highest-leverage unwired thing found after the finished-session cleanup; it also changes what every later dispatch does, so it lands before more dispatch paths are added.
+4. **#xc1u3pi** — the Decision Docket refresh as the cheapest `land-advance` consumer, and the first proof the trigger fires. It is read-only and stands alone, so it can be built against a manual call in parallel with slice 1.
+5. **#xn4cgvr** — `dispatch-task`: the job record emitted by the dispatch itself.
+6. **#xeaxqvw** — lane availability counts correctly.
+7. **#xmgv6bx** — diagnose and fix the stale `ci:failed` label.
+8. **#xjsj7pg** — review and fix dispatch under the shared ceiling.
+9. **#xcqg649** — the turn-digest operation.
+10. **#xf02nzj** — deliver the digest by hook, and derive the handoff (blocked by #xcqg649).
+11. **#x8i6rsg** — decisions bearing on the work in flight, printed by `/wip` and `/status`.
+12. **#xaypr56** — the decision: one system or two? Independent of the slices; it shapes how far slices 9 to 11 and the runner's own loop are simplified afterwards.
 
 Corrections to the brief's guess that items 7 and 8 are the two cheapest wins: **7 is cheap** but is an extension of an existing module, not new work, and the real cost is verifying that review and fix agents report `done` on every exit. **8 is not the cheapest**: it needs a new operation, because `dispatch-lane` has no generic "run this brief file" kind. Cheaper than 8 are #xeaxqvw and #xmgv6bx (small, well-located changes).
 
@@ -64,7 +79,9 @@ Corrections to the brief's guess that items 7 and 8 are the two cheapest wins: *
 ## Flags for the operator
 
 - **Nothing here may become an unattended runner by the back door.** The runner is stopped but not machine-readably paused; the landing operation defaults to plan-only and needs an explicit opt-in to dispatch (details in #x994927).
-- Slice 8 edits the harness-wide `we:.claude/settings.json`; slice 1 also adds a `Stop` hook there. Both need the operator's explicit review of the settings diff.
+- Slice 10 edits the harness-wide `we:.claude/settings.json`; slice 1 also adds a `Stop` hook there. Both need the operator's explicit review of the settings diff.
+- #x1ojdxq turns the graduation model in #3690 (still an open decision) into a dispatch gate; ratify #3690 if the operator's stated intent is the ruling.
+- #x8i6rsg found that the deployed `/wip` command is ahead of the tracked one (32 lines the source lacks) and that neither copy mentions the operator queue. Reconcile before any redeploy.
 - No `preparedDate` is set on #xaypr56; the forks are not skeptic-reviewed.
 
 ## Done when
