@@ -922,7 +922,7 @@ correctly queued for a human per the then-standing 2026-08-31 never-auto-accept 
 hang, not a mechanism failure. That mystery being hard to solve at all is itself real evidence for the new
 `#3436` item below.
 
-**Mechanical acceptance ratified and shipped (`#3434` / `backlog/xpfuj64-*.md`).** The operator, live, mid
+**Mechanical acceptance ratified and shipped (`#3434` / `backlog/3434-*.md`).** The operator, live, mid
 this same session: "I want the acceptance to be mechanical from the verdict." Ratified in discussion (not
 unilaterally): a genuinely independent clean verdict on `review:pending` now clears mechanically, no human
 step — reversing the 2026-08-31 ruling for that tier specifically; `review:human` stays human-only, confirmed

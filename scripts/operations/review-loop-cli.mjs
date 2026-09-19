@@ -75,7 +75,7 @@ export const REVIEW_LOOP_OP = 'review-pr';
  * @param {string[]} o.argv
  * @param {{read: Function, write: Function}} o.store
  * @param {Record<string, Function>} o.sinks
- * @param {(o: {cwd: (string|null), model: (string|null)}) => Function} o.makeJudge
+ * @param {(o: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} o.makeJudge
  * @param {() => string} o.mintRunId
  * @param {(pending: object|null, run: object) => ({value: string}|null)} [o.autoConfirm] - injected so a test
  *   can supply a stub; the real caller always passes {@link reviewLoopAutoConfirm}.
@@ -103,7 +103,9 @@ export async function runReviewLoopOnce({
     };
   }
 
-  const activeJudge = makeJudge({ cwd: parsed.control.cwd || null, model: parsed.control.model || null });
+  const activeJudge = makeJudge({
+    cwd: parsed.control.cwd || null, model: parsed.control.model || null, provider: parsed.control.provider || null,
+  });
 
   let run;
   if (parsed.control.resume) {
