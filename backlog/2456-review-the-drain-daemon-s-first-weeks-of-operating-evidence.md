@@ -5,6 +5,10 @@ parent: "2445"
 status: open
 dateOpened: "2026-07-12"
 tags: []
+scope:
+  - we:backlog/2456-review-the-drain-daemon-s-first-weeks-of-operating-evidence.md
+  - we:backlog/2446-where-does-plateau-loop-live-plateau-app-module-own-repo-or-.md
+  - we:backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s.md
 ---
 
 # Review the drain daemon's first weeks of operating evidence

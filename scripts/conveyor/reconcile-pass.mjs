@@ -46,6 +46,10 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { countRearmComments } from './rearm-review.mjs';
+// #3383 mechanical-dispatcher round-cap fix — see `advisory-round-count.mjs`'s own header (PR #2117: six
+// advisory-panel runs against one identical commit range, because the durable count only ever read re-arm
+// comments, which a never-bounced `review:human` PR never posts).
+import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS } from './reconcile-core.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
 
@@ -176,8 +180,9 @@ export function enrichAgents(agents, { readLaneHead = resolveLaneHead, probe = p
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#durableCountsFrom — the restart-surviving attempt count per PR, read
- * back off each PR's own comment thread with `countRearmComments`. The count IS PR state; no parallel store
- * exists and none is created (#2612).
+ * back off each PR's own comment thread with `countRearmComments` AND `countAdvisoryComments` (#3383 —
+ * unioned, not swapped: see `advisory-round-count.mjs`'s header for why a `review:human` PR needs the second
+ * count at all). The count IS PR state; no parallel store exists and none is created (#2612).
  * @param {Array<object>} prs
  * @returns {object} `{ [prNumber]: n }`
  */
@@ -185,7 +190,9 @@ export function durableCountsFrom(prs) {
   const out = {};
   for (const pr of Array.isArray(prs) ? prs : []) {
     const n = Number(pr?.number);
-    if (Number.isInteger(n) && n > 0) out[n] = countRearmComments(pr?.comments);
+    if (Number.isInteger(n) && n > 0) {
+      out[n] = Math.max(countRearmComments(pr?.comments), countAdvisoryComments(pr?.comments));
+    }
   }
   return out;
 }

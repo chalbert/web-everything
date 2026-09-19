@@ -3121,3 +3121,550 @@ happened; landing has not.
   no merge attempted and no commits toward it — and the PIDs recorded on their leases are no longer running.
   This reads as a stale or abandoned start, not active in-progress work; confirm before assuming it is being
   handled.
+
+## Operator note, recorded for the record (2026-09-13): value confirmed in #3621's container-based resource isolation, but active work is explicitly deferred until judge/provider integration graduates
+
+**The statement, in the operator's own terms:** containers will likely be useful for resource management, but
+it is a larger piece of work, so it should wait until the current judge/provider integration work
+(Codex/Antigravity/model-probation) graduates — i.e. defer per `#3621`'s own already-researched recommended
+sequencing. **This is not a ratification** and does not stamp a `preparedDate` — `#3621` stays `open`/
+unprepared, per this repo's "never take an unprepared decision" doctrine. This entry only records stated
+operator intent/sequencing so it is not lost, the same discipline this tracker has used for every other
+operator statement recorded above tonight.
+
+**This confirms #3621's own most recent amendment rather than adding a new judgment on top of it.** `#3621`'s
+2026-09-11 "LIVE test" amendment already concluded, in its own "Recommended sequencing" section: "the
+operator's stated preference — wait until Codex and Gemini are hooked up — is well supported by the evidence,
+because the Codex work gains nothing from waiting for containers. If anything starts in parallel sooner, it
+should be the heavy-command container pool, not per-lane containers." Tonight's operator statement restates
+and confirms that same sequencing rather than introducing a different one.
+
+**Ties to `#3654`'s graduation criteria.** The "judge/provider integration work" this defers behind is this
+same epic's model-probation system (`we:scripts/lib/model-probation.mjs`) plus its two new advisory seats
+(Codex correctness, Antigravity) — see the session updates above. `#3654` ("Define graduation criteria for a
+model/provider to exit probation status") has had all four of its forks ratified per `PR #2195` — confirmed
+`OPEN`, **not yet merged to `main`** as of this check; do not assume it has landed. Once that PR merges and
+the probation system has real graduation criteria to operate against, active work on `#3621` becomes in-scope
+again per this sequencing.
+
+**If anything on this axis starts before graduation, it should be the heavy-command container pool, not
+per-lane containers** — `#3621`'s own distinction, restated here because it is the one piece of the container
+idea this deferral does not cover: it needs no auth/billing change, answers `#3621`'s founding incident
+(`#3594`'s busy-spin) directly, and would produce the throughput measurement data the core-split amendment
+still lacks.
+
+## Session update (2026-09-13, continued) — `#3654` (graduation criteria for exiting probation) ratified, all four forks
+
+`#3654` — "Define graduation criteria for a model/provider to exit probation status," filed and prepared
+earlier this session (see the "new decision filed and prepared" update above) — was ratified by the operator
+(Nicolas Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**,
+`codifiedIn: we:docs/agent/platform-decisions.md#model-probation-graduation-criteria` — unlike `#3649`, this
+card's full ruling earns statute (it *is* the shape of the graduation bar), not a narrow rider under an
+existing anchor.
+
+Ratified, as recommended: **(1)** a minimum trial count plus at least one genuinely informative trial (a
+confirmed miss or a documented cross-reviewer disagreement), never count alone; **(2)** success rate as a
+floor, with a confirmed calibration miss an independent veto regardless of accept rate, never diluted into a
+blended composite; **(3)** the bar scales with the role's eventual authority (`advisory-review` lightest,
+`delivery` moderate, a future gating role strictest, not yet built); **(4)** one uniform floor for every
+`{provider, model}` identity — no identity buys an easier bar on reputation, though a project may tighten
+(never loosen) per identity as an optional config choice.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3649` Fork 4's own precedent — a
+specific N per role is deferred to a follow-on ordinary (batched) finding once real trial-count data exists,
+never a separate ceremony. No graduation-check function is written and no threshold is wired into
+`we:model-probation.mjs` here — this card rules on the shape of the bar only; wiring it is still unfiled
+future work, distinct from this ratification.
+
+## Session update (2026-09-14) — heavy-command-pool container POC started, per operator direction
+
+Tracked here as a progress note rather than a new formal backlog item, per the operator's own explicit
+instruction ("we can maybe track on the prototype progress unless need formal item to be filed"). Checked
+first whether this repo's PR-landing convention requires a formal item: it does not — `we:scripts/pr-land.mjs`
+only refuses an EMPTY PR description (#2324), and recent precedent (`PR #2131`, "fix: throttle
+we:review-set-label.mjs's last bare execFileSync call (#3631 slice)") lands a real, tested code change that
+references an EXISTING item by number without filing a new one. This slice does the same: it references
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md` directly (an amendment was
+also added there, dated the same day) rather than opening a sibling item.
+
+**Why this slice, now, despite #3621's own per-lane-container deferral still standing.** #3621's 2026-09-11
+amendment corrected an earlier framing and drew a real distinction the operator's brief for this task also
+draws: per-lane containers remain gated on a real, unresolved auth/billing question (switching dispatched
+sessions from OAuth/keychain to `ANTHROPIC_API_KEY` metered billing) — that deferral is UNCHANGED and still
+applies. The heavy-command-pool slice is different: it needs no auth/billing change at all (`check:standards`
+and `test:unit` need no credentials), it was #3621's own amendment's explicit recommendation for "if anything
+starts in parallel sooner," and it answers a real, currently-live problem this same night: the heavy-admission
+semaphore (`we:scripts/readiness/heavy-admission.mjs`, `DEFAULT_ADMISSION_CAP = 2`) is a purely COOPERATIVE
+counting semaphore with no resource boundary behind it — it throttles how many heavy commands run at once,
+never what any one of them can do to the host once admitted.
+
+**What was built — a working first slice, `check:standards` only, proven with real evidence, not a mock.**
+
+- `we:scripts/lib/container-exec.mjs` (new) — builds the `container run --cpus N --memory Ng` argv and runs a
+  command inside a real Apple `container` instance. The checkout is bind-mounted read-write at its own
+  absolute path; when the checkout has a git-alternates primary root (a `--reference`-cloned lane, the normal
+  shape `we:scripts/lane-pool.mjs` produces), that primary is ALSO mounted read-only at its own identical
+  absolute path — without this, `git merge-base origin/main HEAD` and similar calls inside the container fail,
+  which was the first real failure mode hit while building this (git's alternates file records an absolute
+  host path that otherwise does not exist inside the guest).
+- `we:scripts/lib/container-exec/Containerfile` (new) — `node:22-alpine` plus `git` (alpine's base ships
+  none, and `we:scripts/check-standards.mjs` shells out to it). Deliberately does NOT bake a linux-arm64 `node_modules`
+  the way #3621's own fuller research measured: `check:standards`'s actual npm closure (`gray-matter`,
+  `markdown-it`) is pure JS with no native binding, so the lane's own host-built (darwin) `node_modules`
+  mounts straight in and just works. This is a real, narrower, cheaper path than #3621 measured for the FULL
+  suite — but it is NOT proven for `test:unit` (vitest/esbuild/rollup carry real native darwin bindings in
+  this lane's tree; #3621's own `MODULE_NOT_FOUND` finding almost certainly still applies there without the
+  baked-linux-tree approach that item already measured).
+- `we:scripts/readiness/heavy-admission.mjs` — gained a general-purpose `run` CLI mode
+  (`node we:scripts/readiness/heavy-admission.mjs run [--container] -- <cmd…>`, `runUnderAdmission`) that this
+  repo's `main` did not yet have (a fuller version of the same idea exists only on the separate, still-unmerged
+  `lane/mechanical-dispatcher` integration branch, per #3383's own earlier finding — the two will need
+  reconciling, likely a straightforward union, whenever that branch merges to `main`; flagged here rather than
+  silently duplicated). `--container` (or `WE_HEAVY_ADMISSION_CONTAINER=1`) is OPT-IN ONLY: it swaps the
+  command's execution from host `execSync` to `we:scripts/lib/container-exec.mjs#execContainerized`; every existing caller,
+  and `run` without the flag, is byte-for-byte unchanged.
+
+**Real evidence, measured on this machine tonight:**
+
+- **Fidelity**: `check:standards` run inside the container and on the host, back-to-back against the SAME repo
+  state, produced the IDENTICAL error count (3 errors — real, pre-existing, unrelated stranded-backlog-hash
+  issues live on `main` right now) and the identical error messages. The one output difference was a single
+  warning swap (`fui:`/`plateau:` sibling-checkout-absent vs. a block-export-shape warning) caused by this POC
+  not yet mounting the `frontierui`/`plateau-app` sibling checkouts — a named, understood scope gap, not a
+  correctness bug.
+- **Cap enforcement, reproducing #3621's own busy-spin containment method**: 8 unbounded `while :; do :;
+  done` spinners inside a `--cpus 2 --memory 2g` container held the host-side
+  `com.apple.Virtualization.VirtualMachine` process at ~190-205% CPU throughout the run (sampled 3x during a
+  live run) — on this 12-core host, the SAME shape ran unconstrained reaches ~800% per #3621's own prior
+  measurement. The cap is real, not aspirational.
+- **End-to-end via the actual wrapper**: `node we:scripts/readiness/heavy-admission.mjs run --container --
+  node we:scripts/check-standards.mjs` correctly acquired a real admission slot (this host's cap was genuinely
+  saturated by other live lane activity during this session — a real, not staged, demonstration of the
+  capacity pressure this whole item exists to address), ran the command inside the container, and propagated
+  its real nonzero exit code back out.
+- Unit tests added: `we:scripts/lib/__tests__/container-exec.test.mjs` (pure argv/mount-derivation logic, plus
+  a self-skipping REAL integration block that only runs when the `container` CLI and this POC's image are
+  actually present) and new cases in `we:scripts/readiness/__tests__/heavy-admission.test.mjs` for
+  `runUnderAdmission`/`shellQuoteWord`/the injectable container-exec seam.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Only `check:standards` is proven. `test:unit` and the Playwright visual-capture pass are NOT wired or
+   proven — `test:unit` in particular needs the baked-linux-tree approach #3621 already measured (~14s `npm
+   ci` in-image), not the bind-the-host-`node_modules` shortcut this slice uses.
+2. `--container` is not wired as the DEFAULT anywhere — `we:scripts/verify-lane.mjs`'s own gate execution, and every
+   other existing heavy-command call site, still runs on the host exactly as before this PR. Turning it on by
+   default (even for `check:standards` alone) is a deliberate follow-up decision, not made here.
+3. The `frontierui`/`plateau-app` sibling-checkout mounts are not included, so `check:standards`'s
+   cross-repo reference-resolution gates degrade to "skipped" inside the container today.
+4. No image-build automation exists yet (a human/agent runs `container build` by hand per this PR's
+   Containerfile) — a real gap if this is ever wired into an unattended dispatch path.
+5. This work landing on `main` while the fuller `run`-mode implementation lives unmerged on
+   `lane/mechanical-dispatcher` is a known, accepted duplication risk (see above) — not resolved by this PR.
+
+## Session update (2026-09-14, later the same day) — heavy-command-pool container POC extended to `test:unit`
+
+Same tracking convention as the session update directly above: a progress note, not a new formal item, per
+the operator's own standing direction and this repo's PR-landing precedent (`we:scripts/pr-land.mjs` only
+refuses an empty PR description — #2324). First checked whether the prior PR (`#2206`,
+`lane/3621-heavy-command-pool-container-poc`) had merged before starting: it had not (`gh pr view 2206` — open,
+mergeable), so this slice was built as a lane clone based directly on that PR's own branch, reusing its
+`we:scripts/lib/container-exec.mjs`/`Containerfile` infrastructure rather than duplicating it.
+
+**Why `test:unit` next.** `#2206`'s own report named it explicitly: `test:unit`/Playwright aren't
+containerized, and unlike `check:standards`'s pure-JS dependency closure, `test:unit` (vitest) needed the
+baked-Linux-tree approach because of native/compiled deps. Confirmed before writing any code: scanned
+`we:package-lock.json` for every optionalDependency with a `darwin-arm64`/native shape — esbuild, rollup, swc,
+lightningcss, sharp, `@parcel/watcher`, `node-gyp-build-optional-packages` all appear, and the host's own
+`we:node_modules/@esbuild/` directory holds only `darwin-arm64`, confirming vitest's own transform pipeline
+(esbuild, reached via vite) cannot resolve inside a Linux guest mounting that host tree straight in.
+
+**What was built — see `#3621`'s own 2026-09-14 (later) amendment for the full technical writeup; condensed
+here:**
+
+- `we:scripts/lib/container-exec/Containerfile.test-unit-deps` (new) — bakes a Linux `node_modules` via `npm
+  ci` inside plain `node:22-alpine` (no build toolchain needed — every native dep ships a prebuilt Linux
+  binary for this lockfile).
+- `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new) — builds that image, creates/seeds a named
+  `container volume` from its `/app/node_modules`, and stamps a lockfile-hash marker so a re-run with an
+  unchanged lockfile is a cheap no-op; a `status` mode reports image/volume presence and staleness for a
+  preflight.
+- `we:scripts/lib/container-exec.mjs` — gained `nodeModulesVolume` support on `buildContainerRunArgs`/
+  `execContainerized` (mounts a named volume at `<cwd>/node_modules`, shadowing the checkout's own rw mount for
+  that one subtree only — proven empirically that a more-specific mount wins the shadow and that writes to it
+  never touch the host) plus `frontieruiSiblingRoot`, which auto-mounts the `frontierui` sibling checkout
+  read-only when `nodeModulesVolume` is requested (closing the sibling-mount gap named in `#2206`'s report, for
+  `test:unit`'s own import graph specifically — `plateau-app` is a `vite.config.mts`/dev-server-only reference,
+  confirmed not part of `test:unit`'s closure, so deliberately not mounted).
+- `we:scripts/readiness/heavy-admission.mjs` — the `run` CLI gained a `--container-node-modules` flag (or
+  `WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES=1`), layered on top of the existing `--container` flag, with the
+  same fail-loud-with-actionable-message preflight `#2206` already established for a missing image, mirrored
+  for a missing/stale node_modules volume.
+
+**Real evidence, measured on this machine:**
+
+- **Fidelity**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on the host and inside the
+  container produced IDENTICAL pass counts (35/35 files, 441/441 tests) both times — via the actual wrapper,
+  `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run
+  we:blocks/__tests__`. The FULL suite (447 files / 12007 tests, ~9m48s wall-clock on the host, measured this
+  session) was not re-run inside the container — a representative subset was used instead, per this task's own
+  explicit allowance for a first proof.
+- **Cap enforcement, reproduced a third time**: 8 unbounded busy-spin `node -e` processes inside a `--cpus 2
+  --memory 2g` container held the host-side `com.apple.Virtualization.VirtualMachine` process at ~191-204% CPU
+  (sampled twice during a live 15s run), versus ~800% (8 processes each pinned near 100%) running the identical
+  workload unconstrained on the host — same containment result `#2206` measured for `check:standards`, now
+  reproduced under this slice's own node_modules-volume + sibling-mount configuration.
+- **Failure modes confirmed, not just predicted**: running `test:unit` in-container WITHOUT the node_modules
+  volume reproduces the exact `MODULE_NOT_FOUND`-shaped failure `#3621` predicted (here surfacing as an esbuild
+  transform error plus an unresolved `@frontierui/plugs/...` import) — confirming the shortcut genuinely does
+  not extend from `check:standards` to `test:unit` without this slice's own fix.
+- Unit tests added/extended: new cases in `we:scripts/lib/__tests__/container-exec.test.mjs` (the
+  `nodeModulesVolume`/`frontieruiSiblingRoot` pure logic, plus REAL self-skipping integration tests proving the
+  mount-shadow property against an actual container) and a new
+  `we:scripts/lib/container-exec/__tests__/build-test-unit-deps.test.mjs` for the build script's pure helpers.
+  `node we:scripts/check-standards.mjs` passes clean (0 errors) against this change.
+
+**What is explicitly NOT done — left for a real follow-up, not overclaimed:**
+
+1. Playwright is still not containerized — a different, likely harder shape again (needs a real browser inside
+   the guest, not just a Linux dependency tree), genuinely unstarted.
+2. The full `test:unit` suite (447 files / 12007 tests) was not run side-by-side in the container — only a
+   representative subset, per this task's stated allowance. A future pass should measure the full-suite
+   wall-clock cost inside the container (the mount I/O penalty `#3621`'s own research flagged may matter more
+   at that scale).
+3. Neither `--container` nor `--container-node-modules` is wired as a DEFAULT anywhere — every existing
+   heavy-command call site still runs on the host exactly as before.
+4. `check:standards`'s own image is still built by hand; only the `test:unit` deps image has a build/seed
+   script. Generalizing image-build automation beyond this one case is unstarted.
+5. The same `lane/mechanical-dispatcher` reconciliation risk `#2206`'s report named is unchanged by this
+   slice — still an accepted, known risk, not resolved here.
+
+### Design note (2026-09-14) — should heavy git operations share `we:heavy-admission.mjs`'s pool with vitest/check:standards? No current call site warrants wiring it; open forward-looking question only
+
+Follow-up to tonight's runaway `git grep` incident (a one-off pathological command, already killed — see
+above). The operator's architectural point, independent of that specific incident: `we:scripts/readiness/heavy-admission.mjs`'s
+shared semaphore (cap 2, `run` CLI mode) already gates `check:standards`/`verify-lane`/`test:unit`. If a
+genuinely heavy git operation (full-repo `gc`/`repack`/`fsck`, a multi-remote `fetch --all`, a `merge-tree`/
+rebase loop across many commits) ever runs un-gated, it stacks CPU load against those same capped operations
+uncoordinated, because git currently has no presence in the pool at all.
+
+**Checked every git call site in `we:scripts/` (excluding `__tests__`) for anything at that weight class.**
+None found:
+- No `git gc`, no `fetch --all`, no full-repo `fsck` anywhere in `we:scripts/`.
+- Every `fetch` call site (`we:scripts/lane-drain.mjs`, `we:scripts/lane-resume.mjs`, `we:scripts/lane-pool.mjs`,
+  `we:scripts/backlog.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/pr-land.mjs`,
+  `we:scripts/conveyor/branch-sync.mjs`, `we:scripts/conveyor/branch-drift.mjs`,
+  `we:scripts/conveyor/validate-and-promote.mjs`, etc.) fetches a single ref/branch with `--quiet`/`--prune` —
+  narrow and cheap, not a multi-remote full fetch.
+- `git merge-tree --write-tree` appears in `we:scripts/lane-pool.mjs`, `we:scripts/prune-landed-lanes.mjs`,
+  `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/rebase-drop-content.mjs`, `we:scripts/lib/rebase-drop-manifest.mjs`,
+  `we:scripts/lib/git-run.mjs`, `we:scripts/conveyor/branch-drift.mjs`, and
+  `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (the last one *describes* the plumbing but doesn't call
+  it). Every real call site does exactly ONE `merge-tree` between two refs (`base` vs one lane/PR ref) —
+  working-tree-free by design, deliberately chosen (per these files' own comments) *because* it's cheap
+  compared to a real checkout+merge. `we:scripts/prune-landed-lanes.mjs` and `we:scripts/merge-ai-prs.mjs`
+  each call it once per candidate branch/PR in a loop, but that's N cheap single-ref probes, not one big
+  multi-commit rebase/merge — not the weight class the operator named.
+- `git rebase` appears in `we:scripts/operations/poc-land.mjs` and `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`
+  — a normal single-branch rebase onto a fresh tip, not a loop across many commits.
+- `we:scripts/conveyor/branch-sync.mjs` (named explicitly in this investigation's brief) fetches one ref and
+  probes with `merge-tree` before ever attempting a real merge — same cheap pattern, not heavy.
+- `we:scripts/lib/isolation-provider.mjs`'s `repack -a -d -f` (confirmed earlier tonight) runs only against a
+  `--depth 1 --no-hardlinks` **shallow** clone built by its own `buildHistorySurgeryCloneArgv` for the
+  history-surgery path — and per its own doc comment, **production wiring is still deliberately deferred to
+  `#3630`**; today it is exercised only by `we:scripts/lib/__tests__/isolation-provider.test.mjs`. Not a live
+  call site at all right now, so doubly not a concern.
+
+**Recommendation:** nothing to wire in today. Every real git call site currently in `we:scripts/` is either
+narrow-scope (single ref) or a single working-tree-free probe explicitly designed to be cheap — none reaches
+the "full-repo gc/repack/fsck, multi-remote fetch, or a rebase/merge loop across many commits" weight class
+the operator described. `git status`/`git diff`-class calls (the overwhelming majority of call sites: dozens
+of `rev-parse`, `show`, `ls-tree`, `log`, `status --porcelain`, etc.) should stay ungated regardless — gating
+those would slow dispatch-critical paths for no CPU-contention benefit. This stays a genuinely open,
+forward-looking design question rather than a build: **if/when** a real heavy git operation lands in
+`we:scripts/` (a full `gc`, a `fetch --all`, a many-commit rebase/merge loop), it should be wrapped through
+`node we:scripts/readiness/heavy-admission.mjs run -- <command>` — the same one-line opt-in pattern the `run`
+CLI mode already offers on `we:heavy-admission.mjs` — rather than inventing a second limiter. No new item
+filed for this; there is nothing to schedule yet, only a rule to apply the next time such a call site is
+actually written.
+
+**A separate, harder limit, worth stating plainly rather than leaving implicit: `we:heavy-admission.mjs`
+cannot catch an ad hoc/interactive git command no matter how many scripted call sites get wired into it.**
+The module is a purely COOPERATIVE, opt-in semaphore — a caller must itself invoke `we:heavy-admission.mjs
+run -- <command>` (or `acquire`/`release`) to participate; there is no OS-level enforcement and nothing
+forces an arbitrary command through it. `we:heavy-admission.mjs`'s own header says this outright about
+`we:guard-bash.mjs`'s adjacent PreToolUse deny: it "only reaches a MECHANICALLY-DISPATCHED agent (one with
+`WE_DISPATCH_KIND` set)" — a `/workflow`/`/batch` parallel lane, or the operator's own interactive session,
+carries no such env var and is unaffected. The identical limit applies here: tonight's runaway `git grep`
+across 12k+ revisions was typed directly by an agent outside any script, so wiring every scripted git call
+site into the pool — even a maximally thorough one — would still not have caught it, and would not catch the
+next one either. "Add git to the shared queue" can only ever cap *scripted* call sites that opt in; it is
+not, and cannot become without a different mechanism (e.g. a PreToolUse-style interception of raw `git`
+invocations), a general governor over every heavy git command any agent might type.
+
+## Session update (2026-09-14, later still) — three forward-looking capacity requirements recorded on `#3621`; live-tested whether `test:unit`'s worker pool respects a container's `--cpus` allocation
+
+Tracked here as a progress note, same convention as the two container-POC entries directly above — see
+`we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md`'s own 2026-09-14 (later
+still) amendment for the full technical writeup; condensed here.
+
+**Why now.** The operator gave real forward-looking direction on the next phase of this work — reserved
+capacity for heavy-command containers separate from lane capacity, per-command internal-parallelism
+correctness inside whatever container allocation a command actually gets, and a resource-aware (not flat)
+admission cap — and asked for it to be recorded precisely, not designed or built yet, plus one concrete,
+checkable-now piece tested for real.
+
+**Three requirements recorded on `#3621`, not designed here:**
+1. A heavy-command container needs its own reserved CPU/memory budget, kept separate from
+   `we:scripts/lib/lane-concurrency.mjs`'s lane cap — two pools, not one shared budget. Neither `#2206` nor
+   `#2211` built this; both ran a single container ad hoc.
+2. A heavy command (`vitest`/`test:unit`, `we:scripts/verify-lane.mjs`) must size its own internal
+   worker/thread pool to fit the container it actually runs in, not assume the host's full core count. Tested
+   live tonight (below) rather than assumed.
+3. `we:scripts/readiness/heavy-admission.mjs`'s cap (currently a flat `DEFAULT_ADMISSION_CAP = 2`, its own
+   header calling it "an EQUAL-COST NAMED SET") should become resource-aware per command — `vitest` plausibly
+   costing more than `check:standards`. Cited as concrete, dated evidence, not hypothetical: a real live bug
+   found and separately being fixed this same session — the cap's slot reentrancy keys ownership by lane PATH
+   STRING, not process identity, so two genuinely different processes verifying the same lane back-to-back
+   (the conveyor's auto-verify plus a manual re-verify) both read as "one slot," meaning real concurrent load
+   was 3 processes while the gate reported a healthy 2/2.
+
+**The one immediately-checkable piece — tested for real, using `#2211`'s already-built container
+infrastructure (a fresh lane, `lane-20`, acquired specifically for this test).** `container run --cpus 2` gives
+a guest where `os.cpus().length` reports **3** (a confirmed off-by-one, N+1, consistent across `--cpus 1`→2 and
+`--cpus 4`→5) but `os.availableParallelism()` correctly reports **2**. THIS repo's own `test:unit` config
+(`we:vitest.shared.ts#maxTestWorkers`) does not call either API — it is a **hardcoded literal `4`**, already
+tuned (by an existing, unrelated `#3650` fix) for the HOST's 12-core budget under a 3-concurrent-invocation
+burst assumption, with zero awareness of whatever container it might run inside. Ran the real 35-file/441-test
+`we:blocks/__tests__` subset inside an actual `--cpus 2 --memory 2g` container via `node
+we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules -- npx vitest run …` — passed
+35/35 files, 441/441 tests, proving the pipeline works — but confirms `test:unit` would request up to 4 worker
+threads against a container that only has 2 real cores, a genuine 2x oversubscription of that container's own
+allocation. Diagnosed, not fixed, per the operator's own instruction — recorded as a confirmed instance of
+requirement 2 above, left as real follow-up scope once requirement 1's capacity reservation is designed.
+
+## Session update (2026-09-14, continued) — `#3673` (what clears a triggered calibration veto) ratified, all four forks
+
+`#3673` — "Define what clears a triggered calibration veto so a role can graduate," filed and prepared
+earlier this session (`PR #2228`, `preparedDate: "2026-09-14"`) — was ratified by the operator (Nicolas
+Gilbert) in one pass, all four forks approved as prepared, no amendments. Now **resolved**, `codifiedIn:
+we:docs/agent/platform-decisions.md#calibration-veto-clearing` — the same "full ruling earns statute"
+posture `#3654` took, since this card's ruling *is* the shape of veto clearing, not a narrow rider under
+an existing anchor.
+
+Ratified, as recommended: **(1)** a documented root-cause finding, naming which
+`we:scripts/lib/jury-core.mjs#deriveFindingDisposition` sub-answer diverged and why, is a mandatory
+precondition before any post-miss trial counts toward clearing — trial volume alone never suffices; **(2)**
+once eligible, a fixed minimum trial count plus at least one trial specifically targeting a case similar in
+kind to the trigger (severity-ambiguous, a deliberately constructed test scenario permitted when a real one
+is scarce) — N dissimilar clean trials never suffice; **(3)** decay alone (elapsed trials or elapsed time,
+with no clean/relevant requirement) never clears the veto by itself — a cooling-off window may narrow which
+trials count, never substitute for the affirmative evidence clauses 1–2 require; **(4)** a human override is
+available only as a documented, reasoned factual reclassification of the trigger event, narrowly scoped to
+identity/evidentiary errors — never a re-answer of the severity judgment itself, and never a blanket
+trust/confidence grant.
+
+**No concrete numeric N is fixed by this ruling**, consistent with `#3654`/`#3649`'s own deferred-N
+precedent — a specific N is deferred to a follow-on ordinary (batched) finding once real post-clearing trial
+data exists, never a separate ceremony. No `calibrationMiss` field is added to `we:model-probation.json` and
+no clearing-check function is wired here — this card rules on the shape of clearing only. The live PR #2107
+veto on Codex's `advisory-review` role is **not** cleared by this ruling itself: clearing it still needs
+either clause 1's root-cause finding followed by clause 2's similarity-matched trials, or clause 4's narrow
+reclassification override on its own facts.
+## Session update (2026-09-14) — operator directive: audit the REAL open-PR queue for why the driver/drain isn't progressing it on its own, then fix the mechanism (not the symptoms). Three real, distinct root causes found and fixed; one properly-scoped follow-on filed, not built
+
+Written after `gh pr list --repo chalbert/web-everything --state open` (24 open PRs) plus direct code reading and live-system observation — every claim below is grounded in a real artifact re-checked at write time (a real git ref comparison, a real `claude agents --json` read, a real `we:scripts/conveyor/reconcile-pass.mjs --json` read-only run), not carried over from prior session text. Landed directly to this branch (rule 4 / the POC-branch delivery mode, `we:docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode`) — no PR, per the operator's own "must not be slow by the same slow PR process" ruling; also sidesteps the already-filed `x8ghrih`/PR #2219 CI-gap bug on this base branch. Full test suite for every touched area green (`we:scripts/conveyor/__tests__/`, `we:skills-src/conveyor/__tests__/`, new `we:scripts/conveyor/__tests__/main-ref-sync.test.mjs`), `npm run check:standards`: 0 errors, no new warnings.
+
+### Pattern audit — the real queue, categorized
+
+24 open PRs. Three real, DISTINCT populations the driver/drain should be progressing on their own but is not:
+
+1. **3 PRs based on `lane/mechanical-dispatcher`** (#2223, #2220, #2156) — stuck on the already-filed `x8ghrih` CI-gap bug (that base branch has zero CI configured; the drain's hardcoded check-wait stalls forever). Not re-diagnosed here — already tracked, out of scope for this session.
+2. **~10 PRs sitting `review:changes`/`review:pending` for MULTIPLE DAYS** (#2027, #2047, #2058, #2107, #2108, #2115, #2117, #2130, #1985, #2003), several 5-7 days old — each one had a review or fix session dispatched AT SOME POINT in its history, which (see Root cause 2 below) is exactly why the existing neglect watch could never flag any of them.
+3. **A large, currently-idle capacity gap**: 16 acquirable (free) lanes, a live driver lease, a real computed dispatch plan naming 10 owed `fix` dispatches (see Root cause 3) — and, at the moment of checking, `claude agents --json` showed 6 of 7 live `fix-*`/`review-*` sessions in `blocked` state (stuck), only one (`fix-2003`) genuinely `working`. Real spare capacity, real computed work, near-zero actual progress.
+
+### Root cause 1 — `we:scripts/conveyor/driver-watchdog.mjs` had nothing scheduling it (fixed)
+
+Confirmed exactly as already flagged before this session started: no cron, no launchd plist, no GitHub Actions workflow, and no call from `we:skills-src/conveyor/runner.mjs`'s own tick loop — only a manual CLI, or (found live) an ad-hoc, uncommitted shell loop that vanished with whoever's terminal ran it. **Fixed**: wired into `we:skills-src/conveyor/supervisor.mjs` — a NEW `startWatchdogSchedule` (its own timer, its own breadcrumb log — deliberately kept OUT of the supervisor's existing anomaly-detection ring so it can never interleave with and truncate `detectSupervisorAnomalies`'s backward trailing-run scans) that runs `we:scripts/conveyor/driver-watchdog.mjs`'s `runWatchdogOnce` every 5 minutes (`DEFAULT_WATCHDOG_INTERVAL_MS`, matching the ad-hoc shell loop's own observed cadence), starting immediately on supervisor launch. **Defaults to CHECK-ONLY** (`dryRun: true` — diagnose and alert, never `git reset --hard` / `restart-runner`): the heal pipeline is unit-tested end to end but has never been LIVE-fired unattended (this card's own earlier punch-list, item 6), so this session did not unilaterally decide to make THIS the first unattended caller of a real rollback. `--watchdog-heal` opts in once that is proven; `--no-watchdog` / `--watchdog-interval-ms` / `--watchdog-checkout` are the escape hatches. 11 new tests (`we:skills-src/conveyor/__tests__/supervisor.test.mjs`).
+
+**This satisfies the exact "caught automatically instead of needing manual discovery" bar the operator named as the cheap, ready-to-wire fix** — but note the check itself is only as good as its own INDEPENDENT ground truth (queue sidecar, dispatch log, run records — see the file's own header), which is why Root cause 3 below was found by reading actual dispatch code, not by this watchdog (its own design deliberately never reads the driver's decision logic, so it cannot see "the dispatcher's OWN staleness guard is refusing everything").
+
+### Root cause 2 — the neglect watch's "ever dispatched" check was UNSCOPED to a PR's entire history (fixed)
+
+`we:scripts/conveyor/parked-pr-progress-watch.mjs#everDispatchedReviewOrFix` treated ANY `review-<pr>`/`fix-<pr>` session in a PR's FULL history as permanent proof the PR was never neglected — with no time bound at all. Real, live incident this closes: PR #2035's blocking finding was repaired and it re-entered `review:pending` at 2026-09-13T20:13:51Z; nothing re-reviewed it until 2026-09-14T15:43:57Z — 19.7h later — while the OLD `review-2035`/`fix-2035` sessions from 2026-09-07 would have silently suppressed the neglect watch for that ENTIRE window under the un-scoped rule (confirmed off the PR's own real `gh api .../issues/2035/events` timeline and real `claude agents --json --all` `startedAt` values). The SAME structural gap explains the ~10 multi-day-stuck PRs named in the pattern audit above: every one of them already had a review/fix session dispatched at SOME point, so the un-scoped predicate could never fire for any of them no matter how long the CURRENT hold persisted. **Fixed**: `everDispatchedReviewOrFix` gained an optional `sinceMs` — when given, only a session started AT OR AFTER the CURRENT park period's own start counts as "dispatched" (a matching row with unreadable/missing `startedAt` still counts, fail-SAFE, matching this file's existing "never falsely flag" bias); omitted, the original unscoped behavior is preserved byte-for-byte for every pre-existing caller. `we:scripts/conveyor/parked-pr-progress-watch.mjs#watchNeglectedPrs` (the real production sweep) now threads the real park-period start through. 34 pre-existing tests unchanged + 11 new (`we:scripts/conveyor/__tests__/parked-pr-progress-watch.test.mjs`).
+
+**One adjacent, genuinely different gap deliberately left unbuilt and filed separately**, mirroring how `we:3596` was properly carved out of the same module rather than crammed in: PR #2047 shows a completed FIX inside the current park window (so the fixed predicate correctly does not call it never-dispatched) that never triggered a follow-up REVIEW — `review:changes` only clears on a review, not a fix, and the predicate cannot yet tell "some session ran recently" from "the specific action THIS state is owed ran recently." Filed as `we:backlog/3664-neglect-watch-a-completed-fix-with-no-follow-up-review-leave.md` (open, `size: 3`, parent `3549`), with PR #2047's real timestamps as its fixture. Not dev-ready to just build tonight — needs the same "decide the exact shape" pass `we:3596` got, not a rushed bolt-on to an already-changed predicate.
+
+### Root cause 3 — the LARGEST finding: a stale LOCAL `main` ref silently refused every fix/review dispatch, every tick, for over a day (fixed)
+
+Found while investigating the operator's own follow-up question (real spare capacity + a real backlog, so why is nothing dispatching against it). `we:scripts/conveyor/reconcile-pass.mjs` — the REPO-WIDE, restart-survivable fix/review candidate detector already built and wired for exactly this job (`we:3438`, resolved 2026-09-03, specifically to fix `we:scripts/conveyor/tick-core.mjs`'s OWN session-ephemeral `launchedNums` scoping gap) — was run live, read-only, against the real queue: it correctly computed **10 real, currently-owed `fix` dispatches** (#2225, #2223, #2220, #2212, #2210, #2170, #2117, #2115, #2057, #1985) against a pool with 16 free lanes. NONE were live. Root cause, confirmed by direct git inspection of the resident driver's own checkout (`/Users/nicolasgilbert/workspace/webeverything`, live lease held, `pid 93017`, ticking normally): its LOCAL `main` branch ref had not moved since **2026-09-13T07:01:36-04:00** — **161 commits / 33+ hours behind** `origin/main` — because nothing in that checkout's own operating loop ever touches `main` at all (its real work happens on `lane/mechanical-dispatcher`; `main` is watched, never worked). `we:scripts/operations/review-dispatch.mjs#assertMainNotStale` — called as the FIRST line of BOTH `dispatchReview` (review dispatch) and `we:scripts/conveyor/reconcile-fix-dispatch.mjs#runReconcileFixDispatch` (fix dispatch), both wired into `we:skills-src/conveyor/runner.mjs`'s own mechanical-pass tick loop — throws whenever local `main` is behind `origin/main` by even one commit (it hardcodes `autoFf: false` at both call sites, by design: never auto-fast-forward mid-dispatch-decision). Both dispatchers run as SEPARATE CHILD PROCESSES from the runner's `runQuiet` wrapper, which swallows a thrown failure into ONE stderr line and moves on (best-effort — a mechanical-pass failure must never stall a tick). Net effect: a real, correctly-computed, capacity-available dispatch plan silently refused EVERY tick, for over a day, with no alert and no visible symptom beyond a swallowed one-line stderr warning nobody was tailing.
+
+**A backlog item for the "proper" fix already existed and was found during this audit**: `we:backlog/3474-review-dispatch-s-staleness-guard-should-auto-sync-a-clean-f.md` (open, unbuilt) proposes making `assertMainNotStale` itself auto-fast-forward on a clean staleness. Its own design text (`git pull --ff-only` / `git merge --ff-only origin/main`) implicitly assumes the dispatching checkout has `main` itself checked out — on a checkout permanently parked on a DIFFERENT branch (this resident driver's own shape), either operation would fast-forward/merge the WRONG branch, not update `main`'s own ref. Rather than either rushing that fuller redesign tonight or leaving the live gap open until it lands, this session shipped a narrower, definitely-safe **mitigation**: `we:scripts/conveyor/main-ref-sync.mjs` — a NEW mechanical pass, a plain `git fetch origin main:main` (ref-only, never touches the working tree, a harmless no-op if `main` happens to be the checked-out branch), wired into `we:skills-src/conveyor/runner.mjs`'s mechanical passes FIRST — before `we:scripts/conveyor/reconcile-fix-dispatch.mjs` and the review-dispatch reconcile step — so `assertMainNotStale` almost never has anything to refuse on. It does not touch, weaken, or bypass the guard itself. A progress note was added to `we:backlog/3474` cross-referencing this gap for whoever builds its fuller fix. 12 new tests against real throwaway git fixtures (`we:scripts/conveyor/__tests__/main-ref-sync.test.mjs`); the exact mechanical-pass-set pin test (`we:skills-src/conveyor/__tests__/runner.test.mjs`, `xb4fjir`) updated to include it.
+
+**Real evidence this would have caught tonight's incidents**: the fixed neglect watch (Root cause 2) would have flagged PR #2035 as neglected the moment its 2026-09-13T20:13:51Z re-park crossed the 24h default threshold (~2026-09-14T20:14Z) had it not been reviewed first — it happened to clear at 15:44Z, before that threshold, so THIS specific PR's own resolution was not itself caught by the fix, but the general 19.7h-blind-window class of incident it exemplifies now is. `we:scripts/conveyor/main-ref-sync.mjs` (Root cause 3) directly explains and fixes why NONE of tonight's ten real, capacity-available `fix` dispatches (or reviews) fired at all — the dominant, highest-impact finding of this session, larger than the other two combined.
+
+### What this session did NOT find, and did NOT fix — stated plainly rather than papering over
+
+**"Nothing runs unless a session starts the conveyor" (`we:3625`'s own scope) was NOT today's dominant root cause** — checked directly: the resident driver was genuinely alive and ticking normally throughout this session's investigation (live lease, fresh heartbeat, real dispatch plans being computed every tick). The driver's occasional down periods earlier this same day/night (already documented elsewhere on this card) are a real, separate instance of that broader gap, but tonight's dominant symptom — real capacity, real computed work, near-zero actual progress — was Root cause 3 above, not an idle/undriven conveyor. `we:3625` stays open, unsliced, unprepared, exactly as before; nothing here should be read as having closed or narrowed it.
+
+No stuck application PR was manually reviewed, resolved, or merged by this session, per the operator's explicit instruction — the mechanism was fixed, not the symptoms.
+
+## Session update (2026-09-15) — delegation infrastructure hardened (codex/gemini direct-task, provider-routing), graduation-data mechanism live, three real production liveness bugs fixed (x09zslx), operations-coverage audit landed a 17-op phased plan
+
+### Delegation infrastructure built and hardened
+
+`we:codex-direct-task.mjs` and `we:gemini-direct-task.mjs` both went through real bug-fix rounds
+tonight — filename-quoting, worktree, and buffer bugs, each caught by independent review rather
+than shipped first-try-clean. Claude-via-Antigravity wiring (`agy --model claude-sonnet-4-6`)
+confirmed real and running on a quota separate from this session's own. `we:scripts/lib/provider-routing.mjs`
+— a deterministic `selectProvider`/`selectSupervisionLevel` — was built by Gemini on its first real
+trial, after an earlier attempt had timed out.
+
+### Graduation-data mechanism
+
+`we:scripts/conveyor/log-delegation-trial.mjs` now logs real trials into `we:scripts/conveyor/run-scorecards.json`.
+Progressive-backdown thresholds were ratified in `backlog/3690`: N=5 clean trials per
+{provider,model,taskType}, with a calibration-miss as a hard veto. Currently no combination has
+graduated — everything dispatched through the delegation path still gets full verification. The
+tracker status page (this one) was published as a live artifact so this stays checkable without
+re-deriving it from raw logs each time.
+
+### Real production bugs found and fixed tonight
+
+This is the epic's actual point, named plainly rather than folded into infrastructure talk:
+
+- **Three independent instances of the same root-cause class** — "liveness is always the real OS
+  process handle, never an inferred state": the driver-watchdog counted dead sessions as live
+  in-flight work (phantom claims that had gone unnoticed for 13+ days), the lease-reaper had the
+  identical bug for lane leases, and the session-reaper had it again for null-pid registry entries.
+  Filed as its own standing principle rather than three separate patches, `x09zslx`.
+- The driver-watchdog never alerted on a full crash — only on stuck-but-alive. Fixed.
+- A repeated advisory-review churn bug on `review:human` PRs burned 6 wasted panel runs on PR
+  #2117 before being caught.
+- A stale-verify-marker bug was blocking manual approval unnecessarily, `#3538`.
+- A false-positive duplicate-PR flag hit an unsplit epic, recurring twice (`#3683`/`x7nb9hn`)
+  before the actual cause was pinned down.
+
+### Operations-coverage plan
+
+A real session audit — Codex and Gemini, cross-checked against each other — covered 471 dispatches
+and found only 11 of 247 grouped tasks had a matching declared operation. One honest finding from
+the audit itself: Gemini's first attempt turned out to be a copy of Codex's output, not an
+independent pass, and was redone before being trusted. The audit landed as a 17-operation phased
+plan (`backlog/x8cq3pp`, PR #2280). Phase 1 (5 read-only operations) is in progress; 3 of the 5 were
+already found to be specced against modules that only exist on this prototype branch, not on
+`main` — adapted in place rather than blocked on that mismatch.
+
+### Ratified decisions
+
+`#3589` — clear-human must wait for a posted advisory review on the current head before merging.
+Closes the exact race that let PR #2011 clear early on luck rather than on an actual review.
+
+### Still open
+
+- Capability-ratings / AI-watch-program work (external benchmark data feeds exploration priority
+  only — explicitly NOT used for graduation decisions).
+- `/wip` skill update to show supervisor-model/delegation-target per running task.
+- Phase 1 of the operations-coverage plan is still landing, not done.
+
+## Session update (2026-09-15) — Wind-down iteration: conflict-resolution delegation trial, dispatch-consistency fix, conveyor health check
+
+### Delegation/graduation trial
+
+Ran a first-ever supervised trial of Gemini Flash 3.8 (low) doing merge-conflict resolution on PRs
+#2291 and #2292, with a genuinely independent Claude process verifying each resolution (3-way diff +
+full test suite) before push — both accepted and pushed. First entries logged in the
+`{antigravity, gemini-3.8-flash-low, conflict-resolution}` graduation bucket via PR #2294.
+**Verified at note time**: #2294 is still OPEN, carrying `review:changes` — independent review
+bounced it for a real bug (two byte-for-byte duplicate JSON records inflating the clean-streak
+count). Not yet fixed/re-pushed.
+
+### PR #2288 (pr-reconcile op)
+
+Independently reviewed and REJECTED — 3 confirmed real logic bugs. **Verified at note time**: still
+OPEN on `review:changes`, and has since also picked up `merge-status:conflicting` (drifted into a
+real merge conflict on top of the unresolved review bugs). Needs author/Codex follow-up; not yet
+actioned.
+
+### PR #2295
+
+Small Codex-authored fix adding foreground-only banners to `we:codex-direct-task.mjs` /
+`we:gemini-direct-task.mjs` plus an additive we:CLAUDE.md pinned-rule paragraph, addressing a real
+recurring bug where subagents backgrounded these (already-synchronous) dispatch scripts and waited
+on Monitor instead of blocking in the foreground. **Verified at note time**: MERGED
+(2026-09-15T18:21:52Z).
+
+### Real operational gap found and fixed this session
+
+`we:parked-pr-conflict-watch.mjs` bounces a PR to `review:changes` on a real merge conflict, but had no
+mechanism to transition it to a FRESH review once the conflict was genuinely resolved — it either
+sits on the stale label forever (drain won't touch it) or risks someone resurrecting a stale
+pre-fix verdict (caught mid-session before it happened). Manually re-armed #2291/#2292 to
+`review:pending` via `we:rearm-review.mjs` as an immediate fix. A mechanical fix (Codex-built, dispatched
+as agent `a4ce7efd8698d3bfe`) followed: `defaultPostConflictRearm` now shells the same sanctioned
+`we:rearm-review.mjs` hand-back whenever `planConflictLabelChange` sees GitHub's own `mergeable ===
+'MERGEABLE'` (never just the absence of this pass's label, and never on an `UNKNOWN` mergeable
+result) on a PR still carrying `review:changes`. **Verified at note time**: shipped as PR #2296,
+OPEN, all completed CI checks green (a couple of shards still in flight), the dispatching agent still
+correctly blocking in the foreground on its own land process rather than assuming a notification —
+not yet merged.
+
+- #2291: **MERGED** — re-armed, received a fresh review, landed.
+- #2292: OPEN, carries `ready-to-merge` + `review:accepted` (review-round 2) — accepted after re-arm,
+  not yet drained/merged.
+
+### Conveyor supervisor health
+
+Diagnosed a "stale"/"refused"/`healEnabled:false` watchdog state — confirmed NOT a real stall. The
+driver's own readiness check showed zero items genuinely dispatchable (of 94 watchdog-flagged
+"eligible" items: 50 stale already-resolved noise, 31 not-yet-ready, 6 need scope/decision, 8
+lane-conflict-held). Deliberately left alone rather than forcing a heal (checkout has uncommitted
+changes + unpushed commits, so writing a `last-known-good` marker or enabling `--watchdog-heal` was
+judged a real-consequence decision to defer, not something to force from a diagnostic pass).
+
+### Graduation data health check
+
+Confirmed still flowing — 69 scorecard entries logged in a recent 4-hour window (mostly conveyor
+advisory-review observations, codex/gpt-6-astra + antigravity/gemini-3.1-pro, plus 3 real build
+trials on item #3360).
+
+### Recurring theme, still unresolved as a systemic fix
+
+The "subagent ends its turn assuming a backgrounded process/Monitor will notify it" violation
+recurred multiple more times this session, including — notably — around the very agent building the
+fix meant to prevent exactly that pattern for the two delegation scripts. Each instance was caught
+and the agent resumed with an explicit foreground-blocking instruction. This remains a live,
+recurring maintenance cost worth a more structural fix (e.g. a real PreToolUse hook denying
+`run_in_background` on known-synchronous dispatch scripts, not just a memory/prompt rule) — not yet
+built.
+
+### Next-session priorities
+
+- Confirm final state of PR #2294 (duplicate-entry fix needed — still open on `review:changes` as of
+  this note) and PR #2295 (already merged as of this note — just double-check nothing regressed).
+- Confirm PR #2296 (conflict-resolved→fresh-review mechanical fix, agent `a4ce7efd8698d3bfe`) actually
+  lands — CI was green with two shards still running and the PR unmerged as of this note.
+- Confirm #2291/#2292 actually received and passed a fresh review after being re-armed to
+  `review:pending` — #2291 confirmed merged; #2292 confirmed `review:accepted`/`ready-to-merge` but
+  still awaiting drain as of this note.
+- PR #2288 needs real author fixes for its 3 logic bugs, and now also a real merge-conflict
+  resolution on top of that — not yet started.
+- Consider a real PreToolUse hook to hard-block `run_in_background`/Monitor usage on
+  `we:codex-direct-task.mjs`/`we:gemini-direct-task.mjs` invocations, given the prompt-level fix alone
+  hasn't stopped the recurrence.
+- `harness-coverage` operation still deferred pending a design decision.
+- `agy`/`manage_task` task-160 kill-race root cause still not fully investigated (next steps were
+  documented earlier in the session, not yet executed).
+- Antigravity `grep_search` crash: still only a soft prompt-level workaround; a real `we:hooks.json`
+  PreToolUse hard-block was confirmed feasible but not yet wired in.
+
+## Session update (2026-09-15) — Investigated token-usage breakdown by role; capture already machine-wide, aggregation layer still missing
+
+Investigated whether Claude token usage can be broken down by role (main orchestrating session vs. dispatched subagent vs. operation type). Findings:
+
+- No such breakdown exists today. Scattered pieces exist (per-Codex-dispatch token telemetry, a local OTEL metrics collector for Claude's own usage, per-judge-invocation usage in run records) but nothing stitches them into a role-based view. Backlog #3671 already tracks this gap explicitly (today's hooks can't see an Agent/subagent call at all).
+- Good news: machine-wide *capture* of Claude's own token/cost usage is already live, not something to build. Claude Code's global settings file (updated 2026-09-15 16:02) sets telemetry env vars that apply to every Claude Code session on this machine — interactive, VSCode-extension, dispatched lanes, all of it. The collector (at `we:/Users/nicolasgilbert/.claude/scripts/operations/claude-otel-collector.mjs`, PID 80176 as of writing) is already receiving real data from 100+ session IDs/day into `.operations/claude-otel/<day>.jsonl`. Only numeric token/cost counters cross the wire, never prompt/response content (verified: the collector deliberately refuses to persist the /v1/logs channel that could carry content).
+- Real future-work items, not yet built:
+  1. An aggregation/query layer over the collected data producing an actual role/operation breakdown (main session vs. subagent vs. build/fix/review/etc) — this is the actual missing piece, not the capture itself.
+  2. Known unfixed limitation: per-lane-clone CLAUDE_OTEL_ROOT fragmentation can cause a rollup to silently miss lane-local data — flagged in the collector's own code comments, not yet fixed.
+  3. Accepted-risk note worth carrying forward: the local OTLP receiver has no auth and stores plaintext NDJSON including user-identity attributes — fine for a single-operator machine, but should be revisited if this pattern is ever extended to a shared/multi-operator setup.

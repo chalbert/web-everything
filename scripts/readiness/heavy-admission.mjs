@@ -73,6 +73,31 @@
  * #3383's finding-4 contention failure mode — a burst of requests can still all queue behind a saturated cap
  * for a while. v1 does not claim to solve that; it only bounds concurrency and makes the wait OBSERVABLE (the
  * `waiting` intent markers this module writes, which `tick-core.mjs` surfaces as `waiting-for-capacity` notes).
+ *
+ * A GENERAL-PURPOSE `run` CLI MODE — `node scripts/readiness/heavy-admission.mjs run [--container] -- <cmd…>`
+ * wraps `acquire → run <cmd> → release` in one call ({@link runUnderAdmission}), so any caller can opt into
+ * this SAME semaphore without hand-rolling the acquire/execute/release sequence itself.
+ *
+ * THE CAP WAS, UNTIL NOW, PURELY COOPERATIVE — a counting semaphore with NO resource boundary behind it: it
+ * throttles how many heavy commands run at once, never how many CPU cores or how much memory any one of them
+ * gets, so a single admitted command already misbehaving (the #3594 busy-spin incident that opened
+ * `we:backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl.md`) is fully unconstrained
+ * once it starts. `run`'s `--container` flag (or `WE_HEAVY_ADMISSION_CONTAINER=1`) is the #3621 sequencing
+ * note's heavy-command-pool container POC (tracked as a progress note on `we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md`,
+ * not a separate formal item — see that item's own log for why): it swaps the command's execution from a bare
+ * host `execSync` to `we:scripts/lib/container-exec.mjs#execContainerized`, running it inside a real Apple
+ * `container` instance with an enforced `--cpus`/`--memory` ceiling instead. OPT-IN ONLY — every existing
+ * caller, and `run` without the flag, is byte-identical to before this flag existed. See `container-exec.mjs`'s
+ * own header for exactly what is proven to work this way — `check:standards` (mount-straight-in) and, as of
+ * the `test:unit` slice, ALSO `test:unit` via the separate `--container-node-modules` opt-in below (Playwright
+ * remains unproven).
+ *
+ * `--container-node-modules` (or `WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES=1`) is the `test:unit` slice's own
+ * opt-in, layered ON TOP of `--container` (meaningless without it) — it additionally shadows the container's
+ * `node_modules` with the LINUX-built tree `container-exec/build-test-unit-deps.mjs` seeds into a named volume
+ * (`container-exec.mjs#DEFAULT_NODE_MODULES_VOLUME`), because `test:unit`'s own closure (vitest→esbuild/rollup)
+ * carries native `darwin-arm64` bindings the plain `check:standards`-shaped mount cannot resolve. See
+ * `container-exec.mjs`'s module header ("test:unit slice") for the full mechanism and measured evidence.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -81,6 +106,7 @@ import { pathToFileURL } from 'node:url';
 import { reserve, releaseLockDir, readLockEntry } from './file-locks.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { execContainerized, containerCliAvailable, containerImageAvailable, resolveContainerImage, resolveNodeModulesVolume, nodeModulesVolumeAvailable } from '../lib/container-exec.mjs'; // #3621 sequencing note (tracked on #3383) — the heavy-command-pool container POC; see that module's own header for proven scope (check:standards + test:unit)
 
 /** Conservative default — below measured host capacity, not near-full-utilization (#3456 explicit ruling).
  *  Overridable per machine via `WE_HEAVY_ADMISSION_CAP`. */
@@ -399,6 +425,13 @@ export function admissionStatus({ lockRoot, cap }) {
   return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting };
 }
 
+/** Re-quote a single already-split argv word for a shell command line — a no-op for a plain word,
+ *  single-quoted (embedded `'` escaped the POSIX way) otherwise, so `run`'s command tail round-trips through
+ *  `execSync`'s underlying `/bin/sh -c` re-parse without gluing words containing spaces to their neighbour. */
+export function shellQuoteWord(w) {
+  return /^[A-Za-z0-9_\-.\/:=@%,]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`;
+}
+
 // ── CLI (IO shell) ──────────────────────────────────────────────────────────────────────────────────────
 
 function parseFlags(argv) {
@@ -413,18 +446,9 @@ function parseFlags(argv) {
   return { flags, positionals };
 }
 
-/** Re-quote a single already-split argv word for a shell command line — a no-op for a plain word, single-quoted
- *  (embedded `'` escaped the POSIX way) for anything containing whitespace or shell-meaningful characters. Lets
- *  `run`'s command tail (argv words `execSync`'s underlying `/bin/sh -c` must re-parse) round-trip an argument
- *  that itself contains a space, rather than silently gluing it to its neighbour. */
-export function shellQuoteWord(w) {
-  return /^[A-Za-z0-9_\-.\/:=@%,]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`;
-}
-
 async function main(argv) {
   // `run`'s command tail lives after a literal `--` and must never be parsed as this CLI's OWN flags (a
-  // `--coverage` meant for vitest would otherwise be read as a flag of THIS script). Split there first; only
-  // the pre-`--` slice feeds `parseFlags`. Every other mode has no `--` in its argv, so this is a no-op for them.
+  // `--coverage` meant for the wrapped command would otherwise be read as a flag of THIS script).
   const dashDashIdx = argv.indexOf('--');
   const preArgv = dashDashIdx === -1 ? argv : argv.slice(0, dashDashIdx);
   const { flags, positionals } = parseFlags(preArgv);
@@ -437,17 +461,6 @@ async function main(argv) {
   const asJson = !!flags.json;
   const emit = (obj) => writeAllSync(1, JSON.stringify(obj) + '\n');
   const mode = positionals[0] || 'status';
-
-  if (mode === 'run') {
-    if (dashDashIdx === -1 || dashDashIdx === argv.length - 1) {
-      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--timeout-ms=] -- <command…>\n`);
-      process.exit(3);
-    }
-    const command = argv.slice(dashDashIdx + 1).map(shellQuoteWord).join(' ');
-    const timeoutMs = flags['timeout-ms'] != null ? Number(flags['timeout-ms']) : resolveTimeoutMs(process.env);
-    const { exitCode } = await runUnderAdmission({ lockRoot, cap, owner, lane, num, timeoutMs, command, cwd: repo });
-    process.exit(exitCode);
-  }
 
   if (mode === 'status') {
     if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [] }); return; }
@@ -468,6 +481,52 @@ async function main(argv) {
     if (asJson) emit(r);
     else process.stderr.write(r.ok ? `acquired slot-${r.slot} (waited ${r.waitedMs}ms)\n` : `timed out after ${r.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted\n`);
     process.exit(0); // fail-open: a queuing timeout is not a usage error, the caller proceeds regardless
+  }
+  if (mode === 'run') {
+    if (dashDashIdx === -1 || dashDashIdx === argv.length - 1) {
+      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--timeout-ms=] [--container] [--container-node-modules] -- <command…>\n`);
+      process.exit(3);
+    }
+    const command = argv.slice(dashDashIdx + 1).map(shellQuoteWord).join(' ');
+    const timeoutMs = flags['timeout-ms'] != null ? Number(flags['timeout-ms']) : resolveTimeoutMs(process.env);
+    // #3621 sequencing note (tracked on #3383) — the heavy-command-pool container POC. Opt-in ONLY: a caller
+    // must explicitly ask for real OS-level isolation via `--container` or `WE_HEAVY_ADMISSION_CONTAINER=1`;
+    // every existing caller (and the bare default here) still runs on the host, byte-identical to before this
+    // flag existed. See scripts/lib/container-exec.mjs's own header for exactly what is proven to work this
+    // way (check:standards, and — with `--container-node-modules` below — test:unit).
+    const useContainer = !!flags.container || process.env.WE_HEAVY_ADMISSION_CONTAINER === '1';
+    // The `test:unit` slice's own opt-in — layered ON TOP of `--container` (meaningless without it, checked
+    // below). See this file's own header and container-exec.mjs's "test:unit slice" section for why a plain
+    // `--container` mount alone is not enough for test:unit (native darwin bindings in vitest's own closure).
+    const useNodeModulesVolume = !!flags['container-node-modules'] || process.env.WE_HEAVY_ADMISSION_CONTAINER_NODE_MODULES === '1';
+    if (useContainer) {
+      // Fail with a clear, actionable message rather than a raw ENOENT/"image not found" surfaced from deep
+      // inside execFileSync — a caller that opted into real isolation should get a real reason it isn't
+      // available, not a cryptic subprocess error.
+      if (!containerCliAvailable()) {
+        process.stderr.write(`✗ --container requested but the \`container\` CLI is not available on this host (Apple-Silicon-only tool — #3621's own permanent-portability finding). Install it or omit --container.\n`);
+        process.exit(1);
+      }
+      const image = resolveContainerImage(process.env);
+      if (!containerImageAvailable(image)) {
+        process.stderr.write(`✗ --container requested but image "${image}" is not built. Build it: container build -f scripts/lib/container-exec/Containerfile -t ${image} .\n`);
+        process.exit(1);
+      }
+      if (useNodeModulesVolume) {
+        const volume = resolveNodeModulesVolume(process.env);
+        if (!nodeModulesVolumeAvailable(volume)) {
+          process.stderr.write(`✗ --container-node-modules requested but volume "${volume}" does not exist yet. Build/seed it: node scripts/lib/container-exec/build-test-unit-deps.mjs\n`);
+          process.exit(1);
+        }
+      }
+    } else if (useNodeModulesVolume) {
+      process.stderr.write(`✗ --container-node-modules requires --container (it shadows a mount --container itself creates).\n`);
+      process.exit(1);
+    }
+    const runOpts = { lockRoot, cap, owner, lane, num, timeoutMs, command, cwd: repo };
+    if (useContainer) runOpts.exec = (cmd, o) => execContainerized(cmd, { ...o, nodeModulesVolume: useNodeModulesVolume });
+    const { exitCode } = await runUnderAdmission(runOpts);
+    process.exit(exitCode);
   }
   process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run> [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--timeout-ms=] [-- <command…>]\n`);
   process.exit(3);

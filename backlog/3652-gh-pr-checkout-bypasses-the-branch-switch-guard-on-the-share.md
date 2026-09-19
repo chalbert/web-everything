@@ -6,6 +6,7 @@ status: open
 scope: ["we:.claude/hooks/guard-git-branch.mjs"]
 dateOpened: "2026-09-12"
 tags: []
+deliveryAgent: codex
 ---
 
 # gh pr checkout bypasses the branch-switch guard on the shared primary checkout

@@ -72,6 +72,12 @@ const preparePayload = (over = {}) => ({
   ...over,
 });
 
+/** A stable, non-lane-shaped root for every `createDispatchSinks` call in this file — see the identical
+ *  constant + rationale in `./dispatch-lane-build-wiring.test.mjs` (#3637's 16-test false-failure regression):
+ *  `assertNotALaneCheckout` fires on the checkout's own on-disk BASENAME, which these tests never mean to
+ *  exercise, so a fixed fake root keeps them hermetic to where they happen to be checked out. */
+const PRIMARY = '/primary/webeverything';
+
 /** A `spawnDetached` stub that records the argv + options and answers with a fake child. */
 function recordingSpawnDetached(pid = 7331) {
   const calls = [];
@@ -88,8 +94,10 @@ describe('#3641 — the prepare dispatch is MECHANICAL by default', () => {
   it('a DEFAULT prepare dispatch runs the prepare-scope wrapper and NEVER spawns an agent', async () => {
     // NO `provider` injected and NO env var set — this is the REAL, uninjected default path, which is the only
     // thing that proves the wiring rather than the wrapper's existence. `node:child_process` is mocked at the
-    // module boundary above, so the "real" path still starts nothing.
-    const sinks = createDispatchSinks();
+    // module boundary above, so the "real" path still starts nothing. `root` is still pinned to a fixed,
+    // non-lane-shaped fake path (see `PRIMARY` above) — this is REAL in every other respect, but not in where
+    // it happens to be checked out on disk.
+    const sinks = createDispatchSinks({ root: PRIMARY });
 
     const result = await sinks[DISPATCH_EFFECT](preparePayload());
 
@@ -108,7 +116,7 @@ describe('#3641 — the prepare dispatch is MECHANICAL by default', () => {
   it('`WE_PREPARE_DISPATCH_MODE=agent` restores the pre-#3641 `claude --bg` spawn with the old brief', async () => {
     vi.stubEnv('WE_PREPARE_DISPATCH_MODE', 'agent');
     try {
-      const sinks = createDispatchSinks();
+      const sinks = createDispatchSinks({ root: PRIMARY });
       const result = await sinks[DISPATCH_EFFECT](preparePayload());
       expect(spawned).toEqual([]);
       expect(execFileSyncCalls).toHaveLength(1);

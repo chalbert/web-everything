@@ -60,6 +60,16 @@ const buildPayload = (over = {}) => ({
   ...over,
 });
 
+/** A stable, non-lane-shaped root for every `createDispatchSinks` call in this file. `assertNotALaneCheckout`
+ *  (`../dispatch-lane-io.mjs`) refuses a root whose BASENAME matches `lane-<digits>` — correct for a real
+ *  dispatch, but these tests do not exercise that guard at all, and `createDispatchSinks`'s own default root
+ *  (`REPO_ROOT`) is derived from where THIS FILE happens to be checked out on disk, not from anything the test
+ *  controls. Run from inside an actual lane clone (`.lanes/web-everything/lane-52`, say — the ordinary way an
+ *  agent's own tests run), the unrelated default made every test below throw for a reason that had nothing to
+ *  do with what it asserts (#3637's 16-test false-failure regression). `./dispatch-lane.test.mjs` and
+ *  `./dispatch-kind-axes.test.mjs` already pin the same fixed, fake root for the same reason. */
+const PRIMARY = '/primary/webeverything';
+
 /** A `spawnDetached` stub that records the argv + options and answers with a fake child. */
 function recordingSpawnDetached(pid = 4242) {
   const calls = [];
@@ -75,6 +85,7 @@ describe('#3645 — the build dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached(9001);
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // THE OLD PATH, fully wired and fully able to answer — so a failure here is "it was not called",
       // never "it could not have been called".
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
@@ -104,6 +115,7 @@ describe('#3645 — the build dispatch is MECHANICAL by default', () => {
     const spawnAgentCalls = [];
     const { fn: spawnDetached, calls: detachedCalls } = recordingSpawnDetached();
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       buildMode: 'agent',
       spawnAgent: (argv, opts) => { spawnAgentCalls.push({ argv, opts }); return 'backgrounded · 1ae0905c · x\n'; },
       provider: (request) => routeDispatchProvider(request, {

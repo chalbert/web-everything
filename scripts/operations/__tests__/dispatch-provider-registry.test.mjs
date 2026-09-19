@@ -58,6 +58,12 @@ const buildPayload = (over = {}) => ({
  *  (`we:scripts/operations/ci-heal-dispatch-wrapper.mjs`). `investigate` is the last one left. */
 const UNREGISTERED_KINDS = ['investigate'];
 
+/** A stable, non-lane-shaped root for every `createDispatchSinks` call in this file — see the identical
+ *  constant + rationale in `./dispatch-lane-build-wiring.test.mjs` (#3637's 16-test false-failure regression):
+ *  `assertNotALaneCheckout` fires on the checkout's own on-disk BASENAME, which this test never means to
+ *  exercise, so a fixed fake root keeps it hermetic to where it happens to be checked out. */
+const PRIMARY = '/primary/webeverything';
+
 /** Every registered kind's mode with NOTHING set in the environment — derived from the table rather than
  *  written out, so a landing sibling lane edits the ledger above and nothing else (#3641). */
 const defaultModes = () => Object.fromEntries(
@@ -268,6 +274,7 @@ describe('THE DEFAULT PATH — the registry is LIVE, not merely present', () => 
     });
 
     const sinks = createDispatchSinks({
+      root: PRIMARY,
       // NO `provider` and NO `buildMode` — the sink resolves the mode itself, from an environment with nothing
       // in it, and installs its own router over the table.
       modes: dispatchModesFromEnv({}),
