@@ -176,10 +176,24 @@ export function probeSlotHolderLiveness(pid, selfPid) {
 /**
  * Try each of `cap` slots in order; return the first one `owner` wins (free, already-own, or a stale/dead
  * holder reclaimed) via `file-locks.mjs#reserve`. Non-blocking — one attempt across all slots. Probes the
- * CURRENT holder's PID liveness itself (via {@link probeSlotHolderLiveness}) for a slot it does not already
- * own, so a provably-dead same-machine holder is reclaimed immediately regardless of `leaseMinutes` — a
- * caller-supplied `pidLiveness` is no longer accepted, so this fast path can never be silently skipped by an
- * omitted argument the way `verify-lane.mjs`'s call site originally did.
+ * CURRENT holder's PID liveness itself (via {@link probeSlotHolderLiveness}) for any slot not already won by
+ * OUR OWN process, so a provably-dead same-machine holder is reclaimed immediately regardless of
+ * `leaseMinutes` — a caller-supplied `pidLiveness` is no longer accepted, so this fast path can never be
+ * silently skipped by an omitted argument the way `verify-lane.mjs`'s call site originally did.
+ *
+ * SLOT REENTRANCY IS KEYED BY REAL PROCESS IDENTITY (pid), NOT BY THE OWNER STRING ALONE (#3383 fix). `owner`
+ * here is a LANE PATH — shared by every process that verifies that lane — never a per-process token (unlike
+ * `review-runner.mjs`'s `hostname:pid:kind` or `drain-lock.mjs`'s equivalent). Before this fix, `reserve`'s
+ * "already mine" fast path matched on `owner` alone, so a SECOND, genuinely different process verifying the
+ * SAME lane (e.g. a conveyor auto-verify and a manual re-verify racing the same lane back-to-back — the
+ * exact live incident this fixes) was waved through as "already mine" with just a heartbeat refresh, never
+ * consuming a real second slot — `status` under-counted real concurrent load by exactly this overlap. Passing
+ * `requireOwnProcess: true` to `reserve` (below) makes the fast path additionally require the held entry's
+ * pid to match OUR pid; a same-owner-string, different-pid holder now falls through to the ordinary
+ * pid-liveness/lease-TTL logic — occupied (try the next slot) if that other process is alive, reclaimable if
+ * it is provably dead or its lease has gone stale. The one case this must NOT break — the SAME process
+ * re-acquiring its own already-held slot (a heartbeat refresh from itself) — still fast-paths, because its
+ * own pid trivially matches the entry it already wrote.
  * @returns {{ ok:boolean, slot:number|null, cap:number, heldBy:Array<{slot:number,owner:string}> }}
  */
 export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null, leaseMinutes = ADMISSION_LEASE_MINUTES, meta = null }) {
@@ -187,31 +201,66 @@ export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null
   const selfPid = Number.isInteger(pid) ? pid : process.pid;
   for (let i = 0; i < cap; i++) {
     const current = readLockEntry(lockRoot, slotPath(i));
-    const pidLiveness = current && current.owner !== owner ? probeSlotHolderLiveness(current.pid, selfPid) : 'unknown';
-    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, pid, pidLiveness, leaseMinutes, meta);
+    // Probe liveness whenever a DIFFERENT real process holds the slot — including a same-owner-string
+    // holder (the #3383 case); `probeSlotHolderLiveness` itself no-ops to 'unknown' when `current.pid ===
+    // selfPid` (our own slot), so it is always safe to call unconditionally here.
+    const pidLiveness = current ? probeSlotHolderLiveness(current.pid, selfPid) : 'unknown';
+    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, selfPid, pidLiveness, leaseMinutes, meta, /* requireOwnProcess */ true);
     if (r.ok) return { ok: true, slot: i, cap, heldBy };
     heldBy.push({ slot: i, owner: r.heldBy });
   }
   return { ok: false, slot: null, cap, heldBy };
 }
 
-/** Release whichever slot `owner` holds (idempotent — a no-op if it holds none). Scans rather than remembers
- *  the slot index, so a caller that lost track of which slot it won (e.g. a fresh CLI invocation) can still
- *  release cleanly. */
-export function releaseOwnedSlot({ lockRoot, cap, owner }) {
+/**
+ * Release whichever slot `owner` holds (idempotent — a no-op if it holds none). Scans rather than remembers
+ * the slot index, so a caller that lost track of which slot it won (e.g. a fresh CLI invocation) can still
+ * release cleanly.
+ *
+ * PID-DISAMBIGUATED BY DEFAULT (#3383 fix companion). Since two genuinely different real processes can now
+ * legitimately hold two DIFFERENT slots under the SAME owner string (the lane path), a release must not just
+ * match `owner` — it must release THIS caller's own slot, not a sibling process's. `pid` therefore defaults
+ * to `process.pid`: an in-process caller releasing its own held slot (`runUnderAdmission`'s/`verify-lane.mjs`'s
+ * `finally`) always resolves to itself, no code change needed at those call sites. Pass `pid: null` to opt
+ * INTO the old, looser owner-only match — the deliberate escape hatch for the CLI's manual `release` mode,
+ * where an operator's fresh invocation is by definition a different process than whichever one is stuck.
+ * @param {number|null} [pid]  defaults to `process.pid`; pass `null` for an owner-only manual release.
+ */
+export function releaseOwnedSlot({ lockRoot, cap, owner, pid = process.pid }) {
+  const selfPid = Number.isInteger(pid) ? pid : null;
+  let ownerOnlyFallback = null;
   for (let i = 0; i < cap; i++) {
     const entry = readLockEntry(lockRoot, slotPath(i));
-    if (entry && entry.owner === owner) { releaseLockDir(lockRoot, slotPath(i)); return { released: true, slot: i }; }
+    if (!entry || entry.owner !== owner) continue;
+    if (selfPid !== null && Number.isInteger(entry.pid) && entry.pid === selfPid) {
+      releaseLockDir(lockRoot, slotPath(i));
+      return { released: true, slot: i };
+    }
+    // An owner-matching slot we did not just confirm is ours by pid: keep it as a FALLBACK candidate only
+    // when nothing about it actually contradicts us — either we have no pid of our own to check (the
+    // deliberate `pid: null` manual/operator opt-in) or the entry itself never recorded a pid to compare
+    // against (an untagged/legacy acquisition, or `tryAcquireSlot` called directly with no `pid`, as several
+    // pre-#3383 tests still do). A slot that DOES carry a different real pid is provably a different real
+    // process's slot and must never be picked here — that would just reintroduce this same bug in reverse.
+    const safeFallback = selfPid === null || !Number.isInteger(entry.pid);
+    if (safeFallback && ownerOnlyFallback === null) ownerOnlyFallback = i;
+  }
+  if (ownerOnlyFallback !== null) {
+    releaseLockDir(lockRoot, slotPath(ownerOnlyFallback));
+    return { released: true, slot: ownerOnlyFallback };
   }
   return { released: false, slot: null };
 }
 
-/** Read-only snapshot of every slot's holder, for `status` / observability. */
+/** Read-only snapshot of every slot's holder, for `status` / observability. Includes `pid` (#3383 fix
+ *  companion) so two slots legitimately held under the SAME owner string (two different real processes
+ *  verifying the same lane) are distinguishable in `status` output, not just internally in the reentrancy
+ *  decision. */
 export function heldSlots({ lockRoot, cap }) {
   const held = [];
   for (let i = 0; i < cap; i++) {
     const entry = readLockEntry(lockRoot, slotPath(i));
-    if (entry) held.push({ slot: i, owner: entry.owner, heartbeatAt: entry.heartbeatAt, meta: entry.meta || null });
+    if (entry) held.push({ slot: i, owner: entry.owner, pid: entry.pid, heartbeatAt: entry.heartbeatAt, meta: entry.meta || null });
   }
   return held;
 }
@@ -419,7 +468,9 @@ async function main(argv) {
     return;
   }
   if (mode === 'release') {
-    const r = releaseOwnedSlot({ lockRoot, cap, owner });
+    // Manual/operator release: this CLI invocation is by definition a DIFFERENT process than whichever one
+    // actually holds the slot, so `pid: null` deliberately opts into the owner-only match (#3383 companion).
+    const r = releaseOwnedSlot({ lockRoot, cap, owner, pid: null });
     if (asJson) emit(r); else process.stderr.write(r.released ? `released slot-${r.slot} for ${owner}\n` : `${owner} held no slot\n`);
     return;
   }

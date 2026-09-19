@@ -104,7 +104,13 @@ export function isLeaseExpired(entry, nowMs, leaseMinutes = DEFAULT_LEASE_MINUTE
  * NEW owner may seize the path, and WHY. Pure — the caller owns the probe + the fs seize.
  *
  *   • A path with no entry → free (acquirable).
- *   • Held by `requester` already → it's theirs (re-acquire = heartbeat refresh).
+ *   • Held by `requester` already → it's theirs (re-acquire = heartbeat refresh) — UNLESS the caller passed
+ *     `requesterPid` and the entry's own recorded `pid` names a DIFFERENT real process (see `requesterPid`
+ *     below): for most callers `owner` already uniquely names one process for its whole lifetime (it embeds
+ *     the pid, e.g. `review-runner.mjs`'s `hostname:pid:kind`), so this never fires — but a consumer whose
+ *     `owner` string is shared across genuinely different processes by design (`heavy-admission.mjs`'s
+ *     lane-path-keyed slots, #3383) needs "owner matches" to mean "actually the same acquirer", not just
+ *     "the same string".
  *   • `pidLiveness === 'dead'` → PID FAST PATH: the same-machine owner is provably gone, reclaim
  *     immediately without waiting out the lease. `'dead'` must mean the caller verified the PID is gone
  *     (or, robustly, that a live PID's command line is NOT the owning session — the PID-reuse guard).
@@ -112,11 +118,22 @@ export function isLeaseExpired(entry, nowMs, leaseMinutes = DEFAULT_LEASE_MINUTE
  *     is `'alive'`/`'unknown'`, e.g. PID reused or owner on another host).
  *   • else → BLOCKED: a live owner holds it; the requester must wait or defer.
  *
+ * @param {number|null} [requesterPid]  the CALLER's own real pid, opt-in (default `null` ⇒ exactly the prior
+ *   owner-string-only "own" check, so every existing caller that never passes this is byte-for-byte
+ *   unaffected). When supplied AND the held entry recorded an integer `pid` that differs from it, an
+ *   owner-string match is NOT enough to call this "own" — it falls through to the pid-liveness/lease-TTL
+ *   checks below, exactly like a foreign owner (#3383: two real processes must never share one "own" slot
+ *   just because they pass the same owner string).
  * @returns {{ acquirable: boolean, reason: 'free'|'own'|'pid-dead'|'lease-expired'|'held', heldBy: string|null }}
  */
-export function reclaimDecision(entry, nowMs, requester, pidLiveness = 'unknown', leaseMinutes = DEFAULT_LEASE_MINUTES) {
+export function reclaimDecision(entry, nowMs, requester, pidLiveness = 'unknown', leaseMinutes = DEFAULT_LEASE_MINUTES, requesterPid = null) {
   if (!entry) return { acquirable: true, reason: 'free', heldBy: null };
-  if (entry.owner === requester) return { acquirable: true, reason: 'own', heldBy: entry.owner };
+  if (entry.owner === requester) {
+    const differentRealProcess = Number.isInteger(requesterPid) && Number.isInteger(entry.pid) && entry.pid !== requesterPid;
+    if (!differentRealProcess) return { acquirable: true, reason: 'own', heldBy: entry.owner };
+    // Same owner STRING, but a provably different real process holds it — treat exactly like a foreign
+    // owner from here down (pid-liveness fast path, then the lease-TTL floor, then BLOCKED).
+  }
   if (pidLiveness === 'dead') return { acquirable: true, reason: 'pid-dead', heldBy: entry.owner };
   if (isLeaseExpired(entry, nowMs, leaseMinutes)) return { acquirable: true, reason: 'lease-expired', heldBy: entry.owner };
   return { acquirable: false, reason: 'held', heldBy: entry.owner };
@@ -232,13 +249,19 @@ export function releaseLockDir(lockRoot, path) {
  * (release + re-acquire) when {@link reclaimDecision} says so, else report it BLOCKED. Returns the
  * outcome the lane acts on. `pidLiveness` defaults to `'unknown'` (TTL-only reclaim) unless the caller
  * probed same-machine liveness.
+ * @param {boolean} [requireOwnProcess]  opt-in (default `false`, so every EXISTING caller is unaffected):
+ *   when `true`, the "already mine" reentrancy fast path additionally requires the held entry's `pid` to
+ *   match THIS call's own `pid` — see {@link reclaimDecision}'s `requesterPid`. Set this only where `owner`
+ *   is knowingly shared across genuinely different real processes (`heavy-admission.mjs`'s lane-path-keyed
+ *   slots, #3383); every other consumer's `owner` already uniquely names one process (it embeds the pid),
+ *   so this flag would be a no-op for them — left `false` there to keep the change strictly additive.
  * @returns {{ ok: boolean, reason: string, heldBy: string|null }}
  */
-export function reserve(lockRoot, path, owner, nowMs, nowIso, pid = null, pidLiveness = 'unknown', leaseMinutes = DEFAULT_LEASE_MINUTES, meta = null) {
+export function reserve(lockRoot, path, owner, nowMs, nowIso, pid = null, pidLiveness = 'unknown', leaseMinutes = DEFAULT_LEASE_MINUTES, meta = null, requireOwnProcess = false) {
   const entry = makeLockEntry(owner, path, nowIso, pid, meta);
   if (acquireLockDir(lockRoot, path, entry)) return { ok: true, reason: 'free', heldBy: owner };
   const current = readLockEntry(lockRoot, path);
-  const d = reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes);
+  const d = reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes, requireOwnProcess ? pid : null);
   if (!d.acquirable) return { ok: false, reason: d.reason, heldBy: d.heldBy };
   if (d.reason === 'own') { heartbeat(lockRoot, path, owner, nowIso, pid, meta); return { ok: true, reason: 'own', heldBy: owner }; }
   // reclaim a stale/dead owner: drop its dir then re-win atomically (another reclaimer may race — EEXIST
