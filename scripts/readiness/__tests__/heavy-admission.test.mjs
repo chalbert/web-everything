@@ -118,6 +118,99 @@ describe('tryAcquireSlot / releaseOwnedSlot / heldSlots — cap independent slot
     expect(releaseOwnedSlot({ lockRoot, cap: 2, owner: 'nobody' })).toEqual({ released: false, slot: null });
   });
 
+  describe('#3383 live incident — slot reentrancy is keyed by REAL PROCESS IDENTITY, not the owner string alone', () => {
+    // `owner` here is a LANE PATH (matches verify-lane.mjs's real call site: `owner: REPO`) — deliberately the
+    // SAME string for two genuinely different real processes verifying the same lane back-to-back (a conveyor
+    // auto-verify racing a manual re-verify, the confirmed live incident). `process.ppid` stands in for the
+    // second process's pid — a real, distinct, verifiably-alive pid (the same trick this file's own
+    // `probeSlotHolderLiveness` tests already use), so the liveness probe genuinely reports 'alive', not
+    // 'dead' — proving this is NOT just the already-covered dead-pid-reclaim path.
+    const SAME_LANE_PATH = '/Users/x/workspace/.lanes/web-everything/lane-34';
+
+    it('omitting pid records the real process identity, including on same-owner re-acquisition', () => {
+      const cap = 2;
+      const first = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0) });
+      expect(first.ok).toBe(true);
+      expect(heldSlots({ lockRoot, cap })[0].pid).toBe(process.pid);
+      const again = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0 + 1000, nowIso: iso(T0 + 1000) });
+      expect(again.ok).toBe(true);
+      expect(again.slot).toBe(first.slot); // both omitted-pid calls belong to THIS real process
+      const held = heldSlots({ lockRoot, cap });
+      expect(held).toHaveLength(1);
+      expect(held[0].pid).toBe(process.pid);
+    });
+
+    it('BEFORE this fix, two different alive processes under the same owner string would have shared one slot — now the second genuinely different process takes a real SECOND slot', () => {
+      const cap = 2;
+      const a = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.pid });
+      const b = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0 + 1000, nowIso: iso(T0 + 1000), pid: process.ppid });
+      expect(a.ok).toBe(true);
+      expect(b.ok).toBe(true);
+      expect(b.slot).not.toBe(a.slot); // a REAL second slot, never the "already mine" fast path
+      expect(heldSlots({ lockRoot, cap })).toHaveLength(2); // status now correctly counts BOTH real holders
+    });
+
+    it('a genuinely different, still-alive process under the same owner string is BLOCKED (not reclaimed) once the cap is exhausted', () => {
+      const cap = 1;
+      tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.pid });
+      const soonAfter = T0 + 1000; // well within the lease — must be BLOCKED, not fast-pathed or reclaimed
+      const r = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: soonAfter, nowIso: iso(soonAfter), pid: process.ppid });
+      expect(r.ok).toBe(false);
+      expect(heldSlots({ lockRoot, cap })).toHaveLength(1);
+    });
+
+    it('the SAME process re-acquiring its own already-held slot under this owner string still fast-paths as "own" (heartbeat refresh) — the legitimate case this fix must not break', () => {
+      const cap = 1;
+      const first = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.pid });
+      const again = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0 + 1000, nowIso: iso(T0 + 1000), pid: process.pid });
+      expect(again.ok).toBe(true);
+      expect(again.slot).toBe(first.slot);
+      expect(heldSlots({ lockRoot, cap })).toHaveLength(1); // still just one real holder
+    });
+
+    it('a same-owner-string holder that is provably DEAD is still reclaimed immediately (the PID fast path survives this fix)', () => {
+      const cap = 1;
+      const deadPid = 999999; // kill(pid,0) throws ESRCH — cannot exist
+      tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: deadPid });
+      const soonAfter = T0 + 1000;
+      const r = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: soonAfter, nowIso: iso(soonAfter), pid: process.pid });
+      expect(r.ok).toBe(true);
+      expect(heldSlots({ lockRoot, cap })[0].pid).toBe(process.pid);
+    });
+
+    it('releaseOwnedSlot releases the CALLING process\'s own slot, never a sibling process\'s slot held under the same owner string', () => {
+      const cap = 2;
+      const a = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.pid });
+      const b = tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0 + 1000, nowIso: iso(T0 + 1000), pid: process.ppid });
+      // Process A releases (as itself) — must free ITS OWN slot, not B's.
+      const rel = releaseOwnedSlot({ lockRoot, cap, owner: SAME_LANE_PATH, pid: process.pid });
+      expect(rel).toEqual({ released: true, slot: a.slot });
+      const held = heldSlots({ lockRoot, cap });
+      expect(held).toHaveLength(1);
+      expect(held[0].pid).toBe(process.ppid); // B's slot is untouched
+      void b;
+    });
+
+    it('releaseOwnedSlot never grabs a DIFFERENT real pid\'s slot as a fallback — a pid that matches nothing releases nothing', () => {
+      const cap = 1;
+      tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.ppid }); // B's real slot
+      // A THIRD, different real pid (our own) tries to release "its" slot — it holds none; must be a no-op,
+      // never mistakenly free B's still-live slot.
+      const rel = releaseOwnedSlot({ lockRoot, cap, owner: SAME_LANE_PATH, pid: process.pid });
+      expect(rel).toEqual({ released: false, slot: null });
+      expect(heldSlots({ lockRoot, cap })).toHaveLength(1); // B's slot is untouched
+    });
+
+    it('releaseOwnedSlot with pid:null (the CLI\'s manual/operator escape hatch) keeps the old owner-only match — releases the FIRST owner-matching slot regardless of pid', () => {
+      const cap = 2;
+      tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0, nowIso: iso(T0), pid: process.pid });
+      tryAcquireSlot({ lockRoot, cap, owner: SAME_LANE_PATH, nowMs: T0 + 1000, nowIso: iso(T0 + 1000), pid: process.ppid });
+      const rel = releaseOwnedSlot({ lockRoot, cap, owner: SAME_LANE_PATH, pid: null });
+      expect(rel.released).toBe(true); // some owner-matching slot was freed — the deliberate loose fallback
+      expect(heldSlots({ lockRoot, cap })).toHaveLength(1);
+    });
+  });
+
   it('slotPath is stable and distinct per index', () => {
     expect(slotPath(0)).toBe('slot-0');
     expect(slotPath(1)).not.toBe(slotPath(0));

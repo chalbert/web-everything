@@ -84,127 +84,33 @@ import {
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import {
+  CODEX_EFFORT_MAP, CODEX_MODEL, CODEX_TIER_EFFORT, assertCodexModel, resolveCodexEffort,
+} from './lib/codex-model-routing.mjs';
+
 // ── constants ─────────────────────────────────────────────────────────────────────────────────────
 export const CODEX_CLI = 'codex';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — an open-ended coding task, not a quick judge call.
 
 /**
- * The `model_reasoning_effort` levels this file accepts, and what each sends to Codex. **IDENTITY, not a
- * clamp** — every key below is a real level the pinned `CODEX_MODEL` actually offers, so an explicitly
- * requested level is sent through unchanged.
+ * #x8wbivt (`#3635`)'s ratified routing constants are RE-EXPORTED here, not defined here.
  *
- * This previously copied `codex-judge-spawn.mjs#CODEX_EFFORT_MAP`'s clamp-down (`xhigh`/`max` → `high`, no
- * `ultra` at all), which assumed Codex stopped at `high`. `#x8wbivt`'s own catalogue table refutes that, and
- * the assumption was re-checked against the CLI's server-fetched catalogue (`~/.codex/models_cache.json`,
- * `client_version 0.153.4`): `gpt-6-astra`'s `supported_reasoning_levels` are
- * `low·medium·high·xhigh·max·ultra`. Confirmed by EXECUTION, not just by catalogue — a live
- * `codex exec -m gpt-6-astra -c model_reasoning_effort=<level>` ping for each of `xhigh`, `max` and `ultra`
- * completed normally (`turn.completed`), so none of the three is a 400 the clamp was protecting against.
- * Clamping them was therefore silently DOWNGRADING a caller's explicit choice and recording nothing — the
- * exact failure mode `CODEX_MODEL`'s "never inherit, never implicit" ratification exists to close.
+ * They used to be defined in this file, because when #3635 landed this was the only Codex CLI call site on
+ * `main` — its own implementation note says exactly that, and flags the other two sites (the judge seat and
+ * the delivery provider, both on unmerged branches then) as a follow-up that must import these same names
+ * "rather than keeping its own separate `CODEX_EFFORT_MAP` copy". That follow-up is now done: the constants
+ * live in `we:scripts/lib/codex-model-routing.mjs`, the one place a re-ratification has to touch.
  *
- * PER-MODEL CAVEAT: the level set is a property of the MODEL, not of Codex. The pinned `CODEX_MODEL` offers
- * all six; a caller who overrides `model` may name one the catalogue does not list for it (e.g. `gpt-5.5`
- * offers only `low·medium·high·xhigh`), and Codex answers that with its own error. This map validates the
- * vocabulary, not the entitlement. RE-DERIVE on a Codex CLI upgrade or a `CODEX_MODEL` change.
+ * The re-export is deliberate and permanent, not a shim. `CODEX_MODEL`, `CODEX_EFFORT_MAP`,
+ * `CODEX_TIER_EFFORT` and `resolveCodexEffort` are part of THIS module's published surface (its tests and
+ * `we:skills-src/use-codex/SKILL.md` both name them), so they keep resolving from here unchanged.
  */
-export const CODEX_EFFORT_MAP = Object.freeze({
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max',
-  ultra: 'ultra',
-});
-
-/**
- * #x8wbivt — RATIFIED 2026-09-11 (operator, Nicolas Gilbert). The Codex model pin: every real `codex exec`
- * invocation in this file names its model explicitly via `-m`, never relying on the CLI's own implicit
- * default — measured live as resolving to this same model today (`codex doctor`'s un-pinned `model
- * <default>`), but an implicit default is a choice nobody records and the server-fetched catalogue can
- * re-rank without a release. `gpt-6-astra` was chosen on measured evidence (backlog `#x8wbivt`, 89 logged
- * `codex exec` runs across 8 selectable models): top score on every probe (8/8 on the quick-lookup probe,
- * correct on both judgment probes), lowest reasoning-token burn among the perfect scorers, and it shares its
- * weekly quota bucket with the operator's own interactive Codex use (so routing here does not silently drain
- * a SEPARATE, faster-draining bucket the way the "cheap" `gpt-5.3-codex-spark` model measurably does — see
- * the card's quota-bucket table). RE-DERIVE if a future probe run finds a real capability split, or if this
- * model is retired from the entitled catalogue.
- */
-export const CODEX_MODEL = 'gpt-6-astra';
-
-/**
- * #x8wbivt — RATIFIED 2026-09-11. The Claude-side three-rung ladder (`agent-memory-src/
- * always-set-subagent-model-explicitly.md` — Haiku/Sonnet/Opus, routing on the *shape* of the work) is KEPT as
- * a routing vocabulary on the Codex side too, but it no longer selects a MODEL: the card's own measurement
- * (three of four probes scored identically across six of seven current-generation models; the one real
- * separation found was by model *generation*, not marketing tier) refuses a model-based ladder twice over.
- *
- * WHAT THE EFFORT EVIDENCE ACTUALLY SAYS — all three rows of the card's "Effort moved correctness where the
- * model did not" table, not just the flattering one (n=4 per raised-effort cell, one probe shape, one repo):
- *   - `gpt-5.5` default (`medium`) 4/8 → `high` **4/4** — a real rescue, on a previous-generation model.
- *   - `gpt-5.3-codex-spark` default 7/8 → `high` **3/4** — MORE effort scored WORSE. Effort is not monotonic.
- *   - `gpt-6-astra` default (`medium`) 8/8 → `low` **4/4** — on the model this file actually pins, the ladder
- *     is a NO-OP on this probe: the cheap rung scored the same as the default one.
- * So the honest claim is NOT "effort buys correctness". It is: effort is the only axis on which ANY movement
- * was observed at all, the movement was mixed in direction, and on the pinned model nothing moved. The ladder
- * below is therefore kept because it makes the routing choice EXPLICIT AND RECORDED (the Fork-1 principle
- * applied to the second axis) and preserves the rung vocabulary for when real evidence exists — NOT because
- * `high` is measurably better than `low` here. Treat the rungs as a cost/latency dial with an unproven
- * correctness effect, and do NOT cite the 4/8→4/4 row on its own as justification.
- *
- * Mapped onto Codex's own `model_reasoning_effort` values (confirmed real via a live
- * `codex exec -c model_reasoning_effort=<level>` run, not guessed from Claude's low/medium/high naming):
- * `haiku` (a pointer verifiable in seconds) gets the cheapest real effort Codex offers; `sonnet` (execution
- * against a decided spec) gets Codex's own measured *default* (`medium` — unchanged from today's un-pinned
- * behaviour, just made explicit rather than inherited); `opus` (judgment work) gets `high`, the level whose
- * only measured rescue was on a weaker model than the one pinned here. Note the rungs deliberately stop at
- * `high` and do not reach `xhigh`/`max`/`ultra` (all three real and reachable via an explicit `effort` —
- * see `CODEX_EFFORT_MAP`): no probe exercised them, so mapping a rung onto one would invent evidence.
- * RE-DERIVE if a harder probe finds a task shape effort does not rescue — or one where raising it hurts again.
- */
-export const CODEX_TIER_EFFORT = Object.freeze({
-  haiku: 'low',
-  sonnet: 'medium',
-  opus: 'high',
-});
-
-/**
- * Resolve the real `model_reasoning_effort` value a caller's `tier` (`CODEX_TIER_EFFORT`'s keys) or an
- * explicit `effort` should use — an explicit `effort` always wins (a caller who names a level exactly is more
- * specific than one naming a role), `tier` resolves through the ratified map above, and naming NEITHER pins
- * the `sonnet` rung's `medium` rather than leaving the CLI to infer its own default — the same "never
- * implicit" principle `CODEX_MODEL` applies to model, applied here to effort. PURE.
- * Both inputs are VALIDATED and throw a `TypeError` on an unknown value — `effort` symmetrically with `tier`
- * (it previously passed through unchecked, so a typo only surfaced later, inside `buildCodexDirectTaskArgv`,
- * or not at all for a caller using this function on its own).
- *
- * @param {object} [opts]
- * @param {'haiku'|'sonnet'|'opus'} [opts.tier] - a `CODEX_TIER_EFFORT` key. Throws on anything else.
- * @param {string} [opts.effort] - a `CODEX_EFFORT_MAP` key. Throws on anything else.
- * @returns {'low'|'medium'|'high'|'xhigh'|'max'|'ultra'} a real Codex `model_reasoning_effort` level — always
- *   a `CODEX_EFFORT_MAP` key, which is exactly what `buildCodexDirectTaskArgv` accepts as its `effort`. An
- *   explicit `effort` is returned as given (the map is an identity, so "as given" and "mapped" coincide); a
- *   `tier` returns that rung's `CODEX_TIER_EFFORT` value, which is a subset (`low`/`medium`/`high` only).
- * @throws {TypeError} on an unknown `tier` or an unknown `effort`.
- */
-export function resolveCodexEffort({ tier, effort } = {}) {
-  if (effort !== undefined) {
-    if (!Object.hasOwn(CODEX_EFFORT_MAP, effort)) {
-      throw new TypeError(`codex-direct-task: \`effort\` must be one of ${Object.keys(CODEX_EFFORT_MAP).join('|')}, got ${JSON.stringify(effort)}`);
-    }
-    return effort;
-  }
-  if (tier !== undefined) {
-    // `Object.hasOwn`, not a truthiness test on the lookup: a bare object literal still inherits
-    // `constructor`/`toString`, so `CODEX_TIER_EFFORT['constructor']` is truthy and would sail through.
-    const mapped = Object.hasOwn(CODEX_TIER_EFFORT, tier) ? CODEX_TIER_EFFORT[tier] : undefined;
-    if (!mapped) {
-      throw new TypeError(`codex-direct-task: \`tier\` must be one of ${Object.keys(CODEX_TIER_EFFORT).join('|')}, got ${JSON.stringify(tier)}`);
-    }
-    return mapped;
-  }
-  return CODEX_TIER_EFFORT.sonnet;
-}
+export {
+  CODEX_EFFORT_MAP,
+  CODEX_MODEL,
+  CODEX_TIER_EFFORT,
+  resolveCodexEffort,
+} from './lib/codex-model-routing.mjs';
 
 // ── pure: argv / prompt construction ─────────────────────────────────────────────────────────────
 
@@ -258,12 +164,13 @@ export function buildCodexDirectTaskArgv({
     }
     argv.push('--add-dir', dir);
   }
-  if (model !== undefined) {
-    if (typeof model !== 'string' || !model.trim() || model.trim().startsWith('-')) {
-      throw new TypeError(`codex-direct-task: \`model\` must be a plain non-empty string, got ${JSON.stringify(model)}`);
-    }
-    argv.push('-m', model.trim());
-  }
+  // #3635 Fork 1 — UNCONDITIONAL. This previously read `if (model !== undefined) { … }`, which was already
+  // DEAD (the `model = CODEX_MODEL` parameter default means `model` is never `undefined` here, so the branch
+  // always ran) — but it read as a guard, and a later edit that dropped the parameter default would have
+  // turned a dead branch into the exact silent-inheritance hole `codex-judge-spawn.mjs` actually shipped.
+  // Validation now goes through the one shared `assertCodexModel`, so all three call sites agree on what a
+  // usable model name is.
+  argv.push('-m', assertCodexModel(model, 'codex-direct-task'));
   if (effort !== undefined) {
     const mapped = Object.hasOwn(CODEX_EFFORT_MAP, effort) ? CODEX_EFFORT_MAP[effort] : undefined;
     if (!mapped) {
