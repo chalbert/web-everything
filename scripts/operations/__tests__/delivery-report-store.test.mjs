@@ -14,6 +14,7 @@ import {
   listDeliveryReportSessions,
   newDeliveryReport,
   readDeliveryReport,
+  resolveDeliveryReportsDir,
   tryReadDeliveryReport,
   writeDeliveryReport,
 } from '../delivery-report-store.mjs';
@@ -29,6 +30,27 @@ afterEach(() => {
   if (previousDir === undefined) delete process.env.OPERATION_DELIVERY_REPORTS_DIR;
   else process.env.OPERATION_DELIVERY_REPORTS_DIR = previousDir;
   rmSync(dir, { recursive: true, force: true });
+});
+
+// #3627 bug 9 (live #3371 attempt 4, confirmed 2026-09-09) — `resolveDeliveryReportsDir` is the ONE seam
+// `deliver-item-wrapper.mjs#CLAUDE_RESTRICTED_PROVIDER.spawn` relies on to make the wrapper's own process and
+// the delivery agent it spawns (a SEPARATE `git clone`, whose own copy of this file has a DIFFERENT
+// script-location-relative default) agree on the same sidecar directory. This directly asserts the env
+// override wins, and wins with an absolute, resolved path — the exact contract the wrapper's fix depends on.
+describe('resolveDeliveryReportsDir (#3627 bug 9 — the env override the wrapper depends on)', () => {
+  it('returns the env override, resolved to an absolute path, when OPERATION_DELIVERY_REPORTS_DIR is set', () => {
+    expect(resolveDeliveryReportsDir()).toBe(dir); // `dir` (from beforeEach) is already absolute (mkdtempSync).
+  });
+
+  it('falls back to the script-location-relative default when the env override is unset', () => {
+    delete process.env.OPERATION_DELIVERY_REPORTS_DIR;
+    expect(resolveDeliveryReportsDir()).toMatch(/[/\\]\.operations[/\\]delivery-reports$/);
+  });
+
+  it('ignores a blank/whitespace-only override and falls back to the default, same as unset', () => {
+    process.env.OPERATION_DELIVERY_REPORTS_DIR = '   ';
+    expect(resolveDeliveryReportsDir()).toMatch(/[/\\]\.operations[/\\]delivery-reports$/);
+  });
 });
 
 describe('tryReadDeliveryReport', () => {
