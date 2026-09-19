@@ -70,6 +70,18 @@ function toolBearingOp({ model = 'sonnet' } = {}) {
 /** A juror-less declaration — every step `compute`, so the juror flags mean nothing and must be refused. */
 const jurorLessOp = op('juror-less', { input: {}, only: compute({ fn: () => ({ ok: true }) }) });
 
+/** #xqa9ttq — a TOOL-FREE judge declaration: `--provider=codex` is refused for a tool-bearing one (#3581's
+ *  tool-free-only sequencing), so the `--provider` WIRING tests below (which are about the FLAG reaching the
+ *  factory, not about that refusal) use this instead of `toolBearingOp()`. */
+const toolFreeOp = op('tool-free', {
+  input: {},
+  verdictFrom: 'ask',
+  ask: judge({
+    reads: [],
+    request: () => ({ mandate: 'judge it', input: 'the subject', shape: { type: 'object' } }),
+  }),
+});
+
 /** Drive a declaration, recording what the spawn was handed. The REAL `assertLaneCwd` runs inside it. */
 async function driveWithSpawnSpy({ declaration, argv, laneEnv = undefined }) {
   const registry = createRegistry();
@@ -287,6 +299,105 @@ describe('#3151 `--model` overrides the declared juror model without reopening #
     const judgeFn = createDefaultJudge({ provider: async () => ({ value: {} }), model: '--bare' });
     await expect(judgeFn({ mandate: 'm', shape: {}, model: 'sonnet', effort: 'high', budget: 1 }))
       .rejects.toThrow(/refusing to spawn a juror with `model`/);
+  });
+});
+
+// ── #xqa9ttq — `--provider` FOLLOWS THE SAME PARSE/FACTORY SHAPE `--cwd`/`--model` ESTABLISHED (#3151),
+// extended by ONE MORE juror flag. Unlike `--cwd`/`--model`, it is a CLOSED ENUM (`JUDGE_PROVIDER_NAMES`),
+// refused at the parse seam rather than left to fail downstream — see `parseOperationArgv`'s own comment on
+// why (a command-line typo should name the flag it typo'd, not surface inside `createDefaultJudge`).
+describe('#xqa9ttq `--provider` — opt-in JudgeProvider selection, additive over `--cwd`/`--model`', () => {
+  it('is refused for a juror-less declaration, exactly like `--cwd`/`--model`', () => {
+    const parsed = parseOperationArgv(jurorLessOp, ['--provider=codex']);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.errors.join('\n')).toContain('--provider needs a `judge` step');
+    expect(parsed.errors.join('\n')).toContain('there is no juror to pick an implementation for');
+  });
+
+  it('is listed in the unknown-flag message for a tool-bearing declaration', () => {
+    const text = parseOperationArgv(toolBearingOp(), ['--nope=1']).errors.join('\n');
+    expect(text).toContain('--provider');
+  });
+
+  it('accepts exactly the two named providers, and refuses anything else at the parse seam', () => {
+    expect(parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=claude']).ok).toBe(true);
+    expect(parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=codex']).ok).toBe(true);
+    const bad = parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=gemini']);
+    expect(bad.ok).toBe(false);
+    expect(bad.errors.join('\n')).toMatch(/--provider must be one of claude\|codex/);
+  });
+
+  it('refuses a `--provider` given twice', () => {
+    const parsed = parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=claude', '--provider=codex']);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.errors.join('\n')).toContain('--provider was given more than once');
+  });
+
+  it('reaches `createCliJudgeFactory`\'s factory as `providerName`, exactly like `--cwd`/`--model` reach `cwd`/`model`', async () => {
+    // TOOL-FREE declaration — `--provider=codex` combined with a TOOL-BEARING one is a separate, deliberate
+    // refusal (#3581), covered in `judge-provider-selection.test.mjs`; this test is only about the flag
+    // reaching the factory.
+    const seenOpts = [];
+    const registry = createRegistry();
+    registry.register(toolFreeOp);
+    await runOperationCli({
+      declaration: toolFreeOp,
+      registry,
+      store: createMemoryRunStore(),
+      sinks: {},
+      makeJudge: createCliJudgeFactory({
+        env: {},
+        factory: (opts) => { seenOpts.push(opts); return createDefaultJudge({ ...opts, provider: async () => ({ value: {} }) }); },
+      }),
+      argv: ['--provider=codex'],
+      newRunId: () => 'run-provider-flag',
+    });
+    expect(seenOpts).toHaveLength(1);
+    expect(seenOpts[0].providerName).toBe('codex');
+  });
+
+  it('defaults `providerName` to \'claude\' when the flag is omitted and no env fallback is set', async () => {
+    const seenOpts = [];
+    const registry = createRegistry();
+    registry.register(toolFreeOp);
+    await runOperationCli({
+      declaration: toolFreeOp,
+      registry,
+      store: createMemoryRunStore(),
+      sinks: {},
+      makeJudge: createCliJudgeFactory({
+        env: {},
+        factory: (opts) => { seenOpts.push(opts); return createDefaultJudge({ ...opts, provider: async () => ({ value: {} }) }); },
+      }),
+      argv: [],
+      newRunId: () => 'run-provider-default',
+    });
+    expect(seenOpts[0].providerName).toBe('claude');
+  });
+
+  it('falls back to JUDGE_PROVIDER when the flag is omitted, and the FLAG WINS when both are set', async () => {
+    const seenOpts = [];
+    const registry = createRegistry();
+    registry.register(toolFreeOp);
+    const run = async (argv) => {
+      seenOpts.length = 0;
+      await runOperationCli({
+        declaration: toolFreeOp,
+        registry,
+        store: createMemoryRunStore(),
+        sinks: {},
+        makeJudge: createCliJudgeFactory({
+          env: { JUDGE_PROVIDER: 'codex' },
+          factory: (opts) => { seenOpts.push(opts); return createDefaultJudge({ ...opts, provider: async () => ({ value: {} }) }); },
+        }),
+        argv,
+        newRunId: () => 'run-provider-env',
+      });
+    };
+    await run([]);
+    expect(seenOpts[0].providerName).toBe('codex'); // env fallback, flag omitted
+    await run(['--provider=claude']);
+    expect(seenOpts[0].providerName).toBe('claude'); // explicit flag wins over the env var
   });
 });
 
