@@ -323,3 +323,54 @@ and persists the runner's bounded diagnostic verbose window, even if liveness re
 The prepare trace records `dispatch-paused` before its other gates so an unscoped item's build
 `scope` hold does not mask the pause. Whole-queue shaping errors appear on the affected entry as
 `error` with `eligible: false`; single-item invariant failures retain the CLI error contract.
+
+## Claude subagent usage
+
+`node scripts/operations/agent-usage-report.mjs --session=<id>` extracts usage automatically from
+Claude's persisted parent and child transcripts. Omit `--session` to use `CLAUDE_CODE_SESSION_ID`
+with the cwd project slug; `--transcript=<parent.jsonl>` is the unambiguous cross-project form.
+Run ingestion after the children finish: records are append-only snapshots, and a later scan of the
+same agent does not update an earlier snapshot. This CLI does not install a scheduler or Claude hook.
+It is suitable for a serialized session-end job; overlapping writers are not supported.
+
+The script streams **every line** of each child, reusing `inspect-agent-health/agent-health.mjs`'s
+project root, decorated-id handling and transcript resolver. `CLAUDE_PROJECTS_DIR` overrides that
+root (set before module import). Sidecar `toolUseId` and parent `tool_result.tool_use_id` link the
+actual `Agent` dispatch; structured `toolUseResult.agentId` or textual `agentId:` supplies the child
+when the sidecar is absent. Task text prefers the sidecar's exact description, then dispatch description,
+then prompt. Missing children and malformed transcript rows are counted explicitly.
+
+The local sidecar is `.operations/agent-usage/<day>.jsonl`, covered by the existing `.operations/`
+gitignore rule. Like `call-log-store.mjs`, its default root is the **script's checkout**, never cwd.
+Separate physical lane clones therefore have separate defaults; set `OPERATION_AGENT_USAGE_DIR` to
+one absolute directory to aggregate across them. Each timestamp day's `agentId` is the dedupe key;
+no historical directory scan occurs on append. The first physical transcript line supplies the timestamp,
+otherwise mtime does. For mtime-only transcripts, ingest after they stop changing so the day stays stable.
+
+Records retain `task`, `modelTier`, `delegatedProvider`, `delegatedModel`, every `delegations` occurrence,
+nullable `outcome`, `timestamp`/`timestampSource`, `agentId`, `sessionId`, transcript paths and `toolUseId`.
+A single Claude model/provider is a string; multiple distinct models/providers are arrays so mixed runs
+are not silently assigned to their last provider. `delegatedModel` is a `{command, model}` object, an
+array for repeated invocations, or null for none. `delegations` additionally records the provider and
+whether its model was explicit, the current script default, or unspecified. Codex's default comes from
+its real exported `CODEX_MODEL`. Gemini's wrapper has **no pinned default**: it delegates model selection
+to agy, so absent flags yield null, not a guessed model. The current Codex pin is a fallback inference,
+not proof of the pin a historical checkout used.
+
+Only assistant `Bash` tool uses executing the named direct-task script count as delegation. The
+conservative shell classifier understands literal script paths, node, common wrappers, shell `-c`,
+quotes, comments, separators and heredocs. It does not evaluate shell variables, aliases or dynamically
+generated commands. This counts recorded invocations, not proof that the external provider succeeded.
+PR outcomes retain nearby text evidence for a created/opened/merged/rejected/closed PR or a bare PR URL;
+these are best-effort transcript observations, not independently verified GitHub state or attribution.
+
+`node scripts/operations/agent-usage-report.mjs --report --days=7` prints dispatch counts by exact
+Claude model string, delegated provider and day. `--since=YYYY-MM-DD` is inclusive; `--days=N` includes
+today in UTC. `--json` works in both scan and report modes. Each distinct model/provider observed in a
+mixed dispatch receives one count, so category sums can exceed total dispatches. Missing models count
+as `unknown`. Corrupt store rows are skipped and counted; scans also report corruption encountered in
+target day files. Keep this unscored operational log separate from the committed delegation trial scorecard.
+
+Tests under `scripts/operations/__tests__/agent-usage-report.test.mjs` create temporary project trees and
+redirect the store. They exercise missing sidecars/children, full reads beyond the health helper's tail
+budget, shell false positives, model changes, day rotation, reruns, corrupt rows and the actual CLI.

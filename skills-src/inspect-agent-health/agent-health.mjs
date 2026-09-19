@@ -59,7 +59,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+export const PROJECTS_DIR = process.env.CLAUDE_PROJECTS_DIR?.trim()
+  ? path.resolve(process.env.CLAUDE_PROJECTS_DIR.trim())
+  : path.join(os.homedir(), '.claude', 'projects');
 
 // Hard ceilings — NOT just defaults. A caller-supplied override (--max-bytes/--lines/--field-max) is
 // floor-clamped for sanity but must never be able to defeat the "never the whole file" guarantee this
