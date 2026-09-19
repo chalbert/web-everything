@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync,
+  mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync, copyFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -2156,18 +2156,63 @@ describe('the write arc and its #2964 ordering', () => {
         git('config', 'user.email', 'test@test');
         git('config', 'user.name', 'Test');
         git('config', 'commit.gpgsign', 'false');
-        git('config', 'core.hooksPath', join(repo, '.no-hooks'));
+        const sourceRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: dirname(fileURLToPath(import.meta.url)), encoding: 'utf8',
+        }).trim();
+        // Exercise the real hook and its complete dependency graph from the fixture's own cwd.
+        // No POC registry is copied: the real prototype guard reads an empty registry and allows.
+        const hookFiles = [
+          '.githooks/pre-push',
+          'scripts/guard-git-push.mjs',
+          'scripts/guard-prototype-tracker.mjs',
+          'scripts/lib/poc-branches.mjs',
+          'scripts/lib/prototype-tracker-data.mjs',
+          'scripts/lib/local-date.mjs',
+        ];
+        for (const file of hookFiles) {
+          mkdirSync(dirname(join(repo, file)), { recursive: true });
+          copyFileSync(join(sourceRoot, file), join(repo, file));
+        }
+        chmodSync(join(repo, '.githooks/pre-push'), 0o755);
+        git('config', 'core.hooksPath', join(repo, '.githooks'));
         mkdirSync(join(repo, 'scripts/conveyor'), { recursive: true });
         writeFileSync(join(repo, path), '{"version":1,"records":[]}\n');
-        git('add', '--', path);
+        git('add', '--', path, ...hookFiles);
         git('commit', '-qm', 'seed scorecard store');
         git('init', '-q', '--bare', remote);
         git('remote', 'add', 'origin', remote);
-        git('push', 'origin', 'main');
+        execFileSync('git', ['push', 'origin', 'main'], {
+          cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, MAIN_PUSH_OK: '1' },
+        });
       });
       afterEach(() => {
         rmSync(repo, { recursive: true, force: true });
         rmSync(remote, { recursive: true, force: true });
+      });
+
+      it('the REAL pre-push hook rejects an unauthorized main push and allows MAIN_PUSH_OK=1 (#2313 review bounce #3 regression guard)', () => {
+        const remoteHead = git(`--git-dir=${remote}`, 'rev-parse', 'main');
+        append();
+        git('commit', '-qm', 'add trial for hook regression', '--', path);
+        const localHead = git('rev-parse', 'HEAD');
+        expect(localHead).not.toBe(remoteHead);
+        const env = { ...process.env };
+        delete env.MAIN_PUSH_OK;
+        delete env.PROTOTYPE_TRACKER_PUSH_OK;
+        const options = { cwd: repo, encoding: 'utf8', env };
+        const rejected = spawnSync('git', ['push', 'origin', 'main'], options);
+        expect(rejected.error).toBeUndefined();
+        expect(rejected.status).toBe(1);
+        expect(rejected.stderr).toContain('pre-push BLOCKED: a push targets `main`');
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
+
+        const allowed = spawnSync('git', ['push', 'origin', 'main'], {
+          ...options, env: { ...env, MAIN_PUSH_OK: '1' },
+        });
+        expect(allowed.error).toBeUndefined();
+        expect(allowed.status).toBe(0);
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(localHead);
       });
 
       it('accepts, appends, commits, and publishes the actual row to shared history', () => {

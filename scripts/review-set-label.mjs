@@ -483,7 +483,7 @@ export function publishDelegationTrialCommit({ provider, model, taskType, pr, cw
     committed = true;
     stage = 'push-if-green.mjs failed';
     const pushIfGreen = join(dirname(fileURLToPath(import.meta.url)), 'push-if-green.mjs');
-    const out = execFileSync(process.execPath, [pushIfGreen, `--repo=${repoRoot}`, '--assume-green', '--json'], options);
+    const out = execFileSync(process.execPath, [pushIfGreen, `--repo=${repoRoot}`, '--assume-green', '--json'], { ...options, env: { ...process.env, MAIN_PUSH_OK: '1' } });
     const parsed = JSON.parse(out.trim());
     return { committed, pushed: !!parsed.pushed, reason: parsed.detail || parsed.reason };
   } catch (e) {
