@@ -132,7 +132,7 @@ This is about a **delivery agent** the runner spawned (`claude --bg`), not the r
   lesson this whole area keeps re-teaching: a scoped deny-list beats a global bypass, and `we:scripts/operations/
   review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` is this repo's own worked example of the safer
   alternative — reach for it before a bare `bypassPermissions` invocation.
-- **A fresh scratch clone must be trusted before it's dispatched into** — see step 5 above. This isn't an env
+- **A fresh scratch clone must be trusted before it's dispatched into** — see step 6 above. This isn't an env
   var, but it's the other precondition that silently stalls a `--bg` dispatch the same way a missing
   permission mode does, so check both together before a real run.
 
