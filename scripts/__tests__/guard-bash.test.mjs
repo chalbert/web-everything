@@ -598,6 +598,117 @@ describe('guard-bash — direct-push-to-main block (#2203)', () => {
   });
 });
 
+describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3390)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+
+  it('still denies a REAL sed/perl in-place edit or tee write into backlog|reports (unchanged from before)', () => {
+    denied('sed -i s/x/y/ backlog/2200-a.md');
+    denied("sed -i '' s/x/y/ backlog/2200-a.md"); // BSD empty in-place suffix
+    denied('sed --in-place s/x/y/ reports/2200-a.md');
+    denied("perl -pi -e 's/x/y/' backlog/2200-a.md");
+    denied("perl -i -pe 's/x/y/' backlog/2200-a.md");
+    denied('tee -a backlog/2200-a.md');
+    denied('tee reports/2200-a.md'); // bare tee still WRITES the named file
+    denied('echo hi >> backlog/2200-a.md'); // the untouched `>>` half of the OR
+    denied('echo hi >> ./reports/2200-a.md');
+  });
+
+  it('does NOT deny a READ-ONLY sed/tee/perl invocation that merely MENTIONS a backlog|reports path (#3390 false positive)', () => {
+    allowed("sed -n '1,200p' backlog/123-foo.md");
+    allowed("sed -n '1,200p' reports/123-foo.md");
+    allowed("perl -ne 'print' backlog/123-foo.md");
+    allowed("perl -ne 'print if /x/' reports/123-foo.md");
+    allowed('tee /tmp/scratch.md < backlog/123-foo.md'); // reads from backlog, writes only to scratch
+    allowed("sed 's/x/y/' backlog/123-foo.md"); // no -i at all — prints to stdout, writes nothing
+  });
+
+  it('still denies when the write target is backlog|reports even though the READ input is a different path', () => {
+    denied('sed -i s/x/y/ /tmp/scratch.md backlog/2200-a.md');
+    denied("tee -a backlog/2200-a.md < /tmp/in.txt");
+  });
+
+  // Security review on #2108 — sed's `w` write mechanism needs NO `-i`/`--in-place`: a trailing `w <file>`
+  // flag on an `s///` command, or a standalone `/addr/w <file>` address-command, both genuinely write
+  // `<file>` from the script text alone. Verified directly against real sed: pre-fix, `fileWriteTargets`
+  // only ever read ARGV flags (never the script TEXT), so both commands below returned `[]` and were
+  // allowed — a real regression the flag-only rewrite introduced while fixing the mere-mention false
+  // positive above.
+  it('denies a sed `w`-command/`w`-flag write into backlog|reports with NO -i anywhere (#2108 security finding)', () => {
+    denied("sed 's/x/y/w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/w backlog/2200-a.md' file.txt");
+  });
+
+  it('does NOT deny a sed `w`-command/`w`-flag write whose target is NOT backlog|reports', () => {
+    allowed("sed 's/x/y/w /tmp/scratch.md' file.txt");
+    allowed("sed -n '/pat/w /tmp/scratch.md' file.txt");
+  });
+
+  // #2108 review r3 — SED_ADDR_W missed a NEGATED address (`/pat/!w file`), GNU's `first~step` address
+  // extension (`0~3w file`), and the uppercase `W` command — three more real sed write shapes with no
+  // `-i`/`--in-place` anywhere, verified against real sed to genuinely write the named file.
+  it('denies a sed address-write via negation, GNU step address, or the uppercase W command (#2108 review r3)', () => {
+    denied("sed -n '/pat/!w backlog/2200-a.md' file.txt");
+    denied("sed -n '3,5!w backlog/2200-a.md' file.txt");
+    denied("sed -n '0~3w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/W backlog/2200-a.md' file.txt");
+  });
+
+  // #2108 review r3 — an earlier GNU-only flag that takes a SEPARATE argument (`-l N`) shifted the
+  // no-`-e`/no-`-f` fallback's "first operand" pick onto that consumed numeral instead of the real
+  // script, so the actual `w`-write in the script text was never scanned at all.
+  it('still finds the sed script (and its w-write) past a preceding arg-taking flag like -l N (#2108 review r3)', () => {
+    denied("sed -l 80 's/x/y/w backlog/2200-a.md' file.txt");
+  });
+
+  // #2108 review r3 — the deny arm's `atCommand` gate never matched a `gsed` invocation even though
+  // fileWriteTargets/sedScriptTexts already support prog === 'gsed' internally — unreachable from here.
+  it('denies a gsed in-place write into backlog|reports, matching sed (#2108 review r3 coverage gap)', () => {
+    denied('gsed -i s/x/y/ backlog/2200-a.md');
+  });
+
+  // PR #2108 review finding (backlog#x7k9gep follow-up): perl script text open() writes into backlog|reports
+  it('denies a perl script text open() write into backlog|reports (#2108 review finding)', () => {
+    denied('perl -e \'open(F, ">", "backlog/x.md"); print F "x"\'');
+    denied('perl -e \'open(my $fh, ">>", "reports/r.md") or die; print $fh 1\'');
+    denied('perl -e \'open(F, ">backlog/x.md"); print F 1\'');
+    denied("perl -e \"open F, '>>backlog/x.md'\"");
+    denied('perl -E \'open(F, ">:utf8", "backlog/x.md")\'');
+  });
+
+  it('does NOT deny a perl script that opens for read or merely mentions a backlog|reports path (#2108 review finding)', () => {
+    allowed('perl -e \'open(F, "<", "backlog/x.md"); print <F>\'');
+    allowed('perl -e \'open(F, "backlog/x.md")\'');
+    allowed('perl -e \'print "backlog/x.md"\'');
+    allowed('perl -ne \'print\' backlog/1.md');
+    allowed('perl -e \'open(F, ">", "/tmp/x.txt")\'');
+  });
+
+  it('denies perl -ne and -lane scripts opening backlog|reports for write', () => {
+    denied("perl -ne 'open(O, \">>\", \"backlog/x.md\"); print O $_' in.txt");
+    denied("perl -lane 'open(O, \">\", \"reports/r.md\")' in.txt");
+  });
+
+  it('allows a perl script file or a loop flag without in-place write mentioning backlog', () => {
+    allowed('perl backlog/1.md');
+    allowed("perl -pe 's/x/y/' backlog/1.md");
+  });
+
+  it('fileWriteTargets extracts literal paths from perl open() and returns empty for reads/mentions', () => {
+    expect(fileWriteTargets('perl -e \'open(F, ">", "backlog/x.md"); print F "x"\'')).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets('perl -e \'open(my $fh, ">>", "reports/r.md") or die; print $fh 1\'')).toEqual(['reports/r.md']);
+    expect(fileWriteTargets('perl -e \'open(F, ">backlog/x.md"); print F 1\'')).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets("perl -e \"open F, '>>backlog/x.md'\"")).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets('perl -E \'open(F, ">:utf8", "backlog/x.md")\'')).toEqual(['backlog/x.md']);
+
+    expect(fileWriteTargets('perl -e \'open(F, "<", "backlog/x.md"); print <F>\'')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'open(F, "backlog/x.md")\'')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'print "backlog/x.md"\'')).toEqual([]);
+    expect(fileWriteTargets('perl -ne \'print\' backlog/1.md')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'open(F, ">", "/tmp/x.txt")\'')).toEqual(['/tmp/x.txt']);
+  });
+});
+
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
   const blockedMerge = (c) => expect(decide(c), c).toMatch(/assertMayMerge/);
   const allowed = (c) => expect(decide(c), c).toBeNull();

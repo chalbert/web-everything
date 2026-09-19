@@ -1340,6 +1340,115 @@ function fileOperands(args, optsWithArg = new Set()) {
   return files;
 }
 
+/** sed's `w` write mechanism embedded in the SCRIPT TEXT itself — no `-i`/`--in-place` needed. Two shapes:
+ *  a trailing `w <file>` flag on an `s///` command (`s/x/y/w file`, `s/x/y/gw file`), and a standalone
+ *  address-command (`/pat/w file`, `3,5w file`) with no `s` at all. Either way sed opens `<file>` and writes
+ *  to it on a match — a real write the flag-only scan above (in-place / tee operands) never looks at, because
+ *  it only inspects ARGV flags, never the script TEXT. Not full sed grammar (no `{...}` blocks, no `;`-aware
+ *  splitting) — good enough to catch both shapes above without chasing sed's whole command language. */
+const SED_SUB_W = /s(.)(?:\\.|(?!\1).)*?\1(?:\\.|(?!\1).)*?\1[a-zA-Z0-9]*w[ \t]+(\S.*)$/;
+// #2108 review r3 — the address form also writes via a NEGATED address (`/pat/!w file`, `3,5!w file`),
+// via GNU's `first~step` extension (`0~3w file`), and via the uppercase `W` command (writes only the
+// pattern space's FIRST line, GNU sed) — none of which the original lowercase-only, negation-blind regex
+// recognized, so a real write through any of those three shapes silently bypassed the guard.
+const SED_ADDR_W = /^[ \t]*(?:\$|\d+~\d+|\d+(?:,(?:\d+|\$))?|\/(?:\\.|[^\/\\])*\/(?:,\/(?:\\.|[^\/\\])*\/)?)[ \t]*!?[ \t]*[wW][ \t]+(\S.*)$/;
+
+/** The file(s) one sed SCRIPT TEXT writes via an embedded `w` — see `SED_SUB_W`/`SED_ADDR_W` above. Pure.
+ *  Scanned per PHYSICAL LINE (`-e` script fragments join on `\n`, same as sed itself reads them) since `w`
+ *  consumes the rest of its line as the filename, so a later command on the SAME line can never be its own
+ *  match target. */
+function sedWriteTargets(scriptText) {
+  const out = [];
+  for (const line of String(scriptText).split('\n')) {
+    // group 1 of SED_SUB_W is the `s///` DELIMITER (`\1` backreferences need it captured); the filename is
+    // group 2 — `sub[1]` would silently push the delimiter character itself as the "target" instead.
+    const sub = line.match(SED_SUB_W);
+    if (sub) out.push(sub[2].trim());
+    const addr = line.match(SED_ADDR_W);
+    if (addr) out.push(addr[1].trim());
+  }
+  return out;
+}
+
+/** 3-arg perl open: open(FH, MODE, PATH) or open FH, MODE, PATH, where MODE is a quoted literal starting
+ *  with `>`, `>>`, `+>`, `+>>`, or `+<` (optionally with an encoding layer like `>:utf8`), PATH a quoted literal. */
+const PERL_OPEN_3ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)(?::\S+)?\s*\1\s*,\s*(["'])([^$]*?)\3/g;
+/** 2-arg perl open: open(FH, ">path") / open(FH, ">>path") / open FH, ">> path". Strip leading spaces after mode. */
+const PERL_OPEN_2ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)\s*([^$]*?)\1/g;
+
+/** The string-literal file path(s) a Perl script writes via `open(...)`. Pure.
+ *  Handles 3-arg open(FH, MODE, PATH) and 2-arg open(FH, ">path").
+ *  Only literal paths can be returned; a path from a variable (`$f`), computed paths, or other write primitives
+ *  are out of scope as a known limit. Read modes (`<`, no mode, `-|`) and prints without write opens return nothing. */
+function perlWriteTargets(scriptText) {
+  const out = [];
+  const s = String(scriptText);
+  for (const m of s.matchAll(PERL_OPEN_3ARG)) {
+    const path = m[4].trim();
+    if (path) out.push(path);
+  }
+  for (const m of s.matchAll(PERL_OPEN_2ARG)) {
+    // If followed by a comma after the closing quote, it was the MODE of a 3-arg open, not a 2-arg open.
+    const afterQuote = s.slice(m.index + m[0].length).trimStart();
+    if (afterQuote.startsWith(',')) continue;
+    const path = m[3].trim();
+    if (path) out.push(path);
+  }
+  return out;
+}
+
+/** The perl SCRIPT TEXT(s) a tokenized `args` list passes inline. Pure.
+ *  Takes the argument that follows a single-dash flag cluster ending in `e`/`E` (`-e`, `-E`, `-pe`, `-ne`, `-lane`). */
+function perlScriptTexts(args) {
+  const texts = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.quoted) continue;
+    if (!a.text.startsWith('--') && /^-[A-Za-z]*[eE]$/.test(a.text)) {
+      if (args[i + 1]) { texts.push(args[i + 1].text); i += 1; }
+      continue;
+    }
+  }
+  return texts;
+}
+
+/** The sed/perl SCRIPT TEXT(s) a tokenized `args` list passes INLINE — every `-e`/`--expression` operand, or
+ *  (when neither `-e`/`--expression` nor `-f`/`--file` appears at all) the first bare operand, which sed/perl
+ *  read as the script itself (`sed 's/x/y/' file`, `sed -n '/pat/p' file`). A `-f`/`--file` script lives in
+ *  an external file this guard cannot see, so its presence is noted (to skip the implicit-first-operand
+ *  fallback) but its content is never guessed at. Pure. */
+function sedScriptTexts(args) {
+  const texts = [];
+  let sawInlineOrFile = false;
+  // #2108 review r3 — mirrors `args` minus every token CONSUMED by a flag below (the flag itself and, for
+  // an arg-taking flag, its value) — the no-`-e`/no-`-f` fallback below must search THIS, not raw `args`,
+  // or a consumed value (e.g. `80` in `sed -l 80 '...w file' in.txt`) is mistaken for the script itself.
+  const remaining = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.quoted) { remaining.push(a); continue; }
+    if (a.text === '-e' || a.text === '--expression') {
+      sawInlineOrFile = true;
+      if (args[i + 1]) { texts.push(args[i + 1].text); i += 1; }
+      continue;
+    }
+    if (/^--expression=/.test(a.text)) { sawInlineOrFile = true; texts.push(a.text.slice('--expression='.length)); continue; }
+    if (a.text === '-f' || a.text === '--file' || /^--file=/.test(a.text)) {
+      sawInlineOrFile = true;
+      if (a.text === '-f' || a.text === '--file') i += 1; // skip the external script-file operand
+      continue;
+    }
+    // GNU sed's `-l`/`--line-length N` takes a SEPARATE numeric argument that is never the script itself.
+    if (a.text === '-l' || a.text === '--line-length') { i += 1; continue; }
+    remaining.push(a);
+  }
+  if (!sawInlineOrFile) {
+    const first = remaining.find((a) => a.quoted || !a.text.startsWith('-'));
+    if (first) texts.push(first.text);
+  }
+  return texts;
+}
+
 /** EVERY file path `segment` writes via a shell redirect / `tee` / an in-place editor (`sed -i`, `perl -pi`),
  *  scratch paths INCLUDED. Pure.
  *
@@ -1393,6 +1502,20 @@ export function fileWriteTargets(segment) {
       const files = fileOperands(args, new Set(scriptOpts));
       out.push(...(has(...scriptOpts) ? files : files.slice(1)));
     }
+  }
+  // A security review on #2108 found the block above blind to sed's OTHER write mechanism: a `w` write
+  // embedded in the SCRIPT TEXT (a trailing `s///w file` flag, or a standalone `/addr/w file` command) needs
+  // NO `-i`/`--in-place` — `sed 's/x/y/w backlog/x.md' file` and `sed -n '/pat/w backlog/x.md' file` both
+  // genuinely write `backlog/x.md` with no in-place flag anywhere, so the `inPlace`-gated scan above (which
+  // only ever reads ARGV FLAGS) misses both entirely. This runs unconditionally — not gated on `inPlace` —
+  // and scans the actual script TEXT via `sedScriptTexts`/`sedWriteTargets` above. Similarly, perl `open()`-with-a-write-mode
+  // literal path is now detected via `perlScriptTexts`/`perlWriteTargets`; computed paths / other write primitives
+  // are a documented limit.
+  if (prog === 'sed' || prog === 'gsed') {
+    for (const script of sedScriptTexts(args)) out.push(...sedWriteTargets(script));
+  }
+  if (prog === 'perl') {
+    for (const script of perlScriptTexts(args)) out.push(...perlWriteTargets(script));
   }
   if (prog === 'tee') out.push(...fileOperands(args, new Set(['--output-error', '-p'])));
   return out;
@@ -1909,7 +2032,16 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return `Never renumber a backlog item (${srcN} → ${dstN}) — NNN is immutable. A new item takes the next free number; yield this one.`;
   }
 
-  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|tee|perl)\b/) && CORPUS_MD.test(s)))
+  // #3390 — the sed/tee/perl half used to test CORPUS_MD against the WHOLE command string `s`, so a
+  // purely read-only invocation that merely NAMES a backlog/reports path (`sed -n '1,200p' backlog/x.md`,
+  // `perl -ne 'print' backlog/x.md`) was denied even with no `-i`/`--in-place`/write flag anywhere — a
+  // false positive on a benign read, reproduced live twice in one night on two different files. Reuse
+  // `fileWriteTargets`, the SAME real-write-target extractor `primaryTreeWriteReason` above already calls
+  // via `isFileWriteRedirect(s)` for this exact segment — it correctly parses `-i`/`--in-place`/a short
+  // cluster containing `i` for sed/perl and real `tee` targets, so only an ACTUAL write target is tested
+  // against CORPUS_MD, never the raw command text. `atCommand` still scopes this to sed/tee/perl
+  // invocations (a `>>` from any other command is caught by the first half of this OR, untouched).
+  if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|gsed|tee|perl)\b/) && fileWriteTargets(s).some((f) => CORPUS_MD.test(f))))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
 
   // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
