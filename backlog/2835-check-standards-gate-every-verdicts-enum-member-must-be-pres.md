@@ -5,6 +5,18 @@ parent: "2527"
 status: open
 dateOpened: "2026-08-02"
 tags: []
+scope:
+  - we:scripts/lib/verdict-totality.mjs
+  - we:scripts/lib/__tests__/verdict-totality.test.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/lib/jury-core.mjs
+  - we:scripts/lib/disposition-judge.mjs
+  - we:scripts/lib/review-core.mjs
+  - we:scripts/lib/review-render.mjs
+  - we:scripts/lib/converge-core.mjs
+  - we:scripts/lib/review-loop-policy.mjs
+  - we:scripts/pr-status.mjs
+  - we:scripts/conveyor/jury-tree.mjs
 ---
 
 # check:standards gate — DISCOVER every table total over VERDICTS and fail-loud on any that isn't
