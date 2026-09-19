@@ -1,20 +1,71 @@
 ---
 bornAs: xmyj37e
 kind: decision
-status: open
+status: resolved
 relatedTo: ["2895", "2844", "3279"]
 scope: ["we:scripts/review-set-label.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/review-pr.mjs", "we:scripts/lib/review-independence.mjs", "we:docs/agent/platform-decisions.md"]
 dateOpened: "2026-09-07"
+dateResolved: "2026-09-14"
+codifiedIn: "docs/agent/platform-decisions.md#clear-human-requires-current-head-advisory-review"
+preparedDate: "2026-09-14"
 tags: [review, gate, drain]
 ---
 
 # Should clear-human wait for an independent review to actually run before the drain merges — config toggle
 
-**Not yet `preparedDate`-stamped** — this item was authored inline (grounding + forks + recommended
-defaults + confidence below) but has not been through the full `/prepare` close-out (`check:health` green,
-a per-fork fork-existence line, a `Skeptic:`/`Screen:` line each). Treat the forks below as a strong first
-pass, not `✓ ready to ratify`; a `/prepare` pass (or the operator's own read) should confirm or amend before
-this is ratified (rule: never take an unprepared decision, #1457).
+## Ruling (2026-09-14)
+
+**Ratified 2026-09-14** — per the operator's explicit in-conversation instruction to ratify this card
+("I ratify 3589"), confirming both live forks on the card's own bolded recommended defaults. No alternative
+picked, no amendment beyond what each fork's own prepared reasoning — including its self-conducted
+`Skeptic:` attack and the fresh-context `Screen:` pass (#2091) already run under this card — already folded
+in.
+
+- **Fork 1: (a) — apply the wait to every `clear-human` clearance, no sub-scoping, the bold default.**
+  `review:human` is already the narrow, high-blast-radius tier by ratified design (#2771/#2840); there is
+  no larger population to protect against by carving out a `#2011`-shaped subset, and nothing in the
+  incident or the existing statute motivates cutting an already-deliberately-narrow tier in two.
+- **Fork 2: (c) — `clear-human` gets one more precondition, the bold default.** It refuses unless the PR
+  already carries the `advise` step's (#3453) advisory-note comment for its CURRENT head. If absent, the
+  refusal names the fix — dispatch `we:scripts/operations/review-dispatch.mjs --pr=<n>` (or wait for the
+  next conveyor tick), then retry `clear-human`. Nothing about `advise`, `we:scripts/operations/review-dispatch.mjs`,
+  or the conveyor's dispatch decision changes: a single new guard clause, the same shape as the existing
+  `--actor`/`--reason` checks already in `decideSetLabel`'s `clear-human` target
+  (`we:scripts/review-set-label.mjs`).
+
+**Fork 3 (the config default) is not a third ratifiable fork — already correctly dissolved at `/prepare`,
+not re-opened here.** The fresh-context Screen pass (#2091) reclassified it as a config dimension (both
+`on`/`off` are legitimate end-states once build/maintenance cost is zeroed out), so it carries an
+**operational default, not a ratified pick**: **ON** by default, via a
+`WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style env var (name TBD at build time, following the existing
+`WE_MERGE_BREAK_GLASS` convention in `we:scripts/merge-ai-prs.mjs`) — recorded as the item's own "Supported
+by default" text, above, unchanged by this ruling.
+
+**Follow-on build filed at ratification, deliberately NOT built in this same PR** — the item's own "What
+this does not settle" section explicitly deferred the exact precondition-check implementation and the
+`advise`-step per-head marker Fork 2(c) itself flags as a real residual (`renderAdvisoryNote` posts no
+durable per-head marker today, so an exact "is this the CURRENT head's note" check needs a
+`<!-- advisory-sha: … -->` marker, mirroring `buildReviewedShaMarker` in `we:scripts/lib/review-escalation.mjs`,
+before the coarse "does any advisory comment exist" check can be tightened):
+
+- [Gate `clear-human` on a posted advisory review for the current head](/backlog/3692-gate-clear-human-on-a-posted-advisory-review-for-the-current/)
+  (parent: this item; filed `3692`, numbered on land) — implements Fork 2(c)'s guard clause in
+  `we:scripts/review-set-label.mjs`, the per-head `advisory-sha` marker in
+  `we:scripts/operations/review-pr.mjs`'s `renderAdvisoryNote`, and the
+  `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style config toggle (Fork 3, default on) that gates it.
+
+Codified in `we:docs/agent/platform-decisions.md#clear-human-requires-current-head-advisory-review`.
+
+---
+
+**Prepared** (#3589 `/prepare` close-out, 2026-09-14) — the inline authoring already carried real forks,
+concrete `file:line` grounding, and a self-conducted per-fork `Skeptic:` attack. This pass added the
+missing DoR artifacts: a fresh-context two-confusion `Screen:` line under every fork (#2091 — it flagged
+the original Fork 3 as prioritization-in-fork-costume, folded below), a concrete code example for Fork
+2(c)'s code-level shape, and — since the scope touches `we:docs/agent/platform-decisions.md` (a statute
+file), which makes the eventual build `humanRequired` and therefore `careLevel: high` — the pre-registered
+review jury charter (#2638). No fork's substance/recommendation changed; Fork 3 was reclassified, not
+re-decided (see "Supported by default," below).
 
 ## What happened
 
@@ -57,7 +108,10 @@ already built and already usually wins — it just isn't a *gate*, so it can los
 | --- | --- | --- | --- |
 | Fork 1 — scope | **(a) every `clear-human` clearance** | (b) narrow further within the `review:human` tier | high |
 | Fork 2 — mechanism | **(c) `clear-human` refuses unless an advisory note already posted for the current head** | (a) relabel to `review:pending`, ride the mechanical-accept pipeline | medium-high |
-| Fork 3 — config default | **on** | off (preserve today's fast path) | medium |
+
+`clear-human`'s rollout posture (on/off) is **not a third fork** — see "Supported by default," below; the
+`/prepare` two-confusion screen reclassified it as a config dimension (both values legitimate operating
+states), operational default **on**, medium confidence.
 
 ## Fork 1 — Which operator-cleared PRs must wait?
 
@@ -86,6 +140,12 @@ safer to rush than statute ones.
 nothing?* No — the wait is a genuinely new constraint (today `clear-human` clears with zero coupling to
 `advise`); (a) only says the constraint should bind uniformly across the tier it was already scoped to,
 which is the narrower, load-bearing part of the fork (whether to bind at all is Fork 2/3, not this one).
+
+**Screen (fresh-context, #2091):** clear. (1) impl-vs-standard — this rules on the width of an internal
+`review:human` governance tier already owned end-to-end by this repo's own review machinery, not a
+WE↔FUI-crossing contract; no mis-layering. (2) merit-vs-prioritization — with cost zeroed out, (a) and (b)
+still differ on a real risk-ordering claim (does gate-self/leash deserve the same protection as a
+statute-anchor edit?), not just on which ships first; a genuine merit split survives.
 
 ## Fork 2 — How does "wait" actually work?
 
@@ -130,6 +190,28 @@ new guard clause, same shape as the existing ones in the same function.
   "does any advisory comment exist" check is a real but bounded weakening (a PR force-pushed after its
   advisory note would pass the check on stale grounds — narrower than today's total absence of a check).
 
+*Illustrative shape only — the actual marker/grep design is real build work per the residual above:*
+
+```js
+// we:scripts/review-set-label.mjs — inside decideSetLabel's `to === 'clear-human'` branch,
+// alongside the existing `!isHuman` guard (:530-559 already has this shape for --actor/--reason):
+if (to === 'clear-human') {
+  if (!isHuman) { /* existing: nothing to clear */ }
+  if (!hasAdvisoryNoteForHead(currentComments, headSha)) {
+    return {
+      allowed: false,
+      addLabel: '',
+      removeLabels: [],
+      keepsHuman: true,
+      reason: 'no advisory note posted for this head yet — dispatch '
+        + '`we:scripts/operations/review-dispatch.mjs --pr=<n>` (or wait for the next conveyor tick) '
+        + 'and retry clear-human once it lands',
+    };
+  }
+  // ...existing clear-human success path, unchanged
+}
+```
+
 **Skeptic (self-conducted):** *does (c) just formalize "wait a bit," without the operator's actual complaint
 — that findings get seen — being addressed?* The advisory note's findings are already rendered in the
 comment before `clear-human` may now fire, so a human (or the clearing session) sees them before deciding,
@@ -137,28 +219,40 @@ which is exactly "wait for advisory review… in case the mechanic or details ha
 make the note *binding* — the operator keeps full authority to clear over real findings — because the
 incident was about *ordering*, not about *overruling* the operator.
 
-## Fork 3 — Config default
+**Screen (fresh-context, #2091):** clear. (1) impl-vs-standard — a guard clause inside this repo's own
+label-decision function, no cross-repo contract touched. (2) merit-vs-prioritization — with cost zeroed
+out, (a) and (c) still differ on what `clear-human` *means* (a real clearance vs. a relabel that isn't one
+yet) and on failure semantics (an ordinary `review:pending` PR reads as "still needs review," a refused
+`clear-human` reads as "your clearance was refused, here's why") — a genuine semantic/UX split, not
+sequencing.
 
-*Fork-existence justification:* on vs. off is a real behavior split for every future `clear-human` call, not
-a cost question — off reproduces tonight's race exactly; on removes it, at the cost of an occasional refusal.
+## Supported by default — clear-human's rollout posture (not a ratified fork)
 
-**On by default — RECOMMENDED**, name TBD at build time (`WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`
-follows the existing `WE_MERGE_BREAK_GLASS`-style convention, `we:scripts/merge-ai-prs.mjs`). Cost when the
-advisory note already posted — the common case, 4/5 tonight — is exactly zero: `clear-human` proceeds
-unchanged. Cost when it hasn't is one clear, actionable refusal naming the fix, not a silent block. Directly
-motivated by a real, dated incident (#2011) rather than a hypothetical.
+*Reclassified at `/prepare` (2026-09-14).* The original draft framed the config default (on vs. off) as a
+third ratifiable fork. **Screen (fresh-context, #2091): flagged(prio)** — with build/maintenance cost
+zeroed out, the write-up's own reasoning ("the toggle is a one-shot env var away regardless of default")
+concedes both states are reachable at zero lasting cost; what's left is which risk posture ships *first*,
+not a merit difference between two end-states. That mirrors the per-fork classification pass's Q4 test
+(`we:docs/agent/backlog-workflow.md` — "both branches legitimate end-states" → a config dimension, not a
+ratifiable fork): a real either/or between two operating modes isn't a fork when nothing is actually
+excluded, only sequenced. **Citation-scope check (#1932):** the ratified
+[config-extends-platform-default](docs/agent/platform-decisions.md#config-extends-platform-default)
+anchor states the same general shape but its authoring scope is a WE-*authored* project/platform config
+dimension (`webeverything.config.*`, a strategy a standard's consumer picks) — narrower than this case, an
+internal drain/review-tooling env var with no author-facing surface at all. It is cited below as
+*supporting precedent* for the general principle, not as the *authority* deciding this case; the
+reclassification itself rests on the Q4 test alone. Fix applied: dissolved to this "supported by default"
+entry; no `## Fork N` heading, no table row, no ratifiable pick.
 
-**Off by default — the alternative.** Preserves today's fast path unconditionally; an operator wanting the
-new bar opts in per-session. Real argument for it: `review:human` PRs are exactly the population most likely
-to be touched during genuinely time-sensitive incident response, where a new precondition failure is least
-welcome. Weighed against: the failure mode is a loud refusal with a next command, not a silent block, and the
-toggle is a one-shot env var away regardless of default — so the emergency case is one extra flag, not a
-blocked path.
-
-**Skeptic (self-conducted):** *is "on by default" over-reacting to an N=1 incident?* Tonight's population is
-small (5 clearances) but the base rate is favorable to "on" specifically because 4/5 *already* satisfy the
-precondition for free — "on" is not asking for new work most of the time, only for the ordering that already
-usually holds to become guaranteed.
+- **Both values are legitimate, coexisting operating states** of the same `WE_REQUIRE_REVIEW_AFTER_OPERATOR_CLEARANCE`-style
+  env var (name TBD at build time, following the existing `WE_MERGE_BREAK_GLASS` convention,
+  `we:scripts/merge-ai-prs.mjs`) — a project/session config knob, not a WE-standard type.
+- **Operational default: on.** Cost when the advisory note already posted — the common case, 4/5 the night
+  of the incident — is exactly zero: `clear-human` proceeds unchanged. Cost when it hasn't is one clear,
+  actionable refusal naming the fix (Fork 2(c)'s reason string), not a silent block. Directly motivated by
+  the dated #2011 incident rather than a hypothetical, and reversible with one flag by an operator who hits
+  it during time-sensitive incident response — so this is a rollout choice, not a standards-layer ruling,
+  and can be revisited on real operational data without reopening this decision.
 
 ## What this does not settle
 
@@ -167,6 +261,33 @@ usually holds to become guaranteed.
 - Whether `landMode`'s `shadow → enforce` flip (a separate, already-ratified #2838 gate) should be revisited
   in light of this — out of scope; this decision does not touch that flip.
 - The exact env var name and its CLI-flag mirror (if any) — a naming detail for the build, not a fork.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `high` — the scope touches `we:docs/agent/platform-decisions.md` (a statute file), so the
+eventual build is `humanRequired` per #2771/#2840, which `deriveCareLevel` (`we:scripts/lib/review-escalation.mjs:397`)
+maps straight to `high` regardless of scored signals. This jury binds against the item's predicted scope
+and is re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| claim-accuracy#1 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
+| claim-accuracy#2 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
+
+*Predicted touch-set (#2619) for the buildable child this decision authorizes* — the item's own `scope:`:
+`we:scripts/review-set-label.mjs` (Fork 2(c)'s guard clause), `we:scripts/operations/review-pr.mjs` (the
+`advise`-step per-head marker, Fork 2(c)'s stated residual), `we:scripts/operations/review-dispatch.mjs` /
+`we:scripts/lib/review-independence.mjs` (unchanged, cited for grounding only), and
+`we:docs/agent/platform-decisions.md` (codifying the ratified rule). That scope seeds the child's `scope:`
+at carve-off.
 
 ## Context
 

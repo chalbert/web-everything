@@ -609,6 +609,12 @@ export function createDefaultJudge({
       );
     }
     const effectiveProviderName = request?.providerName ?? providerName;
+    // #xqa9ttq (PR #2115 review, CONFIRMED) - `allowedTools: []` is the explicit "no tools" signal
+    // `assertNoCodexTools` documents as tool-free. `assertSafeJudgeRequest` is shared with claude and
+    // rejects [], so the empty array is dropped for an effectively-codex request ONLY, before the guard runs;
+    // claude keeps refusing it.
+    const codexEmptyTools = effectiveProviderName === 'codex' && Array.isArray(request?.allowedTools) && request.allowedTools.length === 0;
+    const declared = codexEmptyTools ? (({ allowedTools: _unused, ...rest }) => rest)(request) : request;
     // THE OVERRIDE IS MERGED BEFORE THE GUARD RUNS, NEVER AFTER (#3151). `assertSafeJudgeRequest` is what stops
     // a flag-shaped `model` reaching argv, so asserting the declaration's request and then substituting the
     // operator's value would check one string and spawn another — the guard would be decorative. The CLI
@@ -619,7 +625,7 @@ export function createDefaultJudge({
     // declaration's `JUDGE_MODEL` literal, or whatever the operator typed for the seat(s) they are steering
     // with `--model`); a request whose effective provider is `codex` (via `request.providerName` or this
     // factory's own) would otherwise carry that Claude model name onto Codex's `-m` flag verbatim.
-    const effective = (model && effectiveProviderName !== 'codex') ? { ...request, model } : request;
+    const effective = (model && effectiveProviderName !== 'codex') ? { ...declared, model } : declared;
     assertSafeJudgeRequest(effective);
     // #xqa9ttq — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside `codex-judge-spawn.mjs`. A caller that
     // injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the one
@@ -627,7 +633,7 @@ export function createDefaultJudge({
     // belt-and-braces reasoning `assertNoForbiddenArgv`'s "reachable through judgeSpawn too" note already uses.
     // Reads `effectiveProviderName` (request-level override included), not the factory's own `providerName`
     // alone — otherwise a factory defaulted to `claude` with a request pinned to `codex` would sail past this.
-    if (effectiveProviderName === 'codex' && effective.allowedTools) {
+    if (effectiveProviderName === 'codex' && Array.isArray(effective.allowedTools) && effective.allowedTools.length > 0) {
       throw new Error(
         'operations: refusing `--provider=codex` with a TOOL-BEARING judge request — the Codex provider is '
         + 'seated as a TOOL-FREE panelist only (#3581). Use the default `claude` provider for a tool-bearing role.',

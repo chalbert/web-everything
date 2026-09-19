@@ -31,6 +31,9 @@
  *     # this lane was cut from / merged onto; `--base` records the commit SHA the lane was reset to, applied
  *     # to every repo entry that doesn't already carry its own `base` in `--repos`. Both optional — omit
  *     # either (or both) for a plain sibling lane, today's unchanged behavior.
+ *   node scripts/lane-manifest-write.mjs --item=2403 --repos='[…]' --graduated-to=6b5874f7
+ *     # #2447 — a dedup-resolve (deliverable already landed): record the resolve's `graduatedTo` so review/label
+ *     # surfaces show "no code change — deliverable already landed in 6b5874f7" on the backlog-only PR. Optional.
  *   node scripts/lane-manifest-write.mjs … --json          # machine-readable result (its `path` is the scratch file for --manifest-file)
  *
  * Exit codes: 0 = written; 3 = bad input (no/invalid --item or --repos, or the built manifest fails validation
@@ -110,6 +113,8 @@ const manifest = buildManifest({
   mergeRiskFiles,
   // #2171 — count of pre-PR review findings the lane dismissed (the drain escalation rubric's strongest signal).
   ...(flags.dismissed != null ? { dismissedFindings: Number(flags.dismissed) } : {}),
+  // #2447 — the resolve's graduatedTo pointer, rendered as the resolution-basis banner on review/label surfaces.
+  ...(typeof flags['graduated-to'] === 'string' ? { graduatedTo: flags['graduated-to'] } : {}),
 });
 const v = validateManifest(manifest);
 if (!v.ok) emit({ ok: false, item, detail: `refusing to write an invalid manifest: ${v.errors.join('; ')}` }, 3);

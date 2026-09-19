@@ -1,0 +1,3 @@
+WE #3605: stamp preparedDate for the prepared decision
+
+Written by the #3644 mechanical prepare-decision wrapper after the authoring agent reported every fork at the Definition of Ready. The decision stays `open` — ratifying it is a later, human turn.

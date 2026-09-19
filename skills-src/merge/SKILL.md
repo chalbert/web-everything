@@ -44,6 +44,17 @@ node scripts/merge-ai-prs.mjs --base=main           # restrict to PRs targeting 
 **Always `--dry-run` first**, relay the verdicts, then run the live sweep only once the user is happy (or they
 asked for it directly). Prefer `--pr=<N>` when they mean one specific PR.
 
+**Relay a resolution basis FIRST, before the file list (#2447).** A PR that resolves its item via `graduatedTo`
+(the deliverable already landed in an earlier commit) has a **backlog-only** diff by design. The sweep marks it: a
+`📦 graduatedTo: <sha> — no code change, deliverable already landed in <sha>` line under the verdict, and a
+`resolutionBasis` object on its `--json` `toMerge` / `parked` / `skipped` entry (the same banner heads the drain's
+park/skip comment on the PR). When you relay such a PR, lead with that line — a backlog-only diff with a
+`resolutionBasis` is a documented dedup-resolve, **not** a hollow resolve, so never strip its `ready-to-merge`
+label on the file list alone. The basis is derived (`deriveResolutionBasis`, `we:scripts/lib/review-render.mjs`)
+from the lane manifest's `graduatedTo`, the resolve frontmatter in the diff, or the body's `graduatedTo:` note, and
+only for an all-`backlog/` diff; it is presentation only and never changes a gate. A backlog-only PR with **no**
+basis is still worth a look — that is the shape a genuinely hollow resolve takes.
+
 ## The gates (a PR is merged ONLY if ALL hold)
 
 1. **AI-generated** — EVERY substantive commit is co-authored by Claude (the `Co-Authored-By: Claude` trailer).

@@ -13,7 +13,9 @@ import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
   REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
+  TOOL_FREE_ONLY_JUDGE_PROVIDERS,
 } from '../review-dispatch.mjs';
+import { buildReviewJudgeRequest, DEFAULT_LENS } from '../review-pr.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
 // below don't hand-duplicate the join.
@@ -235,18 +237,25 @@ describe('dispatchReview — judgeProvider (#xqa9ttq)', () => {
     expect(calls[0].argv.at(-1)).toContain('--provider=claude');
   });
 
-  it('fills the opted-in codex provider into the dispatched session\'s own review-loop-cli.mjs command', () => {
-    const calls = [];
-    const result = dispatchReview({
+  it('refuses judgeProvider \'codex\' BEFORE reading the brief or spawning - review-pr\'s judge steps are tool-bearing (PR #2115 review)', () => {
+    let readBriefCalls = 0;
+    expect(() => dispatchReview({
       pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
-      readBrief: () => JUDGE_PROVIDER_TEMPLATE,
-      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
-      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      readBrief: () => { readBriefCalls += 1; return JUDGE_PROVIDER_TEMPLATE; },
+      spawnAgent: () => { throw new Error('must not be called'); },
       checkStaleness: FRESH,
       judgeProvider: 'codex',
-    });
-    expect(result.judgeProvider).toBe('codex');
-    expect(calls[0].argv.at(-1)).toContain('--provider=codex');
+    })).toThrow(/TOOL-FREE-only/);
+    expect(readBriefCalls).toBe(0);
+  });
+
+  it('premise pin: review-pr\'s REAL judge request is tool-bearing, which is why codex is refused (fails if review-pr ever grows a tool-free-only roster)', () => {
+    const read = {
+      repo: 'o/r', pr: 1, title: 't', body: '', netChangedFiles: ['a.mjs'], diffText: 'diff',
+    };
+    const request = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+    expect(Array.isArray(request.allowedTools) && request.allowedTools.length > 0).toBe(true);
+    expect(TOOL_FREE_ONLY_JUDGE_PROVIDERS).toEqual(['codex']);
   });
 
   it('refuses an unrecognised provider name BEFORE reading the brief or spawning', () => {

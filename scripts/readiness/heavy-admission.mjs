@@ -81,7 +81,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { reserve, releaseLockDir, readLockEntry } from './file-locks.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
@@ -168,7 +168,7 @@ export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null
   for (let i = 0; i < cap; i++) {
     const current = readLockEntry(lockRoot, slotPath(i));
     const pidLiveness = current && current.owner !== owner ? probeSlotHolderLiveness(current.pid, selfPid) : 'unknown';
-    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, pid, pidLiveness, leaseMinutes, meta);
+    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, selfPid, pidLiveness, leaseMinutes, meta);
     if (r.ok) return { ok: true, slot: i, cap, heldBy };
     heldBy.push({ slot: i, owner: r.heldBy });
   }
@@ -388,7 +388,8 @@ async function main(argv) {
   const dashDashIdx = argv.indexOf('--');
   const preArgv = dashDashIdx === -1 ? argv : argv.slice(0, dashDashIdx);
   const { flags, positionals } = parseFlags(preArgv);
-  const repo = typeof flags.repo === 'string' ? flags.repo : process.cwd();
+  // Resolve before lock-root derivation so relative --repo uses the same shared pool and execution cwd.
+  const repo = resolve(typeof flags.repo === 'string' ? flags.repo : process.cwd());
   const cap = flags.cap != null ? Number(flags.cap) : resolveCap(process.env);
   const lockRoot = admissionLockRoot(repo, process.env);
   const owner = typeof flags.owner === 'string' ? flags.owner : repo;

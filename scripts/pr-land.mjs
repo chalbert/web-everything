@@ -42,6 +42,7 @@
  *    committed + pushed (never force-pushed). A heal problem is surfaced but NEVER fails the land (the merge
  *    already succeeded). `--no-heal` opts out.
  *
+ * Delegated work: --delegation=<provider>:<model>:<taskType> stamps explicit metadata for #3690.
  * Usage:
  *   node scripts/pr-land.mjs --ref=lane/2153-pr-substrate                 # publish HEAD → lane ref, open self-approved PR, wait for `test`, merge, delete ref
  *   node scripts/pr-land.mjs --ref=lane/2153-… --sha=<commit>            # publish an explicit commit (default: HEAD) — no local branch is created (guarded)
@@ -100,6 +101,7 @@ import {
 import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute the jury roster from the REAL diff at PR-open
 import { POLICY_CARE_JURY } from './lib/review-policy.mjs'; // #2635 — the care→jury contract's roster-timing mode (knob #4)
 import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs'; // xnsk54v — manifest rides the PR body, not a tracked file
+import { buildDelegationMarker, DELEGATION_MARKER, DELEGATION_TASK_TYPES } from './lib/delegation-marker.mjs';
 import { currentActorId, buildAuthorActorMarker, readAuthorActorStamps } from './lib/review-independence.mjs'; // #2844 — the author stamp the self-clear refusal compares against
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 import { join } from 'node:path';
@@ -111,7 +113,11 @@ const argv = process.argv.slice(2);
 const flags = {};
 for (const a of argv) {
   const m = a.match(/^--([^=]+)(?:=(.*))?$/);
-  if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+  if (m) { flags[m[1]] = m[2] === undefined ? true : m[2]; continue; }
+  // #3690 — keep malformed multiline --delegation values visible to bad-delegation validation;
+  // scope this exception to that flag so every other flag retains its ordinary non-dotAll parsing.
+  const md = a.match(/^--delegation=([\s\S]*)$/);
+  if (md) flags.delegation = md[1];
 }
 const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) : p);
 // Read a PR body from a file (the #2170 lane-review-composed body). Missing/unreadable → null (falls back
@@ -170,6 +176,11 @@ const BODY = typeof flags['body-file'] === 'string'
 const LANE_MANIFEST = typeof flags['manifest-file'] === 'string'
   ? (() => { try { return parseManifest(readFileSync(expandHome(flags['manifest-file']), 'utf8')); } catch { return null; } })()
   : null;
+// Explicit metadata from the delegating session; never infer authorship from commits.
+const delegationParts = typeof flags.delegation === 'string' ? flags.delegation.split(':') : [];
+const [provider, model, taskType] = delegationParts;
+const DELEGATION_MARKER_LINE = delegationParts.length === 3 && DELEGATION_TASK_TYPES.includes(taskType)
+  ? buildDelegationMarker({ provider, model, taskType }) : '';
 // #2844 — the AUTHOR's actor id, stamped into the PR body at OPEN. This is the durable half of the self-clear
 // refusal: it is written HERE, by the producer, before any review exists and before this session knows it might
 // later want to clear the PR — so the later clearance check compares against a value recorded by a different
@@ -197,17 +208,24 @@ export function withAuthorStamp(body, marker = AUTHOR_MARKER) {
   if (readAuthorActorStamps(body).length) return body;
   return `${body}\n\n${marker}\n`;
 }
+/** Append only when absent, including when an existing stamp is malformed or ambiguous. */
+export function withDelegationStamp(body, marker = DELEGATION_MARKER_LINE) {
+  if (!marker || typeof body !== 'string' || !body.trim()) return body;
+  if (new RegExp(`<!--\\s*${DELEGATION_MARKER}:`).test(body)) return body;
+  return `${body}\n\n${marker}\n`;
+}
 /**
  * we:scripts/pr-land.mjs#composePrBody — the body actually shipped to `gh pr create` AND to the re-run backfill
  * edit: the human body with the lane manifest block embedded (xnsk54v) and the #2844 author stamp appended. PURE,
- * with both inputs injectable so BOTH halves of the composition are provable without shelling the CLI. The
+ * with its inputs injectable so each part of the composition is provable without shelling the CLI. The
  * #2332/#2324 body guards still run on the HUMAN `BODY` (a manifest-only body must not pass as real content).
  * @param {string} body
  * @param {object|null} [manifest]
  * @param {string} [marker]
+ * @param {string} [delegationMarker]
  */
-export function composePrBody(body, manifest = LANE_MANIFEST, marker = AUTHOR_MARKER) {
-  return withAuthorStamp(manifest ? embedManifestInBody(body, manifest) : body, marker);
+export function composePrBody(body, manifest = LANE_MANIFEST, marker = AUTHOR_MARKER, delegationMarker = DELEGATION_MARKER_LINE) {
+  return withDelegationStamp(withAuthorStamp(manifest ? embedManifestInBody(body, manifest) : body, marker), delegationMarker);
 }
 const CREATE_BODY = composePrBody(BODY);
 // Post-land id-collision self-heal (#2071, generalized to EVERY land route). After a clean merge, heal any
@@ -632,6 +650,9 @@ function runCli() {
     }, 4);
   }
 
+  if (Object.hasOwn(flags, 'delegation') && !DELEGATION_MARKER_LINE) {
+    emit({ repo: REPO, merged: false, reason: 'bad-delegation', detail: `invalid --delegation — expected <provider>:<model>:<taskType> with non-empty whitespace-free tokens; taskType must be one of: ${DELEGATION_TASK_TYPES.join(', ')}` }, 3);
+  }
   if (!REF) emit({ repo: REPO, merged: false, reason: 'no-ref', detail: 'pass --ref=lane/<name> (the head ref to land onto ' + BASE + ')' }, 3);
   if (!/^lane\//.test(REF)) emit({ repo: REPO, merged: false, reason: 'bad-ref', detail: `--ref="${REF}" must be a lane/* ref (the #1934 guard carve-out) — never a local branch` }, 3);
   // #2622 — `--park=<review:human|review:pending>`: open the PR with that review label already on it and STOP
@@ -777,7 +798,7 @@ function runCli() {
     if (!bodyGuard.ok) emit({ repo: REPO, merged: false, reason: 'empty-body', detail: `${bodyGuard.reason} (head ${REF})` }, 3);
     try { const out = forge.create(createParams); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
     catch (e) { return onCreateFailed(e); }
-  } else if (LANE_MANIFEST || AUTHOR_MARKER) {
+  } else if (LANE_MANIFEST || AUTHOR_MARKER || DELEGATION_MARKER_LINE) {
     // xnsk54v — an existing PR (a re-run, or one opened before the manifest was ready) may lack the manifest
     // block the drain reads. Best-effort embed it (idempotent — embedManifestInBody replaces in place); a gh
     // hiccup never aborts a land, the drain's ref fallback still covers it.

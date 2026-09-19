@@ -59,7 +59,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+export const PROJECTS_DIR = process.env.CLAUDE_PROJECTS_DIR?.trim()
+  ? path.resolve(process.env.CLAUDE_PROJECTS_DIR.trim())
+  : path.join(os.homedir(), '.claude', 'projects');
 
 // Hard ceilings — NOT just defaults. A caller-supplied override (--max-bytes/--lines/--field-max) is
 // floor-clamped for sanity but must never be able to defeat the "never the whole file" guarantee this
@@ -101,13 +103,25 @@ function resolveTranscript(opts) {
   const { target } = opts;
   if (!target) return { error: 'no agent id / output_file / transcript path given' };
 
+  // Compare physical paths on both sides: the store itself may be reached through a symlink.
+  // Keep PROJECTS_DIR's original spelling for callers and diagnostics, including a missing store.
+  let realProjectsDir = PROJECTS_DIR;
+  try { realProjectsDir = fs.realpathSync(PROJECTS_DIR); } catch { /* store may not exist yet */ }
+  function containedTranscript(file) {
+    const real = fs.realpathSync(file);
+    const rel = path.relative(realProjectsDir, real);
+    if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+      return { error: `Transcript path "${file}" resolved outside PROJECTS_DIR (${PROJECTS_DIR}): ${real}` };
+    }
+    if (!rel) return { error: `Transcript path "${file}" names PROJECTS_DIR itself, not a transcript below it` };
+    return { file: real };
+  }
+
   // 1) A path that exists on disk — resolve through the symlink (output_file -> the real .jsonl) and
-  //    use it directly, whatever its name. This is the fast path when you have the Agent tool's own
-  //    output_file line in hand.
+  //    require it to land inside the project store. An output_file line can be untrusted transcript prose.
   if (target.includes('/') || target.includes(path.sep)) {
     try {
-      const real = fs.realpathSync(target);
-      if (fs.existsSync(real)) return { file: real };
+      return containedTranscript(target);
     } catch { /* broken symlink or gone — fall through to id search below */ }
   }
 
@@ -128,18 +142,20 @@ function resolveTranscript(opts) {
     if (opts.session) sessionDirs = sessionDirs.filter((s) => s === opts.session);
     for (const sess of sessionDirs) {
       const file = path.join(projPath, sess, 'subagents', `agent-${id}.jsonl`);
-      if (fs.existsSync(file)) {
+      try {
+        const resolved = containedTranscript(file);
+        if (resolved.error) continue;
         let mtimeMs = 0;
-        try { mtimeMs = fs.statSync(file).mtimeMs; } catch { /* ignore */ }
-        hits.push({ file, mtimeMs });
-      }
+        try { mtimeMs = fs.statSync(resolved.file).mtimeMs; } catch { /* ignore */ }
+        hits.push({ resolved, mtimeMs });
+      } catch { /* broken symlink or gone — skip this candidate */ }
     }
   }
   if (!hits.length) {
     return { error: `no transcript found for agent id "${id}" under ${PROJECTS_DIR}/**/subagents/ (pass the output_file path directly, or narrow with --project/--session)` };
   }
   hits.sort((a, b) => b.mtimeMs - a.mtimeMs); // most-recently-active match wins on an (unlikely) id collision
-  return { file: hits[0].file, ambiguous: hits.length > 1 ? hits.length : 0 };
+  return { ...hits[0].resolved, ambiguous: hits.length > 1 ? hits.length : 0 };
 }
 
 // ── bounded byte-capped tail read (the safety property) ────────────────────────────────────────────

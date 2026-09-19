@@ -97,6 +97,7 @@ import {
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN } from './lib/gate-config.mjs';
+import { scanDiffBranchCoverage } from './lib/diff-branch-coverage.mjs';
 import { isHash } from './backlog/id.mjs';
 
 const require = createRequire(import.meta.url);
@@ -117,6 +118,10 @@ const errors = [];
 const warnings = [];
 const err = (m, descriptor) => errors.push({ message: m, descriptor });
 const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
+
+// #2876 — separate from the scoped-planes average; failures stay blocking.
+const diffBranchCoverage = scanDiffBranchCoverage(ROOT);
+for (const e of diffBranchCoverage.errors) err(e.message, e.descriptor);
 
 // ── Failure descriptors (#095 → fed to the auto-fix agent #196) ────────────────
 // Every descriptor carries a `kind` (the failure class a fixer matches on) and `fix`: the routing
@@ -2584,6 +2589,7 @@ if (filesArg || LOCAL_MODE) {
 
 // ── Report ────────────────────────────────────────────────────────────────────
 const summary = {
+  diffBranchCoverage,
   blocks: blocks.length, plugs: plugs.length, protocols: protocols.length, intents: intents.length,
   capabilities: capabilities.length, terms: semantics.length, research: research.length, backlog: backlog.length,
   errors: errors.length, warnings: warnings.length,
@@ -2623,6 +2629,7 @@ if (JSON_MODE) {
 } else {
   const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', CYN = '\x1b[36m', DIM = '\x1b[2m', RST = '\x1b[0m';
   console.log(`${DIM}check-standards — Web Everything${RST}`);
+  console.log(diffBranchCoverage.message);
   if (scopeNote) console.log(`${CYN}  scope${RST} ${DIM}${scopeNote}${RST}`);
   if (localNote) console.log(`${CYN}  local${RST} ${DIM}${localNote}${RST}`);
   for (const w of warnings) console.log(`${YEL}  warn${RST} ${w.message}`);

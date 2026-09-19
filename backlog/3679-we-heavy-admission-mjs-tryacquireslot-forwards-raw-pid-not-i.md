@@ -3,9 +3,10 @@ bornAs: xrrx1gi
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/heavy-admission.mjs", "we:scripts/readiness/__tests__/heavy-admission.test.mjs"]
 dateOpened: "2026-09-14"
+dateResolved: "2026-09-19"
 tags: []
 ---
 

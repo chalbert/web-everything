@@ -3,8 +3,10 @@ bornAs: x8t2w4w
 kind: story
 size: 3
 parent: "3099"
-status: open
+status: resolved
 dateOpened: "2026-08-14"
+dateStarted: "2026-09-19"
+dateResolved: "2026-09-19"
 tags: [delivery, backlog, readiness, preparation, staleness]
 scope:
   - we:scripts/backlog.mjs

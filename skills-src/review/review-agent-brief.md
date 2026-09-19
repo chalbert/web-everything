@@ -16,7 +16,7 @@
 | `{{PR}}` | the PR number to review — e.g. `1234` |
 | `{{REPO}}` | the `owner/repo` the PR lives in — e.g. `chalbert/web-everything` |
 | `{{SESSION_SLUG}}` | a per-dispatch lane-lease slug, e.g. `review-1234` |
-| `{{JUDGE_PROVIDER}}` | which `JudgeProvider` the tool-free jurors below run as — `claude` (default) or `codex` (`#xqa9ttq`) |
+| `{{JUDGE_PROVIDER}}` | which `JudgeProvider` the tool-free jurors below run as — `claude` (the only value `review-dispatch.mjs` accepts today; `codex` is refused there because review-pr's judge steps are tool-bearing, `#xqa9ttq`) |
 
 ---
 
