@@ -125,10 +125,45 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     return runAgent({
       prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
       execFn: exec, spawnFn: () => { throw new Error('must not spawn'); },
+      disallowedTools: ['Bash(gh pr merge:*)'],
     }).then((st) => {
       expect(st).toBe('skipped (MERGED)');
       expect(leaseCalls).toHaveLength(0);
     });
+  });
+
+  it('refuses to run without a non-empty disallowedTools array (#xxxx dead-code guard)', async () => {
+    await expect(runAgent({
+      prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
+      execFn: baseExec(), spawnFn: () => { throw new Error('must not spawn'); },
+    })).rejects.toThrow(/disallowedTools/);
+    await expect(runAgent({
+      prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
+      execFn: baseExec(), spawnFn: () => { throw new Error('must not spawn'); },
+      disallowedTools: [],
+    })).rejects.toThrow(/disallowedTools/);
+  });
+
+  it('bakes disallowedTools into the spawned argv as ONE `=`-joined element right before the prompt', async () => {
+    let spawnArgv;
+    let child;
+    const spawnFn = (cmd, argv) => { spawnArgv = argv; child = fakeChild(); return child; };
+    const p = runAgent({
+      prompt: 'the-prompt', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
+      execFn: baseExec(), spawnFn, disallowedTools: ['Bash(gh pr merge:*)', 'Bash(gh api:*)'],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    try {
+      expect(spawnArgv[spawnArgv.length - 1]).toBe('the-prompt');
+      expect(spawnArgv[spawnArgv.length - 2]).toBe('--disallowedTools=Bash(gh pr merge:*),Bash(gh api:*)');
+      // never two separate argv elements for --disallowedTools — that shape lets the parser swallow the prompt
+      // (review-dispatch.mjs's own r2 self-review, #3433).
+      expect(spawnArgv).not.toContain('--disallowedTools');
+    } finally {
+      writeFileSync(join(scratch, 'conv-1671-fix-r1.log'), 'x'.repeat(500));
+      child.emit('close', 0);
+      await p;
+    }
   });
 
   it('ok: exits 0 and wrote enough to the log', async () => {
@@ -137,6 +172,7 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     const p = runAgent({
       prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
       execFn: baseExec(), spawnFn,
+      disallowedTools: ['Bash(gh pr merge:*)'],
     });
     // give the promise a tick to reach the spawn + write, then simulate the child finishing.
     await new Promise((r) => setTimeout(r, 10));
@@ -152,6 +188,7 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     const p = runAgent({
       prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
       execFn: baseExec(), spawnFn,
+      disallowedTools: ['Bash(gh pr merge:*)'],
     });
     await new Promise((r) => setTimeout(r, 10));
     writeFileSync(join(scratch, 'conv-1671-fix-r1.log'), 'too short');
@@ -165,6 +202,7 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     const p = runAgent({
       prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
       execFn: baseExec(), spawnFn, verify: () => false,
+      disallowedTools: ['Bash(gh pr merge:*)'],
     });
     await new Promise((r) => setTimeout(r, 10));
     writeFileSync(join(scratch, 'conv-1671-fix-r1.log'), 'x'.repeat(500));
@@ -178,6 +216,7 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     const p = runAgent({
       prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
       execFn: baseExec(), spawnFn,
+      disallowedTools: ['Bash(gh pr merge:*)'],
     });
     await new Promise((r) => setTimeout(r, 10));
     child.emit('close', 2);
@@ -195,6 +234,7 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     const p = runAgent({
       prompt: 'x', lane: 5, tag: '1671-fix-r1', timeoutMs: 5,
       repo: '/repo', lanesDir: '/lanes', scratchDir: scratch, execFn: exec, spawnFn,
+      disallowedTools: ['Bash(gh pr merge:*)'],
     });
     // Let the timeout fire (5ms) and kill the child; then the harness's own `close(null)` follows the kill.
     await new Promise((r) => setTimeout(r, 20));

@@ -62,7 +62,7 @@ Requested assessment (operator, 2026-09-07): what it takes to decouple this repo
 Filed 2026-09-07 at the operator's request for a staged, leverage-first assessment of decoupling the
 mechanical delivery system from Claude specifically, ending in a recommended sequence for adding Codex. Child
 of #3369 (the existing multi-provider epic), scoped to exactly the surface #3369's own text named and
-deferred ("blocked on #3331/#xnukacf/#x4iwn55 landing for Claude first… do not start it earlier").
+deferred ("blocked on #3331/#3367/#3366 landing for Claude first… do not start it earlier").
 
 ## Placement note (2026-09-07)
 
