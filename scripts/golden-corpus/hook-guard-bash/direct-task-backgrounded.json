@@ -1,0 +1,11 @@
+{
+  "id": "direct-task-backgrounded",
+  "cmd": "node scripts/codex-direct-task.mjs --task=\"x\"",
+  "ctx": {
+    "runInBackground": true
+  },
+  "basis": "#3383 — synchronous direct-task banner forbids backgrounding",
+  "expect": {
+    "reason": "codex-direct-task.mjs and gemini-direct-task.mjs are SYNCHRONOUS: they already block until the delegated Codex/Antigravity task completes. Their FOREGROUND ONLY banner comments forbid backgrounding and Monitor/nested waits. Invoke as a normal FOREGROUND Bash call and wait for it to return; backgrounding has no legitimate use and there is no override."
+  }
+}

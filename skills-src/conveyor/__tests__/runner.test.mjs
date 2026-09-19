@@ -36,6 +36,15 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, execFileSync: vi.fn() };
 });
 
+// Keep the real fetch builder while replacing throttle effects (no machine-global locks or real gh).
+vi.mock('../../../scripts/lib/gh-throttle.mjs', async () => {
+  const { execFileSync } = await import('node:child_process');
+  return {
+    runGhSync: (args, opts) => execFileSync('gh', args, opts),
+    execFileSyncThrottled: (file, args, opts) => execFileSync(file, args, opts),
+  };
+});
+
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
 const MIN = 60_000;
 
@@ -479,7 +488,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     // — mutating this list is the mechanical check: delete/reorder/rename a `runQuiet(...)` line above and this
     // assertion goes red, which is the whole point (a `grep` for the added line, this PR's own backlog card
     // cited as its only prior check, catches none of that).
-    expect(calls.map((c) => c.join(' '))).toEqual([
+    expect(calls.filter((c) => c[0] === 'node').map((c) => c.filter((a) => !a.startsWith('--prs-file=')).join(' '))).toEqual([
       'node /scripts/conveyor/infra-blocked.mjs retry --repo=owner/repo',
       'node /scripts/conveyor/lease-reaper.mjs --repo=owner/repo',
       'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',
@@ -492,5 +501,108 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
     ]);
+  });
+});
+
+
+// Emulate only the four named subprocesses' discovery at the mocked boundary. The separate
+// reconcile-fix-dispatch invocation deliberately remains opaque and contributes no calls here.
+import { defaultListOpenPrs } from '../../../scripts/conveyor/duplicate-pr-watch.mjs';
+import { defaultListParkedPrs as listConflicts } from '../../../scripts/conveyor/parked-pr-conflict-watch.mjs';
+import { defaultListParkedPrs as listProgress } from '../../../scripts/conveyor/parked-pr-progress-watch.mjs';
+import { defaultReadPrs } from '../../../scripts/conveyor/reconcile-pass.mjs';
+import { OPEN_PR_LIST_FIELDS } from '../../../scripts/conveyor/open-pr-fetch.mjs';
+
+const consumers = {
+  'parked-pr-conflict-watch.mjs': listConflicts,
+  'reconcile-pass.mjs': defaultReadPrs,
+  'duplicate-pr-watch.mjs': defaultListOpenPrs,
+  'parked-pr-progress-watch.mjs': listProgress,
+};
+
+describe('one open-PR snapshot per mechanical tick', () => {
+  async function tick({ fetchThrows = false, consumerThrows = false, ticks = 1 } = {}) {
+    const cp = await import('node:child_process');
+    const calls = [];
+    const files = [];
+    const snapshots = [];
+    const fixture = [{ number: 42, body: 'snapshot retained intact', files: [{ path: 'scripts/example.mjs' }] }];
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    cp.execFileSync.mockImplementation((cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'gh') {
+        if (fetchThrows && args.includes(OPEN_PR_LIST_FIELDS)) throw new Error('shared discovery failed');
+        return JSON.stringify(fixture);
+      }
+      const name = args[0].split('/').pop();
+      if (consumers[name]) {
+        const flag = args.find((a) => a.startsWith('--prs-file='));
+        if (flag) {
+          const file = flag.slice('--prs-file='.length);
+          files.push(file);
+          // It exists while each consumer runs and contains the full snapshot.
+          snapshots.push(JSON.parse(readFileSync(file, 'utf8')));
+        } else {
+          consumers[name]({ repo: 'owner/repo', exec: cp.execFileSync });
+        }
+        if (consumerThrows) throw new Error('consumer failed');
+      }
+      return name === 'reconcile-pass.mjs' ? JSON.stringify({ dispatch: [], refusals: [] }) : '';
+    });
+    try {
+      const run = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+      for (let i = 0; i < ticks; i++) await run({ out: {} });
+      for (const snapshot of snapshots) expect(snapshot).toEqual(fixture);
+      return { calls, files, warnings: stderr.mock.calls.map(([line]) => line) };
+    } finally {
+      stderr.mockRestore();
+    }
+  }
+
+  function consumerCalls(calls) {
+    return calls.filter(([cmd, script]) => cmd === 'node' && consumers[script.split('/').pop()]);
+  }
+
+  it('fetches exactly once and invokes all four consumers once with the same live file, then deletes it', async () => {
+    const { calls, files } = await tick();
+    const fetches = calls.filter(([cmd, ...args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'list');
+    expect(fetches).toEqual([['gh', 'pr', 'list', '--state', 'open', '--limit', '200', '--json', OPEN_PR_LIST_FIELDS, '--repo', 'owner/repo']]);
+    const consumed = consumerCalls(calls);
+    for (const call of calls.filter(([cmd, script]) => cmd === 'node' && !consumers[script.split('/').pop()])) {
+      expect(call.some((a) => a.startsWith('--prs-file='))).toBe(false);
+    }
+    expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
+    expect(files).toHaveLength(4);
+    expect(new Set(files).size).toBe(1);
+    for (const call of consumed) {
+      expect(call).toContain(`--prs-file=${files[0]}`);
+      expect(call).toContain(call[1].endsWith('/reconcile-pass.mjs') ? '--json' : 'sweep');
+    }
+    expect(existsSync(files[0])).toBe(false);
+  });
+
+  it('warns once on shared-fetch failure and all four consumers perform their standalone discovery without a flag', async () => {
+    const { calls, files, warnings } = await tick({ fetchThrows: true });
+    const consumed = consumerCalls(calls);
+    expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
+    expect(consumed.flat().some((a) => a.startsWith('--prs-file='))).toBe(false);
+    expect(files).toEqual([]);
+    expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(5); // failed shared attempt + four fallbacks
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('mechanical pass open-pr-fetch failed (non-fatal): shared discovery failed');
+  });
+
+  it('cleans up even when consumers fail, still invoking every consumer', async () => {
+    const { calls, files } = await tick({ consumerThrows: true });
+    expect(consumerCalls(calls)).toHaveLength(4);
+    expect(files).toHaveLength(4);
+    for (const file of files) expect(existsSync(file)).toBe(false);
+  });
+
+  it('fetches afresh with a distinct file on the next tick', async () => {
+    const { calls, files } = await tick({ ticks: 2 });
+    expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(2);
+    expect(new Set(files).size).toBe(2);
+    for (const file of files) expect(existsSync(file)).toBe(false);
   });
 });

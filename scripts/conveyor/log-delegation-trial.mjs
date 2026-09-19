@@ -8,8 +8,9 @@ import { appendScorecard } from './run-scorecard-store.mjs';
 import { scrubPublish } from '../lib/secret-scrub.mjs';
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
+export const TASK_TYPES = Object.freeze(['bugfix', 'conflict-resolution', 'doc-fix', 'self-fix', 'other']);
 const enums = {
-  taskType: ['bugfix', 'conflict-resolution', 'doc-fix', 'self-fix', 'other'],
+  taskType: TASK_TYPES,
   outcome: ['landed', 'rejected', 'reworked'],
   verifiedBy: ['claude-subagent', 'independent-claude', 'other'],
 };

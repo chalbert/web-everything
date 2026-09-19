@@ -115,6 +115,16 @@ Everything below is machine-local and gitignored — none of it lands on `main`.
 above). It can report stale rows for sessions that no longer exist; a row missing `pid` is exactly that, not a
 live process to chase down.
 
+## Resolved conflicts return to review
+
+When `parked-pr-conflict-watch.mjs` sees a previously flagged real merge conflict against `main` clear
+(GitHub's own `mergeable: MERGEABLE` confirms it; absence of the watcher's label does not), it removes
+`merge-status:conflicting` and hands a PR still carrying `review:changes` to `rearm-review.mjs` for a
+**fresh review of the current, post-resolution diff**. The sanctioned hand-back swaps the bounce to
+`review:pending` and preserves `review:human`; the PR must never be left stuck on that stale bounce forever.
+It never reuses or resurrects a prior `review:accepted`: that verdict predates the conflict-resolution commits
+and is void for the new diff. An unknown mergeability result keeps the conflict marker for a later tick.
+
 ## Discoverability
 
 Linked from `we:skills-src/conveyor/SKILL.md` §2 ("Start the runner") — that's where an operator running the
