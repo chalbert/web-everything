@@ -46,7 +46,9 @@ import { STAGE_REQUEST_EFFECT } from './record-verdict.mjs';
 import { advance, runStatus } from './engine.mjs';
 import { applyPendingEffects } from './effect-executor.mjs';
 import { createRegistry } from './registry.mjs';
-import { reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor } from './review-pr.mjs';
+import {
+  reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor, codexAdvisoryFromRun,
+} from './review-pr.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Resolved by SCRIPT LOCATION, never cwd — same reason `run-store.mjs` and `review-pr-io.mjs` do it. */
@@ -269,7 +271,12 @@ export async function advanceReviewPrToWriteUp(record, { to, store, sinks = crea
   if (!answer || !record || record.op !== 'review-pr') return record;
 
   const registry = createRegistry();
-  registry.register(reviewPrOperation({ readPr: createReviewPrReader() }));
+  // #xqa9ttq — SAME `REVIEW_PR_CODEX_ADVISORY` ENV VAR `run.mjs` READS. This registration must seat the same
+  // roster the run was STARTED with, or a resume here would be reasoning about a run shape that no longer
+  // exists — see `codexAdvisoryFromEnv`'s own docs (`we:scripts/operations/review-pr.mjs`).
+  // PR #2117 review: the roster now comes from the SAVED RUN (`codexAdvisoryFromRun`), not the ambient env,
+  // so a resume in a process with a different REVIEW_PR_CODEX_ADVISORY than the one the run was started under still registers the right step list.
+  registry.register(reviewPrOperation({ readPr: createReviewPrReader(), codexAdvisory: codexAdvisoryFromRun(record) }));
   if (runStatus(record, { registry }) !== 'awaiting-confirm') return record;
 
   // TWO `advance` calls, not one: the first resolves the `confirm` resume (an answer is recorded, cursor moves
