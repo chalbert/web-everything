@@ -1256,7 +1256,8 @@ export function convergeRoundTouchedFiles(lane, { run: runFn = run } = {}) {
 /**
  * BUG-14 FIX. Commit ONE converge round's genuinely accepted edits — explicit paths, one commit, message
  * written to a file rather than a bash heredoc (the SAME footgun `delivery-agent-brief.md` step 8 calls out:
- * backticks in a heredoc run as a subshell). Mirrors that step's own "commit only this item's files, one
+ * backticks in a heredoc run as a subshell). Paths are staged explicitly first (`git add -- <paths>`) because
+ * `git commit -- <paths>` cannot take untracked files. Mirrors that step's own "commit only this item's files, one
  * commit, never `git add -A`" convention, applied per round instead of once at the very end — this wrapper,
  * unlike a human/full-brief session, must commit BEFORE the next `converge-cli.mjs step` call reads the lane's
  * state and BEFORE `openPr`'s `--sha=HEAD` reads HEAD, or a genuinely accepted editor revision never reaches
@@ -1277,6 +1278,7 @@ export function commitConvergeRound(
     + 'Commits the accepted editor findings from this round of the #3627 delivery-pipeline converge loop '
     + '(runConvergeEdit reported advanced:true) before the loop continues and before the PR opens.\n';
   writeFile(msgFile, message);
+  runFn('git', ['add', '--', ...paths], { cwd: lane });
   runFn('git', ['commit', '-F', msgFile, '--', ...paths], { cwd: lane });
   return { committed: true, paths };
 }

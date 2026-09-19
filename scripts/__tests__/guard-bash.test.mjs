@@ -2213,7 +2213,7 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
   });
 
   it('denies `pr-land.mjs` for a delivery-agent session', () => {
-    expect(reason('node scripts/pr-land.mjs --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
+    expect(reason('node scripts/pr-land.mjs --no-require-verified --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
   });
 
   it('denies `learnings-drop.mjs` for a delivery-agent session', () => {
@@ -2242,7 +2242,7 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
       'node scripts/backlog.mjs claim 1234 --session=x',
       'gh pr view 1234',
       'node scripts/operations/run.mjs open-pr --ref=lane/1234-x',
-      'node scripts/pr-land.mjs --pr=1234',
+      'node scripts/pr-land.mjs --no-require-verified --pr=1234',
       'node scripts/conveyor/learnings-drop.mjs --kind=friction',
       'node scripts/converge-cli.mjs init --lane=/lane-3',
       'node scripts/verify-lane.mjs request',

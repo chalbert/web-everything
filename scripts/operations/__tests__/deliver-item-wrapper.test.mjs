@@ -523,6 +523,7 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
       if (cmd === 'git' && args[0] === 'status') {
         return typeof gitStatus === 'function' ? gitStatus(gitStatusCallIdx++) : gitStatus;
       }
+      if (cmd === 'git' && args[0] === 'add') return '';
       if (cmd === 'git' && args[0] === 'commit') return '';
       if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'step') {
         if (stepIdx >= steps.length) throw new Error(`fakeRun: no scripted step left for call #${stepIdx + 1}`);
@@ -630,12 +631,17 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
 
     const commitCallIdx = run.calls.findIndex((c) => c.cmd === 'git' && c.args[0] === 'commit');
+    const addCallIdx = run.calls.findIndex((c) => c.cmd === 'git' && c.args[0] === 'add');
     const stepCallIdx = run.calls.findIndex((c) => c.cmd === 'node' && c.args[1] === 'step');
     expect(commitCallIdx).toBeGreaterThan(-1);
+    expect(addCallIdx).toBeGreaterThan(-1);
     expect(stepCallIdx).toBeGreaterThan(-1);
+    expect(addCallIdx).toBeLessThan(commitCallIdx);
     expect(commitCallIdx).toBeLessThan(stepCallIdx); // committed before the NEXT step call reads the lane
 
+    const addCall = run.calls[addCallIdx];
     const commitCall = run.calls[commitCallIdx];
+    expect(addCall.args.slice(2)).toEqual(commitCall.args.slice(4)); // add's paths equal commit's paths
     expect(commitCall.args).toEqual(['commit', '-F', `${lane}/.converge-commit-msg-r1.txt`, '--', 'src/foo.mjs']);
     expect(commitCall.args).not.toContain('-A');
     expect(commitCall.args).not.toContain('.converge-obs-1-0.json'); // this wrapper's own bookkeeping, never committed
@@ -720,7 +726,7 @@ describe('convergeRoundTouchedFiles (#3627 bug 14 helper — the real touched-fi
 });
 
 describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round commit)', () => {
-  it('commits explicit paths via `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the round', () => {
+  it('commits explicit paths via `git add -- <paths>` then `git commit -F <msgfile> -- <paths>`, never `git add -A`, message names the round', () => {
     const run = vi.fn(() => '');
     const writeFile = vi.fn();
     const result = commitConvergeRound(
@@ -732,10 +738,13 @@ describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round comm
     const [msgFile, message] = writeFile.mock.calls[0];
     expect(msgFile).toBe('/lane/.converge-commit-msg-r2.txt');
     expect(message).toMatch(/round 2/);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith('git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
     expect(run.mock.calls[0][1]).not.toContain('-A');
     expect(run.mock.calls[0][1]).not.toContain('--all');
+    expect(run.mock.calls[1][1]).not.toContain('-A');
+    expect(run.mock.calls[1][1]).not.toContain('--all');
   });
 
   it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {
