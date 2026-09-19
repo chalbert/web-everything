@@ -104,12 +104,18 @@ function resolveTranscript(opts) {
   if (!target) return { error: 'no agent id / output_file / transcript path given' };
 
   // 1) A path that exists on disk — resolve through the symlink (output_file -> the real .jsonl) and
-  //    use it directly, whatever its name. This is the fast path when you have the Agent tool's own
-  //    output_file line in hand.
+  //    require it to land inside the project store. An output_file line can be untrusted transcript prose.
   if (target.includes('/') || target.includes(path.sep)) {
     try {
       const real = fs.realpathSync(target);
-      if (fs.existsSync(real)) return { file: real };
+      if (fs.existsSync(real)) {
+        const rel = path.relative(PROJECTS_DIR, real);
+        if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+          return { error: `Transcript path "${target}" resolved outside PROJECTS_DIR (${PROJECTS_DIR}): ${real}` };
+        }
+        if (!rel) return { error: `Transcript path "${target}" names PROJECTS_DIR itself, not a transcript below it` };
+        return { file: real };
+      }
     } catch { /* broken symlink or gone — fall through to id search below */ }
   }
 

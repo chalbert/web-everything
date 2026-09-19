@@ -12,8 +12,8 @@
  *   Plus a small proof that `truncate()` strips ANSI/control escape sequences before anything is
  *   printed (review's terminal-escape-injection finding).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,7 +23,7 @@ import {
 
 let dir;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'agent-health-test-')); });
-afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); });
 
 function writeLines(file, lines) { writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n'); }
 
@@ -33,6 +33,45 @@ function assistantEntry(blocks) {
 function toolUseBlock(id, name, input) { return { type: 'tool_use', id, name, input }; }
 function toolResultBlock(toolUseId, content = 'ok') { return { type: 'tool_result', tool_use_id: toolUseId, content }; }
 function userEntry(blocks) { return { type: 'user', message: { role: 'user', content: blocks } }; }
+
+describe('resolveTranscript — confine explicit paths after resolving symlinks', () => {
+  let projects, resolveTranscript, inside, outside, sibling;
+  beforeEach(async () => {
+    projects = join(realpathSync(dir), 'projects');
+    const subagents = join(projects, 'fixture', 'session', 'subagents');
+    mkdirSync(subagents, { recursive: true });
+    mkdirSync(`${projects}-evil`);
+    inside = join(subagents, 'agent-safe.jsonl');
+    outside = join(realpathSync(dir), 'agent-outside.jsonl');
+    sibling = join(`${projects}-evil`, 'agent-secret.jsonl');
+    for (const file of [inside, outside, sibling]) writeLines(file, [assistantEntry([])]);
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    ({ resolveTranscript } = await import('../agent-health.mjs'));
+  });
+  it.each(['absolute', 'sibling prefix', 'traversal', 'symlink escape'])('rejects an outside path: %s', (kind) => {
+    let target = outside;
+    if (kind === 'sibling prefix') target = sibling;
+    if (kind === 'traversal') target = `${projects}/../agent-outside.jsonl`;
+    if (kind === 'symlink escape') {
+      target = join(projects, 'escape.output');
+      symlinkSync(outside, target);
+    }
+    const resolved = resolveTranscript({ target });
+    expect(resolved).toEqual({ error: expect.stringContaining('outside PROJECTS_DIR') });
+    expect(resolved.error).toContain(target);
+    expect(resolved.error).toContain(projects);
+  });
+  it('allows a transcript inside the store, including an external output symlink to it', () => {
+    expect(resolveTranscript({ target: inside })).toEqual({ file: inside });
+    const output = join(dir, 'safe.output');
+    symlinkSync(inside, output);
+    expect(resolveTranscript({ target: output })).toEqual({ file: inside });
+  });
+  it('preserves id-only lookup within the store', () => {
+    expect(resolveTranscript({ target: 'safe' })).toEqual({ file: inside, ambiguous: 0 });
+  });
+});
 
 // ── (1) bounded read: hard ceilings hold even against an oversized override ────────────────────────
 describe('parseArgs — hard ceilings clamp even an explicit oversized override (#1905 finding)', () => {

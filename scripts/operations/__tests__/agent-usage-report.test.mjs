@@ -5,7 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { CODEX_MODEL } from '../../codex-direct-task.mjs';
 import { buildAgyDirectTaskArgv } from '../../gemini-direct-task.mjs';
-import { extractAgentUsage, delegationsFromCommand, scanAndAppend, scanSession, readAgentUsageLog, listAgentUsageDays, appendAgentUsageLogLine, reportAgentUsage, resolveAgentUsageDir, formatAgentUsageReport } from '../agent-usage-report.mjs';
+let extractAgentUsage, delegationsFromCommand, scanAndAppend, scanSession, readAgentUsageLog, listAgentUsageDays,
+  appendAgentUsageLogLine, reportAgentUsage, resolveAgentUsageDir, formatAgentUsageReport, MAX_TASK_CHARS, MAX_COMMAND_CHARS;
 
 let temp, projects, store, parent, childDir;
 const timestamp = '2026-09-18T23:59:00.000Z';
@@ -24,17 +25,55 @@ const child = (id, entries, meta) => {
 const cli = (args, extraEnv = {}) => execFileSync(process.execPath, [resolve('scripts/operations/agent-usage-report.mjs'), ...args], {
   cwd: temp, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECTS_DIR: projects, OPERATION_AGENT_USAGE_DIR: store, ...extraEnv },
 });
-beforeEach(() => {
-  temp = mkdtempSync(join(tmpdir(), 'we-agent-usage-'));
+beforeEach(async () => {
+  temp = realpathSync(mkdtempSync(join(tmpdir(), 'we-agent-usage-')));
   projects = join(temp, 'projects'); store = join(temp, 'usage');
   parent = join(projects, '-fixture', 'session-1.jsonl');
   childDir = join(projects, '-fixture', 'session-1', 'subagents');
   mkdirSync(childDir, { recursive: true });
   vi.stubEnv('OPERATION_AGENT_USAGE_DIR', store);
+  vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+  vi.resetModules();
+  ({ extractAgentUsage, delegationsFromCommand, scanAndAppend, scanSession, readAgentUsageLog, listAgentUsageDays,
+    appendAgentUsageLogLine, reportAgentUsage, resolveAgentUsageDir, formatAgentUsageReport, MAX_TASK_CHARS, MAX_COMMAND_CHARS,
+  } = await import('../agent-usage-report.mjs'));
 });
 afterEach(() => { vi.unstubAllEnvs(); rmSync(temp, { recursive: true, force: true }); });
 
 describe('full child transcript extraction', () => {
+  it('never uses a prompt as task metadata, including in the persisted record', async () => {
+    const sentinel = 'SENTINEL-PROMPT-8f2a: my actual password is hunter2';
+    const record = await extractAgentUsage(child('private', [assistant([])]), {
+      dispatch: { ...dispatch('d'), input: { prompt: sentinel } },
+    });
+    expect(record.task).toBeNull();
+    expect(JSON.stringify(record)).not.toContain(sentinel);
+    appendAgentUsageLogLine(record);
+    expect(readFileSync(join(store, '2026-09-18.jsonl'), 'utf8')).not.toContain(sentinel);
+  });
+  it.each(['sidecar', 'dispatch'])('caps %s descriptions with a visible truncation marker', async (source) => {
+    const description = 'x'.repeat(500);
+    const record = await extractAgentUsage(child('long-label', [assistant([])], source === 'sidecar' ? { description } : undefined), {
+      dispatch: dispatch('d', source === 'dispatch' ? description : 'Fallback label'),
+    });
+    expect(record.task).toBe('x'.repeat(MAX_TASK_CHARS - 1) + '…');
+    expect(record.task).toHaveLength(MAX_TASK_CHARS);
+    expect(JSON.stringify(record)).not.toContain(description);
+  });
+  it.each([
+    'node scripts/codex-direct-task.mjs --model=custom-codex --task="SENTINEL-CMD-91xk: full prompt text nobody should persist"',
+    "bash -lc 'node scripts/codex-direct-task.mjs --model=custom-codex --task=\"SENTINEL-CMD-91xk: full prompt text nobody should persist\"'",
+    'echo SENTINEL-CMD-91xk; node scripts/codex-direct-task.mjs --model=custom-codex --task="private text"',
+  ])('persists only redacted delegation metadata for %s', async (command) => {
+    const record = await extractAgentUsage(child('private-command', [assistant([bash(command)])]));
+    const summary = 'node scripts/codex-direct-task.mjs --model=custom-codex --task=[redacted]';
+    expect(record.delegations).toEqual([{ provider: 'codex', command: summary, model: 'custom-codex', modelSource: 'explicit' }]);
+    expect(record.delegatedModel).toEqual({ command: summary, model: 'custom-codex' });
+    expect(JSON.stringify(record.delegations)).not.toContain('SENTINEL-CMD-91xk');
+    expect(JSON.stringify(record.delegatedModel)).not.toContain('SENTINEL-CMD-91xk');
+    appendAgentUsageLogLine(record);
+    expect(readFileSync(join(store, '2026-09-18.jsonl'), 'utf8')).not.toContain('SENTINEL-CMD-91xk');
+  });
   it('uses the exact sidecar task, real assistant model, timestamp and traceability for pure Claude', async () => {
     const file = child('pure', [assistant([text('Completed without a PR.')])], { description: '  Exact task  ' });
     expect(await extractAgentUsage(file, { dispatch: dispatch('d') })).toMatchObject({
@@ -43,14 +82,15 @@ describe('full child transcript extraction', () => {
     });
   });
   it.each([
-    ['cd /tmp && node scripts/codex-direct-task.mjs --model=custom-codex --task="fix"', 'codex', 'custom-codex'],
-    ['node scripts/gemini-direct-task.mjs -m gemini-custom', 'gemini', 'gemini-custom'],
-    ['node scripts/gemini-direct-task.mjs -m="gemini-other"', 'gemini', 'gemini-other'],
-    ['node scripts/codex-direct-task.mjs', 'codex', CODEX_MODEL],
-  ])('detects script execution: %s', async (command, provider, model) => {
+    ['cd /tmp && node scripts/codex-direct-task.mjs --model=custom-codex --task="fix"', 'codex', 'custom-codex', 'node scripts/codex-direct-task.mjs --model=custom-codex --task=[redacted]'],
+    ['node scripts/gemini-direct-task.mjs -m gemini-custom', 'gemini', 'gemini-custom', 'node scripts/gemini-direct-task.mjs -m gemini-custom'],
+    ['node scripts/gemini-direct-task.mjs -m="gemini-other"', 'gemini', 'gemini-other', 'node scripts/gemini-direct-task.mjs -m=gemini-other'],
+    ['node scripts/codex-direct-task.mjs', 'codex', CODEX_MODEL, 'node scripts/codex-direct-task.mjs'],
+  ])('detects script execution: %s', async (command, provider, model, summary) => {
     const record = await extractAgentUsage(child('delegate', [assistant([bash(command)])]));
     expect(record.delegatedProvider).toBe(provider);
-    expect(record.delegatedModel).toEqual({ command, model });
+    expect(record.delegatedModel).toEqual({ command: summary, model });
+    expect(record.delegations).toEqual([{ provider, command: summary, model, modelSource: command.includes('-m') ? 'explicit' : 'script-default' }]);
   });
   it('does not invent a Gemini default when the real wrapper defers it to agy', async () => {
     expect(buildAgyDirectTaskArgv()).not.toContain('--model');
@@ -99,6 +139,34 @@ describe('full child transcript extraction', () => {
 });
 
 describe('shell invocation classification', () => {
+  it.each(['task', 'task-file', 'prompt', 'message', 'description', 'body', 'text', 'PrOmPt'])('redacts both value forms of %s, retaining other flags and models', (name) => {
+    for (const prefix of ['--', '']) {
+      for (const separator of ['=', ' ']) {
+        const flag = `${prefix}${name}${separator}`;
+        const command = `node scripts/codex-direct-task.mjs ${flag}"SENTINEL-FLAG-a921: private words" --model=custom-codex --effort high`;
+        expect(delegationsFromCommand(command)).toEqual([{
+          provider: 'codex', model: 'custom-codex', modelSource: 'explicit',
+          command: `node scripts/codex-direct-task.mjs ${flag}[redacted] --model=custom-codex --effort high`,
+        }]);
+      }
+    }
+  });
+  it('redacts repeated content flags before capping, preserving later classification flags', () => {
+    const command = `node scripts/codex-direct-task.mjs --task="${'s'.repeat(1000)}" --prompt private --task=secret --model=custom`;
+    expect(delegationsFromCommand(command)[0]).toMatchObject({
+      command: 'node scripts/codex-direct-task.mjs --task=[redacted] --prompt [redacted] --task=[redacted] --model=custom',
+      model: 'custom', modelSource: 'explicit',
+    });
+  });
+  it('caps unrecognized argument text, including the ellipsis, without changing model extraction', async () => {
+    const prefix = 'node scripts/codex-direct-task.mjs --unknown=';
+    const command = `${prefix}${'x'.repeat(500)} --model=custom`;
+    const record = await extractAgentUsage(child('capped-command', [assistant([bash(command)])]));
+    const summary = prefix + 'x'.repeat(MAX_COMMAND_CHARS - prefix.length - 1) + '…';
+    expect(record.delegations[0]).toMatchObject({ command: summary, model: 'custom', modelSource: 'explicit' });
+    expect(record.delegations[0].command).toHaveLength(MAX_COMMAND_CHARS);
+    expect(record.delegatedModel).toEqual({ command: summary, model: 'custom' });
+  });
   it.each([
     '# node scripts/codex-direct-task.mjs --model=fake',
     'echo "node scripts/codex-direct-task.mjs; node scripts/gemini-direct-task.mjs"',
@@ -117,7 +185,7 @@ describe('shell invocation classification', () => {
 });
 
 describe('session scan and durable store', () => {
-  it('handles meta-free old transcripts, missing children, metadata-only linking, prompt fallback and day rotation idempotently', async () => {
+  it('handles meta-free old transcripts, missing children, metadata-only linking, prompt-only tasks and day rotation idempotently', async () => {
     child('old', [assistant([])]);
     child('meta', [assistant([], 'claude-haiku-5', '2026-09-19T00:01:00.000Z')], { toolUseId: 'd2', description: 'Sidecar description' });
     child('prompt', [assistant([])]);
@@ -129,7 +197,7 @@ describe('session scan and durable store', () => {
     const second = await scanAndAppend({ transcript: parent });
     expect(second).toMatchObject({ appended: 0, alreadyPresent: 3 });
     expect(listAgentUsageDays()).toEqual(['2026-09-18', '2026-09-19']);
-    expect(readAgentUsageLog('2026-09-18').lines.map((r) => r.task)).toEqual(['Task d1', 'Prompt-only task']);
+    expect(readAgentUsageLog('2026-09-18').lines.map((r) => r.task)).toEqual(['Task d1', null]);
     expect(readAgentUsageLog('2026-09-19').lines[0].task).toBe('Sidecar description');
     expect(resolveAgentUsageDir()).toBe(store);
   });
@@ -138,6 +206,21 @@ describe('session scan and durable store', () => {
     const entry = result('d1', 'text-id'); delete entry.toolUseResult;
     jsonl(parent, [assistant([dispatch('d1')]), assistant([dispatch('d1')]), entry]);
     expect(await scanSession({ transcript: parent })).toMatchObject({ dispatches: 1, skipped: [], records: [{ agentId: 'text-id' }] });
+  });
+  it.each(['outside', 'projects-evil'])('skips hostile output_file prose pointing into %s and continues scanning', async (directory) => {
+    const outside = join(temp, directory, 'agent-secret.jsonl');
+    mkdirSync(join(temp, directory));
+    const sentinel = 'SENTINEL-OUTSIDE-17fc';
+    jsonl(outside, [assistant([text(sentinel)], sentinel)]);
+    child('safe', [assistant([])]);
+    jsonl(parent, [assistant([dispatch('hostile'), dispatch('safe')]), {
+      type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'hostile', content: `Finished.\noutput_file: ${outside}` }] },
+    }, result('safe', 'safe')]);
+    const scan = await scanSession({ transcript: parent });
+    expect(scan.records.map((r) => r.toolUseId)).toEqual(['safe']);
+    expect(scan.skipped).toEqual([{ toolUseId: 'hostile', reason: expect.stringContaining('outside PROJECTS_DIR') }]);
+    expect(scan.skipped[0].reason).toContain(outside);
+    expect(JSON.stringify(scan)).not.toContain(sentinel);
   });
   it('resolves decorated ids via the shared helper and session env via CLI using a synthetic projects override', async () => {
     child('old', [assistant([])]); jsonl(parent, [assistant([dispatch('d1')]), result('d1', 'old')]);

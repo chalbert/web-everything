@@ -337,8 +337,11 @@ The script streams **every line** of each child, reusing `inspect-agent-health/a
 project root, decorated-id handling and transcript resolver. `CLAUDE_PROJECTS_DIR` overrides that
 root (set before module import). Sidecar `toolUseId` and parent `tool_result.tool_use_id` link the
 actual `Agent` dispatch; structured `toolUseResult.agentId` or textual `agentId:` supplies the child
-when the sidecar is absent. Task text prefers the sidecar's exact description, then dispatch description,
-then prompt. Missing children and malformed transcript rows are counted explicitly.
+when the sidecar is absent. Task metadata prefers the sidecar description, then dispatch description,
+otherwise null; raw prompts are never a fallback. Descriptions are capped at 200 characters, including
+an ellipsis when truncated. Explicit child paths must resolve inside `PROJECTS_DIR` after symlink
+resolution; outside paths (including sibling-prefix collisions) are rejected and counted in `skipped`.
+Missing children and malformed transcript rows are counted explicitly.
 
 The local sidecar is `.operations/agent-usage/<day>.jsonl`, covered by the existing `.operations/`
 gitignore rule. Like `call-log-store.mjs`, its default root is the **script's checkout**, never cwd.
@@ -356,6 +359,13 @@ whether its model was explicit, the current script default, or unspecified. Code
 its real exported `CODEX_MODEL`. Gemini's wrapper has **no pinned default**: it delegates model selection
 to agy, so absent flags yield null, not a guessed model. The current Codex pin is a fallback inference,
 not proof of the pin a historical checkout used.
+
+Both command fields contain only the detected invocation's normalized argv, with content-bearing
+`task`, `task-file`, `prompt`, `message`, `description`, `body` and `text` values replaced by
+`[redacted]` (case-insensitive, both separate and equals forms). The result is capped at 300 characters,
+including a truncation ellipsis. Shell wrappers and adjacent commands are not copied into this summary;
+model extraction still uses the original parsed flags. Keep this transformation pure and redact before
+capping: truncating raw content still leaks its prefix.
 
 Only assistant `Bash` tool uses executing the named direct-task script count as delegation. The
 conservative shell classifier understands literal script paths, node, common wrappers, shell `-c`,
