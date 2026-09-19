@@ -27,7 +27,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createRegistry } from './registry.mjs';
-import { createFileRunStore, newRunId } from './run-store.mjs';
+import { createFileRunStore, createMemoryRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
@@ -43,6 +43,8 @@ import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from
 import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
+import { staleStateOperation, STALE_STATE_OP } from './stale-state.mjs';
+import { createStaleStateReader } from './stale-state-io.mjs';
 import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
 import { createPrReconcileReader } from './pr-status-io.mjs';
 import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
@@ -170,6 +172,10 @@ export const OPERATIONS = Object.freeze({
   // reviewer could only run it by hand-writing the wiring. Same no-sinks reasoning as `suggest-next`.
   // #xewnork — did a check actually RUN on the head that is there now? Read-only, same no-sinks reasoning as
   // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
+  [STALE_STATE_OP]: () => ({
+    declaration: staleStateOperation({ readState: createStaleStateReader() }),
+    sinks: {},
+  }),
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
     sinks: {},
@@ -352,9 +358,10 @@ if (IS_CLI) {
     process.exit(0);
   }
   // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
-  const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores() : {
-    store: createFileRunStore(), callLog: createFileCallLogStore(),
-  };
+  // stale-state promises zero filesystem writes, including engine bookkeeping.
+  const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores()
+    : name === STALE_STATE_OP ? { store: createMemoryRunStore(), callLog: undefined }
+    : { store: createFileRunStore(), callLog: createFileCallLogStore() };
   runOperationCli({
     declaration,
     argv: rest,
