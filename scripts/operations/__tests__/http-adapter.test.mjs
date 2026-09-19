@@ -579,7 +579,7 @@ describe('genericity — the adapter knows nothing about either operation', () =
     // A `humanRequired` PR runs `advise`'s (#xlw02hw) automatic advisory-note effect on the way to `confirm`,
     // which needs a sink even though this test's whole point is the LATER `record` refusal.
     const deps = {
-      ...wiring({ readerOptions: { labels: ['review:human'] }, sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) } }),
+      ...wiring({ readerOptions: { labels: ['review:human'] }, sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) } }),
       store,
       judge: stubJudge,
       newRunId: idMinter(),

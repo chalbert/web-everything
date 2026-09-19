@@ -39,6 +39,7 @@ import {
   renderJudgeInput,
   renderVerdictWriteUp,
   renderAdvisoryNote,
+  deriveAdvisoryOutcome,
   overridesJuror,
   reviewPrOperation,
   shapeReadFinding,
@@ -74,6 +75,7 @@ import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-sp
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
 import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
 import { ADVISORY_LENSES, CITATION_SCOPES, MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
+import { ADVISORY_LABELS, parseAdvisories } from '../../lib/advisory-labels.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -82,6 +84,9 @@ const GH_ONLY_PATH = 'a-sibling-lane-file-that-already-landed.md';
 /** A stub `readPr`. `labels` decides gate-self; `netReason` forces an unscored basis. */
 function stubReader({
   labels = ['review:pending'], netScored = true, netReason = undefined, title = 'a parked PR',
+  // The net basis' head. Defaults to the short, UNPINNED value every existing test was written against; the
+  // `advisory:*` label tests pass a full 40-hex sha, which is what `pinnedSha` accepts.
+  netRev = 'def456',
   // #xwp8ioh — a reviewable PR is OPEN. Defaulted so every OTHER test keeps describing the case it was
   // written for; overridden only by the liveness tests.
   state = 'OPEN',
@@ -110,7 +115,7 @@ function stubReader({
     headRefName: 'lane/thing',
     body,
     net: netScored
-      ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
+      ? { paths: NET_PATHS, base: 'abc123', rev: netRev, scored: true }
       : { paths: [], base: null, rev: null, scored: false, reason: netReason },
     diff: netScored ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true } : { text: '', scored: false, reason: netReason },
   });
@@ -165,7 +170,7 @@ function atConfirm({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 
  */
 async function atConfirmDrainingAdvisory({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 'run-rp' }) {
   const store = createMemoryRunStore();
-  const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) };
+  const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) };
   let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id, input, registry }), { registry });
   const requests = {};
   for (;;) {
@@ -731,7 +736,10 @@ describe('#xlw02hw the advise step posts an advisory note on review:human, befor
     const { registry } = registryFor({ labels: ['review:human'] });
     const store = createMemoryRunStore();
     const posted = [];
-    const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; } };
+    const sinks = {
+      [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; },
+      [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }),
+    };
     const out = await driveRun({
       run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-1', input: BASE_INPUT, registry }),
       registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
@@ -775,6 +783,94 @@ describe('#xlw02hw the advise step posts an advisory note on review:human, befor
     expect(advisory).toContain('ADVISORY REVIEW, NOT A RECORDED VERDICT');
     expect(advisory).toMatch(/still needs the human ceremony/);
     expect(recorded).not.toContain('ADVISORY REVIEW');
+  });
+});
+
+// ── THE `advisory:*` LABEL — the operator's "tag to tell me the advisory accepted" ─────────────────────────────
+// `verdict.verdict` is `needs-human` for EVERY gate-self PR, so it cannot say whether the advisory found anything.
+// These pin the outcome derivation, the comment line the queue reads back, and the ordering/never-touch rules.
+const PINNED_HEAD = 'fd37ce270'.padEnd(40, 'a');
+
+/** Drive a `review:human` run past `advise`, capturing every effect the sinks were handed. */
+async function driveAdvisory({ answer = CLEAN_ANSWER, netRev = PINNED_HEAD, id = 'run-advl' } = {}) {
+  const { registry } = registryFor({ labels: ['review:human'], netRev });
+  const applied = [];
+  const sinks = {
+    [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { applied.push({ type: REVIEW_EFFECTS.ADVISORY_NOTE, payload }); return { ok: true }; },
+    [REVIEW_EFFECTS.ADVISORY_LABEL]: async (payload) => { applied.push({ type: REVIEW_EFFECTS.ADVISORY_LABEL, payload }); return { ok: true }; },
+  };
+  const out = await driveRun({
+    run: startRun({ op: REVIEW_PR_OP, id, input: BASE_INPUT, registry }),
+    registry, store: createMemoryRunStore(), sinks, judge: async () => judgeOutcome(answer, {}),
+  });
+  return { out, applied };
+}
+
+describe('the advise step applies the `advisory:*` label', () => {
+  it('a clean advisory on a pinned head declares `accept` — note first, label second', async () => {
+    const { out, applied } = await driveAdvisory();
+    expect(out.stopped).toBe('confirm');
+    expect(applied.map((a) => a.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE, REVIEW_EFFECTS.ADVISORY_LABEL]);
+    expect(applied[1].payload).toEqual({
+      pr: BASE_INPUT.pr, repo: BASE_INPUT.repo, outcome: 'accept', reviewedHead: PINNED_HEAD,
+    });
+    // The run's own verdict is UNCHANGED by all of this: still the gate-self `needs-human`.
+    expect(out.run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('a blocking advisory declares `changes`, though the run verdict is still `needs-human`', async () => {
+    const { out, applied } = await driveAdvisory({ answer: BLOCKING_ANSWER, id: 'run-advl-2' });
+    expect(out.run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(applied[1].payload).toMatchObject({ outcome: 'changes', reviewedHead: PINNED_HEAD });
+    expect(applied[0].payload.body).toContain('**Advisory outcome:** `changes`');
+  });
+
+  it('the note it posts round-trips through the parser `operator-queue` reads: outcome AND head', async () => {
+    for (const [answer, outcome] of [[CLEAN_ANSWER, 'accept'], [BLOCKING_ANSWER, 'changes']]) {
+      const { applied } = await driveAdvisory({ answer, id: `run-advl-rt-${outcome}` });
+      const [parsed] = parseAdvisories([{ body: applied[0].payload.body, createdAt: '2026-09-19T12:00:00Z' }]);
+      expect(parsed).toMatchObject({ outcome, head: PINNED_HEAD });
+    }
+  });
+
+  it('declares NO label effect when the basis is unpinned — there is no head to describe', async () => {
+    const { applied } = await driveAdvisory({ netRev: 'def456', id: 'run-advl-3' });
+    expect(applied.map((a) => a.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE]);
+  });
+
+  it('a `review:pending` PR still declares nothing — the ordinary path is byte-identical', async () => {
+    const { registry } = registryFor({ labels: ['review:pending'], netRev: PINNED_HEAD });
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-advl-4', input: BASE_INPUT, registry }),
+      registry, store: createMemoryRunStore(), sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.run.effects).toEqual([]);
+  });
+
+  it('never declares anything but an `advisory:*` label — no `review:*` swap, ever', async () => {
+    const { applied } = await driveAdvisory({ id: 'run-advl-5' });
+    const wire = JSON.stringify(applied);
+    expect(wire).not.toContain('review:accepted');
+    expect(wire).not.toContain('addLabel');
+    expect(applied.some((a) => a.type === REVIEW_EFFECTS.LABEL)).toBe(false);
+    expect(Object.values(ADVISORY_LABELS)).toEqual(['advisory:accepted', 'advisory:changes']);
+  });
+});
+
+describe('deriveAdvisoryOutcome', () => {
+  const lensVerdicts = (v) => Object.fromEntries(MANDATORY_LENSES.map((l) => [l, v]));
+
+  it('is `accept` when every mandatory lens accepts, whatever the gate-self verdict says', () => {
+    expect(deriveAdvisoryOutcome({ verdict: 'needs-human', lensVerdicts: lensVerdicts('accept'), admittedFindings: [] })).toBe('accept');
+  });
+
+  it('is `changes` when any mandatory lens asks for changes', () => {
+    expect(deriveAdvisoryOutcome({ verdict: 'needs-human', lensVerdicts: lensVerdicts('changes'), admittedFindings: [] })).toBe('changes');
+  });
+
+  it('is null — no label — when no outcome can be honestly derived', () => {
+    expect(deriveAdvisoryOutcome(undefined)).toBeNull();
+    expect(deriveAdvisoryOutcome({ lensVerdicts: {} })).toBeNull();
   });
 });
 
@@ -829,7 +925,8 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     expect(record.cursor).toBe(6);
     expect(record.findings.confirm).toBe('accept');
     expect(record.effects.filter((e) => e.step === 'stageVerdict' || e.step === 'record')).toEqual([]);
-    expect(record.effects.map((e) => e.step)).toEqual(['advise']);
+    // `advise` declares its note AND (once the basis is pinned) its `advisory:*` label; neither is this invariant's.
+    expect([...new Set(record.effects.map((e) => e.step))]).toEqual(['advise']);
   });
 
   it('is idempotent — a repeat --resume produces byte-identical output and the same exit code', async () => {
@@ -1606,7 +1703,7 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
       store,
       // A `humanRequired` PR now runs `advise` (#xlw02hw) on the way to `confirm`, which needs a sink even
       // though this test's whole point is about the LATER `confirm` suspend, not this earlier one.
-      sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) },
+      sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) },
       judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
       autoConfirm: agentOnly,
     });

@@ -257,9 +257,30 @@ a juror ran, found real findings, and nothing durable ever landed — the sessio
 Now the `advise` step posts a clearly-marked **advisory-only** comment automatically the moment `reduce` has a
 verdict, on every `review:human` PR — no `--resume`, no answer, no extra step of yours required. It happens
 inside the SAME `node scripts/operations/run.mjs review-pr …` invocation you already run above, so you do not
-call anything new. It is unmistakably NOT the real ceremony's comment: no `**Decision:**` line, no label ever
-touched, an explicit "advisory only — the human ceremony is still required" statement top and bottom. A
-`review:pending` PR is completely unaffected — the step declares no effect at all for it.
+call anything new. It is unmistakably NOT the real ceremony's comment: no `**Decision:**` line, no `review:*`
+label ever touched, an explicit "advisory only — the human ceremony is still required" statement top and bottom.
+A `review:pending` PR is completely unaffected — the step declares no effect at all for it.
+
+**The `advisory:accepted` / `advisory:changes` label — the operator's at-a-glance signal.** Right after the note,
+`advise` applies one of two machine-maintained labels, so a human-gated PR whose advisory came back clean no longer
+looks identical to one nobody reviewed:
+
+- `advisory:accepted` — the panel found **no blocking findings on the current head**.
+- `advisory:changes` — it found blocking findings. Each label removes the other, and either one also drops
+  `review:pending` (the advisory has now run). **It never touches `review:human` and never sets `review:accepted`.**
+- The outcome is the panel's verdict with the human gate factored out (`deriveAdvisoryOutcome`), also written into
+  the note as an `**Advisory outcome:**` line — the run's own verdict is `needs-human` on every gate-self PR, so it
+  says nothing about the findings.
+- **It describes the CURRENT head only.** The sink refuses to label a head that moved while the panel ran, and the
+  runner's `advisory-label-sweep.mjs` drops both labels on any PR whose head moves past the advisory (next tick).
+  A pushed commit therefore means no advisory label until the advisory re-runs.
+
+**The operator's rule** (2026-09-19): *do not open a `review:human` PR until it carries `advisory:accepted` and has
+neither `review:changes` nor `review:pending`.* `node scripts/operations/operator-queue.mjs` enforces exactly that as
+a hard gate for its NEEDS YOU list, and cross-checks the label against the parsed advisory comment (newest advisory
+covers the live head and accepts) — any disagreement is listed in NOT READY with the disagreement as the reason.
+GitHub's transient `mergeable: UNKNOWN` is re-polled and, if it never settles, reported in a separate PENDING bucket
+("transient, re-run"), never in NOT READY.
 
 On a host without `gh`, that automatic post can halt as UNKNOWN. Follow the VM write-path section above to
 verify the outcome and, if missing, publish a labelled verbatim transcription before resuming.
