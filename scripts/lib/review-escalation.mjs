@@ -17,6 +17,9 @@ import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivatio
 import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
 
+/** Shared operation identity; core consumers must not import operation declarations. */
+export const REVIEW_PR_OP_ID = 'review-pr';
+
 /** Block tokens whose lines a reader sees as QUOTED. `blockquote_open` covers the container: the drain writes
  *  at top level, so nothing legitimate ever sits behind a `>`.
  *

@@ -60,7 +60,7 @@ import { tmpdir } from 'node:os';
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
 // #x9xqexm's base-independent third marker. Independent concerns.
 import {
-  REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
+  REVIEW_PR_OP_ID, REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
   buildReviewedContributionMarker, buildClearedHumanMarker, READY_TO_MERGE_LABEL,
   // #3007 — the SAME two digests the markers carry, taken raw so the ledger row records the witnesses
   // themselves rather than re-deriving them from the rendered comment. One computation, two consumers.
@@ -82,6 +82,10 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
 import { computeNetDiffText } from './merge-ai-prs.mjs';
+import { parseDelegationMarker } from './lib/delegation-marker.mjs';
+import { isDelegationTripleGraduated } from './conveyor/delegation-trial-gate.mjs';
+import { readStore } from './conveyor/run-scorecard-store.mjs';
+import { logDelegationTrial } from './conveyor/log-delegation-trial.mjs';
 import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 // #3631 slice — the LAST bare `execFileSync` in this file's own gh-adjacent write path. This exec closure is
@@ -515,6 +519,9 @@ export function runReviewLabelCli({
   // Injected so the WRITE ARC — above all the #2964 ordering below — is assertable without `gh`,
   // which it never was: the suite could only reach this function's pure helpers and its refusals.
   provider = createGhProvider(),
+  readTrialStore = readStore,
+  logTrialFn = logDelegationTrial,
+  trialLogIo = {},
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
   // injected emitter too. Without this the guards print past an in-process caller's collector (#3061); the
@@ -627,6 +634,7 @@ export function runReviewLabelCli({
   let headRefName = '';
   let prState = '';
   let prBody = '';
+  let prTitle = '';
   let prCreatedAt = '';
   try {
     const parsed = provider.readPrState(repo, pr);
@@ -639,6 +647,7 @@ export function runReviewLabelCli({
     // #2844 — the PR body carries the `authored-by-actor` stamp pr-land wrote at open. Same gh call, one more
     // json field, no extra hop — the same "ride the existing read" pattern #2953 used for `state`.
     prBody = typeof parsed.body === 'string' ? parsed.body : '';
+    prTitle = typeof parsed.title === 'string' ? parsed.title : '';
     // #3067 — and its open date, on that same call. A stamp missing from a PR opened AFTER the regime began was
     // STRIPPED; one missing from an older PR was never written. Until this was read, both looked identical and
     // both were tolerated.
@@ -941,6 +950,31 @@ export function runReviewLabelCli({
   const acceptanceAlreadyLive = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
   const steps = { comment: postComment, swap: applySwap };
   for (const step of writeOrder({ acceptanceAlreadyLive })) { steps[step](); }
+
+  // #3690 v1 deliberately records outcome:'landed'/findings:null for a CLEAN accept here.
+  // A prior changes round must already have been fixed to reach this accept. Distinguishing clean on
+  // round 1 from reworked then landed needs this PR's verdict-ledger.mjs history: separate follow-up,
+  // out of scope here. Both real acceptance writes have completed before any trial is recorded.
+  if (to === 'accepted' && normalizeChannel(channelArg).includes(REVIEW_PR_OP_ID)) {
+    try {
+      const delegation = parseDelegationMarker(prBody);
+      if (delegation && !isDelegationTripleGraduated(delegation, readTrialStore(trialLogIo))) {
+        const logged = logTrialFn({
+          provider: delegation.provider,
+          model: delegation.model,
+          taskType: delegation.taskType,
+          taskDescription: prTitle || `PR #${pr}`,
+          outcome: 'landed',
+          verifiedBy: 'independent-claude',
+          findings: null,
+          pr: Number(pr),
+        }, trialLogIo);
+        if (logged === null) throw new Error('could not write trial to the scorecard store');
+      }
+    } catch (e) {
+      process.stderr.write(`review-set-label: delegation trial append failed (#3690, non-fatal) — ${String((e && e.message) || e).split('\n')[0]}\n`);
+    }
+  }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — re-read the labels so the printed result reflects the
   // true post-swap state (tolerant: fall back to a locally-derived set if the re-read fails).

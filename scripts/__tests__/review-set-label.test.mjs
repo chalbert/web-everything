@@ -4,7 +4,7 @@
  *   review:human PR is never cleared to accepted here) — is decided in the pure decider and unit-tested here
  *   against fixtures, no network.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync,
@@ -22,6 +22,10 @@ import {
 } from '../review-set-label.mjs';
 // #3334, routes 2 and 3 — asserted through the OTHER two sanctioned paths' own entry points, because a shared
 // core one caller forgets to ask is the defect this item closes.
+import { buildDelegationMarker } from '../lib/delegation-marker.mjs';
+import { readStore } from '../conveyor/run-scorecard-store.mjs';
+import { logDelegationTrial } from '../conveyor/log-delegation-trial.mjs';
+import { REVIEW_PR_CHANNEL } from '../operations/review-pr.mjs';
 import { isPreWriteRefusal } from '../operations/review-pr-io.mjs';
 import { factsFromRun, buildRequest } from '../operations/record-verdict.mjs';
 import { validateRequest } from '../apply-review-request.mjs';
@@ -1883,7 +1887,7 @@ describe('the write arc and its #2964 ordering', () => {
   };
 
   /** Records the ORDER of port calls. Reads answer from `labels`, so a test picks the branch by state. */
-  function stubProvider({ labels = [] } = {}) {
+  function stubProvider({ labels = [], body = '', title = '' } = {}) {
     const calls = [];
     return {
       calls,
@@ -1891,7 +1895,7 @@ describe('the write arc and its #2964 ordering', () => {
       currentRepo: () => 'o/n',
       readPrState: () => {
         calls.push('readPrState');
-        return { labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' };
+        return { labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body, title };
       },
       readLabels: () => { calls.push('readLabels'); return labels.map((name) => ({ name })); },
       setLabels: (_r, _p, spec) => { calls.push('setLabels'); calls.push(spec); },
@@ -1899,12 +1903,12 @@ describe('the write arc and its #2964 ordering', () => {
     };
   }
 
-  const run = (provider, argv) => {
+  const run = (provider, argv, config = {}) => {
     const chunks = [];
     const realExit = process.exit.bind(process);
     process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
     let exitCode = 0;
-    try { runReviewLabelCli({ ...CFG, emit: (l) => chunks.push(String(l)), provider, argv }); }
+    try { runReviewLabelCli({ ...CFG, emit: (l) => chunks.push(String(l)), provider, argv, ...config }); }
     catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
     finally { process.exit = realExit; }
     return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
@@ -1939,6 +1943,136 @@ describe('the write arc and its #2964 ordering', () => {
     expect(p.calls).not.toContain('setLabels');
     expect(p.calls).not.toContain('postComment');
   });
+
+  describe('automatic session-delegation trials (#3690)', () => {
+    const triple = { provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix' };
+    const author = '<!-- authored-by-actor: delegation-author -->';
+    const body = `${author}\n${buildDelegationMarker(triple)}`;
+    const argv = ['1048', '--repo=o/n', '--to=accepted', `--channel=${REVIEW_PR_CHANNEL}`];
+    const seeded = () => Array.from({ length: 6 }, (_, i) => ({
+      ...triple, dispatchKind: 'session-delegation', verifiedBy: 'independent-claude',
+      outcome: 'landed', findings: i === 0 ? 'Caught a quoting error' : null,
+      scoredAt: `2026-09-0${i + 1}T00:00:00.000Z`,
+    }));
+    function memIo(records = []) {
+      let store = { version: 1, records };
+      return {
+        read: () => JSON.stringify(store),
+        write: (_p, s) => { store = JSON.parse(s); },
+        exists: () => true,
+      };
+    }
+    beforeEach(() => vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'independent-reviewer'));
+    afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+    it('records a real trial only after both acceptance writes, using the fetched title', () => {
+      const p = stubProvider({ labels: ['review:pending'], body, title: 'Fix launch wrapper' });
+      const io = memIo();
+      const readTrialStore = vi.fn((passedIo) => {
+        expect(passedIo).toBe(io);
+        expect(p.calls).toContain('postComment');
+        expect(p.calls).toContain('setLabels');
+        expect(p.calls).not.toContain('readLabels');
+        return readStore(passedIo);
+      });
+      const result = run(p, argv, { trialLogIo: io, readTrialStore });
+      expect(result.exitCode).toBe(0);
+      expect(result.payload.ok).toBe(true);
+      expect(readTrialStore).toHaveBeenCalledTimes(1);
+      expect(readStore(io).records).toHaveLength(1);
+      expect(readStore(io).records[0]).toMatchObject({
+        ...triple, dispatchKind: 'session-delegation', pr: 1048,
+        verifiedBy: 'independent-claude', outcome: 'landed', findings: null,
+        taskDescription: 'Fix launch wrapper',
+      });
+    });
+
+    it('does not append to an already-graduated triple', () => {
+      const records = seeded();
+      const io = memIo(records);
+      const logTrialFn = vi.fn(logDelegationTrial);
+      expect(run(stubProvider({ body }), argv, { trialLogIo: io, logTrialFn }).exitCode).toBe(0);
+      expect(readStore(io).records).toEqual(records);
+      expect(readStore(io).records).toHaveLength(6);
+      expect(logTrialFn).not.toHaveBeenCalled();
+    });
+
+    it.each([{ records: [] }, { records: seeded() }])('does not read or log trials for Claude-native work', ({ records }) => {
+      const io = memIo(records);
+      const readTrialStore = vi.fn(readStore);
+      const logTrialFn = vi.fn(logDelegationTrial);
+      expect(run(stubProvider({ body: author }), argv, { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
+      expect(readStore(io).records).toEqual(records);
+      expect(readTrialStore).not.toHaveBeenCalled();
+      expect(logTrialFn).not.toHaveBeenCalled();
+    });
+
+    it.each([null, 'manual /review', 'rearm-review', 'reconcile-finding'])('does not log through channel %j', (channel) => {
+      const io = memIo();
+      const readTrialStore = vi.fn(readStore);
+      const logTrialFn = vi.fn(logDelegationTrial);
+      const args = argv.slice(0, 3).concat(channel === null ? [] : [`--channel=${channel}`]);
+      expect(run(stubProvider({ body }), args, { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
+      expect(readStore(io).records).toEqual([]);
+      expect(readTrialStore).not.toHaveBeenCalled();
+      expect(logTrialFn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      '<!-- delegation: provider=codex model=gpt-6-astra taskType=invalid -->',
+      '<!-- delegation: provider=codex taskType=bugfix -->',
+      `${buildDelegationMarker(triple)}\n${buildDelegationMarker({ ...triple, model: 'other' })}`,
+    ])('completes acceptance without logging malformed/ambiguous metadata: %s', (marker) => {
+      const p = stubProvider({ labels: ['review:pending'], body: `${author}\n${marker}` });
+      const io = memIo();
+      expect(run(p, argv, { trialLogIo: io }).exitCode).toBe(0);
+      expect(p.calls).toContain('postComment');
+      expect(p.calls).toContainEqual({ add: 'review:accepted', remove: ['review:pending'] });
+      expect(readStore(io).records).toEqual([]);
+    });
+
+    it.each(['changes', 'clear-human', 'rearm', 'restamp'])('does not log target %s even on the review-pr channel', (to) => {
+      const io = memIo();
+      const labels = to === 'clear-human' ? ['review:human'] : to === 'restamp' ? ['review:accepted'] : ['review:changes'];
+      const args = ['1048', '--repo=o/n', `--channel=${REVIEW_PR_CHANNEL}`, '--actor=operator', '--reason=Repair needed'];
+      const config = { fixedTo: to, allowClearHuman: true, verdictBody: 'Repair needed', trialLogIo: io };
+      expect(run(stubProvider({ labels, body }), args, config).exitCode).toBe(0);
+      expect(readStore(io).records).toEqual([]);
+    });
+
+    it('uses the PR number when the title is missing', () => {
+      const io = memIo();
+      expect(run(stubProvider({ body }), argv, { trialLogIo: io }).exitCode).toBe(0);
+      expect(readStore(io).records[0].taskDescription).toBe('PR #1048');
+    });
+
+    it.each(['read', 'log', 'write'])('keeps acceptance successful on a trial %s failure', (failure) => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const io = memIo();
+      const fail = () => { throw new Error('trial storage unavailable'); };
+      const config = { trialLogIo: io };
+      if (failure === 'read') config.readTrialStore = fail;
+      if (failure === 'log') config.logTrialFn = fail;
+      if (failure === 'write') io.write = fail;
+      const p = stubProvider({ body });
+      expect(run(p, argv, config).exitCode).toBe(0);
+      expect(p.calls).toContain('postComment');
+      expect(p.calls).toContain('setLabels');
+      expect(readStore(io).records).toEqual([]);
+      expect(stderr.mock.calls.flat().join('')).toContain('delegation trial append failed (#3690, non-fatal)');
+    });
+
+    it.each(['postComment', 'setLabels'])('does not log when acceptance write %s fails', (method) => {
+      const io = memIo();
+      const p = stubProvider({ body });
+      p[method] = () => { throw new Error('forge unavailable'); };
+      const logTrialFn = vi.fn(logDelegationTrial);
+      expect(run(p, argv, { trialLogIo: io, logTrialFn }).exitCode).not.toBe(0);
+      expect(logTrialFn).not.toHaveBeenCalled();
+      expect(readStore(io).records).toEqual([]);
+    });
+  });
+
 });
 
 /**
