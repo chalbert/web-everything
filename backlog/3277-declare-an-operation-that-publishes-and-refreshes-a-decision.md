@@ -16,7 +16,7 @@ Six artifact publishes and refreshes were hand-driven in one session: a decision
 
 ## Placement note (2026-09-07)
 
-This item's consumers (we:backlog/3560, we:backlog/3562, we:backlog/x7wehz2 — together the "Decision
+This item's consumers (we:backlog/3560, we:backlog/3562, we:backlog/3685 — together the "Decision
 Board") are an interim WE-side prototype for the conveyor's own operational use, not the permanent home
 for these mechanics. we:backlog/3595 tracks their eventual generalization into a real plateau-app
 console feature under the existing Plateau Loop epic (we:backlog/2445/2505), per

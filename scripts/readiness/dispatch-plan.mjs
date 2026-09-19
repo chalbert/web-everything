@@ -80,6 +80,7 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
+import { driftDefaults } from '../lib/poc-branches.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -221,14 +222,20 @@ export const ALREADY_DONE_AGE_GATE_ENV = 'WE_DISPATCH_PLAN_ALREADY_DONE_AGE_MS';
  */
 /** The default drift-watched branch + its own live scope (#3464) — the SAME repo-qualified form `scope:`
  *  frontmatter and lease scopes already use, so it compares directly via `scopesOverlap`. Matches
- *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — kept as
- *  separate constants (not imported) because the IO shell only needs the SCOPE the branch is presumed to carry
- *  unreconciled changes in, not the branch-drift module's git-plumbing internals. Overridable via
+ *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — and since #3637
+ *  both are DERIVED from the same registry rather than separately declared here, so the two can no longer
+ *  drift apart (they had, silently, which is what made this a latent bug). Overridable via
  *  `--drift-scope=<repo:path,...>` for a future second long-lived branch, or `--no-drift-check` to skip the
  *  check entirely (mirrors `--no-ground-truth`). */
-export const DEFAULT_DRIFT_BRANCH = 'lane/mechanical-dispatcher';
-export const DEFAULT_DRIFT_TARGET = 'main';
-export const DEFAULT_DRIFT_SCOPE = Object.freeze(['we:scripts/conveyor/', 'we:skills-src/conveyor/']);
+// #3637 — all three now DERIVE from `we:scripts/lib/poc-branches.json`, the single place a POC branch is
+// declared, instead of being a second independent copy of `branch-drift.mjs`'s own constants. That duplication
+// was a latent bug (a change to one never reached the other) that #3637's survey found and named. `--drift-*`
+// still overrides every one of them, and the "future second long-lived branch" the comment above anticipated
+// is now simply a second registry entry.
+const DRIFT_DEFAULTS = driftDefaults();
+export const DEFAULT_DRIFT_BRANCH = DRIFT_DEFAULTS.branch;
+export const DEFAULT_DRIFT_TARGET = DRIFT_DEFAULTS.target;
+export const DEFAULT_DRIFT_SCOPE = DRIFT_DEFAULTS.scope;
 
 export function isStaleEnoughForGroundTruth(item, nowMs, ageGateMs = ALREADY_DONE_AGE_GATE_MS) {
   const at = Date.parse(String(item?.dateStarted || item?.dateOpened || ''));
@@ -295,7 +302,7 @@ function hasOpenBlockers(item) {
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, trace = false } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
@@ -311,12 +318,19 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
 
   const launch = [];
   const held = [];
+  const admission = [];
   const launched = []; // { num, lane, scope } — SCOPED items launched THIS tick, for the rival-pair check
 
   // ── ONE pass over the queue in rank order. An unscoped item is NEVER launched (auto-prepare, not a serial
   //    floor): it is held `unshaped-no-scope` for the /conveyor skill to prepare its scope upstream. ──
   for (const item of items) {
     const num = item.num;
+    const gates = [];
+    if (trace) admission.push({ num, gates });
+    const blocked = (name, condition, observed) => {
+      if (trace) gates.push({ name, pass: !condition, observed });
+      return condition;
+    };
 
     // 0. GROUND TRUTH (#3457/#3460) — a real merged PR already closes this item out. Checked FIRST, ahead of
     //    every other branch: `blocked`, `needs-slice`, `needs-decision` and the scope/overlap reads below are
@@ -327,7 +341,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    simply trusts what it was handed, same as every other enrichment field on `item`. HOLDS, never
     //    auto-resolves — see `ALREADY_DONE_HINT` and `we:scripts/operations/dispatch-lane-io.mjs`'s
     //    `filterAlreadyDoneCandidates` docblock for why a false positive here must stay recoverable.
-    if (item.alreadyDonePr) {
+    if (blocked('already-done', !!item.alreadyDonePr, item.alreadyDonePr ?? null)) {
       held.push({ num, reason: 'already-done' });
       continue;
     }
@@ -337,7 +351,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    emits only READY items (isReady requires every blockedBy resolved), so their openBlockers is always
     //    []. It is kept as defense-in-depth for DIRECT core use (a future shell that feeds an unfiltered queue)
     //    and is pinned by the unit tests below. Checked FIRST for every item, scoped or not.
-    if (hasOpenBlockers(item)) {
+    if (blocked('blockedBy', hasOpenBlockers(item), { openBlockers: item.openBlockers ?? [], blockedBy: item.blockedBy ?? [] })) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
@@ -352,7 +366,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    blockers clear. `isGroupingKind` (scripts/check-standards-rules.mjs) is the single source of truth
     //    for the grouping-kind set, shared with conveyor-state.mjs, so a future grouping kind needs one
     //    update, not several scattered `kind === 'epic'` checks.
-    if (isGroupingKind(item.kind)) {
+    if (blocked('grouping-kind', isGroupingKind(item.kind), item.kind ?? null)) {
       held.push({ num, reason: 'needs-slice' });
       continue;
     }
@@ -364,7 +378,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    prepare/present TRIGGER: the /conveyor skill reads this hold (and `state.decisions`) and routes by the
     //    decision's prepared state — UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks.
     //    A BLOCKED decision is still `blocked` (checked first): it can't be prepared until its blockers clear.
-    if (item.kind === 'decision') {
+    if (blocked('decision-kind', item.kind === 'decision', item.kind ?? null)) {
       held.push({ num, reason: 'needs-decision' });
       continue;
     }
@@ -376,7 +390,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    file header): [] is not a meaningful "touches nothing" build, so it is treated identically to absent.
     //    Keying on the NORMALIZED scope's emptiness catches all four (undefined / non-array / [] / all-blank).
     const scope = normScope(item.scope);
-    if (scope.length === 0) {
+    if (blocked('scope', scope.length === 0, scope)) {
       held.push({ num, reason: 'unshaped-no-scope' });
       continue;
     }
@@ -386,14 +400,14 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    them is exactly what turned #3464's own incident into an unresolvable conflict. Hold until a fresh
     //    `branch-drift.mjs sweep` clears it. Checked before the lease/rival gates — same "blanket hold, not a
     //    lane-scheduling concern" precedence as the checks above.
-    if (driftScope.length > 0 && scopesOverlap(scope, driftScope)) {
+    if (blocked('branch-drift', driftScope.length > 0 && scopesOverlap(scope, driftScope), { scope, driftScope })) {
       held.push({ num, reason: 'branch-drift-blocked' });
       continue;
     }
 
     // 5. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
     const leaseHit = activeLeases.find((l) => scopesOverlap(scope, l.scope));
-    if (leaseHit) {
+    if (blocked('scope-overlap-lease', !!leaseHit, { scope, lease: leaseHit ?? null })) {
       held.push({ num, reason: `overlaps lane-${leaseHit.lane}` });
       continue;
     }
@@ -402,7 +416,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    one holds on the lane its rival took. A higher rival that did NOT launch is absent here, so it never
     //    spuriously blocks a lower item — the hold is only against work that is actually starting.
     const rival = launched.find((r) => scopesOverlap(scope, r.scope));
-    if (rival) {
+    if (blocked('scope-overlap-rival', !!rival, { scope, rival: rival ?? null })) {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
       continue;
     }
@@ -411,14 +425,14 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    point a lane would actually be handed out, so it never relabels an item already held for a more
     //    specific reason above (blocked / needs-slice / needs-decision / unshaped-no-scope / branch-drift-blocked
     //    / an overlap) — pausing changes nothing about why those items weren't launching anyway.
-    if (dispatchPaused) {
+    if (blocked('dispatch-paused', dispatchPaused, dispatchPaused)) {
       held.push({ num, reason: 'dispatch-paused' });
       continue;
     }
     // 7. Disjoint — launch it on the next free lane, or hold for want of one. `capacity-cap` (#xupukxa) fires
     //    instead of `no free lane` when a physical free lane exists but the concurrency ceiling withheld it —
     //    a DIFFERENT reason on purpose, since the remedy differs (raise the cap / wait vs. free a lane).
-    if (free.length === 0) {
+    if (blocked('lane-capacity', free.length === 0, { freeLanes: [...free], capacityLimited })) {
       held.push({ num, reason: capacityLimited ? 'capacity-cap' : 'no free lane' });
       continue;
     }
@@ -427,7 +441,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     launched.push({ num, lane, scope });
   }
 
-  return { launch, held };
+  return { launch, held, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -443,10 +457,15 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<{num:*}>} the cleared rows, rank order preserved
  */
-export function selectClearedRows(rows, clearedKeys, norm) {
+export function selectClearedRows(rows, clearedKeys, norm, observe = null) {
   const cleared = clearedKeys instanceof Set ? clearedKeys : new Set(clearedKeys);
   const key = typeof norm === 'function' ? norm : (x) => String(x);
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && cleared.has(key(r.num)));
+  return (Array.isArray(rows) ? rows : []).filter((r) => {
+    if (!r) return false;
+    const pass = cleared.has(key(r.num));
+    observe?.(r.num, { name: 'queue-membership', pass, observed: { cleared: pass } });
+    return pass;
+  });
 }
 
 /**
@@ -461,12 +480,17 @@ export function selectClearedRows(rows, clearedKeys, norm) {
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<*>} the cleared ids with no ready row, original spelling preserved
  */
-export function clearedNotReady(clearedEntries, readyRows, norm) {
+export function clearedNotReady(clearedEntries, readyRows, norm, observe = null) {
   const key = typeof norm === 'function' ? norm : (x) => String(x);
   const ready = new Set((Array.isArray(readyRows) ? readyRows : []).map((r) => key(r?.num)));
   return (Array.isArray(clearedEntries) ? clearedEntries : [])
     .map((e) => (e && typeof e === 'object' ? e.num : e))
-    .filter((n) => n != null && String(n) !== '' && !ready.has(key(n)));
+    .filter((n) => {
+      if (n == null || String(n) === '') return false;
+      const pass = ready.has(key(n));
+      observe?.(n, { name: 'readiness', pass, observed: { inReadyBuildQueue: pass } });
+      return !pass;
+    });
 }
 
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
@@ -532,10 +556,16 @@ async function main(argv) {
   }
   const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
   const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
-  const rows = selectClearedRows(bqRows, cleared, normNum);
+  const selection = new Map();
+  const observeSelection = (num, gate) => {
+    const key = normNum(num);
+    if (!selection.has(key)) selection.set(key, { num: key, gates: [] });
+    selection.get(key).gates.push(gate);
+  };
+  const rows = selectClearedRows(bqRows, cleared, normNum, observeSelection);
   // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never
   // silently dropped (#2613 review, required 2b).
-  const notReady = clearedNotReady(sidecar, bqRows, normNum);
+  const notReady = clearedNotReady(sidecar, bqRows, normNum, observeSelection);
   let byNum = new Map();
   try {
     const { createRequire } = await import('node:module');
@@ -629,6 +659,10 @@ async function main(argv) {
       const branch = typeof flags['drift-branch'] === 'string' ? flags['drift-branch'] : DEFAULT_DRIFT_BRANCH;
       const target = typeof flags['drift-target'] === 'string' ? flags['drift-target'] : DEFAULT_DRIFT_TARGET;
       const scope = typeof flags['drift-scope'] === 'string' ? flags['drift-scope'].split(',').filter(Boolean) : [...DEFAULT_DRIFT_SCOPE];
+      // #3637 — no branch to check (an EMPTY POC-branch registry and no `--drift-branch=`) means there is
+      // nothing carrying unreconciled drift, so there is nothing to hold on. Skip rather than shelling out
+      // with a `null` branch name and relying on the fail-open catch to clean it up.
+      if (!branch) throw new Error('no POC branch registered and no --drift-branch given — nothing to check');
       const out = execSync('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       const verdict = JSON.parse(out);
       if (verdict?.status === 'blocked') driftBlockedScope = scope;
@@ -653,7 +687,7 @@ async function main(argv) {
 
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -664,6 +698,14 @@ async function main(argv) {
     plan.held.push(pr ? { num, reason: 'already-done', alreadyDonePr: pr } : { num, reason: 'cleared-but-not-ready' });
   }
 
+  // Membership/readiness evidence comes from the selection above, including cleared
+  // entries which never reached the pure build planner.
+  plan.selection = [...selection.values()];
+  const notReadyKeys = new Set(notReady.map(normNum));
+  plan.cleared = sidecar.map((entry) => ({
+    num: normNum(entry.num),
+    ready: !notReadyKeys.has(normNum(entry.num)),
+  }));
   if (flags.json) {
     // Drain synchronously before exit — `process.stdout.write` is async to a pipe and the `process.exit(0)`
     // below would drop the unflushed tail, truncating this JSON for an `execFileSync`/pipe consumer (exactly

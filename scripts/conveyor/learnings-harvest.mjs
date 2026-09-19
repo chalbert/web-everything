@@ -6,15 +6,21 @@
  * THE RULE IT IMPLEMENTS: **collection is not adjudication.** A session — main loop or subagent — only ever
  * APPENDS what it observed (learnings-drop.mjs). It never decides what that observation is worth. Worth is
  * decided later, ONCE, over the whole cross-session pool. This file is the "later": read every pool file,
- * re-validate it against the SCHEMA, cluster across sessions, rank by recurrence, and hand a short candidate list to the `/harvest`
- * skill's judgment half (red-team → route to backlog/memory → lane → PR).
+ * re-validate it against the SCHEMA, VERIFY each note's grounding against its transcript, cluster across
+ * sessions, rank by recurrence, and hand the ranked candidate list to the `/harvest` skill's judgment half
+ * (red-team → route to backlog/memory → lane → PR).
  *
  * WHY NOT AT CLOSE (what close-session-sweep.mjs did, single-session):
  *   1. A subagent cannot run a session close, so its entries only counted if some OTHER session closed.
  *   2. A session that ends without a close lost everything it noticed.
- *   3. Dedup-from-a-sample-of-one: the red-team's own filters ask recurrence questions ("a fresh angle on a
- *      covered cluster?", "narrow/rare → leave on-disk") that ONE session structurally cannot answer. A pool
- *      answers them with a count — `count` (entries) and `sessions` (distinct sessions) are that evidence.
+ *   3. Dedup-from-a-sample-of-one: "are these N notes one cause with N symptoms?" is a question ONE session
+ *      structurally cannot ask. A pool can.
+ *
+ * WHAT RECURRENCE IS FOR, AND WHAT IT IS NOT (ratified #2978, built #3016). `sessions`, `days` and `count` are
+ * DIAGNOSIS (a cluster points at a common cause) and RANKING (what to look at first). They never ADMIT: they
+ * are emitter-written and forgeable, and a floor on them excludes the one-off operator directive. What admits a
+ * note to agent memory is VERIFIED GROUNDING — its quoted turn really is in the harness transcript it points at
+ * (learnings-grounding.mjs) — and then surviving the red-team. #1068's `--min-sessions` floor is gone.
  *
  * THE POOL. `$LEARNINGS_POOL || ~/.claude/conveyor/learnings` — `*.jsonl`, one file per session (so
  * concurrent agents never contend on one file), all read together. The directory is MACHINE-fixed, NOT
@@ -30,7 +36,7 @@
  * seam in #3015, so this is not a secret filter) and the same `dedup` clustering.
  *
  * Usage:
- *   node scripts/conveyor/learnings-harvest.mjs [--dir=<pool>] [--threshold=0.6] [--min-sessions=1] [--json]
+ *   node scripts/conveyor/learnings-harvest.mjs [--dir=<pool>] [--threshold=0.6] [--json]
  *   node scripts/conveyor/learnings-harvest.mjs --status [--json]     # depth/age only — what a close reports
  *   node scripts/conveyor/learnings-harvest.mjs --archive --stamp=<iso> --files=<a.jsonl,b.jsonl>
  *   node scripts/conveyor/learnings-harvest.mjs --archive --stamp=<iso> --before=<iso>
@@ -44,6 +50,7 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { validateEntry, poolDir as machinePoolDir } from './learnings-drop.mjs';
 import { dedup, DEFAULT_THRESHOLD } from './learnings-dedup.mjs';
+import { GROUNDING, verifyGrounding, cachedReader, normalizeQuote } from './learnings-grounding.mjs';
 import { approvalsPath, readApprovals, isApproved } from './hiccup-approve.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 
@@ -142,27 +149,70 @@ export function ageStats(entries, { now } = {}) {
 }
 
 /**
- * harvest(entries, { threshold, minSessions, now }) → { candidates, stats }. PURE.
- *
- * Clusters across the WHOLE pool, then ranks by `sessions` (distinct sessions that hit it) before `count`
- * (raw entries) — a friction three different sessions independently hit outranks one session that dropped
- * three restatements of it. `minSessions` is the recurrence floor: raise it to harvest only what has
- * demonstrably recurred, leaving one-offs in the pool for the next run (they are NOT discarded).
+ * How much of ONE quoted turn a candidate carries into the harvest's output (#3016, #2978 Fork 3 amendment). The
+ * pool stores quotes uncapped; what the harvest SENDS is a model-context budget — a cluster of eight 3,000-char
+ * quotes must not flood the red-team. An excerpt keeps `transcript` + the verified `turn` id, so the full turn
+ * is one open away when the synthesis needs it.
  */
-export function harvest(entries, { threshold = DEFAULT_THRESHOLD, minSessions = 1, now } = {}) {
-  const { clusters, stats } = dedup(entries, { threshold });
-  const ranked = clusters
-    .map((c) => ({ ...c, sessions: c.sessions?.length ?? 0 }))
-    .sort((a, b) => (b.sessions - a.sessions) || (b.count - a.count));
-  const candidates = ranked.filter((c) => c.sessions >= minSessions);
+export const EVIDENCE_EXCERPT_CHARS = 600;
+
+/** The grounding verdict an entry carries into ranking. Fail-safe: a quote nobody verified is NOT verified. */
+function groundingOf(e) {
+  if (e?.grounding?.status) return e.grounding;
+  return e?.quotedTurn != null ? { status: GROUNDING.FAILED, reason: 'not-verified' } : { status: GROUNDING.UNGROUNDED };
+}
+
+/** countGrounding(entries) → { verified, failed, ungrounded } over each entry's grounding verdict. PURE. */
+export function countGrounding(entries) {
+  const counts = { verified: 0, failed: 0, ungrounded: 0 };
+  for (const e of entries) counts[groundingOf(e).status]++;
+  return counts;
+}
+
+function excerpt(row) {
+  const full = normalizeQuote(row.quotedTurn);
+  if (full.length <= EVIDENCE_EXCERPT_CHARS) return { ...row, quotedTurn: full };
+  return { ...row, quotedTurn: `${full.slice(0, EVIDENCE_EXCERPT_CHARS)}…`, truncated: true, quoteChars: full.length };
+}
+
+/**
+ * harvest(entries, { threshold, now }) → { candidates, stats }. PURE.
+ *
+ * Clusters across the WHOLE pool and returns EVERY cluster, ranked. Recurrence is a DIAGNOSTIC and RANKING input
+ * only — never admission (ratified #2978 Fork 2). The ranking keys, in order: `sessions` (distinct sessions that
+ * hit it) → `days` (distinct UTC days its members were observed on) → `count` (raw entries). A friction three
+ * sessions independently hit outranks one session that dropped three restatements of it.
+ *
+ * THERE IS NO FLOOR. #1068 shipped a `minSessions` recurrence floor that filtered one-session clusters out of
+ * the candidate list. It is deleted, not tuned: `session`/`ts` are emitter-written, so a count authenticates
+ * nothing, and a floor structurally excludes the one-off operator directive — the source of most standing
+ * rules. A one-session cluster is a real signal that sorts lower. What admits a note to MEMORY is verified
+ * grounding (`grounding.verified` here, then the red-team) — see learnings-grounding.mjs.
+ */
+export function harvest(entries, { threshold = DEFAULT_THRESHOLD, now } = {}) {
+  const tagged = entries.map((e) => ({ ...e, grounding: groundingOf(e) }));
+  const { clusters, stats } = dedup(tagged, { threshold });
+  const candidates = clusters
+    .map((c) => {
+      // Every grounded member has an evidence row carrying its verdict; every other member is ungrounded.
+      const rows = c.evidence ?? [];
+      const grounding = { verified: 0, failed: 0, ungrounded: c.count - rows.length };
+      for (const row of rows) grounding[row.grounding.status]++;
+      return {
+        ...c,
+        sessions: c.sessions?.length ?? 0,
+        days: c.days?.length ?? 0,
+        grounding,
+        ...(c.evidence ? { evidence: rows.map(excerpt) } : {}),
+      };
+    })
+    .sort((a, b) => (b.sessions - a.sessions) || (b.days - a.days) || (b.count - a.count));
   return {
     candidates,
     stats: {
       ...stats,
       ...ageStats(entries, { now }),
-      ranked: ranked.length,
-      belowFloor: ranked.length - candidates.length,
-      minSessions,
+      verification: countGrounding(tagged),
     },
   };
 }
@@ -189,18 +239,24 @@ export function partitionGated(entries, { approvals = {} } = {}) {
 }
 
 /**
- * harvestPool({ dir, threshold, minSessions, now }) → { candidates, gated, stats, dir, files }.
- * The I/O wrapper: resolve → read → GATE (#3421) → harvest. An absent/empty pool returns empty candidates
- * and exit-0 — the common, correct outcome (nothing observed since the last harvest is not a failure).
- * `gated` surfaces the blocking entries this run held back for approval — see partitionGated.
+ * harvestPool({ dir, threshold, now, transcriptRoot, readTranscript }) → { candidates, gated, stats, dir, files }.
+ * The I/O wrapper: resolve → read → GATE (#3421) → VERIFY GROUNDING (#3016) → harvest. An absent/empty pool
+ * returns empty candidates and exit-0 — the common, correct outcome (nothing observed since the last harvest is
+ * not a failure). `gated` surfaces the blocking entries this run held back for approval — see partitionGated.
+ *
+ * Verification opens each pointed-at transcript ONCE per run (`cachedReader`) and only for eligible entries —
+ * a gated entry is never a candidate this run, so it is not worth a transcript read. `poolStatus` never verifies:
+ * it is the cheap depth/age read a close makes every time.
  */
-export function harvestPool({ dir, threshold, minSessions, now, env, root } = {}) {
-  const poolDir = resolvePoolDir({ dir, env, root });
+export function harvestPool({ dir, threshold, now, env, root, home, transcriptRoot, readTranscript } = {}) {
+  const poolDir = resolvePoolDir({ dir, env, root, home });
   const files = poolFiles(poolDir);
   const { entries, stats: readStats } = readPool(files);
   const approvals = readApprovals(approvalsPath({ dir: poolDir, env }));
   const { gated, eligible } = partitionGated(entries, { approvals });
-  const { candidates, stats } = harvest(eligible, { threshold, minSessions, now });
+  const read = cachedReader(readTranscript);
+  const verified = eligible.map((e) => ({ ...e, grounding: verifyGrounding(e, { read, root: transcriptRoot, env, home }) }));
+  const { candidates, stats } = harvest(verified, { threshold, now });
   return { candidates, gated, stats: { ...readStats, ...stats, gated: gated.length }, dir: poolDir, files };
 }
 
@@ -324,11 +380,17 @@ function main(argv) {
     process.exit(0);
   }
 
+  // The recurrence floor was DELETED (#3016, ratified #2978 Fork 2). Refuse the old flag loudly rather than
+  // ignore it: a caller still passing `--min-sessions=2` believes it is filtering, and would otherwise read an
+  // unfiltered candidate list as if one-offs had been screened out.
+  if (f['min-sessions'] != null) {
+    console.error('learnings-harvest: --min-sessions was removed — recurrence ranks candidates, it no longer filters them (#2978). Every cluster is returned; one-session clusters sort lower.');
+    process.exit(2);
+  }
   const threshold = f.threshold != null ? Number(f.threshold) : DEFAULT_THRESHOLD;
-  const minSessions = f['min-sessions'] != null ? Number(f['min-sessions']) : 1;
   let result;
   try {
-    result = harvestPool({ dir, threshold, minSessions });
+    result = harvestPool({ dir, threshold });
   } catch (e) {
     console.error(`learnings-harvest: cannot harvest (${e.message})`);
     process.exit(2);
@@ -339,9 +401,15 @@ function main(argv) {
     console.log(`learnings pool empty (${result.dir}) — nothing to harvest.`);
   } else {
     const s = result.stats;
-    console.log(`harvested ${result.dir}: ${s.received} entries / ${s.files} session file(s) (${s.rejected} rejected, ${s.malformed} malformed) → ${result.candidates.length} candidate(s)${s.belowFloor ? `, ${s.belowFloor} below the ×${s.minSessions}-session floor` : ''}${s.gated ? `, ${s.gated} gated (blocking, awaiting approval)` : ''}${s.ageDays != null ? `; oldest ${s.ageDays}d` : ''}.`);
+    const v = s.verification;
+    console.log(`harvested ${result.dir}: ${s.received} entries / ${s.files} session file(s) (${s.rejected} rejected, ${s.malformed} malformed) → ${result.candidates.length} candidate(s); grounding ${v.verified} verified / ${v.failed} failed / ${v.ungrounded} ungrounded${s.gated ? `, ${s.gated} gated (blocking, awaiting approval)` : ''}${s.ageDays != null ? `; oldest ${s.ageDays}d` : ''}.`);
     for (const c of result.candidates) {
-      console.log(`  [${c.kind}] ${c.sessions} session(s) / ×${c.count}  ${c.area}\n     ${c.summary}\n     → ${c.suggestion}`);
+      console.log(`  [${c.kind}] ${c.sessions} session(s) / ${c.days} day(s) / ×${c.count}  ${c.area}\n     ${c.summary}\n     → ${c.suggestion}`);
+      for (const row of c.evidence ?? []) {
+        const g = row.grounding;
+        const mark = g.status === GROUNDING.VERIFIED ? `✓ verified (${g.role} turn ${g.turn ?? '?'})` : `✗ ${g.reason}`;
+        console.log(`     grounding ${mark}: "${row.quotedTurn}"\n       ${row.transcript}`);
+      }
       // An APPROVED blocking hiccup carries its proposed fix(es) through clustering (#3421 review fix) —
       // surface it here too, or the whole point of "propose a fix" is lost the moment approval clears it.
       if (c.blocking && Array.isArray(c.proposedFixes)) {

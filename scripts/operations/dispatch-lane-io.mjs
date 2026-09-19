@@ -57,6 +57,8 @@ const execFileAsync = promisify(execFile);
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
+// #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
+import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
@@ -177,9 +179,11 @@ export function readTick({
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
   now = () => new Date(),
+  all = false,
+  verbose,
 } = {}) {
   const key = normNum(num);
-  if (!key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
+  if (!all && !key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
 
   // THE CALLER'S BOOKKEEPING, or none. A missing file is a REFUSAL, not a silent fall back to `{}`: a caller
   // that named a file meant to dispatch under its live guards, and quietly dropping them is precisely the
@@ -195,6 +199,13 @@ export function readTick({
     bookkeepingSource = 'file';
   }
 
+  // An explicit verbose setting bypasses tick-core's read-and-advance of the
+  // persisted diagnostic window. Read-only reports must supply false.
+  if (verbose != null) {
+    const payload = JSON.parse(stdin);
+    stdin = JSON.stringify({ ...payload, config: { ...payload.config, verbose } });
+  }
+
   let tick;
   try {
     tick = JSON.parse(String(runNode([tickCli(root)], { cwd: root, input: stdin })));
@@ -203,6 +214,45 @@ export function readTick({
     throw new Error(`dispatch-lane-io: could not read the conveyor tick — ${msg}`);
   }
   const decisions = tick && typeof tick.decisions === 'object' && tick.decisions ? tick.decisions : {};
+  if (all) {
+    if (!tick?.decisions?.admission) {
+      throw new Error('dispatch-lane-io: tick has no admission evidence for the whole queue');
+    }
+    const evidence = tick.decisions.admission;
+    const keys = [...new Set([
+      ...evidence.queue.filter((row) => row.buildQueued),
+      ...(evidence.cleared ?? []), ...evidence.held, ...evidence.planned,
+    ].map((row) => normNum(row.num)).filter(Boolean))];
+    const items = loadItems();
+    const observedAt = now();
+    const tickJson = JSON.stringify(tick);
+    const texts = new Map();
+    if (String(bookkeepingFile || '').trim()) texts.set(bookkeepingFile, readText(bookkeepingFile));
+    const cachedText = (path) => {
+      if (!texts.has(path)) texts.set(path, readText(path));
+      return texts.get(path);
+    };
+    let agentsRead = false;
+    let agents;
+    let agentsError;
+    const cachedAgents = () => {
+      if (!agentsRead) {
+        agentsRead = true;
+        try { agents = listAgents(); } catch (error) { agentsError = error; }
+      }
+      if (agentsError) throw agentsError;
+      return agents;
+    };
+    // One tick and one item corpus for the entire report. Reuse the SAME selection and
+    // guard reader for each id; never run a second scheduler or persist hypothetical guards.
+    return keys.map((id) => readTick({
+      num: id, root, exec, bookkeepingFile,
+      runNode: () => tickJson, readText: cachedText, loadItems: () => items,
+      listInFlightDispatches, listAgents: cachedAgents, recordLiveness, laneRefForPr, checkAlreadyDone,
+      now: () => observedAt,
+    }));
+  }
+
   // `pr` is an OPTIONAL extra filter — every existing call site (the launch-list scan below, `suppressed`)
   // passes only `rows` and gets the original num-only match; `dispatchedGuard`'s fix/ci-heal branches are the
   // only callers that pass it (see the comment above that selection for why).
@@ -279,6 +329,15 @@ export function readTick({
 
   return {
     resolvedNum: key,
+    admission: tick.decisions?.admission ? {
+      cleared: match(tick.decisions.admission.cleared),
+      prepare: match(tick.decisions.admission.prepare),
+      selection: match(tick.decisions.admission.selection)?.gates ?? [],
+      queueRow: match(tick.decisions.admission.queue),
+      held: match(tick.decisions.admission.held),
+      planned: match(tick.decisions.admission.planned),
+      gates: match(tick.decisions.admission.traces)?.gates ?? [],
+    } : null,
     launch,
     // WHICH LIST IT CAME OUT OF. It picks the brief below, and the session slug and the lane scope in the
     // declaration — one answer, read three times, rather than three re-derivations that can disagree.
@@ -597,25 +656,51 @@ export function defaultLoadItems(root) {
  *  hold — but this function used to narrow the record down to `num`/`slug`/`specPath`/`scope` and drop it,
  *  which is why the manual `--num=<N>` path had no `blockedBy` awareness at all: the data was computed, never
  *  read here. See `shapeDispatchRead`'s blocked-item refusal, which is what actually reads this field. */
-export function findItem(key, loadItems) {
+export function findItem(key, loadItems, pocRegistry = null) {
   let items = [];
   try { items = loadItems() || []; } catch { return null; }
   const it = (Array.isArray(items) ? items : []).find((x) => normNum(x?.num) === key);
   if (!it || !it.slug) return null;
+  const rawTarget = typeof it.deliveryTarget === 'string' && it.deliveryTarget.trim() ? it.deliveryTarget.trim() : null;
   return {
     num: String(it.num),
+    status: it.status ?? null,
+    deliveryAgent: it.deliveryAgent ?? null,
     slug: String(it.slug),
     specPath: `backlog/${it.num}-${it.slug}.md`,
     // Already repo-qualified by the loader (`we:scripts/...`), which is the form the brief's `--scope` wants.
     scope: Array.isArray(it.scope) ? it.scope.map(String) : [],
     // The still-open `blockedBy` targets (#3462), or `[]` when every edge resolved or the item names none.
     openBlockers: Array.isArray(it.openBlockers) ? it.openBlockers.map(String) : [],
+    // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
+    // loader spreads unknown frontmatter through (`...data`), so this arrives with no loader change; it is
+    // narrowed here for the same reason `openBlockers` is — a field that is computed but never carried through
+    // this function is a field the dispatch path cannot see.
+    //
+    // RESOLVED AND VALIDATED HERE, in the io shell, not in the declaration. `we:scripts/operations/
+    // dispatch-lane.mjs` is asserted (by its own suite) to reach nothing that can act — no `node:` specifier
+    // anywhere in its import graph — and the registry lives in a file, so the read belongs on this side. The
+    // declaration only reads the resolved `deliveryBase` string.
+    deliveryTarget: rawTarget || null,
+    deliveryBase: resolveDeliveryBase(rawTarget, it.num, pocRegistry),
   };
+}
+
+/** #3637 — the delivery target for one item, validated against the POC-branch registry. An UNREGISTERED
+ *  branch THROWS: doctrine rule 10(c) says a POC branch must be DECLARED, and a dispatch aimed at an
+ *  undeclared ref would fork a lane from a ref that may not exist and then have nowhere to land it. The same
+ *  predicate runs as a LINT at filing time (`we:scripts/check-backlog-item.mjs`), so the normal way to satisfy
+ *  this is never to reach it with a bad value. `registry` is injected for tests. */
+export function resolveDeliveryBase(target, num, registry) {
+  const reg = registry ?? readPocRegistry();
+  const verdict = validateDeliveryTarget(reg, target);
+  if (!verdict.ok) throw new Error(`dispatch-lane.read: #${num} — ${verdict.error}`);
+  return verdict.target;
 }
 
 /** `readTick` bound to one root — the shape the declaration wants. */
 export function createTickReader(bindings = {}) {
-  return ({ num, bookkeepingFile }) => readTick({ ...bindings, num, bookkeepingFile });
+  return ({ num, bookkeepingFile, all = false, verbose = bindings.verbose }) => readTick({ ...bindings, num, bookkeepingFile, all, verbose });
 }
 
 /**

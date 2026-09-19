@@ -56,6 +56,13 @@ export const isItemId = (v) => {
   return false;
 };
 
+/** #2447 — a manifest `graduatedTo` → one trimmed line, or `null` for a non-string / empty / `none`. Pure. */
+function normalizeManifestGraduatedTo(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.replace(/[\r\n]+/g, ' ').trim();
+  return s && s.toLowerCase() !== 'none' ? s : null;
+}
+
 /** The manifest filename — a NEW file in the WE lane commit (one-sided add; drain deletes at landing). */
 export const MANIFEST_FILENAME = '.lane-manifest.json';
 
@@ -84,7 +91,11 @@ function orderRank(repo) {
  * carries today's plain-sibling behavior unchanged (backward compatible). Neither is consumed by the drain
  * yet (that lands in the later `proof-gated-stacked-drain` slice); this is just the primitive + round-trip.
  *
- * @param {{item:number|string, batchSlug?:string, repos:Array<{repo:string, ref:string, carriesResolve?:boolean, base?:string}>, stackParents?:Array<number|string>, blockedBy?:Array<number|string>, mergeRiskFiles?:string[]}} input
+ * `graduatedTo` (#2447) — the resolve's `graduatedTo` pointer (e.g. the SHA a dedup-resolve's deliverable already
+ * landed in). OPTIONAL and presentation-only: review/label surfaces render it as the resolution-basis banner so a
+ * backlog-only diff is not misread as a hollow resolve. It gates nothing. Omitted when absent or `none`.
+ *
+ * @param {{item:number|string, batchSlug?:string, repos:Array<{repo:string, ref:string, carriesResolve?:boolean, base?:string}>, stackParents?:Array<number|string>, blockedBy?:Array<number|string>, mergeRiskFiles?:string[], dismissedFindings?:number, graduatedTo?:string}} input
  */
 export function buildManifest(input) {
   const item = asItemId(input.item); // NNN or provisional hash (#2288)
@@ -115,6 +126,10 @@ export function buildManifest(input) {
     // #2171 — the count of pre-PR review findings the lane DISMISSED (#2170). The drain's escalation rubric
     // reads it as its strongest signal (a lane judging its own reviewer's findings away → a second look). 0 default.
     dismissedFindings: Number.isFinite(Number(input.dismissedFindings)) ? Math.max(0, Number(input.dismissedFindings)) : 0,
+    // #2447 — NORMALIZED here rather than validated: it is presentation-only, so a malformed value (a non-string, or
+    // a body-edited `none`) is DROPPED instead of failing `validateManifest` and blocking the land over a banner.
+    // Newlines collapse to one line; absent/empty/`none` is omitted so a plain manifest is byte-identical to before.
+    ...(normalizeManifestGraduatedTo(input.graduatedTo) ? { graduatedTo: normalizeManifestGraduatedTo(input.graduatedTo) } : {}),
   };
 }
 

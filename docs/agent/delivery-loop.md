@@ -54,6 +54,28 @@ Only two things genuinely stop and wait for a person:
 > `review-escalation.mjs` and in a #2851 anchor, and in neither place a driver reads mid-loop — so it was
 > re-derived from feel, twice, wrongly. It is stated here because *here* is where the driver is.
 
+## Session-delegation trial logging
+
+When opening work delegated to another provider, the orchestrating session passes
+`--delegation=codex:gpt-6-astra:bugfix` (substitute the actual provider, model and task type) to
+`pr-land.mjs`. The PR body carries the explicit `delegation` marker alongside the author stamp;
+commits and labels cannot recover this metadata reliably. Omitting the flag leaves ordinary work
+unmarked. Malformed flags fail before publishing; an existing marker is preserved on re-runs.
+
+After the declared `review-pr` operation completes an `accepted` label swap and comment,
+`review-set-label.mjs` records a session-delegation trial only for a valid, unambiguous marker whose
+exact triple has not met #3690's bar. The gate reads the live scorecard store: five trailing clean
+Claude-verified trials plus an earlier informative finding; other verifiers neither count nor break
+the streak. Other channels and label targets do not log. Logging failures are non-fatal.
+
+V1 records `outcome: landed` and `findings: null` at acceptance. It does not distinguish a first-round
+clean accept from an accept after repairs; consulting verdict-ledger history is separate follow-up work.
+Only accepted PRs with author-supplied delegation markers are auto-logged: rejected or abandoned
+delegated tasks leave no row and cannot count against the streak. This survivorship bias means the
+graduation signal sees only work that eventually succeeded, never work that failed outright. It is a
+known v1 scope limit, not a bug; tracked as follow-up alongside the round-history distinction, with no
+structural fix required for PR #2313.
+
 ## Spawning a reviewer that is actually independent
 
 **A subagent is not a second actor.** It inherits the parent's `CLAUDE_CODE_SESSION_ID`, so the repo's
@@ -177,6 +199,32 @@ against them.
 
 **Watch for the vacuous test.** Assertions inside an `if` that never runs, or a loop over an empty list, pass
 silently. So does a bare `return` used as a conditional skip — use `ctx.skip()`, which reports as skipped.
+
+## Explain PR holds before dispatching
+
+Run `node scripts/operations/run.mjs pr-reconcile --repo=chalbert/web-everything --json`
+before dispatching a review or asking for a human-approval pass. Read `verdict.prs`: one row per PR,
+sorted by number, across open, merged and closed states. The scope is every PR in the named repo
+(a superset of conveyor work, so missing labels cannot hide a hold); `--pr=N` narrows it.
+`requiredCheck` reports the head-keyed `test` check used by the conveyor; `--requiredCheck=<name>`
+selects another named check. This is not discovery of GitHub branch-protection rules.
+
+`heldBy` is a summary, with precedence human → stand-down → conflict → dependency → advisory-pending
+→ none; `holds` retains every detected reason and its evidence and unblock action. Current labels
+`review:human`, `review:pending`, `review:changes`, and `blocked` are recognized. Comment evidence
+includes the canonical conveyor stand-down marker and explicit hold statements (the drain's
+`held — a review hold (...) stands` wording, human-review requirements, pending advisory review,
+conflict and dependency statements). Quoted text and arbitrary mentions of label names are not holds.
+Ordinary comment holds use the latest explicit hold/clear statement per category; an acceptance label
+alone cannot date or override a comment-only hold. Stand-down markers remain terminal until removed, as the conveyor defines.
+Closed/merged PRs report `heldBy: none`; their labels/comments remain visible as history.
+
+Every hold carries a label or comment excerpt. Mergeability is reported independently: without a
+recorded conflict hold it does not invent label/comment evidence. Unknown prose is preserved in
+`comments` for the reading agent to interpret; this deterministic report is not a natural-language judge.
+Diff `verdict` between calls: it contains no observation timestamps (the shared CLI envelope still
+carries its normal run identity). This operation explains holds; it never clears, labels, or merges.
+Choosing between rival PRs remains the reading agent's judgment.
 
 ## When to stand down instead of iterating
 

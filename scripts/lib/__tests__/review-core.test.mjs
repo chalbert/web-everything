@@ -238,6 +238,14 @@ describe('buildMandate', () => {
     expect(text).toMatch(/throwaway `git clone`/);
   });
 
+  // #3158 — a `judgePanel` seat is always tool-free (`--tools ''`), so the clone escape must not read as an
+  // unconditional instruction to a juror that structurally cannot run `git clone` at all.
+  it('#3158 — the clone escape self-scopes on tool availability, both branches present unconditionally', () => {
+    const text = buildMandate();
+    expect(text).toMatch(/you have tools and genuinely must run the code/);
+    expect(text).toMatch(/If you have no tools at all, you cannot run or clone anything/);
+  });
+
   it('joins a multi-mandate array (the #2285 v3 reviewer-panel shape)', () => {
     const text = buildMandate({ mandate: ['correctness', 'security', 'simplicity'] });
     expect(text).toContain('correctness, security, simplicity');
@@ -785,6 +793,27 @@ describe('buildPanelMandate (#2310)', () => {
       const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
       expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
       expect(text).toContain(MUTATION_PROBE_RULE);
+    });
+  });
+
+  // ── #3158 — THE PROBE SELF-SCOPES ON TRANSPORT TOO, SAME PHRASING PATTERN AS #3094 ─────────────────────
+  // A `judgePanel` seat is always tool-free (`we:scripts/lib/judge-panel.mjs` forwards no `allowedTools`),
+  // so the old unconditional "BREAK the line" instruction told every seat to do something it cannot. No
+  // caller flag was added (matching the #3094 ruling above): the rule's own WORDING now carries both a
+  // tool-bearing branch and a tool-free branch, unconditionally, for every lens.
+  describe('#3158 — the probe tells a tool-free juror what to do instead of fabricating a mutation', () => {
+    it('names both branches — tool-bearing break-the-line, and tool-free name-the-test', () => {
+      expect(MUTATION_PROBE_RULE).toMatch(/when you have tools and can act on the diff, BREAK the line/);
+      expect(MUTATION_PROBE_RULE).toMatch(/When you have NO tools \(a tool-free juror\), you cannot run this probe/);
+      expect(MUTATION_PROBE_RULE).toMatch(/name the test you believe WOULD need to redden/);
+      expect(MUTATION_PROBE_RULE).toMatch(/never claim to have broken or run anything you did not/);
+    });
+
+    it('is present for every lens with no caller flag — the #3094 invariant holds for the new branch too', () => {
+      for (const lens of PANEL_LENSES) {
+        const text = buildPanelMandate({ lens });
+        expect(text, lens).toContain('When you have NO tools (a tool-free juror), you cannot run this probe');
+      }
     });
   });
 

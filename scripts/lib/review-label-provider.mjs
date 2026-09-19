@@ -27,16 +27,25 @@
  * provider call; it does not pretend to be one.
  *
  * IMPURE by construction in `createGhProvider`; the module itself is pure.
+ *
+ * DEFAULT `exec` IS THROTTLED (#3621) — `we:scripts/lib/gh-throttle.mjs#runGhSync`, a byte-for-byte transparent
+ * `execFileSync('gh', args, opts)` replacement that gates every call through a host-wide concurrency semaphore
+ * and retries a rate-limit-shaped failure with bounded backoff. This is the SAME `(args, opts) => …` shape the
+ * inline call above had, so nothing about this adapter's return/throw contract changes — only the safety
+ * margin under GitHub's secondary (burst) rate limit does. Every caller of `createGhProvider()` with no `exec`
+ * override (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, `review-round-tag.mjs`, `review-status-tag.mjs`
+ * — all three run every conveyor-runner tick) gets this for free.
  */
 
-import { execFileSync } from 'node:child_process';
 import { unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runGhSync } from './gh-throttle.mjs';
 
 /** The `--json` fields the label arc reads about a PR. Named once so a second adapter supplies the same shape
  *  rather than guessing at it, and so a stub in a test cannot drift from what the real one returns. */
-export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt']);
+export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt', 'title']);
+// `title` supplies delegation trial descriptions on this same call, with no extra hop.
 // `createdAt` (#3067) rides the SAME call — one more json field, no extra hop, the pattern #2844 used for
 // `body` and #2953 for `state`. It is what turns a MISSING `authored-by-actor` stamp from an assumption into a
 // checkable comparison: a PR opened after `STAMP_REGIME_START` and now lacking a stamp had one STRIPPED, while
@@ -89,7 +98,7 @@ export const GH_ARGV = Object.freeze({
  * @param {{exec?: Function, writeFile?: Function, removeFile?: Function, tmpDir?: string}} [o]
  */
 export function createGhProvider({
-  exec = (args, opts) => execFileSync('gh', args, { encoding: 'utf8', ...opts }),
+  exec = (args, opts) => runGhSync(args, { encoding: 'utf8', ...opts }),
   writeFile = writeFileSync,
   removeFile = unlinkSync,
   tmpDir = tmpdir(),

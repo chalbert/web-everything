@@ -50,12 +50,9 @@
  * the io shell (`./file-item-io.mjs`) is the only place this touches `fs`.
  *
  * NON-DISPATCHABLE KINDS ARE DUPLICATED HERE, NOT IMPORTED, and that is a deliberate, narrow choice, not an
- * oversight: `we:scripts/conveyor/queue.mjs`'s own `NON_DISPATCHABLE` map is module-local (not exported), and
- * exporting it would touch a file under active concurrent work (#3478's queue-sidecar-resolution PRs) for a
- * two-line gain. The two kinds it names — `epic` (needs `/slice`) and `decision` (needs `/prepare` +
- * `/decision`) — are read from `we:scripts/check-standards-rules.mjs#BACKLOG_KINDS`'s own closed set, so this
- * file cannot invent a THIRD kind queue.mjs does not also know about; the two lists are asserted to agree in
- * `./__tests__/file-item.test.mjs`.
+ * oversight: importing the conveyor CLI here would pull IO dependencies into this pure declaration.
+ * The agreement test in `./__tests__/file-item.test.mjs` imports keys derived from queue.mjs's actual
+ * `NON_DISPATCHABLE` warning map and compares both sets, catching additions or removals on either side.
  *
  * PURE. No fs, no clock, no process, no network. `./file-item-io.mjs` is the only place it touches the world.
  */
@@ -73,8 +70,8 @@ export const FILE_ITEM_QUEUE_EFFECT = 'file-item.queue-add';
 /**
  * Kinds `we:scripts/conveyor/tick-core.mjs#planTick` can NEVER dispatch a build for, whatever their frontmatter
  * says — mirrors `we:scripts/conveyor/queue.mjs`'s own `NON_DISPATCHABLE` map (see this file's header for why
- * it is a local copy, not an import). Read from {@link BACKLOG_KINDS} so a new kind added to the gate's own
- * closed set cannot silently slip past both copies agreeing.
+ * it is a local copy, not an import). Entries are selected from {@link BACKLOG_KINDS}; the agreement test
+ * detects drift from the conveyor's warning map.
  */
 export const NON_DISPATCHABLE_KINDS = Object.freeze(
   [...BACKLOG_KINDS].filter((k) => k === 'epic' || k === 'decision'),

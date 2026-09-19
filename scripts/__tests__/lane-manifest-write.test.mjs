@@ -151,3 +151,16 @@ describe('#2390 — manifestBaseForRepo (the per-repo stacked base a scorer diff
     expect(manifestBaseForRepo(m, null)).toBe(null);
   });
 });
+
+describe('lane-manifest-write --graduated-to (#2447)', () => {
+  it('records the resolve\'s graduatedTo, and omits `none`', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lmw-2447-'));
+    try {
+      const out = join(dir, 'm.json');
+      expect(run(['--item=2403', '--repos=[{"repo":"we","ref":"lane/2403-x"}]', '--graduated-to=6b5874f7', '--out=' + out, '--json']).code).toBe(0);
+      expect(parseManifest(readFileSync(out, 'utf8')).graduatedTo).toBe('6b5874f7');
+      expect(run(['--item=2403', '--repos=[{"repo":"we","ref":"lane/2403-x"}]', '--graduated-to=none', '--out=' + out, '--json']).code).toBe(0);
+      expect('graduatedTo' in parseManifest(readFileSync(out, 'utf8'))).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});

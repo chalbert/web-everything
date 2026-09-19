@@ -2,8 +2,10 @@
 bornAs: x1t5emx
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-13"
+dateResolved: "2026-09-13"
 tags: []
 scope:
   - we:scripts/conveyor/
@@ -20,3 +22,11 @@ Independent review of #1991 (graduating we:scripts/operations/file-item.mjs to m
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Progress
+
+- Confirmed the agreement test only compared a hardcoded literal and the conveyor map remained private.
+- Exported keys derived from the actual warning map, guarded CLI execution on import, and changed the test to compare both sets directly.
+- Expanded the operation's end-to-end refusal test to every kind exported by the conveyor map.
+- Validation: `node we:node_modules/vitest/vitest.mjs run we:scripts/operations/__tests__/file-item.test.mjs we:scripts/conveyor/__tests__/queue.test.mjs` passed all 25 tests, including CLI subprocess roundtrips.
+- Mutation proof: temporarily adding `task` to the conveyor warning map failed both the direct agreement assertion and the end-to-end no-queue-effect assertion. Restored the map after the probe.

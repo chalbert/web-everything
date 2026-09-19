@@ -3,7 +3,7 @@
  * `planConflictLabelChange` + IO-shell tests over injected fakes (no `gh` process anywhere in this file),
  * mirroring `we:scripts/conveyor/__tests__/review-status-tag.test.mjs`'s own shape.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   CONFLICT_LABEL,
@@ -17,6 +17,7 @@ import {
   buildConflictFindingBody,
   defaultPostConflictFinding,
   defaultPostConflictStandDown,
+  defaultPostConflictRearm,
   defaultListPrFiles,
   GH_FILES_GRAPHQL_CAP,
 } from '../parked-pr-conflict-watch.mjs';
@@ -61,7 +62,7 @@ describe('the real incident that motivated this pass — WE PR #1920, captured l
     const calls = [];
     const provider = { setLabels: (repo, pr, spec) => calls.push(['setLabels', repo, pr, spec]) };
     const results = watchParkedPrConflicts({ repo: 'chalbert/web-everything', listPrs: () => [healed], provider });
-    expect(results).toEqual([{ num: 1920, isConflicting: false, add: null, remove: [CONFLICT_LABEL], newlyDetected: false, commented: false }]);
+    expect(results).toEqual([{ num: 1920, isConflicting: false, add: null, remove: [CONFLICT_LABEL], newlyDetected: false, newlyResolved: true, commented: false }]);
     expect(calls).toEqual([['setLabels', 'chalbert/web-everything', 1920, { add: undefined, remove: [CONFLICT_LABEL] }]]);
   });
 });
@@ -117,8 +118,13 @@ describe('planConflictLabelChange', () => {
   });
 
   it('removes the label once the conflict resolves — no re-comment', () => {
-    expect(planConflictLabelChange({ isConflicting: false, currentLabels: [{ name: CONFLICT_LABEL }] }))
-      .toEqual({ add: null, remove: [CONFLICT_LABEL], newlyDetected: false });
+    expect(planConflictLabelChange({ isConflicting: false, isResolved: true, currentLabels: [{ name: CONFLICT_LABEL }] }))
+      .toEqual({ add: null, remove: [CONFLICT_LABEL], newlyDetected: false, newlyResolved: true });
+  });
+
+  it('keeps the conflict marker until resolution is confirmed', () => {
+    expect(planConflictLabelChange({ isConflicting: false, currentLabels: [CONFLICT_LABEL] }))
+      .toEqual({ add: null, remove: [], newlyDetected: false });
   });
 
   it('is a no-op when never conflicting and never labelled', () => {
@@ -333,8 +339,93 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     const provider = fakeProvider();
     const listPrs = () => [{ number: 1920, mergeable: 'MERGEABLE', labels: [{ name: 'review:human' }, { name: CONFLICT_LABEL }] }];
     const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider });
-    expect(results).toEqual([{ num: 1920, isConflicting: false, add: null, remove: [CONFLICT_LABEL], newlyDetected: false, commented: false }]);
+    expect(results).toEqual([{ num: 1920, isConflicting: false, add: null, remove: [CONFLICT_LABEL], newlyDetected: false, newlyResolved: true, commented: false }]);
     expect(provider.calls).toEqual([['setLabels', 'o/n', 1920, { add: undefined, remove: [CONFLICT_LABEL] }]]);
+  });
+
+  it('rearms a resolved conflict still on review:changes and removes the conflict label without fresh-conflict routing', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider,
+      postRearm: (o) => routed.push(['rearm', o.pr.number, o.repo]),
+      postFinding: (o) => routed.push(['finding', o.pr.number, o.repo]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number, o.repo]),
+    });
+    expect(routed).toEqual([['rearm', 1920, 'o/n']]);
+    expect(provider.calls).toEqual([['setLabels', 'o/n', 1920, { add: undefined, remove: [CONFLICT_LABEL] }]]);
+    expect(results).toEqual([{
+      num: 1920, isConflicting: false, add: null, remove: [CONFLICT_LABEL], newlyDetected: false,
+      newlyResolved: true, commented: false, routedTo: 'rearm-review',
+    }]);
+  });
+
+  it('only removes the conflict label when a resolved PR has no review:changes bounce', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{ number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }] }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postRearm: (o) => routed.push(['rearm', o.pr.number]),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+    });
+    expect(routed).toEqual([]);
+    expect(provider.calls).toEqual([['setLabels', 'o/n', 1920, { add: undefined, remove: [CONFLICT_LABEL] }]]);
+    expect(results[0].newlyResolved).toBe(true);
+    expect(results[0].routedTo).toBeUndefined();
+  });
+
+  it('dry-run: a resolved review:changes conflict makes no writes or rearm call', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{ number: 1920, mergeable: 'MERGEABLE', labels: [CONFLICT_LABEL, 'review:changes'] }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, dryRun: true,
+      postRearm: (o) => routed.push(o),
+    });
+    expect(results[0].newlyResolved).toBe(true);
+    expect(provider.calls).toEqual([]);
+    expect(routed).toEqual([]);
+  });
+
+  it('records a rearm failure and continues rearming the remaining resolved PRs', () => {
+    const provider = fakeProvider();
+    provider.currentRepo = () => 'resolved/repo';
+    const routed = [];
+    const listPrs = () => [1, 2].map((number) => ({ number, mergeable: 'MERGEABLE', labels: [CONFLICT_LABEL, 'review:changes'] }));
+    const results = watchParkedPrConflicts({
+      listPrs, provider,
+      postRearm: (o) => {
+        routed.push([o.pr.number, o.repo]);
+        if (o.pr.number === 1) throw new Error('rearm failed\nmore detail');
+      },
+    });
+    expect(routed).toEqual([[1, 'resolved/repo'], [2, 'resolved/repo']]);
+    expect(results[0].error).toBe('rearm failed');
+    expect(results[0].routedTo).toBeUndefined();
+    expect(results[1].routedTo).toBe('rearm-review');
+  });
+
+  it.each(['UNKNOWN', undefined, 'CONFLICTING'])('does not rearm or lose the marker while mergeable is %s', (mergeable) => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{ number: 1920, mergeable, labels: [CONFLICT_LABEL, 'review:changes'] }];
+    const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider, postRearm: (o) => routed.push(o) });
+    expect(results).toEqual([]);
+    expect(provider.calls).toEqual([]);
+    expect(routed).toEqual([]);
+  });
+
+  it('does not rearm an unflagged review:changes PR even when GitHub reports MERGEABLE', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{ number: 1920, mergeable: 'MERGEABLE', labels: ['review:changes'] }];
+    const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider, postRearm: (o) => routed.push(o) });
+    expect(results).toEqual([]);
+    expect(provider.calls).toEqual([]);
+    expect(routed).toEqual([]);
   });
 
   it('ignores a CONFLICTING PR with no park label — not this pass\'s scope', () => {
@@ -434,7 +525,17 @@ describe('buildConflictFindingBody', () => {
   });
 });
 
-describe('defaultPostConflictFinding / defaultPostConflictStandDown — argv shape (exec injected, no real gh/node)', () => {
+describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPostConflictRearm — argv shape (exec injected, no real gh/node)', () => {
+  it('shells rearm-review.mjs with the PR, actor and repo through node', () => {
+    const calls = [];
+    const exec = (cmd, argv, options) => { calls.push([cmd, argv, options]); return ''; };
+    defaultPostConflictRearm({ pr: { number: 1920 }, repo: 'o/n', exec });
+    expect(calls).toEqual([['node', [
+      expect.stringMatching(/\/scripts\/conveyor\/rearm-review\.mjs$/), '1920',
+      '--actor=parked-pr-conflict-watch (conflict resolved)', '--repo=o/n',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 }]]);
+  });
+
   it('shells reconcile-finding.mjs with a --body-file, --agent and --repo', () => {
     let capturedArgv;
     const exec = (cmd, argv) => { capturedArgv = argv; return ''; };
@@ -455,4 +556,24 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown — argv sha
     expect(capturedArgv).toContain('--reason=conflict');
     expect(capturedArgv).toContain('--repo=o/n');
   });
+});
+
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal(), execFileSync: vi.fn(),
+}));
+vi.mock('../../lib/gh-throttle.mjs', async () => {
+  const { execFileSync } = await import('node:child_process');
+  return {
+    execFileSyncThrottled: vi.fn((file, args, opts) => execFileSync(file, args, opts)),
+    runGhSync: vi.fn((args, opts) => execFileSync('gh', args, opts)),
+  };
+});
+vi.mock('../../lib/write-all-sync.mjs', () => ({ writeAllSync: vi.fn(), writeLineSync: vi.fn() }));
+
+import { prFileContract } from './pr-file-test-helpers.mjs';
+prFileContract({
+  name: 'parked-pr-conflict-watch', load: () => import('../parked-pr-conflict-watch.mjs'),
+  reader: 'defaultListParkedPrs', run: 'watchParkedPrConflicts',
+  fields: 'number,headRefName,mergeable,mergeStateStatus,labels,files',
 });

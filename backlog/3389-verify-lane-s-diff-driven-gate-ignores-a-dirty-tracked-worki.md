@@ -1,8 +1,9 @@
 ---
 bornAs: xwdpujf
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-29"
+dateResolved: "2026-09-15"
 scope:
   - we:scripts/lib/verify-lane-gate.mjs
 tags: []

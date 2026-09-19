@@ -12,7 +12,7 @@
  *     stops on the core's idle-stop and on the tick budget, and stops when its singleton lease is lost.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLockEntry } from '../../../scripts/readiness/file-locks.mjs';
@@ -23,7 +23,9 @@ import {
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
+  writeDriverStatus, appendDecisionTrace, DRIVER_STATUS_FILENAME,
 } from '../runner.mjs';
+import { localDateString } from '../../../scripts/lib/local-date.mjs';
 
 // Hoisted mock — `makeCliMechanicalPasses` dynamically `import('node:child_process')`s `execFileSync`
 // (§below, x5v8yy9 review finding), so the module itself must be mocked rather than the binding. Keeps every
@@ -32,6 +34,15 @@ import {
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, execFileSync: vi.fn() };
+});
+
+// Keep the real fetch builder while replacing throttle effects (no machine-global locks or real gh).
+vi.mock('../../../scripts/lib/gh-throttle.mjs', async () => {
+  const { execFileSync } = await import('node:child_process');
+  return {
+    runGhSync: (args, opts) => execFileSync('gh', args, opts),
+    execFileSyncThrottled: (file, args, opts) => execFileSync(file, args, opts),
+  };
 });
 
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
@@ -128,6 +139,8 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
       spawnBuilds: [{ num: 1, lane: 1 }], spawnPrepareScope: [{ num: 2, lane: 2 }],
       spawnPrepareDecision: [{ num: 3, lane: 3 }], spawnFixes: [{ pr: 9 }], spawnCiHeals: [{ pr: 10 }],
       armWatchers: [{ pr: 9, releaseSession: 'conveyor-1' }],
+      stalled: [{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }],
+      decisionTrace: [{ kind: 'dispatch', num: 1, text: 'dispatched #1 to lane-1: build' }],
     } };
     const s = tickSurface(out);
     expect(s.statusLine).toBe('conveyor · 2 building');
@@ -137,10 +150,92 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
       prepareDecision: [{ num: 3, lane: 3 }], fixes: [{ pr: 9 }], ciHeals: [{ pr: 10 }],
     });
     expect(s.armWatchers).toEqual([{ pr: 9, releaseSession: 'conveyor-1' }]);
+    // 2026-09-14 (#3521/lane-2 incident) — the self-diagnosed stall list and the plain-language decision trace
+    // are projected through just as faithfully as every other decisions field.
+    expect(s.stalled).toEqual([{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }]);
+    expect(s.decisionTrace).toEqual([{ kind: 'dispatch', num: 1, text: 'dispatched #1 to lane-1: build' }]);
   });
   it('is total on a bare tick output (all empties, never throws)', () => {
     const s = tickSurface({});
-    expect(s).toEqual({ statusLine: '', notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
+    expect(s).toEqual({
+      statusLine: '', notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] },
+      armWatchers: [], stalled: [], decisionTrace: [],
+    });
+  });
+});
+
+describe('writeDriverStatus — the durable EXTERNAL status file (2026-09-14, #3521/lane-2 incident)', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'driver-status-')); });
+  afterEach(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  it('writes tick, timestamp, statusLine, stalled, and dispatch — readable by a separate process', () => {
+    const path = join(root, '.conveyor', DRIVER_STATUS_FILENAME);
+    const surface = {
+      statusLine: 'conveyor · 1 building',
+      stalled: [{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }],
+      dispatch: { builds: [{ num: 1, lane: 1 }], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] },
+    };
+    writeDriverStatus(path, { tick: 7 }, surface);
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written.tick).toBe(7);
+    expect(typeof written.at).toBe('string');
+    expect(written.statusLine).toBe('conveyor · 1 building');
+    expect(written.stalled).toEqual([{ num: 3521, reason: 'overlaps lane-2', ticks: 3 }]);
+    expect(written.dispatch.builds).toEqual([{ num: 1, lane: 1 }]);
+  });
+
+  it('overwrites (not appends) on the next tick — the file always reflects only the LATEST tick', () => {
+    const path = join(root, '.conveyor', DRIVER_STATUS_FILENAME);
+    writeDriverStatus(path, { tick: 1 }, { statusLine: 'a', stalled: [], dispatch: {} });
+    writeDriverStatus(path, { tick: 2 }, { statusLine: 'b', stalled: [], dispatch: {} });
+    const written = JSON.parse(readFileSync(path, 'utf8'));
+    expect(written.tick).toBe(2);
+    expect(written.statusLine).toBe('b');
+  });
+
+  it('never throws on an unwritable path (best-effort — a status write must never wedge the tick)', () => {
+    expect(() => writeDriverStatus('/nonexistent-root-xyz/.conveyor/driver-status.json', { tick: 0 }, { statusLine: '', stalled: [], dispatch: {} })).not.toThrow();
+  });
+});
+
+describe('appendDecisionTrace — the durable, day-sharded decision-trace JSONL sidecar (2026-09-14, #3521 decision-trace v1)', () => {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'decision-trace-')); });
+  afterEach(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  it('appends one JSON line per trace entry, each carrying the tick and a timestamp', () => {
+    const dir = join(root, '.conveyor', 'decision-trace');
+    appendDecisionTrace(dir, { tick: 3 }, [
+      { kind: 'dispatch', num: 10, text: 'dispatched #10 to lane-4: build' },
+      { kind: 'skip', num: 3521, reason: 'overlaps lane-2', text: 'skipped #3521: overlaps lane-2' },
+    ]);
+    const day = localDateString(new Date());
+    const lines = readFileSync(join(dir, `${day}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ tick: 3, kind: 'dispatch', num: 10, text: 'dispatched #10 to lane-4: build' });
+    expect(lines[1]).toMatchObject({ tick: 3, kind: 'skip', num: 3521, reason: 'overlaps lane-2' });
+    expect(typeof lines[0].at).toBe('string');
+  });
+
+  it('appends across multiple calls into the SAME day file rather than overwriting', () => {
+    const dir = join(root, '.conveyor', 'decision-trace');
+    appendDecisionTrace(dir, { tick: 1 }, [{ kind: 'dispatch', num: 1, text: 'a' }]);
+    appendDecisionTrace(dir, { tick: 2 }, [{ kind: 'dispatch', num: 2, text: 'b' }]);
+    const day = localDateString(new Date());
+    const lines = readFileSync(join(dir, `${day}.jsonl`), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+  });
+
+  it('is a no-op on an empty/absent entries list — never creates a file for a quiet tick', () => {
+    const dir = join(root, '.conveyor', 'decision-trace');
+    appendDecisionTrace(dir, { tick: 1 }, []);
+    appendDecisionTrace(dir, { tick: 2 }, null);
+    expect(existsSync(join(dir, `${localDateString(new Date())}.jsonl`))).toBe(false);
+  });
+
+  it('never throws on an unwritable path (best-effort)', () => {
+    expect(() => appendDecisionTrace('/nonexistent-root-xyz/.conveyor/decision-trace', { tick: 0 }, [{ kind: 'dispatch', num: 1, text: 'x' }])).not.toThrow();
   });
 });
 
@@ -393,7 +488,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     // — mutating this list is the mechanical check: delete/reorder/rename a `runQuiet(...)` line above and this
     // assertion goes red, which is the whole point (a `grep` for the added line, this PR's own backlog card
     // cited as its only prior check, catches none of that).
-    expect(calls.map((c) => c.join(' '))).toEqual([
+    expect(calls.filter((c) => c[0] === 'node').map((c) => c.filter((a) => !a.startsWith('--prs-file=')).join(' '))).toEqual([
       'node /scripts/conveyor/infra-blocked.mjs retry --repo=owner/repo',
       'node /scripts/conveyor/lease-reaper.mjs --repo=owner/repo',
       'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',
@@ -406,5 +501,108 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
     ]);
+  });
+});
+
+
+// Emulate only the four named subprocesses' discovery at the mocked boundary. The separate
+// reconcile-fix-dispatch invocation deliberately remains opaque and contributes no calls here.
+import { defaultListOpenPrs } from '../../../scripts/conveyor/duplicate-pr-watch.mjs';
+import { defaultListParkedPrs as listConflicts } from '../../../scripts/conveyor/parked-pr-conflict-watch.mjs';
+import { defaultListParkedPrs as listProgress } from '../../../scripts/conveyor/parked-pr-progress-watch.mjs';
+import { defaultReadPrs } from '../../../scripts/conveyor/reconcile-pass.mjs';
+import { OPEN_PR_LIST_FIELDS } from '../../../scripts/conveyor/open-pr-fetch.mjs';
+
+const consumers = {
+  'parked-pr-conflict-watch.mjs': listConflicts,
+  'reconcile-pass.mjs': defaultReadPrs,
+  'duplicate-pr-watch.mjs': defaultListOpenPrs,
+  'parked-pr-progress-watch.mjs': listProgress,
+};
+
+describe('one open-PR snapshot per mechanical tick', () => {
+  async function tick({ fetchThrows = false, consumerThrows = false, ticks = 1 } = {}) {
+    const cp = await import('node:child_process');
+    const calls = [];
+    const files = [];
+    const snapshots = [];
+    const fixture = [{ number: 42, body: 'snapshot retained intact', files: [{ path: 'scripts/example.mjs' }] }];
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    cp.execFileSync.mockImplementation((cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'gh') {
+        if (fetchThrows && args.includes(OPEN_PR_LIST_FIELDS)) throw new Error('shared discovery failed');
+        return JSON.stringify(fixture);
+      }
+      const name = args[0].split('/').pop();
+      if (consumers[name]) {
+        const flag = args.find((a) => a.startsWith('--prs-file='));
+        if (flag) {
+          const file = flag.slice('--prs-file='.length);
+          files.push(file);
+          // It exists while each consumer runs and contains the full snapshot.
+          snapshots.push(JSON.parse(readFileSync(file, 'utf8')));
+        } else {
+          consumers[name]({ repo: 'owner/repo', exec: cp.execFileSync });
+        }
+        if (consumerThrows) throw new Error('consumer failed');
+      }
+      return name === 'reconcile-pass.mjs' ? JSON.stringify({ dispatch: [], refusals: [] }) : '';
+    });
+    try {
+      const run = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+      for (let i = 0; i < ticks; i++) await run({ out: {} });
+      for (const snapshot of snapshots) expect(snapshot).toEqual(fixture);
+      return { calls, files, warnings: stderr.mock.calls.map(([line]) => line) };
+    } finally {
+      stderr.mockRestore();
+    }
+  }
+
+  function consumerCalls(calls) {
+    return calls.filter(([cmd, script]) => cmd === 'node' && consumers[script.split('/').pop()]);
+  }
+
+  it('fetches exactly once and invokes all four consumers once with the same live file, then deletes it', async () => {
+    const { calls, files } = await tick();
+    const fetches = calls.filter(([cmd, ...args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'list');
+    expect(fetches).toEqual([['gh', 'pr', 'list', '--state', 'open', '--limit', '200', '--json', OPEN_PR_LIST_FIELDS, '--repo', 'owner/repo']]);
+    const consumed = consumerCalls(calls);
+    for (const call of calls.filter(([cmd, script]) => cmd === 'node' && !consumers[script.split('/').pop()])) {
+      expect(call.some((a) => a.startsWith('--prs-file='))).toBe(false);
+    }
+    expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
+    expect(files).toHaveLength(4);
+    expect(new Set(files).size).toBe(1);
+    for (const call of consumed) {
+      expect(call).toContain(`--prs-file=${files[0]}`);
+      expect(call).toContain(call[1].endsWith('/reconcile-pass.mjs') ? '--json' : 'sweep');
+    }
+    expect(existsSync(files[0])).toBe(false);
+  });
+
+  it('warns once on shared-fetch failure and all four consumers perform their standalone discovery without a flag', async () => {
+    const { calls, files, warnings } = await tick({ fetchThrows: true });
+    const consumed = consumerCalls(calls);
+    expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
+    expect(consumed.flat().some((a) => a.startsWith('--prs-file='))).toBe(false);
+    expect(files).toEqual([]);
+    expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(5); // failed shared attempt + four fallbacks
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('mechanical pass open-pr-fetch failed (non-fatal): shared discovery failed');
+  });
+
+  it('cleans up even when consumers fail, still invoking every consumer', async () => {
+    const { calls, files } = await tick({ consumerThrows: true });
+    expect(consumerCalls(calls)).toHaveLength(4);
+    expect(files).toHaveLength(4);
+    for (const file of files) expect(existsSync(file)).toBe(false);
+  });
+
+  it('fetches afresh with a distinct file on the next tick', async () => {
+    const { calls, files } = await tick({ ticks: 2 });
+    expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(2);
+    expect(new Set(files).size).toBe(2);
+    for (const file of files) expect(existsSync(file)).toBe(false);
   });
 });
