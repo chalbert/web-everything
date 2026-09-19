@@ -404,7 +404,8 @@ export function dispatchReview({
     throw new Error(
       `review-dispatch: \`judgeProvider: ${JSON.stringify(judgeProvider)}\` is refused - it is a TOOL-FREE-only provider (#3581) and every judge step review-pr runs is tool-bearing, `
       + 'so a dispatched review would be refused at its first judge step. Use the default `claude`. '
-      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag.',
+      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag. '
+      + 'Opt in with REVIEW_PR_CODEX_ADVISORY=1 in the environment instead.',
     );
   }
   const planned = planReviewDispatch({ pr, repo });
