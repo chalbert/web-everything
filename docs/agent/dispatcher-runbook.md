@@ -89,11 +89,36 @@ This is about a **delivery agent** the runner spawned (`claude --bg`), not the r
 - **The permission mode that actually works for `--bg`, confirmed the hard way (#3383, 2026-08-31 session):
   `dontAsk`.** `acceptEdits` works fine for a foreground (`claude -p`) dispatch but stalls every time under
   `claude --bg` specifically — the two modes are not interchangeable across foreground/background, contrary to
-  earlier assumptions. `bypassPermissions` is not viable either (`--dangerously-skip-permissions` requires a
-  real TTY to accept its one-time disclaimer; cannot be scripted). So the working invocation is:
+  earlier assumptions. `bypassPermissions` is not viable for `--bg` specifically — confirmed live (2026-09-19):
+  `claude --bg --permission-mode bypassPermissions "<task>"` refuses immediately with `--bg with
+  bypassPermissions requires accepting the disclaimer first. Run 'claude --dangerously-skip-permissions' once
+  interactively.` That is a one-time acceptance gate this machine/account had not cleared for `--bg`
+  specifically, not a per-invocation TTY check on the flag itself — see the correction below. So the working
+  invocation for `--bg` dispatch stays:
   ```bash
   WE_DISPATCH_AGENT_ARGS='["--permission-mode","dontAsk"]' node skills-src/conveyor/runner.mjs --json
   ```
+
+- **Correction (2026-09-19): the line above used to read "`bypassPermissions` … requires a real TTY … cannot be
+  scripted" with no `--bg` qualifier — read that way, it contradicts `we:docs/agent/delivery-loop.md`'s own
+  documented, working `claude -p --permission-mode bypassPermissions` pattern, and the two pages were being read
+  as disagreeing about the same flag.** They were not: FOREGROUND `claude -p --permission-mode
+  bypassPermissions` (equivalently `--dangerously-skip-permissions`) needs no TTY at all and is fully
+  scriptable. Confirmed live, piped stdin, `[ -t 0 ]` false (not a TTY), even under a stripped `env -i`
+  environment:
+  ```bash
+  echo "Reply with exactly the single word: PONG" | claude -p --permission-mode bypassPermissions
+  # → exit 0, stdout "PONG", no disclaimer prompt, no TTY
+  echo "Reply with exactly the single word: PONG2" | env -i HOME="$HOME" PATH="$PATH" claude -p --permission-mode bypassPermissions
+  # → exit 0, stdout "PONG2" — reproduces under a stripped environment too
+  ```
+  So "requires a TTY, cannot be scripted" is real only for `--bg`, and only until the one-time disclaimer has
+  been accepted once, interactively, on the dispatching machine — it was never true for the foreground `claude
+  -p` shape `we:docs/agent/delivery-loop.md`'s independent-reviewer pattern and `we:scripts/operator/dispatch.mjs`'s
+  `runAgent` already use. See `we:agent-memory-src/scoped-approval-beats-global-bypass.md` for the standing
+  lesson this whole area keeps re-teaching: a scoped deny-list beats a global bypass, and `we:scripts/operations/
+  review-dispatch.mjs`'s `REVIEW_DISPATCH_DISALLOWED_TOOLS` is this repo's own worked example of the safer
+  alternative — reach for it before a bare `bypassPermissions` invocation.
 - **A fresh scratch clone must be trusted before it's dispatched into** — see step 5 above. This isn't an env
   var, but it's the other precondition that silently stalls a `--bg` dispatch the same way a missing
   permission mode does, so check both together before a real run.
