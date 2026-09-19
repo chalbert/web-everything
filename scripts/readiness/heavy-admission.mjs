@@ -168,7 +168,7 @@ export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null
   for (let i = 0; i < cap; i++) {
     const current = readLockEntry(lockRoot, slotPath(i));
     const pidLiveness = current && current.owner !== owner ? probeSlotHolderLiveness(current.pid, selfPid) : 'unknown';
-    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, pid, pidLiveness, leaseMinutes, meta);
+    const r = reserve(lockRoot, slotPath(i), owner, nowMs, nowIso, selfPid, pidLiveness, leaseMinutes, meta);
     if (r.ok) return { ok: true, slot: i, cap, heldBy };
     heldBy.push({ slot: i, owner: r.heldBy });
   }
