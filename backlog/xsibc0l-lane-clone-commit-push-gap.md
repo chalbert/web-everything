@@ -9,8 +9,8 @@ tags:
   - git-workflow
   - push-gap
 crossRef:
-  - url: "#2308"
-    label: "PR #2308"
+  url: "#2308"
+  label: "PR #2308"
 ---
 
 # Lane-clone commit push gap
