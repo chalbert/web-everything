@@ -72,6 +72,17 @@ temporary git repo to verify gate arguments and green/red handling without recur
 suite. Exercise real subprocesses and git transport. Emit gate chatter in the fixture too: a CLI's
 machine-readable JSON stdout must remain parseable when its child gate prints output.
 
+### Passive-wait hook regression probes
+
+Test Stop/SubagentStop with distinct parent and subagent JSONL files: SubagentStop prefers
+`agent_transcript_path`, falling back to `transcript_path` only when absent; an unreadable or malformed
+selected file fails open. Keep Monitor cases event-specific: any Monitor call plus passive-wait
+language blocks SubagentStop, even with its immediate "started" result, while Stop permits it.
+Agent/Task remain excluded for both events.
+The PreToolUse Monitor guard denies only when `agent_id` identifies a subagent and leaves main-session
+watches alone. Exercise each script through stdin as well as its pure decision functions; these
+probes verify local decisions and wiring, not whether the upstream harness fires every hook.
+
 ### Nested CLI isolation probes
 
 Establish an ordinary child CLI baseline before attributing failure to isolation. In #3371 Probe 10,

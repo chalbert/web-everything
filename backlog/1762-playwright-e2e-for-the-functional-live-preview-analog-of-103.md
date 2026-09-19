@@ -5,6 +5,10 @@ status: open
 blockedBy: ["1761"]
 dateOpened: "2026-06-24"
 locus: frontierui
+scope:
+  - fui:workbench/
+  - fui:tools/maas/
+  - fui:vite.maas.config.mts
 relatedProject: webdocs
 tags: [webdocs, block-explorer, workbench, polyglot, functional-adapter, e2e]
 ---

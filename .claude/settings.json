@@ -83,6 +83,15 @@
             "command": "node scripts/guard-bash.mjs"
           }
         ]
+      },
+      {
+        "matcher": "Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-monitor-subagent.mjs"
+          }
+        ]
       }
     ],
     "Stop": [

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
-  MAX_TRANSCRIPT_BYTES, hasPassiveWaitLanguage, findUnresolvedBackgroundedBash,
+  MAX_TRANSCRIPT_BYTES, hasPassiveWaitLanguage, findUnresolvedBackgroundedBash, findAnyMonitorCall,
   shouldBlockStop, readTranscriptTail,
 } from '../guard-stop-passive-wait.mjs';
 
@@ -14,6 +14,11 @@ const use = (name = 'Bash', input = { run_in_background: true }, id = 'call-1') 
 });
 const result = (id = 'call-1') => ({
   type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'done' }] },
+});
+const monitorStarted = (id = 'call-1') => ({
+  type: 'user',
+  message: { content: [{ type: 'tool_result', tool_use_id: id, content:
+    'Monitor started (task ba59nqsob, timeout 600000ms). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply.' }] },
 });
 const passive = "I'll wait for the background verification to finish — the monitor will notify me when it's done";
 
@@ -45,8 +50,57 @@ describe('guard-stop-passive-wait — both signals are required (#3383)', () => 
     expect(shouldBlockStop({ lastAssistantText: 'The tests passed. Work is complete.', transcriptEntries: [use(), result()] })).toBeNull();
     expect(shouldBlockStop({ lastAssistantText: 'A real blocker needs your input.', transcriptEntries: [use()] })).toBeNull();
   });
-  it.each(['Agent', 'Task', 'Monitor'])('does not guess that pending %s is untracked Bash work', (name) => {
-    expect(shouldBlockStop({ lastAssistantText: passive, transcriptEntries: [use(name)] })).toBeNull();
+  it.each(['Agent', 'Task', 'Monitor'])('Stop permits pending %s', (name) => {
+    expect(shouldBlockStop({ hookEventName: 'Stop', lastAssistantText: passive, transcriptEntries: [use(name)] })).toBeNull();
+  });
+  it.each(['Agent', 'Task'])('SubagentStop still permits harness-tracked %s', (name) => {
+    expect(shouldBlockStop({ hookEventName: 'SubagentStop', lastAssistantText: passive, transcriptEntries: [use(name)] })).toBeNull();
+  });
+  it('only SubagentStop blocks passive waiting on a Monitor call, without a background flag', () => {
+    const event = { lastAssistantText: passive, transcriptEntries: [use('Monitor', {})] };
+    expect(shouldBlockStop({ ...event, hookEventName: 'SubagentStop' })).toMatch(/transcript shows a Monitor call/);
+    expect(shouldBlockStop({ ...event, hookEventName: 'Stop' })).toBeNull();
+    expect(shouldBlockStop(event)).toBeNull();
+    expect(shouldBlockStop({ ...event, hookEventName: 'SubagentStop', stopHookActive: true })).toBeNull();
+    expect(shouldBlockStop({ ...event, hookEventName: 'SubagentStop', lastAssistantText: 'I need your input.' })).toBeNull();
+  });
+  it('finds a Monitor call even when paired with its real started acknowledgment', () => {
+    const monitor = use('Monitor', {});
+    // The old findUnresolvedMonitor returned null here: acknowledgment was mistaken for completion.
+    expect(findAnyMonitorCall([monitor, monitorStarted()])).toBe(monitor.message.content[0]);
+  });
+  it('blocks passive SubagentStop regardless of Monitor result order or parallel calls', () => {
+    const monitor = use('Monitor', {});
+    const parallel = use('Monitor', {}, 'call-2');
+    for (const transcriptEntries of [
+      [monitor, monitorStarted()], [monitorStarted(), monitor],
+      [monitor, parallel, monitorStarted(), monitorStarted('call-2')],
+    ]) {
+      expect(findAnyMonitorCall(transcriptEntries)?.id).toBe('call-1');
+      expect(shouldBlockStop({ hookEventName: 'SubagentStop', lastAssistantText: passive, transcriptEntries }))
+        .toMatch(/transcript shows a Monitor call/);
+    }
+    expect(findUnresolvedBackgroundedBash([monitor])).toBeNull();
+  });
+  it('ignores malformed Monitor blocks, non-assistant entries, and nested progress', () => {
+    const monitor = use('Monitor', {});
+    const missingId = use('Monitor', {});
+    delete missingId.message.content[0].id;
+    const invalidEntries = [
+      null, {}, { type: 'progress', data: monitor }, { ...monitor, type: 'user' },
+      { type: 'assistant', message: { content: 'Monitor' } },
+      { type: 'assistant', message: { content: [null, {}] } },
+      use('Monitor', {}, ''), use('Monitor', {}, 1), missingId,
+    ];
+    expect(findAnyMonitorCall(null)).toBeNull();
+    expect(findAnyMonitorCall(invalidEntries)).toBeNull();
+    expect(findAnyMonitorCall([...invalidEntries, monitor])).toBe(monitor.message.content[0]);
+  });
+  it('permits SubagentStop without Monitor or without passive final-message language', () => {
+    const event = { hookEventName: 'SubagentStop', lastAssistantText: passive };
+    expect(shouldBlockStop({ ...event, transcriptEntries: [use('Read', {}), result()] })).toBeNull();
+    expect(shouldBlockStop({ ...event, transcriptEntries: [use('Monitor', {}), monitorStarted()],
+      lastAssistantText: 'The verify gate passed. Work is complete.' })).toBeNull();
   });
   it('pairs by id across the entire window, including parallel calls and later resolved tools', () => {
     const parallel = use();
@@ -105,10 +159,48 @@ describe('guard-stop-passive-wait — real CLI boundary and bounded transcript I
     expectAllow({ ...envelope, last_assistant_message: 'Finished: all checks passed.' });
     expectAllow({ ...envelope, stop_hook_active: true });
   });
-  it('reads transcript_path for SubagentStop the same way as Stop — the docs name no separate agent-transcript field', () => {
+  it('prefers agent_transcript_path for SubagentStop, even when the parent has no pending work', () => {
+    const event = { ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1' };
+    const ownPath = transcript('own.jsonl', [{ ...use(), sessionId: 'session-1', agentId: 'agent-1' }]);
+    expect(run({ ...event, transcript_path: resolvedPath, agent_transcript_path: ownPath }).status).toBe(2);
+    expectAllow({ ...event, transcript_path: pendingPath, agent_transcript_path: resolvedPath });
+  });
+  it('keeps Stop on transcript_path even if agent_transcript_path is supplied', () => {
+    expectAllow({ ...envelope, transcript_path: resolvedPath, agent_transcript_path: pendingPath });
+    expect(run({ ...envelope, transcript_path: pendingPath, agent_transcript_path: resolvedPath }).status).toBe(2);
+  });
+  it('falls back to transcript_path when SubagentStop has no agent_transcript_path', () => {
     expectAllow({ ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1', transcript_path: resolvedPath });
     expect(run({ ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1', transcript_path: pendingPath }).status).toBe(2);
     expectAllow({ ...envelope, hook_event_name: 'SubagentStop', transcript_path: join(temp, 'missing-agent.jsonl') });
+  });
+  it('fails open on unreadable or malformed agent transcripts without falling back to the parent', () => {
+    const bad = join(temp, 'bad-agent.jsonl');
+    writeFileSync(bad, JSON.stringify(use()) + '\n{malformed\n');
+    for (const agent_transcript_path of [join(temp, 'absent-agent.jsonl'), temp, bad]) {
+      expectAllow({ ...envelope, hook_event_name: 'SubagentStop', agent_transcript_path });
+    }
+  });
+  it('blocks a fully acknowledged Monitor with passive final text only through SubagentStop', () => {
+    const finalText = "I'll wait for the monitor to notify me when the verify gate finishes rather than continuing to poll manually.";
+    const monitorPath = transcript('monitor-started.jsonl', [
+      use('Monitor', {}), monitorStarted(),
+      { type: 'assistant', message: { content: [{ type: 'text', text: finalText }] } },
+    ]);
+    expectAllow({ ...envelope, transcript_path: monitorPath });
+    const event = { ...envelope, hook_event_name: 'SubagentStop', agent_id: 'agent-1',
+      transcript_path: resolvedPath, agent_transcript_path: monitorPath, last_assistant_message: finalText };
+    const output = run(event);
+    expect(output.status).toBe(2);
+    const decision = JSON.parse(output.stdout);
+    expect(decision.decision).toBe('block');
+    expect(decision.reason).toMatch(/transcript shows a Monitor call/);
+    expect(decision.reason).toMatch(/"started" acknowledgment does not prove/);
+    expect(decision.reason).not.toMatch(/unresolved Monitor/);
+    expect(output.stderr.trim()).toBe(decision.reason);
+    expectAllow({ ...event, hook_event_name: 'Stop', transcript_path: monitorPath });
+    expectAllow({ ...event, stop_hook_active: true });
+    expectAllow({ ...event, last_assistant_message: 'I need your input.' });
   });
   it('ignores explicitly foreign session/agent entries and nested child progress', () => {
     const path = transcript('foreign.jsonl', [
