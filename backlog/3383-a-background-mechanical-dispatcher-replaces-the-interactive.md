@@ -3668,3 +3668,20 @@ Investigated whether Claude token usage can be broken down by role (main orchest
   1. An aggregation/query layer over the collected data producing an actual role/operation breakdown (main session vs. subagent vs. build/fix/review/etc) — this is the actual missing piece, not the capture itself.
   2. Known unfixed limitation: per-lane-clone CLAUDE_OTEL_ROOT fragmentation can cause a rollup to silently miss lane-local data — flagged in the collector's own code comments, not yet fixed.
   3. Accepted-risk note worth carrying forward: the local OTLP receiver has no auth and stores plaintext NDJSON including user-identity attributes — fine for a single-operator machine, but should be revisited if this pattern is ever extended to a shared/multi-operator setup.
+
+## Session update (2026-09-19) — folded PR #2156 (#3635 Codex model pin) into the branch; #2220/#2223 left for independent review
+
+Folded PR #2156 (WE #3635 — pin an explicit Codex model at every call site) directly into
+`lane/mechanical-dispatcher` per the operator rule of 2026-09-19 (prototype work commits straight to the branch,
+no PR of its own). #2156 already carried an independent `review:accepted`, so it was folded as-is: merge commit
+`c55ef40d`, two conflicts resolved keeping both sides (the `#3663` vitest-cap card — both the duplicate-pair note
+and the "work did land as ab7ac270c" note kept, with a correction line — and a whitespace-only conflict in
+`we:scripts/operations/__tests__/dispatch-lane.test.mjs`). No code was changed in the fold. The six vitest files
+covering the touched scripts pass (431 tests).
+
+Not folded, by a later operator rule (an independent review agent — not the folding session — decides whether
+prototype work is good): #2220 (per-process host samples keep real identity) and #2223 (heavy-admission slot
+reentrancy by real process identity) are both `review:changes` and were left exactly as they are, open and
+untouched, for fresh independent reviews. The advisory review's one finding on #2156 (`resolveCodexEffort`'s
+`TypeError` messages hardcode a `codex-direct-task:` prefix although the function is now shared) was NOT fixed
+in the fold; it is cosmetic and currently dormant.
