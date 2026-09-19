@@ -2140,6 +2140,12 @@ describe('the write arc and its #2964 ordering', () => {
     describe('against real local and bare remote git fixtures', () => {
       let repo, remote;
       const path = 'scripts/conveyor/run-scorecards.json';
+      const pushIfGreenPath = join(dirname(fileURLToPath(import.meta.url)), '../push-if-green.mjs');
+      const gateTests = [
+        'scripts/__tests__/review-set-label.test.mjs',
+        'scripts/conveyor/__tests__/run-scorecard-store.test.mjs',
+        'scripts/conveyor/__tests__/log-delegation-trial.test.mjs',
+      ];
       const git = (...args) => execFileSync('git', args, {
         cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
       }).trim();
@@ -2177,7 +2183,18 @@ describe('the write arc and its #2964 ordering', () => {
         git('config', 'core.hooksPath', join(repo, '.githooks'));
         mkdirSync(join(repo, 'scripts/conveyor'), { recursive: true });
         writeFileSync(join(repo, path), '{"version":1,"records":[]}\n');
-        git('add', '--', path, ...hookFiles);
+        // A real npm subprocess exercises the gate transport without recursively running this suite.
+        // Keep evidence under .git so neither the commit pathspec nor clean-tree assertions hide it.
+        writeFileSync(join(repo, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'node fixture-gate.mjs' } }));
+        writeFileSync(join(repo, 'fixture-gate.mjs'), `
+          import { writeFileSync, existsSync } from 'node:fs';
+          import { deepStrictEqual } from 'node:assert';
+          deepStrictEqual(process.argv.slice(2), ${JSON.stringify(gateTests)});
+          writeFileSync('.git/gate-args.json', JSON.stringify(process.argv.slice(2)));
+          console.log('fixture gate stdout: must not contaminate the JSON result');
+          process.exit(existsSync('.git/gate-red') ? 1 : 0);
+        `);
+        git('add', '--', path, ...hookFiles, 'package.json', 'fixture-gate.mjs');
         git('commit', '-qm', 'seed scorecard store');
         git('init', '-q', '--bare', remote);
         git('remote', 'add', 'origin', remote);
@@ -2223,6 +2240,7 @@ describe('the write arc and its #2964 ordering', () => {
         });
         expect(result.exitCode).toBe(0);
         expect(result.payload.ok).toBe(true);
+        expect(JSON.parse(readFileSync(join(repo, '.git/gate-args.json'), 'utf8'))).toEqual(gateTests);
         const log = git('log', '--oneline', '--', path).split('\n');
         expect(log).toHaveLength(2);
         expect(log[0]).toContain('conveyor: log codex/gpt-6-astra bugfix trial for PR #1048 (#3690)');
@@ -2243,6 +2261,69 @@ describe('the write arc and its #2964 ordering', () => {
         expect(git('status', '--porcelain')).toBe('A  unrelated.txt');
       });
 
+      it('refuses diverged local main without committing or shipping another process\'s stray commit', () => {
+        const remoteHead = git(`--git-dir=${remote}`, 'rev-parse', 'main');
+        writeFileSync(join(repo, 'stray-from-another-process.txt'), 'unrelated\n');
+        git('add', '--', 'stray-from-another-process.txt');
+        git('commit', '-qm', 'stray unrelated commit');
+        const straySha = git('rev-parse', 'HEAD');
+        append();
+        const result = publish();
+        expect(result).toEqual({ committed: false, pushed: false, reason: expect.stringContaining('diverged history') });
+        expect(result.reason).toContain(straySha.slice(0, 8));
+        expect(result.reason).toContain(remoteHead.slice(0, 8));
+        expect(git('rev-parse', 'HEAD')).toBe(straySha);
+        expect(git('status', '--porcelain')).toBe(`M ${path}`);
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
+        expect(() => git(`--git-dir=${remote}`, 'show', 'main:stray-from-another-process.txt')).toThrow();
+      });
+
+      it('pushes exactly --sha even when a later unrelated commit has advanced local main', () => {
+        append();
+        git('commit', '-qm', 'trial commit (the ONE we intend to publish)', '--', path);
+        const intendedSha = git('rev-parse', 'HEAD');
+        writeFileSync(join(repo, 'later-unrelated.txt'), 'later\n');
+        git('add', '--', 'later-unrelated.txt');
+        git('commit', '-qm', 'a LATER unrelated commit that must NOT be published');
+        const laterSha = git('rev-parse', 'HEAD');
+        const out = execFileSync(process.execPath, [
+          pushIfGreenPath, `--repo=${repo}`, `--sha=${intendedSha}`,
+          `--gate=npm run test:unit -- ${gateTests.join(' ')}`, '--json',
+        ], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MAIN_PUSH_OK: '1' } });
+        expect(JSON.parse(out)).toMatchObject({ pushed: true, gate: 'green' });
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(intendedSha);
+        expect(git('rev-parse', 'main')).toBe(laterSha);
+        expect(() => git(`--git-dir=${remote}`, 'show', 'main:later-unrelated.txt')).toThrow();
+        const store = JSON.parse(git(`--git-dir=${remote}`, 'show', `main:${path}`));
+        expect(store.records).toHaveLength(1);
+        expect(store.records[0]).toMatchObject({ ...triple, pr: 1048, outcome: 'landed' });
+      });
+
+      it.each(['missing', 'unrelated'])('refuses a %s --sha before gating or pushing', (kind) => {
+        const remoteHead = git(`--git-dir=${remote}`, 'rev-parse', 'main');
+        const sha = kind === 'missing' ? 'not-a-commit' : git('commit-tree', 'HEAD^{tree}', '-m', 'unrelated root');
+        const result = spawnSync(process.execPath, [
+          pushIfGreenPath, `--repo=${repo}`, `--sha=${sha}`,
+          `--gate=npm run test:unit -- ${gateTests.join(' ')}`, '--json',
+        ], { cwd: repo, encoding: 'utf8', env: { ...process.env, MAIN_PUSH_OK: '1' } });
+        expect(result.status).toBe(3);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          pushed: false, gate: 'skipped', reason: kind === 'missing' ? 'no-such-sha' : 'sha-not-on-branch',
+        });
+        expect(existsSync(join(repo, '.git/gate-args.json'))).toBe(false);
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
+      });
+
+      it('leaves the committed trial local when the scoped gate is red', () => {
+        const remoteHead = git(`--git-dir=${remote}`, 'rev-parse', 'main');
+        writeFileSync(join(repo, '.git/gate-red'), 'red');
+        append();
+        expect(publish()).toMatchObject({ committed: true, pushed: false, reason: expect.stringContaining('is RED') });
+        expect(JSON.parse(readFileSync(join(repo, '.git/gate-args.json'), 'utf8'))).toEqual(gateTests);
+        expect(git('rev-parse', 'HEAD')).not.toBe(remoteHead);
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
+      });
+
       it.each(['lane/test', 'detached'])('refuses to commit or push on %s before changing history', (branch) => {
         if (branch === 'detached') git('checkout', '--detach');
         else git('checkout', '-b', branch);
@@ -2261,13 +2342,24 @@ describe('the write arc and its #2964 ordering', () => {
       });
 
       it('recovers the real push helper JSON on a non-zero exit', () => {
-        git('remote', 'set-url', 'origin', join(repo, 'missing-remote'));
+        // Fetch succeeds; the remote rejects only the final push, after the commit and green gate.
+        writeFileSync(join(remote, 'hooks/pre-receive'), '#!/bin/sh\nexit 1\n');
+        chmodSync(join(remote, 'hooks/pre-receive'), 0o755);
         append();
         const result = publish();
         expect(result).toMatchObject({ committed: true, pushed: false });
         expect(result.reason).toContain('origin unchanged');
         expect(git('status', '--porcelain')).toBe('');
         expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).not.toBe(git('rev-parse', 'HEAD'));
+      });
+
+      it('refuses to commit when fetching origin/main fails', () => {
+        const head = git('rev-parse', 'HEAD');
+        git('remote', 'set-url', 'origin', join(repo, 'missing-remote'));
+        append();
+        expect(publish()).toMatchObject({ committed: false, pushed: false, reason: expect.stringContaining('could not fetch origin/main') });
+        expect(git('rev-parse', 'HEAD')).toBe(head);
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(head);
       });
     });
   });

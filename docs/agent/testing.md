@@ -65,6 +65,13 @@ applies to every "does it work / why is it broken" moment, not just to written t
   run the 11ty build, so render-layer bugs stay green-invisible — smoke template changes with a real
   build/probe too.
 
+### Gates in git fixtures
+
+When a publish gate runs the suite that tests its own caller, use a fixture-local npm script in the
+temporary git repo to verify gate arguments and green/red handling without recursively launching the
+suite. Exercise real subprocesses and git transport. Emit gate chatter in the fixture too: a CLI's
+machine-readable JSON stdout must remain parseable when its child gate prints output.
+
 ### Nested CLI isolation probes
 
 Establish an ordinary child CLI baseline before attributing failure to isolation. In #3371 Probe 10,

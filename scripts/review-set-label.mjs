@@ -458,7 +458,7 @@ export const bodyFileRoots = (cwd = process.cwd(), tmp = tmpdir()) => [cwd, tmp,
  * #3690 — PR #2313's SECOND review bounce: appending to a TRACKED store is not publishing a trial.
  * An uncommitted row in the reviewer's checkout can disappear on reset and never informs another
  * checkout's graduation/dedupe reads. Mirror lane-drain.mjs's quietGit/publishMain convention: commit
- * ONLY the scorecard path, then publish through push-if-green.mjs (--assume-green, ff-only, #2073).
+ * ONLY the scorecard path, then publish its exact SHA through push-if-green.mjs (scoped gate, ff-only, #2073).
  * Guard HEAD BEFORE committing; the push helper's own branch refusal would be too late to prevent a
  * bookkeeping commit on a lane ref. Resolve the helper from THIS module, but target the injected repo.
  * Acceptance has already succeeded. Every git/publish failure returns evidence for the caller's loud
@@ -477,13 +477,33 @@ export function publishDelegationTrialCommit({ provider, model, taskType, pr, cw
     if (branch !== 'main') {
       return { committed: false, pushed: false, reason: `HEAD is "${branch}", not "main" — the scorecard row must land on shared main, never a lane branch; commit skipped` };
     }
+    stage = 'could not fetch origin/main';
+    execFileSync('git', ['fetch', 'origin', 'main', '--quiet'], options);
+    stage = 'could not compare main to origin/main';
+    const local = execFileSync('git', ['rev-parse', 'main'], options).trim();
+    let remote = null;
+    try { remote = execFileSync('git', ['rev-parse', 'origin/main'], options).trim(); } catch { /* no tracking ref yet — nothing to compare */ }
+    if (remote && local !== remote) {
+      return { committed: false, pushed: false, reason: `local main (${local.slice(0, 8)}) differs from origin/main (${remote.slice(0, 8)}) — refusing to publish on diverged history; commit skipped` };
+    }
     stage = 'git commit failed';
     const message = `conveyor: log ${provider}/${model} ${taskType} trial for PR #${pr} (#3690)`;
     execFileSync('git', ['commit', '-m', message, '--', 'scripts/conveyor/run-scorecards.json'], options);
     committed = true;
+    stage = 'could not resolve committed HEAD';
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], options).trim();
     stage = 'push-if-green.mjs failed';
     const pushIfGreen = join(dirname(fileURLToPath(import.meta.url)), 'push-if-green.mjs');
-    const out = execFileSync(process.execPath, [pushIfGreen, `--repo=${repoRoot}`, '--assume-green', '--json'], { ...options, env: { ...process.env, MAIN_PUSH_OK: '1' } });
+    // appendScorecard/logDelegationTrial already fully validate the row (schema, enums, secret scrub),
+    // throwing before this function is reached: this gate cannot be protecting against a bad row.
+    // The commit is pathspec-scoped to this one non-code JSON file (the "commits only the scorecard"
+    // test proves it); no build consumer depends on it in a way a full lint/test run adds coverage for.
+    // The only residual gate risk is regression in this commit/push code path, run-scorecard-store.mjs,
+    // or log-delegation-trial.mjs, directly and fully exercised by these three suites. Every PR,
+    // including this change, still runs FULL test:unit && check:standards in CI before merge.
+    // This is a separate best-effort, non-fatal, post-merge single-file side-effect publish, not a code merge.
+    const gate = 'npm run test:unit -- scripts/__tests__/review-set-label.test.mjs scripts/conveyor/__tests__/run-scorecard-store.test.mjs scripts/conveyor/__tests__/log-delegation-trial.test.mjs';
+    const out = execFileSync(process.execPath, [pushIfGreen, `--repo=${repoRoot}`, `--sha=${sha}`, `--gate=${gate}`, '--json'], { ...options, env: { ...process.env, MAIN_PUSH_OK: '1' } });
     const parsed = JSON.parse(out.trim());
     return { committed, pushed: !!parsed.pushed, reason: parsed.detail || parsed.reason };
   } catch (e) {
