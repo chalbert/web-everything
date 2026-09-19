@@ -1,0 +1,208 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3675-give-codex-s-review-seat-container-scoped-write-access-to-a/">#3675</a> asks whether
+Codex's advisory review seat should be given container-scoped write access to a full lane checkout, because the
+seat is read-only while Claude's juror can write and mutation-verify. An operator steer relayed on 2026-09-19
+narrows the preferred answer: <em>if the reviewer can benefit from tools, allow some, but ideally only
+codified operations.</em> This survey checks what is actually true of Codex CLI, of the repo's operation layer
+and of the seat as wired on <code>main</code>, so the decision can rule on facts instead of on the card's
+filing-day premises. Everything marked <strong>live</strong> was run on 2026-09-19 against
+<code>codex-cli 0.155.1</code> (the #3371 probes ran on <code>0.153.4</code>).</p>
+
+<h2>Finding 1 — three premises in the card and in the code are stale</h2>
+
+<ul>
+<li><strong>"No context-strip flag" (probe 9) was corrected.</strong> #3371 probes 12–14 found
+<code>-c project_doc_max_bytes=0</code> suppresses the automatic <code>AGENTS.md</code> load in both
+<code>read-only</code> and <code>workspace-write</code>. But it is a token saving, not isolation: 6 of 6
+tool-bearing runs in probe 13 <code>cat</code> the file unprompted, and probe 14a found a session recovers a
+deleted copy with <code>git show HEAD:AGENTS.md</code>. The header of
+<code>scripts/lib/codex-judge-spawn.mjs</code> (lines 15–19 and 305–314) still states probe 9's original
+conclusion. Probe 14's recipe (native filesystem deny plus git-history surgery) is shipped as
+<code>createNativeDenyWithHistoryStripIsolationProvider</code> and is not wired into any call site (#3630 is
+still open).</li>
+<li><strong>The seat on <code>main</code> runs the wrong lens for tools to matter.</strong>
+<code>ADVISORY_JUDGE_LENS</code> is <code>ADVISORY_LENSES[0]</code>, which is <code>simplicity</code>
+(<code>scripts/lib/jury-core.mjs:1141</code>, <code>scripts/operations/review-pr.mjs:305</code>). The
+mutation-probe rule (<code>scripts/lib/review-core.mjs:250</code>) says to say nothing about mutation for a
+simplicity finding. The correctness-lens Codex seat that produced the #2107 record lives only on
+<code>lane/mechanical-dispatcher</code>. Giving tools to the seat as it stands would change nothing.</li>
+<li><strong>#3673 is not open.</strong> It resolved on 2026-09-14 and is codified at
+<code>docs/agent/platform-decisions.md#calibration-veto-clearing</code>. Its clause 1 says a tooling fix is
+not, by itself, a root-cause finding for the #2107 veto.</li>
+</ul>
+
+<h2>Finding 2 — what "allow some tools" can mean for <code>codex exec</code></h2>
+
+<p>Codex has no tool allow-list flag. The three <code>-s</code> sandbox modes bound <em>damage</em>, not
+<em>tools</em>:</p>
+
+<table>
+<thead><tr><th>Mode</th><th>Writes</th><th>Reads</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td><code>read-only</code></td><td>none (an <code>apply_patch</code> write was rejected: "writing is blocked by read-only sandbox" — <strong>live</strong>)</td><td>whole filesystem</td><td>#3371 probe 14b (reads unconfined); shell still runs read-only commands</td></tr>
+<tr><td><code>workspace-write</code></td><td>the cwd and temp</td><td>whole filesystem — a session read <code>../sb-clone/AGENTS.md</code> from a sibling clone</td><td>#3371 probe 14b</td></tr>
+<tr><td><code>danger-full-access</code></td><td>anything the user can</td><td>anything</td><td>a sandbox flag passed alongside the native-deny profile silently defeats the deny (#3371 probe 14 progress note)</td></tr>
+</tbody>
+</table>
+
+<p>The nearest thing to tool removal is the feature-flag surface. <strong>Live</strong>: with
+<code>--disable shell_tool --disable unified_exec -s read-only</code> the session reported no shell tool
+(<code>tools.exec_command is not a function</code>) and could not run <code>echo</code>. This is one run and
+the model's own report, not an adversarial test. The tool list that remained included
+<code>apply_patch</code>, <code>web__run</code>, <code>image_gen</code>, <code>view_image</code>, the
+<code>collaboration.spawn_agent</code> family, MCP resource tools and <code>functions.exec</code>. The
+flag <code>apply_patch_freeform</code> is listed as <em>removed</em>, so <code>apply_patch</code> cannot be
+switched off by flag; the read-only sandbox is what stops its writes.</p>
+
+<h2>Finding 3 — an MCP tool is the one clean way to hand Codex a bounded verb, and it moves the trust boundary</h2>
+
+<p><strong>Live</strong>, with a 20-line stdio MCP server exposing one echo tool
+(<code>run_declared_operation</code>):</p>
+
+<ul>
+<li><code>-c mcp_servers.ops.command="node" -c 'mcp_servers.ops.args=["…/mcp.mjs"]'</code> makes the tool
+callable. Without more, the call fails: <em>"MCP tool call requires approval, but approval policy is
+never"</em>.</li>
+<li><code>-c mcp_servers.ops.default_tools_approval_mode="approve"</code> lets it run. The key exists in the
+binary's config table.</li>
+<li>With the shell disabled, the shell attempt failed and the <code>apply_patch</code> write was rejected,
+while the MCP call succeeded — a session whose only working tool was the server's.</li>
+<li><strong>The server process is not inside Codex's sandbox.</strong> Asked to write a file outside the
+session's cwd, the server did, while the session's sandbox was <code>read-only</code>. So the operation
+server is the security perimeter: any argument it fails to validate is an unsandboxed write with the
+operator's privileges.</li>
+</ul>
+
+<p>The repo has no MCP server today (a search of <code>scripts/</code> and <code>src/</code> finds none). Its
+generated callers are argv (<code>scripts/operations/run.mjs</code>) and HTTP
+(<code>scripts/operations/http-adapter.mjs</code>). Clause 1 of
+<a href="/backlog/3031-delivery-operations-are-declared-once-every-caller-is-a-gene/">#operations-declared-once-callers-generated</a> (#3031)
+already names "the typed-tool caller" as a caller that falls out of a declaration.</p>
+
+<h3>The same MCP server constrains Claude's juror, and verifiably</h3>
+
+<p>An operator ruling relayed on 2026-09-19 makes the tool surface identical for every reviewer, so the
+mechanism has to work for Claude too. <strong>Live</strong>, <code>claude 2.1.278</code>, same probe server:
+<code>--tools "" --mcp-config &lt;file&gt; --strict-mcp-config --allowedTools mcp__ops__run_declared_operation</code>
+started a session whose <code>system/init</code> event listed exactly one tool,
+<code>["mcp__ops__run_declared_operation"]</code>, with the server <code>connected</code>. The model called it
+and reported it had no shell. Two details matter:</p>
+
+<ul>
+<li><code>--safe-mode</code> — the flag the juror recipe uses today — <em>drops</em> MCP configuration: init
+showed <code>tools=[]</code> and <code>mcp=[]</code>. The recipe would have to move to <code>--restricted</code>
+(which ignores settings files but, unlike <code>--safe-mode</code>, is not documented to strip
+<code>CLAUDE.md</code>: <strong>not verified</strong>, and #2336's context isolation depends on it).</li>
+<li>For Claude the tool set is <strong>preventive and machine-checkable</strong>: the init event is an assertable
+record. For Codex it is not: <code>codex debug prompt-input</code> does not list tools. Codex offers only a
+<strong>detective</strong> check — the <code>--json</code> stream names every executed tool as an item
+(<code>mcp_tool_call</code>, <code>command_execution</code>, <code>file_change</code>), so a run containing
+anything other than operation-server calls can be voided after the fact.</li>
+</ul>
+
+<h2>Finding 4 — the operations a reviewer would need, against what is declared</h2>
+
+<table>
+<thead><tr><th>Reviewer need</th><th>Claude juror uses</th><th>Declared today?</th></tr></thead>
+<tbody>
+<tr><td>see the diff, title, changed files</td><td>prompt text (<code>renderJudgeInput</code>)</td><td>yes — <code>review-pr</code>'s read step, <code>stage-pr-view</code></td></tr>
+<tr><td>read a file at the PR head</td><td><code>Read</code></td><td><strong>no</strong></td></tr>
+<tr><td>search or list files</td><td><code>Grep</code>, <code>Glob</code></td><td><strong>no</strong></td></tr>
+<tr><td>read git (base version, log, blame)</td><td><code>Bash</code> + git</td><td><strong>no</strong></td></tr>
+<tr><td>run one test file</td><td><code>Bash</code> + vitest</td><td><strong>no</strong> — <code>verify</code> runs the lane gate; <code>mutation-check</code> needs a find/replace</td></tr>
+<tr><td>run the repo gate</td><td><code>Bash</code></td><td>yes — <code>verify --gate</code></td></tr>
+<tr><td>mutation probe (break the line, run, restore)</td><td><code>Bash</code> + ad-hoc script</td><td>yes — <code>mutation-check</code>: restore is in a <code>finally</code> and verified by re-read; outcome is killed / survived / unrun</td></tr>
+<tr><td>write and run a throwaway repro</td><td><code>Bash</code></td><td>no, and not proposed: a <code>run(script, args)</code> operation is the anti-pattern #3001 rejected</td></tr>
+</tbody>
+</table>
+
+<p><code>mutation-check-io.mjs</code> has no path confinement on <code>--target</code> or <code>--checkout</code>
+(no <code>resolve</code>, <code>relative</code> or containment check appears in the file). That is fine for a
+trusted operator calling it, and unacceptable if a model supplies the arguments.</p>
+
+<p>The Claude juror's own tool list is <code>Bash, Read, Grep, Glob</code>
+(<code>REVIEW_JUROR_TOOLS</code>, <code>scripts/operations/review-pr.mjs:547</code>). There is no Write or Edit
+tool; it mutates through <code>Bash</code>.</p>
+
+<h2>Finding 5 — could operations-only reproduce the mutation probe? An analytical answer, not a tested one</h2>
+
+<p>#3371 probe 13 ran Codex, tool-bearing, on four scenarios and it reached the correct verdict in six of six
+runs, agreeing with Claude on the four shared ones. Re-reading those transcripts against
+<code>mutation-check</code>'s contract: scenarios A and B reduce to one or three mutate-run-restore calls.
+Scenarios C and D are "no named test reddens" findings, which is exactly a <code>survived</code> outcome. The
+extra impact proofs the transcripts contain (a real-git colour probe; a leaked-directory count) go beyond what
+the mandate's mutation rule asks for. What operations-only cannot do is a bespoke repro script. <strong>Not
+tested:</strong> nobody has run Codex through <code>mutation-check</code>; the calibration replay in Fork 5 is
+where this gets tested.</p>
+
+<h2>Finding 6 — the statutes that already govern this turf</h2>
+
+<ul>
+<li><strong>#agent-mutations-through-typed-operations (#3001).</strong> Reads stay free <em>and
+sandboxed</em>; mutations outside the agent's own lane clone go through a typed, fail-closed operation
+catalog; "a sandbox bounds damage; the operation catalog bounds authority". It rejected a full allow-list
+including reads, on coverage cost. Two consequences here: writes <em>inside</em> an own clone are already
+legal, so operations-only is stricter than the statute; and its "sandboxed reads" premise does not hold for
+Codex on the host, because the read-only and workspace-write sandboxes do not confine reads.</li>
+<li><strong>#dispatched-agent-never-runs-commands-directly (#3405).</strong> A gap is a
+<code>missing-operation</code> finding, halt and surface, not a workaround.</li>
+<li><strong>#operations-declared-once-callers-generated, clause 3.</strong> A judge step needs no tools; work
+needing a tree is an agent session. <code>review-pr</code>'s tool-bearing jurors already sit outside that
+clause, so any tool-bearing Codex seat widens an existing exception; an operations-only seat is the variant
+that fits clause 1's "typed-tool caller".</li>
+<li><strong>#skill-memory-replay-substrate.</strong> Precedent for an ephemeral throwaway clone rather than
+the shared lane pool.</li>
+<li><strong>#model-probation-graduation-criteria</strong> and <strong>#calibration-veto-clearing.</strong>
+The trust bar. The #2107 veto sits on Codex's <code>advisory-review</code> role.</li>
+</ul>
+
+<h2>Finding 7 — evidence for and against</h2>
+
+<p><strong>For.</strong> Probe 13: six of six real mutation probes by tool-bearing Codex, four of four
+verdict agreements with Claude, roughly 20% faster wall time. #3621: a container held every write, including
+a planted git hook, for Antigravity; subscription auth for Codex works from inside a container
+(<code>~/.codex/auth.json</code>). The capability-parity principle
+(<code>agent-memory-src/agent-capability-parity-principle.md</code>) says default to parity but lean on
+scoped, contained access.</p>
+
+<p><strong>Against or unverified.</strong> The card's own five-PR experiment (nine of ten read-only findings
+unable to verify; seven of nine write-mode findings ran a scratch test) cannot be re-checked: its directory
+is gone. Codex reads are unconfined in both writable modes. Codex runs under none of the guard hooks — but
+neither does the Claude juror, which runs <code>--safe-mode</code> with hooks off; a lane of its own is its
+only isolation. A container costs a Linux dependency tree per image, about 3.6× on mount-bound I/O, and about
+378 MB of memory per idle guest (#3621 measurements). Nothing exists yet that runs the Codex CLI inside a
+container.</p>
+
+<h2>Finding 8 — external prior art</h2>
+
+<ul>
+<li><strong>Model Context Protocol tools.</strong> A server declares named, schema-typed tools; the client
+exposes exactly those. This is the standard way to hand an agent a bounded verb set, and it is what Finding 3
+exercised.</li>
+<li><strong>Codex sandbox modes and per-profile permissions.</strong> OS-enforced write scope; the
+per-profile filesystem deny is undocumented (found in #3371 probe 14f).</li>
+<li><strong>Claude Code <code>--allowedTools</code>.</strong> A native allow-list, so for the Claude juror
+an operations-only surface is expressible today; for Codex it needs the recipe in Finding 3.</li>
+<li><strong>Least privilege and capability-based design.</strong> Give an agent capabilities, not ambient
+authority. The operation catalog is the capability list.</li>
+</ul>
+
+<h2>What was not verified</h2>
+
+<ul>
+<li>Whether <code>--restricted</code> keeps <code>CLAUDE.md</code> out of a Claude juror's context the way
+<code>--safe-mode</code> does.</li>
+<li>Whether a Claude juror on the operations-only surface holds the same review quality as today's
+<code>Bash, Read, Grep, Glob</code> juror. Nobody has run one.</li>
+<li>That the built-in tools left after the Finding 2 flags (<code>web__run</code>,
+<code>spawn_agent</code>, <code>image_gen</code>, connectors) can all be closed. Not tested.</li>
+<li>That a session with the shell disabled cannot reach a shell by another route. One run, self-reported.</li>
+<li>That Codex's built-in flags are stable across releases: the tool list differs between
+<code>0.153.4</code> and <code>0.155.1</code>.</li>
+<li>That the native-deny profile works when the checkout lives under a denied root such as
+<code>~/workspace/.lanes/</code>. Probe 14 used a clone under the temp directory.</li>
+<li>Any agent-driven adversarial test of a sealed configuration (probe 14g's own limit).</li>
+</ul>
+{% endraw %}

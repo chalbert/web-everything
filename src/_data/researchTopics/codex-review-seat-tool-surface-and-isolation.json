@@ -1,0 +1,13 @@
+{
+  "id": "codex-review-seat-tool-surface-and-isolation",
+  "title": "What tools may a non-Claude review seat hold, how is that enforced, and where does it run? Codex's review seat, grounded live on codex-cli 0.155.1",
+  "status": "open",
+  "summary": "Grounds decision #3675. The card asks whether Codex's advisory review seat should get container-scoped write access to a full lane checkout. Three premises in the card and in codex-judge-spawn.mjs's header are stale or incomplete: probe 9's 'no context-strip flag' was corrected by #3371 probes 12-14; the seat on main runs the simplicity lens, where the mutation-probe rule says nothing about mutation, so tools change nothing for it; and #3673 is now ratified. The survey adds live evidence on codex-cli 0.155.1: there is no tool allow-list, but --disable shell_tool --disable unified_exec removes the shell, the read-only sandbox blocks apply_patch writes, an MCP server declared with -c mcp_servers.<id> is reachable with default_tools_approval_mode=\"approve\", and that MCP server process runs OUTSIDE the sandbox with the operator's full privilege (it wrote a file outside the cwd while the sandbox was read-only). So an operations-only tool surface is buildable and enforceable for Codex, but it moves the trust boundary from Codex's sandbox to our own operation server; mutation-check-io.mjs has no path confinement today. In-repo prior art: #3001 (reads free and sandboxed, mutations only through typed operations, run(script,args) is the rejected anti-pattern), #3405, #3029 clause 1 (a typed-tool caller is a generated caller). External prior art: the Model Context Protocol tool model, Codex's own sandbox modes, Claude Code's allowedTools. A second finding, live on claude 2.1.278: the same MCP server constrains Claude's juror too (--tools \"\" --mcp-config --strict-mcp-config left exactly one tool in the init event), but --safe-mode drops MCP, so the juror recipe would have to move to --restricted. Grounds four forks after an operator ruling relayed 2026-09-19 that every reviewer seat gets the same tool surface: the tool ceiling, where the review runs, the evidence bar before the mandatory Claude seats move, and veto inheritance.",
+  "dateOpened": "2026-09-19",
+  "lastReviewed": "2026-09-19",
+  "reviewHorizon": "P3M",
+  "tags": ["codex", "review", "tool-surface", "sandbox", "mcp", "operations", "isolation", "calibration", "decision-prep"],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
