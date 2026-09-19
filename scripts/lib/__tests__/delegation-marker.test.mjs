@@ -4,6 +4,14 @@ import { TASK_TYPES } from '../../conveyor/log-delegation-trial.mjs';
 
 const triple = { provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix' };
 describe('delegation PR-body marker', () => {
+  it('rejects an unclosed marker with 8000 spaces in under 100ms', () => {
+    const body = `<!-- delegation:${' '.repeat(8000)}`;
+    const start = performance.now();
+    const result = parseDelegationMarker(body);
+    const elapsed = performance.now() - start;
+    expect(result).toBeNull();
+    expect(elapsed).toBeLessThan(100);
+  });
   it('single-sources the enum and round-trips every task type', () => {
     expect(DELEGATION_TASK_TYPES).toBe(TASK_TYPES);
     for (const taskType of TASK_TYPES) {
@@ -11,6 +19,21 @@ describe('delegation PR-body marker', () => {
       expect(parseDelegationMarker(buildDelegationMarker(row))).toEqual(row);
     }
     expect(buildDelegationMarker(triple)).toBe('<!-- delegation: provider=codex model=gpt-6-astra taskType=bugfix -->');
+  });
+  it('keeps scanning after empty, oversized, or nonmatching occurrences', () => {
+    const marker = buildDelegationMarker(triple);
+    for (const skipped of ['<!-- delegation:-->', `<!-- delegation:${'x'.repeat(301)}-->`, '<!-- delegation: bad> -->']) {
+      expect(parseDelegationMarker(`${marker}\n${skipped}\n${marker}`)).toEqual(triple);
+    }
+    expect(parseDelegationMarker(`<!-- delegation:${'x'.repeat(301)}${marker}`)).toEqual(triple);
+    expect(parseDelegationMarker(`${marker}\n<!-- delegation:unclosed`)).toEqual(triple);
+  });
+  it('preserves whitespace padding and the 300-character content boundary', () => {
+    const row = { ...triple, model: 'm'.repeat(263) };
+    const marker = buildDelegationMarker(row);
+    expect(`provider=${row.provider} model=${row.model} taskType=${row.taskType}`).toHaveLength(300);
+    expect(parseDelegationMarker(marker.replace('delegation: ', 'delegation:\t\n').replace(' -->', '\t\n -->'))).toEqual(row);
+    expect(parseDelegationMarker(`${buildDelegationMarker(triple)}\n<!-- delegation: \t -->`)).toBeNull();
   });
   it('rejects invalid task types and missing fields without throwing', () => {
     expect(buildDelegationMarker({ ...triple, taskType: 'invalid' })).toBe('');

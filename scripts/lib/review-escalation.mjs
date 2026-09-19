@@ -20,6 +20,9 @@ import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-polic
 /** Shared operation identity; core consumers must not import operation declarations. */
 export const REVIEW_PR_OP_ID = 'review-pr';
 
+/** Shared verdict surface; importing it here avoids a cycle through the operation declaration. */
+export const REVIEW_PR_CHANNEL = `the declared \`${REVIEW_PR_OP_ID}\` operation (#3035)`;
+
 /** Block tokens whose lines a reader sees as QUOTED. `blockquote_open` covers the container: the drain writes
  *  at top level, so nothing legitimate ever sits behind a `>`.
  *

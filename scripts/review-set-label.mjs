@@ -60,7 +60,7 @@ import { tmpdir } from 'node:os';
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
 // #x9xqexm's base-independent third marker. Independent concerns.
 import {
-  REVIEW_PR_OP_ID, REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
+  REVIEW_PR_CHANNEL, REVIEW_LABELS, hasReviewLabel, buildReviewedShaMarker, buildReviewedDiffMarker,
   buildReviewedContributionMarker, buildClearedHumanMarker, READY_TO_MERGE_LABEL,
   // #3007 — the SAME two digests the markers carry, taken raw so the ledger row records the witnesses
   // themselves rather than re-deriving them from the rendered comment. One computation, two consumers.
@@ -955,10 +955,13 @@ export function runReviewLabelCli({
   // A prior changes round must already have been fixed to reach this accept. Distinguishing clean on
   // round 1 from reworked then landed needs this PR's verdict-ledger.mjs history: separate follow-up,
   // out of scope here. Both real acceptance writes have completed before any trial is recorded.
-  if (to === 'accepted' && normalizeChannel(channelArg).includes(REVIEW_PR_OP_ID)) {
+  if (to === 'accepted' && normalizeChannel(channelArg) === REVIEW_PR_CHANNEL) {
     try {
       const delegation = parseDelegationMarker(prBody);
-      if (delegation && !isDelegationTripleGraduated(delegation, readTrialStore(trialLogIo))) {
+      const trialStore = delegation ? readTrialStore(trialLogIo) : null;
+      const alreadyLogged = (trialStore?.records ?? []).some((row) =>
+        row.dispatchKind === 'session-delegation' && row.pr === Number(pr));
+      if (delegation && !alreadyLogged && !isDelegationTripleGraduated(delegation, trialStore)) {
         const logged = logTrialFn({
           provider: delegation.provider,
           model: delegation.model,

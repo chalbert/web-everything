@@ -1997,6 +1997,40 @@ describe('the write arc and its #2964 ordering', () => {
       expect(logTrialFn).not.toHaveBeenCalled();
     });
 
+    it('does not append a second session-delegation trial when the same PR is re-accepted', () => {
+      const io = memIo();
+      const readTrialStore = vi.fn(readStore);
+      const logTrialFn = vi.fn(logDelegationTrial);
+      expect(run(stubProvider({ body }), argv, { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
+      const records = readStore(io).records;
+      expect(records).toHaveLength(1);
+      readTrialStore.mockClear();
+      logTrialFn.mockClear();
+      const write = vi.spyOn(io, 'write');
+      expect(run(stubProvider({ body, labels: ['review:accepted'] }), argv,
+        { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
+      expect(readStore(io).records).toEqual(records);
+      expect(readTrialStore).toHaveBeenCalledTimes(1);
+      expect(logTrialFn).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { pr: 1049, dispatchKind: 'session-delegation' },
+      { pr: 1048, dispatchKind: 'conflict-resolution' },
+    ])('still logs with a prior trial for $pr / $dispatchKind', (prior) => {
+      const records = [{ ...seeded()[0], ...prior }];
+      const io = memIo(records);
+      const readTrialStore = vi.fn(readStore);
+      const logTrialFn = vi.fn(logDelegationTrial);
+      expect(run(stubProvider({ body }), argv, { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
+      expect(readTrialStore).toHaveBeenCalledTimes(1);
+      expect(logTrialFn).toHaveBeenCalledTimes(1);
+      expect(readStore(io).records).toHaveLength(2);
+      expect(readStore(io).records[0]).toEqual(records[0]);
+      expect(readStore(io).records[1]).toMatchObject({ ...triple, pr: 1048, dispatchKind: 'session-delegation' });
+    });
+
     it.each([{ records: [] }, { records: seeded() }])('does not read or log trials for Claude-native work', ({ records }) => {
       const io = memIo(records);
       const readTrialStore = vi.fn(readStore);
@@ -2007,7 +2041,7 @@ describe('the write arc and its #2964 ordering', () => {
       expect(logTrialFn).not.toHaveBeenCalled();
     });
 
-    it.each([null, 'manual /review', 'rearm-review', 'reconcile-finding'])('does not log through channel %j', (channel) => {
+    it.each([null, 'manual /review', 'rearm-review', 'reconcile-finding', 'fake-review-pr-thing'])('does not log through channel %j', (channel) => {
       const io = memIo();
       const readTrialStore = vi.fn(readStore);
       const logTrialFn = vi.fn(logDelegationTrial);
