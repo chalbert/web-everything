@@ -23,9 +23,9 @@ must produce a no-op delta and open 0 new backlog items. `scripts/gap-sweep-stat
 
 ## The loop
 
-1. **Snapshot** the baseline. `node scripts/gap-sweep-status.mjs --snapshot` writes
+1. **Snapshot** the baseline. `node scripts/operations/run.mjs gap-sweep-status --mode=snapshot` writes
    `reports/gap-sweep-snapshots/<lastSwept>.json` — the revision you'll diff against. (Run the bare
-   `node scripts/gap-sweep-status.mjs` first to see today's state + confirm invariants are green.)
+   `node scripts/operations/run.mjs gap-sweep-status` first to see today's state + confirm invariants are green.)
 
 2. **Refresh the corpus** (phase 1). Re-apply the corpus's own `selectionCriteria` + `inclusionRule` to
    `benchmarkCorpus.json`: add genuinely-new leading systems, drop abandoned ones, re-categorise as needed,
@@ -57,7 +57,7 @@ must produce a no-op delta and open 0 new backlog items. `scripts/gap-sweep-stat
    tracking item → file a placement `decision` (`--parent=099`), after deduping vs open+parked backlog
    (idempotent). The axis was completeness-swept 2026-06-21; re-walk it and append newly-surfaced verbs.
 
-5. **Delta + gate.** `node scripts/gap-sweep-status.mjs --baseline=reports/gap-sweep-snapshots/<that-date>.json`
+5. **Delta + gate.** `node scripts/operations/run.mjs gap-sweep-status --mode=diff --baseline=reports/gap-sweep-snapshots/<that-date>.json`
    prints what changed (corpus ±, capabilities ±, re-kinded, fileable-gaps ±, newly-tracked) and fails on any
    invariant violation (unknown capability ids, count mismatches, missing triage). A no-op delta is the
    success case for an unchanged landscape — stop here, nothing to file.
