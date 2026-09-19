@@ -3685,3 +3685,12 @@ reentrancy by real process identity) are both `review:changes` and were left exa
 untouched, for fresh independent reviews. The advisory review's one finding on #2156 (`resolveCodexEffort`'s
 `TypeError` messages hardcode a `codex-direct-task:` prefix although the function is now shared) was NOT fixed
 in the fold; it is cosmetic and currently dormant.
+
+## Session update (2026-09-19) — folded PR #2223 (#3383 heavy-admission slot reentrancy by process identity) into the branch
+
+Folded PR #2223 (WE #3383 — heavy-admission: key slot reentrancy by real process identity, not owner string)
+directly into `lane/mechanical-dispatcher` per the operator rule of 2026-09-19 (prototype work commits straight
+to the branch, no PR of its own). #2223 now carries an independent `review:accepted` (review round 2), so it was
+folded as-is: merge commit `0817a539`, no conflicts, no code changed in the fold. It touches
+`we:scripts/readiness/heavy-admission.mjs`, `we:scripts/readiness/file-locks.mjs` and their two test files.
+Nine vitest files covering the touched scripts pass (274 tests). The PR is closed with a pointer to this commit.
