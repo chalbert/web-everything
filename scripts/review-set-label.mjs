@@ -56,6 +56,8 @@
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
 // #x9xqexm's base-independent third marker. Independent concerns.
@@ -453,6 +455,50 @@ export function checkBodyFileLocation(abs, roots) {
 export const bodyFileRoots = (cwd = process.cwd(), tmp = tmpdir()) => [cwd, tmp, '/tmp'];
 
 /**
+ * #3690 — PR #2313's SECOND review bounce: appending to a TRACKED store is not publishing a trial.
+ * An uncommitted row in the reviewer's checkout can disappear on reset and never informs another
+ * checkout's graduation/dedupe reads. Mirror lane-drain.mjs's quietGit/publishMain convention: commit
+ * ONLY the scorecard path, then publish through push-if-green.mjs (--assume-green, ff-only, #2073).
+ * Guard HEAD BEFORE committing; the push helper's own branch refusal would be too late to prevent a
+ * bookkeeping commit on a lane ref. Resolve the helper from THIS module, but target the injected repo.
+ * Acceptance has already succeeded. Every git/publish failure returns evidence for the caller's loud
+ * recovery warning, never an exception that could turn a completed accept into a failed verdict.
+ */
+export function publishDelegationTrialCommit({ provider, model, taskType, pr, cwd } = {}) {
+  let committed = false;
+  let stage = 'could not resolve repo root';
+  const firstLine = (e) => String((e && (e.stderr || e.message)) || e).trim().split('\n')[0];
+  try {
+    const options = { cwd: cwd ?? process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+    const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], options).trim();
+    options.cwd = repoRoot;
+    stage = 'could not resolve HEAD';
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], options).trim();
+    if (branch !== 'main') {
+      return { committed: false, pushed: false, reason: `HEAD is "${branch}", not "main" — the scorecard row must land on shared main, never a lane branch; commit skipped` };
+    }
+    stage = 'git commit failed';
+    const message = `conveyor: log ${provider}/${model} ${taskType} trial for PR #${pr} (#3690)`;
+    execFileSync('git', ['commit', '-m', message, '--', 'scripts/conveyor/run-scorecards.json'], options);
+    committed = true;
+    stage = 'push-if-green.mjs failed';
+    const pushIfGreen = join(dirname(fileURLToPath(import.meta.url)), 'push-if-green.mjs');
+    const out = execFileSync(process.execPath, [pushIfGreen, `--repo=${repoRoot}`, '--assume-green', '--json'], options);
+    const parsed = JSON.parse(out.trim());
+    return { committed, pushed: !!parsed.pushed, reason: parsed.detail || parsed.reason };
+  } catch (e) {
+    // publishMain's non-zero-exit convention: the refusal is still JSON on stdout, not stderr.
+    if (committed) {
+      try {
+        const parsed = JSON.parse(String(e?.stdout || '').trim());
+        return { committed, pushed: !!parsed.pushed, reason: parsed.detail || parsed.reason || `${stage}: ${firstLine(e)}` };
+      } catch { /* no JSON result — report the subprocess failure below */ }
+    }
+    return { committed, pushed: false, reason: `${stage}: ${firstLine(e)}` };
+  }
+}
+
+/**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
  * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→write→re-read arc
  * against `gh`; only three things differ and they arrive as config (exactly the deltas #2644 names):
@@ -521,6 +567,7 @@ export function runReviewLabelCli({
   provider = createGhProvider(),
   readTrialStore = readStore,
   logTrialFn = logDelegationTrial,
+  publishTrialFn = publishDelegationTrialCommit,
   trialLogIo = {},
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
@@ -973,6 +1020,11 @@ export function runReviewLabelCli({
           pr: Number(pr),
         }, trialLogIo);
         if (logged === null) throw new Error('could not write trial to the scorecard store');
+        const publishResult = publishTrialFn({ ...delegation, pr: Number(pr) });
+        if (!publishResult.committed || !publishResult.pushed) {
+          const location = publishResult.committed ? 'a local commit' : "this checkout's working tree";
+          process.stderr.write(`review-set-label: delegation trial row WRITTEN LOCALLY BUT NOT ON SHARED HISTORY (#3690, non-fatal) — ${publishResult.reason} — the row is only in ${location}; commit+push scripts/conveyor/run-scorecards.json by hand (push the existing commit if already committed) or it may be lost.\n`);
+        }
       }
     } catch (e) {
       process.stderr.write(`review-set-label: delegation trial append failed (#3690, non-fatal) — ${String((e && e.message) || e).split('\n')[0]}\n`);

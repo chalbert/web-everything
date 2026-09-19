@@ -5,9 +5,9 @@
  *   against fixtures, no network.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync,
+  mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, neutralizeCommentMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
-  checkBodyFileLocation, bodyFileRoots,
+  checkBodyFileLocation, bodyFileRoots, publishDelegationTrialCommit,
   // #3334 — re-exported by the single home from `we:scripts/lib/reasonless-bounce.mjs`; imported from HERE on
   // purpose, so this suite proves the home actually exposes the rule its `decideSetLabel` enforces.
   REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, bounceEvidenceFromWriteUp,
@@ -1879,6 +1879,8 @@ describe('runReviewLabelCli — a changes verdict must carry its findings (#xd6m
  */
 describe('the write arc and its #2964 ordering', () => {
   const CFG = {
+    // Memory-store tests must never commit/push the running checkout. Real git tests override this.
+    publishTrialFn: vi.fn(() => ({ committed: true, pushed: true })),
     defaultActor: 'test',
     usage: 'usage: test',
     buildComment: () => '# verdict body',
@@ -1962,7 +1964,10 @@ describe('the write arc and its #2964 ordering', () => {
         exists: () => true,
       };
     }
-    beforeEach(() => vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'independent-reviewer'));
+    beforeEach(() => {
+      vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'independent-reviewer');
+      CFG.publishTrialFn.mockClear();
+    });
     afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
     it('records a real trial only after both acceptance writes, using the fetched title', () => {
@@ -1979,6 +1984,8 @@ describe('the write arc and its #2964 ordering', () => {
       expect(result.exitCode).toBe(0);
       expect(result.payload.ok).toBe(true);
       expect(readTrialStore).toHaveBeenCalledTimes(1);
+      expect(CFG.publishTrialFn).toHaveBeenCalledTimes(1);
+      expect(CFG.publishTrialFn).toHaveBeenCalledWith({ ...triple, pr: 1048 });
       expect(readStore(io).records).toHaveLength(1);
       expect(readStore(io).records[0]).toMatchObject({
         ...triple, dispatchKind: 'session-delegation', pr: 1048,
@@ -1995,6 +2002,7 @@ describe('the write arc and its #2964 ordering', () => {
       expect(readStore(io).records).toEqual(records);
       expect(readStore(io).records).toHaveLength(6);
       expect(logTrialFn).not.toHaveBeenCalled();
+      expect(CFG.publishTrialFn).not.toHaveBeenCalled();
     });
 
     it('does not append a second session-delegation trial when the same PR is re-accepted', () => {
@@ -2006,6 +2014,7 @@ describe('the write arc and its #2964 ordering', () => {
       expect(records).toHaveLength(1);
       readTrialStore.mockClear();
       logTrialFn.mockClear();
+      CFG.publishTrialFn.mockClear();
       const write = vi.spyOn(io, 'write');
       expect(run(stubProvider({ body, labels: ['review:accepted'] }), argv,
         { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
@@ -2013,6 +2022,7 @@ describe('the write arc and its #2964 ordering', () => {
       expect(readTrialStore).toHaveBeenCalledTimes(1);
       expect(logTrialFn).not.toHaveBeenCalled();
       expect(write).not.toHaveBeenCalled();
+      expect(CFG.publishTrialFn).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -2104,6 +2114,116 @@ describe('the write arc and its #2964 ordering', () => {
       expect(run(p, argv, { trialLogIo: io, logTrialFn }).exitCode).not.toBe(0);
       expect(logTrialFn).not.toHaveBeenCalled();
       expect(readStore(io).records).toEqual([]);
+    });
+
+    it.each([false, true])('warns distinctly and preserves acceptance when publishing fails (committed=%s)', (committed) => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const io = memIo();
+      const publishTrialFn = vi.fn(() => ({ committed, pushed: false, reason: 'publication unavailable' }));
+      const p = stubProvider({ body });
+      const result = run(p, argv, { trialLogIo: io, publishTrialFn });
+      expect(result.exitCode).toBe(0);
+      expect(result.payload.ok).toBe(true);
+      expect(p.calls).toContain('postComment');
+      expect(p.calls).toContain('setLabels');
+      expect(readStore(io).records).toHaveLength(1);
+      expect(publishTrialFn).toHaveBeenCalledTimes(1);
+      expect(publishTrialFn).toHaveBeenCalledWith({ ...triple, pr: 1048 });
+      const warning = stderr.mock.calls.flat().join('');
+      expect(warning).toContain('WRITTEN LOCALLY BUT NOT ON SHARED HISTORY');
+      expect(warning).toContain('publication unavailable');
+      expect(warning).toContain(committed ? 'a local commit' : "this checkout's working tree");
+      expect(warning).toContain('commit+push scripts/conveyor/run-scorecards.json by hand');
+      expect(warning).not.toContain('delegation trial append failed');
+    });
+
+    describe('against real local and bare remote git fixtures', () => {
+      let repo, remote;
+      const path = 'scripts/conveyor/run-scorecards.json';
+      const git = (...args) => execFileSync('git', args, {
+        cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+      const publish = () => publishDelegationTrialCommit({ ...triple, pr: 1048, cwd: repo });
+      const append = () => logDelegationTrial({
+        ...triple, pr: 1048, taskDescription: 'Fix launch wrapper', outcome: 'landed',
+        verifiedBy: 'independent-claude', findings: null,
+      }, { path: join(repo, path) });
+
+      beforeEach(() => {
+        repo = mkdtempSync(join(tmpdir(), 'delegation-trial-local-'));
+        remote = mkdtempSync(join(tmpdir(), 'delegation-trial-remote-'));
+        git('init', '-q', '-b', 'main');
+        git('config', 'user.email', 'test@test');
+        git('config', 'user.name', 'Test');
+        git('config', 'commit.gpgsign', 'false');
+        git('config', 'core.hooksPath', join(repo, '.no-hooks'));
+        mkdirSync(join(repo, 'scripts/conveyor'), { recursive: true });
+        writeFileSync(join(repo, path), '{"version":1,"records":[]}\n');
+        git('add', '--', path);
+        git('commit', '-qm', 'seed scorecard store');
+        git('init', '-q', '--bare', remote);
+        git('remote', 'add', 'origin', remote);
+        git('push', 'origin', 'main');
+      });
+      afterEach(() => {
+        rmSync(repo, { recursive: true, force: true });
+        rmSync(remote, { recursive: true, force: true });
+      });
+
+      it('accepts, appends, commits, and publishes the actual row to shared history', () => {
+        const p = stubProvider({ labels: ['review:pending'], body, title: 'Fix launch wrapper' });
+        const result = run(p, argv, {
+          trialLogIo: { path: join(repo, path) },
+          publishTrialFn: (args) => publishDelegationTrialCommit({ ...args, cwd: repo }),
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.payload.ok).toBe(true);
+        const log = git('log', '--oneline', '--', path).split('\n');
+        expect(log).toHaveLength(2);
+        expect(log[0]).toContain('conveyor: log codex/gpt-6-astra bugfix trial for PR #1048 (#3690)');
+        expect(git('status', '--porcelain')).toBe('');
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(git('rev-parse', 'HEAD'));
+        const store = JSON.parse(readFileSync(join(repo, path), 'utf8'));
+        expect(store.records).toHaveLength(1);
+        expect(store.records[0]).toMatchObject({ ...triple, pr: 1048, outcome: 'landed', findings: null });
+        expect(JSON.parse(git(`--git-dir=${remote}`, 'show', `main:${path}`))).toEqual(store);
+      });
+
+      it('commits only the scorecard even with an unrelated staged change', () => {
+        writeFileSync(join(repo, 'unrelated.txt'), 'leave staged\n');
+        git('add', '--', 'unrelated.txt');
+        append();
+        expect(publish()).toMatchObject({ committed: true, pushed: true });
+        expect(git('diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD')).toBe(path);
+        expect(git('status', '--porcelain')).toBe('A  unrelated.txt');
+      });
+
+      it.each(['lane/test', 'detached'])('refuses to commit or push on %s before changing history', (branch) => {
+        if (branch === 'detached') git('checkout', '--detach');
+        else git('checkout', '-b', branch);
+        const head = git('rev-parse', 'HEAD');
+        append();
+        const result = publish();
+        expect(result).toMatchObject({ committed: false, pushed: false });
+        expect(result.reason).toContain('commit skipped');
+        expect(git('rev-parse', 'HEAD')).toBe(head);
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(head);
+        expect(git('status', '--porcelain')).toBe(`M ${path}`);
+      });
+
+      it('reports a commit failure without throwing', () => {
+        expect(publish()).toMatchObject({ committed: false, pushed: false, reason: expect.stringContaining('git commit failed') });
+      });
+
+      it('recovers the real push helper JSON on a non-zero exit', () => {
+        git('remote', 'set-url', 'origin', join(repo, 'missing-remote'));
+        append();
+        const result = publish();
+        expect(result).toMatchObject({ committed: true, pushed: false });
+        expect(result.reason).toContain('origin unchanged');
+        expect(git('status', '--porcelain')).toBe('');
+        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).not.toBe(git('rev-parse', 'HEAD'));
+      });
     });
   });
 

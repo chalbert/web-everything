@@ -70,6 +70,11 @@ the streak. Other channels and label targets do not log. Logging failures are no
 
 V1 records `outcome: landed` and `findings: null` at acceptance. It does not distinguish a first-round
 clean accept from an accept after repairs; consulting verdict-ledger history is separate follow-up work.
+Only accepted PRs with author-supplied delegation markers are auto-logged: rejected or abandoned
+delegated tasks leave no row and cannot count against the streak. This survivorship bias means the
+graduation signal sees only work that eventually succeeded, never work that failed outright. It is a
+known v1 scope limit, not a bug; tracked as follow-up alongside the round-history distinction, with no
+structural fix required for PR #2313.
 
 ## Spawning a reviewer that is actually independent
 

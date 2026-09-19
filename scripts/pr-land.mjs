@@ -112,9 +112,12 @@ import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './li
 const argv = process.argv.slice(2);
 const flags = {};
 for (const a of argv) {
-  // Keep malformed multiline values visible to flag validation rather than silently dropping them.
-  const m = a.match(/^--([^=]+)(?:=(.*))?$/s);
-  if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+  const m = a.match(/^--([^=]+)(?:=(.*))?$/);
+  if (m) { flags[m[1]] = m[2] === undefined ? true : m[2]; continue; }
+  // #3690 — keep malformed multiline --delegation values visible to bad-delegation validation;
+  // scope this exception to that flag so every other flag retains its ordinary non-dotAll parsing.
+  const md = a.match(/^--delegation=([\s\S]*)$/);
+  if (md) flags.delegation = md[1];
 }
 const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) : p);
 // Read a PR body from a file (the #2170 lane-review-composed body). Missing/unreadable → null (falls back
