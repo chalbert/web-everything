@@ -2,9 +2,10 @@
 bornAs: x0dk81c
 kind: story
 size: 3
-status: active
+status: resolved
 dateOpened: "2026-08-03"
 dateStarted: "2026-09-19"
+dateResolved: "2026-09-19"
 tags: [drain, jit-numbering, cross-clone, backlog-state]
 relatedTo: ["2288", "2392", "2428"]
 scope:
