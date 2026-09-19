@@ -3,9 +3,10 @@ bornAs: xc1wd1f
 kind: story
 size: 3
 parent: "2676"
-status: active
+status: resolved
 dateOpened: "2026-07-26"
 dateStarted: "2026-09-07"
+dateResolved: "2026-09-19"
 tags: []
 scope:
   - "plateau-app:src/feature-tracker/design-snapshots.ts"
