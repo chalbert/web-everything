@@ -12,8 +12,8 @@
  *   Plus a small proof that `truncate()` strips ANSI/control escape sequences before anything is
  *   printed (review's terminal-escape-injection finding).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,7 +23,7 @@ import {
 
 let dir;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'agent-health-test-')); });
-afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); });
 
 function writeLines(file, lines) { writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n'); }
 
@@ -33,6 +33,106 @@ function assistantEntry(blocks) {
 function toolUseBlock(id, name, input) { return { type: 'tool_use', id, name, input }; }
 function toolResultBlock(toolUseId, content = 'ok') { return { type: 'tool_result', tool_use_id: toolUseId, content }; }
 function userEntry(blocks) { return { type: 'user', message: { role: 'user', content: blocks } }; }
+
+describe('resolveTranscript — confine explicit paths after resolving symlinks', () => {
+  let projects, resolveTranscript, inside, outside, sibling;
+  beforeEach(async () => {
+    projects = join(realpathSync(dir), 'projects');
+    const subagents = join(projects, 'fixture', 'session', 'subagents');
+    mkdirSync(subagents, { recursive: true });
+    mkdirSync(`${projects}-evil`);
+    inside = join(subagents, 'agent-safe.jsonl');
+    outside = join(realpathSync(dir), 'agent-outside.jsonl');
+    sibling = join(`${projects}-evil`, 'agent-secret.jsonl');
+    for (const file of [inside, outside, sibling]) writeLines(file, [assistantEntry([])]);
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    ({ resolveTranscript } = await import('../agent-health.mjs'));
+  });
+  it.each(['absolute', 'sibling prefix', 'traversal', 'symlink escape'])('rejects an outside path: %s', (kind) => {
+    let target = outside;
+    if (kind === 'sibling prefix') target = sibling;
+    if (kind === 'traversal') target = `${projects}/../agent-outside.jsonl`;
+    if (kind === 'symlink escape') {
+      target = join(projects, 'escape.output');
+      symlinkSync(outside, target);
+    }
+    const resolved = resolveTranscript({ target });
+    expect(resolved).toEqual({ error: expect.stringContaining('outside PROJECTS_DIR') });
+    expect(resolved.error).toContain(target);
+    expect(resolved.error).toContain(projects);
+  });
+  it('allows a transcript inside the store, including an external output symlink to it', () => {
+    expect(resolveTranscript({ target: inside })).toEqual({ file: inside });
+    const output = join(dir, 'safe.output');
+    symlinkSync(inside, output);
+    expect(resolveTranscript({ target: output })).toEqual({ file: inside });
+  });
+  it('preserves id-only lookup within the store', () => {
+    expect(resolveTranscript({ target: 'safe' })).toEqual({ file: inside, ambiguous: 0 });
+  });
+  it.each(['bare id', 'broken output symlink'])('skips an escaping id-search candidate for a %s', (kind) => {
+    const sentinel = 'OUTSIDE_STORE_SENTINEL';
+    writeFileSync(outside, sentinel);
+    symlinkSync(outside, join(projects, 'fixture', 'session', 'subagents', 'agent-planted.jsonl'));
+    let target = 'planted';
+    if (kind === 'broken output symlink') {
+      target = join(dir, 'planted.output');
+      symlinkSync(join(dir, 'missing.jsonl'), target);
+    }
+    const resolved = resolveTranscript({ target });
+    const content = resolved.file ? readFileSync(resolved.file, 'utf8') : JSON.stringify(resolved);
+    expect(content).not.toContain(sentinel);
+    expect(resolved).toEqual({ error: expect.stringContaining('no transcript found') });
+  });
+  it('skips the newest escaping id-search hit and uses the older legitimate hit', () => {
+    const newer = join(projects, 'fixture', 'newer-session', 'subagents');
+    mkdirSync(newer, { recursive: true });
+    writeFileSync(outside, 'OUTSIDE_STORE_SENTINEL');
+    symlinkSync(outside, join(newer, 'agent-safe.jsonl'));
+    utimesSync(inside, 1000, 1000);
+    utimesSync(outside, 2000, 2000);
+    const resolved = resolveTranscript({ target: 'safe' });
+    expect(readFileSync(resolved.file, 'utf8')).not.toContain('OUTSIDE_STORE_SENTINEL');
+    expect(resolved).toEqual({ file: inside, ambiguous: 0 });
+  });
+  it('allows an id-search candidate symlink whose destination stays inside the store', () => {
+    symlinkSync(inside, join(projects, 'fixture', 'session', 'subagents', 'agent-linked.jsonl'));
+    expect(resolveTranscript({ target: 'linked' })).toEqual({ file: inside, ambiguous: 0 });
+  });
+  it('handles a missing project store without throwing and retains its original path in errors', () => {
+    rmSync(projects, { recursive: true });
+    expect(resolveTranscript({ target: 'safe' })).toEqual({ error: `no Claude project store at ${projects}` });
+    expect(resolveTranscript({ target: outside })).toEqual({
+      error: `Transcript path "${outside}" resolved outside PROJECTS_DIR (${projects}): ${outside}`,
+    });
+  });
+});
+
+describe('resolveTranscript — symlinked PROJECTS_DIR', () => {
+  it('resolves explicit paths and ids through a symlinked project store', async () => {
+    const realStore = join(realpathSync(dir), 'real-store');
+    const projects = join(dir, 'projects');
+    const subagents = join(realStore, 'fixture', 'session', 'subagents');
+    mkdirSync(subagents, { recursive: true });
+    const inside = join(subagents, 'agent-safe.jsonl');
+    writeLines(inside, [assistantEntry([])]);
+    symlinkSync(realStore, projects, 'dir');
+    // Deliberately import with the symlink spelling, never its realpath.
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    const { PROJECTS_DIR, resolveTranscript } = await import('../agent-health.mjs');
+    expect(PROJECTS_DIR).toBe(projects);
+    expect(PROJECTS_DIR).not.toBe(realpathSync(projects));
+    expect(resolveTranscript({ target: join(projects, 'fixture', 'session', 'subagents', 'agent-safe.jsonl') }))
+      .toEqual({ file: inside });
+    expect(resolveTranscript({ target: inside })).toEqual({ file: inside });
+    expect(resolveTranscript({ target: 'safe' })).toEqual({ file: inside, ambiguous: 0 });
+    const outside = join(dir, 'outside.jsonl');
+    writeFileSync(outside, 'outside');
+    expect(resolveTranscript({ target: outside }).error).toContain(`outside PROJECTS_DIR (${projects})`);
+  });
+});
 
 // ── (1) bounded read: hard ceilings hold even against an oversized override ────────────────────────
 describe('parseArgs — hard ceilings clamp even an explicit oversized override (#1905 finding)', () => {

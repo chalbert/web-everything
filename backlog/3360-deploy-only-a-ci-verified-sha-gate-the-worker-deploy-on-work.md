@@ -6,6 +6,7 @@ status: open
 scope: ["we:.github/workflows/deploy.yml"]
 dateOpened: "2026-08-26"
 tags: []
+deliveryAgent: codex
 ---
 
 # Deploy only a CI-verified SHA — gate the Worker deploy on workflow_run and re-derive the verdict

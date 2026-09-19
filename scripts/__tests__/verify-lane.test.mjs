@@ -90,6 +90,42 @@ describe('verify-lane writer — overlapping-runs race (#2833 finding 1)', () =>
   });
 });
 
+describe('verify-lane START write — spent terminal markers (#3538)', () => {
+  it.each(['green', 'red'].flatMap(status =>
+    ['merged', 'unmerged', 'missing-ref', 'unknown-sha'].map(ancestry => ({ status, ancestry })),
+  ))('$status marker with $ancestry ancestry only yields when merged', ({ status, ancestry }) => {
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', headSha()], { cwd: dir });
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'marked'], { cwd: dir });
+    const markedSha = headSha();
+    if (ancestry === 'merged') {
+      execFileSync('git', ['update-ref', 'refs/remotes/origin/main', markedSha], { cwd: dir });
+    } else if (ancestry === 'missing-ref') {
+      execFileSync('git', ['update-ref', '-d', 'refs/remotes/origin/main'], { cwd: dir });
+    }
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'next'], { cwd: dir });
+    const terminal = JSON.stringify({ sha: ancestry === 'unknown-sha' ? OTHER_SHA : markedSha, status, startedAt: '2026-08-02T00:00:00.000Z', finishedAt: '2026-08-02T00:01:00.000Z', suites: 'gate', exitCode: status === 'green' ? 0 : 2 }) + '\n';
+    writeFileSync(marker(), terminal);
+
+    // Observe the marker during the gate, proving the START write happened before execution.
+    const snapshot = join(dir, 'gate-start.json');
+    const gateScript = join(dir, 'gate.mjs');
+    writeFileSync(gateScript, `import { copyFileSync } from 'node:fs';\ncopyFileSync(${JSON.stringify(marker())}, ${JSON.stringify(snapshot)});\n`);
+    const { code, json } = runVerify(`node ${gateScript}`);
+
+    if (ancestry === 'merged') {
+      expect(code).toBe(0);
+      expect(json?.status).toBe('green');
+      expect(JSON.parse(readFileSync(snapshot, 'utf8'))).toMatchObject({ sha: headSha(), status: 'running', finishedAt: null });
+      expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ sha: headSha(), status: 'green' });
+    } else {
+      expect(code).toBe(3);
+      expect(json?.status).toBe('superseded');
+      expect(existsSync(snapshot)).toBe(false);
+      expect(readFileSync(marker(), 'utf8')).toBe(terminal);
+    }
+  });
+});
+
 describe('verify-lane request (#3105) — stamp the marker, run nothing, return immediately', () => {
   function runRequest(gate) {
     try {

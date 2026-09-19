@@ -15,7 +15,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, cpSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reconcileScope } from '../scope-reconcile.mjs';
 import { ROUTE_ENTRIES } from '../../lib/route-import-graph.mjs';
@@ -86,8 +87,19 @@ beforeAll(() => {
   clone = mkdtempSync(join(tmpdir(), 'we-scope-reconcile-'));
   cpSync(WE_SCRIPTS_DIR, join(clone, 'scripts'), { recursive: true });
   // backlog.mjs reads `scope:` through gray-matter via createRequire — resolution walks up from
-  // <clone>/scripts, so the clone needs a node_modules to find it.
-  symlinkSync(join(WE_ROOT, 'node_modules'), join(clone, 'node_modules'), 'dir');
+  // <clone>/scripts, so the clone needs a node_modules to find it. We resolve `gray-matter`'s REAL
+  // install location via this process's OWN module resolution (`createRequire(...).resolve(...)`)
+  // rather than assuming `WE_ROOT/node_modules` is populated: a harness-sandboxed Claude Code agent
+  // worktree (`.claude/worktrees/agent-*`, created by the `isolation: "worktree"` mechanism) can have
+  // an absent or stray near-empty `node_modules` of its own, since nothing ever ran `npm install`
+  // there — CI and every normal checkout always run `npm ci` first, so this only bites a worktree that
+  // never got one. Resolving via `createRequire` walks up the directory tree exactly the way the
+  // running test process itself resolves `gray-matter` (and the way Node's own `require` would from
+  // `<clone>/scripts`), so it always lands on wherever `gray-matter` truly lives — it can never point
+  // at an empty/nonexistent directory the way `WE_ROOT/node_modules` could.
+  const grayMatterEntry = createRequire(import.meta.url).resolve('gray-matter');
+  const grayMatterNodeModules = grayMatterEntry.slice(0, grayMatterEntry.lastIndexOf(`${sep}node_modules${sep}`) + `${sep}node_modules`.length);
+  symlinkSync(grayMatterNodeModules, join(clone, 'node_modules'), 'dir');
   mkdirSync(join(clone, '.claude', 'skills', 'batch-backlog-items'), { recursive: true });
   mkdirSync(join(clone, 'backlog'), { recursive: true });
   // `src/_includes/` must be TRACKED before the per-test presentation file is written into it: plain

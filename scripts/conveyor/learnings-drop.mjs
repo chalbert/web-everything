@@ -9,11 +9,17 @@
  * can't run a session close itself, so N micro-closes would land N unvetted duplicates; the drop-box is the
  * hand-off seam between the two.
  *
- * TENANT-READY BY CONSTRUCTION (the hard rule). The entry schema carries GENERALIZED-LESSON fields ONLY —
- * there is deliberately NO field for raw code, diffs, secrets, or absolute/repo-identifying paths. This is
- * the same seam that later feeds the multi-tenant product feedback channel (#2610), where minimal-by-schema
- * is a privacy requirement: if the schema has no field for it, it can't leak. `validateEntry` enforces that
- * SCHEMA boundary — the allow-list, the `kind` enum, the per-field caps. A rejected entry is NEVER appended.
+ * THE SCHEMA IS AN ALLOW-LIST. The lesson itself is four GENERALIZED fields (`kind`/`summary`/`area`/
+ * `suggestion`, capped — a lesson is a sentence, not a paste). `validateEntry` enforces that boundary — the
+ * allow-list, the `kind` enum, the per-field caps. A rejected entry is NEVER appended.
+ *
+ * THE EVIDENCE RIDES ALONGSIDE, UNCAPPED (#3016, ratified #2978 Fork 3). An entry MAY carry `quotedTurn` (the
+ * verbatim turn that established it) plus `transcript` (the absolute path of the harness session transcript),
+ * which the harvest verifies (learnings-grounding.mjs) — the one thing that admits a note to agent memory. That
+ * deliberately ENDS the old "no field for raw content or absolute paths" property, and it is only safe because
+ * of the ordering #3015 enforced: the pool is untracked machine-local state, and the secret scrub now sits at
+ * the PUBLISH seam where content becomes a committed artifact. When the multi-tenant channel (#2610) exists,
+ * minimal-by-schema returns for THAT transport; the migration is accepted cost, recorded in #2978.
  *
  * THE CONTENT SCRUB NO LONGER RUNS HERE (#3015, ratified #2978 Fork 3). It used to: `validateEntry` also ran
  * `scrubReasons` on every text field, so an entry carrying a secret was refused at APPEND time. That gated
@@ -35,12 +41,12 @@
  *        --summary="lane gate re-runs the full suite even for a docs-only diff" \
  *        --area="lane gating / check:standards" \
  *        --suggestion="scope the lane gate to touched file-families" \
- *        --session=<slug> [--file=<path>] [--json]
+ *        --session=<slug> [--quoted-turn="<verbatim turn>" --transcript=<abs .jsonl>] [--file=<path>] [--json]
  *   echo '{"kind":"doc-gap","summary":"…","area":"…","suggestion":"…"}' \
  *        | node scripts/conveyor/learnings-drop.mjs --stdin --session=<slug>
  *
  * `--session` is REQUIRED (unless an explicit --file / $LEARNINGS_DROPBOX targets a file): distinct-session
- * COUNT is the harvest's ranking signal, so a shared default file would silently collapse every session
+ * COUNT is one of the harvest's RANKING inputs, so a shared default file would silently collapse every session
  * into one.
  *
  * The drop-box file is TRANSIENT session-meta (like claims.json) — it is NOT committed; the sweep consumes
@@ -52,6 +58,7 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, isAbsolute } from 'node:path';
+import { MIN_QUOTE_CHARS, normalizeQuote } from './learnings-grounding.mjs';
 
 // ── schema ────────────────────────────────────────────────────────────────────────────────────────
 export const KINDS = ['friction', 'missing-convention', 'doc-gap', 'skill-gap', 'improvement'];
@@ -62,7 +69,13 @@ export const KINDS = ['friction', 'missing-convention', 'doc-gap', 'skill-gap', 
 // with a generalized `proposedFix` and an explicit `approvalPending` flag; a non-blocking entry (the
 // pre-existing shape) carries neither — see validateEntry's blocking branch below.
 export const OPTIONAL_HICCUP_KEYS = ['blocking', 'proposedFix', 'approvalPending'];
-export const ALLOWED_KEYS = ['kind', 'summary', 'area', 'suggestion', ...OPTIONAL_HICCUP_KEYS];
+// The two OPTIONAL grounding fields (#3016, ratified #2978 Fork 1/3): the verbatim turn that established the
+// observation and an absolute pointer to the harness transcript it came from. Both or neither. UNCAPPED on
+// purpose — "save all relevant info" while single-tenant; the size limit belongs on what the harvest SENDS per
+// cluster (see learnings-harvest.mjs's EVIDENCE_EXCERPT_CHARS), never on what is stored. The harvest verifies
+// the quote against the transcript (learnings-grounding.mjs); the append seam only checks the SHAPE.
+export const GROUNDING_KEYS = ['quotedTurn', 'transcript'];
+export const ALLOWED_KEYS = ['kind', 'summary', 'area', 'suggestion', ...OPTIONAL_HICCUP_KEYS, ...GROUNDING_KEYS];
 const TEXT_FIELDS = ['summary', 'area', 'suggestion'];
 // STRUCTURAL leak-class kill (review fix A): a summary is a sentence, a suggestion a short recommendation, an
 // area a coarse label. Capping each field forecloses whole leak classes (PEM keys, code blocks, pasted files
@@ -127,7 +140,8 @@ export function validateEntry(entry) {
     errors.push(`kind must be one of ${KINDS.join('|')} (got ${JSON.stringify(entry.kind)})`);
   }
   // (3) text fields present, non-empty, and within the per-field cap. NO CONTENT SCRUB — #3015 moved it to
-  // the publish seam; the caps remain (they are structural, and #3016 is what removes them).
+  // the publish seam. The caps STAY on these three (#3016): they shape the LESSON, which must cluster and be
+  // read at a glance. #2978 Fork 3's "uncapped" is about the EVIDENCE, which rides in the grounding pair (5).
   for (const f of TEXT_FIELDS) {
     const v = entry[f];
     if (typeof v !== 'string' || !v.trim()) {
@@ -166,6 +180,23 @@ export function validateEntry(entry) {
       errors.push('approvalPending is only allowed when blocking is true');
     }
   }
+  // (5) the GROUNDING pair (#3016) — OPTIONAL, both or neither. Shape only: whether the quote is really in the
+  // transcript is the HARVEST's check (it reads a file the harness wrote; this seam would only be trusting the
+  // emitter). No length cap — see GROUNDING_KEYS. A too-short quote is refused because it would verify against
+  // almost any transcript, tying the note to no particular moment.
+  const hasQuote = Object.prototype.hasOwnProperty.call(entry, 'quotedTurn');
+  const hasPointer = Object.prototype.hasOwnProperty.call(entry, 'transcript');
+  if (hasQuote !== hasPointer) {
+    errors.push('quotedTurn and transcript go together — a quote with no transcript cannot be verified, a transcript with no quote grounds nothing');
+  } else if (hasQuote) {
+    if (typeof entry.quotedTurn !== 'string' || normalizeQuote(entry.quotedTurn).length < MIN_QUOTE_CHARS) {
+      errors.push(`quotedTurn must be the verbatim grounding turn, at least ${MIN_QUOTE_CHARS} chars — a shorter quote matches almost any transcript`);
+    }
+    const t = entry.transcript;
+    if (typeof t !== 'string' || !t.trim() || /[\0\n\r]/.test(t) || !isAbsolute(t.trim()) || !t.trim().endsWith('.jsonl')) {
+      errors.push('transcript must be the absolute path of the harness session transcript (a .jsonl file)');
+    }
+  }
   if (errors.length) return { ok: false, errors, clean: null };
   const clean = {
     kind: entry.kind,
@@ -181,6 +212,13 @@ export function validateEntry(entry) {
     clean.blocking = true;
     clean.proposedFix = entry.proposedFix.trim();
     clean.approvalPending = true;
+  }
+  // Same conditional spread for the grounding pair — an ungrounded entry's shape is unchanged. The quote is kept
+  // VERBATIM (not trimmed): the harvest normalizes whitespace when it matches, and the stored evidence should be
+  // exactly what was said.
+  if (hasQuote) {
+    clean.quotedTurn = entry.quotedTurn;
+    clean.transcript = entry.transcript.trim();
   }
   return { ok: true, errors: [], clean };
 }
@@ -219,9 +257,9 @@ export function poolDir({ env = process.env, home } = {}) {
  *
  * THE SLUG IS REQUIRED (review fix, PR #1068 blocker 2). It used to default to the literal `session`, so
  * an emitter that forgot `--session` appended to one shared `session.jsonl` — every close in every session
- * collapsing into ONE apparent session. That silently zeroes the whole point of the pool: `sessions` stays
- * 1 forever, distinct-session ranking never fires, and `--min-sessions=2` filters out 100% of those
- * entries. Refusing is the only way the flag cannot be dropped again by the next emitter.
+ * collapsing into ONE apparent session. That silently flattens the pool's ranking: `sessions` stays 1 forever
+ * and a cluster several sessions independently hit reads like one session repeating itself. Refusing is the
+ * only way the flag cannot be dropped again by the next emitter.
  */
 export function resolveDropboxPath({ file, session, env = process.env, root, home } = {}) {
   if (file) return isAbsolute(file) ? file : join(root || repoRoot(), file);
@@ -275,6 +313,10 @@ function main(argv) {
     try { entry = JSON.parse(readFileSync(0, 'utf8')); } catch (e) { console.error(`learnings-drop: --stdin expects one JSON object (${e.message})`); process.exit(2); }
   } else {
     entry = { kind: f.kind, summary: f.summary, area: f.area, suggestion: f.suggestion };
+    // Only set when passed, so an ungrounded CLI drop keeps the plain four-field shape. Passing just one of
+    // the two is kept (not silently dropped) so validateEntry's both-or-neither refusal fires loudly.
+    if (f['quoted-turn'] !== undefined) entry.quotedTurn = f['quoted-turn'];
+    if (f.transcript !== undefined) entry.transcript = f.transcript;
   }
   try {
     const { record, path } = appendEntry(entry, { file: f.file, session: f.session });

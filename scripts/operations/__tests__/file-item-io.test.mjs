@@ -14,7 +14,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createFileItemReader, createFileItemSinks } from '../file-item-io.mjs';
 import { SCAFFOLD_EFFECT } from '../scaffold.mjs';
 import { FILE_ITEM_QUEUE_EFFECT } from '../file-item.mjs';
@@ -31,6 +32,29 @@ describe('createFileItemReader is scaffold\'s own reader, not a re-derived copy'
 });
 
 describe('the sink map', () => {
+  it.each([
+    ['042', '42'],
+    ['42', '0042'],
+    ['#042', 42],
+    ['42', ' #0042 '],
+    ['X9Z9Z9', 'x9z9z9'],
+    ['x9z9z9', ' #X9Z9Z9 '],
+  ])('the queue sink recognizes normalized duplicate %s → %s without rewriting', async (stored, requested) => {
+    const tmp = mkdtempSync(join(tmpdir(), 'file-item-duplicate-'));
+    const qPath = join(tmp, 'queue.json');
+    // Compact formatting makes an unnecessary serialize/write observable in the actual file bytes.
+    const original = JSON.stringify([{ num: stored, addedAt: '2026-09-01T00:00:00.000Z' }]);
+    try {
+      writeFileSync(qPath, original);
+      const sinks = createFileItemSinks({ root: tmp, queuePath: () => qPath });
+      const result = await sinks[FILE_ITEM_QUEUE_EFFECT]({ num: requested });
+      expect(result).toEqual({ num: requested, queued: true, alreadyQueued: true, path: qPath });
+      expect(readFileSync(qPath, 'utf8')).toBe(original);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('carries both effect types — scaffold\'s write AND the new queue-add', () => {
     const sinks = createFileItemSinks({ root: '/repo' });
     expect(new Set(Object.keys(sinks))).toEqual(new Set([SCAFFOLD_EFFECT, FILE_ITEM_QUEUE_EFFECT]));

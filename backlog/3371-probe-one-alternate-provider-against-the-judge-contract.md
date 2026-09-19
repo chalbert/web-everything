@@ -430,7 +430,7 @@ This run itself has restricted filesystem/network access and no permission escal
 `we:scripts/operations/cli-adapter.mjs` were read, along with the existing injectable-spawn tests in
 `we:scripts/lib/__tests__/judge-spawn.test.mjs`. The requested `we:scripts/lib/codex-judge-spawn.mjs`,
 `we:scripts/__tests__/codex-direct-task.test.mjs`, and `we:scripts/codex-direct-task.mjs` are absent in this
-checkout. `git branch -a --list '*xqa9ttq*'` and the following history query returned no entries:
+checkout. `git branch -a --list '*3704*'` and the following history query returned no entries:
 
 ```sh
 git log --all -1 --format='%h %s' -- scripts/lib/codex-judge-spawn.mjs scripts/codex-direct-task.mjs
@@ -755,8 +755,8 @@ tool-bearing Codex juror in a lane cwd is no longer blocked on this specific gro
 juror/fixer role is scoped at all is a separate question this probe does not answer, same caveat
 we:backlog/3630-wire-the-isolationprovider-macos-deletion-backend-into-a-rea.md already carries.)
 This also corrects the false premise
-we:backlog/xqa9ttq-wire-codex-cli-as-a-second-judge-provider-tool-free-panelist.md and PR #2117 (open,
-unmerged as of this writing, branch `lane/xqa9ttq-review-pr-codex-advisory-seat`) built on when they seated
+we:backlog/3704-wire-codex-cli-as-a-second-judge-provider-tool-free-panelist.md and PR #2117 (open,
+unmerged as of this writing, branch `lane/3704-review-pr-codex-advisory-seat`) built on when they seated
 Codex tool-free-only for that reason — that PR's own review should re-check whether the tool-free
 constraint it carries is still warranted in light of this probe, not assume it still is.
 

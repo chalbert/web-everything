@@ -26,7 +26,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   readQueueFile, writeQueueFile, addToQueue, removeFromQueue, queueHas, resolveQueuePath, normNum,
 } from './queue-store.mjs';
@@ -51,6 +51,9 @@ const NON_DISPATCHABLE = {
   epic: 'is a `kind:epic`; the conveyor can\'t build an epic — `/slice` it into stories first',
   decision: 'is a `kind:decision`; the conveyor can\'t build a decision — `/prepare` then `/decision` (ratify) it first',
 };
+
+/** Keys of the warning map used by the CLI, exposed for the file-item agreement test. */
+export const NON_DISPATCHABLE_KINDS = Object.freeze(Object.keys(NON_DISPATCHABLE));
 
 /**
  * Best-effort `kind` of the item behind `num` — reads the backlog card's frontmatter directly (fast, no
@@ -183,4 +186,6 @@ function main(argv) {
   );
 }
 
-main(process.argv.slice(2));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2));
+}

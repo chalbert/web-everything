@@ -261,7 +261,7 @@ an item*). The backlog file is the durable, resumable record — the item body *
 6. **Resume, don't re-pick, an `active` item.** Asked to continue one (or finding a stranded claim): read
    its `## Progress`, check out its branch, continue from **Next**.
 7. **Close it out when done — mark it `resolved`** (*backlog-workflow.md → Closing out a completed item*).
-   Confirm done — `node scripts/operations/run.mjs verify --checkout=<lane> --json`, whose `verdict.ok` is true
+   Confirm done — prove any guard `## Done when` criteria fail under mutation via `node scripts/operations/run.mjs mutation-check --checkout=<lane> --target=<file> --find="<pattern>" --replace="<pattern>" --suite=<suite>` (see *Prove a guard fails — mutation-check* below), then verify with `node scripts/operations/run.mjs verify --checkout=<lane> --json`, whose `verdict.ok` is true
    only when every check PASSED (an `unrun` check is not a pass; see *backlog-workflow.md → Closing out*) — take a **careful last look for leftovers** and capture
    each as its **own new item** via the OPERATION — **`node scripts/operations/run.mjs scaffold
    --title='…' --workItem=… --size=… --digest='…' [--parent=NNN] [--blockedBy=NNN,xhash] --json`** (#xrrpfo7).
@@ -318,3 +318,21 @@ an item*). The backlog file is the durable, resumable record — the item body *
 
    If the invocation came from step 0 (item named directly, no shortlist gathered), there is nothing to
    carry — skip this step.
+
+## Prove a guard fails — mutation-check (#3219)
+
+When an item's `## Done when` criteria demand proving a guard actually fails when the bug it names returns, run the declared **`mutation-check`** operation (`we:scripts/operations/mutation-check.mjs`, #3219). It replaces ad-hoc shell or python heredocs with a safe, verified mutate → run → restore transaction in the target checkout:
+
+```
+node scripts/operations/run.mjs mutation-check --checkout=<lane> --target=<file> --find="<pattern>" --replace="<pattern>" --suite=<suite> [--json]
+```
+
+- **Why use it**: a green test suite proves the code passes the tests, not that the tests would catch the bug if reintroduced. Running vitest against a manually mutated file risks leaving mutants behind if the run dies or aborts. `mutation-check` captures the original bytes, runs the baseline suite first (must be green), applies the mutant, runs the named suite, and unconditionally restores the original file in a verified `finally` block.
+- **Flags**:
+  - `--checkout=<lane>` — the working tree / lane clone to mutate in (required; never defaulted to cwd for safety).
+  - `--target=<file>` — file the bug goes back into, relative to `checkout` (required).
+  - `--find="<pattern>"` — exact literal text in `target` to replace (required; literal, not regex).
+  - `--replace="<pattern>"` — exact literal text to replace it with (required).
+  - `--suite=<suite>` — the vitest suite expected to catch the mutant (required; passed to `vitest run <suite>`).
+  - `--json` — optional JSON output including the full verdict and probe findings.
+- **Outcomes**: three-valued — `killed` (the guard caught the mutant; passes), `survived` (the mutant stayed green; **blocking** defect — the guard is vacuous), or `unrun` (the pattern was not found, the baseline was red, or the runner crashed; also **blocking**).
