@@ -40,6 +40,7 @@ import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { loadAdapters } from './lib/adapters-loader.cjs';
 import { localToday } from './lib/local-date.mjs';
 import { findUtcDaySlices, utcDaySliceMessage } from './lib/utc-day-slice-scan.mjs';
+import { scanInvisibleSourceTree } from './lib/invisible-source-scan.mjs';
 import { scanStdoutFlush, stdoutFlushMessage } from './lib/stdout-flush-scan.mjs';
 import { runWeScan } from './lib/rust-scan-bridge.mjs';
 import {
@@ -96,6 +97,7 @@ import {
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN } from './lib/gate-config.mjs';
+import { scanDiffBranchCoverage } from './lib/diff-branch-coverage.mjs';
 import { isHash } from './backlog/id.mjs';
 
 const require = createRequire(import.meta.url);
@@ -116,6 +118,10 @@ const errors = [];
 const warnings = [];
 const err = (m, descriptor) => errors.push({ message: m, descriptor });
 const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
+
+// #2876 — separate from the scoped-planes average; failures stay blocking.
+const diffBranchCoverage = scanDiffBranchCoverage(ROOT);
+for (const e of diffBranchCoverage.errors) err(e.message, e.descriptor);
 
 // ── Failure descriptors (#095 → fed to the auto-fix agent #196) ────────────────
 // Every descriptor carries a `kind` (the failure class a fixer matches on) and `fix`: the routing
@@ -960,6 +966,13 @@ try {
   err(`UTC day-slice scan failed: ${e.message}`);
 }
 
+// #2866: backstop for shell writes and the existing scripts/docs source corpus.
+try {
+  for (const finding of scanInvisibleSourceTree(ROOT)) err(finding.message, finding.descriptor);
+} catch (e) {
+  err(`Invisible-character scan failed: ${e.message}`);
+}
+
 // stdout flushed before a process.exit (#3061). `write(big); process.exit()` TRUNCATES to the pipe buffer
 // (~8 KB) whenever a parent CAPTURES stdout — silently, with a zero status. Eight live CLIs carried it, four
 // losing over 99 % of their payload, including this gate. Prose did not stop it: five files had each
@@ -1276,7 +1289,7 @@ try {
         break;
       }
       case 'hashslug': {
-        emit(`${f.file}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`}\` is cited ` +
+        emit(`${f.file}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-….md`}\` is cited ` +
           `outside the at-land rewrite scope (backlog/, docs/agent/, agent-memory-src/) — ` +
           `numberPendingHashes never rewrites it, so it dangles permanently once the item lands with a real ` +
           `NNN (#2821 gate 3). Name the epic/item in prose, or cite its resolved #NNN.`,
@@ -1284,7 +1297,7 @@ try {
         break;
       }
       case 'memoryhash': {
-        const slugText = f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`;
+        const slugText = f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-….md`;
         const why = f.reason === 'dead-landed'
           ? 'the item it names has already LANDED under a real number, so this citation should already ' +
             'read `#NNN` and does not'
@@ -2576,6 +2589,7 @@ if (filesArg || LOCAL_MODE) {
 
 // ── Report ────────────────────────────────────────────────────────────────────
 const summary = {
+  diffBranchCoverage,
   blocks: blocks.length, plugs: plugs.length, protocols: protocols.length, intents: intents.length,
   capabilities: capabilities.length, terms: semantics.length, research: research.length, backlog: backlog.length,
   errors: errors.length, warnings: warnings.length,
@@ -2615,6 +2629,7 @@ if (JSON_MODE) {
 } else {
   const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', CYN = '\x1b[36m', DIM = '\x1b[2m', RST = '\x1b[0m';
   console.log(`${DIM}check-standards — Web Everything${RST}`);
+  console.log(diffBranchCoverage.message);
   if (scopeNote) console.log(`${CYN}  scope${RST} ${DIM}${scopeNote}${RST}`);
   if (localNote) console.log(`${CYN}  local${RST} ${DIM}${localNote}${RST}`);
   for (const w of warnings) console.log(`${YEL}  warn${RST} ${w.message}`);

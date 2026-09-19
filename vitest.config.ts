@@ -1,5 +1,6 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import { maxTestWorkers, weAlias } from './vitest.shared';
+import { TRUST_CHAIN_TIER_FILES } from './scripts/lib/trust-chain-tier.mjs';
 
 export default defineConfig({
   // Mirror vite.config.mts so .tsx files (the shared mapping fixtures + conformance suites)
@@ -33,7 +34,13 @@ export default defineConfig({
       // (build tooling, mostly .mjs). Measured 85% across this set (blocks-only was 85.45%); folding in
       // the UI/build planes craters it to ~68% and misrepresents the bar. Keep this list and the
       // `test.include` standards planes in lockstep when a new plane lands.
+      // #2875: the ONE exception to the scripts/ exclusion is the TRUST-CHAIN TIER — the exact file list
+      // `isTrustChainTier` names (scripts/lib/trust-chain-tier.mjs), spread in by path, never a scripts/ glob.
+      // Before #2875 these files were not instrumented at all (0% measured, not "already at 80%"); they are
+      // instrumented so the #2873 per-diff floor has coverage to attribute. They now count toward the
+      // combined 80% bar like any other included file; this adds no tier-specific threshold.
       include: [
+        ...TRUST_CHAIN_TIER_FILES,
         'blocks/**/*.ts',
         'capabilities/**/*.ts',
         'validity-merge/**/*.ts',

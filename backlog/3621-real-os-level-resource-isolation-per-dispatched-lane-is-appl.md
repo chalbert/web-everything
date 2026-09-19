@@ -408,6 +408,61 @@ The 2026-09-08 git-manager idea (Idea 1 of the amendment above) is **not built**
 we:scripts/lib/gh-throttle.mjs exists and nothing under we:scripts/, we:docs/ or we:backlog/ references a
 git-manager or gh-throttle. It remains open as written.
 
+## Amendment (2026-09-14) — the heavy-command-pool container POC, started and given a real first working slice
+
+Same discipline as every amendment above: this one DOES change something — it records real code, not just
+research — but changes no `status` and resolves no fork; this item's own two remaining forks (Docker
+Desktop/OrbStack as a simpler mature alternative; the platform-neutral-abstraction question) are still open.
+Tracked as a progress note on `we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md`
+(see that item's own 2026-09-14 session update for the full account) rather than as a new formal backlog item
+— per the operator's own explicit direction, and confirmed against this repo's actual convention: landing a
+PR here does not require a fresh item number when the change legitimately references an existing one
+(precedent: `PR #2131` landed real code referencing `#3631` by number alone).
+
+**Why now, despite this item's own per-lane-container deferral still standing as written.** The
+2026-09-11 amendment above already drew the exact distinction this slice depends on: per-lane containers stay
+deferred on a real, unresolved auth/billing question (OAuth/keychain → metered `ANTHROPIC_API_KEY`); the
+heavy-command-pool slice needs none of that (`check:standards`/`test:unit` need no credentials at all) and was
+this item's OWN amendment's explicit recommendation for what should start first if anything did. Nothing about
+that recommendation has changed — this is that recommendation acted on, not a reopening of the per-lane
+question.
+
+**A real first working slice landed, `check:standards` only — see `#3383`'s session update for the full
+build/evidence writeup (`we:scripts/lib/container-exec.mjs`, `we:scripts/lib/container-exec/Containerfile`,
+and a new `run` CLI mode on `we:scripts/readiness/heavy-admission.mjs`).** Headline results, condensed here
+because they bear directly on open questions THIS item's own body left unresolved:
+
+- **The CPU cap reproduces this item's own 2026-09-11 busy-spin containment result on a second, independent
+  build**: 8 unbounded spinners inside a `--cpus 2 --memory 2g` container held host CPU at ~190-205%
+  throughout the run, versus ~800% unconstrained on this same 12-core host. Corroborates, does not merely
+  repeat, the earlier finding.
+- **A real fidelity proof for a HEAVY COMMAND specifically** (the earlier amendment proved the isolation
+  provider's own unit suite in-container; this proves an actual heavy command in the closed named set
+  `we:scripts/readiness/heavy-admission.mjs` gates): `check:standards` produced an identical error count and
+  identical error messages run inside the container vs. the host, back-to-back against the same repo state.
+- **A cheaper path than this item's own measured `npm ci`-in-container approach, for commands with a pure-JS
+  dependency closure**: `check:standards`'s only two npm dependencies (`gray-matter`, `markdown-it`) carry no
+  native binding, so the container mounts the lane's own HOST-BUILT (darwin) `node_modules` read-only rather
+  than baking a separate linux-arm64 tree. This is real, but narrow — it does NOT extend to `test:unit`
+  (vitest/esbuild/rollup carry native darwin bindings in this lane's tree), where this item's own
+  `MODULE_NOT_FOUND` finding almost certainly still applies and the baked-linux-tree approach already measured
+  above remains the needed path.
+- **A previously-unnamed friction point, found and closed while building this**: a lane clone's
+  `.git/objects/info/alternates` records an ABSOLUTE host path to the primary checkout (how `--reference`
+  object sharing works) — a container that mounts only the lane itself cannot resolve it, so `git merge-base
+  origin/main HEAD` and similar calls fail inside the guest. Fixed by mounting the primary checkout read-only
+  at its own identical absolute path alongside the lane's read-write mount. Worth recording here since any
+  future container work touching a lane clone (per-lane containers included) will hit the same thing.
+
+**Still explicitly open, not resolved by this slice:** whether `--container` should ever become the DEFAULT
+execution path for `check:standards` (not done here — opt-in only, via a new `--container` flag/
+`WE_HEAVY_ADMISSION_CONTAINER=1`); `test:unit`/Playwright coverage (unstarted); the `frontierui`/`plateau-app`
+sibling-checkout mount gap (a named, understood scope limitation, not yet closed); image-build automation (a
+human/agent runs `container build` by hand today); and a real, accepted risk that this landed on `main` while
+a fuller version of the same general-purpose `run`-CLI idea already exists, unmerged, on the separate
+`lane/mechanical-dispatcher` integration branch — reconciling the two is deferred to whoever lands that
+branch's eventual merge.
+
 ### This amendment does NOT stamp `preparedDate`, deliberately
 
 It closes real questions (is the tool usable; does the cap work; what does a lane cost; does the Codex
@@ -619,6 +674,194 @@ already reached in its own "Recommended sequencing" section — restated and con
 judgment. If anything on this axis starts before that graduation, it should be the heavy-command container
 pool named in that section, not per-lane containers. Recorded in full on the epic tracker,
 we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md (operator note, 2026-09-13).
+
+## Amendment (2026-09-14, later the same day) — the heavy-command-pool container POC extended: `test:unit` (vitest) now proven too
+
+Same discipline as every amendment above: this records real code and real evidence, changes no `status`,
+resolves no fork, and stamps no `preparedDate`. Tracked as a progress note on
+`we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md` (see that item's own
+2026-09-14 session update, second entry) rather than a new formal item, same convention as the amendment
+directly above this one.
+
+**What this closes from the prior amendment's own "still explicitly open" list.** That amendment named
+`test:unit`/Playwright coverage as unstarted, the `frontierui`/`plateau-app` sibling-mount gap as open, and
+image-build automation as manual-only. This slice closes the first two for `test:unit` specifically (not
+Playwright — still unstarted) and adds real automation for the third:
+
+- **The predicted blocker was real and confirmed empirically, not just inferred**: mounting the lane's own
+  host-built (darwin) `node_modules` straight into the container — the shortcut that worked for
+  `check:standards`'s pure-JS dependency closure — fails for `test:unit` exactly as predicted. `npx vitest run`
+  inside a container with only the host `node_modules` mounted throws `Failed to resolve import
+  "@frontierui/plugs/..."` and, separately, esbuild's own native binding never resolves (only
+  `@esbuild/darwin-arm64` exists in the host tree; the guest needs `@esbuild/linux-arm64`).
+- **The fix, measured**: bake a real LINUX-built `node_modules` via `npm ci` inside `node:22-alpine`
+  (`we:scripts/lib/container-exec/Containerfile.test-unit-deps` — no compiler toolchain needed; every native
+  optionalDependency in this lockfile — esbuild, rollup, swc, lightningcss, sharp, `@parcel/watcher` — ships a
+  prebuilt `linux-arm64`/`linux-arm64-musl` binary; `npm ci` completes in ~15-20s), seed a named `container
+  volume` from the result, then mount that volume at `<cwd>/node_modules` OVER the checkout's own rw mount — a
+  more-specific-path mount genuinely shadows the parent bind mount for just that subtree (proven directly: a
+  host-side stub `we:node_modules/marker.json` placed under the checkout mount is completely unreachable inside
+  the guest once the volume is mounted on top, and a write the guest makes into the shadowed path never
+  reaches the host — see `we:scripts/lib/container-exec.mjs`'s own "test:unit slice" header section and its
+  test suite's real integration proof for the exact mechanism).
+- **The second predicted gap, also confirmed and closed**: `we:vitest.config.ts` resolves `@frontierui/plugs`/
+  `@frontierui/webtheme` to the sibling `frontierui` checkout (`we:vitest.shared.ts`'s
+  `resolve(repoRoot, '../frontierui/...')`) — mounting that sibling directory read-only at its own identical
+  host path (`we:scripts/lib/container-exec.mjs#frontieruiSiblingRoot`) fixes it. `plateau-app` was
+  deliberately NOT mounted — it is a `we:vite.config.mts`/dev-server-only reference, never part of `test:unit`'s
+  own import graph (confirmed by running the proof WITHOUT a plateau-app mount and getting a clean pass).
+- **Real evidence, measured on this machine**: the same 35-file/441-test subset (`we:blocks/__tests__`) run on
+  the host and inside the container (via `node we:scripts/readiness/heavy-admission.mjs run --container
+  --container-node-modules -- npx vitest run we:blocks/__tests__`) produced IDENTICAL pass counts both times.
+  The full suite (447 files / 12007 tests, ~9m48s on the host) was NOT re-run inside the container for this
+  proof — a representative subset was used instead, matching this task's own explicit allowance, since the
+  full run's wall-clock cost does not belong in a first-proof loop. The busy-spin CPU-cap containment result
+  was independently reproduced a THIRD time under this exact node_modules-volume + sibling-mount
+  configuration: 8 unbounded spinners held to ~191-204% aggregate host CPU inside a `--cpus 2` container vs.
+  ~800% unconstrained on the host (8 separate `node -e` processes, each pinned at ~100%).
+- **Image-build automation, partially closed**: `we:scripts/lib/container-exec/build-test-unit-deps.mjs` (new)
+  builds the deps image, creates/seeds the named volume, stamps a lockfile-hash marker so a re-run is a cheap
+  no-op when the lockfile hasn't changed, and reports `status` (image/volume presence + staleness) for a
+  preflight. This is real automation for the ONE image this slice needs — it does not generalize to
+  `check:standards`'s own image (still built by hand per the prior amendment) or to any future image, so "no
+  image-build automation exists yet" is now only PARTIALLY true.
+
+**Still explicitly open, not resolved by this slice:** Playwright coverage (unstarted — a different, likely
+harder shape again, since it needs a real browser inside the guest, not just a Linux dependency tree);
+`--container`/`--container-node-modules` are not wired as any default anywhere; the full `test:unit` suite was
+not run side-by-side in the container (representative-subset evidence only, as stated above); `check:standards`'s
+own image-build step is still manual; and the same `lane/mechanical-dispatcher` reconciliation risk the prior
+amendment named is unchanged by this slice.
+
+## Amendment (2026-09-14, later still) — three forward-looking requirements for the NEXT phase of this work, plus a live test of one of them
+
+Same discipline as every amendment above — a requirements/evidence addendum only, ratifying nothing, changing
+no status, resolving no fork, and deliberately NOT designing the full solution (that is real scoping work for
+later, per the operator's own explicit instruction). Captured now, precisely, so nothing said tonight gets lost
+to conversation. Triggered by the operator's own direct statement: *"we will need to use a container for the
+heavy command soon. Have capacity reserved for it separate from lane capacity. Commands like vitest and
+verify lane must use the correct parallelism to not overflow allocation and the cap 2 should be aware of what
+each heavy command usage is."* That statement breaks cleanly into three distinct requirements, none of which
+either `#2206` or `#2211` (the two container POC slices landed earlier tonight, see the two amendments directly
+above) actually built — both proved CONTAINMENT works (a command runs correctly inside a capped container,
+producing identical results), not CAPACITY PARTITIONING, INTERNAL-PARALLELISM CORRECTNESS, or an
+INTELLIGENT ADMISSION POLICY. Checked before writing this in: grepped `we:scripts/` for any existing
+implementation of a separate heavy-command resource pool, a container-aware worker-count derivation, or a
+per-command-weighted admission cap — none exists; each of the three below is genuinely open ground, not a
+rediscovery.
+
+### Requirement 1 — reserved capacity for heavy-command containers, kept SEPARATE from lane capacity (two pools, not one shared budget)
+
+A heavy-command container needs its own CPU/memory budget that does not compete with, or get counted against,
+`we:scripts/lib/lane-concurrency.mjs`'s lane-concurrency cap (`DEFAULT_MAX_CONCURRENT_LANES = 8`, env-overridable
+via `WE_MAX_CONCURRENT_LANES`). Today those are already two DIFFERENT counters
+(`we:scripts/lib/lane-concurrency.mjs`'s lane cap vs. `we:scripts/readiness/heavy-admission.mjs`'s `DEFAULT_ADMISSION_CAP = 2`
+heavy-command cap) — but neither is backed by an actual reserved slice of host CPU/memory; both are purely
+COOPERATIVE counting semaphores drawing from the same undivided host resource pool. This is exactly the
+"low-cpu lane containers + a separate heavy-command core pool" idea this item's own 2026-09-08 amendment
+already floated in the abstract (see above) — this requirement makes it concrete and names it as a real,
+needed piece of work rather than a still-open idea: whatever eventually runs heavy commands in containers needs
+a resource reservation (e.g. a fixed CPU/memory slice carved out up front, or a hard ceiling enforced
+independently of how many lanes happen to be open) that a burst of lane-orchestration activity cannot eat into,
+and vice versa. Neither `#2206` nor `#2211` touched this — both ran a SINGLE container ad hoc, on demand, with
+no notion of a standing reserved pool at all.
+
+### Requirement 2 — a heavy command must configure its OWN internal parallelism to fit the container it actually runs in, not autodetect (or assume) the host's full core count
+
+A command like `vitest` (`test:unit`) or `we:scripts/verify-lane.mjs`, when run inside a `container run --cpus
+N` instance, must size its own worker/thread pool to fit within N — never oversubscribe its OWN container
+allocation. This needs to be verified/fixed PER COMMAND, not assumed to already hold repo-wide.
+
+**Live-tested tonight, on this machine, per the operator's own request for a real answer rather than an
+assumption** — using `#2211`'s already-built container infrastructure directly (a fresh lane, `lane-20`,
+acquired via `we:scripts/lane-pool.mjs` specifically for this test; the node_modules volume/image were already
+built and fresh on this host):
+
+- **Does Node itself see a container's real CPU allocation?** Mixed, and worth recording precisely rather than
+  as a single yes/no. `container run --cpus 2 --memory 2g node:22-alpine node -e "os.cpus().length"` → **3**
+  (an off-by-one, N+1 — matching this item's own 2026-09-11 amendment's earlier finding, now reconfirmed with
+  `--cpus 1` → 2 and `--cpus 4` → 5, a consistent pattern, not a one-off fluke). But `os.availableParallelism()`
+  — the newer, cgroup-aware Node API — correctly reported **2** for `--cpus 2`. So a command that reads the
+  older `os.cpus().length` API gets a systematically wrong (inflated by one) view of its container's real
+  allocation; one that reads `os.availableParallelism()` gets the correct, cgroup-limited number. Which API a
+  given command's dependency chain actually calls is exactly the kind of thing that has to be checked per
+  command, not assumed.
+- **Does THIS repo's `test:unit` (vitest) actually use either API to size its pool?** No — and this is the
+  more important finding. `we:vitest.shared.ts#maxTestWorkers` is a **hardcoded literal constant, `= 4`**, wired
+  into `we:vitest.config.ts`/`we:vitest.maas-conformance.config.ts`'s `poolOptions.threads.maxThreads` and
+  `we:vitest.integration.config.ts`'s `poolOptions.forks.maxForks`. It calls neither `os.cpus()` nor
+  `os.availableParallelism()` at all — confirmed by reading the constant's own definition and every call site.
+  It was deliberately sized (per that constant's own `#3650` comment, already in the repo, unrelated to this
+  amendment) for the HOST's 12-core budget under a documented worst-case assumption of **3 concurrent `vitest`
+  invocations** racing past `we:scripts/readiness/heavy-admission.mjs`'s admission cap during its fail-open timeout window (3×4=12,
+  "fully subscribed but never oversubscribed" — on the HOST). **That sizing has nothing to do with, and does
+  not adapt to, any container it might later run inside.** Ran the real 35-file/441-test `we:blocks/__tests__`
+  subset (the same subset `#2211` proved fidelity with) inside a real `--cpus 2 --memory 2g` container via the
+  actual wrapper — `node we:scripts/readiness/heavy-admission.mjs run --container --container-node-modules --
+  npx vitest run --config we:vitest.config.ts we:blocks/__tests__` — and it passed 35/35 files, 441/441 tests,
+  confirming the pipeline itself works end to end. But the config value governing its worker count is still the
+  same literal `4`, regardless of the `--cpus 2` the container was actually given.
+- **The confirmed, specific instance of this requirement, stated plainly:** `test:unit`, run inside a `--cpus 2`
+  container exactly the way a future heavy-command-pool default would run it, will request up to **4** worker
+  threads against a container that only has **2** real cores — a genuine 2x oversubscription of the
+  container's own allocation, distinct from (and not fixed by) the host-level oversubscription
+  `maxTestWorkers = 4` was originally built to prevent. This is NOT the naive failure mode this requirement's
+  own framing worried about going in (blind `os.cpus().length` autodetection of the HOST'S full core count) —
+  that specific shape is already avoided by the existing hardcoded constant. It is a related but different
+  gap: a fixed value tuned for one resource budget (the host, under a specific concurrent-invocation
+  assumption) silently carried into a different, smaller, actual resource budget (one container's `--cpus N`)
+  with no mechanism connecting the two. Diagnosed here, not fixed — per the operator's own instruction, fixing
+  vitest's config to read its container's real allocation (e.g. via `os.availableParallelism()`, or an
+  explicit `--cpus`-derived env var the wrapper could pass in) is real scope, better sequenced as its own
+  follow-up once Requirement 1's capacity reservation is designed — a worker-count fix sized against an
+  UNRESERVED container allocation would just be guessing at a moving target.
+- **Not yet checked, flagged rather than assumed:** `we:scripts/verify-lane.mjs` itself and `check:standards`'s
+  own internal parallelism (if any) were not tested this way tonight — only `test:unit`/vitest was, since it is
+  the one with a real, already-discovered worker-pool config to inspect. Whoever picks this requirement up
+  should check each named heavy command individually, not generalize from vitest's result alone.
+
+### Requirement 3 — the admission cap should become resource-aware per command, not a flat cap-of-2 treating every heavy command as equal
+
+`we:scripts/readiness/heavy-admission.mjs`'s own header is explicit that v1 is "an EQUAL-COST NAMED SET — every
+heavy command consumes exactly one slot, none is weighted differently." The operator's direction tonight is
+that this should change: the cap should know what each specific heavy command actually needs (e.g. `vitest`
+plausibly needing more CPU/memory budget than `check:standards`'s pure-JS static analysis pass) rather than
+treating every admitted command as an interchangeable unit. This is a real evolution of the semaphore model —
+weighted/typed slots, or a per-command resource-cost table the admission logic consults — not a small tweak to
+the existing flat-count code.
+
+**This is not purely theoretical — a live instance of the SAME underlying "admission control does not actually
+see what is really happening" gap was found and is being fixed separately tonight, worth citing here as
+concrete, dated evidence rather than a hypothetical.** Confirmed 2026-09-14: `we:scripts/readiness/heavy-admission.mjs`'s slot
+reentrancy is keyed by LANE PATH STRING, not process identity — so two genuinely different processes legitimately
+verifying the same lane back-to-back (the conveyor's own auto-verify, then a manual re-verify after a new
+commit landed) both get treated as "one slot" under that owner key, meaning real concurrent load on this host
+was 3 processes while the gate reported a healthy 2/2. A fix for that specific reentrancy bug is separately in
+flight this same session (not yet landed as of this note) — flagged here only as evidence that a cap-of-2
+which cannot see what is really holding its slots is already producing real, measurable blind spots today, not
+as a claim that fixing it resolves this requirement. Requirement 3 is the larger, forward-looking shape:
+even a cap that correctly counts HOW MANY processes hold a slot still treats every one of them as costing the
+same, which this requirement says should not remain true.
+
+**Cross-reference, not merged into this requirement:** this item's own 2026-09-13 "Operator goal, recorded for
+the record: make the lane-concurrency admission cap resource-aware instead of a flat count" entry (above, under
+`we:scripts/lib/lane-concurrency.mjs`) is a SIBLING goal, not a duplicate — that one is about the LANE-COUNT cap
+(how many lanes may be open at once) becoming resource-aware using accumulated `host.process.*` telemetry;
+this requirement is about the HEAVY-COMMAND admission cap (how many heavy commands may run at once) becoming
+aware of each named command's own resource footprint. Both point at the same underlying shift — flat counts
+are a crude stopgap, real capacity should be measured/weighted, not counted — but they are two different caps
+on two different resources, and should likely be designed together rather than one blocking the other, per
+whoever eventually scopes this.
+
+### Explicitly not decided or built by this amendment
+
+None of the three requirements above is designed in any technical detail here, deliberately, per the
+operator's own instruction that this needs proper scoping later rather than being designed or built now. Left
+open: how a reserved heavy-command pool would actually be carved out of host resources (Requirement 1); how
+each per-command worker-pool fix would read its container's real allocation, and whether that is env-var-based,
+API-based, or something else (Requirement 2); and what shape a weighted/typed admission cap takes — a static
+per-command cost table, measured telemetry, or something else (Requirement 3). This amendment does not stamp
+`preparedDate` — it is a requirements capture, not a readiness claim.
 
 ## Done when
 

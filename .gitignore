@@ -20,6 +20,15 @@ test-results/
 reports/progress-board.html
 reports/.progress-board-cache.json
 
+# Decision Docket GENERATED HTML (backlog/3562's data/template separation, scripts/gen-decision-docket.mjs)
+# — same shape as progress-board above: the page is a PURE re-render of reports/decision-docket-data.json
+# through skills-src/decision-docket/template.html, so committing it would churn the tree every run (the
+# generatedAt timestamp alone) with nothing a reader could review in the diff. The DATA file is the thing
+# meant to be tracked — its git history is the real, diff-able "what changed and when" record this rebuild
+# exists to provide, replacing the hand-written "Correction —"/"second pass" prose the old process baked
+# into the page itself. Regenerate the page any time with `npm run gen:decision-docket`.
+reports/decision-docket.html
+
 # Parcel build cache (trait-enforcer #787 conformance harness)
 .parcel-cache/
 

@@ -1,6 +1,6 @@
 ---
 name: decision-docket
-description: Build or refresh the Decision Docket — the published Artifact page listing open decisions ranked by leverage, with every prepared item's full fork breakdown (every option, every rejection reason, the bold default). Use when the user asks to "build/refresh the decision docket", "publish the decision board", "show me the open decisions", or when a decision-mode session (see next-backlog-item / prepare-decision-item) wants to surface its ranked prepared set as a page instead of chat prose. NOT a generator — until backlog/3562's mechanical pass ships, a session pulls the data and fills the template by hand; this skill's whole job is to make that hand-fill consistent instead of reinvented per session.
+description: Build or refresh the Decision Docket — the published Artifact page listing open decisions ranked by leverage, with every prepared item's full fork breakdown (every option, every rejection reason, the bold default). Use when the user asks to "build/refresh the decision docket", "publish the decision board", "show me the open decisions", or when a decision-mode session (see next-backlog-item / prepare-decision-item) wants to surface its ranked prepared set as a page instead of chat prose. Run `node scripts/gen-decision-docket.mjs all --ref=origin/main` FIRST (a real data/template separation — clean JSON in, deterministic HTML out, no hand-authored prose) and hand-fill only what it flags `parseOk: false`; this is still not backlog/3562's standing mechanical pass (that needs backlog/3277's unbuilt publish operation + conveyor wiring) or an auto-publish to the Artifact — a session still runs the `Artifact` tool on the rendered page.
 ---
 
 # Decision Docket — the ranked, full-fork-detail decision page
@@ -60,7 +60,47 @@ An item that is **not yet prepared** (no `## Fork N` sections, no bold default) 
 `.dcard` — it belongs in an "upstream / not yet prepared" table instead, so the page never dresses
 up cold research as a ready ratification.
 
-## Pulling the data
+## Generating it mechanically — do this FIRST, hand-fill only for what it can't cover
+
+`scripts/gen-decision-docket.mjs` (+ its pure core, `scripts/lib/decision-docket-data.mjs` and
+`scripts/lib/decision-docket-render.mjs`) is a real data/template separation for the two steps below:
+a data-extraction step that parses the live backlog into a clean JSON record per decision (no prose
+narrative field anywhere in the shape — there is nowhere in it to put a "correction"/"second
+pass"/"false alarm" note), and a PURE render function that turns that JSON into this page's HTML
+through `template.html`, deterministically. Run it before hand-authoring anything:
+
+```bash
+node scripts/gen-decision-docket.mjs all --ref=origin/main   # writes reports/decision-docket-data.json
+                                                              # + renders reports/decision-docket.html
+# or, once package.json is updated on your checkout:
+npm run gen:decision-docket
+```
+
+`--ref` reads backlog files via `git show <ref>:<path>` instead of the working tree — always pass
+`--ref=origin/main` (or the fetched `origin/lane/<branch>` ref for source 2 below) unless you are
+certain your checkout IS a fresh `main`, since a stale/divergent working tree ranks and renders wrong
+state with no warning otherwise. Then **read `reports/decision-docket-data.json`'s `items[]`**: every
+item carries `parseOk` and, when false, a `warnings[]` array naming exactly what didn't match the
+documented shape (no lettered options found, no option marked RECOMMENDED, no `Skeptic:` line, …) —
+the render still gives that item a full `.dcard` (never thins it to a table row) but visibly flags it
+"Parse incomplete" instead of fabricating a default or silently dropping content. **This is expected,
+not a bug**: many currently-prepared items predate the canonical prepared-fork shape hardening and use
+older, less machine-parseable conventions (numbered lists, unlabeled defaults, un-bolded Skeptic
+lines). For any `parseOk: false` prepared item, read `backlog/<NUM>-*.md` directly and hand-author
+just that one card into the rendered HTML before publishing — never the whole page.
+
+**This does NOT close `backlog/3562`.** #3562 is the standing MECHANICAL PASS — wired into the
+conveyor's own tick loop, auto-dispatching `/prepare` for the un-prepared top-N via
+`scripts/conveyor/tick-core.mjs`'s existing spawn/guard primitives, and auto-publishing through
+`backlog/3277`'s still-unbuilt operation. This script does none of that: no conveyor wiring, no
+dispatch, no watch loop, no dependency on #3277, and no auto-publish to the Artifact (Artifact
+publishing isn't scriptable from Node — a session still runs the `Artifact` tool by hand on the
+rendered HTML, same as always, passing the existing docket's `url` so it updates in place rather than
+minting a new page). It is the narrower, immediately-buildable piece both #3562 and #3277 still need
+regardless: a real data model + a pure renderer, so the eventual mechanical pass (once #3277 exists to
+call) produces the exact same clean page a hand session produces today.
+
+## Pulling the data by hand — fallback for a `parseOk: false` item, or when the generator is unavailable
 
 Two sources, because the mechanical pass that would unify them (`#3562`) hasn't shipped yet:
 
@@ -122,7 +162,15 @@ wants a page instead of chat prose to hand the operator. Not a timer job. Typica
   the *held back* pattern in the worked precedent below) — this is a legitimate reason to reduce
   the "ready to ratify" count, and the docket should say so plainly rather than silently drop rows
 
-## Filling the template
+## Filling the template by hand — fallback only; run the generator (above) first
+
+Run `node scripts/gen-decision-docket.mjs all --ref=origin/main` first — it does steps 1-4 below for
+every item whose body matches the documented prepared-fork shape, deterministically, with no risk of
+the visual-language drift or the hand-fill inconsistency this skill was originally written to fix.
+Everything below is now only for **item bodies the generator flags `parseOk: false`** (fix that one
+card in the rendered `reports/decision-docket.html`, never rebuild the whole page by hand) or for a
+not-yet-merged prepared item (source 2 above — `--ref=origin/lane/<branch>` covers this too, once the
+lane's ref is fetched locally).
 
 1. Copy `template.html` (or read it and edit in place — either way, start from it, never a blank
    file or a prior docket's HTML).
@@ -136,7 +184,11 @@ wants a page instead of chat prose to hand the operator. Not a timer job. Typica
    `.opt.ov` (rejected, reason included), the `Skeptic:`/`Screen:` line, and a `.thecall` footer
    naming what happens once ratified (the codification target, or the spun-off build items).
 5. Add the optional sections (*Held back*, *Ratified this session*, *Not yet prepared*) only when
-   there's real content for them — an empty section is noise, not thoroughness.
+   there's real content for them — an empty section is noise, not thoroughness. **These sections
+   describe backlog STATE (an item held back, an item ratified, an item not yet prepared) — never
+   session narrative about the docket's own refresh history** ("second pass", "correction", "false
+   alarm"). A mistake in a prior render is fixed by regenerating from corrected data, and the fix's
+   history lives in `git log reports/decision-docket-data.json` — never as a paragraph in the page.
 6. Publish as an Artifact. Find the existing one first — `Artifact(action:"list")`, match the title
    "Decision Docket" — and pass its `url` so the refresh updates the same page instead of minting a
    new one (the same URL-stability discipline `skills-src/progress-board/SKILL.md` documents for
