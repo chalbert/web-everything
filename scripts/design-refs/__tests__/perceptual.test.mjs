@@ -1,9 +1,74 @@
 // Tests for the perceptual near-dup pass (backlog #395): PPM parse → dHash fingerprint → Hamming
 // distance → single-link clustering. Pure logic, no dwebp/sharp/browser — the decode (dwebp) is the
 // only I/O and is exercised by the CLI, not here.
+//
+// fileDHash (#2806) is the one exception: it IS the dwebp/cwebp decode path, generalized to accept any
+// raster file. Its tests below are real round-trips against the system cwebp/dwebp binaries — the same
+// ones the CLI's `collect`/`dedup` paths already require. A round-2 review finding: "confirmed present"
+// was previously asserted only in this prose comment, with no runtime check backing it — CWEBP_AVAILABLE
+// below is the actual check, and the suite SKIPS (not fails) when the binaries are absent.
 
-import { describe, it, expect } from 'vitest';
-import { ppmToGray, dHash, hammingHex, clusterByHamming } from '../../design-refs.mjs';
+import { describe, it, expect, afterAll } from 'vitest';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { deflateSync } from 'node:zlib';
+import { execFileSync } from 'node:child_process';
+import { ppmToGray, dHash, hammingHex, clusterByHamming, fileDHash, imageFileToWebp } from '../../design-refs.mjs';
+
+function checkCwebpAvailable() {
+  try {
+    execFileSync('cwebp', ['-version'], { stdio: 'ignore' });
+    execFileSync('dwebp', ['-version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const CWEBP_AVAILABLE = checkCwebpAvailable();
+
+// ---- minimal PNG encoder (no deps) — just enough to feed fileDHash a real raster file ----
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const typeBuf = Buffer.from(type, 'ascii');
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([len, typeBuf, data, crc]);
+}
+// width×height 8-bit RGB PNG; `fillFn(x, y) -> [r,g,b]` supplies pixel colour.
+function makePng(width, height, fillFn) {
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // color type: RGB
+  const raw = Buffer.alloc(height * (1 + width * 3));
+  let p = 0;
+  for (let y = 0; y < height; y++) {
+    raw[p++] = 0; // filter: none
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = fillFn(x, y);
+      raw[p++] = r; raw[p++] = g; raw[p++] = b;
+    }
+  }
+  return Buffer.concat([sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
+}
 
 // Build a binary P6 PPM buffer from a flat RGB array (width*height*3 bytes).
 function ppm(width, height, rgb) {
@@ -92,4 +157,45 @@ describe('clusterByHamming', () => {
     expect(clusters).toHaveLength(1); // 1—2—3 chained even though 1↔3 is 2 bits
     expect(clusters[0].map((x) => x.id).sort()).toEqual(['1', '2', '3']);
   });
+});
+
+describe.skipIf(!CWEBP_AVAILABLE)('fileDHash (#2806)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'file-dhash-test-'));
+  const stripe = (x) => (x < 5 ? [255, 255, 255] : [0, 0, 0]); // left-white/right-black 9×8 pattern
+
+  it('hashes a PNG file (routes through imageFileToWebp — dwebp cannot read PNG directly)', () => {
+    const pngPath = join(dir, 'stripe.png');
+    writeFileSync(pngPath, makePng(9, 8, (x) => stripe(x)));
+    const hex = fileDHash(pngPath);
+    expect(hex).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('hashes a WebP file directly, with no conversion step', () => {
+    const pngPath = join(dir, 'stripe2.png');
+    writeFileSync(pngPath, makePng(9, 8, (x) => stripe(x)));
+    const webpPath = join(dir, 'stripe2.webp');
+    writeFileSync(webpPath, imageFileToWebp(pngPath));
+    const hex = fileDHash(webpPath);
+    expect(hex).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('a PNG and its WebP re-encode of the same image hash identically', () => {
+    const pngPath = join(dir, 'stripe3.png');
+    writeFileSync(pngPath, makePng(9, 8, (x) => stripe(x)));
+    const webpPath = join(dir, 'stripe3.webp');
+    writeFileSync(webpPath, imageFileToWebp(pngPath));
+    expect(fileDHash(pngPath)).toBe(fileDHash(webpPath));
+  });
+
+  it('a flat (no left>right anywhere) image hashes to all zeros, same convention as dHash', () => {
+    const pngPath = join(dir, 'flat.png');
+    writeFileSync(pngPath, makePng(9, 8, () => [128, 128, 128]));
+    expect(fileDHash(pngPath)).toBe('0000000000000000');
+  });
+
+  it('returns null (never throws) for a nonexistent / undecodable path', () => {
+    expect(fileDHash(join(dir, 'does-not-exist.png'))).toBeNull();
+  });
+
+  afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } });
 });

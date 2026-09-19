@@ -6,6 +6,13 @@ blockedBy: ["3214"]
 status: open
 dateOpened: "2026-08-20"
 tags: []
+scope:
+  - we:scripts/lib/verdict-ledger.mjs
+  - we:scripts/lib/__tests__/verdict-ledger.test.mjs
+  - we:scripts/review-set-label.mjs
+  - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/operations/review-pr-io.mjs
+  - we:scripts/operations/__tests__/review-pr-io.test.mjs
 ---
 
 # Revisit the ledger write-miss posture before the authority moves

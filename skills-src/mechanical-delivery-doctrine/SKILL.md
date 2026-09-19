@@ -1,11 +1,11 @@
 ---
 name: mechanical-delivery-doctrine
-description: The eleven standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state — and a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
+description: The twelve standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, a long-lived divergent branch is a DECLARED delivery mode (a "POC branch"), N of them may stand at once, and landing inside one skips review entirely — tests only, with the real review deferred to graduation — a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified — and default to routing filing/building/investigating through the conveyor itself (`file-item` + `tier --to=pinned` for urgency) rather than a hand-dispatched subagent, wherever the conveyor's own dispatch already covers that work kind. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
 ---
 
 # Mechanical-delivery doctrine — epic #3383's standing operating rules
 
-Eleven rules accumulated while building and live-firing `#3383`'s own machinery (the background
+Twelve rules accumulated while building and live-firing `#3383`'s own machinery (the background
 mechanical dispatcher that replaces an interactive session as delivery supervisor). Each rule below
 is enough to act on without reading further — the full evidence and reasoning for each sits in the
 named section of `#3383`'s own card
@@ -114,25 +114,27 @@ history. If a rule itself changes, edit it here first, then note the change on t
    once the subsession's fix is proven (measured before/after, not asserted) and landed does the
    orchestrating session resume delivery. (Full evidence: `#3383`'s "Working doctrine (2026-09-04):
    rule 9" section.)
-10. **The runner's steady state is tracking `main` directly; a long-lived divergent branch is not the
-    default operating mode.** When a mechanical bug in the delivery machinery itself needs fixing:
-    (1) stop the runner (or otherwise take it off `main`), (2) cut a SHORT-LIVED branch/lane fresh off
-    current `main` for the fix, iterate and test it live there, (3) once the fix is confirmed working
-    and merged back to `main`, switch the runner back to tracking `main` directly. The fix branch is
-    disposable — it does not linger as a standing parallel tree. Set after tonight's own prototype
-    branch, `origin/lane/mechanical-dispatcher`, drifted 97 commits behind `main` behind a
-    silently-failing auto-sync loop, costing a ~40-minute manual reconciliation (15 real conflicts)
-    before delivery could resume at all — while the same quick-fix-via-fresh-scratch-lane pattern
-    (`#1894`/`#1895`/`#1902`/`#1903`, all tonight) landed repeatedly without ever needing a standing
-    branch. **Not yet fully in effect as of 2026-09-04**: `#3443` (the branch's own graduation to
-    `main`) is still open, with real content still unique to the branch, so the runner currently still
-    needs to run off `origin/lane/mechanical-dispatcher` (freshly reconciled tonight, not stale)
-    rather than `main` directly — this rule states the TARGET steady state once graduation completes,
-    not a claim about today's actual runner configuration; check `#3443`'s live status to know whether
-    this rule is fully active yet. (Full rationale: `#3383`'s "Working doctrine (2026-09-04,
-    continued): rule 10" section.) **If a manual reconciliation like this one turns up a PR that conflicts
-    with a decision made elsewhere on `main`** (a sequencing conflict, not a text conflict), post it as a
-    finding on that PR rather than only in your own task summary:
+10. **A long-lived divergent branch is a DECLARED delivery mode — a "POC branch" — not temporary
+    scaffolding to wind down. What is forbidden is an UNDECLARED, unreconciled one.** This is now a
+    **durable, cross-cutting rule**, not scoped to this epic — the canonical, full-detail source is
+    statute
+    [`#poc-branch-declared-delivery-mode`](../../docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode)
+    (the operator's ruling verbatim, all four clauses, and exactly what the amendment deletes from the
+    original framing); read it before extending or citing this rule anywhere outside this epic. The
+    load-bearing points for driving `#3383` day to day: **N POC branches may stand concurrently**, each
+    declared via `deliveryTarget:` and a registry entry (branch, graduation target, scope, graduation
+    item); **landing inside a POC branch skips review entirely** — tests/build validation only, no
+    judge panel, no escalation label, no per-landing review pass of any shape; **the full review
+    process runs once, undiluted, at graduation** to `main`; the runner's own steady state still tracks
+    `main` — a POC branch is a delivery TARGET, never the default; build no more machinery than the POC
+    needs; and drift is still actively reconciled per branch, never tolerated
+    (`we:scripts/conveyor/branch-drift.mjs`). A mechanical fix to the delivery machinery itself still
+    takes a SHORT-LIVED scratch lane cut fresh off *current* `main` (`#1894`/`#1895`/`#1902`/`#1903` are
+    the pattern) — "I need a POC branch" is never the answer to "I need to fix the runner". (Amended
+    2026-09-12 by the operator's ruling on `#3637`; full before/after and design on `#3383`'s "Working
+    doctrine (2026-09-12): rule 10 amended" section.) **If a manual reconciliation like this one turns
+    up a PR that conflicts with a decision made elsewhere on `main`** (a sequencing conflict, not a text
+    conflict), post it as a finding on that PR rather than only in your own task summary:
     `node we:scripts/conveyor/reconcile-finding.mjs <pr> --body-file=<path> [--repo=<owner/name>]` (the same
     tool `we:skills-src/finish/SKILL.md`'s rebase step uses for this).
 11. **A one-off action that relieves a symptom is not a fix.** Landing counts only once the real root
@@ -145,6 +147,25 @@ history. If a rule itself changes, edit it here first, then note the change on t
     were. A one-off workaround is fine as an immediate mitigation, but only when named explicitly as
     temporary, with the real fix still owed and tracked, not quietly dropped once the symptom is gone.
     (Full rationale: `#3383`'s "Working doctrine (2026-09-04, continued): rule 11" section.)
+12. **Default to routing THROUGH the conveyor itself, not a hand-dispatched subagent, wherever the
+    conveyor's own dispatch already covers the work kind.** Before spinning up an `Agent`-tool
+    subagent to file, build, or investigate something live, file it via `file-item` (composing the
+    title/digest/scope is still your own job — `file-item`'s own SKILL.md says so, and that doesn't
+    change here) and, if it's urgent, prioritize it the declared way
+    (`we:scripts/backlog.mjs tier <NNN> --to=pinned`) — then let the conveyor's own dispatch cycle
+    build it, rather than reaching for a bespoke `Agent()` call to do the work directly. This sharpens
+    rules 2/3/9 rather than replacing them: those say the orchestrating session must delegate rather
+    than hold the pen; this one adds WHICH delegate to prefer when both exist. It applies only where
+    the conveyor's dispatch already covers the work kind — build does, today; investigation-shaped
+    work doesn't yet (`#3567`, in progress), so a hand-dispatched investigator stays legitimate until
+    that lands, same as for any work kind the conveyor genuinely can't dispatch yet. Grounded the night
+    of 2026-09-06→07: the conveyor's own tick loop built and landed real items completely unattended
+    all night — no subagent involved — while several live-conversation requests that same night still
+    got hand-dispatched purely for turnaround speed, even though `tier --to=pinned` already exists as
+    the declared way to get something built fast through the SAME mechanical path instead of bypassing
+    it. The gap was concrete enough to spawn its own follow-on decision, filed that night, on
+    distinguishing conveyor-origin throughput from a "session-driven burst (like the one that filed
+    this very card)" (`#3383`'s dispatch-origin-attribution decision).
 
 ## Not `/conveyor`, on purpose
 

@@ -58,6 +58,7 @@ size: 3                            # Fibonacci points — ONLY on stories + unst
 parent: "049"                      # optional — NNN of the epic this rolls under (quote it: leading zeros)
 blockedBy: ["079", "092"]          # optional — NNN(s) this item can't start until they're resolved (quote: leading zeros)
 scope: ["src/backlog-view/", "docs/agent/"]   # optional — predicted touch-set (repo-relative path prefixes) a probe agent writes; the conveyor dispatcher reads it to hold overlapping items apart
+deliveryTarget: lane/mechanical-dispatcher   # optional — WHICH BRANCH this item lands on (#3637); absent/`main` = the normal PR-to-main path
 dateOpened: "YYYY-MM-DD"          # quote it — keeps it a string, not a parsed date
 dateResolved: "YYYY-MM-DD"        # required once status: resolved — the burndown plots this
 tags: [tag-a, tag-b]
@@ -73,6 +74,30 @@ The first paragraph is the summary shown on the index card. The rest of the
 body is the detail-page content. Keep the *deep* thinking in a report and link
 to it via `relatedReport`, rather than pasting a whole report in here.
 ```
+
+### `deliveryTarget:` — landing on a POC branch instead of `main` (#3637) {#delivery-target}
+
+Almost every item leaves this field off, and that is the normal path: the item is built in a lane forked from
+`main`, opens a PR against `main`, and lands through the drain with the full review process. Setting
+`deliveryTarget: <branch>` changes exactly one thing — **where the work lands** — and one consequence:
+
+- The lane is forked from that branch (`lane-pool.mjs acquire --base=<branch>`), not from `main`.
+- **There is no PR and no review pass of any shape.** No judge panel, no `converge` run, no escalation label.
+  The item's own tests/build (`verify-lane`) is the only gate. That is the whole point of the mode — the
+  operator's ruling on `#3637`: a landing into a POC branch must not pay a per-landing review tax, because
+  real review happens once, at graduation.
+- Landing runs `node scripts/operations/poc-land.mjs --branch=<branch>`, which takes that branch's own write
+  lock, fast-forwards when it can, and otherwise rebases onto the fresh tip, re-runs the tests and retries —
+  bounded at 3 attempts. It never forces.
+
+**The branch must be DECLARED.** `check:standards` (and the scoped `check:item`) reject a `deliveryTarget:`
+that is not in `we:scripts/lib/poc-branches.json`, and the dispatcher refuses the launch for the same reason.
+A POC branch's registry entry names what it is for, who graduates it, its graduation target and its scope —
+doctrine rule 10(c) in `we:skills-src/mechanical-delivery-doctrine/SKILL.md`. Register the branch first, then
+point items at it.
+
+**Graduating a POC branch to `main` is untouched by all of this** — that goes through the full existing
+process, undiluted, as its own item.
 
 **Repo-locus on code-path references.** Every code-path reference in the body (and in reports) must carry a
 `<repo>:` prefix so its constellation repo is unambiguous in chat / raw markdown: in-repo paths keep a
@@ -527,11 +552,13 @@ This sequence is also why **research-first matters**: it supplies the platform v
 - **Research reshapes the forks, it doesn't just fill the template** — in #64 the survey *added* Fork 4 (a multi-select cascade the item omitted) and dissolved a worry the original raised. A prep pass that only confirms the item's existing framing usually means the survey was too shallow.
 - **Lead with the decision; quarantine the context — the decider must see *what they're choosing* in one screen, not hunt for it.** Run the *fork-existence test* (above) first and let it shrink the item: branches that can coexist go under a short **"Supported by default (not decisions)"** list; forced invariants are stated as a one-line **ratify**; only genuine either/or choices get a `## Fork N`. Then push all the framing tables, sequencing, and relationship notes **below** a clear `## Context` (or `---`) divider so they don't read as part of the call. A prepared decision that lists five "forks" where four are just "support all of these" is *verbose, not thorough* — it buries the real call. Crisp-and-separated beats complete-but-undifferentiated: the glance table + the `## Fork N` sections should contain **only** things the human actually decides. (Worked example: [#088](/backlog/088-module-service-versioning/) was rewritten from five bold-default "forks" to *one forced invariant + one A/B*, with the matrix/sequencing demoted to `## Context`.)
 
-An item with all forks stated this way — each carrying options, a bold default, and a fork-specific `/research/` topic — is **prepared**: first run `npm run check:health` green alongside the standard `npm run check:standards` gate (catches a G4 false-prepared-fork tell — e.g. a prioritization/effort word that only *looks* like one — before review instead of after a bounce; the #3427 prep bounced review:changes on exactly this), then stamp **`preparedDate: "YYYY-MM-DD"`** into its frontmatter with `node scripts/backlog.mjs prepare-stamp <NNN>` **in the lane** (the #2219 (b) flow, shipped #2264 — the stamp is a backlog mutation, blocked from a primary cwd and landed via the one PR; don't hand-Edit it onto primary). While you prepare, a hard local `prepare-hold` keeps the fork out of every other session's selection + claim. `check:readiness --select` then ranks a prepared item **prepared-first within Tier B and tags it `✓ ready to ratify`** (vs `○ needs prep`), so decision-mode surfaces the ready-to-ratify forks ahead of the ones still needing a research pass. The research cost is paid once, ahead of the turn, not re-paid cold in every discussion.
+An item with all forks stated this way — each carrying options, a bold default, and a fork-specific `/research/` topic — is **prepared**: first run `npm run check:health` green alongside the standard `npm run check:standards` gate (catches a G4 false-prepared-fork tell — e.g. a prioritization/effort word that only *looks* like one — before review instead of after a bounce; the #3427 prep bounced review:changes on exactly this), then stamp **`preparedDate: "YYYY-MM-DD"`** (alongside **`preparedAgainstSha`**, #3108) into its frontmatter with `node scripts/backlog.mjs prepare-stamp <NNN>` **in the lane** (the #2219 (b) flow, shipped #2264 — the stamp is a backlog mutation, blocked from a primary cwd and landed via the one PR; don't hand-Edit it onto primary). While you prepare, a hard local `prepare-hold` keeps the fork out of every other session's selection + claim. `check:readiness --select` then ranks a prepared item **prepared-first within Tier B and tags it `✓ ready to ratify`** (vs `○ needs prep`), so decision-mode surfaces the ready-to-ratify forks ahead of the ones still needing a research pass. The research cost is paid once, ahead of the turn, not re-paid cold in every discussion.
 
 **The prepared *validation-gate* shape — DoR for a go/no-go decision (no `## Fork N`, still prepared).** A validation-gate decision (third archetype, above) reaches Definition of Ready with a different body shape than a fork — it carries **no** `## Fork N` (correctly: there is no excluded branch to weigh) yet is genuinely prepared. Its DoR body has all of: a **`## Digest`** leading with the recommended **verdict** (go / no / not-yet) + a confidence (lead with prose, not a `**Label:**`); **`## What you're deciding`** stating the candidate concretely; **`## Why this isn't a classic fork (and is still a decision)`** naming it a one-sided gate; **`## Context & prior-art delta`** — a table of real named incumbents and the WE semantic delta (this is what turns a bare "do we need it" into a real call, and supplies the examples a decider needs); **`## Dependencies & lineage`**; and **`## Recommendation`** = the verdict + a **concrete** un-gate trigger (a named substrate shipping, an evidence threshold — never "on what trigger" left blank) + a **`Skeptic:`** line refuted on merit (the prep skeptic seat applies here too — attack the verdict, fold the result in). The `/research/` topic is optional for a validation gate when the prior-art delta is captured inline and shallow; spin a topic when the survey is deep enough to stand alone. (Canonical worked example: [#1631](/backlog/1631-shareable-full-context-repro-bundle-for-the-dev-browser/).)
 
 **`preparedDate` means the research + authoring is done and every fork is at the Definition of Ready — *not* "this item gets ratified directly."** A fork reaches that bar three ways: it's **resolved**, it's stated in the prepared-fork shape above, or it's **delegated** — carved out to a child item that is *itself* prepared. **(A *validation-gate* decision reaches the bar via the validation-gate shape just above — verdict + concrete trigger + merit `Skeptic:` line — instead of `## Fork N` sections.)** **Those three are exhaustive. A fork left as a bare "needs a human call" / "confirm X" / "TBD" / slash-name (`webpush`-vs-`webpermissions`) with no options + tradeoffs + bold default is _not_ at DoR — it is the un-prepared part wearing a prepared stamp.** *(This disqualifier targets **merit forks** that dodge their options/default. It does **not** disqualify a yes/no question per se: a **validation-gate** decision asks a go/no-go question by design, and is at DoR once it carries a recommended verdict + concrete trigger + merit `Skeptic:` line. The disqualifier still bites a validation gate that's a **bare** question — no verdict, no trigger, no prior-art delta — which is the #1620 soft-park, not a prepared gate.)* The point of prep is to bring the *human-judgment* fork to options-and-a-default the decider ratifies or overrides; "left for a human" unshaped means prep stopped exactly at the boundary where its real work begins. Stamping `preparedDate` over such a fork is a false "ready" — fix it (shape the fork or delegate it) before stamping, and never trust the stamp without checking (see the *Fork-readiness pass*' first bullet). So a **parent/epic decision whose only open fork was spun out to a child is prepared once that child reaches prepared shape**: stamp the parent's `preparedDate`, and rewrite the carved-out fork from "Open decisions" to **"→ delegated to #NNN (prepared)"** so the flag is truthful rather than a bare stamp. Ratifying the child settles the parent's fork; the parent then `resolve`s. Don't leave such a parent tagged `○ needs prep` just because the call happens on the child — there is no separate research left to do on it. (Worked example: the design-ref corpus decision [#581](/backlog/581-design-ref-corpus-pipeline-shape-subject-classification-fork/) — Forks 1 & 2 resolved, Fork 3 delegated to the prepared [#394](/backlog/394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets/) → stamped prepared, then resolved. It was originally conflated into the epic #382 and later split out — see the "never one item that is both `kind: decision` and `kind: epic`" rule under *Rules*.)
+
+**Story-kind extension — `preparedDate` + `preparedAgainstSha` (#3108).** The `prepareStamp()` mechanism is kind-agnostic and writes both `preparedDate` and `preparedAgainstSha` (the HEAD commit at stamp time). For stories, preparation readiness follows the 10-item checklist in `agent-memory-src/story-preparation-checklist.md` (scope, size, acceptance, design, interfaces, tasks, delivery shape, de-risking, independent review, and stamp). Unlike a decision whose staleness is re-verified by human review of its forks at claim time, a story's scope files are concrete paths checkable via git: `node scripts/readiness/prep-staleness.mjs --item=<NNN>` reports whether any declared `scope:` files have changed since `preparedAgainstSha`. Cards lacking `preparedAgainstSha` simply report uncheckable (`checked: false`), never an error.
 
 **No live choice may sit *outside* a `## Fork N` — a "residue / TBD / decide-at-ratification" aside in prose is an un-prepared fork in disguise, and the structural reason `prepare` and the decision turn can _diverge_ (#1935).** The trinity above (resolved / stated-as-fork / delegated) and the close-out walk both scan the **`## Fork N` headings** — so a real sub-choice written as *prose* slips past every check: "open residue for the ratification turn", "whether v1 ships X in full or Y first", "TBD", "to be decided later", a glance-table footnote, a "Net mechanism … open question:" trailer. That aside **is** a live fork. Leave it and the decider must originate a conclusion **cold** at the call — which is precisely how a prepared item and its own decision turn reach *different* answers. They should not be able to: a decider only *ratifies the item's default*, so divergence is never a judgment gap — it is the signal that **a choice was left un-prepared**. Close the hole at prep: at close-out **scan the whole body, not just the headings**, for any deferred-choice phrasing and resolve each — promote it to its own `## Fork N` (research it now: options + bold default + `Skeptic:` line), fold it into an existing fork's default, or drop it as not-actually-a-choice. A body carrying a dangling residue is `○ needs prep`, never `✓ ready to ratify`; the stamp is false. (Worked example: [#1935](/backlog/1935-how-to-determine-merge-risk-files-that-must-be-reserved-befo/) was stamped prepared with Fork 2's "ship C in full vs. A-only first" left as an *open-residue* prose line rather than a fork — the decision turn then formed a chat-only sequencing recommendation that diverged from the body's stated default of C, the exact failure this rule prevents.)
 
@@ -540,6 +567,41 @@ An item with all forks stated this way — each carrying options, a bold default
 - the **source file** — `[backlog/<id>.md](backlog/<id>.md)` (opens the markdown in the editor; always works regardless of server state).
 
 Example offer line: *`jsx-directive-sugar` — add the deferred `<For>/<Show>/<Resource>` layer ([live](http://localhost:3000/backlog/070-jsx-directive-sugar/) · [md](backlog/070-jsx-directive-sugar.md))*.
+
+### Publishing the Decision Docket — full fork detail for every prepared item shown, never a summary row {#decision-docket}
+
+The **Decision Docket** — the "prepared to decide" surface of the shared **Decision Board** artifact
+([backlog/3562](/backlog/3562-a-standing-mechanical-pass-keeps-the-5-highest-leverage-open/),
+[backlog/3277](/backlog/3277-declare-an-operation-that-publishes-and-refreshes-a-decision/),
+[backlog/3685](/backlog/3685-a-permanent-decision-ledger-artifact-backed-by-the-db-capabi/)) —
+lists the highest-leverage prepared decisions ranked by `check:readiness --select --json` /
+`suggest-next --tier=B --json` (same leverage heuristic as everywhere else in this doc). Until the
+standing `decision-docket-watch` mechanical pass (#3562) ships and owns the refresh, a session builds or
+refreshes this page **by hand** — and this is the one, standing convention for doing so, not a preference
+to reinvent per session:
+
+> **Every prepared item the docket lists gets its full fork breakdown — every option, not just the
+> default, with the reason each rejected option was rejected, stated on merit. A rejection you cannot see
+> is a rejection you cannot overrule.**
+
+Concretely: for **each** prepared decision the docket shows, render the complete *prepared-fork shape*
+(above) straight from the item — every `## Fork N`'s options `(a)`/`(b)`/`(c)`…, the bold recommended
+default, and the *stated rejection reason* for every non-default option — not a compact summary row
+(ID / title / unblocks-count / age). A summary row forces the decider to open the item's own file to
+actually rule on it, which defeats the docket's whole purpose: a decider must be able to rule from the
+page alone, with nothing hidden behind another click.
+
+**This bar does not vary by section or by how the item got there.** It is tempting to give full detail
+only to the items a session is actively ratifying that turn (a "Current batch" / ratified section) or the
+ones it just finished preparing (a "Prep run this session" section), and fall back to a thinner summary
+row for every other prepared item merely *listed* on the docket. Resist that split: an item's *presence*
+on the docket — not the session's proximity to it or when it was prepared — is what earns the full
+breakdown. If a docket build genuinely can't afford full detail for every item it would otherwise list,
+the fix is to **list fewer items** (shrink the ranked window, e.g. via
+`WE_DECISION_DOCKET_TARGET_COUNT` once #3562 ships), never to thin the detail on the ones that stay.
+
+This same rule binds whoever eventually builds #3562's automated pass — it is not a hand-session-only
+convention that the mechanical version is free to relax.
 
 ### When nothing is agent-ready — surface the one highest-leverage blocker
 
@@ -660,6 +722,62 @@ distinguish from a right one without independently re-deriving it — which defe
 **Watch for:** this stays a convention, not a lookup table. A task's true shape can diverge from its `size`
 or `kind` the same way the model table warns about (a `story·3` can still hide a real design call) — route
 on what the brief actually asks the spawn to *do*, never on a field alone.
+
+### Codex model routing — pin the model, differentiate on effort {#codex-model-routing}
+
+Ratified by [#3635](/backlog/3635-codex-model-routing-pin-a-codex-model-per-rung-or-keep-inher/)
+(operator, 2026-09-11), on 89 logged `codex exec` runs across 8 selectable models (backlog `#3635`'s own
+evidence). Three rules, deliberately different in shape from the Claude-side table above:
+
+1. **Every real Codex CLI invocation names its model explicitly**, the same "never inherit, never
+   default-cheap" discipline `agent-memory-src/always-set-subagent-model-explicitly.md` requires for a
+   Claude `Agent()` spawn — Codex's own implicit default silently resolves to the top rung today and nothing
+   records that choice. `scripts/codex-direct-task.mjs#CODEX_MODEL` pins `gpt-6-astra`, threaded via `-m` into
+   every constructed argv (`buildCodexDirectTaskArgv` defaults to it — there is no way to omit `-m`).
+2. **The three-rung Haiku/Sonnet/Opus vocabulary survives, but it selects EFFORT, not model.** The evidence
+   refuses a model-based ladder (three of four probes scored identically across six of seven current-generation
+   models; the one real split was by model *generation*, not tier). Effort is the only axis on which *any*
+   movement was observed — but **the movement was mixed, and it is not a claim that more effort is better.**
+   All three rows of the card's effort table, n=4 per raised-effort cell, one probe shape:
+
+   | run | correct | what it shows |
+   |---|---|---|
+   | `gpt-5.5` default (`medium`) → `high` | 4/8 → **4/4** | a real rescue — on a *previous-generation* model |
+   | `gpt-5.3-codex-spark` default → `high` | 7/8 → **3/4** | **more effort scored WORSE** — effort is not monotonic |
+   | `gpt-6-astra` default (`medium`) → `low` | 8/8 → **4/4** | on the model actually pinned, the ladder is a **no-op** |
+
+   So: cite the ladder as **an explicit, recorded routing choice** (rule 1's principle applied to the second
+   axis) and as a cost/latency dial — never as "high effort is measurably more correct here". On `gpt-6-astra`,
+   the model every call site actually runs, no probe has yet distinguished `low` from `medium`. The rungs are
+   kept so the vocabulary survives for when real per-shape evidence exists, not because today's data separates
+   them. All three pin the SAME `CODEX_MODEL` and differ only on Codex's own `model_reasoning_effort` (real
+   values, confirmed via a live `-c model_reasoning_effort=<level>` run — not Claude's low/medium/high names
+   applied by assumption): `scripts/codex-direct-task.mjs#CODEX_TIER_EFFORT` =
+   `{ haiku: 'low', sonnet: 'medium', opus: 'high' }`, resolved via `resolveCodexEffort({ tier, effort })` (an
+   explicit `effort` always outranks a named `tier`; both throw on an unknown value).
+
+   **The rungs stop at `high`; the effort *vocabulary* does not.** `gpt-6-astra`'s catalogue entry
+   (`~/.codex/models_cache.json`, `supported_reasoning_levels`) offers `low·medium·high·xhigh·max·ultra`, and
+   all six are reachable through an explicit `effort` — `scripts/codex-direct-task.mjs#CODEX_EFFORT_MAP` is an
+   **identity**, not a clamp (an earlier copy folded `xhigh`/`max` down to `high` and rejected `ultra`
+   outright, silently discarding a caller's explicit choice; `xhigh`, `max` and `ultra` were each re-confirmed
+   live against `gpt-6-astra` before that was removed). No rung maps onto them because no probe exercised them
+   — reaching above `high` is a deliberate per-call decision, never something a named rung does for you. Note
+   the level set is a property of the **model**: a `--model` override may not offer all six (`gpt-5.5` lists
+   only `low·medium·high·xhigh`).
+3. **The quota-consumption signal is surfaced, not thrown away.** No USD figure exists anywhere in Codex's
+   output, but a real `rate_limits` block (`used_percent`/`window_minutes`/`resets_at`/`plan_type`) is
+   persisted in a non-`--ephemeral` run's rollout file as a `token_count` event. The ratified shape for a
+   caller with no resume use case (mirrors the fire-and-forget judge role): write the rollout normally, read
+   the one record, then delete the rollout file (`collectAndClearRolloutQuota`) — same net cleanliness
+   `--ephemeral` gives, but the signal gets read first. A caller that genuinely needs `codex exec resume
+   <thread-id>` (`scripts/codex-direct-task.mjs`'s own documented reason for not passing `--ephemeral` by
+   default) reads the same signal WITHOUT deleting (`readRolloutQuota`) — deleting the rollout there would
+   silently remove the resume feature the non-ephemeral default exists for.
+
+**RE-DERIVE, don't assume, when either axis changes**: a harder probe finding a real capability split (model
+axis), a task shape effort does not rescue (effort axis), or a Codex CLI upgrade re-ranking its catalogue —
+this table's whole premise is measured evidence with a short shelf life, not a permanent mapping.
 
 ## Running a batch — chain several small items, stop on a solid condition
 

@@ -6,6 +6,20 @@ parent: "2527"
 status: open
 dateOpened: "2026-08-01"
 tags: [ratify-gate, provenance, check-standards, hooks, drain, citation-verification]
+scope:
+  - we:backlog/2821-ratify-gate-provenance-hooks-make-the-self-ratify-pr-number-.md
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/lane-drain.mjs
+  - we:scripts/backlog/id.mjs
+  - we:scripts/lint-locus-prefix.mjs
+  - we:scripts/lib/validate-rules-anchors.cjs
+  - we:scripts/__tests__/
+  - we:docs/agent/conventions.md
+  - we:docs/agent/platform-decisions.md
+  - we:src/_data/researchTopics/risk-based-care-scaled-review-gating.json
+  - we:src/_includes/research-descriptions/risk-based-care-scaled-review-gating.njk
+scopeRationale: "we:scripts/__tests__/ stays directory-level because this 10-gate citation-provenance story adds/extends fixtures across most of the existing check-standards-rules test split (backlog-integrity, content-lint, conformance-gates, githook-flags, lock-point-and-exports, registry-validators) plus we:scripts/__tests__/check-standards.test.mjs itself — narrowing to a subset would understate the touch-set. we:scripts/lib/gate-config.mjs and we:.claude/settings.json were considered and dropped: gate 8 is retracted from keying off that file's tier: field (reads POLICY_SPEC only, no edit), and the PreToolUse write-gate form of gate 1b is floated only as a stronger alternative, never committed to by Acceptance."
 ---
 
 # Ratify-gate + provenance hooks — make the unreconciled-resolve + PR-number-as-#NNN + hash-slug-drift + unresolved-citation failures script-decidable

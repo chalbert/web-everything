@@ -90,11 +90,57 @@ empty** one (`"labels": []` is a claim; omission is not), writes under the reade
 a view whose `headRefOid` is not the head the judged diff will come from, and stamps `_stagedFrom` into the
 staged bytes so the artefact records where its evidence came from.
 
-It reads the PR, judges the diff, reduces to a verdict, and then **suspends**. It writes nothing on this
-invocation. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
+### On a host where `gh` cannot authenticate — the VM write path (#3539)
+
+The staged view solves reading only. `review.advisory-note` and `review.label-swap` both call `gh`; either can
+halt after judging with its outcome **UNKNOWN**. Before recording on this host, read
+*What still needs you → A host that cannot authenticate to GitHub* below: use
+`node scripts/operations/record-verdict-cli.mjs --runId=<run-id> --to=accepted --json` for an ordinary accept,
+or `--to=clear-human --operatorInstruction="<quoted instruction>"` for the authorized human ceremony.
+That transport runs the real CLI in CI and preserves its guards; it is the preferred write route (#3540).
+
+If an effect has already halted, read
+[docs/agent/vm-sessions.md → When an effect halts with its outcome UNKNOWN](../../docs/agent/vm-sessions.md#when-an-effect-halts-with-its-outcome-unknown)
+before `--resume`. Check the live PR's comments and labels through the credentialed channel to establish what
+actually happened. Only then resolve that effect's entry in `.operations/runs/<run-id>.json`: `applied` for a
+verified completed effect, with a `result` naming the fallback and its evidence; `failed` only when verified
+not applied. If still uncertain, leave it unresolved. A `failed` entry permits retry; it does not give this
+host a `gh` credential. Complete a missing effect through the working channel, verify it on GitHub, mark it
+`applied`, then run `node scripts/operations/run.mjs review-pr --resume=<run-id>`. Never replay blindly.
+
+**Keep the juror's words.** If `review.advisory-note` did not post, its findings remain local. Transcribe the
+juror's findings and verdict verbatim from the run record through the credentialed channel, label the comment
+as a transcription with the run id, and retain the advisory-only / human-ceremony-required notice. Do not
+substitute the session's retelling or present the transcription as an automatically posted juror comment.
+
+**A connector label swap is unguarded.** If the guarded transport is unavailable and the authorized clearance
+must use the connector, first read
+*docs/agent/vm-sessions.md → What the credential-less fallback silently drops*. In the durable clearance
+record, say plainly that the swap bypassed `we:scripts/review-set-label.mjs` and ALL its guards: the actor
+independence check, the `reviewed-sha` / `reviewed-diff` / `reviewed-contribution` markers and the write ordering.
+Do not describe them as passed. Preserve the human ceremony's PR-specific instruction verbatim and identify
+the actual judging actors; a shared git login is not an independence test. This fallback does not authorize
+an agent to clear its own diff or turn an advisory verdict into a human instruction.
+
+### Present the verdict and record the decision
+
+The operation reads the PR, judges the diff, reduces to a verdict, and then **suspends** for the decision.
+On `review:human` it also attempts the automatic advisory note described below; a VM write halt needs the
+recovery above before continuing. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
 reason, the disposition, the net changed-file list, any advisory comment), its `spend` (what the juror cost —
 the operator is on a constrained model budget, so report the dollar figure, never omit it) and its
 `pending.asks` to the operator, then stop.
+
+**Lead with the resolution basis when there is one (#2447).** A backlog-only PR that resolves its item via
+`graduatedTo` — the deliverable already landed in an earlier commit — reads like a hollow resolve if you present
+its file list first. Before the findings, check for the basis: `node scripts/review-detail.mjs <PR>
+--repo=<owner/name> --json` carries it as `resolutionBasis` (and prints its banner under the title), and the drain's
+park comment opens with the same `📦 Resolution basis: graduatedTo: <sha> — no code change — deliverable already
+landed in <sha>` line. Present that line first, then the rest. When you render a comment through
+`review-core-cli.mjs comment`, pass `changedFiles` plus the PR `body` (or `graduatedTo`) in its input and the banner
+heads the comment for you — it fires only for an all-`backlog/` diff, so a code resolve renders unchanged. What
+you are still judging on such a PR is whether the cited commit really delivers the item's acceptance; the banner
+says where to look, it is not a verdict.
 
 **A run seats TWO jurors, and `--lens=` steers only the first (#3319).** There are two declared `judge` steps:
 `judge`, whose lens comes from `--lens=` and defaults to `correctness` (`MANDATORY_LENSES[0]`), and
@@ -132,7 +178,7 @@ earned beside it (#3335):** the write-up's *Earned vs seated* line names the der
 that were earned but did not sit, so "3 panel lenses did not run" can be read as proportionate or as a
 shortfall. Carry both halves; neither sentence means anything without the other.
 
-On the operator's explicit decision:
+On the operator's explicit decision (on a VM, use the write path above):
 
 ```
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=accept    # → review:accepted
@@ -140,6 +186,11 @@ node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes   #
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes --reason="<what must change>"   # required when the juror found nothing
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=abstain   # → records nothing at all
 ```
+
+**`accepted` on a `review:human` PR is refused by `decideSetLabel` by design; on a VM where the guarded
+`--to=clear-human` transport is unavailable, the connector is the only route for an authorized human clearance,
+and disclosure that it bypasses `we:scripts/review-set-label.mjs` and all its guards is mandatory.**
+Use the human ceremony under *What still needs you*; `--answer=accept` cannot replace it.
 
 Five things you no longer have to remember, because the machinery holds them:
 
@@ -153,8 +204,8 @@ Five things you no longer have to remember, because the machinery holds them:
 - **The diff is on the net basis** vs current `main` (#2450/#2901), and the juror is told that file set as
   ground truth. `gh pr diff`'s inflated three-dot list never reaches it. A mis-shaped `exec` (#2952) is a hard
   refusal, not a quiet fallback.
-- **Re-running is safe, and now provably so.** A `--resume` re-enters the effects, skips every one already
-  applied, and refuses to guess at one whose outcome is unknown. No duplicate comment.
+- **Re-running skips applied effects.** A `--resume` refuses to guess at an UNKNOWN outcome; resolve it using
+  *On a host where `gh` cannot authenticate — the VM write path* above before resuming.
 - **The label swap goes through `we:scripts/review-set-label.mjs`** — the single home (#2644), with the
   `reviewed-sha` / `reviewed-diff` / `reviewed-contribution` markers and the #2964 write ordering. `accepted` on
   a `review:human` PR is refused in `decideSetLabel`'s pure core, so the operation cannot clear a gate-self PR
@@ -210,6 +261,9 @@ call anything new. It is unmistakably NOT the real ceremony's comment: no `**Dec
 touched, an explicit "advisory only — the human ceremony is still required" statement top and bottom. A
 `review:pending` PR is completely unaffected — the step declares no effect at all for it.
 
+On a host without `gh`, that automatic post can halt as UNKNOWN. Follow the VM write-path section above to
+verify the outcome and, if missing, publish a labelled verbatim transcription before resuming.
+
 ## What still needs you
 
 **The two shapes of a `review:human` park.** Read the drain's comment to tell them apart (`deriveReviewDisposition`,
@@ -221,7 +275,7 @@ touched, an explicit "advisory only — the human ceremony is still required" st
   pushed nothing. You break the tie.
 
 **Clearing a gate-self PR — the human ceremony (#2895).** `--answer=accept` is REFUSED on a `review:human` PR,
-and that is the invariant working. The only thing that removes `review:human` is:
+and that is the invariant working. The guarded human-ceremony command is:
 
 ```
 node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=clear-human --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
@@ -238,8 +292,9 @@ judgment, not a declared input. **You may run it ONLY on an explicit in-conversa
 operator naming that PR, and you must pass that instruction verbatim as `--reason`.** No instruction, or an
 instruction about a different PR: hand the operator the command line and stop. Nothing in the tool checks who
 ran it — #2895 ruled the unforgeable actor signal DEFERRED, so what stands in the way of a clearance nobody
-asked for is that misuse takes a written lie. Do not go looking for a third route; there is none, and there is
-no `--force`. Its durable comment says the clearance was a HUMAN CEREMONY, not an established-independent
+asked for is that misuse takes a written lie. On a VM use the guarded transport below, or the disclosed
+connector fallback in the VM write-path section when that transport is unavailable; neither relaxes the
+ceremony's authorization, and there is no `--force`. Its durable comment says the clearance was a HUMAN CEREMONY, not an established-independent
 review — never describe it as the latter.
 
 **A self-cleared verdict (#2844).** `--answer=accept` also refuses when the clearing actor is provably the PR's
@@ -252,15 +307,25 @@ only downgrades the record to *"Independence NOT established"*.
 an accept. Do not re-run the panel: prove the net patch is byte-identical, then re-run the operation with a body
 that says so. `reviewed-contribution` (#x9xqexm) already covers pure base movement.
 
-**A host that cannot authenticate to GitHub — record through the operation, never by hand (#xrk6hmj).** On a
-cloud VM no local process holds a GitHub credential, so the `record` effect's shell-out to
+**A host that cannot authenticate to GitHub — record through the guarded transport (#xrk6hmj).** On a
+cloud VM no local process holds a GitHub credential, so `record`'s label-swap effect's shell-out to
 `we:scripts/review-set-label.mjs` fails and the verdict has to travel as a file on the `ops/review-requests`
 branch, which `we:.github/workflows/apply-review-request.yml` applies with the real CLI. That transport has a
-caller now — use it:
+caller now — use it, and use the SELF-SUFFICIENT one (#3540):
 
 ```
-node scripts/operations/run.mjs record-verdict --runId=<run-id> --to=accepted|changes|clear-human [--operatorInstruction="<quoted instruction>"] --json
+node scripts/operations/record-verdict-cli.mjs --runId=<run-id> --to=accepted|changes|clear-human [--operatorInstruction="<quoted instruction>"] --json
 ```
+
+**Use `record-verdict-cli.mjs`, not the bare `run.mjs record-verdict`, on a host with no `gh` (#3540).** Before
+this, the write-up `record-verdict` needs was staged ONLY by `review-pr`'s own `record` step — bundled with the
+`gh`-needing label swap — so reaching it meant a separate, manual `review-pr --resume=<runId> --answer=accept`
+first, which then halted on the label swap it could never complete: a clean, agent-reviewable accept recorded
+as an indistinguishable `effect-halted` run. `record-verdict-cli.mjs` answers `review-pr`'s `confirm` and stages
+its write-up (`stageVerdict`, the local half — no `gh`) as part of THIS SAME call, so `--runId=<run-id>
+--to=accepted` is the whole thing: no prior `review-pr --resume` of your own. (`run.mjs record-verdict` still
+works exactly as before for a host that already has the write-up staged some other way — e.g. re-recording a
+verdict whose `review-pr` run already completed `record` in full.)
 
 **There is deliberately no `--pr`.** The subject, the repo, the juror's session id and the staged write-up are
 read back out of the run record the review itself wrote, because the failure mode here is not tedium — it is
@@ -271,9 +336,13 @@ transport branch over your lane — the operation pushes through its own worktre
 hand takes your uncommitted work with it.
 
 It refuses rather than inventing: a run that produced no verdict, a run that is not a review, and a run that
-staged no write-up are all refused, because each would put a request on the transport branch indistinguishable
-from a real review. `--to=clear-human` still carries every constraint of the ceremony above — the instruction
-goes in `--operatorInstruction`, verbatim, and the applier refuses the target without it.
+genuinely staged no write-up are all refused, because each would put a request on the transport branch
+indistinguishable from a real review. The refusal now names WHY the write-up is missing (#3540) — a deliberate
+`abstain`, a `confirm` that still needs an answer, or (unreachable in the ordinary case) a genuine defect — so
+it no longer reads as "the review was defective" when a clean review simply had not been recorded yet.
+`--to=clear-human` still carries every constraint of the ceremony above — the instruction goes in
+`--operatorInstruction`, verbatim, and the applier refuses the target without it, and it names no `review-pr`
+confirm answer, so `record-verdict-cli.mjs`'s pre-pass never touches the review-pr run for it.
 
 ## Invariant
 

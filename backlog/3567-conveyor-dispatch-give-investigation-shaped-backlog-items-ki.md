@@ -36,3 +36,10 @@ Gap found live 2026-09-06/07: build-shaped backlog items auto-get a doctrine-loa
 6. **Explicitly out of scope**: this does NOT change we:scripts/operations/explore.mjs (#3150's manually-invoked
    N-panelist committee) — that stays the on-demand tool a live session calls by hand; this item only wires the
    conveyor's own automatic per-item dispatch to recognize and correctly brief an investigation-shaped card.
+
+## Placement note (2026-09-07)
+
+This item's kind-based dispatch routing generalizes we:backlog/2445's own "item selection/authoring" AI seam
+past the build-only path. we:backlog/3620 tracks generalizing it into the Loop's own item-selection
+substrate under the existing Plateau Loop epic (we:backlog/2445). Build and land this item for WE's own
+conveyor regardless; this note is a forward pointer, not a dependency.

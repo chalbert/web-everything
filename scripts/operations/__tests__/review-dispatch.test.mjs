@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
-  REVIEW_DISPATCH_DISALLOWED_TOOLS,
+  REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
 } from '../review-dispatch.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
@@ -117,6 +117,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
+      '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
@@ -169,12 +170,36 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
+      '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
     ]);
+  });
+
+  // #xy8di3v — extending #3418/#xqyyoje's static system-prompt fix to review-dispatch: live-confirmed
+  // 2026-09-07, review-1998/2024/2027 each read a genuinely, correctly instantiated brief and wrongly
+  // concluded they'd been handed a raw template — see we:backlog/3606-*.md. Pin the argv shape directly, the
+  // same way dispatch-lane-io.test.mjs pins it for the build-dispatch side.
+  it('#xy8di3v — always passes REVIEW_DISPATCH_SYSTEM_PROMPT_FILE via --append-system-prompt-file, ahead of '
+    + 'the disallowed-tools deny list and any extraArgs', () => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234,
+      repo: 'chalbert/web-everything',
+      root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
+    });
+    const promptFileIdx = calls[0].argv.indexOf('--append-system-prompt-file');
+    expect(promptFileIdx).toBeGreaterThan(-1);
+    expect(calls[0].argv[promptFileIdx + 1]).toBe(REVIEW_DISPATCH_SYSTEM_PROMPT_FILE);
+    const disallowedIdx = calls[0].argv.findIndex((a) => a.startsWith('--disallowedTools='));
+    expect(disallowedIdx).toBeGreaterThan(promptFileIdx);
   });
 });
 
@@ -260,6 +285,19 @@ describe('assertMainNotStale', () => {
 
   it('does not refuse when the staleness check is offline (fail-soft, matching main-staleness.mjs itself)', () => {
     expect(assertMainNotStale('/repo', () => ({ offline: true }))).toEqual({ offline: true });
+  });
+
+  // #3637 — a checkout sitting on a POC branch is behind `origin/main` BY CONSTRUCTION, so the question this
+  // guard asks has to be "behind its own delivery target", not "behind main".
+  it('measures staleness against a NAMED base, and says which one it meant', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 7, ahead: 0, dirty: false, warning: 'stub' }), { base: 'lane/mechanical-dispatcher' }))
+      .toThrow(/7 commit\(s\) behind origin\/lane\/mechanical-dispatcher/);
+  });
+
+  it('defaults to main, so every pre-#3637 caller is byte-identical', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 1, ahead: 0, dirty: false, warning: 'stub' })))
+      .toThrow(/behind origin\/main/);
+    expect(assertMainNotStale('/repo', FRESH)).toEqual({ fresh: true, behind: 0 });
   });
 });
 

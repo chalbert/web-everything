@@ -64,6 +64,7 @@ import {
   composeInvestigationPrompt,
   createExploreObservers,
   createExploreSinks,
+  defaultClaudeProvider,
   escapeHtml,
   inheritedTopicDates,
   isReportComplete,
@@ -879,5 +880,100 @@ describe('the io shell — refusals that keep a malformed run out of the world',
     });
     return expect(sinks[INVESTIGATE_EFFECT]({ panelist: 'p1', brief: 'go', expectedWithinMinutes: 10 }, { runId: 'run-a' }))
       .resolves.toMatchObject({ expectedBy: '2026-08-17T10:10:00.000Z' });
+  });
+});
+
+// #3579 — the provider port between "a panelist is ready to investigate" and any one CLI's argv/output. Mirrors
+// `dispatch-lane.test.mjs`'s own "the provider port — #3579" block.
+describe('the provider port — #3579', () => {
+  it('accepts a hand-written PORT-shaped fake (not a CLI-argv-shaped spawnAgent) and is driven the same way', async () => {
+    const requests = [];
+    const sinks = createExploreSinks({
+      root: '/primary/webeverything', env: SCRATCH_ENV, ensureDir: () => {}, mintSessionId: () => 'sess-port-1',
+      now: () => new Date('2026-08-17T10:00:00.000Z'),
+      // A fake with NO argv/opts shape at all — just the port contract: a request in, a handle out.
+      provider: (request) => {
+        requests.push(request);
+        return 'provider-handle-1';
+      },
+    });
+    const result = await sinks[INVESTIGATE_EFFECT]({ panelist: 'p1', brief: 'go' }, { runId: 'run-explore-a' });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      sessionId: 'sess-port-1', runId: 'run-explore-a', panelist: 'p1', cwd: '/primary/webeverything',
+    });
+    expect(requests[0].prompt).toContain(REPORT_END_MARKER);
+    // …driven the same way the real spawner is: its RETURNED handle becomes the in-flight marker's handle.
+    expect(result).toMatchObject({ handle: 'provider-handle-1' });
+  });
+
+  it('defaultClaudeProvider is ONE implementation of the port, composing buildInvestigatorArgv + spawnAgent', () => {
+    const spawned = [];
+    const handle = defaultClaudeProvider(
+      { sessionId: 'sess-c9', runId: 'run-explore-b', panelist: 'p2', cwd: '/primary/webeverything', prompt: 'go investigate' },
+      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; } },
+    );
+    expect(handle).toBe('sess-c9');
+    expect(spawned).toEqual([{
+      argv: buildInvestigatorArgv({
+        sessionId: 'sess-c9', runId: 'run-explore-b', payload: { panelist: 'p2' }, prompt: 'go investigate',
+      }),
+      opts: { cwd: '/primary/webeverything' },
+    }]);
+  });
+
+  it('a plain spawnAgent (the old CLI-argv-shaped stub) still drives the DEFAULT provider unmodified', async () => {
+    const spawned = [];
+    const sinks = createExploreSinks({
+      root: '/primary/webeverything', env: SCRATCH_ENV, ensureDir: () => {}, mintSessionId: () => 'sess-legacy',
+      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+    });
+    const result = await sinks[INVESTIGATE_EFFECT]({ panelist: 'p1', brief: 'go' }, { runId: 'run-explore-c' });
+    expect(spawned).toHaveLength(1);
+    expect(result).toMatchObject({ handle: 'sess-legacy' });
+  });
+
+  // #3579 review — `composeInvestigationPrompt`'s own empty-brief refusal now runs while BUILDING the request
+  // object passed to `provider`, i.e. inside the try/catch that also handles spawn failures. Prove the
+  // `if (e && e.notApplied) throw e;` guard actually preserves the pre-#3579 "clean failed, not indeterminate"
+  // shape end to end, not just by unit-testing `composeInvestigationPrompt` in isolation.
+  it('an empty-brief refusal, reached while building the provider request, still rejects CLEAN — not indeterminate', async () => {
+    const sinks = createExploreSinks({
+      root: '/primary/webeverything', env: SCRATCH_ENV, ensureDir: () => {}, mintSessionId: () => 'sess-empty',
+      spawnAgent: () => { throw new Error('must not spawn — refused before any process could exist'); },
+    });
+    await expect(sinks[INVESTIGATE_EFFECT]({ panelist: 'p1', brief: '  ' }, { runId: 'run-explore-empty' }))
+      .rejects.toMatchObject({ notApplied: true, message: expect.stringContaining('empty brief') });
+  });
+
+  it('a provider returning no handle (null/undefined) falls back to the minted sessionId, exactly like the default', async () => {
+    const sinks = createExploreSinks({
+      root: '/primary/webeverything', env: SCRATCH_ENV, ensureDir: () => {}, mintSessionId: () => 'sess-no-handle',
+      provider: () => undefined,
+    });
+    const result = await sinks[INVESTIGATE_EFFECT]({ panelist: 'p1', brief: 'go' }, { runId: 'run-explore-nh' });
+    expect(result).toMatchObject({ handle: 'sess-no-handle' });
+  });
+
+  // #3579 review (correctness + standards-conformance, twice, mirroring the dispatch-lane finding) —
+  // `defaultClaudeProvider` forwards a NARROWED `{panelist}` object to `buildInvestigatorArgv` instead of the
+  // caller's whole `payload`/`ctx`. Prove that is lossless by construction: `buildInvestigatorArgv` reads only
+  // `payload?.panelist`, so the argv it produces from the narrowed request is byte-identical to calling it
+  // directly with a richer payload carrying extra fields.
+  it('the narrowed request `defaultClaudeProvider` builds is lossless — identical argv to a full-payload buildInvestigatorArgv call', () => {
+    const richPayload = {
+      panelist: 'p3',
+      // fields buildInvestigatorArgv does NOT read — present to prove they were never needed, not silently dropped.
+      brief: 'go investigate', expectedWithinMinutes: 30, unrelatedField: 'ignored-by-buildInvestigatorArgv',
+    };
+    const directArgv = buildInvestigatorArgv({
+      sessionId: 'sess-parity', runId: 'run-explore-parity', payload: richPayload, prompt: 'go investigate',
+    });
+    const spawned = [];
+    defaultClaudeProvider(
+      { sessionId: 'sess-parity', runId: 'run-explore-parity', panelist: richPayload.panelist, cwd: '/primary/webeverything', prompt: 'go investigate' },
+      { spawnAgent: (argv) => { spawned.push(argv); return ''; } },
+    );
+    expect(spawned[0]).toEqual(directArgv);
   });
 });

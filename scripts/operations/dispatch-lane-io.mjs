@@ -57,6 +57,8 @@ const execFileAsync = promisify(execFile);
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
+// #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
+import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
@@ -177,9 +179,11 @@ export function readTick({
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
   now = () => new Date(),
+  all = false,
+  verbose,
 } = {}) {
   const key = normNum(num);
-  if (!key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
+  if (!all && !key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
 
   // THE CALLER'S BOOKKEEPING, or none. A missing file is a REFUSAL, not a silent fall back to `{}`: a caller
   // that named a file meant to dispatch under its live guards, and quietly dropping them is precisely the
@@ -195,6 +199,13 @@ export function readTick({
     bookkeepingSource = 'file';
   }
 
+  // An explicit verbose setting bypasses tick-core's read-and-advance of the
+  // persisted diagnostic window. Read-only reports must supply false.
+  if (verbose != null) {
+    const payload = JSON.parse(stdin);
+    stdin = JSON.stringify({ ...payload, config: { ...payload.config, verbose } });
+  }
+
   let tick;
   try {
     tick = JSON.parse(String(runNode([tickCli(root)], { cwd: root, input: stdin })));
@@ -203,6 +214,45 @@ export function readTick({
     throw new Error(`dispatch-lane-io: could not read the conveyor tick — ${msg}`);
   }
   const decisions = tick && typeof tick.decisions === 'object' && tick.decisions ? tick.decisions : {};
+  if (all) {
+    if (!tick?.decisions?.admission) {
+      throw new Error('dispatch-lane-io: tick has no admission evidence for the whole queue');
+    }
+    const evidence = tick.decisions.admission;
+    const keys = [...new Set([
+      ...evidence.queue.filter((row) => row.buildQueued),
+      ...(evidence.cleared ?? []), ...evidence.held, ...evidence.planned,
+    ].map((row) => normNum(row.num)).filter(Boolean))];
+    const items = loadItems();
+    const observedAt = now();
+    const tickJson = JSON.stringify(tick);
+    const texts = new Map();
+    if (String(bookkeepingFile || '').trim()) texts.set(bookkeepingFile, readText(bookkeepingFile));
+    const cachedText = (path) => {
+      if (!texts.has(path)) texts.set(path, readText(path));
+      return texts.get(path);
+    };
+    let agentsRead = false;
+    let agents;
+    let agentsError;
+    const cachedAgents = () => {
+      if (!agentsRead) {
+        agentsRead = true;
+        try { agents = listAgents(); } catch (error) { agentsError = error; }
+      }
+      if (agentsError) throw agentsError;
+      return agents;
+    };
+    // One tick and one item corpus for the entire report. Reuse the SAME selection and
+    // guard reader for each id; never run a second scheduler or persist hypothetical guards.
+    return keys.map((id) => readTick({
+      num: id, root, exec, bookkeepingFile,
+      runNode: () => tickJson, readText: cachedText, loadItems: () => items,
+      listInFlightDispatches, listAgents: cachedAgents, recordLiveness, laneRefForPr, checkAlreadyDone,
+      now: () => observedAt,
+    }));
+  }
+
   // `pr` is an OPTIONAL extra filter — every existing call site (the launch-list scan below, `suppressed`)
   // passes only `rows` and gets the original num-only match; `dispatchedGuard`'s fix/ci-heal branches are the
   // only callers that pass it (see the comment above that selection for why).
@@ -279,6 +329,15 @@ export function readTick({
 
   return {
     resolvedNum: key,
+    admission: tick.decisions?.admission ? {
+      cleared: match(tick.decisions.admission.cleared),
+      prepare: match(tick.decisions.admission.prepare),
+      selection: match(tick.decisions.admission.selection)?.gates ?? [],
+      queueRow: match(tick.decisions.admission.queue),
+      held: match(tick.decisions.admission.held),
+      planned: match(tick.decisions.admission.planned),
+      gates: match(tick.decisions.admission.traces)?.gates ?? [],
+    } : null,
     launch,
     // WHICH LIST IT CAME OUT OF. It picks the brief below, and the session slug and the lane scope in the
     // declaration — one answer, read three times, rather than three re-derivations that can disagree.
@@ -597,25 +656,51 @@ export function defaultLoadItems(root) {
  *  hold — but this function used to narrow the record down to `num`/`slug`/`specPath`/`scope` and drop it,
  *  which is why the manual `--num=<N>` path had no `blockedBy` awareness at all: the data was computed, never
  *  read here. See `shapeDispatchRead`'s blocked-item refusal, which is what actually reads this field. */
-export function findItem(key, loadItems) {
+export function findItem(key, loadItems, pocRegistry = null) {
   let items = [];
   try { items = loadItems() || []; } catch { return null; }
   const it = (Array.isArray(items) ? items : []).find((x) => normNum(x?.num) === key);
   if (!it || !it.slug) return null;
+  const rawTarget = typeof it.deliveryTarget === 'string' && it.deliveryTarget.trim() ? it.deliveryTarget.trim() : null;
   return {
     num: String(it.num),
+    status: it.status ?? null,
+    deliveryAgent: it.deliveryAgent ?? null,
     slug: String(it.slug),
     specPath: `backlog/${it.num}-${it.slug}.md`,
     // Already repo-qualified by the loader (`we:scripts/...`), which is the form the brief's `--scope` wants.
     scope: Array.isArray(it.scope) ? it.scope.map(String) : [],
     // The still-open `blockedBy` targets (#3462), or `[]` when every edge resolved or the item names none.
     openBlockers: Array.isArray(it.openBlockers) ? it.openBlockers.map(String) : [],
+    // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
+    // loader spreads unknown frontmatter through (`...data`), so this arrives with no loader change; it is
+    // narrowed here for the same reason `openBlockers` is — a field that is computed but never carried through
+    // this function is a field the dispatch path cannot see.
+    //
+    // RESOLVED AND VALIDATED HERE, in the io shell, not in the declaration. `we:scripts/operations/
+    // dispatch-lane.mjs` is asserted (by its own suite) to reach nothing that can act — no `node:` specifier
+    // anywhere in its import graph — and the registry lives in a file, so the read belongs on this side. The
+    // declaration only reads the resolved `deliveryBase` string.
+    deliveryTarget: rawTarget || null,
+    deliveryBase: resolveDeliveryBase(rawTarget, it.num, pocRegistry),
   };
+}
+
+/** #3637 — the delivery target for one item, validated against the POC-branch registry. An UNREGISTERED
+ *  branch THROWS: doctrine rule 10(c) says a POC branch must be DECLARED, and a dispatch aimed at an
+ *  undeclared ref would fork a lane from a ref that may not exist and then have nowhere to land it. The same
+ *  predicate runs as a LINT at filing time (`we:scripts/check-backlog-item.mjs`), so the normal way to satisfy
+ *  this is never to reach it with a bad value. `registry` is injected for tests. */
+export function resolveDeliveryBase(target, num, registry) {
+  const reg = registry ?? readPocRegistry();
+  const verdict = validateDeliveryTarget(reg, target);
+  if (!verdict.ok) throw new Error(`dispatch-lane.read: #${num} — ${verdict.error}`);
+  return verdict.target;
 }
 
 /** `readTick` bound to one root — the shape the declaration wants. */
 export function createTickReader(bindings = {}) {
-  return ({ num, bookkeepingFile }) => readTick({ ...bindings, num, bookkeepingFile });
+  return ({ num, bookkeepingFile, all = false, verbose = bindings.verbose }) => readTick({ ...bindings, num, bookkeepingFile, all, verbose });
 }
 
 /**
@@ -804,12 +889,34 @@ export function isPreSpawnRefusal(error) {
  * and the isolation default are the two things a first live run has to settle; #xaibmeu, which routes the
  * conveyor through this operation, is where that happens.
  *
+ * ── THE PROVIDER PORT (#3579) ───────────────────────────────────────────────────────────────────────────────
+ *
+ * `provider` is the seam between "an item is ready to dispatch" and "some CLI's argv/stdout" — the boundary
+ * this item (#3579) names, mirroring #3370's judge-seam extraction. Its shape is deliberately independent of
+ * any one CLI:
+ *
+ *   request:  {sessionId, cwd, prompt, sessionSlug, num, extraArgs, systemPromptFile}
+ *             — a session/item identity, the FILLED brief text, and an expected-duration hint (read by the
+ *             caller from `payload.expectedWithinMinutes`, not part of the request itself).
+ *   returns:  a durable handle string (or a Promise of one) usable for LATER liveness polling — never a raw
+ *             stdout blob or a CLI-shaped result.
+ *
+ * `defaultClaudeProvider` is ONE implementation of this port, not the port itself: it composes
+ * {@link buildAgentArgv} (Claude's argv construction) with the injected `spawnAgent` (the CLI-shaped seam that
+ * already existed) and answers with `sessionId` as the handle — Claude's own liveness reads (`stampLiveness`
+ * et al.) already poll by that same minted id, so {@link parseBackgroundedId}'s stdout parsing plays no part in
+ * producing THIS handle; it stays exactly where it was, serving the resume-detection path
+ * (`resumeSucceeded`) that reads a live spawn's own printed id.
+ *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
  *   so this is the checkout it runs `lane-pool acquire` from, never the lane itself.
- * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
+ * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`. Feeds
+ *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT `spawnAgent` goes through. See
  *   {@link readTick} for why this is a second seam and not the same one.
+ * @param {(request: object) => (string|Promise<string>)} [o.provider] - the PORT (see above). Defaults to
+ *   {@link defaultClaudeProvider} closed over `spawnAgent`.
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
@@ -819,6 +926,7 @@ export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
+  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
@@ -827,10 +935,21 @@ export function createDispatchSinks({
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
       const sessionId = String(mintSessionId());
-      const argv = buildAgentArgv({ sessionId, payload, extraArgs, systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE });
+      let handle;
       try {
-        spawnAgent(argv, { cwd: root });
+        handle = await provider({
+          sessionId,
+          cwd: root,
+          prompt: payload?.prompt,
+          sessionSlug: payload?.sessionSlug,
+          num: payload?.num,
+          extraArgs,
+          systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+        });
       } catch (e) {
+        // A validation failure `buildAgentArgv` already proved happened before any process existed (e.g. an
+        // empty prompt) carries `.notApplied` — rethrow it as-is rather than reclassifying it as indeterminate.
+        if (e && e.notApplied) throw e;
         if (isPreSpawnRefusal(e)) {
           throw notApplied(`claude could not be started (${String(e.code)}) — no agent exists`, { sessionId });
         }
@@ -845,11 +964,32 @@ export function createDispatchSinks({
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
       return inFlight({
-        handle: sessionId,
+        handle: handle != null ? String(handle) : sessionId,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });
     },
   };
+}
+
+/**
+ * THE DEFAULT provider port implementation (#3579) — Claude's own. Translates the port's CLI-independent
+ * request into {@link buildAgentArgv}'s payload shape, hands the resulting argv to `spawnAgent`, and answers
+ * with the pre-minted `sessionId` as the durable handle (matching the pre-#3579 behaviour exactly: the sink
+ * never trusted stdout for the handle, only the id it minted itself).
+ *
+ * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
+ * @param {{spawnAgent?: Function}} [io]
+ * @returns {string}
+ */
+export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts) } = {}) {
+  const argv = buildAgentArgv({
+    sessionId: request.sessionId,
+    payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },
+    extraArgs: request.extraArgs,
+    systemPromptFile: request.systemPromptFile,
+  });
+  spawnAgent(argv, { cwd: request.cwd });
+  return request.sessionId;
 }
 
 /**

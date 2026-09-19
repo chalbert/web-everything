@@ -17,7 +17,7 @@ output on every slash character in every scanned file -- effectively quadratic p
 43.7s of check:standards's 52.7s total (83 percent); an incremental O(1) tail-state tracker dropped the whole
 gate to 7.5s, identical findings, full unit suite green. Also why we:scripts/__tests__/stdout-flush.test.mjs was
 pulled into the slow integration config -- its two heaviest tests hit this bug; now 16.7s, not 88.9s. Algorithmic
-fix only, landed ahead of and independent of xdpzhqc/#3417 (the core-cap + worker-pool item) -- unrelated mechanisms.
+fix only, landed ahead of and independent of 3417/#3417 (the core-cap + worker-pool item) -- unrelated mechanisms.
 
 ## Done when
 

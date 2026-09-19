@@ -12,6 +12,7 @@
  *      helper function is individually correct.
  */
 import { describe, it, expect } from 'vitest';
+import { NON_DISPATCHABLE_KINDS as QUEUE_NON_DISPATCHABLE_KINDS } from '../../conveyor/queue.mjs';
 
 import { advanceWhileRunning, startRun, runStatus } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
@@ -29,9 +30,9 @@ const read = (over = {}) => shapeScaffoldRead({
   ...over,
 });
 
-describe('NON_DISPATCHABLE_KINDS agrees with what queue.mjs itself refuses to clear', () => {
-  it('is exactly epic + decision — the two kinds the conveyor can never build', () => {
-    expect(new Set(NON_DISPATCHABLE_KINDS)).toEqual(new Set(['epic', 'decision']));
+describe('NON_DISPATCHABLE_KINDS agrees with what queue.mjs flags as non-dispatchable', () => {
+  it('matches the keys of the conveyor CLI warning map', () => {
+    expect(new Set(NON_DISPATCHABLE_KINDS)).toEqual(new Set(QUEUE_NON_DISPATCHABLE_KINDS));
   });
 });
 
@@ -123,7 +124,7 @@ describe('the declaration end to end', () => {
     expect(run.verdict.status).toBe('open');
   });
 
-  it('files an EPIC — writes the card but declares NO queue effect', async () => {
+  it.each(QUEUE_NON_DISPATCHABLE_KINDS)('files a %s — writes the card but declares NO queue effect', async (kind) => {
     const registry = buildRegistry();
     const written = [];
     const queued = [];
@@ -134,13 +135,14 @@ describe('the declaration end to end', () => {
 
     let run = advanceWhileRunning(startRun({
       op: FILE_ITEM_OP, id: 'run-fi-2',
-      input: { title: 'An epic', kind: 'epic', digest: 'why it exists' },
+      input: { title: `A ${kind}`, kind, digest: 'why it exists' },
       registry,
     }), { registry });
     run = await runToCompletion(run, { registry, sinks, store: createMemoryRunStore() });
 
     expect(written).toHaveLength(1); // still filed
-    expect(queued).toHaveLength(0); // never cleared — the conveyor can't build an epic
+    expect(run.verdict.kind).toBe(kind);
+    expect(queued).toHaveLength(0); // never cleared — the conveyor can't build this kind
   });
 
   it('respects `--queue=false`: writes the card, never calls the queue sink at all', async () => {

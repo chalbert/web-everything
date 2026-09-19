@@ -3,9 +3,12 @@ bornAs: x8fptpl
 kind: story
 size: 8
 parent: "2804"
-status: open
+status: resolved
 dateOpened: "2026-08-01"
 blockedBy: []
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+graduatedTo: none
 scope:
   - we:scripts/lib/target-registry.mjs
   - we:scripts/__tests__/target-registry.test.mjs

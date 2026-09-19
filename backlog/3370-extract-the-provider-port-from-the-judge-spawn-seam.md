@@ -3,9 +3,11 @@ bornAs: xyp1wnt
 kind: story
 size: 3
 parent: "3369"
-status: open
+status: resolved
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/cli-adapter.mjs"]
 dateOpened: "2026-08-27"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: [operations, multi-provider, refactor]
 ---
 

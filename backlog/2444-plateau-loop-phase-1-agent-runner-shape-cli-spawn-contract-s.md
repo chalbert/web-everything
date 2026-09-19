@@ -46,6 +46,12 @@ the runner interface itself is built by **#2530** (Slice C).
 > contract drift, steering reach, auth path) is already banked below. Prepared here to prepared-fork DoR;
 > the call itself is still open — ratify via `/next decision`.
 
+> **Post-ratification evidence check (2026-09-18, #2456).** The daemon's multi-week operating evidence is now in
+> ([#2456](/backlog/2456-review-the-drain-daemon-s-first-weeks-of-operating-evidence/), ~67 days). As predicted
+> above, none of it bears on the steer or permission forks. For Fork 3 (stop semantics), 9 weeks of
+> clean-`SIGTERM` lease release and one correct wait-out-the-lease double-start recovery support the ratified
+> graceful-then-`SIGTERM` shape. There is no reason to reopen the ruling.
+
 > **Prep assessment (banked 2026-07-12, `/prepare all`):** the docs survey is published at
 > [/research/claude-cli-agent-runner-headless-contract/](/research/claude-cli-agent-runner-headless-contract/)
 > (facts verified against the official docs; report `we:reports/2026-07-12-claude-cli-agent-runner-headless-contract.md`).

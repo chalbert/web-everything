@@ -31,6 +31,7 @@ import { createRegistry } from '../registry.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
 import {
   BRIEF_PLACEHOLDERS,
+  BRIEF_VALUE_RE,
   BRIEF_REQUIRED_BY_KIND,
   BRIEF_TOKEN_RE,
   DEFAULT_EXPECTED_WITHIN_MINUTES,
@@ -59,6 +60,7 @@ import {
   classifyDispatchPr,
   createDispatchObservers,
   createDispatchSinks,
+  defaultClaudeProvider,
   DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
   REPO_ROOT,
   defaultLaneRefForPr,
@@ -78,6 +80,8 @@ import {
   // #xu2krte — resume-or-fresh dispatch.
   parseBackgroundedId,
   resumeSucceeded,
+  // #3637 — the POC delivery target.
+  resolveDeliveryBase,
 } from '../dispatch-lane-io.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -430,7 +434,7 @@ describe('the lane comes from the tick core or nowhere', () => {
 // ── 3. the brief is FILLED, and a half-filled one never leaves the building ─────────────────────────────────
 
 describe('filling the delivery brief', () => {
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b' };
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b', DELIVERY_BASE: 'main' };
 
   it('substitutes all five placeholders and leaves the prose alone', () => {
     const { prompt, unknownTokens } = fillBrief(BRIEF, VALUES);
@@ -791,6 +795,104 @@ describe('what the sink actually runs', () => {
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
     const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-d4' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
+  });
+});
+
+// #3579 — the provider port between "an item is ready to dispatch" and any one CLI's argv/output.
+describe('the provider port — #3579', () => {
+  it('accepts a hand-written PORT-shaped fake (not a CLI-argv-shaped spawnAgent) and is driven the same way', async () => {
+    const requests = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      mintSessionId: () => 'sess-port-1',
+      now: () => new Date('2026-08-13T10:00:00.000Z'),
+      // A fake with NO argv/opts shape at all — just the port contract: a request in, a handle out.
+      provider: (request) => {
+        requests.push(request);
+        return 'provider-handle-1';
+      },
+    });
+    const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1' });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      sessionId: 'sess-port-1', cwd: PRIMARY, prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1',
+    });
+    // …driven the same way the real spawner is: its RETURNED handle becomes the in-flight marker's handle.
+    expect(result).toMatchObject({ handle: 'provider-handle-1' });
+    expect(isInFlightResult(result)).toBe(true);
+  });
+
+  it('defaultClaudeProvider is ONE implementation of the port, composing buildAgentArgv + spawnAgent', () => {
+    const spawned = [];
+    const handle = defaultClaudeProvider(
+      { sessionId: 'sess-c9', cwd: PRIMARY, prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9', extraArgs: ['--model', 'sonnet'] },
+      { spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; } },
+    );
+    expect(handle).toBe('sess-c9');
+    expect(spawned).toEqual([{
+      argv: buildAgentArgv({
+        sessionId: 'sess-c9',
+        payload: { prompt: '# build #9', sessionSlug: 'conveyor-9', num: '9' },
+        extraArgs: ['--model', 'sonnet'],
+      }),
+      opts: { cwd: PRIMARY },
+    }]);
+  });
+
+  it('a plain spawnAgent (the old CLI-argv-shaped stub) still drives the DEFAULT provider unmodified', async () => {
+    const spawned = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+      mintSessionId: () => 'sess-legacy',
+    });
+    const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #legacy', sessionSlug: 'conveyor-legacy', num: 'legacy' });
+    expect(spawned).toHaveLength(1);
+    expect(result).toMatchObject({ handle: 'sess-legacy' });
+  });
+
+  // #3579 review — a validation refusal from `buildAgentArgv` now runs INSIDE the provider call (moved there so
+  // the port can compose it). The only thing preserving the pre-#3579 "clean failed, not indeterminate" shape
+  // is the `if (e && e.notApplied) throw e;` rethrow, and that guarantee was stated only in a comment — prove it
+  // end to end through the real sink + the DEFAULT provider, not just by unit-testing buildAgentArgv in isolation.
+  it('an empty-prompt refusal from buildAgentArgv, reached via the DEFAULT provider, still rejects CLEAN — not indeterminate', async () => {
+    const spawnAgent = () => { throw new Error('must not spawn — refused before any process could exist'); };
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent, mintSessionId: () => 'sess-empty' });
+    // `notApplied: true` (retriable), NOT a bare/UNKNOWN error — the empty-prompt guard already proved nothing
+    // started, and moving `buildAgentArgv` inside the provider call must not blur that into "indeterminate".
+    await expect(sinks[DISPATCH_EFFECT]({ prompt: '  ', sessionSlug: 's', num: '1' }))
+      .rejects.toMatchObject({ notApplied: true, message: expect.stringContaining('empty prompt') });
+  });
+
+  it('a provider returning no handle (null/undefined) falls back to the minted sessionId, exactly like the default', async () => {
+    const sinks = createDispatchSinks({
+      root: PRIMARY, mintSessionId: () => 'sess-no-handle', provider: () => undefined,
+    });
+    const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #x', sessionSlug: 'conveyor-x', num: 'x' });
+    expect(result).toMatchObject({ handle: 'sess-no-handle' });
+  });
+
+  // #3579 review (correctness + standards-conformance, twice) — `defaultClaudeProvider` forwards a NARROWED
+  // `{prompt, sessionSlug, num}` object to `buildAgentArgv` instead of the caller's whole `payload`. Prove that
+  // is lossless by construction, not by assertion: the argv `defaultClaudeProvider` produces from a request
+  // built off a payload carrying EXTRA fields is byte-identical to calling `buildAgentArgv` with that whole
+  // payload directly — because `buildAgentArgv` itself reads only `.prompt`/`.sessionSlug`/`.num` off `payload`.
+  it('the narrowed request `defaultClaudeProvider` builds is lossless — identical argv to a full-payload buildAgentArgv call', () => {
+    const richPayload = {
+      prompt: '# build #42', sessionSlug: 'conveyor-42', num: '42',
+      // fields buildAgentArgv does NOT read — present to prove they were never needed, not silently dropped.
+      expectedWithinMinutes: 90, scope: ['we:scripts/foo.mjs'], unrelatedField: 'ignored-by-buildAgentArgv',
+    };
+    const directArgv = buildAgentArgv({ sessionId: 'sess-parity', payload: richPayload, extraArgs: ['--model', 'sonnet'] });
+    const spawned = [];
+    defaultClaudeProvider(
+      {
+        sessionId: 'sess-parity', cwd: PRIMARY, prompt: richPayload.prompt, sessionSlug: richPayload.sessionSlug,
+        num: richPayload.num, extraArgs: ['--model', 'sonnet'],
+      },
+      { spawnAgent: (argv) => { spawned.push(argv); return ''; } },
+    );
+    expect(spawned[0]).toEqual(directArgv);
   });
 });
 
@@ -1400,6 +1502,8 @@ describe('the tick reader', () => {
   it('resolves the item\'s spec path, repo-qualified scope and open blockers from the canonical loader', () => {
     expect(readTick({ num: '3037', ...bindings }).item).toEqual({
       num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: [],
+      // #3637 — an item with no `deliveryTarget:` resolves to the default target, `main`.
+      deliveryTarget: null, deliveryBase: 'main', status: null, deliveryAgent: null,
     });
   });
 
@@ -1541,9 +1645,11 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     return { run: outcome.run, spawned };
   }
 
-  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. */
+  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. Passes
+   *  the KIND'S OWN required set (not `fillBrief`'s build-shaped default), so a name only one kind's brief
+   *  carries — `DELIVERY_BASE` since #3637 — is never demanded of a kind that has no such token. */
   function expectedPrompt(kind, values) {
-    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values).prompt;
+    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values, BRIEF_REQUIRED_BY_KIND[kind]).prompt;
   }
 
   // ── criterion 1 ──────────────────────────────────────────────────────────────────────────────────────────
@@ -1606,7 +1712,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
-        SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/',
+        SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',
       }),
     ]);
     expect(run.findings.read.scope).toEqual(['we:scripts/operations/']);
@@ -2161,7 +2267,7 @@ describe('#3110 — attemptTagFor: the pure retry-letter mapping', () => {
 });
 
 describe('#3110 — fillBrief tolerates a blank OPTIONAL placeholder (ATTEMPT_TAG), everything else unchanged', () => {
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x' };
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x', DELIVERY_BASE: 'main' };
 
   it('ATTEMPT_TAG never supplied at all does not throw, even though it is now in the build required set', () => {
     // BRIEF (the synthetic fixture above) never references {{ATTEMPT_TAG}} at all, so this only proves the
@@ -2219,6 +2325,7 @@ describe('#3110 — a fresh build dispatch\'s attempt tag rides its session slug
   it('the REAL delivery-agent brief folds ATTEMPT_TAG into the branch name exactly where step 8 shows', () => {
     const VALUES = {
       ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: '8', SESSION_SLUG: 'conveyor-3037b', SCOPE: 'we:scripts/',
+      DELIVERY_BASE: 'main',
     };
     const firstAttempt = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: '' }, BRIEF_REQUIRED_BY_KIND.build);
     expect(firstAttempt.prompt).toContain('lane/3037-<slug>');
@@ -2422,5 +2529,44 @@ describe('readTick — `openBlockers` reaches the read end to end, from `loadIte
     const v = shapeDispatchRead(out, { num: '3398' });
     expect(v.dispatching).toBe(false);
     expect(v.holdReason).toContain('3443');
+  });
+});
+
+
+// ── #3637 — the POC delivery target rides the brief as {{DELIVERY_BASE}} ────────────────────────────────────
+
+describe('#3637 — deliveryTarget resolves to the brief\'s {{DELIVERY_BASE}}', () => {
+  const REG = { version: 1, branches: [{ branch: 'lane/demo', purpose: 'p', owner: 'o', dateOpened: '2026-09-12', target: 'main', scope: [], graduationItem: null }] };
+
+  it('DELIVERY_BASE is a registered placeholder, required for BUILD only', () => {
+    expect(BRIEF_PLACEHOLDERS).toContain('DELIVERY_BASE');
+    expect(BRIEF_REQUIRED_BY_KIND.build).toContain('DELIVERY_BASE');
+    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+      expect(BRIEF_REQUIRED_BY_KIND[kind]).not.toContain('DELIVERY_BASE');
+    }
+  });
+
+  it('THE REAL BRIEF carries the token — the literal `--base=main` is gone from both the acquire and the open-pr', () => {
+    const brief = readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8');
+    expect(brief).toMatch(/\{\{DELIVERY_BASE\}\}/);
+    expect(brief).not.toMatch(/--base=main\b/);
+  });
+
+  it('an item with NO deliveryTarget resolves to main — today\'s behaviour, byte-identical', () => {
+    expect(resolveDeliveryBase(null, '3037', REG)).toBe('main');
+    expect(resolveDeliveryBase('main', '3037', REG)).toBe('main');
+  });
+
+  it('a REGISTERED POC branch resolves to that branch, either spelling', () => {
+    expect(resolveDeliveryBase('lane/demo', '3037', REG)).toBe('lane/demo');
+    expect(resolveDeliveryBase('origin/lane/demo', '3037', REG)).toBe('lane/demo');
+  });
+
+  it('an UNREGISTERED branch REFUSES the dispatch rather than forking a lane from a ref that may not exist', () => {
+    expect(() => resolveDeliveryBase('lane/never-declared', '3037', REG)).toThrow(/not a registered POC branch/);
+  });
+
+  it('a resolved POC branch survives BRIEF_VALUE_RE — it is pasted unquoted into a shell command', () => {
+    expect(BRIEF_VALUE_RE.test('lane/mechanical-dispatcher')).toBe(true);
   });
 });

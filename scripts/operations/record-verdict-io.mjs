@@ -37,8 +37,16 @@ import { stageOnTransportBranch, trackingRefspec } from '../lib/git-transport-br
 // and #3264's own prose reference it at this path, and a moved symbol should not break its callers silently.
 export { trackingRefspec };
 import { createFileRunStore } from './run-store.mjs';
-import { reviewBodyPath } from './review-pr-io.mjs';
+import { reviewBodyPath, createReviewPrReader, createReviewPrSinks } from './review-pr-io.mjs';
 import { STAGE_REQUEST_EFFECT } from './record-verdict.mjs';
+// #3540 — THE LOCAL DRIVE. `advance`/`runStatus` are the engine's own pure step machinery, `applyPendingEffects`
+// is the ONE thing allowed to apply a declared effect, and `reviewPrOperation`/`REVIEW_EFFECTS`/`confirmAnswerFor`
+// are review-pr's OWN declaration and vocabulary — all imported, none re-derived, so this file's auto-drive
+// cannot answer `confirm` or stage a write-up any differently than a caller driving `review-pr` by hand would.
+import { advance, runStatus } from './engine.mjs';
+import { applyPendingEffects } from './effect-executor.mjs';
+import { createRegistry } from './registry.mjs';
+import { reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor } from './review-pr.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Resolved by SCRIPT LOCATION, never cwd — same reason `run-store.mjs` and `review-pr-io.mjs` do it. */
@@ -229,6 +237,84 @@ export function createRunReader({ root = REPO_ROOT, store = createFileRunStore()
     }
     return { record, body };
   };
+}
+
+/**
+ * #3540 — ADVANCE `review-pr` TO A STAGED WRITE-UP, LOCALLY, WITH NO `gh`. This is what makes ONE
+ * `record-verdict` call (via `we:scripts/operations/record-verdict-cli.mjs`) end to end on a credential-less
+ * host: before this, the ONLY thing that staged a write-up was `review-pr`'s own `record` step, whose SAME
+ * effect list also swapped the label (needs `gh`) — so reaching the write-up meant a separate, manual
+ * `review-pr --resume=<runId> --answer=accept` first, which then halted on the label swap it could never
+ * complete (#3540's own reproduction, PR #1961).
+ *
+ * WHAT THIS DOES. If `record` (the run) is genuinely `awaiting-confirm` and `to` names a real `confirm` answer
+ * (see {@link confirmAnswerFor} — `clear-human` names none, since it is the human ceremony's own clearance, not
+ * a `review-pr` confirm answer), answers it and applies ONLY the resulting `stageVerdict` effect (#3540's own
+ * split — the WRITE_UP, and nothing past it) through the SAME sink `review-pr` itself uses for that type. The
+ * run is then advanced ONE step further so `record`'s own label/ledger/notice effects are DECLARED — a legible
+ * "here's exactly what's left" record — but they are NEVER APPLIED here: they still need `gh`, and applying
+ * them is left to the CI-side applier (`we:.github/workflows/apply-review-request.yml`) once the request this
+ * transport stages lands.
+ *
+ * PURELY ADDITIVE. A run that is not a `review-pr` run, is not genuinely `awaiting-confirm` (already staged,
+ * mid-judge, or answered `abstain`), or a `to` that names no confirm answer, passes through UNCHANGED — this
+ * never invents a decision the caller has not asked for, and never re-answers a run that already has one.
+ *
+ * @param {object|null} record - the run record read from the store, or `null`.
+ * @param {{to: string, store: {read: Function, write: Function}, sinks?: Record<string, Function>}} o
+ * @returns {Promise<object|null>} the (possibly advanced) run record.
+ */
+export async function advanceReviewPrToWriteUp(record, { to, store, sinks = createReviewPrSinks() } = {}) {
+  const answer = confirmAnswerFor(to);
+  if (!answer || !record || record.op !== 'review-pr') return record;
+
+  const registry = createRegistry();
+  registry.register(reviewPrOperation({ readPr: createReviewPrReader() }));
+  if (runStatus(record, { registry }) !== 'awaiting-confirm') return record;
+
+  // TWO `advance` calls, not one: the first resolves the `confirm` resume (an answer is recorded, cursor moves
+  // to `stageVerdict`) and returns — resolving a suspend never executes the NEXT step's function, per the
+  // engine's own contract (`resolvePending`). The second is what actually calls `stageVerdict`'s `effects` fn
+  // and declares the WRITE_UP effect.
+  //
+  // #3540 round 4 (converge, claim-accuracy) — A THROW HERE IS TAGGED, a throw BELOW IS NOT, and that
+  // difference is deliberate, not an oversight. A throw from these two `advance` calls can only be
+  // `planRecordDecision`'s OWN pure-core refusal (INVARIANT 2 / the reasonless-bounce guard) — a deliberate
+  // policy decision, never an infrastructure failure, since nothing here has touched a sink yet. The caller
+  // (`record-verdict-cli.mjs`) needs to tell that apart from a genuine crash (a real disk-write failure inside
+  // the WRITE_UP sink below, say) so it does not relabel an unexpected bug as an expected, no-action-needed
+  // "refused" — see `reviewPrRefusal` there.
+  let run;
+  try {
+    run = advance(record, { registry, resume: { step: record.pending.step, value: answer } });
+    run = advance(run, { registry });
+  } catch (e) {
+    if (e && typeof e === 'object') e.reviewPrRefusal = true;
+    throw e;
+  }
+  store.write(run);
+  if (runStatus(run, { registry }) === 'awaiting-effect') {
+    const outcome = await applyPendingEffects(run, {
+      // ONLY the WRITE_UP sink — see the docblock above. `stageVerdict` never declares anything else, but
+      // scoping the sink table to just this type keeps that a property of THIS call, not an assumption about
+      // the declaration staying that way forever.
+      sinks: { [REVIEW_EFFECTS.WRITE_UP]: sinks[REVIEW_EFFECTS.WRITE_UP] },
+      store,
+    });
+    run = outcome.run;
+    // NOT tagged `reviewPrRefusal` — this is the sink's own failure (e.g. a real disk-write error), a genuine
+    // infrastructure fault, never a deliberate refusal. It propagates as an ordinary, un-tagged throw.
+    if (outcome.error) throw outcome.error;
+    // TWO MORE `advance` calls: the first resolves `stageVerdict`'s finding and moves the cursor to `record`;
+    // the second calls `record`'s `effects` fn, which DECLARES its label/ledger/notice effects — but declaring
+    // is not applying, and this function never calls `applyPendingEffects` on them. The run ends up cleanly
+    // `awaiting-effect` at `record`, a legible "here's exactly what's left, and it needs `gh`" state, rather
+    // than a bare `running` cursor a reader would have to interpret.
+    run = advance(run, { registry });
+    run = advance(run, { registry });
+    store.write(run);
+  }
+  return run;
 }
 
 /**

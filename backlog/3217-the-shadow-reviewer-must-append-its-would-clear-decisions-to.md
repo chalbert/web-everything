@@ -4,9 +4,19 @@ kind: story
 size: 3
 parent: "2405"
 blockedBy: ["3214"]
-status: open
+status: resolved
 dateOpened: "2026-08-20"
+dateStarted: "2026-09-19"
+dateResolved: "2026-09-19"
 tags: []
+scope:
+  - we:scripts/converge-daemon-pass.mjs
+  - we:scripts/review-runner.mjs
+  - we:scripts/lib/review-runner-core.mjs
+  - we:scripts/lib/verdict-ledger.mjs
+  - we:scripts/review-ledger-check.mjs
+  - we:scripts/__tests__/
+  - we:scripts/lib/__tests__/
 ---
 
 # The shadow reviewer must append its would-clear decisions to the verdict ledger

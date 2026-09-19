@@ -137,10 +137,12 @@ function collectAnchorReferences(texts, ids) {
   return referenced;
 }
 
-// Normalized character count of the content behind an anchor: from its definition (explicit `{#id}`,
-// slugged heading, or raw-HTML id) to the next heading line (or EOF). `null` when the anchor can't be
-// located (the resolution gate reports that separately).
-function anchorSubstance(src, id) {
+// Locates the content behind an anchor: from its definition (explicit `{#id}`, slugged heading, or
+// raw-HTML id) to the next heading line (or EOF). Returns `{ startLine, text }` (1-based `startLine`,
+// normalized single-line `text`), or `null` when the anchor can't be located (the resolution gate
+// reports that separately). Shared by `anchorSubstance` (a length) and the point-in-time claim lint
+// below (which needs the text itself).
+function locateAnchorBody(src, id) {
   const lines = src.split('\n');
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -157,7 +159,14 @@ function anchorSubstance(src, id) {
   }
   // The anchor's own line counts too (inline anchors sit mid-paragraph), minus the marker itself.
   body.unshift(lines[start].replace(/\{#[\w-]+\}/g, '').replace(/^#{1,6}\s+/, ''));
-  return body.join(' ').replace(/\s+/g, ' ').trim().length;
+  return { startLine: start + 1, text: body.join(' ').replace(/\s+/g, ' ').trim() };
+}
+
+// Normalized character count of the content behind an anchor. `null` when the anchor can't be located
+// (the resolution gate reports that separately).
+function anchorSubstance(src, id) {
+  const located = locateAnchorBody(src, id);
+  return located ? located.text.length : null;
 }
 
 const HEADING_LINE_RE_LOCAL = /^(#{1,6})\s+(.*)$/;
@@ -181,6 +190,170 @@ function validateAnchorSubstance(anchorIndexSrc, cites, { minChars = 120 } = {})
       errors.push({ message:
         `${docPath}#${m[2]}: cited by codifiedIn but has only ${n} chars of content before the next ` +
         `heading — a rule in name only. Write the rule body at the anchor, or re-point the cite.` });
+  }
+  return errors;
+}
+
+// ── #2849 · AN UNCATALOGUED ANCHOR'S POINT-IN-TIME CLAIM MUST NAME ITS RETIRING OPEN ITEM ────────────────────────
+//
+// THE DRIFT THIS STOPS. An anchor body can carry an honest build-pending disclosure ("today the gate still
+// parks…", "not yet enforced") that is true at the moment written and silently false once the mechanization it
+// describes lands — exactly the "outstanding prevention" drift #2842/#2844 above were built to catch on the
+// STATUS-CLAIM and INVARIANT-ENFORCER surfaces respectively. This rule catches the same drift on free-text
+// PROSE: a temporal claim with no linked expiry rots into a wrong statement of current fact with nothing
+// pointing back at it.
+//
+// SHAPE OF THE RULE, derived from #2854 Fork 1 = (a) ("build status lives on the decision item and the open
+// guards; the anchor states only the timeless rule"), split by catalogue membership per that ruling's
+// consequence table:
+//   (i)  a CATALOGUED anchor — one an `invariants[].anchor` entry in `invariant-catalogue.json` points at —
+//        already carries its build status machine-readably (`status`/`owedTo`, enforced by #2844's
+//        `validateInvariantEnforcers` above). This rule does nothing new there; checking it again in prose
+//        would just be a second, weaker copy of what #2844 already holds.
+//   (ii) an UNCATALOGUED anchor's point-in-time token must be paired with an "until #NNNN" pointer naming the
+//        OPEN item whose resolution retires the claim — the one retiring-item shape #2854 kept (narrower than
+//        this item's original as-filed spec, which allowed any "name the item" phrasing). No pointer, or a
+//        pointer at an item that isn't OPEN (dangling, resolved, dropped): ERROR, directing the author to
+//        either register a catalogue entry (durable, machine-checked) or move the disclosure onto the item
+//        itself (per #2854's ruling) instead of leaving free prose that can go stale unnoticed.
+//
+// TRANSITION GRANDFATHER. #2854 measured that this token list would hard-error the pre-existing corpus without
+// an exemption list for anchors written before this lint shipped. `POINT_IN_TIME_EXEMPT_ANCHORS` is exactly
+// that one-time list — it must only ever SHRINK (as those anchors are rewritten to (i) or (ii)), never grow: a
+// newly written anchor earns no grandfathering.
+//
+// DELIBERATELY OUT OF SCOPE, for the same reason #2844's scope note gives: no attempt to heuristically classify
+// which prose "sounds temporal" beyond the fixed token list — a broader heuristic is exactly the kind of
+// classifier this file's own #2844 note measured as unreliable (5 false positives on a first pass). Authors
+// opt in by writing one of the fixed tokens.
+
+const POINT_IN_TIME_TOKENS = ['today', 'not yet', 'build-pending', 'still parks'];
+const POINT_IN_TIME_RE = new RegExp(`\\b(${POINT_IN_TIME_TOKENS.join('|')})\\b`, 'i');
+const UNTIL_OPEN_ITEM_RE = /\buntil\s+#(\d+)/i;
+const UNTIL_OPEN_ITEM_RE_GLOBAL = /\buntil\s+#(\d+)/gi;
+
+// The one-time transition grandfather (#2854 Fork 1 = (a); #2849). Every id below is an explicit `{#id}`
+// anchor in docs/agent/platform-decisions.md that already carried a point-in-time token before this lint
+// shipped and has not yet been rewritten per the shape above. Shrinks over time; never grows.
+const POINT_IN_TIME_EXEMPT_ANCHORS = new Set([
+  'constellation-placement', 'relocation-granularity', 'backlog-tracking-locus-now-distributed-next',
+  'non-verdict-conformance-matcher', 'portfolio-project-tiering', 'plug-distribution-unit',
+  'native-first-baseline', 'forward-emit-dedicated-ir', 'standard-consumability',
+  'webrouting-runtime-route-ingestion', 'first-party-dogfood', 'vocabulary-completeness-early',
+  'merge-risk-optimistic-with-targeted-lock', 'pr-flow-rollout-mechanism',
+  'operations-declared-once-callers-generated', 'conveyor-dispatch-calls-the-declared-operation',
+  'state-lives-where-its-nature-dictates', 'deterministic-oracle-clears-slice',
+  'human-is-principle-surface-not-path', 'enforce-flip-triple-gated', 'memory-admission-verified-grounding',
+  'statute-anchor-states-rule-not-status', 'size-adds-reviewers-never-refuses',
+  'every-pr-gets-a-look-advisory-floor', 'heavy-command-admission-queue',
+  'agent-mutations-through-typed-operations', 'registry-name-guard-namespace',
+  'ci-lifecycle-total-label-function',
+  // 'anchor' is not a real anchor — it is `collectExplicitAnchorDefs` matching a LITERAL `{#anchor}` example
+  // inside backticks (docs/agent/platform-decisions.md:3760, illustrating the `### … {#anchor}` heading
+  // syntax generically). Fixing that requires making the shared anchor-def collector backtick-aware, which
+  // is #2083's scope, not this lint's — grandfathered here rather than papered over with a narrower regex.
+  'anchor',
+]);
+
+// The "until #NNNN" pointer must sit within this many characters of the TOKEN OCCURRENCE it retires — a
+// fixed char-distance bound, not a sentence-boundary heuristic. A sentence splitter was tried first and a
+// red-team broke it (an under-split on a lowercase-starting continuation sentence silently merges two
+// unrelated clauses into one "sentence", so a pointer that retires a DIFFERENT claim reads as covering
+// this one — the exact failure the guard exists to prevent). A raw character window has no such failure
+// mode: it is pure arithmetic, not a classification that can misfire. 60 is picked with headroom on both
+// sides of the real corpus: every fixture pairing in this file sits within ~15 chars, and the adversarial
+// unrelated-clause case found in review ("Today this still needs manual review. See #4200 for the
+// tracking grooming, filed until #4300 sweeps the backlog.") puts its pointer ~84 chars from the token —
+// outside this window, so it correctly reads as ungrounded. Mirrors the same-clause-adjacency techniques
+// #2842 already uses above for cite-status attribution (its CLAIM_B_WINDOW, tuned the same way).
+const POINT_IN_TIME_WINDOW = 60;
+
+/**
+ * The anchor ids in `docPath` that a catalogue entry already points at — #2849's "cataloged, so exempt"
+ * half. Pure, and exercised directly (not just incidentally through `runStatuteCheck`'s real-corpus pass),
+ * per build-brief discipline: an integration test must exercise the real call path, not only the isolated
+ * `findPointInTimeClaims` unit.
+ * @param {Array<object>} invariants - the `invariants` array from invariant-catalogue.json.
+ * @param {string} docPath - the doc whose anchors to collect (e.g. docs/agent/platform-decisions.md).
+ * @returns {Set<string>}
+ */
+function collectCatalogedAnchorIds(invariants, docPath) {
+  return new Set(
+    (invariants || [])
+      .map((inv) => (inv && typeof inv.anchor === 'string' ? inv.anchor.trim().match(DOC_CITE_RE) : null))
+      .filter((m) => m && `docs/agent/${m[1]}.md` === docPath)
+      .map((m) => m[2]),
+  );
+}
+
+const POINT_IN_TIME_RE_GLOBAL = new RegExp(`\\b(${POINT_IN_TIME_TOKENS.join('|')})\\b`, 'gi');
+
+/**
+ * #2849 — an uncatalogued anchor's point-in-time claim must name the OPEN item that retires it. The
+ * "until #NNNN" pointer must sit within `POINT_IN_TIME_WINDOW` characters of the TOKEN OCCURRENCE it
+ * retires — a pointer elsewhere in a multi-claim anchor body must not silently retire a claim it was
+ * never written to cover (found in review: a body mixing an unrelated "#4300" mention with its own live
+ * "today" disclosure must not read as covered by the other clause's pointer). Pure + injectable
+ * (`isOpenItem`), so the whole rule is fixture-testable without the real tree.
+ * @param {string} src - the statute doc source (docs/agent/platform-decisions.md).
+ * @param {string} docPath - that doc's path, for the message.
+ * @param {{catalogedAnchorIds?: Set<string>, exemptAnchorIds?: Set<string>, isOpenItem: (id:string)=>boolean}} deps
+ * @returns {Array<{message:string}>}
+ */
+function findPointInTimeClaims(src, docPath, { catalogedAnchorIds = new Set(), exemptAnchorIds = new Set(), isOpenItem } = {}) {
+  const errors = [];
+  const seen = new Set();
+  for (const { id } of collectExplicitAnchorDefs(src)) {
+    if (seen.has(id) || catalogedAnchorIds.has(id)) continue;
+    seen.add(id);
+    const located = locateAnchorBody(src, id);
+    if (!located) continue;
+    const text = located.text;
+
+    // Every "until #NNNN" pointer in the whole body, found ONCE and reused for every token occurrence — a
+    // per-token slice-then-match would find the FIRST pointer inside the slice rather than the CLOSEST one
+    // to that specific token, wrongly crediting an earlier, unrelated pointer to a later claim whenever two
+    // tokens' windows overlap. Nearest-by-distance instead, the same "nearest, not leftmost" guard #2842
+    // already applies above for cite-status attribution.
+    const untilPointers = [...text.matchAll(UNTIL_OPEN_ITEM_RE_GLOBAL)];
+
+    const matchedTokens = new Set();
+    let missingPointer = false;
+    const danglingCites = [];
+    for (const m of text.matchAll(POINT_IN_TIME_RE_GLOBAL)) {
+      matchedTokens.add(m[0].toLowerCase());
+      let nearest = null;
+      let nearestDist = Infinity;
+      for (const u of untilPointers) {
+        const dist = u.index < m.index ? m.index - (u.index + u[0].length) : u.index - (m.index + m[0].length);
+        if (Math.max(dist, 0) < nearestDist) { nearestDist = Math.max(dist, 0); nearest = u; }
+      }
+      if (!nearest || nearestDist > POINT_IN_TIME_WINDOW) { missingPointer = true; continue; }
+      if (isOpenItem(nearest[1])) continue; // a live, nearby retiring pointer — the narrow escape #2854 kept
+      danglingCites.push(nearest[1]); // a pointer exists but names a dead item — collect ALL, not just the last
+    }
+    if (!matchedTokens.size) continue; // no point-in-time language in this anchor at all
+
+    if (danglingCites.length) {
+      const cites = [...new Set(danglingCites)];
+      errors.push({ message:
+        `${docPath}:${located.startLine}: anchor "{#${id}}" points a point-in-time claim at ${cites
+          .map((c) => `"until #${c}"`).join(', ')}, but ${cites.length > 1 ? 'none of those are' : `#${cites[0]} is not`} ` +
+        `an OPEN backlog item — a resolved/dropped/absent item retires nothing. Edit ${docPath}:${located.startLine} ` +
+        '— point "until #NNNN" at a live item, or resolve the claim per #2854 (catalogue entry, or move it onto ' +
+        'the item).' });
+      continue;
+    }
+    if (!missingPointer) continue; // every token occurrence paired with a live, nearby pointer
+    if (exemptAnchorIds.has(id)) continue; // pre-existing — grandfathered by the #2849 transition list
+
+    errors.push({ message:
+      `${docPath}:${located.startLine}: anchor "{#${id}}" makes a point-in-time claim (${[...matchedTokens]
+        .map((t) => `"${t}"`).join(', ')}) with no linked open item retiring it nearby. Edit ` +
+      `${docPath}:${located.startLine} — either register an invariant-catalogue.json entry (#2844) naming this ` +
+      'anchor and its real status, or say "until #NNNN" (naming the OPEN item whose resolution retires the ' +
+      `claim) within ${POINT_IN_TIME_WINDOW} chars of the claim, or move the disclosure out of the anchor onto ` +
+      'that item (#2854: build status lives on the decision item, not the timeless rule).' });
   }
   return errors;
 }
@@ -558,6 +731,14 @@ function runStatuteCheck() {
     statusOf: (nnn) => (itemStatuses.has(nnn) ? itemStatuses.get(nnn) : null),
   }));
 
+  // #2849 — an uncatalogued anchor's point-in-time claim must name the OPEN item that retires it (#2854
+  // Fork 1 = (a)). A catalogued anchor is exempt — #2844 above already binds its status machine-readably.
+  errors.push(...findPointInTimeClaims(statuteSrc, statutePath, {
+    catalogedAnchorIds: collectCatalogedAnchorIds(catalogue.invariants, statutePath),
+    exemptAnchorIds: POINT_IN_TIME_EXEMPT_ANCHORS,
+    isOpenItem: (id) => openIds.has(id),
+  }));
+
   return { errors, warnings: [] };
 }
 
@@ -567,4 +748,6 @@ module.exports = {
   anchorSubstance, validateAnchorSubstance, runStatuteCheck,
   collectEnforcerPaths, enforcerPathCandidates, validateInvariantEnforcers, collectOpenItemIds,
   collectItemStatuses, validateCitedItemStatusClaims, citeRunAfterOpen,
+  locateAnchorBody, findPointInTimeClaims, POINT_IN_TIME_TOKENS, POINT_IN_TIME_EXEMPT_ANCHORS,
+  collectCatalogedAnchorIds,
 };

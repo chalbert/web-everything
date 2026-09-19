@@ -14,7 +14,9 @@ import { describe, it, expect } from 'vitest';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
-import { recordVerdictOperation, factsFromRun, buildRequest, RECORD_VERDICT_OP, STAGE_REQUEST_EFFECT } from '../record-verdict.mjs';
+import {
+  recordVerdictOperation, factsFromRun, buildRequest, RECORD_VERDICT_OP, STAGE_REQUEST_EFFECT, describeNoWriteUp,
+} from '../record-verdict.mjs';
 import {
   writeUpName, TRANSPORT_BRANCH, createRecordVerdictSinks, resolveTransportRoot,
   APPLIER_WORKFLOW, BOARD_SOURCE_BRANCH, trackingRefspec,
@@ -142,6 +144,33 @@ describe('the read step refuses a verdict with nothing to say', () => {
   it('refuses when the run staged no write-up — the comment IS the review', () => {
     const decl = ops(() => ({ record: run(), body: '  ' }));
     expect(() => step(decl, 'read').fn({ input: { runId: 'review-pr-abc' } })).toThrow(/staged no write-up/);
+  });
+
+  // #3540 — the refusal now NAMES the reason, so "not recorded yet" reads differently from "genuinely empty".
+  it('names the specific reason in the refusal, via describeNoWriteUp', () => {
+    const decl = ops(() => ({ record: run({ pending: { kind: 'confirm', step: 'confirm' } }), body: '' }));
+    expect(() => step(decl, 'read').fn({ input: { runId: 'review-pr-abc' } })).toThrow(/has not been RECORDED yet/);
+  });
+});
+
+describe('#3540 describeNoWriteUp — WHY is the write-up missing?', () => {
+  it('names a deliberate abstain as deliberate, not a defect', () => {
+    expect(describeNoWriteUp(run({ findings: { confirm: 'abstain' } }))).toMatch(/deliberate/);
+  });
+
+  it('names a still-unanswered confirm, and points at the self-sufficient CLI', () => {
+    const msg = describeNoWriteUp(run({ pending: { kind: 'confirm', step: 'confirm' } }));
+    expect(msg).toMatch(/has not been RECORDED yet/);
+    expect(msg).toMatch(/record-verdict-cli\.mjs/);
+  });
+
+  it('names anything else as a genuine defect — the judge shape should make this unreachable', () => {
+    expect(describeNoWriteUp(run())).toMatch(/should not be reachable/);
+  });
+
+  it('never throws on a missing or malformed record', () => {
+    expect(describeNoWriteUp(null)).toMatch(/No run record/);
+    expect(describeNoWriteUp(undefined)).toMatch(/No run record/);
   });
 });
 

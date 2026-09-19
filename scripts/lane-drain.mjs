@@ -73,7 +73,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
-import { isHash, isNum, idFromName, applyLedger, swapHashes } from './backlog/id.mjs';
+import { isHash, isNum, idFromName, applyLedger, swapHashes, mapHashReferences } from './backlog/id.mjs';
 // #2603 — the drain's resolve-reachable check reads `status:` FRONTMATTER-strict (see `resolveReachableFromBody`),
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
@@ -605,8 +605,11 @@ const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
  * `agent-memory-src/*.md` (#3100 — the compiled agent-memory bundle every future session loads into
  * context; a dangling hash there is silently READ and misdirects every session from then on, not merely
  * discoverable like a stale backlog cross-ref) — numbering each item AND repairing any cross-lane
- * `blockedBy`/`parent`/`#ref` that still points at an already-numbered blocker by its old hash. Commits the
- * rename+rewrites in ONE scoped commit; the caller publishes. Best-effort like the rest of the reconcile: a
+ * `blockedBy`/`parent`/`#ref` that still points at an already-numbered blocker by its old hash.
+ * Missing local mappings for explicit references fall back to bornAs on origin/main (#2903).
+ * Unresolved references are warned and returned as `unresolvedReferences`, distinguishing visible
+ * in-flight targets from potentially dead/unobservable targets. This does not change the numbering trigger.
+ * Commits the rename+rewrites in ONE scoped commit; the caller publishes. Best-effort like the rest of the reconcile: a
  * failure is reported, the land stands.
  */
 export function numberPendingHashes(CWD, { dryRun = false } = {}) {
@@ -696,12 +699,47 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     assigned.push({ hash, nnn });
   }
 
-  // applyLedger numbers each item AND stamps its bornAs:<hash> proof-of-land (#2392) — the durable,
-  // cross-clone, renumber-immune landed record read back via landedNumberFor. Derived from the same
-  // ledger that assigns the number, so the local id-ledger.json (numbering bookkeeping) and
-  // bornAs-on-main (the sole cross-clone landed proof) cannot diverge. It also returns pathRenames
-  // (#2400) — co-referenced ON-DISK report files whose stem embeds a numbered hash.
-  const { renames, rewrites, pathRenames } = applyLedger(files, ledger);
+  // Local bookkeeping cannot answer for another clone. Resolve explicit references through the
+  // durable origin/main bornAs record before applying this clone's ledger (#2903).
+  const unresolvedReferences = [];
+  const resolutions = new Map();
+  let visibleHashItems;
+  const resolveReference = (hash, name) => {
+    if (ledger[hash] !== undefined) return hash; // the existing ledger pass owns this rewrite
+    if (!resolutions.has(hash)) resolutions.set(hash, landedNumberFor(hash, CWD));
+    const landed = resolutions.get(hash);
+    if (landed !== null) return landed;
+    // A visible provisional item is positive evidence of in-flight work. Absence is NOT proof
+    // of death: another clone may have an unfetched/private branch. Surface that uncertainty.
+    if (!visibleHashItems) {
+      visibleHashItems = new Set(stems.map(idFromName).filter(isHash));
+      const refs = (quietGit(CWD, ['for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/']) || '').split('\n').filter(Boolean);
+      for (const ref of refs) {
+        const paths = quietGit(CWD, ['ls-tree', '-r', '--name-only', ref, '--', 'backlog/']) || '';
+        for (const path of paths.split('\n')) {
+          const id = idFromName(path.replace(/^backlog\//, ''));
+          if (isHash(id)) visibleHashItems.add(id);
+        }
+      }
+    }
+    const status = visibleHashItems.has(hash) ? 'in-flight' : 'unresolvable';
+    if (!unresolvedReferences.some((r) => r.hash === hash && r.name === name)) {
+      unresolvedReferences.push({ hash, name, status });
+      console.warn(`[numberPendingHashes] ${name}: ${hash} ${status}` +
+        (status === 'unresolvable' ? ' (no ledger, bornAs, or visible provisional item; potentially dead)' : ' (visible provisional item; left pending)'));
+    }
+    return hash;
+  };
+  const resolvedFiles = files.map(({ name, content }) => ({ name,
+    content: mapHashReferences(content, (hash) => resolveReference(hash, name)),
+  }));
+  // Only newly assigned items are stamped; fallback mappings never alter birth records or numbering.
+  const { renames, rewrites, pathRenames } = applyLedger(resolvedFiles, ledger);
+  // applyLedger compares against resolvedFiles, so retain fallback-only edits as well.
+  const rewrittenNames = new Set(rewrites.map((r) => r.name));
+  for (const file of resolvedFiles) {
+    if (!rewrittenNames.has(file.name) && file.content !== contentByName.get(file.name)) rewrites.push(file);
+  }
   // #2400 — path-value refs are derived from UNTRUSTED backlog content, so CONFINE them to inside the repo
   // before acting: a crafted `relatedReport`/body token like `../../../outside/notes-<hash>.md` would
   // otherwise make `writeFileSync(join(CWD, to))` + `git rm from` write outside the tree and delete an
@@ -715,7 +753,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     inRepo(from) && inRepo(to) && existsSync(join(CWD, from)));
   // #2319 — `number-stranded --dry-run`: report the planned mapping + renames without touching the tree/index.
   if (dryRun) return {
-    assigned, committed: false, dryRun: true,
+    assigned, committed: false, dryRun: true, unresolvedReferences,
     renamed: renames.map((r) => r.to),
     wouldRename: [...renames, ...livePathRenames].map((r) => ({ from: r.from, to: r.to })),
   };
@@ -766,7 +804,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const paths = [...new Set(commitPaths)];
   const summary = assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ');
   const committed = quietGit(CWD, ['commit', '-m', `drain: JIT-number ${summary} at land (#2288)`, '--', ...paths]) != null;
-  return { assigned, committed, renamed: [...renames, ...livePathRenames].map((r) => r.to), changedPaths: paths };
+  return { assigned, committed, unresolvedReferences, renamed: [...renames, ...livePathRenames].map((r) => r.to), changedPaths: paths };
 }
 
 /**

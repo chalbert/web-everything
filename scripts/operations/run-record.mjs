@@ -169,6 +169,171 @@ export function totalJudgeSpend(run) {
 }
 
 /**
+ * EXTRACT TOKEN COUNTERS from a telemetry row's `usage` block (#3521). PURE.
+ *
+ * Reads both CLI-native counters (`cache_read_input_tokens`, `cache_creation_input_tokens`,
+ * `input_tokens`) and short-form variants (`cache_read`, `cache_creation`, `input`).
+ * Non-numeric entries degrade to 0.
+ *
+ * @param {object} [usage]
+ * @returns {{cacheRead: number, cacheCreation: number, input: number, loaded: number}}
+ */
+export function extractUsageCounters(usage = {}) {
+  const readVal = usage?.cache_read_input_tokens ?? usage?.cache_read;
+  const writeVal = usage?.cache_creation_input_tokens ?? usage?.cache_creation;
+  const inputVal = usage?.input_tokens ?? usage?.input;
+  const cacheRead = typeof readVal === 'number' && Number.isFinite(readVal) && readVal >= 0 ? readVal : 0;
+  const cacheCreation = typeof writeVal === 'number' && Number.isFinite(writeVal) && writeVal >= 0 ? writeVal : 0;
+  const input = typeof inputVal === 'number' && Number.isFinite(inputVal) && inputVal >= 0 ? inputVal : 0;
+  const loaded = cacheRead + cacheCreation + input;
+  return { cacheRead, cacheCreation, input, loaded };
+}
+
+/**
+ * DERIVE CACHE HIT METRICS for a single usage block (#3521). PURE.
+ *
+ *   hit rate = cache_read / (cache_read + cache_creation + input)
+ *   reads-per-write = cache_read / cache_creation
+ *
+ * Both ratios return `null` when their denominator is 0.
+ *
+ * @param {object} [usage]
+ * @returns {{cacheRead: number, cacheCreation: number, input: number, loaded: number, hitRate: number|null, readsPerWrite: number|null}}
+ */
+export function deriveCacheHitMetrics(usage = {}) {
+  const counters = extractUsageCounters(usage);
+  const { cacheRead, cacheCreation, loaded } = counters;
+  return {
+    ...counters,
+    hitRate: loaded > 0 ? cacheRead / loaded : null,
+    readsPerWrite: cacheCreation > 0 ? cacheRead / cacheCreation : null,
+  };
+}
+
+/**
+ * DERIVE THE INVOCATION ROLE from a telemetry row and optional enclosing run record (#3521). PURE.
+ *
+ * Precedence: `row.role` → `row.lens` → `row.step` → `run.op` → `'unknown'`.
+ *
+ * @param {object} [row] - telemetry row.
+ * @param {object} [run] - enclosing run record.
+ * @returns {string} role identifier.
+ */
+export function extractInvocationRole(row, run = null) {
+  if (typeof row?.role === 'string' && row.role.trim()) return row.role.trim();
+  if (typeof row?.lens === 'string' && row.lens.trim()) return row.lens.trim();
+  if (typeof row?.step === 'string' && row.step.trim()) return row.step.trim();
+  if (typeof run?.op === 'string' && run.op.trim()) return run.op.trim();
+  return 'unknown';
+}
+
+/**
+ * AGGREGATE CACHE METRICS PER ROLE across one or more run records (#3521). PURE.
+ *
+ * Groups telemetry rows by role, summing cache read, cache creation, fresh input, and loaded context tokens.
+ *
+ * SURFACES ZERO HIT RATE ACROSS REPEATED SAME-ROLE INVOCATIONS (#3521 Done-when #2):
+ * A role with 2 or more zero-cache-read invocations across all aggregated runs has `zeroHitAlert: true`.
+ * Runs with 2 or more zero-cache-read invocations are recorded in `zeroHitRuns`.
+ * This prevents zero hit rates on repeated invocations from being silently averaged away into
+ * a misleadingly non-zero aggregate across runs, even when spread across multiple separate run records.
+ *
+ * @param {object|object[]} runs - one or more run records.
+ * @returns {Array<{role: string, invocations: number, cacheReadTokens: number, cacheCreationTokens: number, inputTokens: number, loadedContextTokens: number, hitRate: number|null, readsPerWrite: number|null, zeroHitInvocations: number, zeroHitAlert: boolean, zeroHitRuns: Array<{runId: string, invocations: number}>}>}
+ */
+export function aggregateRoleCacheMetrics(runs) {
+  const list = Array.isArray(runs) ? runs : (runs && typeof runs === 'object' ? [runs] : []);
+  const byRole = new Map();
+
+  for (const run of list) {
+    if (!run || typeof run !== 'object') continue;
+    const telemetryRows = Array.isArray(run.telemetry) ? run.telemetry : [];
+    const runRoleMap = new Map();
+
+    for (const row of telemetryRows) {
+      if (!row || typeof row !== 'object') continue;
+      if (!row.usage || typeof row.usage !== 'object') continue;
+
+      const u = extractUsageCounters(row.usage);
+      const role = extractInvocationRole(row, run);
+
+      let roleEntry = byRole.get(role);
+      if (!roleEntry) {
+        roleEntry = {
+          role,
+          invocations: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          inputTokens: 0,
+          loadedContextTokens: 0,
+          zeroHitInvocations: 0,
+          zeroHitRuns: [],
+        };
+        byRole.set(role, roleEntry);
+      }
+
+      roleEntry.invocations += 1;
+      roleEntry.cacheReadTokens += u.cacheRead;
+      roleEntry.cacheCreationTokens += u.cacheCreation;
+      roleEntry.inputTokens += u.input;
+      roleEntry.loadedContextTokens += u.loaded;
+      if (u.cacheRead === 0) {
+        roleEntry.zeroHitInvocations += 1;
+      }
+
+      let runRoleStats = runRoleMap.get(role);
+      if (!runRoleStats) {
+        runRoleStats = { invocations: 0, cacheReadTokens: 0, runId: run.id ?? 'unknown' };
+        runRoleMap.set(role, runRoleStats);
+      }
+      runRoleStats.invocations += 1;
+      runRoleStats.cacheReadTokens += u.cacheRead;
+    }
+
+    for (const [role, stats] of runRoleMap.entries()) {
+      if (stats.invocations >= 2 && stats.cacheReadTokens === 0) {
+        const roleEntry = byRole.get(role);
+        if (roleEntry) {
+          roleEntry.zeroHitRuns.push({
+            runId: stats.runId,
+            invocations: stats.invocations,
+          });
+        }
+      }
+    }
+  }
+
+  const results = [];
+  for (const entry of byRole.values()) {
+    const hitRate = entry.loadedContextTokens > 0
+      ? entry.cacheReadTokens / entry.loadedContextTokens
+      : null;
+    const readsPerWrite = entry.cacheCreationTokens > 0
+      ? entry.cacheReadTokens / entry.cacheCreationTokens
+      : null;
+
+    const zeroHitAlert = entry.zeroHitInvocations >= 2;
+
+    results.push({
+      role: entry.role,
+      invocations: entry.invocations,
+      cacheReadTokens: entry.cacheReadTokens,
+      cacheCreationTokens: entry.cacheCreationTokens,
+      inputTokens: entry.inputTokens,
+      loadedContextTokens: entry.loadedContextTokens,
+      hitRate: hitRate !== null ? Number(hitRate.toFixed(4)) : null,
+      readsPerWrite: readsPerWrite !== null ? Number(readsPerWrite.toFixed(2)) : null,
+      zeroHitInvocations: entry.zeroHitInvocations,
+      zeroHitAlert,
+      zeroHitRuns: entry.zeroHitRuns,
+    });
+  }
+
+  return results.sort((a, b) => a.role.localeCompare(b.role));
+}
+
+
+/**
  * ONE stepTimings ROW, whitelisted the way {@link normalizeJudgeTelemetry} whitelists `telemetry` (#3368).
  * `stepTimings` answers "how long did this STEP take", a different question from "what did a judge SPAWN
  * cost" — see `withTelemetry`'s refusal in `engine.mjs`, which is exactly why this is its own field with its

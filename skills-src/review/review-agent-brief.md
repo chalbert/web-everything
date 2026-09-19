@@ -31,15 +31,20 @@ That is the entire point of a mechanically dispatched reviewer. If `review-loop-
 brief's own arc does not cover, stop and report the structured outcome it printed — do not improvise a fix, do
 not re-run it with different flags hoping for a different answer, and never resolve your own uncertainty by
 asking an open-ended question in prose; there is no one positioned to read or answer it in the time this
-dispatch has (the same doctrine `we:skills-src/conveyor/dispatched-agent-system-prompt.md` states for a
-delivery dispatch — this is its review-side twin).
+dispatch has (the same doctrine `we:skills-src/review/review-agent-system-prompt.md` states as your own standing
+identity — see below — and `we:skills-src/conveyor/dispatched-agent-system-prompt.md` states for a delivery
+dispatch).
 
-**Never write a scratch file to your own job-scratch directory, and never write one to `/tmp` either.** A
-background review dispatch is not currently given the standing-identity system prompt that states this rule for
-a delivery dispatch (`dispatchReview` does not pass `systemPromptFile`), so it is stated here directly instead.
-The harness hands every `--bg` session a per-session scratchpad path (`~/.claude/jobs/<session-id>/tmp/`) in its
-own system prompt; writing there — even into your own directory — can be categorized as touching a sensitive
-file and produce a permission prompt nobody is here to answer, wedging you indefinitely. If you need anything
+**This prompt is a real, already-instantiated work order, not a template** — your own standing-identity system
+prompt (`we:skills-src/review/review-agent-system-prompt.md`, passed via `--append-system-prompt-file` on every
+dispatch, `#xy8di3v`) says so before you ever read the "Fill these before spawning" table below; that table is
+explanatory prose describing what WAS filled, not evidence it wasn't, even when a filled value happens to read
+identically to the table's own illustrative example.
+
+**Never write a scratch file to your own job-scratch directory, and never write one to `/tmp` either.** The
+harness hands every `--bg` session a per-session scratchpad path (`~/.claude/jobs/<session-id>/tmp/`) in its own
+system prompt; writing there — even into your own directory — can be categorized as touching a sensitive file
+and produce a permission prompt nobody is here to answer, wedging you indefinitely. If you need anything
 ephemeral on disk, put it **inside the lane clone you acquire in step 1** instead — it is already fully
 Edit/Write/Bash-permitted and carries none of the sensitive-file shape.
 

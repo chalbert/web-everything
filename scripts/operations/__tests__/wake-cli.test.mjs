@@ -27,13 +27,15 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 
-import { advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
+import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
 import { createFileRunStore } from '../run-store.mjs';
 import { createRegistry } from '../registry.mjs';
 import { DISPATCH_LANE_OP, dispatchLaneOperation } from '../dispatch-lane.mjs';
 import { LIST_TIMEOUT_ENV, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT, PR_LIST_TIMEOUT_ENV, createDispatchSinks } from '../dispatch-lane-io.mjs';
 import { assertHandleNotLive, closeOutEntry, flagValue } from '../wake.mjs';
+import { EXPLORE_OP, exploreOperation } from '../explore.mjs';
+import { REPORT_DIR_ENV, REPORT_END_MARKER, createExploreSinks, panelistReportDir, panelistReportPath } from '../explore-io.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WAKE_CLI = resolve(HERE, '..', 'wake.mjs');
@@ -48,10 +50,14 @@ let dir;
 let binDir;
 let argvFile;
 let ghArgvFile;
+let scratchDir;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'we-wake-cli-runs-'));
   binDir = mkdtempSync(join(tmpdir(), 'we-wake-cli-bin-'));
+  // The explore scratch root, relocated for EVERY case: the CLI reclaims under it on each pass (#2304), and the
+  // real workspace-level root is never one a test should even list.
+  scratchDir = mkdtempSync(join(tmpdir(), 'we-wake-cli-scratch-'));
   argvFile = join(binDir, 'argv.txt');
   ghArgvFile = join(binDir, 'gh-argv.txt');
   // THE STUB `claude`. `sh` builtins only, so it needs nothing on `PATH` itself — which lets the child run with
@@ -71,6 +77,7 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
   rmSync(binDir, { recursive: true, force: true });
+  rmSync(scratchDir, { recursive: true, force: true });
 });
 
 /** Park a real dispatch run on disk, aged past the observer's 2-minute listing grace and far short of escalation. */
@@ -164,6 +171,7 @@ function runWakeCli(args = [], { agents = '[]', prs = '[]', execTimeoutMs = EXEC
       STUB_GH_ARGV_FILE: ghArgvFile,
       [LIST_TIMEOUT_ENV]: '0',
       [PR_LIST_TIMEOUT_ENV]: '0',
+      [REPORT_DIR_ENV]: scratchDir,
     },
   });
 }
@@ -305,6 +313,45 @@ describe('the waker CLI registers the dispatch observer — the half of the feat
     expect(out).toMatch(new RegExp(`wake\\.mjs --resolve=${RUN_ID} --key=<effectKey>`));
     // `unresolved` WRITES NOTHING — the entry is still in flight, which is why a close-out surface has to exist.
     expect(createFileRunStore(dir).read(RUN_ID).effects[0].status).toBe('in-flight');
+  }, CHILD_PROCESS_TIMEOUT_MS);
+});
+
+// ── #2304 — the CLI is the one thing that reclaims an explore committee's scratch directory ─────────────────────
+
+describe('the waker CLI reclaims a completed explore run\'s scratch directory', () => {
+  it('removes the directory of a COMPLETED committee on a plain pass, and leaves the record alone', async () => {
+    const registry = createRegistry();
+    registry.register(exploreOperation());
+    const store = createFileRunStore(dir);
+    const env = { [REPORT_DIR_ENV]: scratchDir };
+    const sinks = createExploreSinks({ root: PRIMARY, env, spawnAgent: () => '' });
+    const id = 'run-wake-cli-explore';
+    let run = advanceWhileRunning(startRun({
+      op: EXPLORE_OP, id, input: { question: 'q', terminal: 'report-only' }, registry,
+    }), { registry });
+    // Every seat dispatched through the real sink (which creates the directory) and closed out with a report.
+    for (let seat = 0; seat < run.findings.plan.panelSize; seat += 1) {
+      run = (await applyPendingEffects(run, { sinks, store })).run;
+      run = {
+        ...run,
+        effects: run.effects.map((e) => {
+          if (e.status !== 'in-flight') return e;
+          writeFileSync(panelistReportPath(id, e.payload.panelist, e.handle, { root: PRIMARY, env }), `r\n${REPORT_END_MARKER}\n`);
+          return { ...e, status: 'applied', result: { panelist: e.payload.panelist, lens: e.payload.lens, report: 'r' } };
+        }),
+      };
+      run = advanceWhileRunning(run, { registry });
+    }
+    run = advanceWhileRunning(advance(run, { registry, resume: { value: { summary: 's', findings: [] } } }), { registry });
+    run = advanceWhileRunning(advance(run, { registry, resume: { value: 'proceed' } }), { registry });
+    expect(runStatus(run, { registry })).toBe('complete');
+    store.write(run);
+    expect(existsSync(panelistReportDir(id, { root: PRIMARY, env }))).toBe(true);
+
+    const out = runWakeCli([]);
+    expect(out).toMatch(new RegExp(`reclaimed the explore scratch directory of 1 completed run\\(s\\): ${id}`));
+    expect(existsSync(panelistReportDir(id, { root: PRIMARY, env }))).toBe(false);
+    expect(createFileRunStore(dir).read(id)).not.toBeNull();
   }, CHILD_PROCESS_TIMEOUT_MS);
 });
 

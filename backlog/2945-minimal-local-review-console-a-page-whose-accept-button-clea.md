@@ -10,6 +10,7 @@ scope:
   - we:scripts/review-detail.mjs
 tags: [review, console, gate-self, devx, interim]
 dateOpened: "2026-08-06"
+deliveryAgent: codex
 ---
 
 # Minimal local review console: a page whose accept button clears a gate-self PR

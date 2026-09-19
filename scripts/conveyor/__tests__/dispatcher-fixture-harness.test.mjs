@@ -117,8 +117,11 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       // 3. dispatch-plan.mjs --backlog-dir — a blocked/active item is EXCLUDED from the ready queue upstream
       //    (backlog.mjs build-queue never emits it), so #9002/#9003/#9004 can never appear in launch OR held —
       //    that holds regardless of the machine's real free-lane count. #9001 (cleared + ready + scoped) DOES
-      //    reach the lane-assignment step, so it appears in EITHER launch (a real free lane existed) or held
-      //    with reason "no free lane" (none did) — never absent, and never any OTHER held reason.
+      //    reach the lane-assignment step, so it appears in EITHER launch (a real free lane existed, within the
+      //    concurrency cap) or held with reason "no free lane" (none did) or "capacity-cap" (#xupukxa — a free
+      //    lane existed, but this REAL machine's own already-active lease count already meets/exceeds
+      //    `WE_MAX_CONCURRENT_LANES`/its default, which this test does not control since it deliberately shells
+      //    the REAL lane-pool CLI, not a fixture) — never absent, and never any OTHER held reason.
       const plan = JSON.parse(execFileSync(
         'node', [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
@@ -129,7 +132,7 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       expect(allNums).not.toContain('9004');
       const launched9001 = plan.launch.find((l) => String(l.num) === '9001');
       const held9001 = plan.held.find((h) => String(h.num) === '9001');
-      expect(Boolean(launched9001) || held9001?.reason === 'no free lane').toBe(true);
+      expect(Boolean(launched9001) || held9001?.reason === 'no free lane' || held9001?.reason === 'capacity-cap').toBe(true);
 
       // 4. tick-core.mjs's planTick (pure core) — fed the real `state` above, plus a SYNTHETIC freeLanes +
       //    bookkeeping.launchedNums simulating "this conveyor already launched #9003/#9004 on a prior tick"

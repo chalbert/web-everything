@@ -35,6 +35,14 @@
             "command": "node scripts/bootstrap-session.mjs"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-prototype-tracker.mjs --session-start"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -48,6 +56,10 @@
           {
             "type": "command",
             "command": "node scripts/lint-locus-prefix.mjs --pre"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/lint-invisible-characters.mjs"
           },
           {
             "type": "command",
@@ -69,6 +81,35 @@
           {
             "type": "command",
             "command": "node scripts/guard-bash.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-monitor-subagent.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-stop-passive-wait.mjs"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-stop-passive-wait.mjs"
           }
         ]
       }

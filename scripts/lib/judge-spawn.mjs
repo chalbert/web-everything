@@ -699,6 +699,12 @@ export function loadedContextTokens(usage = {}) {
 /**
  * THE ONE FUNCTION A `judge` STEP CALLS. Spawns a tool-free juror and returns its validated answer.
  *
+ * THIS SATISFIES THE PROVIDER PORT (`JudgeProvider`, named next to `createDefaultJudge` in
+ * `we:scripts/operations/cli-adapter.mjs`, #3370). That port is the stable request/outcome shape a second
+ * implementation (#3371) must match; this function is ONE implementation of it, not the port itself — its
+ * Claude-specific argv (`buildJudgeArgv`) and stdout parsing (`parseJudgeOutcome`) are exactly what a
+ * different provider would replace, and nothing here changed to make that true.
+ *
  * @param {object} opts
  * @param {string} opts.mandate - the stable juror instruction (system prompt suffix).
  * @param {string} opts.input - the material to judge; written to the juror's stdin.
