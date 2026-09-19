@@ -73,6 +73,7 @@ import {
   scanHarnessScaffolding,
   findGitHookAllFlags,
   gitHookAllFlagError,
+  validateLeashPin, validateMarkedInvariants,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
@@ -96,7 +97,11 @@ import {
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
 } from './lib/citation-check.mjs';
-import { TRUST_CHAIN } from './lib/gate-config.mjs';
+import {
+  TRUST_CHAIN, RATIFIED_POLICY_SPEC_FLOOR, POLICY_SPEC_BASENAMES, isPrincipleSurface, isMarkerSourcePath,
+  parseMarkedBlocks, markerBlockPin,
+} from './lib/gate-config.mjs';
+import { scoreEscalation, producerReviewLabel, REVIEW_LABELS } from './lib/review-escalation.mjs';
 import { isHash } from './backlog/id.mjs';
 
 const require = createRequire(import.meta.url);
@@ -2284,6 +2289,34 @@ try {
       for (const hit of findGitHookAllFlags(readFileSync(abs, 'utf8'))) err(gitHookAllFlagError(`.githooks/${name}`, hit));
     }
   }
+}
+
+// ── 17c. The PRINCIPLE-SURFACE floors (#2892, enforcing #2840) ───────────────────
+// Two rules keep the `review:human` trigger honest. (1) The LEASH PIN: every declarative-leash file stays a
+// principle surface under every diff shape, and the real scorer routes it to review:human — so #2838's
+// `landMode` flip edit can never become agent-clearable. (2) MARKER PINS: every `@principle`/`@invariant`
+// block's pin matches its body, which is what lets the scorer read a marked-guarantee edit off a 3-line-context
+// diff at all. Pure rules live in check-standards-rules.mjs; the live gate and the tracked-file read are here.
+try {
+  for (const message of validateLeashPin({
+    floor: RATIFIED_POLICY_SPEC_FLOOR,
+    specBasenames: POLICY_SPEC_BASENAMES,
+    trustChain: TRUST_CHAIN,
+    isPrincipleSurface,
+    scoreEscalation,
+    producerReviewLabel,
+    humanLabel: REVIEW_LABELS.human,
+  })) err(message, { kind: 'principle-surface-leash-pin', file: 'scripts/lib/gate-config.mjs' });
+
+  const docs = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    .split('\0')
+    .filter((f) => f && isMarkerSourcePath(f) && existsSync(join(ROOT, f)))
+    .map((file) => ({ file, content: readFileSync(join(ROOT, file), 'utf8') }));
+  for (const { file, line, message } of validateMarkedInvariants(docs, { parseMarkedBlocks, markerBlockPin })) {
+    err(`${file}:${line}: ${message}`, { kind: 'principle-surface-marker-pin', file });
+  }
+} catch (e) {
+  err(`principle-surface floors failed to run: ${e.message}`, { kind: 'principle-surface-leash-pin', file: 'scripts/lib/gate-config.mjs' });
 }
 
 // ── 17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ────────

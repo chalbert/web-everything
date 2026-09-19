@@ -565,14 +565,22 @@ describe('#2890 — diffHunks (base-vs-head diff CONTENT) is accepted and thread
     const r = scoreEscalation({ changedFiles: ['backlog/x.md'], diffLines: 20, diffHunks: hunks });
     expect(r.diffHunks).toBe(hunks);
   });
-  it('does NOT itself change escalate/humanRequired/reasons/signals — #2890 is plumbing, not a detector', () => {
-    const hunks = '@@ -1,2 +1,2 @@\n-### Some Rule {#some-rule}\n+### Some Other Rule {#some-rule}\n';
+  it('#2892 — a real rule-text edit scores the SAME with hunks as with none; only the unknown-content flag differs', () => {
+    // #2890 shipped this as "plumbing, not a detector". #2892 is the detector: with no hunks the statute term
+    // fails closed (unknown ⇒ human), and with hunks that really change a rule it fires on the content — so the
+    // two verdicts agree, and the only difference is the flag that says the marker axis could not see the base.
+    const hunks = 'diff --git a/docs/agent/platform-decisions.md b/docs/agent/platform-decisions.md\n'
+      + '--- a/docs/agent/platform-decisions.md\n+++ b/docs/agent/platform-decisions.md\n'
+      + '@@ -1,2 +1,2 @@\n-### Some Rule {#some-rule}\n+### Some Other Rule {#some-rule}\n';
     const withHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], diffHunks: hunks });
     const withoutHunks = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'] });
     expect(withHunks.escalate).toBe(withoutHunks.escalate);
-    expect(withHunks.humanRequired).toBe(withoutHunks.humanRequired);
+    expect(withHunks.humanRequired).toBe(true);
+    expect(withoutHunks.humanRequired).toBe(true);
     expect(withHunks.reasons).toEqual(withoutHunks.reasons);
-    expect(withHunks.signals).toEqual(withoutHunks.signals);
+    const { principleContentUnknown, ...rest } = withoutHunks.signals;
+    expect(principleContentUnknown).toBe(true);
+    expect(withHunks.signals).toEqual(rest);
   });
   it('anything that is NOT a string collapses to null — a caller that regresses to passing the raw result OBJECT lands on the safe side', () => {
     expect(() => scoreEscalation({ diffHunks: null })).not.toThrow();
@@ -672,12 +680,15 @@ describe('#2890-review-r2 finding 5 — plainDiffPath: numstat DISPLAY encoding 
     // actually find the file in the hunk text. With the display encoding it never could.
     expect(r.diffHunksBasisFiles.some((f) => hunkHeader.includes(`b/${f}`))).toBe(true);
   });
-  it('the SCORING terms still read the raw display-encoded list — normalizing those is a gate change, not this item', () => {
-    // Deliberate and recorded: a renamed statute file is not caught by the statute term. That fail-open is
-    // PRE-EXISTING (it lives in `parseNumstat`'s output, not in this PR) and closing it changes gate behaviour.
-    const r = scoreEscalation({ changedFiles: ['docs/agent/{old.md => platform-decisions.md}'], diffHunks: 'x' });
-    expect(r.humanRequired).toBe(false);
-    expect(r.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md']);
+  it('#2892 — the HUMAN trigger also reads the plain path, closing the renamed-statute/leash fail-open #2890 recorded', () => {
+    // #2890 left this open on purpose ("closing it changes gate behaviour"); #2892 is the gate-behaviour item. The
+    // principle surface is evaluated on the raw AND the plain spelling, which can only add firings.
+    const statute = scoreEscalation({ changedFiles: ['docs/agent/{old.md => platform-decisions.md}'], diffHunks: 'x' });
+    expect(statute.humanRequired).toBe(true);
+    expect(statute.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md']);
+    const leash = scoreEscalation({ changedFiles: ['scripts/lib/{old-roster.mjs => gate-config.mjs}'] });
+    expect(leash.humanRequired).toBe(true);
+    expect(leash.signals.gateSelf).toEqual(['scripts/lib/{old-roster.mjs => gate-config.mjs}']);
   });
 });
 

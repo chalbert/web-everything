@@ -13,7 +13,11 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { createHash } from 'node:crypto';
-import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, isEngineTierPath, basenameOf } from './gate-config.mjs';
+import {
+  isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, isEngineTierPath, basenameOf,
+  STATUTE_PATHS, isStatutePath, isDeclarativeLeashPath, isStatuteAnchorEdit, isMarkedInvariantEdit, isPrincipleSurface,
+  indexDiffByFile, unquoteGitPath,
+} from './gate-config.mjs';
 import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
 
@@ -69,20 +73,10 @@ export const REVIEW_LABEL_META = {
  *  existing caller; only the source of the numbers moved. */
 export const DEFAULT_THRESHOLDS = POLICY_THRESHOLDS;
 
-/** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. Editing the cite-able cluster
- *  rules is a governance change a human must ratify, so (like the policy-tier trust chain) it forces
- *  `review:human`, not just an agent panel. Kept as its own set so it drives BOTH escalation (blast-radius,
- *  below) AND the human gate (scoreEscalation). */
-const STATUTE_PATHS = [
-  /^docs\/agent\/platform-decisions\.md$/,   // the statute layer (cite-able cluster rules)
-  /^docs\/agent\/.*statute/i,                // any statute doc
-];
-
-/** Does this repo-relative path edit the statute layer (→ a human must ratify)? Pure. (#2412) */
-export function isStatutePath(path) {
-  const p = String(path || '');
-  return STATUTE_PATHS.some((re) => re.test(p));
-}
+/** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. The set lives in gate-config.mjs
+ *  (#2892) and drives BOTH escalation (blast-radius, whole-file, below) AND — content-scoped, via
+ *  `isStatuteAnchorEdit` — the human gate (scoreEscalation). Re-exported under its historical home. */
+export { isStatutePath, isStatuteAnchorEdit, isMarkedInvariantEdit, isPrincipleSurface };
 
 /** High-blast-radius path patterns (#2171). A diff touching any of these is escalation-worthy on its own —
  *  these files change how the system itself behaves, so a bad merge there is far costlier than a leaf edit.
@@ -334,10 +328,10 @@ export const isGateSelfPath = isPolicyCorePath;
  * contract, the roster, and the invariant / conformance suites. Those files ARE the encoded policy, so there is
  * no behaviour-preserving edit to them. The other half — the derivation CODE (`isPolicyDerivationPath`) — still
  * escalates but routes to the sized independent committee. Re-exported here under the leash name so callers read
- * the rubric's vocabulary; the roster and the classification live in gate-config.mjs.
+ * the rubric's vocabulary; the roster and the classification live in gate-config.mjs. Since #2840/#2892 it is the
+ * permanent path FLOOR of the principle surface (`isPrincipleSurface`), no longer the whole human trigger.
  */
-export const isDeclarativeLeashPath = isPolicySpecPath;
-export { isPolicyDerivationPath, isPolicySpecPath, isEngineTierPath };
+export { isDeclarativeLeashPath, isPolicyDerivationPath, isPolicySpecPath, isEngineTierPath };
 
 /**
  * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
@@ -417,13 +411,15 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * A PR escalates ONLY for one of these real reasons — there is no random/sampling floor (#xlno40g): a
  * clean, CI-green PR with no scored signal and no dismissed finding reaches no reviewer, it just lands.
  *
- * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip and again by #2771/#2785): true
- * iff the diff touches the DECLARATIVE LEASH (`isDeclarativeLeashPath` — the contract, the roster, the
- * invariant/conformance suites) or the STATUTE layer (`isStatutePath` — a governance rule a human must ratify).
- * Those are the classes where genuine human judgment is essential. Everything else escalates but is
- * agent-reviewable and does NOT set humanRequired: the ENGINE tier (the lander) and the policy tier's DERIVATION
- * CODE (#2771 Fork A — the rubric, the router, the loader, the seams). A *classification* of an already-escalating
- * PR (a policy/statute file is always blast-radius too), never a fresh escalation trigger.
+ * Also returns `humanRequired` (#2285 v1, narrowed by the #2445 two-tier flip, by #2771/#2785, and recomposed by
+ * #2840/#2892): true iff some basis file is a PRINCIPLE SURFACE (`isPrincipleSurface`, gate-config.mjs) — the
+ * DECLARATIVE LEASH by path (the contract, the roster, the invariant/conformance suites — pinned, content never
+ * read), a STATUTE-ANCHOR rule-text edit (a whitespace/reflow touch to a statute doc no longer fires), or an edit
+ * to a `@principle`/`@invariant`-marked guarantee already on the base, wherever it lives. Everything else escalates
+ * but is agent-reviewable and does NOT set humanRequired: the ENGINE tier (the lander), the policy tier's
+ * DERIVATION CODE (#2771 Fork A), and a statute doc touched only in whitespace. A *classification* of an
+ * already-escalating PR (a leash/statute file is always blast-radius too; a marked file may not be, and then the
+ * marker is what escalates it), never a relaxation of escalation.
  *
  * #2390-review-fix — the gate-self / `humanRequired` trigger reads `humanBasisFiles` (the CUMULATIVE
  * `origin/main…head` file set), NOT the possibly-de-inflated own-delta `changedFiles`. A stacked lane may
@@ -436,12 +432,11 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * identical), so every existing caller is unchanged.
  *
  * #2890 — `diffHunks` (base-vs-head DIFF CONTENT, not just file names + a line count) is accepted and carried
- * through to the returned verdict unchanged. This rubric does NOT read it for any signal today — that is
- * deliberate: #2890 is PURE PLUMBING, the shared precondition #2839's `assertNotPrincipleAndImpl` and #2840's
- * `isPrincipleSurface` need (both are content-reading detectors — a statute-anchor-body edit or a
- * pre-existing-marker edit are base-vs-head FACTS no file name or line count can answer). Threading it here
- * now, ahead of either detector landing, means neither follow-on has to touch this signature again — they
- * only add a term that reads `diffHunks`.
+ * through to the returned verdict unchanged. #2892 is its first reader: the human trigger slices it per file
+ * (`indexDiffByFile`) and hands each basis file its own section to `isPrincipleSurface`. Neither content
+ * detector throws on any input, `null` included, so no containment is needed at the call sites; a `null` makes
+ * the statute term fire (unknown ⇒ human) and leaves the marker axis unable to see the base — the verdict then
+ * carries `signals.principleContentUnknown` so that residual is visible.
  *
  * #2890-review-fix finding 1 — THE `null` CONTRACT, and why it is `null` and not `''`. Every producer of this
  * signal (`computeNetDiffText`, `computeProposedFileDiffText`) returns `text:''` on EVERY failure path
@@ -537,28 +532,6 @@ export function plainDiffPath(entry) {
 // rename as a plain path has one slash.
 function collapseSlashes(p) { return p.replace(/\/{2,}/g, '/'); }
 
-/**
- * Decode git's C-quoting (`core.quotePath`): a path with non-ASCII or control bytes is wrapped in `"` with each
- * byte escaped as `\NNN` OCTAL, plus the usual `\n`/`\t`/`\\`/`\"` escapes. The octal escapes are BYTES of the
- * UTF-8 encoding, so they must be reassembled as bytes and decoded once — decoding each `\303` to a codepoint
- * would give mojibake (`cafÃ©`). An unquoted string passes through untouched.
- */
-function unquoteGitPath(s) {
-  if (typeof s !== 'string' || s.length < 2 || s[0] !== '"' || s[s.length - 1] !== '"') return s;
-  const body = s.slice(1, -1);
-  const bytes = [];
-  const simple = { n: 0x0a, t: 0x09, r: 0x0d, f: 0x0c, b: 0x08, v: 0x0b, a: 0x07, '\\': 0x5c, '"': 0x22 };
-  for (let i = 0; i < body.length; i += 1) {
-    const c = body[i];
-    if (c !== '\\') { for (const b of Buffer.from(c, 'utf8')) bytes.push(b); continue; }
-    const next = body[i + 1];
-    const octal = body.slice(i + 1, i + 4);
-    if (/^[0-7]{3}$/.test(octal)) { bytes.push(parseInt(octal, 8)); i += 3; continue; }
-    if (next !== undefined && Object.prototype.hasOwnProperty.call(simple, next)) { bytes.push(simple[next]); i += 1; continue; }
-    bytes.push(0x5c); // a lone backslash git did not escape — keep it rather than eat the next char
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
 
 /**
  * #3317 — union two changed-file lists, cumulative first, first-seen order preserved, duplicates dropped.
@@ -636,19 +609,43 @@ export function scoreEscalation({
   // escalates to the sized independent committee instead. Both sets come from the ONE roster in gate-config.mjs.
   // #3317 — these read `basisFiles` (⊇ the cumulative set they read before), so the gate they realize is
   // unchanged where it already fired and only ever fires in MORE cases, never fewer.
+  //
+  // #2840/#2892 — THE PRINCIPLE SURFACE replaces both path OR-terms (leash path ∨ statute path):
+  // `humanRequired = gateBasis.some(f => isPrincipleSurface(f, fileDiff(f)))`. Each file is read under BOTH its
+  // raw spelling and its plain path (`plainDiffPath`), because the basis is numstat DISPLAY encoding: a renamed
+  // leash or statute file renders `dir/{old => gate-config.mjs}` and matched nothing before. Reading both can
+  // only ADD firings. Its diff section is looked up by the plain path; a file absent from the computed diff gets
+  // `null` (unknown), never `''`.
   const gateBasis = basisFiles;
-  const leashFiles = gateBasis.filter(isDeclarativeLeashPath);
+  const hunks = typeof diffHunks === 'string' ? diffHunks : null;
+  const sections = indexDiffByFile(hunks);
+  const onEitherSpelling = (pred) => (f) => {
+    const plain = plainDiffPath(f);
+    const fileDiff = hunks === null ? null : (sections.get(plain) ?? null);
+    return pred(f, fileDiff) || (plain !== f && pred(plain, fileDiff));
+  };
+  const humanRequired = gateBasis.some(onEitherSpelling(isPrincipleSurface));
+  // The three triggers again, per file, only to NAME them in the reasons. The partition is exhaustive over
+  // `isPrincipleSurface` (it is exactly their union), so a humanRequired verdict always carries a human-clearance
+  // reason — the disposition router keys on the reason, not on this boolean.
+  const leashFiles = gateBasis.filter(onEitherSpelling((f) => isDeclarativeLeashPath(f)));
+  const statuteFiles = gateBasis.filter(onEitherSpelling(isStatuteAnchorEdit));
+  const markedFiles = gateBasis.filter((f) => !leashFiles.includes(f) && onEitherSpelling(isMarkedInvariantEdit)(f));
   const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
-  const statuteFiles = gateBasis.filter(isStatutePath);
-  // The STATUTE term is UNCHANGED by this narrowing (#2771 Fork A): every statute touch still forces a human,
-  // exactly as before. Only the first term moved — from the whole policy tier to its declarative-leash half.
-  const humanRequired = leashFiles.length > 0 || statuteFiles.length > 0;
   if (leashFiles.length) { signals.gateSelf = leashFiles; reasons.push(`gate-self (${leashFiles.join(', ')}) — declarative leash, human review required`); }
   // The derivation half keeps its own signal + reason so the PR still ESCALATES on a stacked basis where the
   // file is in `humanBasisFiles` but not in the own-delta `changedFiles` that fed the blast-radius signal above.
   // Its token's clearance is `agent` in the contract, so the panel may CLEAR it — that is the whole narrowing.
   if (derivationFiles.length) { signals.gateDerivation = derivationFiles; reasons.push(`gate-derivation (${derivationFiles.join(', ')}) — gate derivation code, independent committee review`); }
+  // A statute doc touched only in whitespace/reflow is NOT listed: it still escalates (blast-radius) but emits no
+  // human-clearance `statute` reason, so the committee may clear it — the one narrowing #2840 intends.
   if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
+  // A marked guarantee rides the `gate-self` token (human clearance): it is the encoded policy, exactly like the
+  // leash — just encoded line-by-line wherever it lives rather than as a whole file.
+  if (markedFiles.length) { signals.principleMarker = markedFiles; reasons.push(`gate-self (${markedFiles.join(', ')}) — edits a pre-existing @principle/@invariant-marked guarantee, human review required`); }
+  // The marker axis cannot see the base without content. Flag it (a signal, not a reason — it changes no route)
+  // so a reviewer can tell "no marked guarantee was edited" from "this could not be checked".
+  if (hunks === null && gateBasis.length > 0) signals.principleContentUnknown = true;
 
   // #3343 — DID THE BASIS EVEN NARROW TO THIS PR? `basisNarrowed:false` means the caller's cumulative file set
   // is the un-narrowed base-TIP diff (`resolveNetDiffBasis`'s merge-base lookup fell through and its ancestry
@@ -699,7 +696,7 @@ export function scoreEscalation({
   // verdict object gets `diffHunks` for free, without a second signature change, once a future detector reads it.
   // #2890-review-fix finding 1 — anything that is not a string collapses to `null` (NOT COMPUTED); `''` is
   // reserved for "computed, genuinely empty". A detector must branch on `=== null` before reading content.
-  const hunks = typeof diffHunks === 'string' ? diffHunks : null;
+  // (`hunks` is normalized once, above, where the principle surface first reads it.)
   // #2890-review-fix finding 4 — the file list on the SAME (cumulative) basis as `hunks`. `null` when there are
   // no hunks, so a detector can never pair a real file list with an absent content signal.
   // #2890-review-r2 finding 5 — as PLAIN paths, the only spelling that can match a hunk header.

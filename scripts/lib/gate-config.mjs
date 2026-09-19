@@ -72,7 +72,20 @@
  * pin its properties — is itself a trust-chain change that forces `review:human`. You cannot quietly
  * DROP a member, RENAME one without re-registering, or weaken an invariant to make a diff pass: every
  * such change is human-reviewed by construction. That is the point.
+ *
+ * THE PRINCIPLE SURFACE (#2840, built by #2892, codified
+ * [`#human-is-principle-surface-not-path`](../../docs/agent/platform-decisions.md#human-is-principle-surface-not-path)).
+ * The `review:human` trigger is no longer a set of paths: it is `isPrincipleSurface(changedFile, fileDiff)`, the
+ * union of (1) a statute-anchor RULE-TEXT edit, (2) an edit to a marked guarantee already present on the base, and
+ * (3) the declarative-leash path floor above, pinned permanently. Its grammar lives at the bottom of this file, in
+ * the roster, because what counts as a principle IS the gate's definition — an edit to it is itself human-gated.
  */
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+
+// The statute-anchor grammar is the one `validate-rules-anchors.cjs` reads, so "did a rule change?" is the same
+// deterministic parse the anchor gate makes (#2840). Pure — `extractAnchors` does no fs reads.
+const { extractAnchors } = createRequire(import.meta.url)('./rules-loader.cjs');
 
 /**
  * The trust chain, as explicit versioned config. Each entry is one member of the machinery that decides
@@ -212,8 +225,8 @@ export const TRUST_CHAIN = [
   // guarantee has no conformance suite pinning it, so the #2771 backstop ("a behaviour change reddens conformance
   // and forces a contract diff") does NOT hold here: a committee could clear the very edit that arms the runner.
   // #2840 trigger 2 is the right long-term home (a `@principle`/`@invariant` marker on the constant, evaluated
-  // per-diff) and it is an unbuilt follow-on. Until then these stay `spec` — the fail-closed direction, and a
-  // strict no-op on today's behaviour. Reclassifying them is a separate, human-ratified call.
+  // per-diff). #2892 built the marker axis and seeded its first marker on the runner's forced-shadow unit test,
+  // but these files stay `spec` — the fail-closed direction. Reclassifying them is a separate, human-ratified call.
   {
     role: 'review-runner-core',
     file: 'review-runner-core.mjs',
@@ -516,4 +529,299 @@ export function isPolicySpecPath(path) {
  */
 export function isPolicyDerivationPath(path) {
   return POLICY_DERIVATION_BASENAMES.has(basenameOf(path));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE PRINCIPLE SURFACE (#2840 / #2892) — what forces `review:human`.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. Moved here from review-escalation.mjs
+ *  (which re-exports both names unchanged) so the principle-surface composition below reads it without a
+ *  circular import. The path set still drives blast-radius escalation whole-file; only the HUMAN trigger is
+ *  content-scoped, by `isStatuteAnchorEdit`. Frozen. */
+export const STATUTE_PATHS = Object.freeze([
+  /^docs\/agent\/platform-decisions\.md$/,   // the statute layer (cite-able cluster rules)
+  /^docs\/agent\/.*statute/i,                // any statute doc
+]);
+
+/** Does this repo-relative path edit the statute layer? Pure. (#2412) */
+export function isStatutePath(path) {
+  const p = String(path || '');
+  return STATUTE_PATHS.some((re) => re.test(p));
+}
+
+/** #2840 trigger 3 — the declarative-leash path floor, PERMANENT: the one path-based term that survives. It is
+ *  exactly `isPolicySpecPath`, named for the role it plays in the principle surface. */
+export const isDeclarativeLeashPath = isPolicySpecPath;
+
+/**
+ * Split a whole unified diff (`git diff` output — the `diffHunks` signal #2890 threads into `scoreEscalation`)
+ * into one section per file, keyed by PLAIN path. Pure, total: anything that is not a string, or carries no
+ * `diff --git` header, yields an empty map.
+ *
+ * A section is registered under BOTH its old and new path, so a rename or a deletion of a statute doc is found
+ * whichever side the caller names. Paths come from the header region only (before the first `@@`) — inside a
+ * hunk a removed line `-- x` renders as `--- x`, which is not a file header. Sources, most specific first:
+ * `---`/`+++` lines, `rename from/to` and `copy from/to` lines, then the `diff --git a/P b/P` line itself (the
+ * only source for a mode-only change, where the two sides are the same path and can be split by length).
+ * C-quoted paths are decoded; the trailing TAB git appends to a `---`/`+++` name containing a space is dropped.
+ * @param {string|null|undefined} diffText
+ * @returns {Map<string, string>} plain path → that file's section text (header + hunks)
+ */
+export function indexDiffByFile(diffText) {
+  const out = new Map();
+  if (typeof diffText !== 'string' || !diffText) return out;
+  const lines = diffText.split('\n');
+  let start = -1;
+  const flush = (end) => {
+    if (start === -1) return;
+    const section = lines.slice(start, end);
+    for (const p of sectionPaths(section)) if (!out.has(p)) out.set(p, section.join('\n'));
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].startsWith('diff --git ')) { flush(i); start = i; }
+  }
+  flush(lines.length);
+  return out;
+}
+
+function sectionPaths(section) {
+  const paths = new Set();
+  const add = (raw, prefix) => {
+    if (raw == null) return;
+    let p = unquoteGitPath(String(raw).replace(/\t$/, ''));
+    if (p === '/dev/null') return;
+    if (prefix && p.startsWith(prefix)) p = p.slice(prefix.length);
+    if (p) paths.add(p);
+  };
+  for (const line of section.slice(1)) {
+    if (line.startsWith('@@')) break;
+    let m;
+    if ((m = line.match(/^--- (.+)$/))) add(m[1], 'a/');
+    else if ((m = line.match(/^\+\+\+ (.+)$/))) add(m[1], 'b/');
+    else if ((m = line.match(/^(?:rename|copy) (?:from|to) (.+)$/))) add(m[1]);
+  }
+  if (paths.size === 0) {
+    // `diff --git a/P b/P` — same path both sides (mode-only / empty-file). Unquoted: split by length.
+    const rest = section[0].slice('diff --git '.length);
+    const quoted = rest.match(/^"a\/(.*)" "b\/(.*)"$/);
+    if (quoted) { add(`"${quoted[1]}"`); add(`"${quoted[2]}"`); }
+    else if (rest.startsWith('a/') && (rest.length - 5) % 2 === 0) {
+      const len = (rest.length - 5) / 2;
+      const left = rest.slice(2, 2 + len);
+      if (rest.slice(2 + len) === ` b/${left}`) add(left);
+    }
+  }
+  return paths;
+}
+
+/**
+ * Decode git's C-quoting (`core.quotePath`): a path with non-ASCII or control bytes is wrapped in `"` with each
+ * byte escaped as `\NNN` OCTAL, plus the usual `\n`/`\t`/`\\`/`\"` escapes. The octal escapes are BYTES of the
+ * UTF-8 encoding, so they must be reassembled as bytes and decoded once — decoding each `\303` to a codepoint
+ * would give mojibake (`cafÃ©`). An unquoted string passes through untouched. Shared with
+ * review-escalation.mjs#plainDiffPath, so the numstat path and the diff-header path decode identically.
+ */
+export function unquoteGitPath(s) {
+  if (typeof s !== 'string' || s.length < 2 || s[0] !== '"' || s[s.length - 1] !== '"') return s;
+  const body = s.slice(1, -1);
+  const bytes = [];
+  const simple = { n: 0x0a, t: 0x09, r: 0x0d, f: 0x0c, b: 0x08, v: 0x0b, a: 0x07, '\\': 0x5c, '"': 0x22 };
+  for (let i = 0; i < body.length; i += 1) {
+    const c = body[i];
+    if (c !== '\\') { for (const b of Buffer.from(c, 'utf8')) bytes.push(b); continue; }
+    const next = body[i + 1];
+    const octal = body.slice(i + 1, i + 4);
+    if (/^[0-7]{3}$/.test(octal)) { bytes.push(parseInt(octal, 8)); i += 3; continue; }
+    if (next !== undefined && Object.prototype.hasOwnProperty.call(simple, next)) { bytes.push(simple[next]); i += 1; continue; }
+    bytes.push(0x5c); // a lone backslash git did not escape — keep it rather than eat the next char
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+/**
+ * The hunks of ONE file's diff section, as `{ removed, added }` line lists (the `-`/`+` prefix stripped). Pure,
+ * total. Context lines and `\ No newline at end of file` are dropped; nothing before the first `@@` is read.
+ * @param {string|null|undefined} fileDiff
+ * @returns {Array<{removed:string[], added:string[]}>}
+ */
+export function parseHunks(fileDiff) {
+  if (typeof fileDiff !== 'string') return [];
+  const hunks = [];
+  let cur = null;
+  for (const line of fileDiff.split('\n')) {
+    if (line.startsWith('@@')) { cur = { removed: [], added: [] }; hunks.push(cur); continue; }
+    if (!cur) continue;
+    if (line[0] === '-') cur.removed.push(line.slice(1));
+    else if (line[0] === '+') cur.added.push(line.slice(1));
+  }
+  return hunks;
+}
+
+/** A file section whose content git could not render as text — unknown content, never "no change". */
+function isBinarySection(fileDiff) {
+  return /^(?:Binary files .* differ|GIT binary patch)$/m.test(fileDiff);
+}
+
+/** Does this hunk leave the RULE TEXT untouched — a whitespace / reflow / blank-line change only? True iff the
+ *  removed and added text are equal once every whitespace run collapses, AND the anchor inventory
+ *  (`extractAnchors`: heading level + text + anchor, inline `{#id}`, HTML ids) of the two sides is identical — so
+ *  a reflow that folds a heading line into a paragraph, or a `{#id}` that moves onto a heading, is a rule change. */
+function isRuleTextPreserving({ removed, added }) {
+  const flat = (xs) => xs.join('\n').replace(/\s+/g, ' ').trim();
+  if (flat(removed) !== flat(added)) return false;
+  const inventory = (xs) => {
+    const { anchors, headings } = extractAnchors(xs.join('\n'));
+    return JSON.stringify({ anchors: [...anchors].sort(), headings });
+  };
+  return inventory(removed) === inventory(added);
+}
+
+/**
+ * #2840 trigger 1 — a STATUTE-ANCHOR edit: the file is on the statute layer AND a hunk changes rule text (adds,
+ * removes or alters a heading/anchor, or changes any non-whitespace text). Pure, total, never throws.
+ *
+ * Fails CLOSED wherever the content is unknown, per #2890's `null` contract: a `null`/non-string `fileDiff` (NOT
+ * COMPUTED, or the file is absent from a computed diff) and a binary section both fire. What does NOT fire: a
+ * section with no hunks (mode-only, a pure rename) and hunks that are whitespace/reflow only.
+ *
+ * Deliberate over-fires, in the safe direction: a typo fix is a text change and fires (no deterministic read
+ * separates a typo from a one-word rule change), and an edit ABOVE the first anchor (a doc preamble) fires too —
+ * a hunk alone does not say which heading it sits under, and guessing "not under an anchor" would under-gate.
+ * @param {string} changedFile
+ * @param {string|null} fileDiff this file's own section of the diff (`indexDiffByFile`), or null
+ */
+export function isStatuteAnchorEdit(changedFile, fileDiff) {
+  if (!isStatutePath(changedFile)) return false;
+  if (typeof fileDiff !== 'string' || isBinarySection(fileDiff)) return true;
+  return parseHunks(fileDiff).some((h) => !isRuleTextPreserving(h));
+}
+
+/** The source files a `@principle`/`@invariant` marker may live in — the set `check:standards` validates pins
+ *  over. A marker-shaped comment in any other file type is not a marker (the scorer ignores it), so the scorer
+ *  and the validator can never disagree about which markers are real. Frozen. */
+export const MARKER_SOURCE_EXTENSIONS = Object.freeze(['.mjs', '.cjs', '.js', '.jsx', '.ts', '.tsx', '.mts', '.cts']);
+
+/** Is this path a file type markers are recognized in? Pure. */
+export function isMarkerSourcePath(path) {
+  const p = String(path || '');
+  return MARKER_SOURCE_EXTENSIONS.some((ext) => p.endsWith(ext));
+}
+
+// A marker is a line comment (`//`, `/*`, or a JSDoc `*` continuation) whose FIRST token is the marker tag.
+//   open   `// @invariant <id> pin:<12 hex>`  (or `@principle`; trailing text — e.g. the anchor it enforces — is free)
+//   close  `// @end-invariant <id>`           (or `@end-principle`)
+// MARKER_LINE_RE is the LOOSE shape: anything that looks like a marker, well-formed or not. The scorer fires on it
+// (over-firing on a malformed marker is the safe direction) and check:standards rejects every loose match that is
+// not a well-formed open/close, so a half-typed marker can never be a guarantee the scorer silently ignores.
+const COMMENT_LEAD = String.raw`^\s*(?:\/\/+|\/\*+|\*)\s*`;
+export const MARKER_LINE_RE = new RegExp(`${COMMENT_LEAD}@(?:end-)?(?:principle|invariant)\\b`);
+const MARKER_OPEN_RE = new RegExp(`${COMMENT_LEAD}@(principle|invariant)\\s+([a-z0-9][a-z0-9.-]*)\\s+pin:([0-9a-f]{12})(?=\\s|\\*\\/|$)`);
+const MARKER_CLOSE_RE = new RegExp(`${COMMENT_LEAD}@end-(principle|invariant)\\s+([a-z0-9][a-z0-9.-]*)(?=\\s|\\*\\/|$)`);
+
+/**
+ * The PIN of a marked block's body — why the marker axis can be read off a 3-line-context diff at all.
+ *
+ * A hunk only shows a few lines around a change, so an edit in the middle of a long marked block need not show
+ * the marker. The pin closes that: `check:standards` requires every open marker's `pin:` to equal this hash of the
+ * body (the lines strictly between open and close), so ANY content edit to a marked guarantee must also rewrite
+ * its open marker line — and a rewritten, moved or deleted marker line is a REMOVED line in the diff. "A hunk
+ * overlaps a base-present marked block" therefore reduces, on a green tree, to "the diff removes a marker line".
+ * ADDING a new marked block only adds lines, so it never fires: that is implementation (#2839).
+ *
+ * Whitespace-insensitive (runs collapsed, lines trimmed, blank lines dropped), so a reformat needs no re-pin and
+ * does not reach a human. sha256, first 12 hex chars.
+ * @param {string[]} bodyLines
+ * @returns {string}
+ */
+export function markerBlockPin(bodyLines) {
+  const canon = (Array.isArray(bodyLines) ? bodyLines : [])
+    .map((l) => String(l).replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+  return createHash('sha256').update(canon).digest('hex').slice(0, 12);
+}
+
+/**
+ * Parse every marked block in one source file. Pure, total. Returns the well-formed blocks and every structural
+ * problem: a loose marker line that is neither a well-formed open nor close, an unclosed open, a close with no
+ * open, a close whose kind or id does not match the open, a marker nested inside another block, and a repeated id.
+ * Pins are NOT checked here (see `check:standards`), so a caller can list blocks without asserting them.
+ * @param {string} content
+ * @returns {{ blocks: Array<{kind:string, id:string, pin:string, openLine:number, closeLine:number, body:string[]}>,
+ *            problems: Array<{line:number, message:string}> }}
+ */
+export function parseMarkedBlocks(content) {
+  const lines = String(content ?? '').split('\n');
+  const blocks = [];
+  const problems = [];
+  const seen = new Set();
+  let open = null;
+  lines.forEach((line, i) => {
+    if (!MARKER_LINE_RE.test(line)) return;
+    const n = i + 1;
+    const o = line.match(MARKER_OPEN_RE);
+    const c = o ? null : line.match(MARKER_CLOSE_RE);
+    if (!o && !c) { problems.push({ line: n, message: 'malformed marker — expected `@principle|@invariant <id> pin:<12 hex>` or `@end-principle|@end-invariant <id>`' }); return; }
+    if (o) {
+      if (open) { problems.push({ line: n, message: `marker \`${o[2]}\` opens inside block \`${open.id}\` (line ${open.openLine}) — marked blocks do not nest` }); return; }
+      if (seen.has(o[2])) problems.push({ line: n, message: `marker id \`${o[2]}\` is used twice in this file` });
+      seen.add(o[2]);
+      open = { kind: o[1], id: o[2], pin: o[3], openLine: n };
+      return;
+    }
+    if (!open) { problems.push({ line: n, message: `\`@end-${c[1]} ${c[2]}\` closes no open marker` }); return; }
+    if (c[1] !== open.kind || c[2] !== open.id) {
+      problems.push({ line: n, message: `\`@end-${c[1]} ${c[2]}\` does not match the open \`@${open.kind} ${open.id}\` (line ${open.openLine})` });
+      open = null;
+      return;
+    }
+    blocks.push({ ...open, closeLine: n, body: lines.slice(open.openLine, i) });
+    open = null;
+  });
+  if (open) problems.push({ line: open.openLine, message: `\`@${open.kind} ${open.id}\` is never closed (expected \`@end-${open.kind} ${open.id}\`)` });
+  return { blocks, problems };
+}
+
+/**
+ * #2840 trigger 2 — an edit to a `@principle`/`@invariant`-marked guarantee ALREADY PRESENT ON THE BASE: a hunk
+ * REMOVES a marker line (the base side — an edited, moved or deleted marker). By the pin (`markerBlockPin`),
+ * every content edit to a marked block on a check:standards-green tree rewrites its open marker, so this is the
+ * whole overlap test. A marker line that is only ADDED is a new guarantee — implementation (#2839) — and does
+ * not fire. Pure, total, never throws.
+ *
+ * RESIDUAL, stated: with no content (`fileDiff` null — the diff was not computed, or was over the producer's
+ * cap) this axis cannot see the base and returns false. The gate then sits exactly on the post-#2785 line (leash
+ * floor + statute), never below it — the SAFEGUARD #2840 ratified — and `scoreEscalation` flags the verdict
+ * `principleContentUnknown` so the gap is visible rather than silent.
+ * @param {string} changedFile
+ * @param {string|null} fileDiff this file's own section of the diff (`indexDiffByFile`), or null
+ */
+export function isMarkedInvariantEdit(changedFile, fileDiff) {
+  if (typeof fileDiff !== 'string') return false;
+  // A rename OUT of the marker-source types un-recognizes every marker in the file without removing a line
+  // (a 100%-similar rename has no hunks). Whether the file carried markers is unknowable here — fire.
+  const from = fileDiff.match(/^rename from (.+)$/m);
+  const to = fileDiff.match(/^rename to (.+)$/m);
+  if (from && to && isMarkerSourcePath(unquoteGitPath(from[1])) && !isMarkerSourcePath(unquoteGitPath(to[1]))) return true;
+  if (!isMarkerSourcePath(changedFile)) return false;
+  return parseHunks(fileDiff).some((h) => h.removed.some((l) => MARKER_LINE_RE.test(l)));
+}
+
+/**
+ * THE PRINCIPLE SURFACE (#2840) — does this file's change need a HUMAN? The union of the three ratified triggers:
+ * the permanent declarative-leash path floor, a statute-anchor rule-text edit, and an edit to a base-present marked
+ * guarantee. `scoreEscalation` sets `humanRequired = gateBasis.some(f => isPrincipleSurface(f, fileDiff(f)))`.
+ * A trust-chain file that is none of these still ESCALATES (blast-radius / trust-chain) — to the committee.
+ *
+ * The leash term reads no content at all, so no diff shape — null, empty, whitespace-only — can ever drop a leash
+ * file from the human gate; `check:standards` pins exactly that (the leash-pin rule, guarding #2838's flip edit).
+ * @param {string} changedFile a repo-relative (or repo-prefixed) PLAIN path
+ * @param {string|null} fileDiff this file's own section of the diff (`indexDiffByFile`), or null when unknown
+ * @returns {boolean}
+ */
+export function isPrincipleSurface(changedFile, fileDiff) {
+  return isDeclarativeLeashPath(changedFile)
+    || isStatuteAnchorEdit(changedFile, fileDiff)
+    || isMarkedInvariantEdit(changedFile, fileDiff);
 }
