@@ -4,8 +4,10 @@ kind: story
 size: 3
 parent: "2405"
 blockedBy: ["3214"]
-status: open
+status: resolved
 dateOpened: "2026-08-20"
+dateStarted: "2026-09-19"
+dateResolved: "2026-09-19"
 tags: []
 scope:
   - we:scripts/converge-daemon-pass.mjs

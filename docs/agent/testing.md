@@ -2,6 +2,27 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## Shadow reviewer agreement evidence
+
+`review-runner.mjs` appends each shadow prediction through `appendVerdict` as `verdict: observed`,
+`mode: shadow`, boolean `wouldClear`, and `applied: false` / `mutated: false`. The builder and reader
+reject shadow metadata on bearing verdicts. The existing non-bearing fold keeps these rows in history
+without changing clearance, outstanding holds, review-round counts, or live label drift comparisons.
+Append failures are reported best-effort on stderr and do not abort the shadow report.
+
+Query the durable evidence offline with
+`node scripts/lib/verdict-ledger.mjs shadow-agreement --repo=chalbert/web-everything --human-actor=nic --json`.
+Use the exact declared human actor stored in your verdict rows. Without `--human-actor`, only the explicit
+`clear-human` ceremony is a human outcome; with it, accepted/changes rows for that actor also qualify.
+Declared attribution is not identity verification. `summarizeShadowAgreement` compares the latest preceding
+prediction against the next qualifying human outcome for the same repo and PR, consuming each pair once.
+It reports superseded predictions and unmatched pending predictions separately. This is PR-level outcome
+agreement, not proof that two reviews covered identical content, and it does not enable enforcement.
+`summarizeAgreement` retains its separate ledger-versus-live-label drift meaning.
+
+Tests redirect `WE_VERDICT_LEDGER_DIR` and `CONVEYOR_JURY_DIR` into temporary directories and drive the
+runner with a read-only `gh` fixture; a file in place of the ledger directory probes real append failure.
+
 ## Runner activity report
 
 `node scripts/operations/run.mjs runner-activity --json` reports driver health in `verdict` using
