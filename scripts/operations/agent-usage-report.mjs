@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * Machine-local Claude dispatch telemetry. Streams entire transcripts; never executes their commands.
+ * Task and command attribution retain capped metadata, never raw prompts or content-bearing flag values.
  * See docs/agent/testing.md#claude-subagent-usage for schema, usage and inference limits.
  */
 import { createReadStream, appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -12,11 +13,37 @@ import { PROJECTS_DIR, idFromAny, resolveTranscript, flattenToolResultText, stri
 import { CODEX_MODEL } from '../codex-direct-task.mjs';
 
 export const AGENT_USAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+export const MAX_TASK_CHARS = 200;
+export const MAX_COMMAND_CHARS = 300;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PROVIDERS = ['codex', 'gemini', 'none'];
 const asArray = (value) => value == null ? [] : Array.isArray(value) ? value : [value];
 const compact = (values) => values.length === 1 ? values[0] : values.length ? values : null;
 const blocks = (entry) => Array.isArray(entry?.message?.content) ? entry.message.content.filter(Boolean) : [];
+
+/** Bound classification labels, including the visible truncation marker; malformed labels are absent. */
+export function capText(value, maxChars) {
+  if (typeof value !== 'string') return null;
+  return value.length > maxChars ? `${value.slice(0, maxChars - 1)}…` : value;
+}
+
+/** Pure metadata projection of parsed argv. Redact whole values BEFORE applying the length cap. */
+export function summarizeCommand(argv) {
+  const redacted = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const equals = arg.indexOf('=');
+    const name = equals < 0 ? arg : arg.slice(0, equals);
+    if (/^(--)?(task|task-file|prompt|message|description|body|text)$/i.test(name)) {
+      if (equals >= 0) redacted.push(`${name}=[redacted]`);
+      else {
+        redacted.push(name);
+        if (i + 1 < argv.length) { redacted.push('[redacted]'); i++; }
+      }
+    } else redacted.push(arg);
+  }
+  return capText(redacted.join(' '), MAX_COMMAND_CHARS);
+}
 
 /** Stream even very large transcripts. Malformed rows are observable, not fatal. */
 async function* entries(file, diagnostics) {
@@ -106,9 +133,11 @@ export function delegationsFromCommand(command) {
       while (/^[A-Za-z_][\w]*=/.test(argv[0] ?? '') || argv[0] === '--') argv = argv.slice(1);
     }
     if (['bash', 'sh', 'zsh'].includes(basename(argv[0] ?? '')) && /^-[a-z]*c[a-z]*$/.test(argv[1] ?? '')) {
-      for (const nested of delegationsFromCommand(argv[2])) found.push({ ...nested, command });
+      // Keep the nested invocation's sanitized metadata; the wrapper contains the raw command body.
+      found.push(...delegationsFromCommand(argv[2]));
       continue;
     }
+    const invocation = argv;
     if (/^node(?:js)?$/.test(basename(argv[0] ?? ''))) {
       argv = argv.slice(1);
       while (['--no-warnings', '--enable-source-maps', '--'].includes(argv[0])) argv = argv.slice(1);
@@ -125,7 +154,7 @@ export function delegationsFromCommand(command) {
       if (flag) { model = flag[1] || null; modelSource = 'explicit'; }
       else if (['--model', '-m'].includes(argv[i])) { model = argv[++i] ?? null; modelSource = 'explicit'; }
     }
-    found.push({ provider, command, model, modelSource });
+    found.push({ provider, command: summarizeCommand(invocation), model, modelSource });
   }
   return found;
 }
@@ -182,7 +211,8 @@ export async function extractAgentUsage(target, { dispatch, session, project } =
     if (entry.type === 'assistant' && typeof entry.message?.content === 'string') collectOutcomes(entry.message.content, outcomes);
   }
   return {
-    task: meta?.description ?? dispatch?.input?.description ?? dispatch?.input?.prompt ?? null,
+    // Prompts are content, not classification metadata — never use even a truncated prefix here.
+    task: capText(meta?.description ?? dispatch?.input?.description ?? null, MAX_TASK_CHARS),
     modelTier: compact([...models]),
     delegatedProvider: compact([...new Set(delegations.map((d) => d.provider))]) ?? 'none',
     delegatedModel: compact(delegations.map(({ command, model }) => ({ command, model }))),
