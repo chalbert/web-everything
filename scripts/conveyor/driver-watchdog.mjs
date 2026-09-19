@@ -708,12 +708,17 @@ export function healDriver({
 /**
  * ONE watchdog pass: observe, judge, and (unless `dryRun`) heal. The only caller-facing entry point.
  *
- * A stale verdict is ALWAYS surfaced durably — log line, dedup record, desktop notification — whether the heal
- * ran, refused, or was skipped. That is `branch-sync.mjs`'s own #3472 lesson applied here: the incident it
+ * A `stale` verdict is ALWAYS surfaced durably — log line, dedup record, desktop notification — whether the
+ * heal ran, refused, or was skipped. That is `branch-sync.mjs`'s own #3472 lesson applied here: the incident it
  * replaced wrote one line into a log nobody was tailing and the checkout drifted 53 commits behind. A driver
  * that had to be rolled back is a real event a human must learn about, not something to hide behind a silent
  * self-repair. {@link decideEscalation} dedups the notification (same state ⇒ quiet for 30 min) so a driver
  * stuck across many checks nags once, not every pass.
+ *
+ * `down` gets the SAME desktop alert (found missing tonight — a fully-crashed driver never notified anyone,
+ * `.conveyor/watchdog-alert.json` sat untouched through two real down episodes), but deliberately none of the
+ * rest: `down` never reaches {@link decideRollback} or {@link healDriver}, because `verdict.actionable` stays
+ * `false` for it (see {@link classifyDriver}) — only the ALERT widened, not the auto-heal policy.
  */
 export function runWatchdogOnce({
   checkout,
@@ -754,7 +759,25 @@ export function runWatchdogOnce({
 
   if (!verdict.actionable) {
     line(verdict.reason);
-    return { checkout: root, verdict, action: 'none', rollback: null, heal: null, alerted: false };
+    if (verdict.state !== 'down') {
+      return { checkout: root, verdict, action: 'none', rollback: null, heal: null, alerted: false };
+    }
+    // `down` ALERTS EXACTLY LIKE `stale` (same `notifyDesktop`, same `decideEscalation` dedup/re-nag window) —
+    // the most severe verdict this file can reach must never sit silent just because it is not the one this
+    // file may HEAL. It must NOT, however, reach `decideRollback`/`heal`: `verdict.actionable` stays `false`
+    // for `down` (untouched — see `classifyDriver`'s own `down` branch for why rolling back under a dead
+    // driver would destroy evidence), so the heal-gating this file already had is exactly as before. This is
+    // the ONE place `actionable:false` still reaches the desktop notification; every other non-actionable state
+    // (`idle`, `working`, `unknown`, `settling`, `completed`) returns above, unchanged.
+    const escalation = decideEscalation({
+      signature: `down:${verdict.reason}`,
+      lastAlert: loadAlert(alertPath(root)), nowMs: facts.nowMs, renagMs,
+    });
+    if (escalation.fire) {
+      saveAlert(alertPath(root), { ...escalation.record, state: verdict.state, action: 'alert-only', reason: verdict.reason });
+      notify({ title: 'Conveyor driver DOWN', body: `${root}: ${verdict.reason}` });
+    }
+    return { checkout: root, verdict, action: 'alert-only', rollback: null, heal: null, alerted: escalation.fire };
   }
 
   const head = readHeadFn({ checkout: root, ...io });

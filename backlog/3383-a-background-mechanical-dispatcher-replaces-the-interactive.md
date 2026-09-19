@@ -3493,7 +3493,7 @@ Confirmed exactly as already flagged before this session started: no cron, no la
 
 `we:scripts/conveyor/parked-pr-progress-watch.mjs#everDispatchedReviewOrFix` treated ANY `review-<pr>`/`fix-<pr>` session in a PR's FULL history as permanent proof the PR was never neglected — with no time bound at all. Real, live incident this closes: PR #2035's blocking finding was repaired and it re-entered `review:pending` at 2026-09-13T20:13:51Z; nothing re-reviewed it until 2026-09-14T15:43:57Z — 19.7h later — while the OLD `review-2035`/`fix-2035` sessions from 2026-09-07 would have silently suppressed the neglect watch for that ENTIRE window under the un-scoped rule (confirmed off the PR's own real `gh api .../issues/2035/events` timeline and real `claude agents --json --all` `startedAt` values). The SAME structural gap explains the ~10 multi-day-stuck PRs named in the pattern audit above: every one of them already had a review/fix session dispatched at SOME point, so the un-scoped predicate could never fire for any of them no matter how long the CURRENT hold persisted. **Fixed**: `everDispatchedReviewOrFix` gained an optional `sinceMs` — when given, only a session started AT OR AFTER the CURRENT park period's own start counts as "dispatched" (a matching row with unreadable/missing `startedAt` still counts, fail-SAFE, matching this file's existing "never falsely flag" bias); omitted, the original unscoped behavior is preserved byte-for-byte for every pre-existing caller. `we:scripts/conveyor/parked-pr-progress-watch.mjs#watchNeglectedPrs` (the real production sweep) now threads the real park-period start through. 34 pre-existing tests unchanged + 11 new (`we:scripts/conveyor/__tests__/parked-pr-progress-watch.test.mjs`).
 
-**One adjacent, genuinely different gap deliberately left unbuilt and filed separately**, mirroring how `we:3596` was properly carved out of the same module rather than crammed in: PR #2047 shows a completed FIX inside the current park window (so the fixed predicate correctly does not call it never-dispatched) that never triggered a follow-up REVIEW — `review:changes` only clears on a review, not a fix, and the predicate cannot yet tell "some session ran recently" from "the specific action THIS state is owed ran recently." Filed as `we:backlog/x30inwx-neglect-watch-a-completed-fix-with-no-follow-up-review-leave.md` (open, `size: 3`, parent `3549`), with PR #2047's real timestamps as its fixture. Not dev-ready to just build tonight — needs the same "decide the exact shape" pass `we:3596` got, not a rushed bolt-on to an already-changed predicate.
+**One adjacent, genuinely different gap deliberately left unbuilt and filed separately**, mirroring how `we:3596` was properly carved out of the same module rather than crammed in: PR #2047 shows a completed FIX inside the current park window (so the fixed predicate correctly does not call it never-dispatched) that never triggered a follow-up REVIEW — `review:changes` only clears on a review, not a fix, and the predicate cannot yet tell "some session ran recently" from "the specific action THIS state is owed ran recently." Filed as `we:backlog/3664-neglect-watch-a-completed-fix-with-no-follow-up-review-leave.md` (open, `size: 3`, parent `3549`), with PR #2047's real timestamps as its fixture. Not dev-ready to just build tonight — needs the same "decide the exact shape" pass `we:3596` got, not a rushed bolt-on to an already-changed predicate.
 
 ### Root cause 3 — the LARGEST finding: a stale LOCAL `main` ref silently refused every fix/review dispatch, every tick, for over a day (fixed)
 
@@ -3508,3 +3508,163 @@ Found while investigating the operator's own follow-up question (real spare capa
 **"Nothing runs unless a session starts the conveyor" (`we:3625`'s own scope) was NOT today's dominant root cause** — checked directly: the resident driver was genuinely alive and ticking normally throughout this session's investigation (live lease, fresh heartbeat, real dispatch plans being computed every tick). The driver's occasional down periods earlier this same day/night (already documented elsewhere on this card) are a real, separate instance of that broader gap, but tonight's dominant symptom — real capacity, real computed work, near-zero actual progress — was Root cause 3 above, not an idle/undriven conveyor. `we:3625` stays open, unsliced, unprepared, exactly as before; nothing here should be read as having closed or narrowed it.
 
 No stuck application PR was manually reviewed, resolved, or merged by this session, per the operator's explicit instruction — the mechanism was fixed, not the symptoms.
+
+## Session update (2026-09-15) — delegation infrastructure hardened (codex/gemini direct-task, provider-routing), graduation-data mechanism live, three real production liveness bugs fixed (x09zslx), operations-coverage audit landed a 17-op phased plan
+
+### Delegation infrastructure built and hardened
+
+`we:codex-direct-task.mjs` and `we:gemini-direct-task.mjs` both went through real bug-fix rounds
+tonight — filename-quoting, worktree, and buffer bugs, each caught by independent review rather
+than shipped first-try-clean. Claude-via-Antigravity wiring (`agy --model claude-sonnet-4-6`)
+confirmed real and running on a quota separate from this session's own. `we:scripts/lib/provider-routing.mjs`
+— a deterministic `selectProvider`/`selectSupervisionLevel` — was built by Gemini on its first real
+trial, after an earlier attempt had timed out.
+
+### Graduation-data mechanism
+
+`we:scripts/conveyor/log-delegation-trial.mjs` now logs real trials into `we:scripts/conveyor/run-scorecards.json`.
+Progressive-backdown thresholds were ratified in `backlog/3690`: N=5 clean trials per
+{provider,model,taskType}, with a calibration-miss as a hard veto. Currently no combination has
+graduated — everything dispatched through the delegation path still gets full verification. The
+tracker status page (this one) was published as a live artifact so this stays checkable without
+re-deriving it from raw logs each time.
+
+### Real production bugs found and fixed tonight
+
+This is the epic's actual point, named plainly rather than folded into infrastructure talk:
+
+- **Three independent instances of the same root-cause class** — "liveness is always the real OS
+  process handle, never an inferred state": the driver-watchdog counted dead sessions as live
+  in-flight work (phantom claims that had gone unnoticed for 13+ days), the lease-reaper had the
+  identical bug for lane leases, and the session-reaper had it again for null-pid registry entries.
+  Filed as its own standing principle rather than three separate patches, `x09zslx`.
+- The driver-watchdog never alerted on a full crash — only on stuck-but-alive. Fixed.
+- A repeated advisory-review churn bug on `review:human` PRs burned 6 wasted panel runs on PR
+  #2117 before being caught.
+- A stale-verify-marker bug was blocking manual approval unnecessarily, `#3538`.
+- A false-positive duplicate-PR flag hit an unsplit epic, recurring twice (`#3683`/`x7nb9hn`)
+  before the actual cause was pinned down.
+
+### Operations-coverage plan
+
+A real session audit — Codex and Gemini, cross-checked against each other — covered 471 dispatches
+and found only 11 of 247 grouped tasks had a matching declared operation. One honest finding from
+the audit itself: Gemini's first attempt turned out to be a copy of Codex's output, not an
+independent pass, and was redone before being trusted. The audit landed as a 17-operation phased
+plan (`backlog/x8cq3pp`, PR #2280). Phase 1 (5 read-only operations) is in progress; 3 of the 5 were
+already found to be specced against modules that only exist on this prototype branch, not on
+`main` — adapted in place rather than blocked on that mismatch.
+
+### Ratified decisions
+
+`#3589` — clear-human must wait for a posted advisory review on the current head before merging.
+Closes the exact race that let PR #2011 clear early on luck rather than on an actual review.
+
+### Still open
+
+- Capability-ratings / AI-watch-program work (external benchmark data feeds exploration priority
+  only — explicitly NOT used for graduation decisions).
+- `/wip` skill update to show supervisor-model/delegation-target per running task.
+- Phase 1 of the operations-coverage plan is still landing, not done.
+
+## Session update (2026-09-15) — Wind-down iteration: conflict-resolution delegation trial, dispatch-consistency fix, conveyor health check
+
+### Delegation/graduation trial
+
+Ran a first-ever supervised trial of Gemini Flash 3.8 (low) doing merge-conflict resolution on PRs
+#2291 and #2292, with a genuinely independent Claude process verifying each resolution (3-way diff +
+full test suite) before push — both accepted and pushed. First entries logged in the
+`{antigravity, gemini-3.8-flash-low, conflict-resolution}` graduation bucket via PR #2294.
+**Verified at note time**: #2294 is still OPEN, carrying `review:changes` — independent review
+bounced it for a real bug (two byte-for-byte duplicate JSON records inflating the clean-streak
+count). Not yet fixed/re-pushed.
+
+### PR #2288 (pr-reconcile op)
+
+Independently reviewed and REJECTED — 3 confirmed real logic bugs. **Verified at note time**: still
+OPEN on `review:changes`, and has since also picked up `merge-status:conflicting` (drifted into a
+real merge conflict on top of the unresolved review bugs). Needs author/Codex follow-up; not yet
+actioned.
+
+### PR #2295
+
+Small Codex-authored fix adding foreground-only banners to `we:codex-direct-task.mjs` /
+`we:gemini-direct-task.mjs` plus an additive we:CLAUDE.md pinned-rule paragraph, addressing a real
+recurring bug where subagents backgrounded these (already-synchronous) dispatch scripts and waited
+on Monitor instead of blocking in the foreground. **Verified at note time**: MERGED
+(2026-09-15T18:21:52Z).
+
+### Real operational gap found and fixed this session
+
+`we:parked-pr-conflict-watch.mjs` bounces a PR to `review:changes` on a real merge conflict, but had no
+mechanism to transition it to a FRESH review once the conflict was genuinely resolved — it either
+sits on the stale label forever (drain won't touch it) or risks someone resurrecting a stale
+pre-fix verdict (caught mid-session before it happened). Manually re-armed #2291/#2292 to
+`review:pending` via `we:rearm-review.mjs` as an immediate fix. A mechanical fix (Codex-built, dispatched
+as agent `a4ce7efd8698d3bfe`) followed: `defaultPostConflictRearm` now shells the same sanctioned
+`we:rearm-review.mjs` hand-back whenever `planConflictLabelChange` sees GitHub's own `mergeable ===
+'MERGEABLE'` (never just the absence of this pass's label, and never on an `UNKNOWN` mergeable
+result) on a PR still carrying `review:changes`. **Verified at note time**: shipped as PR #2296,
+OPEN, all completed CI checks green (a couple of shards still in flight), the dispatching agent still
+correctly blocking in the foreground on its own land process rather than assuming a notification —
+not yet merged.
+
+- #2291: **MERGED** — re-armed, received a fresh review, landed.
+- #2292: OPEN, carries `ready-to-merge` + `review:accepted` (review-round 2) — accepted after re-arm,
+  not yet drained/merged.
+
+### Conveyor supervisor health
+
+Diagnosed a "stale"/"refused"/`healEnabled:false` watchdog state — confirmed NOT a real stall. The
+driver's own readiness check showed zero items genuinely dispatchable (of 94 watchdog-flagged
+"eligible" items: 50 stale already-resolved noise, 31 not-yet-ready, 6 need scope/decision, 8
+lane-conflict-held). Deliberately left alone rather than forcing a heal (checkout has uncommitted
+changes + unpushed commits, so writing a `last-known-good` marker or enabling `--watchdog-heal` was
+judged a real-consequence decision to defer, not something to force from a diagnostic pass).
+
+### Graduation data health check
+
+Confirmed still flowing — 69 scorecard entries logged in a recent 4-hour window (mostly conveyor
+advisory-review observations, codex/gpt-6-astra + antigravity/gemini-3.1-pro, plus 3 real build
+trials on item #3360).
+
+### Recurring theme, still unresolved as a systemic fix
+
+The "subagent ends its turn assuming a backgrounded process/Monitor will notify it" violation
+recurred multiple more times this session, including — notably — around the very agent building the
+fix meant to prevent exactly that pattern for the two delegation scripts. Each instance was caught
+and the agent resumed with an explicit foreground-blocking instruction. This remains a live,
+recurring maintenance cost worth a more structural fix (e.g. a real PreToolUse hook denying
+`run_in_background` on known-synchronous dispatch scripts, not just a memory/prompt rule) — not yet
+built.
+
+### Next-session priorities
+
+- Confirm final state of PR #2294 (duplicate-entry fix needed — still open on `review:changes` as of
+  this note) and PR #2295 (already merged as of this note — just double-check nothing regressed).
+- Confirm PR #2296 (conflict-resolved→fresh-review mechanical fix, agent `a4ce7efd8698d3bfe`) actually
+  lands — CI was green with two shards still running and the PR unmerged as of this note.
+- Confirm #2291/#2292 actually received and passed a fresh review after being re-armed to
+  `review:pending` — #2291 confirmed merged; #2292 confirmed `review:accepted`/`ready-to-merge` but
+  still awaiting drain as of this note.
+- PR #2288 needs real author fixes for its 3 logic bugs, and now also a real merge-conflict
+  resolution on top of that — not yet started.
+- Consider a real PreToolUse hook to hard-block `run_in_background`/Monitor usage on
+  `we:codex-direct-task.mjs`/`we:gemini-direct-task.mjs` invocations, given the prompt-level fix alone
+  hasn't stopped the recurrence.
+- `harness-coverage` operation still deferred pending a design decision.
+- `agy`/`manage_task` task-160 kill-race root cause still not fully investigated (next steps were
+  documented earlier in the session, not yet executed).
+- Antigravity `grep_search` crash: still only a soft prompt-level workaround; a real `we:hooks.json`
+  PreToolUse hard-block was confirmed feasible but not yet wired in.
+
+## Session update (2026-09-15) — Investigated token-usage breakdown by role; capture already machine-wide, aggregation layer still missing
+
+Investigated whether Claude token usage can be broken down by role (main orchestrating session vs. dispatched subagent vs. operation type). Findings:
+
+- No such breakdown exists today. Scattered pieces exist (per-Codex-dispatch token telemetry, a local OTEL metrics collector for Claude's own usage, per-judge-invocation usage in run records) but nothing stitches them into a role-based view. Backlog #3671 already tracks this gap explicitly (today's hooks can't see an Agent/subagent call at all).
+- Good news: machine-wide *capture* of Claude's own token/cost usage is already live, not something to build. Claude Code's global settings file (updated 2026-09-15 16:02) sets telemetry env vars that apply to every Claude Code session on this machine — interactive, VSCode-extension, dispatched lanes, all of it. The collector (at `we:/Users/nicolasgilbert/.claude/scripts/operations/claude-otel-collector.mjs`, PID 80176 as of writing) is already receiving real data from 100+ session IDs/day into `.operations/claude-otel/<day>.jsonl`. Only numeric token/cost counters cross the wire, never prompt/response content (verified: the collector deliberately refuses to persist the /v1/logs channel that could carry content).
+- Real future-work items, not yet built:
+  1. An aggregation/query layer over the collected data producing an actual role/operation breakdown (main session vs. subagent vs. build/fix/review/etc) — this is the actual missing piece, not the capture itself.
+  2. Known unfixed limitation: per-lane-clone CLAUDE_OTEL_ROOT fragmentation can cause a rollup to silently miss lane-local data — flagged in the collector's own code comments, not yet fixed.
+  3. Accepted-risk note worth carrying forward: the local OTLP receiver has no auth and stores plaintext NDJSON including user-identity attributes — fine for a single-operator machine, but should be revisited if this pattern is ever extended to a shared/multi-operator setup.

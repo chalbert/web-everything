@@ -35,6 +35,7 @@ import {
 } from '../reconcile-core.mjs';
 import { STAND_DOWN_MARKER } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
+import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
@@ -257,6 +258,31 @@ describe('case 3b — a `review:human` PR now gets the SAME `review` dispatch a 
     });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0].kind).toBe('cap-exhausted');
+  });
+
+  // #3383 — THE PR #2117 REGRESSION. A `review:human` PR's `review:pending` label is NEVER cleared by `record`
+  // (INVARIANT 2), so it never bounces `review:changes` and NEVER posts a `REARM_COMMENT_MARKER` comment — not
+  // once, no matter how many advisory rounds run. Before this fix, `durableCounts` was supplied empty (exactly
+  // what a fresh reconcile pass reads) and the cap-check's ONLY fallback was `countRearmComments`, which stays 0
+  // forever for this population — so the cap NEVER bound. Confirmed live on PR #2117: six full advisory-panel
+  // runs against the identical commit range `a443ada1..e0769309`, roughly every 20-50 minutes, no end condition.
+  // What DOES post once per completed round is the advisory comment itself (`ADVISORY_NOTE_MARKER`,
+  // `we:scripts/operations/review-pr.mjs#renderAdvisoryNote`) — this pins that counting THOSE is what makes the
+  // cap actually bind for this population, with NO durableCounts map supplied at all (mirrors case 4's own
+  // "the PR's own re-arm comments bind the cap even when the shell supplied no map at all").
+  it('#3383 — PR #2117 regression: repeated advisory-panel comments alone (never a re-arm marker) still trip the cap', () => {
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one` });
+    const burned = prGateSelf({ comments: Array.from({ length: 6 }, (_, i) => advisoryRound(i + 1)) });
+    const plan = planReconcile({ prs: [burned], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: 6, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('#3383 — one advisory round below the cap still dispatches — the fix does not over-tighten the cap', () => {
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n}` });
+    const notYetBurned = prGateSelf({ comments: Array.from({ length: NEGOTIATION_ROUND_CAP - 1 }, (_, i) => advisoryRound(i + 1)) });
+    const plan = planReconcile({ prs: [notYetBurned], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1801, attempts: NEGOTIATION_ROUND_CAP - 1 })]);
   });
 
   it('a LIVE session already bound to the PR still refuses dispatch — `needs-human` is not exempt from refusal 4 either', () => {

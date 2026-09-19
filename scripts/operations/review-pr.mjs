@@ -236,6 +236,12 @@ import { CODEX_MODEL } from '../codex-direct-task.mjs';
 // `defaultAntigravityReviewProbationCheck` reads the probation registry with, mirroring `CODEX_MODEL`'s import
 // immediately above exactly. A leaf import with no jury/markdown-it edge — see that module's own header.
 import { ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
+// #3383 mechanical-dispatcher round-cap fix — `renderAdvisoryNote`'s comment opens with this SAME literal
+// `we:scripts/conveyor/reconcile-core.mjs`'s round-cap check counts back off the PR's own comment thread
+// (`countAdvisoryComments`, `we:scripts/conveyor/advisory-round-count.mjs`). Build and count share ONE marker
+// so they can never drift — see that file's own header for why a `review:human` PR's advisory rounds could
+// never be capped before this (PR #2117: six full panel runs against one identical commit range).
+import { ADVISORY_NOTE_MARKER } from '../conveyor/advisory-round-count.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -1688,7 +1694,7 @@ export function renderAdvisoryNote({ read, verdict } = {}) {
     : `Net basis: \`${read.netBasis.base ?? '?'}..${read.netBasis.rev ?? '?'}\`${renderRevProvenance(read.netBasis)} — `
       + `${read.netChangedFiles.length} net changed file(s) vs current main (#2450), not \`gh pr diff\`'s three-dot list.`;
   return [
-    '**⚠️ THIS IS AN ADVISORY REVIEW, NOT A RECORDED VERDICT.** This PR carries `review:human`. The independent',
+    `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`. The independent`,
     'AI review below ran automatically, before the required human review ceremony — it has neither accepted nor',
     'bounced this PR. No label was changed and no decision was recorded.',
     '',

@@ -116,3 +116,42 @@ export async function autoFixAfterReview({ pr, repo, findings, item = null } = {
   }
   return { tier, baseRefName, results };
 }
+
+/**
+ * #3383 mechanical-dispatcher — THE VISIBILITY GAP {@link autoFixAfterReview} left. When every finding it was
+ * handed declines auto-fix (the whole PR is, say, path-blacklisted), this router today posts NOTHING — the only
+ * trace is a `writeErr` on an actual THROW, and a clean decline is not a throw. An operator reading the advisory
+ * comment has no way to tell "auto-fix ran and found nothing it could touch" apart from "auto-fix never ran at
+ * all". {@link summarizeAutoFixDecline} is the PURE check for that exact shape: `null` for every other outcome
+ * (nothing to consider, or at least one finding WAS dispatched), and a summary only when the router genuinely
+ * looked at one or more findings and auto-fixed none of them.
+ * @param {{results?: Array<{dispatched?: boolean, risk?: {reason?: string}}>}} autofix - {@link autoFixAfterReview}'s return value
+ * @returns {{count: number, reasonCounts: Record<string, number>}|null}
+ */
+export function summarizeAutoFixDecline(autofix) {
+  const results = Array.isArray(autofix?.results) ? autofix.results : [];
+  if (results.length === 0) return null; // nothing to consider — zero findings is not a decline.
+  if (results.some((r) => r?.dispatched)) return null; // at least one auto-fixed — not "all declined".
+  const reasonCounts = {};
+  for (const r of results) {
+    const reason = typeof r?.risk?.reason === 'string' && r.risk.reason ? r.risk.reason : 'unknown';
+    reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+  }
+  return { count: results.length, reasonCounts };
+}
+
+/**
+ * #3383 — the small, visible note posted when {@link summarizeAutoFixDecline} finds a clean all-declined
+ * outcome. Deliberately terse (one line, no table) — it is a footnote to the advisory comment's own findings
+ * table, not a second report: the findings and their reasoning are already there, this only says whether
+ * auto-fix looked at them and what it did (nothing). Pure.
+ * @param {{count: number, reasonCounts: Record<string, number>}} decline
+ * @returns {string}
+ */
+export function renderAutoFixDeclineNote({ count, reasonCounts }) {
+  const byReason = Object.entries(reasonCounts)
+    .map(([reason, n]) => `${n} ${reason}`)
+    .join(', ');
+  return `🛠️ Auto-fix checked the ${count} finding(s) above and fixed 0 — ${byReason || 'none cleared the auto-fix gate'}. `
+    + 'No fix was dispatched; they are left exactly as reported for a human to address.';
+}

@@ -164,20 +164,29 @@ export function findPocBranch(registry, branch) {
  */
 export function isPocBranch(registry, branch) { return findPocBranch(registry, branch) !== null; }
 
+/** The env var {@link resolveAutoSyncEnabled} reads for its global default/kill-switch — mirrors
+ *  `we:scripts/lib/lane-concurrency.mjs`'s `WE_MAX_CONCURRENT_LANES` and
+ *  `we:scripts/readiness/heavy-admission.mjs`'s `WE_HEAVY_ADMISSION_CAP` naming convention. */
+export const AUTO_SYNC_ENV_VAR = 'WE_POC_BRANCH_SYNC';
+
 /**
  * THE #3383 ON/OFF KNOB for "keep this POC branch mechanically synced with its graduation target" — the config
  * convention this repo already established for a feature toggle: a `WE_<NAME>` env var
- * ({@link AUTO_SYNC_ENV_VAR}, mirroring `we:scripts/lib/lane-concurrency.mjs`'s `WE_MAX_CONCURRENT_LANES` and
- * `we:scripts/readiness/heavy-admission.mjs`'s `WE_HEAVY_ADMISSION_CAP`), settable PER-BRANCH via this
- * registry's own `autoSync` field, with a conservative global default (OFF) when neither says otherwise. PURE.
+ * ({@link AUTO_SYNC_ENV_VAR}), settable PER-BRANCH via this registry's own `autoSync` field, with a
+ * conservative global default (OFF) when neither says otherwise. PURE.
  *
  * RESOLUTION ORDER, each one a deliberate footgun-avoidance choice:
- *   1. `env.WE_POC_BRANCH_SYNC === '0'` is a GLOBAL KILL SWITCH — it forces every branch OFF regardless of its
- *      own `autoSync: true`, so an operator can pause every mechanical branch-sync at once (e.g. mid-incident)
- *      without hand-editing the registry entry-by-entry.
- *   2. The entry's OWN `autoSync` (an explicit `true`/`false`) wins next — the registry is the durable,
+ *   1. NO SUCH BRANCH (`entry` is `null`/not an object) is ALWAYS off, regardless of the env default — the
+ *      global opt-in only ever applies to a branch that is genuinely REGISTERED but undecided (case 3 below);
+ *      it must never be read as "sync anything, registered or not" (review finding: a caller that mistakenly
+ *      passed a `null` entry — e.g. `findPocBranch` missing — must not have that mistake silently upgraded
+ *      into a real sync attempt just because `WE_POC_BRANCH_SYNC=1` happens to be set).
+ *   2. `env.WE_POC_BRANCH_SYNC === '0'` is a GLOBAL KILL SWITCH — it forces every REGISTERED branch OFF
+ *      regardless of its own `autoSync: true`, so an operator can pause every mechanical branch-sync at once
+ *      (e.g. mid-incident) without hand-editing the registry entry-by-entry.
+ *   3. The entry's OWN `autoSync` (an explicit `true`/`false`) wins next — the registry is the durable,
  *      per-branch, committed decision, and is meant to win over a machine-local env default.
- *   3. Otherwise (the entry never decided): `env.WE_POC_BRANCH_SYNC === '1'` opts every undecided branch IN;
+ *   4. Otherwise (a real, registered entry that never decided): `env.WE_POC_BRANCH_SYNC === '1'` opts it IN;
  *      anything else (unset, any other value) is the conservative default — OFF. A brand-new POC branch that
  *      forgets to set `autoSync` never gets pushed to automatically, matching this repo's "footguns first"
  *      default-safe convention (mirrors {@link resolveCap}-style resolvers' own min-1-not-0 floor).
@@ -185,11 +194,10 @@ export function isPocBranch(registry, branch) { return findPocBranch(registry, b
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}
  */
-export const AUTO_SYNC_ENV_VAR = 'WE_POC_BRANCH_SYNC';
-
 export function resolveAutoSyncEnabled(entry, env = process.env) {
+  if (!entry || typeof entry !== 'object') return false;
   if (env?.[AUTO_SYNC_ENV_VAR] === '0') return false;
-  if (entry && typeof entry.autoSync === 'boolean') return entry.autoSync;
+  if (typeof entry.autoSync === 'boolean') return entry.autoSync;
   return env?.[AUTO_SYNC_ENV_VAR] === '1';
 }
 

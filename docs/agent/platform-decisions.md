@@ -2954,7 +2954,7 @@ graduate."* Four clauses:
 temporary build tool, not the default steady state" that must be wound down, and the assumption that there is
 only ever one such branch at a time.
 
-**Lineage:** #3637 (ratified 2026-09-12, operator, in conversation; `bornAs: x7ppgg6`), amending epic
+**Lineage:** #3637 (ratified 2026-09-12, operator, in conversation; `bornAs: 3637`), amending epic
 `#3383`'s own operating doctrine rule 10 — the before/after and full design (transport, completion signal,
 registry shape) sit on `#3637` itself and in `we:skills-src/mechanical-delivery-doctrine/SKILL.md` (rule 10),
 which carries the epic-scoped operational detail and cites this anchor as the canonical statute. Composes
