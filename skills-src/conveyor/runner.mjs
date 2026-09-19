@@ -306,6 +306,10 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
       // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
       // population) — see that file's own header for the full gap this closes.
       runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep', ...prsArgs]);
+      // The `advisory:accepted` / `advisory:changes` staleness sweep — drops either label from any PR whose head
+      // has moved past the advisory that earned it, off the SAME shared snapshot (no extra fetch, no new poller).
+      // See that file's own header; `operator-queue.mjs` covers the ~1-tick lag on the read side.
+      runQuiet('conveyor/advisory-label-sweep.mjs', ['sweep', ...prsArgs]);
       // #3568 — reaps known-safe scratch litter (`.commit-msg.txt`, `.pr-body.md`, …) from every UNLEASED lane
       // whose entire dirty state matches only that allowlist, reusing the SAME `we:scripts/lib/lane-litter.mjs`
       // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix

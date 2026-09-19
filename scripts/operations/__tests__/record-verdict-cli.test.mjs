@@ -62,7 +62,7 @@ async function runAtConfirm({ id = 'run-3540', labels = ['review:pending'], code
       continue;
     }
     if (status === 'awaiting-effect') {
-      ({ run } = await applyPendingEffects(run, { sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) }, store }));
+      ({ run } = await applyPendingEffects(run, { sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) }, store }));
       run = advanceWhileRunning(run, { registry });
       continue;
     }

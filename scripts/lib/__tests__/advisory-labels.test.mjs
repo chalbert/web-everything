@@ -1,0 +1,133 @@
+/** @file The `advisory:*` label pair — outcome parsing, the label plan, and the staleness plan. All pure. */
+import { describe, expect, it } from 'vitest';
+
+import {
+  ADVISORY_LABELS, advisoryCoversHead, labelForOutcome, latestAdvisory, parseAdvisories,
+  planAdvisoryLabels, planAdvisoryStaleLabels,
+} from '../advisory-labels.mjs';
+
+const HEAD = 'fd37ce270'.padEnd(40, 'a');
+const BASE = 'a'.repeat(40);
+const note = ({ head = HEAD, outcome, verdict = '🚦 human review required', at = '2026-09-19T12:00:00Z' } = {}) => ({
+  body: [`**Verdict:** ${verdict}`, ...(outcome ? [`**Advisory outcome:** \`${outcome}\` — x.`] : []),
+    `Net basis: \`${BASE}..${head}\` — 3 net changed file(s)`].join('\n'),
+  createdAt: at,
+});
+const labels = (...names) => names.map((name) => ({ name }));
+
+describe('planAdvisoryLabels', () => {
+  it('accept on a human PR: adds advisory:accepted, drops review:pending', () => {
+    expect(planAdvisoryLabels({ outcome: 'accept', currentLabels: labels('review:human', 'review:pending') }))
+      .toEqual({ add: 'advisory:accepted', remove: ['review:pending'] });
+  });
+
+  it('changes: adds advisory:changes and removes the opposite label', () => {
+    expect(planAdvisoryLabels({ outcome: 'changes', currentLabels: labels('review:human', 'review:pending', 'advisory:accepted') }))
+      .toEqual({ add: 'advisory:changes', remove: ['advisory:accepted', 'review:pending'] });
+  });
+
+  it('accept removes a stale advisory:changes', () => {
+    expect(planAdvisoryLabels({ outcome: 'accept', currentLabels: labels('review:human', 'advisory:changes') }))
+      .toEqual({ add: 'advisory:accepted', remove: ['advisory:changes'] });
+  });
+
+  it('leaves review:pending alone on a PR that is not human-gated', () => {
+    expect(planAdvisoryLabels({ outcome: 'accept', currentLabels: labels('review:pending') }).remove).toEqual([]);
+  });
+
+  it('is idempotent — the desired state yields no change', () => {
+    expect(planAdvisoryLabels({ outcome: 'accept', currentLabels: labels('review:human', 'advisory:accepted') }))
+      .toEqual({ add: null, remove: [] });
+  });
+
+  it('NEVER touches review:human and NEVER adds anything but an advisory label — for every input', () => {
+    const everything = ['review:human', 'review:pending', 'review:changes', 'review:accepted', 'advisory:accepted', 'advisory:changes'];
+    for (const outcome of ['accept', 'changes']) {
+      for (let mask = 0; mask < 2 ** everything.length; mask += 1) {
+        const current = everything.filter((_, i) => mask & (1 << i));
+        const plan = planAdvisoryLabels({ outcome, currentLabels: current });
+        expect(plan.remove).not.toContain('review:human');
+        expect(plan.remove).not.toContain('review:changes');
+        expect(plan.remove).not.toContain('review:accepted');
+        expect(Object.values(ADVISORY_LABELS)).toContain(plan.add ?? ADVISORY_LABELS.ACCEPTED);
+      }
+    }
+  });
+
+  it('an unknown outcome plans nothing', () => {
+    expect(planAdvisoryLabels({ outcome: 'needs-human', currentLabels: labels('review:human') }))
+      .toMatchObject({ add: null, remove: [], reason: expect.stringContaining('unknown advisory outcome') });
+    expect(labelForOutcome('nope')).toBeNull();
+  });
+});
+
+describe('parseAdvisories', () => {
+  it('reads the stated outcome line and the reviewed head', () => {
+    expect(parseAdvisories([note({ outcome: 'changes' })])[0]).toMatchObject({ outcome: 'changes', head: HEAD });
+  });
+
+  it('falls back to the verdict line for a comment posted before the outcome line existed', () => {
+    expect(latestAdvisory([note({ verdict: '🔁 changes requested' })]).outcome).toBe('changes');
+    expect(latestAdvisory([note({ verdict: '✅ pass — no blocking findings' })]).outcome).toBe('accept');
+  });
+
+  it('the stated outcome wins over the verdict line', () => {
+    expect(latestAdvisory([note({ outcome: 'accept', verdict: '🔁 changes requested' })]).outcome).toBe('accept');
+  });
+
+  it('ignores comments without both a verdict line and a Net basis line, and orders newest first', () => {
+    const newer = note({ head: 'b'.repeat(40), at: '2026-09-19T13:00:00Z' });
+    const parsed = parseAdvisories([note(), { body: '**Verdict:** x' }, { body: 'hello' }, newer]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].head).toBe('b'.repeat(40));
+    expect(parseAdvisories(undefined)).toEqual([]);
+  });
+});
+
+describe('advisoryCoversHead', () => {
+  it('matches a sha or a prefix in either direction, and never on blank input', () => {
+    expect(advisoryCoversHead({ head: HEAD }, HEAD)).toBe(true);
+    expect(advisoryCoversHead({ head: HEAD.slice(0, 9) }, HEAD)).toBe(true);
+    expect(advisoryCoversHead({ head: HEAD }, HEAD.slice(0, 9))).toBe(true);
+    expect(advisoryCoversHead({ head: HEAD }, 'b'.repeat(40))).toBe(false);
+    expect(advisoryCoversHead({ head: HEAD }, '')).toBe(false);
+    expect(advisoryCoversHead(undefined, HEAD)).toBe(false);
+  });
+});
+
+describe('planAdvisoryStaleLabels — the labels are dropped when a new commit lands', () => {
+  const comments = [note({ outcome: 'accept' })];
+
+  it('keeps both labels while the head is still the one the advisory judged', () => {
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('review:human', 'advisory:accepted'), comments, headRefOid: HEAD }))
+      .toEqual({ remove: [] });
+  });
+
+  it('drops advisory:accepted the moment the head moves', () => {
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('review:human', 'advisory:accepted'), comments, headRefOid: 'b'.repeat(40) }))
+      .toEqual({ remove: ['advisory:accepted'] });
+  });
+
+  it('drops advisory:changes too, and both when both are present', () => {
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('advisory:changes'), comments, headRefOid: 'b'.repeat(40) }).remove)
+      .toEqual(['advisory:changes']);
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('advisory:accepted', 'advisory:changes'), comments, headRefOid: 'b'.repeat(40) }).remove)
+      .toEqual(['advisory:accepted', 'advisory:changes']);
+  });
+
+  it('drops a label with no advisory comment behind it', () => {
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('advisory:accepted'), comments: [], headRefOid: HEAD }).remove)
+      .toEqual(['advisory:accepted']);
+  });
+
+  it('a newer advisory on the new head keeps the label (the review re-ran)', () => {
+    const rerun = [...comments, note({ head: 'b'.repeat(40), outcome: 'accept', at: '2026-09-19T14:00:00Z' })];
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('advisory:accepted'), comments: rerun, headRefOid: 'b'.repeat(40) }).remove)
+      .toEqual([]);
+  });
+
+  it('drops nothing on an unknown head, and nothing when no advisory label is present', () => {
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('advisory:accepted'), comments, headRefOid: '' }).remove).toEqual([]);
+    expect(planAdvisoryStaleLabels({ currentLabels: labels('review:human'), comments, headRefOid: 'b'.repeat(40) }).remove).toEqual([]);
+  });
+});

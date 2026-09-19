@@ -54,7 +54,15 @@
  * line and no label-swap payload with `renderVerdictWriteUp` — see its own docblock. It posts through a bare
  * `gh pr comment` (via `we:scripts/lib/review-label-provider.mjs#createGhProvider`'s `postComment`, the same
  * primitive `review-set-label.mjs` itself uses), never through `we:scripts/review-set-label.mjs`, because that
- * single home ALWAYS couples a comment with a label swap (#2644) and this step swaps no label, ever.
+ * single home ALWAYS couples a comment with a label swap (#2644) and this step swaps no `review:*` label, ever.
+ *
+ * THE `advisory:*` LABEL (the operator's "tag to tell me the advisory accepted"). The note alone left a clean
+ * advisory indistinguishable, by label, from a PR never reviewed. So `advise` declares a SECOND effect after the
+ * note, `ADVISORY_LABEL`, whose sink (`we:scripts/operations/review-pr-io.mjs`) applies `advisory:accepted` or
+ * `advisory:changes` (`we:scripts/lib/advisory-labels.mjs`) and drops `review:pending`. It is deliberately NOT a
+ * `decideSetLabel` swap: it never touches `review:human`, never adds `review:accepted`. The outcome it records
+ * is the panel's verdict on the admitted findings with the human gate factored OUT ({@link deriveAdvisoryOutcome}),
+ * because `verdict.verdict` is `needs-human` for EVERY gate-self PR and so says nothing about the findings.
  *
  * THE RESIDUAL THIS INHERITS, STATED RATHER THAN HIDDEN. `resolvePending` addresses a suspended run's step by
  * the NUMERIC index frozen on `run.pending` at suspend time, and `declarationFor` only refuses a stale run whose
@@ -226,6 +234,9 @@ import { CARE_LEVELS, CARE_LEVEL_ORDER, REVIEW_PR_CHANNEL } from '../lib/review-
 // `we:scripts/conveyor/advisory-round-count.mjs`). Build and count share ONE marker so they can never drift —
 // see that file's own header for the `#2117`/`#2298` incident this closes.
 import { ADVISORY_NOTE_MARKER } from '../conveyor/advisory-round-count.mjs';
+// The `advisory:*` label pair's outcome vocabulary — a leaf, shared with the sink, the staleness sweep and
+// `operator-queue.mjs` so nobody restates it.
+import { ADVISORY_OUTCOMES } from '../lib/advisory-labels.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -603,6 +614,9 @@ export const REVIEW_EFFECTS = Object.freeze({
   LEDGER: LEDGER_EFFECT_TYPE,
   NOTICE: 'review.notice',
   ADVISORY_NOTE: 'review.advisory-note',
+  // `advise`'s SECOND effect: the `advisory:accepted` / `advisory:changes` label. Its own type for the same reason
+  // as `ADVISORY_NOTE` — never `LABEL`, which is the real ceremony's `review:*` swap.
+  ADVISORY_LABEL: 'review.advisory-label',
 });
 
 /**
@@ -1210,6 +1224,52 @@ function renderRevProvenance(netBasis) {
 }
 
 /**
+ * THE ADVISORY'S OWN OUTCOME — `accept` or `changes` — with the human gate FACTORED OUT. PURE.
+ *
+ * `verdict.verdict` cannot be used: `derivePanelVerdict` returns `needs-human` for EVERY gate-self PR before it
+ * looks at a single finding, so it is identical for a clean advisory and a blocked one. This re-runs the SAME
+ * reducer over the SAME admitted findings and lens verdicts with `humanRequired` off, i.e. "what would the panel
+ * have said if this PR were not human-gated" — the honest answer to "did the advisory find anything blocking".
+ * `accept` only when every mandatory lens accepts and no guard is owed; anything else is `changes`.
+ *
+ * `null` when no outcome can be honestly derived (no mandatory lens seated, a mandatory lens with no verdict) —
+ * the caller then posts the note with no outcome line and applies no label, exactly like before this existed.
+ *
+ * @param {object} verdict the `reduce` step's output.
+ * @returns {'accept'|'changes'|null}
+ */
+export function deriveAdvisoryOutcome(verdict) {
+  const v = verdict && typeof verdict === 'object' ? verdict : {};
+  const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
+  const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
+  try {
+    const reduced = derivePanelVerdict({
+      lensVerdicts,
+      humanRequired: false,
+      mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
+      // The ADMITTED set, exactly as `reduce` reduced it — an off-scope (unverifiable) citation must not block
+      // here any more than it did there (#x6t2z6h). Falls back to the published list for a record that predates it.
+      findings: v.admittedFindings ?? v.findings ?? [],
+    });
+    return reduced === VERDICTS.ACCEPT ? ADVISORY_OUTCOMES.ACCEPT : ADVISORY_OUTCOMES.CHANGES;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE OUTCOME THE NOTE STATES AND THE LABEL APPLIES — {@link deriveAdvisoryOutcome}, but only when the panel judged
+ * a PINNED commit. An unpinned or degraded basis (`netBasis.rev` null) names no head, so there is no head for a
+ * label to describe and no `Net basis: <base>..<head>` line a reader could compare against — the note then carries
+ * no outcome line and no label is applied, rather than a label nothing can ever verify. PURE.
+ * @returns {'accept'|'changes'|null}
+ */
+export function advisoryLabelOutcome({ read, verdict } = {}) {
+  if (!read || read.degraded || !read.netBasis?.rev) return null;
+  return deriveAdvisoryOutcome(verdict);
+}
+
+/**
  * THE PRE-HUMAN-CEREMONY ADVISORY NOTE (#xlw02hw) — the `advise` step's comment body. PURE.
  *
  * DELIBERATELY SHARES NO SHAPE WITH `renderVerdictWriteUp`'s output beyond the findings table itself
@@ -1220,7 +1280,8 @@ function renderRevProvenance(netBasis) {
  *     the shape `we:skills-src/review/SKILL.md`'s own live comment sweep matches — and this function never emits
  *     it;
  *   - no `addLabel`/`removeLabels` payload anywhere near it, because this step never calls `decideSetLabel` and
- *     declares no label-swap effect, ever;
+ *     declares no `review:*` label-swap effect, ever (its `advisory:*` label is a separate, later effect —
+ *     {@link deriveAdvisoryOutcome});
  *   - an explicit "NOT a recorded verdict" statement at BOTH the top and the bottom, so it reads that way
  *     whichever end a human sees first.
  *
@@ -1229,6 +1290,7 @@ function renderRevProvenance(netBasis) {
  */
 export function renderAdvisoryNote({ read, verdict } = {}) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
+  const outcome = advisoryLabelOutcome({ read, verdict });
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
   const body = renderPanelComment({
@@ -1248,9 +1310,16 @@ export function renderAdvisoryNote({ read, verdict } = {}) {
   return [
     `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`. The independent`,
     'AI review below ran automatically, before the required human review ceremony — it has neither accepted nor',
-    'bounced this PR. No label was changed and no decision was recorded.',
+    'bounced this PR. No `review:*` label was changed and no decision was recorded.',
     '',
     body,
+    // THE MACHINE-READABLE OUTCOME, the line `we:scripts/lib/advisory-labels.mjs#parseAdvisories` reads back.
+    // The `**Verdict:**` line above cannot carry it: on a `review:human` PR it is always "human review required".
+    ...(outcome
+      ? ['', `**Advisory outcome:** \`${outcome}\` — ${outcome === ADVISORY_OUTCOMES.ACCEPT
+        ? 'no blocking findings on this head; `advisory:accepted` is applied'
+        : 'blocking findings on this head; `advisory:changes` is applied'}.`]
+      : []),
     '',
     '---',
     '',
@@ -1729,7 +1798,7 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
       effects: (view) => {
         const read = view.findings.read;
         if (read.humanRequired !== true) return [];
-        return [{
+        const note = {
           type: REVIEW_EFFECTS.ADVISORY_NOTE,
           payload: {
             pr: view.input.pr,
@@ -1738,6 +1807,24 @@ export function reviewPrOperation({ readPr, codexAdvisory = false } = {}) {
           },
           // IDEMPOTENT: FALSE. It posts a real, durable `gh pr comment` — replaying it on an unknown outcome
           // would risk a second one, exactly the reason `record`'s own LABEL effect is `false` (see there).
+          idempotent: false,
+        };
+        // THE `advisory:*` LABEL, AFTER THE NOTE — so a label can never exist without the comment that backs it
+        // (`operator-queue.mjs` reads the comment as the source of truth and reports a label with no matching
+        // comment as a disagreement). `reviewedHead` is the commit the panel judged; the sink applies the label
+        // only if that is STILL the PR's head, so the label never describes a head that has since moved.
+        const outcome = advisoryLabelOutcome({ read, verdict: view.verdict });
+        if (!outcome) return [note];
+        return [note, {
+          type: REVIEW_EFFECTS.ADVISORY_LABEL,
+          payload: {
+            pr: view.input.pr,
+            repo: view.input.repo,
+            outcome,
+            reviewedHead: read.netBasis.rev,
+          },
+          // NOT idempotent: it reads live labels then writes, and an unknown outcome is safest left for a
+          // person rather than replayed against labels another actor may have changed meanwhile.
           idempotent: false,
         }];
       },
