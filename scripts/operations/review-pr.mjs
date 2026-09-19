@@ -220,7 +220,7 @@ import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 // lists differ — never that the caller and the operation hold two different derivations. `CARE_LEVEL_ORDER` is
 // the band ordering the comparison is made on; both are pure, and neither is restated here.
 import { buildShapePlan } from '../review-core-cli.mjs';
-import { CARE_LEVELS, CARE_LEVEL_ORDER } from '../lib/review-escalation.mjs';
+import { CARE_LEVELS, CARE_LEVEL_ORDER, REVIEW_PR_CHANNEL } from '../lib/review-escalation.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -228,12 +228,13 @@ export const REVIEW_PR_OP = 'review-pr';
 /**
  * THE SURFACE this operation's verdicts come through, as `review-set-label.mjs --channel` renders it (#2898).
  *
- * Declared HERE, beside the footer that says the same thing, because the two sentences appear in ONE comment
+ * Re-exported HERE from the shared review constants to avoid a cycle through `review-set-label.mjs`.
+ * Kept beside the footer that says the same thing, because the two sentences appear in ONE comment
  * and drifting apart is the defect: the first live run (PR #1146) posted a comment whose attribution credited
  * the Plateau Loop review console — the CLI's old hardcoded constant — three lines above its own footer saying
  * it came through this operation. Same comment, two provenances.
  */
-export const REVIEW_PR_CHANNEL = `the declared \`${REVIEW_PR_OP}\` operation (#3035)`;
+export { REVIEW_PR_CHANNEL };
 
 /** The default lens the FIRST juror judges under. `correctness` is `MANDATORY_LENSES[0]` — the floor, not a pick. */
 export const DEFAULT_LENS = MANDATORY_LENSES[0];

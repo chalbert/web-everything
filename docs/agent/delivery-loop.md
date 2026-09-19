@@ -54,6 +54,28 @@ Only two things genuinely stop and wait for a person:
 > `review-escalation.mjs` and in a #2851 anchor, and in neither place a driver reads mid-loop — so it was
 > re-derived from feel, twice, wrongly. It is stated here because *here* is where the driver is.
 
+## Session-delegation trial logging
+
+When opening work delegated to another provider, the orchestrating session passes
+`--delegation=codex:gpt-6-astra:bugfix` (substitute the actual provider, model and task type) to
+`pr-land.mjs`. The PR body carries the explicit `delegation` marker alongside the author stamp;
+commits and labels cannot recover this metadata reliably. Omitting the flag leaves ordinary work
+unmarked. Malformed flags fail before publishing; an existing marker is preserved on re-runs.
+
+After the declared `review-pr` operation completes an `accepted` label swap and comment,
+`review-set-label.mjs` records a session-delegation trial only for a valid, unambiguous marker whose
+exact triple has not met #3690's bar. The gate reads the live scorecard store: five trailing clean
+Claude-verified trials plus an earlier informative finding; other verifiers neither count nor break
+the streak. Other channels and label targets do not log. Logging failures are non-fatal.
+
+V1 records `outcome: landed` and `findings: null` at acceptance. It does not distinguish a first-round
+clean accept from an accept after repairs; consulting verdict-ledger history is separate follow-up work.
+Only accepted PRs with author-supplied delegation markers are auto-logged: rejected or abandoned
+delegated tasks leave no row and cannot count against the streak. This survivorship bias means the
+graduation signal sees only work that eventually succeeded, never work that failed outright. It is a
+known v1 scope limit, not a bug; tracked as follow-up alongside the round-history distinction, with no
+structural fix required for PR #2313.
+
 ## Spawning a reviewer that is actually independent
 
 **A subagent is not a second actor.** It inherits the parent's `CLAUDE_CODE_SESSION_ID`, so the repo's
