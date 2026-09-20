@@ -1,4 +1,5 @@
 ---
+bornAs: x2len1z
 kind: decision
 parent: "2288"
 status: open
@@ -9,7 +10,7 @@ tags: []
 
 # Decision: where backlog ids are assigned so a temporary hash id is structurally unable to reach main
 
-Operator requirement 2026-09-19: a backlog file with a temporary hash id must be STRUCTURALLY UNABLE to reach main — not caught after the fact, not repaired by a follow-up PR. Today's #2319 rule (we:scripts/check-standards-rules.mjs strandedHashesOnMain) is a post-land detector because numbering is deferred to land (#2288, we:scripts/merge-ai-prs.mjs numberPendingHashes tail); any land route or failed tail strands a hash and turns main red — twice on 2026-09-19 (xoywo06 via PR #2335, then 9 cards via PRs #2032/#2318/#2210/#2338, all merged by the drain). Decide where numbering belongs and what makes it unskippable.
+Operator requirement 2026-09-19: a backlog file with a temporary hash id must be STRUCTURALLY UNABLE to reach main — not caught after the fact, not repaired by a follow-up PR. Today's #2319 rule (we:scripts/check-standards-rules.mjs strandedHashesOnMain) is a post-land detector because numbering is deferred to land (#2288, we:scripts/merge-ai-prs.mjs numberPendingHashes tail); any land route or failed tail strands a hash and turns main red — twice on 2026-09-19 (3707 via PR #2335, then 9 cards via PRs #2032/#2318/#2210/#2338, all merged by the drain). Decide where numbering belongs and what makes it unskippable.
 
 ## The requirement
 
@@ -25,22 +26,22 @@ Here “reach main” includes commits made reachable through merge history, not
 ## Evidence
 
 **VERIFIED — measured live 2026-09-19 (`git log --diff-filter=A` on origin/main @ b4331d956 plus `gh pr view` merge-trace comments/labels for each PR).**
-After the xoywo06 incident repaired through #2335, nine more cards stranded on main:
+After the 3707 incident repaired through #2335, nine more cards stranded on main:
 
 | Hash | Local repair NNN | PR | Merged (ET) | Route |
 | --- | --- | --- | --- | --- |
-| x93vxdr | #3708 | #2318 | 18:08 | Drain |
-| x997mz7 | #3709 | #2318 | 18:08 | Drain |
-| xb93l5b | #3710 | #2032 | 17:24 | Drain |
-| xfxt77w | #3711 | #2032 | 17:24 | Drain |
-| xhr0lj8 | #3712 | #2338 | 18:39 | Drain |
-| xj9554r | #3713 | #2210 | 18:11 | Drain |
-| xt20eug | #3714 | #2210 | 18:11 | Drain |
-| xu0gnzj | #3715 | #2210 | 18:11 | Drain |
-| xyp1wsl | #3716 | #2032 | 17:24 | Drain |
+| 3708 | #3708 | #2318 | 18:08 | Drain |
+| 3709 | #3709 | #2318 | 18:08 | Drain |
+| 3710 | #3710 | #2032 | 17:24 | Drain |
+| 3711 | #3711 | #2032 | 17:24 | Drain |
+| 3712 | #3712 | #2338 | 18:39 | Drain |
+| 3713 | #3713 | #2210 | 18:11 | Drain |
+| 3714 | #3714 | #2210 | 18:11 | Drain |
+| 3715 | #3715 | #2210 | 18:11 | Drain |
+| 3716 | #3716 | #2032 | 17:24 | Drain |
 
 **Later update (2026-09-19, VERIFIED):** the same nine were subsequently numbered on main by a drain
-commit (`11bc4e922`, "drain: JIT-number x93vxdr→#3708 … xyp1wsl→#3716 at land (#2288)") — to exactly the
+commit (`11bc4e922`, "drain: JIT-number 3708→#3708 … 3716→#3716 at land (#2288)") — to exactly the
 numbers above — when PR #2058 landed. The hashes sat on main until an unrelated later land's tail happened to
 sweep them: a late, accidental repair, which confirms the tail is not a guarantee.
 
@@ -60,11 +61,11 @@ explain how a drain merge can strand hashes; they do not identify which window c
 **VERIFIED — filing and repair.** `we:scripts/operations/file-item.mjs` calls `planScaffold` from
 `we:scripts/operations/scaffold.mjs`, whose default allocator is `nextHash` (~111). `--queue=false` only
 suppresses conveyor queueing; it creates the same hash-born card as queued filing. The operator observed
-xhr0lj8 filed this way and landed within the hour. This is not a separate numbering bypass: both filing
+3712 filed this way and landed within the hour. This is not a separate numbering bypass: both filing
 routes depend on land-time numbering, including cards carried incidentally by another PR.
 `we:scripts/backlog.mjs number-stranded [--dry-run]` is the existing working repair (#2319/#2288): it
 calls `numberPendingHashes` for every tracked hash card, rewrites references, and normally commits the result.
-It refuses a lane locus; untracked scaffolds are excluded. Its use for these nine and xoywo06 is supplied
+It refuses a lane locus; untracked scaffolds are excluded. Its use for these nine and 3707 is supplied
 live evidence; this pass verified the implementation without executing the mutating command.
 
 **VERIFIED — GitHub API measurements (`gh api repos/chalbert/web-everything`, `.../branches/main/protection`, `.../rulesets`, 2026-09-19).**
