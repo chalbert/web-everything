@@ -5,6 +5,8 @@
  * Every other source is best effort and isolated per session. Supervisor reads reuse
  * the health inspector's bounded tail; delegation reads stream at most 64 MB and
  * parse only candidate lines. A truncated no-hit scan cannot prove no delegation.
+ * Process probes and transcript mtimes are isolated even for done records. Drain logs
+ * use bounded 512 KB tails; unreadable logs never fail the report.
  * All external ports can be replaced by tests without launching agents or networking.
  */
 import { execFileSync } from 'node:child_process';
@@ -20,6 +22,28 @@ import { extractDelegations, lastAssistantModel } from './wip-agents.mjs';
 const CAP = 64 * 1024 * 1024;
 const parse = (line) => { try { return JSON.parse(line); } catch { return null; } };
 
+function readDrainLog(file) {
+  let fd;
+  try {
+    fd = openSync(file, 'r');
+    const size = statSync(file).size, start = Math.max(0, size - 512 * 1024);
+    const buffer = Buffer.alloc(size - start);
+    let count = 0;
+    while (count < buffer.length) {
+      const n = readSync(fd, buffer, count, buffer.length - count, start + count);
+      if (!n) break;
+      count += n;
+    }
+    const lines = buffer.subarray(0, count).toString('utf8').split('\n');
+    if (start) lines.shift();
+    return lines.map(parse).filter((v) => v && typeof v === 'object');
+  } catch { return null; }
+  finally { try { if (fd !== undefined) closeSync(fd); } catch { /* best effort close */ } }
+}
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; }
+}
 function transcriptFacts(file) {
   const size = statSync(file).size;
   const transcriptModel = lastAssistantModel(tailLines(file, 40, 512 * 1024).lines.map(parse));
@@ -90,7 +114,9 @@ function version(provider) {
 export function createWipAgentsReader({
   listAgents = () => execFileSync('claude', ['agents', '--json'], { encoding: 'utf8', timeout: 15000, stdio: 'pipe' }),
   readTranscript = transcriptFacts, readDispatchRecords = dispatchRecords,
-  cliVersion = version, now = Date.now, homeDir = homedir,
+  cliVersion = version, now = Date.now, homeDir = homedir, pidAlive = processAlive,
+  statTranscript = (file) => { try { return statSync(file).mtimeMs; } catch { return null; } },
+  readDrainHistory = readDrainLog, readDrainAlerts = readDrainLog,
 } = {}) {
   return function readAgents() {
     let agents;
@@ -103,12 +129,16 @@ export function createWipAgentsReader({
     try { records = readDispatchRecords(); } catch { records = new Map(); }
     const facts = Object.create(null), versions = new Map();
     for (const agent of agents) {
-      if (agent?.state === 'done') continue;
-      let f = {};
+      let f = {}, file = null, alive = null, mtime = null;
+      if (Object.hasOwn(agent ?? {}, 'pid')) {
+        try { alive = pidAlive(agent.pid) === true; } catch { alive = false; }
+      }
       try {
-        const file = transcriptPath(agent, typeof homeDir === 'function' ? homeDir() : homeDir);
+        file = transcriptPath(agent, typeof homeDir === 'function' ? homeDir() : homeDir);
         if (file) f = readTranscript(file, agent) ?? {};
       } catch { /* unknown evidence for only this session */ }
+      try { if (file) mtime = statTranscript(file, agent); } catch { /* unknown mtime */ }
+      f.pidAlive = alive; f.transcriptMtimeMs = Number.isFinite(mtime) ? mtime : null;
       const entries = records instanceof Map ? records.entries() : Object.entries(records ?? {});
       for (const [handle, record] of entries) {
         if (isHandleListed(handle, [agent]) || (normalizeHandle(handle) && normalizeHandle(handle) === normalizeHandle(agent?.id))) { f.dispatch = record; break; }
@@ -122,6 +152,12 @@ export function createWipAgentsReader({
       }
       facts[agent?.sessionId] = f;
     }
-    return { agents, facts, now: Number(now()) };
+    let passes = null, alerts = null;
+    try {
+      const dir = process.env.WIP_DRAIN_DIR || join(typeof homeDir === 'function' ? homeDir() : homeDir, 'workspace/plateau-app/.drain-daemon');
+      try { passes = readDrainHistory(join(dir, 'history.jsonl')) ?? null; } catch { /* unreadable history */ }
+      try { alerts = readDrainAlerts(join(dir, 'alerts.jsonl')) ?? null; } catch { /* unreadable alerts */ }
+    } catch { /* unavailable home */ }
+    return { agents, facts, now: Number(now()), drain: { passes, alerts } };
   };
 }

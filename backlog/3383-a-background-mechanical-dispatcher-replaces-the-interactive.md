@@ -3740,3 +3740,14 @@ Folded PR #2220 (`lane/3383-host-process-granularity`, "per-process host samples
 - Merge was clean (`--no-ff`, no conflicts). Touched: `scripts/operations/{host-process-sample,telemetry,telemetry-cli,command-redact}.mjs` (+ their tests) and `skills-src/conveyor/runner.mjs`.
 - Vitest over `scripts/operations/__tests__`, `scripts/conveyor/__tests__`, `skills-src/conveyor/__tests__`, and the gate-config / gate-invariants tests: 146 files, 4711 tests, all passing.
 - No code changes beyond the merge itself. PR #2220 closed with a pointer to the fold commit.
+
+## Session update (2026-09-20) — wip-agents liveness: dead registry records no longer print as working; drain-health rows added
+
+`wip-agents` now reports liveness, not just registry state. Audit at 07:58 ET showed `claude agents --json` marking 44 sessions `working`/`blocked` with no `pid` (no process); the old table printed them as work in progress.
+
+- Each session gets a closed liveness enum: `live-active` (pid alive, transcript touched <=15 min), `live-idle`, `waiting` (⚠), `dead-record` (no pid / dead pid, printed `dead-record (was working)`, never a bare `working`), `done` (a done row with a live pid is shown as `done (process still alive)`).
+- Order: live-active, waiting, live-idle, then dead-records collapsed to one row per (state, age band) with count and names; `--json` keeps every row.
+- New "Work in flight (not agents)" lines from the drain's `history.jsonl` and `alerts.jsonl`: `PR #<n> deferred every pass (N passes, since T): <waitOn> (drain has flagged <health> [<types>] since T)`; stale or unreadable drain logs say so. Fixture reproduces #2072 / `couple-carrier:unknown` vs `considered-never-merged`.
+- Missing or unreadable transcript prints `unknown`, never `none` (test added for a dead-record with no transcript).
+- Live run: 62 sessions = 9 live-active, 2 waiting, 3 live-idle, 4 done (all with live pid), 44 dead-record shown as 4 summary rows.
+- Authored by Codex (`codex-direct-task.mjs`), reviewed and verified by Claude Sonnet 5. Known limit: a dead record whose pid was reused by an unrelated process reads as alive.

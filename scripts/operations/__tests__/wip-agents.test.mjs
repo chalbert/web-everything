@@ -1,6 +1,6 @@
 /** Mechanical facts: no judgment filters, no inferred default for Gemini. */
 import { it, expect } from 'vitest';
-import { classifyAgents, renderTable, extractDelegations, lastAssistantModel, pickSupervisor, pickExecutor, wipAgentsOperation } from '../wip-agents.mjs';
+import { classifyAgents, classifyLiveness, ACTIVE_WINDOW_MS, classifyDrain, renderDrain, renderTable, extractDelegations, lastAssistantModel, pickSupervisor, pickExecutor, wipAgentsOperation } from '../wip-agents.mjs';
 import { sessionTarget } from '../../conveyor/session-reaper.mjs';
 import { CODEX_MODEL } from '../../codex-direct-task.mjs';
 import { createRegistry } from '../registry.mjs';
@@ -31,15 +31,15 @@ it('keeps last real assistant model and dispatch precedence', () => {
   expect(pickExecutor({ executor: { provider: 'Codex', model: 'recorded' } }, { status: 'none' }).source).toBe('dispatch');
   expect(pickExecutor(null, { status: 'unknown' }).source).toBe('unknown');
 });
-it('keeps odd rows, excludes only done, sorts and escapes cells', () => {
-  const rows = classifyAgents({ agents: [{ id: 'b', startedAt: 1, kind: 'interactive', status: 'waiting', waitingFor: 'dialog open', name: 'odd|\nname' }, { id: 'a', startedAt: 1 }, { id: 'c', startedAt: 2 }, { state: 'done' }], now: 11520001 });
-  expect(rows.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+it('keeps odd and done rows, sorts and escapes cells', () => {
+  const rows = classifyAgents({ agents: [{ id: 'b', sessionId: 'b', pid: 1, startedAt: 1, kind: 'interactive', status: 'waiting', waitingFor: 'dialog open', name: 'odd|\nname' }, { id: 'a', startedAt: 1 }, { id: 'c', startedAt: 2 }, { state: 'done' }], now: 11520001, facts: { b: { pidAlive: true } } });
+  expect(rows.map((r) => r.id)).toEqual(['unknown', 'a', 'b', 'c']);
   const table = renderTable(rows);
-  expect(table).toContain('waiting · 3h 12m · ⚠ waiting on: dialog open');
+  expect(table).toContain('⚠ waiting on: dialog open · waiting · state waiting · 3h 12m · transcript unknown');
   expect(table).toContain('odd\\| name');
   expect(table.split('\n')).toHaveLength(5);
   expect(renderTable([])).toContain('No live agents.');
-  expect(renderTable(classifyAgents({ agents: [{ sessionId: 'x' }], now: 0, facts: { x: { transcriptScan: { status: 'none' } } } }))).toContain('| none |');
+  expect(renderTable(classifyAgents({ agents: [{ sessionId: 'x', pid: 1 }], now: 0, facts: { x: { pidAlive: true, transcriptScan: { status: 'none' } } } }))).toContain('| none |');
 });
 it('runs the registered compute declaration to a verdict', () => {
   const registry = createRegistry(); registry.register(wipAgentsOperation({ readAgents: () => ({ agents: [{}], now: 0 }) }));
@@ -59,8 +59,81 @@ it('handles value-bearing Node flags and never guesses shell-expanded model ids'
 });
 
 it('falls back to the sessionId prefix when an interactive row carries no short id, and renders day-scale ages', () => {
-  const agents = [{ kind: 'interactive', sessionId: 'abcdef12-0000-4000-8000-000000000000', name: 'x', status: 'idle', startedAt: 0 }];
-  const rows = classifyAgents({ agents, now: 26 * 3600000 });
+  const agents = [{ kind: 'interactive', sessionId: 'abcdef12-0000-4000-8000-000000000000', name: 'x', pid: 1, status: 'idle', startedAt: 0 }];
+  const rows = classifyAgents({ agents, now: 26 * 3600000, facts: { [agents[0].sessionId]: { pidAlive: true } } });
   expect(rows[0].id).toBe('abcdef12');
   expect(renderTable(rows)).toContain('idle · 1d 2h');
+});
+
+it.each([
+  [{ state: 'done' }, {}, 'done'], [{ kind: 'interactive', status: 'done', pid: 1 }, { pidAlive: true }, 'done'],
+  [{ state: 'working' }, { pidAlive: true }, 'dead-record'], [{ pid: 1 }, { pidAlive: false }, 'dead-record'],
+  [{ pid: 1, waitingFor: 'human' }, { pidAlive: false }, 'dead-record'],
+  [{ pid: 1, waitingFor: 'human' }, { pidAlive: true }, 'waiting'],
+  [{ pid: 1 }, { pidAlive: true, transcriptMtimeMs: 0 }, 'live-active'],
+  [{ pid: 1 }, { pidAlive: true, transcriptMtimeMs: -1 }, 'live-idle'],
+  [{ pid: 1 }, { pidAlive: true, transcriptMtimeMs: null }, 'live-idle'],
+])('classifies liveness %j with %j as %s', (agent, facts, expected) => {
+  expect(classifyLiveness(agent, { now: ACTIVE_WINDOW_MS, ...facts })).toBe(expected);
+});
+it('collapses dead records by state and age, retaining all names in rows', () => {
+  const now = 10 * 86400000;
+  const agents = Array.from({ length: 30 }, (_, i) => ({ sessionId: `s${i}`, name: `agent-${i}`, state: i < 20 ? 'working' : 'blocked', startedAt: i < 10 ? 0 : now - 1000 }));
+  const rows = classifyAgents({ agents, now }), table = renderTable(rows);
+  expect(rows).toHaveLength(30);
+  expect(table.match(/dead-record/g)).toHaveLength(3);
+  expect(table).toContain('dead-record (was working) ×10 · age 7d+');
+  expect(table).toContain('dead-record (was working) ×10 · age <1h');
+  expect(table).toContain('dead-record (was blocked) ×10 · age <1h');
+  expect(table).toContain('`agent-5` +4 more (see --json)');
+  for (const line of table.split('\n').filter((l) => l.includes('dead-record'))) expect(line.split('|')[2]).not.toMatch(/\bworking\b|\bblocked\b/);
+  expect(renderTable(classifyAgents({ agents: [{}], now }))).toContain('dead-record ×1 · age unknown');
+});
+it('orders live groups by liveness then oldest start and keeps a done live process visible', () => {
+  const agents = ['idle', 'wait', 'active-new', 'active-old', 'done-live', 'done-dead'].map((name, i) => ({ name, sessionId: name, pid: i + 1, startedAt: name === 'active-old' ? 0 : 1, state: name.startsWith('done') ? 'done' : 'working', waitingFor: name === 'wait' ? 'human' : null }));
+  const facts = Object.fromEntries(agents.map((a) => [a.sessionId, { pidAlive: a.name !== 'done-dead', transcriptMtimeMs: a.name.startsWith('active') ? 1000 : null }]));
+  const rows = classifyAgents({ agents, facts, now: 1000 }), table = renderTable(rows);
+  expect(rows).toHaveLength(6);
+  expect(table.indexOf('`active-old`')).toBeLessThan(table.indexOf('`active-new`'));
+  expect(table.indexOf('`active-new`')).toBeLessThan(table.indexOf('`wait`'));
+  expect(table.indexOf('`wait`')).toBeLessThan(table.indexOf('`idle`'));
+  expect(table).toContain('done (process still alive)');
+  expect(table).toMatch(/1 done \(not shown\)$/);
+  expect(rows.find((r) => r.name === 'active-old')).toMatchObject({ pid: 4, pidAlive: true, transcriptAgeMs: 0, wasState: 'working' });
+});
+const pr = { num: 2072, item: 3140, waitOn: ['couple-carrier:unknown'] };
+const at = (h) => new Date(Date.UTC(2026, 8, 19, h, 54)).toISOString();
+it('reports a twelve-hour deferral streak and the standing alert independently of its last log', () => {
+  const passes = Array.from({ length: 14 }, (_, i) => ({ at: at(i + 9), deferredDetail: i ? [pr] : [] }));
+  const alerts = [{ at: at(9), health: 'ok', signature: 'ok' }, ...[10, 14, 22].map((h) => ({ at: at(h), health: 'stuck', signature: 'stuck', types: ['considered-never-merged'] }))];
+  const drain = classifyDrain({ passes, alerts, now: Date.parse(at(22)) });
+  expect(drain.deferred[0]).toMatchObject({ streak: 13, capped: false, sinceAt: at(10) });
+  expect(renderDrain(drain)).toBe('PR #2072 deferred every pass (13 passes, since 2026-09-19 06:54 EDT): couple-carrier:unknown (drain has flagged stuck [considered-never-merged] since 2026-09-19 06:54 EDT, last logged 2026-09-19 18:54 EDT)');
+  expect(renderDrain(classifyDrain({ passes: passes.slice(1), alerts, now: Date.parse(at(22)) }))).toContain('at least 13 passes');
+});
+it('reports stale, unreadable, single-pass and clean drain evidence honestly', () => {
+  const passes = [{ at: at(10), deferredDetail: [pr] }], now = Date.parse(at(10));
+  expect(renderDrain(classifyDrain({ passes: null, alerts: [], now }))).toBe('drain: unknown (history.jsonl unreadable)');
+  expect(renderDrain(classifyDrain({ passes, alerts: [], now }))).toBe('PR #2072 deferred this pass: couple-carrier:unknown (drain has not flagged it)');
+  expect(renderDrain(classifyDrain({ passes, alerts: null, now }))).toContain('(drain alert log unreadable)');
+  for (const health of ['ok', 'healthy']) expect(renderDrain(classifyDrain({ passes, alerts: [{ at: at(10), health }], now }))).toContain('(drain has not flagged it)');
+  const clean = [{ at: at(10), deferredDetail: [] }];
+  expect(renderDrain(classifyDrain({ passes: clean, alerts: [], now: now + ACTIVE_WINDOW_MS }))).toBe('drain: last pass clean (no deferred PRs)');
+  expect(renderDrain(classifyDrain({ passes: clean, alerts: [], now: now + ACTIVE_WINDOW_MS + 1 }))).toBe('drain: last pass 15m ago (daemon may be stopped)');
+  expect(renderDrain(classifyDrain({ passes, alerts: [], now: now + 3600000 }))).toMatch(/^drain: last pass 1h 0m ago \(daemon may be stopped\)\nPR #2072/);
+  expect(renderDrain(classifyDrain({ passes: [{ at: at(10), deferredDetail: [{ ...pr, waitOn: [] }] }], alerts: [], now }))).toContain('no waitOn recorded');
+});
+it('breaks deferral streaks at missing PRs and alert runs at changed signatures', () => {
+  const passes = [0, 1, 2].map((i) => ({ at: at(i), deferredDetail: i === 1 ? [] : [pr] }));
+  const alerts = ['stuck', 'ok', 'stuck'].map((signature, i) => ({ at: at(i), signature }));
+  const drain = classifyDrain({ passes, alerts, now: Date.parse(at(2)) });
+  expect(drain.deferred[0]).toMatchObject({ streak: 1, capped: false, sinceAt: at(2) });
+  expect(drain.alert.standingSince).toBe(at(2));
+});
+
+it('uses each dead-record age band at its boundary and clamps future transcript ages', () => {
+  const ages = [0, 3600000, 86400000, 7 * 86400000, null], now = 8 * 86400000;
+  const rows = classifyAgents({ agents: ages.map((ms, i) => ({ sessionId: `s${i}`, name: `n${i}`, startedAt: ms == null ? undefined : now - ms })), now, facts: { s0: { transcriptMtimeMs: now + 1 } } });
+  for (const b of ['<1h', '1h-1d', '1d-7d', '7d+', 'unknown']) expect(renderTable(rows)).toContain(`age ${b}`);
+  expect(rows.find((r) => r.sessionId === 's0').transcriptAgeMs).toBe(0);
 });

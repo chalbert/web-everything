@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createWipAgentsReader } from '../wip-agents-io.mjs';
+import { main } from '../wip-agents-cli.mjs';
 import { classifyAgents, renderTable } from '../wip-agents.mjs';
 import { CODEX_MODEL } from '../../codex-direct-task.mjs';
 import { createMemoryRunStore, createFileRunStore, validateRunRecord } from '../run-store.mjs';
@@ -16,7 +17,7 @@ import { createDispatchSinks, inFlightDispatchesFor } from '../dispatch-lane-io.
 import { withRealRepo } from './helpers/real-repo.mjs';
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 const dirs = [];
-afterEach(() => { vi.unstubAllEnvs(); for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 function setup() {
   const home = mkdtempSync(join(tmpdir(), 'wip-agents-')); dirs.push(home);
   const project = join(home, '.claude/projects/-Users-x-workspace--operations-jobs'); mkdirSync(project, { recursive: true });
@@ -27,9 +28,9 @@ function setup() {
 }
 it('reads fixture transcripts, versions once, missing evidence and all live sessions', () => {
   const { home, agents } = setup(), calls = [];
-  const data = createWipAgentsReader({ homeDir: home, listAgents: () => agents, readDispatchRecords: () => new Map(), cliVersion: (p) => { calls.push(p); return '0.155.1'; }, now: () => 0 })();
+  const data = createWipAgentsReader({ homeDir: home, listAgents: () => agents, pidAlive: () => true, readDispatchRecords: () => new Map(), cliVersion: (p) => { calls.push(p); return '0.155.1'; }, now: () => 0 })();
   const rows = classifyAgents(data);
-  expect(rows).toHaveLength(6);
+  expect(rows).toHaveLength(7);
   expect(rows.find((r) => r.id === 'missing')).toMatchObject({ supervisor: { model: 'unknown' }, executor: { source: 'unknown' }, state: 'waiting' });
   expect(rows.find((r) => r.id === '2').executor.providers[0].model).toBe(CODEX_MODEL);
   const table = renderTable(rows);
@@ -126,4 +127,53 @@ it('reads a transcript from the actual checkout cwd slug with the real-repo harn
       readDispatchRecords: () => new Map(), cliVersion: () => null });
     expect(classifyAgents(readAgents())[0]).toMatchObject({ supervisor: { model: 'claude-fixture' }, executor: { source: 'transcript', providers: [] } });
   });
+});
+
+it('isolates process, transcript and mtime failures, including done sessions and missing files', () => {
+  const { home, agents } = setup();
+  agents.push({ sessionId: 'done-live', state: 'done', pid: 99 });
+  delete agents[5].pid;
+  const data = createWipAgentsReader({ homeDir: home, listAgents: () => agents, readDispatchRecords: () => new Map(), cliVersion: () => null,
+    pidAlive: (pid) => { if (pid === 123) throw Error('probe failed'); return true; },
+    statTranscript: (_file, a) => { if (a.id === '0') throw Error('stat failed'); return 100; },
+    readTranscript: (_file, a) => { if (a.id === '1') throw Error('read failed'); return { transcriptModel: 'claude-ok', transcriptScan: { status: 'none' } }; },
+    readDrainHistory: () => { throw Error('denied'); }, readDrainAlerts: () => [], now: () => 99 })();
+  const rows = classifyAgents(data);
+  expect(rows.find((r) => r.id === '0')).toMatchObject({ pidAlive: false, transcriptAgeMs: null });
+  expect(rows.find((r) => r.id === '1')).toMatchObject({ transcriptAgeMs: 0, executor: { source: 'unknown' }, supervisor: { model: 'unknown' } });
+  expect(rows.find((r) => r.id === 'missing')).toMatchObject({ liveness: 'dead-record', pid: null, pidAlive: null, transcriptAgeMs: null, executor: { source: 'unknown' }, supervisor: { model: 'unknown' } });
+  expect(renderTable(rows)).toContain('done (process still alive)');
+  expect(data.drain).toEqual({ passes: null, alerts: [] });
+});
+it('default process probe accepts EPERM and rejects dead or invalid pids', () => {
+  const { home } = setup();
+  const kill = vi.spyOn(process, 'kill').mockImplementation((pid) => { if (pid === 2) throw Object.assign(Error(), { code: 'EPERM' }); if (pid === 3) throw Object.assign(Error(), { code: 'ESRCH' }); return true; });
+  const agents = [1, 2, 3, 0, -1, 1.2, '1', null].map((pid, i) => ({ sessionId: `s${i}`, pid }));
+  agents.push({ sessionId: 'absent' });
+  const { facts } = createWipAgentsReader({ homeDir: home, listAgents: () => agents, readDispatchRecords: () => new Map() })();
+  expect(Object.values(facts).map((f) => f.pidAlive)).toEqual([true, true, false, false, false, false, false, false, null]);
+  expect(kill).toHaveBeenCalledTimes(3);
+});
+it('reads bounded drain tails, skips partial and malformed lines, supports the directory override', () => {
+  const { home } = setup(), dir = join(home, 'workspace/plateau-app/.drain-daemon'); mkdirSync(dir, { recursive: true });
+  const pass = { at: '2026-09-19T10:54:00Z', deferredDetail: [{ num: 2072, item: 3140, waitOn: ['couple-carrier:unknown'] }] };
+  writeFileSync(join(dir, 'history.jsonl'), JSON.stringify({ old: true }) + '\n' + 'x'.repeat(512 * 1024) + '\nbroken\n' + JSON.stringify(pass) + '\n');
+  writeFileSync(join(dir, 'alerts.jsonl'), 'invalid\n' + JSON.stringify({ at: pass.at, health: 'stuck', signature: 'stuck' }));
+  const read = createWipAgentsReader({ homeDir: home, listAgents: () => [], readDispatchRecords: () => new Map() });
+  expect(read().drain).toEqual({ passes: [pass], alerts: [{ at: pass.at, health: 'stuck', signature: 'stuck' }] });
+  vi.stubEnv('WIP_DRAIN_DIR', join(home, 'override')); mkdirSync(join(home, 'override'));
+  writeFileSync(join(home, 'override/history.jsonl'), JSON.stringify(pass));
+  expect(read().drain).toEqual({ passes: [pass], alerts: null });
+});
+it('CLI JSON retains all dead records while stdout groups them and appends drain health', async () => {
+  const agents = Array.from({ length: 30 }, (_, i) => ({ name: `dead-${i}`, sessionId: `s${i}`, state: 'working' }));
+  const readAgents = () => ({ agents, facts: {}, now: 0, drain: { passes: null, alerts: null } });
+  let output = '';
+  expect(await main({ argv: ['--json'], readAgents, stdout: (s) => { output = s; } })).toBe(0);
+  expect(JSON.parse(output).rows.map((r) => r.name)).toEqual(agents.map((a) => a.name));
+  expect(JSON.parse(output).drain.readable).toBe(false);
+  expect(await main({ argv: [], readAgents, stdout: (s) => { output = s; } })).toBe(0);
+  expect(output).toContain('dead-record (was working) ×30');
+  expect(output).toContain('+24 more (see --json)');
+  expect(output).toContain('\n\nWork in flight (not agents):\ndrain: unknown (history.jsonl unreadable)');
 });

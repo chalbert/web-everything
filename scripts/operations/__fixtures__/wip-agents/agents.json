@@ -6,7 +6,8 @@
     "name": "conveyor-0",
     "kind": "background",
     "state": "working",
-    "startedAt": 0
+    "startedAt": 0,
+    "pid": 123
   },
   {
     "id": "1",
@@ -15,7 +16,8 @@
     "name": "conveyor-1",
     "kind": "background",
     "state": "working",
-    "startedAt": 1
+    "startedAt": 1,
+    "pid": 123
   },
   {
     "id": "2",
@@ -24,7 +26,8 @@
     "name": "conveyor-2",
     "kind": "background",
     "state": "working",
-    "startedAt": 2
+    "startedAt": 2,
+    "pid": 123
   },
   {
     "id": "3",
@@ -33,7 +36,8 @@
     "name": "conveyor-3",
     "kind": "background",
     "state": "working",
-    "startedAt": 3
+    "startedAt": 3,
+    "pid": 123
   },
   {
     "id": "4",
@@ -42,14 +46,16 @@
     "name": "conveyor-4",
     "kind": "background",
     "state": "working",
-    "startedAt": 4
+    "startedAt": 4,
+    "pid": 123
   },
   {
     "id": "missing",
     "sessionId": "missing",
     "kind": "interactive",
     "status": "waiting",
-    "waitingFor": "dialog open"
+    "waitingFor": "dialog open",
+    "pid": 123
   },
   {
     "id": "done",
