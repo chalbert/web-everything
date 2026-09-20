@@ -3908,3 +3908,22 @@ Hook slice, part 1: the standalone `tick-once` CLI, the throttled last-tick reco
 - **Proof it is a pure move.** `--dry-run --json` against the live registry, original file vs split, run back to back: byte-identical JSON and stderr. Tests: the two old files (103 tests) become seven files, 104 tests (the +1 pins that the facade re-exports the same 19 names as the same bindings); every old test name survives. Conveyor, operations and skills-src/conveyor suites plus gate-config and gate-invariants pass.
 - **Owed:** graduate the pure planner to `main` first and alone (it no longer needs the hand-port); the stop-confirmation fix (a stop cannot be verified); stop re-stopping the ~570 already-stopped sessions each run; scheduling the reaper while the runner is down. Also: `we:backlog/3475-*.md` cites `session-reaper.mjs:364-394`-style line numbers that now run past the end of the shorter file (three `check:standards` warnings).
 - Authored by Claude Sonnet 5 directly (delivery worker for the operator's orchestrator).
+
+## Session update (2026-09-20) — issue and fix index from the 2026-09-20 session: 13 uncleared cards filed, in-flight briefs, owed items
+
+The operator asked (2026-09-20) that every issue and fix from the session be tracked and queued, with the tracker and filed cards as the only two sources. This note is the index; the detail is in the cards (PR #2356, all uncleared and design-first, filed under this epic).
+
+**Filed as cards (13):** hand dispatch must carry out the brief and subscribe to an idle notice; jury panel launcher must return a file path and summary; reaper cannot verify a stop and re-stops finished sessions; nothing runs the reaper or restarts the runner; tick-once follow-ups; tick hook wiring as data; tick start-gate; open-pr reports complete with no PR; verify-lane terminal-red marker and environment-only failures; guard-bash blocks a read-only sed; untrusted dispatch clones; land-advance follow-ups; decision docket not rebuilt. Also earlier today: the telemetry stories (limits, collector, usage by role) and the `track` epic with its 11 slices (PR #2355). The limits and usage cards now carry their design-review findings; the collector review (elevated) was still running when this was written.
+
+**In flight as worker briefs (the brief and result file are the record):** `wip-honest-2` (truthful remedy labels in the wip report, `auto (runner down)`), `reaper-split-2` (move-only split of the reaper into plan, evidence, stop and CLI). Both were first dispatched with a prompt that only said to read the brief and never started; re-dispatched with an explicit carry-out instruction.
+
+**Done today, for the record:** reaper repo-less PR name resolution and the operator ruling that a PR closed unmerged is terminal in the cross-repo check; tick-once CLI, throttle, worker marker and wall-clock guard TTLs; wip report as stacked bullets; the host sampler (running under launchd since 13:06 EDT).
+
+**Owed and not carded (with why):**
+- Graduate the reaper pure planner to main first (blocked on the split; the operator decisions are in the reaper-graduate result, and the dead-process axis and the verdict axis exist only on this branch).
+- Graduation G2 (routing, supervisor loop, supervision tree in the wip report) and the tag-script pid check: carried over from the earlier handoff with no detail here; each needs a card once its scope is re-read.
+- `resourceReviewOwed` wiring and the land-advance worker cap: covered by the limits card.
+- The earlier unsent tracker note 4 (items 15 to 23) was never written and cannot be reconstructed from this session; re-derive it from the epic if still wanted.
+- `/prepare` for the two filed decision cards (family and benchmark prior; approval carry-over).
+- The collector design review result, when it lands.
+- Correction recorded: the operator memory rule that the main session delegates edits and investigation was not followed this session (the orchestrator wrote code, cards and notes itself); future work of that kind is dispatched.
