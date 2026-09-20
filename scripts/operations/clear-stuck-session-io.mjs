@@ -47,6 +47,7 @@ import { defaultListAgents, normalizeHandle } from './dispatch-lane-io.mjs';
 import { bindAgents } from '../conveyor/reconcile-core.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { QUARANTINE_MOVE_EFFECT } from './clear-stuck-session.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 
 /** `$CLAUDE_CONFIG_DIR` when set, else `~/.claude` — the same default the `claude` CLI itself resolves to. */
 export function configDir(env = process.env) {
@@ -148,10 +149,14 @@ export function resolveSessionForPr(pr, { fetchPr, agents }) {
   return bound.length ? String(bound[0].agent?.id ?? '') || null : null;
 }
 
-/** `gh pr view <n> --json number,headRefOid,headRefName` → `{number, headRefOid, headRefName}`, or `null`. */
-export function defaultFetchPr(pr, { exec = execFileSync } = {}) {
+/**
+ * `gh pr view <n> --repo <repo> --json number,headRefOid,headRefName` → `{number, headRefOid, headRefName}`, or `null`.
+ * `repo` defaults to the WE slug: this operation's run-store and lane heads are WE's, and a repo-less `gh pr view`
+ * would resolve against whatever checkout `cwd` happens to be in.
+ */
+export function defaultFetchPr(pr, { exec = execFileSync, repo = CONSTELLATION_REPOS.we.slug } = {}) {
   try {
-    const out = String(exec('gh', ['pr', 'view', String(pr), '--json', 'number,headRefOid,headRefName'], {
+    const out = String(exec('gh', ['pr', 'view', String(pr), '--repo', repo, '--json', 'number,headRefOid,headRefName'], {
       encoding: 'utf8', timeout: 30_000,
     }));
     const parsed = JSON.parse(out);
