@@ -1,0 +1,187 @@
+/**
+ * @file land-advance-io.mjs
+ * Evidence ports are synchronous so the declared operation can remain compute-only.
+ * Missing optional sidecars mean no records; unreadable or malformed sources are
+ * errors, never empty success. Drain reads are bounded at bytes AND lines.
+ * PLAN never fetches: fetch mutates git metadata. APPLY refreshes branch evidence
+ * before replanning; a failed refresh is explicitly unknown. This preserves the
+ * read-only operation contract even when invoked without a session.
+ * Follow-ups use the existing run-store's in-flight DISPATCH_EFFECT + plain dispatch
+ * metadata, one run per launch, with no changes to dispatch-lane semantics.
+ */
+import * as fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { homedir, loadavg, cpus } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from '../conveyor/driver-watchdog.mjs';
+import { planFixesFromReconcile, dispatchFix as realDispatchFix } from '../conveyor/reconcile-fix-dispatch.mjs';
+import { defaultLoadItems, findItem } from './dispatch-lane-io.mjs';
+import { dispatchReview as realDispatchReview } from './review-dispatch.mjs';
+import { createFileRunStore, newRunId, newRunRecord } from './run-store.mjs';
+import { completionPath } from './completion-store.mjs';
+import { inFlight } from './effect-executor.mjs';
+import { DISPATCH_EFFECT } from './dispatch-lane.mjs';
+import { repoKeyFromSlug, capacityFor, drainWait } from './land-advance.mjs';
+import { allowedToolsArg, ALLOWED_TOOLS_BY_KIND } from './land-advance-tools.mjs';
+import { listEscalations, buildEscalationPacket, writeEscalationPacket } from './land-advance-escalations.mjs';
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const runDefault = (program, args) => String(execFileSync(program, args, { cwd: ROOT, encoding: 'utf8', timeout: 30000, stdio: 'pipe' }));
+const missing = (fn, fallback) => { try { return fn(); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } };
+export function readJsonlTail(path, { fs: io = fs, maxBytes = 8 * 1024 * 1024, maxLines = 20000 } = {}) {
+  return missing(() => {
+    const size = io.statSync(path).size, start = Math.max(0, size - maxBytes), fd = io.openSync(path, 'r');
+    const buffer = Buffer.alloc(Math.min(size, maxBytes));
+    let count;
+    try { count = io.readSync(fd, buffer, 0, buffer.length, start); } finally { io.closeSync(fd); }
+    let text = buffer.subarray(0, count).toString('utf8');
+    if (start) text = text.slice(text.indexOf('\n') + 1);
+    const lines = text.split('\n').filter((s) => s.trim());
+    return { entries: lines.slice(-maxLines).map((line) => JSON.parse(line)), capped: start > 0 || lines.length > maxLines };
+  }, { entries: [], capped: false });
+}
+export function readFollowUps({ store = createFileRunStore() } = {}) {
+  return store.list().flatMap((id) => (store.read(id)?.effects ?? [])
+    .filter((e) => e.type === DISPATCH_EFFECT && e.dispatch?.followUp)
+    .map((e) => e.dispatch.followUp));
+}
+export function writeFollowUp(entry, { store = createFileRunStore(), mintId = newRunId } = {}) {
+  const run = newRunRecord({ id: mintId('land-advance'), op: 'land-advance-dispatch', input: { target: entry.target } });
+  const metadata = { launchKind: entry.kind, followUp: entry };
+  const effect = entry.session ? inFlight({ handle: entry.session, expectedBy: entry.deadline, dispatch: metadata })
+    : { handle: null, expectedBy: entry.deadline, dispatch: metadata };
+  // inFlight is a sink result; the executor normally transfers these fields to its effect entry.
+  run.effects.push({ key: `${entry.target}:${entry.kind}`, type: DISPATCH_EFFECT, stepIndex: 0, index: 0,
+    status: 'in-flight', handle: effect.handle, expectedBy: effect.expectedBy, startedAt: entry.launchedAt, dispatch: effect.dispatch });
+  store.write(run);
+}
+export function readLiveSessions({ run = runDefault, listAgents = () => run('claude', ['agents', '--json']),
+  ps = () => scanPsOutput({ exec: (program, args) => run(program, args) }), isPidAlive = defaultIsPidAlive } = {}) {
+  const raw = listAgents(), agents = Array.isArray(raw) ? raw : JSON.parse(raw);
+  if (!Array.isArray(agents)) throw new Error('claude agents: expected array');
+  const psOutput = ps();
+  return agents.map((s) => {
+    const alive = resolvePidAlive(s, { psOutput, isPidAlive });
+    if (alive == null) throw new Error(`Unknown liveness for ${s.name ?? s.id}`);
+    return { ...s, liveness: !alive ? 'dead-record' : (s.state ?? s.status) === 'done' ? 'done' : s.waitingFor ? 'waiting'
+      : ['idle', 'blocked'].includes(s.state ?? s.status) ? 'live-idle' : 'live-active' };
+  });
+}
+export function resultProvider(text) {
+  const section = String(text).match(/(?:^|\n)[#*\s]*(?:provider used|authorship)[^\n]*\n?([\s\S]*?)(?=\n#{1,6}\s|$)/i)?.[0];
+  const name = section?.match(/codex-direct-task|codex|gemini/i)?.[0];
+  return name ? (/codex/i.test(name) ? 'Codex' : 'Gemini') : null;
+}
+export function createLandAdvanceReader(ports = {}) {
+  const { fs: io = fs, run = runDefault, now = Date.now, home = homedir(), cap = 3, loadThreshold = 1.5,
+    machineLoad = () => loadavg()[0] / cpus().length, store = createFileRunStore(),
+    drainDir = join(home, 'workspace/plateau-app/.drain-daemon'), jobsDir = join(home, 'workspace/.operations/jobs'),
+    trialLog = join(home, 'workspace/.operations/delegation-trials.jsonl'), escalationsDir = join(home, 'workspace/.operations/escalations'),
+    sweptReposPath = join(ROOT, 'scripts/lib/swept-repos.json'),
+    readSessions = () => readLiveSessions({ run }), findItemFn = findItem, loadItems = () => defaultLoadItems(ROOT),
+    resolveFallbackScope = (pr) => run('gh', ['pr', 'diff', String(pr), '--repo', 'chalbert/web-everything', '--name-only']).trim().split('\n').filter(Boolean).map((p) => `we:${p}`),
+    followUpEvidence, refreshPrototype = false, readPrototype } = ports;
+  return function readInputs() {
+    const errors = [], get = (source, fn, fallback) => { try { return fn(); } catch (e) { errors.push({ source, message: String(e.message ?? e) }); return fallback; } };
+    const slugs = JSON.parse(io.readFileSync(sweptReposPath, 'utf8'));
+    const prs = slugs.flatMap((slug) => {
+      const repo = repoKeyFromSlug(slug);
+      return get(`prs:${repo}`, () => JSON.parse(run('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '200', '--json', 'number,title,labels,baseRefName,headRefName,headRefOid,createdAt,updatedAt,mergeable,mergeStateStatus,isDraft,body'])).map((p) => ({ ...p, repo, slug })), []);
+    });
+    const sessions = get('sessions', readSessions, []);
+    const capturedAt = now();
+    const lanes = get('lanes', () => run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n').filter(Boolean), null);
+    const history = get('drain-history', () => readJsonlTail(join(drainDir, 'history.jsonl'), { fs: io }), { entries: [], capped: false });
+    const alerts = get('drain-alerts', () => readJsonlTail(join(drainDir, 'alerts.jsonl'), { fs: io }).entries, []);
+    const trials = get('trials', () => missing(() => io.readFileSync(trialLog, 'utf8'), '').split('\n').filter(Boolean).map(JSON.parse), []);
+    const results = get('results', () => missing(() => io.readdirSync(jobsDir), []).filter((n) => n.endsWith('.result.md')).map((n) => {
+      const path = join(jobsDir, n); return { path, provider: resultProvider(io.readFileSync(path, 'utf8')), mtime: io.statSync(path).mtime.toISOString() };
+    }), []);
+    const prototype = get('prototype', readPrototype ?? (() => {
+      if (refreshPrototype) run('git', ['fetch', 'origin']);
+      const [behind, ahead] = run('git', ['rev-list', '--left-right', '--count', 'origin/main...origin/lane/mechanical-dispatcher']).trim().split(/\s+/).map(Number);
+      if (![ahead, behind].every(Number.isFinite)) throw new Error('Invalid branch counts');
+      return { ahead, behind, refreshed: refreshPrototype, reason: refreshPrototype ? 'fetched origin' : 'cached refs; plan does not fetch' };
+    }), { status: 'unknown' });
+    const fixPlans = {};
+    for (const p of prs.filter((p) => p.labels.some((l) => (l.name ?? l) === 'review:changes'))) {
+      const target = `${p.repo}#${p.number}`;
+      if (p.repo !== 'we') { fixPlans[target] = { refusal: { kind: 'unsupported-repo', why: 'fix planner supports we only' } }; continue; }
+      fixPlans[target] = get(`fix:${target}`, () => {
+        const result = planFixesFromReconcile([{ ...p, kind: 'fix', prNumber: p.number, labels: p.labels.map((l) => l.name ?? l) }], findItemFn, loadItems, resolveFallbackScope);
+        return { planned: result.planned[0], refusal: result.refusals[0] };
+      }, { refusal: { kind: 'source-failed', why: 'fix planner source failed' } });
+    }
+    const ledger = get('follow-ups', () => readFollowUps({ store }), []);
+    const followUps = ledger.map((entry) => get(`follow-up:${entry.target}`, () => {
+      const s = sessions.find((s) => [s.id, s.sessionId].includes(entry.session));
+      const p = prs.find((p) => `${p.repo}#${p.number}` === entry.target);
+      const ls = (p?.labels ?? []).map((l) => l.name ?? l);
+      let observed = { ambiguous: !entry.session, targetMovedOn: Boolean(p && ((entry.kind === 'review' && !ls.includes('review:pending')) || (entry.kind === 'fix' && !ls.includes('review:changes')))),
+        drainWait: p ? drainWait(p, history.entries, history.capped) : null };
+      if (followUpEvidence) observed = { ...observed, ...followUpEvidence(entry, { sessions, prs }) };
+      else {
+        if (!p) {
+          const [key, pr] = entry.target.split('#'), slug = slugs.find((v) => repoKeyFromSlug(v) === key);
+          if (slug) observed.targetState = JSON.parse(run('gh', ['pr', 'view', pr, '--repo', slug, '--json', 'state'])).state;
+        }
+        if (s?.sessionId && /^[\w-]+$/.test(s.sessionId)) {
+          const path = join(home, '.claude/projects', String(s.cwd ?? '').replace(/[^A-Za-z0-9]/g, '-'), `${s.sessionId}.jsonl`);
+          observed.lastActivityAt = missing(() => io.statSync(path).mtime.toISOString(), null);
+        }
+      }
+      let resultPresent = results.some((r) => r.path === entry.expectedResultPath && Date.parse(r.mtime) >= Date.parse(entry.launchedAt));
+      if (entry.expectedResultPath?.endsWith('.json')) {
+        const record = missing(() => JSON.parse(io.readFileSync(entry.expectedResultPath, 'utf8')), null);
+        const shared = ledger.some((other) => other !== entry && other.target !== entry.target && other.expectedResultPath === entry.expectedResultPath);
+        resultPresent = !shared && record?.status === 'done' && Date.parse(record.startedAt) >= Date.parse(entry.launchedAt);
+        if (shared) observed.ambiguous = true;
+      }
+      return { ...entry, evidence: { liveness: s?.liveness ?? (errors.some((e) => e.source === 'sessions') ? undefined : 'dead-record'), waitingFor: s?.waitingFor,
+        resultPresent, targetState: p ? 'OPEN' : undefined,
+        ...observed } };
+    }, { ...entry, evidence: { ambiguous: true } }));
+    const load = get('load', machineLoad, null);
+    return { now: capturedAt, prs, sessions, history: history.entries, historyCapped: history.capped, alerts, trials, results, prototype,
+      fixPlans, followUps, escalationsDir, jobsDir, escalations: get('escalations', () => listEscalations({ dir: escalationsDir, fs: io }), []),
+      freeLanes: errors.some((e) => e.source === 'sessions') ? 'unknown' : lanes?.length ?? 'unknown', cap, load, loadThreshold, errors };
+  };
+}
+export function createLandAdvanceApplier(ports = {}) {
+  const { run = runDefault, now = Date.now, home = homedir(), dispatchReview = realDispatchReview, dispatchFix = realDispatchFix,
+    readCapacity = () => ({ sessions: readLiveSessions({ run }), freeLanes: run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n').filter(Boolean).length,
+      load: loadavg()[0] / cpus().length }),
+    pickFixLane = () => { const path = run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n')[0]; const n = path?.match(/lane-(\d+)\/?$/)?.[1]; if (!n) throw new Error('No numbered fix lane'); return Number(n); },
+    writeLedger = (e) => writeFollowUp(e), reap = () => run('node', ['scripts/conveyor/session-reaper.mjs']),
+    escalationsDir = join(home, 'workspace/.operations/escalations'),
+    expectedResultPathFor = (result) => result?.expectedResultPath ?? (result?.sessionSlug ? completionPath(result.sessionSlug) : null),
+    writePacket = (packet) => writeEscalationPacket(packet, { dir: escalationsDir }) } = ports;
+  return async function apply(plan) {
+    const dispatched = [], errors = [], deferred = [];
+    let target = null;
+    if (plan.errors.length) return { dispatched, errors: [{ message: 'Required evidence failed; refusing apply' }], deferred };
+    try {
+      for (const row of plan.rows.filter((r) => r.owedAction === 'escalate')) await writePacket(buildEscalationPacket(row, now(), plan.escalations.find((p) => p.id === row.packetId)));
+      if (plan.rows.some((r) => r.owedAction === 'reap-owed')) await reap();
+      let remaining = plan.capacity.budget;
+      for (const row of plan.proposed) {
+        target = row.subject;
+        const capacity = capacityFor({ ...plan.capacity, ...await readCapacity() });
+        if (!remaining || !capacity.budget) { deferred.push({ target: row.subject, reason: 'capacity' }); break; }
+        const kind = row.owedAction === 'dispatch-review' ? 'review' : 'fix', extraArgs = [allowedToolsArg(kind)];
+        const launchTime = now();
+        const result = kind === 'review' ? await dispatchReview({ pr: row.pr, repo: row.slug, extraArgs })
+          : await dispatchFix({ ...row.fixPlan, lane: await pickFixLane() }, { extraArgs });
+        if (result?.ok === false || result?.error) throw new Error(result.error ?? 'dispatch failed');
+        const session = result?.agentId ?? null;
+        const launchedAt = new Date(launchTime).toISOString();
+        const entry = { session: session ?? null, kind, target: row.subject, launchedAt, deadline: new Date(now() + 7200000).toISOString(),
+          expectedResultPath: expectedResultPathFor(result), permissionsGranted: [...ALLOWED_TOOLS_BY_KIND[kind]] };
+        // Persist even an unidentifiable launch; never retry blindly after a spawn.
+        await writeLedger(entry); dispatched.push({ ...entry, result }); remaining--;
+        if (!session) throw new Error('Dispatch returned no addressable session');
+      }
+    } catch (e) { errors.push({ target, message: String(e.message ?? e) }); }
+    return { dispatched, errors, deferred };
+  };
+}

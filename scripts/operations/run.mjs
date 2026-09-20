@@ -46,6 +46,8 @@ import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-he
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { wipAgentsOperation, WIP_AGENTS_OP } from './wip-agents.mjs';
 import { createWipAgentsReader } from './wip-agents-io.mjs';
+import { landAdvanceOperation, LAND_ADVANCE_OP } from './land-advance.mjs';
+import { createLandAdvanceReader } from './land-advance-io.mjs';
 import { createPrReader } from './pr-status-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
@@ -98,6 +100,7 @@ import { writeAllSync } from '../lib/write-all-sync.mjs';
  * declaration is what {@link ./http-adapter.mjs} derives a route table from, with no third entry anywhere.
  */
 export const OPERATIONS = Object.freeze({
+  [LAND_ADVANCE_OP]: () => ({ declaration: landAdvanceOperation({ readInputs: createLandAdvanceReader() }), sinks: {} }),
   [WIP_AGENTS_OP]: () => ({ declaration: wipAgentsOperation({ readAgents: createWipAgentsReader() }), sinks: {} }),
   // `json` is the ONE operation-table entry that reads its `resolveOperation(name, opts)` opts at all — every
   // other builder below still takes none, and passing the extra argument to a zero-arg arrow is a harmless
