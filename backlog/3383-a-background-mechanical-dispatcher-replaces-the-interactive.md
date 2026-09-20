@@ -4003,3 +4003,28 @@ The eleven cards stay UNCLEARED (design-first; their design calls are still open
 Not verified here: the 714 / 569 / 145 reaper counts and the 38-row before-and-after figures (they describe a run that has finished; only the current row count was re-read); the operator-queue script output (this clone's branch does not carry that script, as the PR 2359 note already said).
 
 Owed: settle the design calls in the eleven cards, then clear them; sequence xscm8rl (#3770) with #3746, since both change `planQueueing`; decide the branch merge policy (xl8pvh7, #3772) now that the branch has no open PR.
+
+## Session update (2026-09-20) — reaper stop is verified against a re-read registry and never re-stops finished sessions (#3744, prototype commit e0165b4e9)
+
+Card #3744 is built on this branch as commit e0165b4e9, pushed straight to `lane/mechanical-dispatcher` (prototype work, no pull request, main untouched). The card was read from `origin/main` and not copied onto the branch. The fix lives in the stop module (`we:scripts/conveyor/session-reap-stop.mjs`), and the CLI only wires it.
+
+**What changed:**
+- A row that is already done, stopped or failed before the pass gets no stop call. It is counted as already-terminal. (A `stopped` row was never planned for reap; it is now counted here instead of under kept.)
+- After the stop pass the reaper waits, re-reads the registry once with the same `claude agents --json --all` reader, and calls a stop confirmed only if the row is gone or its state is terminal. Otherwise it is unconfirmed.
+- An unconfirmed stop goes on an in-memory retry list: re-stopped and re-read at most 2 more times this run, then reported by id on one line. A run with nothing stopped makes no re-read.
+- The summary line now reads `N session(s) listed · X confirmed, Y unconfirmed, Z already-terminal, K kept`, then one line naming the unconfirmed ids. The JSON report drops `stopped` for `confirmed`, `unconfirmed`, `unconfirmedIds` and `alreadyTerminal`. Nothing in the repo reads the reaper's JSON, so no consumer changed.
+
+**Design calls, chosen by the orchestrator, open to review:**
+1. Confirmation is one registry re-read after a bounded wait: `STOP_CONFIRM_WAIT_MS` = 5000, overridable with `--confirm-wait-ms=N`, and the wait is injected in tests (no test sleeps). A retry round adds one further read, so the worst case is 3 reads.
+2. Confirmed means the row is gone or its state is done, stopped or failed. Anything else is unconfirmed.
+3. A session already done, stopped or failed before the pass is never re-stopped.
+4. Unconfirmed sessions go on an in-memory retry list, at most 2 retries per run. No persisted retry list in this slice.
+5. The only operator-visible record is the summary line (four separate counts plus the unconfirmed ids). Persisting unconfirmed ids across runs is left open.
+
+Two consequences worth knowing. First, since a done or failed session is no longer stopped, the reaper no longer clears those rows; the listing kept them after a stop anyway (the 18:37 ET reading above), so this removes wasted calls, not a working cleanup. Second, an unconfirmed stop does not fail the run: exit code stays 0 and the next tick sees the row again. The exit code is still 1 for a failed stop or a missing id, as before.
+
+**Verify:** the reaper test files (`session-reap-*`, `session-reaper*`, plus `session-verdicts` and `wip-agents`, 9 files) went from 221 to 249 passing tests, none failing. `dispatch-lane`, `wip-report`, `tick-core` and the conveyor runner tests also pass (627). New cases cover a lagging listing reporting unconfirmed, a 700-row listing with stop calls only for the 8 live rows, and the four separate counts on the summary line; the runner, listing and clock are injected and the stub `claude` is used, so the real `claude stop` never ran. `check:standards` gave 15 errors before and 15 after, the same set: the known card #3768 errors (4 duplicate ids, 3 hand-picked ids, 2 bare-path cards, 4 dead cites, 2 missing real-mechanism tests). None is in the reaper files. Warnings held at 1823.
+
+Not verified here: the fix was not run against the live registry (no live `claude stop` and no dry run against real sessions), so the 5 second wait is untested against the real listing lag, and how long the lag lasts is unknown. The known local-only failures (container-exec, two gh-throttle fidelity tests, stale-state-io) were not re-run.
+
+Owed: review the 5 second wait and the exit-code choice against a live run; decide whether unconfirmed ids should be persisted; file a card for actually clearing finished rows if they are meant to leave the listing (`claude rm` is not used by the reaper).
