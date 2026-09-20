@@ -5,8 +5,9 @@
  * output. The IO shell that gathers the facts is `wip-report-io.mjs`; the CLI is `wip-report-cli.mjs`.
  *
  * Shape (in this order): one header line, `## Attention`, `## Work items`, `## Done since <last-wip>`, `## Next`,
- * `## Needs you`. Nothing here is composed by a model. Rows are per WORK ITEM (a PR, an open decision), and the live
- * sessions working on an item nest under it.
+ * `## Needs you`. Nothing here is composed by a model. Rows are per WORK ITEM (a PR, or an item that live sessions work
+ * on), and the live sessions nest under it. Decisions live in the docket, never here: the report only says how many are open
+ * (a count line, flagged when the docket file is over 24 h old) and never presents a decision as operator work.
  *
  * Reused, never re-derived: session facts come from `wip-agents.mjs#classifyAgents` (liveness from the pid, the
  * mechanical verdict of `conveyor/session-verdicts.mjs`); PR facts come from `land-advance.mjs#planLandAdvance`
@@ -33,6 +34,8 @@ export const PR_STATES = Object.freeze([
   'reviewing', 'waiting-for-reviewer', 'fixing', 'waiting-CI', 'waiting-merge', 'blocked-on:<what>',
   'needs-operator', 'landed', 'unknown',
 ]);
+// `blocked-on:review stalled` / `blocked-on:fix stalled` (a bound session whose verdict is `stalled`) is chosen over
+// `waiting-for-reviewer`: a reviewer IS assigned, it has stopped making progress, and the nested session row says `stalled`.
 
 /**
  * The CLOSED Attention rule table. `remedy` is `auto` when a handler for the problem exists in the mechanism (the
@@ -56,8 +59,8 @@ const RULE_ORDER = Object.keys(ATTENTION_RULES);
 
 /** Fallback window for `Done` when no `last-wip` timestamp has ever been stamped. */
 export const DONE_FALLBACK_MS = 3 * 60 * 60 * 1000;
-/** Decision rows shown; the docket is already ranked by leverage, so the top of it is what a row list can carry. */
-export const DECISION_ROWS = 5;
+/** A docket file older than this is flagged `docket may be stale`. */
+export const DOCKET_STALE_MS = 24 * 60 * 60 * 1000;
 export const TIME_ZONE = 'America/New_York';
 
 // ── formatting ──────────────────────────────────────────────────────────────────────────────────
@@ -132,7 +135,7 @@ export function derivePrState(pr, { sessions = [], planRow = null } = {}) {
   if (planRow?.owedAction === 'needs-operator' || (ls.includes('review:human') && ls.includes('advisory:accepted'))) return 'needs-operator';
   const fixer = sessions.find((s) => ['fix', 'ci-heal'].includes(s.binding.role)), reviewer = sessions.find((s) => s.binding.role === 'review');
   const worker = fixer ?? reviewer;
-  if (worker) return isStuck(worker.session) ? `blocked-on:${fixer ? 'fixer' : 'reviewer'} ${worker.session.verdict === 'stalled' ? 'stalled' : 'waiting on a permission prompt'}` : fixer ? 'fixing' : 'reviewing';
+  if (worker) return isStuck(worker.session) ? `blocked-on:${fixer ? 'fix' : 'review'} ${worker.session.verdict === 'stalled' ? 'stalled' : 'waiting on a permission prompt'}` : fixer ? 'fixing' : 'reviewing';
   if (planRow?.owedAction === 'wait-on-drain' || planRow?.owedAction === 'escalate') {
     const reason = planRow.evidence?.[0] ?? 'the drain';
     return `blocked-on:drain (${planRow.owedAction === 'escalate' ? 'stuck: ' : ''}${reason})`;
@@ -155,7 +158,7 @@ export function capacityWords(c) {
   if (!Number.isFinite(c.load)) return 'load unknown';
   if (c.load > c.loadThreshold) return `machine load ${c.load.toFixed(2)} per core is over ${c.loadThreshold}`;
   if (!Number.isInteger(c.freeLanes)) return 'free lanes unknown';
-  return `${c.live} of ${c.cap} worker slots in use as land-advance counts them, ${c.freeLanes} free lanes`;
+  return `${c.live} of ${c.cap} workers running, ${c.freeLanes} free lanes`;
 }
 
 function nextFor(state, planRow, deferred, capacity) {
@@ -231,13 +234,8 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
       next: nextFor(state, planRow, deferred, capacity), planAction: planRow?.owedAction ?? null, proposed: proposed.has(`${p.repo}#${p.number}`),
       sessions: mine.map((x) => ({ name: x.session.name, id: x.session.id, state: sessionWords(x.session), agent: agentWords(x.session), since: startedMs(x.session, now) })) };
   });
-  // Work items: one row per open decision the docket lists (when that data source exists).
+  // Decisions live in the docket, never in this report and never as operator work: only a count line (see `docket`).
   const docketItems = input.docket?.items ?? [];
-  const decisions = docketItems.slice(0, DECISION_ROWS).map((d) => {
-    const id = d.id ?? d.num ?? d.number;
-    return { type: 'decision', ref: `decision #${id}`, title: d.title ?? '', state: 'open decision', since: toMs(d.createdAt ?? d.filedAt ?? null),
-      next: d.prepared ? 'ready to ratify — you decide' : 'needs preparation', sessions: [] };
-  });
   // Live sessions that belong to no listed item: item sessions get an item row, the rest are listed as sessions.
   const itemSessions = new Map(), other = [];
   for (const x of live) {
@@ -281,8 +279,9 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
   if (unreaped.length) add('session-finished-unreaped', `${unreaped.length} session${unreaped.length === 1 ? '' : 's'}`, `finished but the process is still running: ${unreaped.slice(0, 6).map((s) => s.name).join(', ')}${unreaped.length > 6 ? ` +${unreaped.length - 6} more` : ''}`, Math.min(...unreaped.map((s) => startedMs(s, now) ?? Infinity)));
   const pre = prs.filter((p) => toMs(p.createdAt) != null && dayKey(toMs(p.createdAt)) < dayKey(now)).sort((a, b) => toMs(a.createdAt) - toMs(b.createdAt));
   if (pre.length) add('pre-today-pr-open', `${pre.length} PR${pre.length === 1 ? '' : 's'}`, `opened before today and still open; oldest is ${prRef(pre[0])}`, toMs(pre[0].createdAt));
-  // Workers = live sessions with a dispatch name. Counted here, not from `capacity.live`: land-advance counts a finished-but-unreaped session as a worker.
-  const workers = live.filter((x) => x.binding).length;
+  // ONE worker count for the header, over-capacity and the Next lines: land-advance's own (`capacityFor`, which counts only
+  // sessions whose verdict holds a slot). Without a plan, fall back to the live dispatch-named sessions counted here.
+  const workers = capacity ? capacity.live : live.filter((x) => x.binding).length;
   if (capacity && workers > capacity.cap) add('over-capacity', `${workers} workers`, `${workers} workers are running and the cap is ${capacity.cap}`, null);
   const runnerLive = input.runner?.state === 'alive-and-idle', runnerKnown = input.runner && input.runner.state !== 'unknown';
   if (runnerKnown && !runnerLive) add('runner-not-live', 'conveyor runner', input.runner.stalledReason ?? `runner state ${input.runner.state}`, null);
@@ -312,8 +311,8 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
     operatorQueue: needsYou == null ? 'unknown' : needsYou.length ? `${needsYou.length}` : 'none', checkedAt: clock(now),
   };
   return { generatedAt: new Date(now).toISOString(), header, attention, attentionCounts: { dead: deadCount, unreaped: unreaped.length },
-    workItems: [...items, ...decisions, ...itemRows, ...otherRows], docketAvailable: input.docket != null,
-    docket: input.docket == null ? null : { total: docketItems.length, shown: decisions.length, generatedAt: toMs(input.docket.generatedAt) },
+    workItems: [...items, ...itemRows, ...otherRows], docketAvailable: input.docket != null,
+    docket: input.docket == null ? null : { total: docketItems.length, generatedAt: toMs(input.docket.generatedAt), stale: !(now - toMs(input.docket.generatedAt) <= DOCKET_STALE_MS) },
     done: { since: sinceMs, fallback: lastMs == null, rows: done, merged: input.merged != null }, next, capacity, needsYou, errors: input.errors ?? [] };
 }
 
@@ -341,7 +340,7 @@ export function renderReport(r) {
   out.push('');
 
   out.push('## Work items');
-  if (!r.workItems.length) out.push('No open PRs, decisions or live sessions.');
+  if (!r.workItems.length) out.push('No open PRs or live sessions.');
   else {
     out.push('| Item | State | Agent | Since | Next |', '| --- | --- | --- | --- | --- |');
     for (const w of r.workItems) {
@@ -350,7 +349,7 @@ export function renderReport(r) {
     }
   }
   if (!r.docketAvailable) out.push('', 'Open decisions: not listed (no decision docket data on this machine).');
-  else if (r.docket.total > r.docket.shown) out.push('', `${r.docket.total - r.docket.shown} more open decisions in the docket (top ${r.docket.shown} by leverage shown${Number.isFinite(r.docket.generatedAt) ? `; docket built ${stamp(r.docket.generatedAt)}` : ''}).`);
+  else out.push('', `${r.docket.total} open decision${r.docket.total === 1 ? '' : 's'} in the docket (built ${Number.isFinite(r.docket.generatedAt) ? stamp(r.docket.generatedAt) : 'unknown date'})${r.docket.stale ? ' — docket may be stale' : ''}`);
   out.push('');
 
   out.push(r.done.fallback ? `## Done since ${stamp(r.done.since)} (last 3 h; no earlier /wip stamp)` : `## Done since ${stamp(r.done.since)}`);

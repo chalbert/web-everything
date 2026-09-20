@@ -43,7 +43,9 @@ describe('the fixture state (2026-09-20)', () => {
     const row = rowsFor(report, 'session-stalled').find((r) => r.item.startsWith('review-148'));
     expect(row).toBeTruthy();
     expect(row.what).toMatch(/no activity for 2h/);
-    expect(report.workItems.find((w) => w.ref === 'plateau-app#148').state).toBe('blocked-on:reviewer stalled');
+    expect(report.workItems.find((w) => w.ref === 'plateau-app#148').state).toBe('blocked-on:review stalled');
+    // the nested session row says `stalled` too, so the PR row and its session never disagree
+    expect(text).toContain('| ↳ review-148 | stalled | runs on');
   });
   it('counts finished-but-unreaped sessions (a count row) and the pre-today PRs (queue-first)', () => {
     const [u] = rowsFor(report, 'session-finished-unreaped');
@@ -100,9 +102,30 @@ describe('the fixture state (2026-09-20)', () => {
     expect(text).toContain(`${dead.length} dead session records (no process): nothing to act on.`);
     expect(report.workItems.filter((w) => w.type === 'session').every((w) => liveNames.has(w.sessions[0].name))).toBe(true);
   });
-  it('shows a work item for the open decisions the docket lists, capped, with the rest counted', () => {
-    expect(report.workItems.filter((w) => w.type === 'decision')).toHaveLength(5);
-    expect(text).toMatch(/3 more open decisions in the docket \(top 5 by leverage shown/);
+  it('never lists a decision as a work item or as operator work: one count line after the table, flagged when stale', () => {
+    expect(report.workItems.filter((w) => w.type === 'decision')).toHaveLength(0);
+    expect(text).not.toMatch(/decision #|ready to ratify|you decide|open decision \|/);
+    expect(report.docket).toMatchObject({ total: 8, stale: true });
+    // the docket file in the fixture was built 2026-09-14, days before the capture
+    expect(text).toMatch(/\n\n8 open decisions in the docket \(built 2026-09-14 \d\d:\d\d EDT\) — docket may be stale\n\n## Done since/);
+  });
+  it('drops the stale flag for a docket built within 24 h, and says nothing when there is no docket', () => {
+    const fresh = clone(); fresh.docket.generatedAt = new Date(RAW.now - 3600000).toISOString();
+    const t = run(fresh).text;
+    expect(t).toMatch(/8 open decisions in the docket \(built 2026-09-20 \d\d:\d\d EDT\)\n/);
+    expect(t).not.toContain('may be stale');
+    const none = clone(); none.docket = null;
+    expect(run(none).text).toContain('Open decisions: not listed (no decision docket data on this machine).');
+    const one = clone(); one.docket.items = one.docket.items.slice(0, 1); one.docket.generatedAt = fresh.docket.generatedAt;
+    expect(run(one).text).toContain('1 open decision in the docket (built');
+  });
+  it('uses ONE worker count: the header, the over-capacity rule and the Next lines agree, and a finished session with a live pid is not a worker', () => {
+    const cap = report.capacity, header = text.split('\n')[0];
+    expect(header).toContain(`workers ${cap.live} of ${cap.cap}`);
+    expect(cap.live).toBe(3); // review-148, fix-2347 (stalled), fix-2108; the old finished fix-2347 no longer holds a slot
+    expect(text).toContain(`no free worker slot (${cap.live} of ${cap.cap} workers running, ${cap.freeLanes} free lanes)`);
+    expect(text).not.toContain('as land-advance counts them');
+    expect(rowsFor(report, 'over-capacity')).toHaveLength(0);
   });
 });
 
@@ -141,7 +164,8 @@ describe('derivePrState (labels + mergeStateStatus + session verdicts)', () => {
     [pr(['review:human', 'advisory:accepted']), {}, 'needs-operator'],
     [pr(['review:pending']), { sessions: [sess('review')] }, 'reviewing'],
     [pr(['review:changes']), { sessions: [sess('fix')] }, 'fixing'],
-    [pr(['review:changes']), { sessions: [sess('fix', 'stalled')] }, 'blocked-on:fixer stalled'],
+    [pr(['review:changes']), { sessions: [sess('fix', 'stalled')] }, 'blocked-on:fix stalled'],
+    [pr(['review:pending']), { sessions: [sess('review', 'waiting-permission')] }, 'blocked-on:review waiting on a permission prompt'],
     [pr(['review:pending']), {}, 'waiting-for-reviewer'],
     [pr(['review:accepted']), {}, 'waiting-merge'],
     [pr(['review:accepted'], { mergeStateStatus: 'UNSTABLE' }), {}, 'waiting-CI'],
@@ -200,6 +224,7 @@ describe('attention rules', () => {
   it('flags over-capacity from the live workers versus the cap', () => {
     const raw = base();
     raw.landInputs.cap = 1;
+    raw.landInputs.sessions = ['fix-1', 'fix-2'].map((name) => ({ name, kind: 'background', liveness: 'live-active', verdict: 'progressing' }));
     raw.wipData = { agents: ['fix-1', 'fix-2'].map((name, i) => ({ id: `a${i}`, sessionId: `s${i}`, kind: 'background', name, state: 'working', status: 'busy', pid: 10 + i, startedAt: raw.now - 600000 })),
       facts: { s0: { pidAlive: true, transcriptMtimeMs: raw.now - 1000, resultFiles: [] }, s1: { pidAlive: true, transcriptMtimeMs: raw.now - 1000, resultFiles: [] } } };
     const { report } = run(raw);

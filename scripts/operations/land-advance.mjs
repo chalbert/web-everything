@@ -27,8 +27,15 @@ export function repoKeyFromSlug(value) {
 }
 export const isLive = (s) => ['live-active', 'live-idle', 'waiting'].includes(s.liveness);
 const labels = (p) => (p.labels ?? []).map((v) => typeof v === 'string' ? v : v.name);
+/**
+ * Verdicts that hold a worker slot: a live process doing (or stuck in) its work. `finished-unreaped` and
+ * `target-moved-on` are finished sessions whose process merely lingers, and `dead-record` has no process, so none of them
+ * consumes capacity. A session with NO verdict (an older reader, a bare fixture) keeps the liveness-only rule.
+ */
+export const SLOT_VERDICTS = Object.freeze(['progressing', 'stalled', 'waiting-permission']);
+const holdsSlot = (s) => isLive(s) && (s.verdict === undefined || SLOT_VERDICTS.includes(s.verdict));
 export function capacityFor({ sessions = [], freeLanes = 'unknown', cap = 3, load = 0, loadThreshold = 1.5 }) {
-  const live = sessions.filter((s) => s.kind === 'background' && isLive(s) && /^(review-|fix-|ci-heal-|conveyor-|prepare)/.test(s.name ?? '')).length;
+  const live = sessions.filter((s) => s.kind === 'background' && holdsSlot(s) && /^(review-|fix-|ci-heal-|conveyor-|prepare)/.test(s.name ?? '')).length;
   const known = Number.isInteger(freeLanes) && freeLanes >= 0 && Number.isFinite(load);
   const budget = known && load <= loadThreshold ? capToConcurrency(Array.from({ length: freeLanes }), { activeCount: live, cap }).admitted.length : 0;
   return { budget, live, freeLanes, cap, load, loadThreshold };

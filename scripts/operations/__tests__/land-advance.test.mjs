@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { planLandAdvance, followUpVerdict, OWED_ACTIONS, repoKeyFromSlug, sessionMatch, renderTable } from '../land-advance.mjs';
+import { planLandAdvance, capacityFor, followUpVerdict, OWED_ACTIONS, repoKeyFromSlug, sessionMatch, renderTable } from '../land-advance.mjs';
 import { CONSTELLATION_REPOS } from '../../lib/constellation-repos.mjs';
 const today = JSON.parse(readFileSync('scripts/operations/__fixtures__/land-advance/today.json'));
 const now = Date.parse('2026-09-20T00:00:00Z');
@@ -45,6 +45,17 @@ describe('what is owed', () => {
     expect(plan({ prototype }).rows[0].owedAction).toBe('graduation-owed');
     expect(plan({ prototype, prs: [pr(2344, { headRefName: 'lane/graduate-3443-fix-dispatch-pr-diff-scope' })] }).rows.some((r) => r.owedAction === 'graduation-owed')).toBe(false);
     expect(plan({ prototype, sessions: [{ name: 'conveyor-3443', liveness: 'live-idle' }] }).rows).toHaveLength(0);
+  });
+  it('capacity counts only sessions whose verdict holds a slot: a finished session with a live pid does not', () => {
+    const s = (name, verdict, extra = {}) => ({ name, kind: 'background', liveness: 'live-idle', verdict, ...extra });
+    const sessions = [s('review-1', 'progressing'), s('fix-2', 'stalled'), s('fix-3', 'waiting-permission'), // hold a slot
+      s('fix-4', 'finished-unreaped'), s('fix-5', 'target-moved-on'), s('fix-6', 'finished-unreaped', { liveness: 'done' }), s('fix-7', 'dead-record', { liveness: 'dead-record' }), // do not
+      { name: 'fix-8', kind: 'background', liveness: 'live-active' }]; // no verdict: legacy liveness-only rule
+    expect(capacityFor({ sessions, freeLanes: 9, cap: 5 })).toMatchObject({ live: 4, budget: 1 });
+    // tonight: two fixers and a reviewer working, one old finished fixer still alive, cap 4 -> a slot is free
+    const tonight = [s('review-148', 'progressing'), s('fix-2347', 'stalled'), s('fix-2108', 'progressing'), s('fix-2347', 'finished-unreaped')];
+    expect(capacityFor({ sessions: tonight, freeLanes: 12, cap: 4 })).toMatchObject({ live: 3, budget: 1 });
+    expect(planLandAdvance({ now, prs: [pr(10)], freeLanes: 8, sessions: tonight, cap: 4 }).proposed).toHaveLength(1);
   });
   it.each([{ freeLanes: 0 }, { load: 1.6 }, { freeLanes: 'unknown' }, { sessions: [1,2,3].map((n) => ({ name: `review-${n}`, kind: 'background', liveness: 'live-active' })) }])('fails closed on capacity %j', (extra) => {
     const p = plan({ prs: [pr(10), pr(11)], ...extra }); expect(p.proposed).toHaveLength(0); expect(p.deferred.map((r) => r.reason)).toEqual(['capacity','capacity']);
