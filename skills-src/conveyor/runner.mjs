@@ -61,8 +61,8 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadavg, freemem, totalmem, cpus } from 'node:os';
-import { mkdirSync, writeFileSync, renameSync, appendFileSync } from 'node:fs';
+import { loadavg, freemem, totalmem, cpus, hostname } from 'node:os';
+import { mkdirSync, writeFileSync, renameSync, appendFileSync, readFileSync } from 'node:fs';
 import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -86,6 +86,11 @@ import { createTelemetryRecorder } from '../../scripts/operations/telemetry-stor
 import {
   readProcessSample, buildProcessSnapshot, processSnapshotMetrics,
 } from '../../scripts/operations/host-process-sample.mjs';
+import { createActionStore } from '../../scripts/operations/action-store.mjs';
+import { defaultGroundTruth } from '../../scripts/operations/action-ground-truth.mjs';
+import { reconcileActions } from '../../scripts/operations/action-dispatch.mjs';
+import { tryAcquireTickMutex, DRIVER_ID } from '../../scripts/operations/tick-mutex.mjs';
+import { createTickBookkeeping } from '../../scripts/conveyor/tick-bookkeeping.mjs';
 import { localDateString } from '../../scripts/lib/local-date.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
@@ -189,6 +194,67 @@ export function tickSurface(out) {
  * @param {object} [effects.initial]                                   first tick's STDIN payload (default `{}`)
  * @returns {Promise<{ ticks: number, stoppedReason: string, lastOut: object|null }>}
  */
+/** #3383 — A shared tick is one critical section. No emit or pass runs for a losing driver. */
+let tickSequence = 0;
+export function createTickCoordination({ root, now = Date.now, actions = createActionStore({ root, now }),
+  listAgents = defaultGroundTruth().listAgents, findEffect = defaultGroundTruth().findEffect,
+  postconditionHolds = defaultGroundTruth().postconditionHolds, ...options } = {}) {
+  return {
+    acquire: (ctx) => tryAcquireTickMutex({ root, now, ...options, ...ctx }),
+    ...createTickBookkeeping({ root, now, actions, ...options }),
+    reconcileActions: () => reconcileActions({ actions, listAgents, findEffect, postconditionHolds, now }),
+  };
+}
+export async function runTickOnce({ effects, coordination = null, driverId = DRIVER_ID, now = Date.now,
+  payload = effects?.initial ?? {}, tick = 0 } = {}) {
+  const tickId = `${driverId}#${++tickSequence}`;
+  let acquired;
+  try {
+    acquired = coordination ? await coordination.acquire({ tickId, owner: { driverId, pid: process.pid, host: hostname() } })
+      : { ok: true, handle: { heartbeat: () => true, release: () => true } };
+  } catch (error) { return { ok: false, reason: 'coordination-unavailable', error: error.message }; }
+  if (!acquired.ok) return { ok: false, reason: acquired.reason || 'busy', heldBy: acquired.heldBy };
+  const mutex = acquired.handle;
+  let lost = false;
+  const heartbeat = async () => {
+    if (lost) return false;
+    const lockAlive = await mutex.heartbeat();
+    const runnerAlive = await (effects.heartbeat?.() ?? true);
+    lost = lockAlive !== true || runnerAlive !== true;
+    return !lost;
+  };
+  try {
+    const stored = coordination ? await coordination.loadBookkeeping() : { ok: true, fresh: true };
+    if (!stored.ok) return { ok: false, reason: 'bookkeeping-unavailable', error: stored.error };
+    const out = await effects.tickOnce(stored.fresh ? payload : { ...payload, bookkeeping: stored.bookkeeping });
+    const ctx = { tick, driverId, tickId, at: new Date(now()).toISOString() };
+    if (coordination && !await heartbeat()) return { ok: false, reason: 'lease-lost' };
+    // Real status/trace publication is synchronous; fence it against stealing as one fs section.
+    const publish = () => ({ ok: true, result: effects.emit?.(tickSurface(out), ctx) });
+    const publication = mutex.runIfOwned ? mutex.runIfOwned(publish) : publish();
+    if (!publication.ok) return { ok: false, reason: 'lease-lost' };
+    await publication.result;
+    let reconciliation = [];
+    if (coordination) {
+      try { reconciliation = await coordination.reconcileActions?.() ?? [];
+        await effects.reportCoordination?.(reconciliation, ctx); }
+      catch (error) { return { ok: false, reason: 'coordination-unavailable', error: error.message }; }
+    }
+    try { await effects.mechanicalPasses?.({ ...ctx, out, heartbeat }); } catch { /* best-effort mechanical pass */ }
+    if (coordination && !await heartbeat()) return { ok: false, reason: 'lease-lost' };
+    let dispatched = { nextState: out?.nextState || {} };
+    try { dispatched = await effects.dispatchPass?.({ ...ctx, out, heartbeat }) ?? dispatched; } catch { /* actions retain uncertain dispatches */ }
+    if (coordination) {
+      if (!await heartbeat()) return { ok: false, reason: 'lease-lost' };
+      const save = () => ({ ok: true, result: coordination.saveBookkeeping({ nextState: dispatched.nextState, driverId, tickId, now, guardMeta: stored.guardMeta }) });
+      const saved = mutex.runIfOwned ? mutex.runIfOwned(save) : save();
+      if (!saved.ok) return { ok: false, reason: 'lease-lost' };
+      await saved.result;
+    }
+    return { ok: true, out, dispatched, tickId, driverId, reconciliation };
+  } finally { await mutex.release(); }
+}
+
 export async function runLoop({
   tickOnce,
   emit = () => {},
@@ -199,6 +265,10 @@ export async function runLoop({
   intervalMs = DEFAULT_TICK_INTERVAL_MS,
   maxTicks = Infinity,
   initial = {},
+  coordination = null,
+  driverId = DRIVER_ID,
+  now = Date.now,
+  reportCoordination,
 } = {}) {
   if (typeof tickOnce !== 'function') throw new TypeError('runLoop requires a tickOnce effect');
   let payload = initial || {};
@@ -208,37 +278,16 @@ export async function runLoop({
   // The loop stops on the core's idle-stop, a spent `maxTicks` budget, or a lost lease; a real run passes
   // `maxTicks: Infinity` and relies on idle / lease-loss to end it (a test always bounds it via `maxTicks`).
   for (;;) {
-    const out = await tickOnce(payload);
+    const result = await runTickOnce({ effects: { tickOnce, emit, dispatchPass, mechanicalPasses, heartbeat, reportCoordination },
+      coordination, driverId, now, payload, tick });
+    if (!result.ok) {
+      await reportCoordination?.([result], { driverId, tick });
+      if (result.reason !== 'busy' || tick + 1 >= maxTicks) { stoppedReason = result.reason; break; }
+      if (!await heartbeat()) { stoppedReason = 'lease-lost'; break; }
+      await sleep(intervalMs); tick += 1; continue;
+    }
+    const { out, dispatched } = result;
     lastOut = out;
-    await emit(tickSurface(out), { tick });
-
-    // Best-effort deterministic passes — a throw here must never wedge the loop (mirrors the SKILL's §4b/§4c/§4d
-    // "best-effort; its exit never gates the tick"). #3404 — `heartbeat` is threaded IN here so a pass that
-    // itself runs longer than the lease TTL (the #3105 verify-dispatch pass: "can legitimately run for as long
-    // as the gate itself takes, 150-350s, sometimes longer") can extend the lease MID-PASS, not only after it
-    // returns — a single heartbeat call placed after this line, the way it used to be, would still let the
-    // lease go stale while the pass that needs it most is still running.
-    //
-    // RUNS BEFORE `dispatchPass` BELOW — deliberately, moved here from AFTER it (xpshzms, live-caught
-    // 2026-09-07). `dispatchPass` is a STRICTLY SEQUENTIAL loop of blocking, untimed `execFileSync` spawns —
-    // one per surfaced build/fix/ci-heal item (see `makeCliDispatchPass`'s own docblock) — that can run for
-    // many minutes on a large backlog, confirmed live via a process sample of the resident runner (100% of a
-    // 5s sample sat inside `node::SyncProcessRunner::Spawn`). With mechanical passes running AFTER dispatch,
-    // as this file used to, a big backlog starved them (and the heartbeat below, called only once both
-    // finish) of a timely turn every tick — the confirmed root cause of PR #1939 sitting with a real merge
-    // conflict `we:scripts/conveyor/parked-pr-conflict-watch.mjs` never caught (compare PR #1932, which the
-    // SAME pass DID catch, hours before that night's backlog built up). Running these cheap, bounded passes
-    // FIRST guarantees they get a turn every ~120s tick regardless of how long the dispatch backlog behind
-    // them takes to drain.
-    try { await mechanicalPasses({ tick, out, heartbeat }); } catch { /* best-effort — a pass failure never stalls a tick */ }
-
-    // DISPATCH what this tick decided (#3383) — now AFTER the mechanical passes above, not before (xpshzms).
-    // Still unrelated to them (infra recovery, lease reaping — neither reads nor produces `nextState`).
-    // Best-effort: a dispatch failure must not wedge the loop. On a throw, `dispatched` keeps its default
-    // (this tick's own raw `nextState`) — the same degraded-but-safe behaviour the runner had before this
-    // pass existed, never worse.
-    let dispatched = { nextState: (out && out.nextState) || {} };
-    try { dispatched = await dispatchPass({ tick, out }); } catch { /* best-effort */ }
 
     const stop = shouldStop(out, { tick, maxTicks });
     if (stop.stop) { stoppedReason = stop.reason; break; }
@@ -318,10 +367,8 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
  *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
  *  `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so it can just be re-run every
- *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
- *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
- *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
- *  flight for a PR simply does not appear in next tick's plan.
+ *  tick. The upstream liveness read suppresses known live work; #3383's durable resource action record
+ *  also refuses a dispatch when that read lags. The shared tick mutex serializes these passes across drivers.
  *
  *  THE HICCUP SINK is the ONLY one of the eleven that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
@@ -334,11 +381,9 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
  *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
  *  `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so it can just be re-run every
- *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
- *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
- *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
- *  flight for a PR simply does not appear in next tick's plan. Firing its per-PR `review-dispatch.mjs` calls
- *  SEQUENTIALLY mirrors `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state —
+ *  tick. The upstream liveness read and #3383's durable resource action record both guard dispatch.
+ *  Firing its per-PR `review-dispatch.mjs` calls
+ *  SEQUENTIALLY mirrors `makeCliDispatchPass`'s own reasoning —
  *  parallel runs have no benefit and this keeps one bad dispatch's blast radius the same as every other pass
  *  here. #xu2pp2m — each call is now a BLOCKING mechanical review rather than a fork-and-return `claude --bg`
  *  spawn, so this pass (like verify-dispatch) heartbeats the lease while it runs.
@@ -346,11 +391,11 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
  *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
  *  simply takes longer; nothing about the runner's own loop is bound by a per-turn window the way an
- *  interactive agent's Bash call is. #3404 — it is run through {@link runQuietHeartbeating}, not the plain
- *  synchronous `runQuiet` the other passes use: it is the one pass whose runtime can outlast the singleton
+ *  interactive agent's Bash call is. #3404 — it is run through {@link runQuietHeartbeating}: its runtime can outlast the singleton
  *  lease's TTL if nothing heartbeats DURING it — a mid-pass heartbeat closes the exact stale-lease-mid-run
- *  window `#2453` already fixed for the plateau-app drain daemon's whole-process lease. The other passes are
- *  quick bookkeeping sweeps; wrapping them the same way would add an async spawn + timer for no real benefit.
+ *  window `#2453` already fixed for the plateau-app drain daemon's whole-process lease. #3383 extends this
+ *  heartbeating wrapper to the other passes too: the shared tick mutex has a shorter lease, and every pass
+ *  must renew both leases while it runs.
  */
 
 /**
@@ -435,15 +480,11 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // determine an origin URL`, every tick, forever (this pass never needs `--repo` at all: `defaultListLaneStatus`
     // already reads `root`'s OWN pool via `cwd`, no selector required). So this one pass opts OUT of the
     // default forward entirely — seen live in `wev-scratch-dispatcher-9/run.log`.
-    const runQuiet = (relPath, extraArgs = [], { forwardRepo = true } = {}) => {
-      try {
-        const args = [join(scriptsDir, relPath), ...extraArgs];
-        if (forwardRepo && typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
-        execFileSync('node', args, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
-      } catch (e) {
-        process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
-      }
-    };
+    // #3383: even the fix-reconcile subprocess can outlast the tick lease. Keep the event loop
+    // available so every mechanical child renews both leases throughout its execution.
+    const runQuiet = (relPath, extraArgs = [], { forwardRepo = true } = {}) => runQuietHeartbeating(
+      join(scriptsDir, relPath), { args: extraArgs, repo: forwardRepo ? repo : null, heartbeat, label: relPath },
+    );
     // epic #3383 — FIRST, before anything that might refuse on a stale `main`. `we:scripts/operations/
     // review-dispatch.mjs#assertMainNotStale` (called by BOTH `reconcile-fix-dispatch.mjs` just below and the
     // review-dispatch reconcile step later in this same pass) throws whenever this checkout's LOCAL `main` ref
@@ -457,7 +498,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // checks from going stale in the first place. `forwardRepo: false` — this pass takes `--repo-dir=`, a
     // filesystem path, not the GH `owner/repo` slug `runQuiet` forwards by default (same reasoning
     // `lane-pool-health-watch.mjs` below states for its own opt-out).
-    runQuiet('conveyor/main-ref-sync.mjs', [], { forwardRepo: false });
+    await runQuiet('conveyor/main-ref-sync.mjs', [], { forwardRepo: false });
     // epic #3383 — THE GENERALIZED POC-BRANCH ↔ TARGET SYNC. `main-ref-sync.mjs` just above keeps this
     // checkout's own LOCAL `main` ref fresh; this pass is the OTHER half — it keeps every REGISTERED POC
     // branch (`we:scripts/lib/poc-branches.json`) mechanically merged with its own graduation target, gated
@@ -468,32 +509,32 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // divergence merges automatically; a real conflict is bounded-retried then durably escalated, exactly
     // `conveyor/branch-sync.mjs`'s own discipline (reused here, not reimplemented) — never force-merged
     // through. `forwardRepo: false` — like `main-ref-sync.mjs`, this pass takes no GH-slug flag at all.
-    runQuiet('conveyor/poc-branch-sync.mjs', [], { forwardRepo: false });
-    runQuiet('conveyor/infra-blocked.mjs', ['retry']);
-    runQuiet('conveyor/lease-reaper.mjs');
-    runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
-    runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
+    await runQuiet('conveyor/poc-branch-sync.mjs', [], { forwardRepo: false });
+    await runQuiet('conveyor/infra-blocked.mjs', ['retry']);
+    await runQuiet('conveyor/lease-reaper.mjs');
+    await runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
+    await runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
     // #3464 — sweeps its OWN default watched branch (`lane/mechanical-dispatcher` vs `main`), env/flag
     // overridable. `runQuiet` still appends `--repo=<repo>` when this runner was given one — harmless, since
     // `branch-drift.mjs`'s CLI parses and simply ignores any flag it doesn't itself read.
-    runQuiet('conveyor/branch-drift.mjs', ['sweep']);
+    await runQuiet('conveyor/branch-drift.mjs', ['sweep']);
     // #3574 — samples `gh run list`'s started-minus-created wait time and appends it to the durable sidecar
     // history, so a genuine Actions run-queue regression becomes a visible trend instead of invisible (this
     // repo's own investigation found nothing tracking it over time). Purely informative — no dispatch gate
     // reads its verdict, unlike branch-drift's `blocked` above.
-    runQuiet('conveyor/ci-queue-watch.mjs', ['sweep']);
+    await runQuiet('conveyor/ci-queue-watch.mjs', ['sweep']);
     // #xw0odtv — sweeps every OPEN PR for a review-parked (review:human/pending/uncleared-changes) hold that
     // has drifted into a REAL merge conflict (mergeable === CONFLICTING) against main, applying an informative
     // `merge-status:conflicting` label + a one-time comment (self-clearing once the conflict resolves). Distinct
     // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
     // population) — see that file's own header for the full gap this closes.
-    runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
+    await runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
     // #3568 — reaps known-safe scratch litter (`.commit-msg.txt`, `.pr-body.md`, …) from every UNLEASED lane
     // whose entire dirty state matches only that allowlist, reusing the SAME `we:scripts/lib/lane-litter.mjs`
     // core `we:scripts/lane-pool.mjs#cmdRelease` uses at release time — reclaims litter that predates that fix
     // or accumulated through any path other than a normal release. See that file's own header for the full
     // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
-    runQuiet('conveyor/lane-pool-health-watch.mjs', [], { forwardRepo: false });
+    await runQuiet('conveyor/lane-pool-health-watch.mjs', [], { forwardRepo: false });
     // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
     // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
     // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
@@ -580,7 +621,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
                 label: `review-dispatch --pr=${d.prNumber}`,
               },
             );
-            if (!dispatched) continue; // no review actually ran — never advance the round label for this PR
+            if (!dispatched || !await heartbeat()) continue; // no review actually ran — never advance the round label for this PR
             // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
             // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
             // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
@@ -628,7 +669,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // by the 2026-09-05 incident this pass was born from). Dedup: a PR already carrying `review:changes` is
     // skipped (the label's own presence is the durable marker, same idea as the conflict-watch line above,
     // reusing an existing label instead of minting a new one). See that file's own header for the full design.
-    runQuiet('conveyor/duplicate-pr-watch.mjs', ['sweep']);
+    await runQuiet('conveyor/duplicate-pr-watch.mjs', ['sweep']);
     // we:3550 — sweeps every OPEN, review-parked PR (review:pending/review:changes/review:human) for the
     // general neglect axis neither sibling watch above catches: no `review-<pr>`/`fix-<pr>` agent session has
     // EVER been dispatched for it, and it has sat past a configurable threshold (default 24h,
@@ -636,7 +677,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // Posts a `review:changes` finding via reconcile-finding.mjs, same as the line above. Dedup: a PR already
     // `review:changes` is skipped (that re-check is the separate follow-on we:3596, out of scope here). See
     // that file's own header for the full design, ratified in we:3549.
-    runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep']);
+    await runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep']);
     // #3105/#3404 — unlike the passes above, this one can legitimately run for as long as the gate itself
     // takes (150–350s, sometimes longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep.
     // That is fine here — this tick simply takes longer — but the lease must be heartbeated WHILE it runs, not
@@ -677,6 +718,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
  * @returns {Promise<boolean>} did the child exit 0?
  */
 async function runQuietHeartbeating(scriptPath, { repo = null, args: extraArgs = [], heartbeat = () => true, label } = {}) {
+  if (!await heartbeat()) return false;
   const { spawn } = await import('node:child_process');
   const args = [scriptPath, ...extraArgs];
   if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
@@ -685,7 +727,7 @@ async function runQuietHeartbeating(scriptPath, { repo = null, args: extraArgs =
   try {
     await new Promise((resolvePromise) => {
       const child = spawn('node', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-      timer = setInterval(() => { try { heartbeat(); } catch { /* best-effort */ } }, MECHANICAL_PASS_HEARTBEAT_MS);
+      timer = setInterval(() => { Promise.resolve().then(heartbeat).catch(() => {}); }, MECHANICAL_PASS_HEARTBEAT_MS);
       let stderr = '';
       child.stderr.on('data', (d) => { stderr += String(d); });
       child.on('error', (e) => {
@@ -771,7 +813,7 @@ export function bookkeepingForDispatch(nextState, item) {
 
 function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
   void repo; // see the doc comment above: dispatch-lane declares no --repo input
-  return async ({ out } = {}) => {
+  return async ({ out, heartbeat = () => true } = {}) => {
     let nextState = (out && out.nextState) || {};
     const d = tickSurface(out).dispatch;
     const items = [...d.builds, ...d.prepareScope, ...d.prepareDecision, ...d.fixes, ...d.ciHeals];
@@ -784,6 +826,7 @@ function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'we-conveyor-dispatch-'));
     try {
       for (let i = 0; i < items.length; i += 1) {
+        if (!await heartbeat()) break;
         const item = items[i];
         try {
           // #3416 — see bookkeepingForDispatch's own docblock above for why this strip exists.
@@ -1043,10 +1086,15 @@ export const DRIVER_STATUS_FILENAME = 'driver-status.json';
 export function writeDriverStatus(path, ctx, surface) {
   try {
     mkdirSync(dirname(path), { recursive: true });
+    const at = ctx.at ?? new Date().toISOString();
+    try {
+      const previous = JSON.parse(readFileSync(path, 'utf8'));
+      if (Date.parse(previous.at) > Date.parse(at)) return false;
+    } catch (e) { if (e.code !== 'ENOENT') throw e; }
     const body = JSON.stringify(
       {
         tick: ctx.tick,
-        at: new Date().toISOString(),
+        at, driverId: ctx.driverId ?? DRIVER_ID, tickId: ctx.tickId ?? `${DRIVER_ID}#${ctx.tick}`,
         statusLine: surface.statusLine || '',
         stalled: Array.isArray(surface.stalled) ? surface.stalled : [],
         dispatch: surface.dispatch,
@@ -1080,10 +1128,10 @@ export function appendDecisionTrace(traceDir, ctx, entries) {
   if (!Array.isArray(entries) || entries.length === 0) return;
   try {
     mkdirSync(traceDir, { recursive: true });
-    const at = new Date();
+    const at = new Date(ctx.at ?? Date.now());
     // #2747 — the day-shard is the OPERATOR's calendar day (`localDateString`), not the runtime's UTC day.
     const day = localDateString(at);
-    const lines = entries.map((e) => JSON.stringify({ tick: ctx.tick, at: at.toISOString(), ...e })).join('\n') + '\n';
+    const lines = entries.map((e) => JSON.stringify({ ...e, tick: ctx.tick, at: at.toISOString(), driverId: ctx.driverId ?? DRIVER_ID, tickId: ctx.tickId ?? `${DRIVER_ID}#${ctx.tick}` })).join('\n') + '\n';
     appendFileSync(join(traceDir, `${day}.jsonl`), lines);
   } catch (e) {
     process.stderr.write(`⚠ decision-trace write failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
@@ -1339,6 +1387,12 @@ async function main(argv) {
 
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = () => ({
+    coordination: createTickCoordination(),
+    reportCoordination: (rows) => {
+      for (const row of rows.filter((r) => r.reason && r.reason !== 'held')) {
+        process.stderr.write(`conveyor coordination: ${row.reason} ${row.record?.resource ?? ''}${row.error ? ` — ${row.error}` : ''}\n`);
+      }
+    },
     tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
     emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
     dispatchPass: makeCliDispatchPass({ scriptsDir: SCRIPTS_DIR, repo }),

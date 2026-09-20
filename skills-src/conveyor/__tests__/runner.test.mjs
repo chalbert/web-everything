@@ -708,7 +708,7 @@ describe('summarizeMechanicalPassError — the real error, not just execFileSync
 
 describe('makeCliMechanicalPasses — the review-reconcile dispatch block never advances review-round on a failed dispatch', () => {
   /** Route each mocked `execFileSync` call by which script it invokes, recording every call along the way. */
-  function makeExecFileSyncRouter({ plan, dispatchThrows = false }) {
+  function makeExecFileSyncRouter({ plan, dispatchThrows = false, dispatchCode = 1 }) {
     const calls = [];
     return {
       calls,
@@ -723,14 +723,14 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
       // `blocked-on-infra` (the review loop could not run), which is exactly what must not advance the round
       // label. `dispatchThrows` keeps its original meaning — "this dispatch produced no review".
       spawn: vi.fn(makeSpawnRouter(calls, (joined) => (
-        dispatchThrows && joined.includes('review-dispatch.mjs') ? 1 : 0
+        dispatchThrows && joined.includes('review-dispatch.mjs') ? dispatchCode : 0
       ))),
     };
   }
 
-  it('SKIPS review-round-tag.mjs for a PR whose review-dispatch.mjs call threw', async () => {
+  it.each([1, 75])('SKIPS review-round-tag.mjs when review-dispatch exits %s', async (dispatchCode) => {
     const { execFileSync, spawn, calls } = makeExecFileSyncRouter({
-      dispatchThrows: true,
+      dispatchThrows: true, dispatchCode,
       plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
     });
     const cp = await import('node:child_process');
@@ -833,12 +833,12 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     });
     const cp = await import('node:child_process');
     cp.execFileSync.mockImplementation(execFileSync);
-    if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
+    cp.spawn.mockImplementation(makeSpawnRouter(calls));
 
     const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
     await mechanicalPasses({ out: {} });
 
-    // The exact relative script path (or literal flag) each call carries, in the order `execFileSync` saw them
+    // The exact relative script path (or literal flag) each call carries, in the order both subprocess APIs saw them
     // — mutating this list is the mechanical check: delete/reorder/rename a `runQuiet(...)` line above and this
     // assertion goes red, which is the whole point (a `grep` for the added line, this PR's own backlog card
     // cited as its only prior check, catches none of that).
@@ -856,6 +856,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
+      'node /scripts/conveyor/verify-dispatch.mjs --repo=owner/repo',
     ]);
   });
 });

@@ -6,7 +6,7 @@
  * `run-record.mjs` and is re-exported here so a caller has one import. This file adds only the boundary:
  * where the record lives on disk, and how it is read, written, listed and deleted.
  *
- * WHERE RUNS LIVE, AND WHY. A **gitignored session-local sidecar** — `we:.operations/runs/<id>.json`. That
+ * WHERE RUNS LIVE, AND WHY. A shared operator sidecar — `<coordination-root>/runs/<id>.json` (#3383). That
  * is clause 1 of
  * [#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
  * (#2615/#2617): a half-finished run is transient operator/session intent, not durable repo readiness, so it
@@ -20,10 +20,12 @@
  * nothing above the seam changes.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+
+import { coordinationPaths, resolveCoordinationRoot } from './coordination-root.mjs';
 
 import { assertRunRecord, isValidRunId, parseRunRecord, serializeRunRecord } from './run-record.mjs';
 
@@ -39,9 +41,7 @@ export {
   validateRunRecord,
 } from './run-record.mjs';
 
-// Resolved by SCRIPT LOCATION, never CWD — the same reason `queue-store.mjs` does it (#2613 review, nit 4):
-// a run written from one worktree and read from another must resolve to the SAME sidecar, or a resume
-// silently sees no run at all. `OPERATION_RUNS_DIR` overrides it (tests, and any out-of-tree caller).
+// #3383: the default is shared across checkouts. Keep the old explicit-root helper for callers.
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const RUNS_ROOT = resolve(HERE, '..', '..');
 
@@ -53,7 +53,7 @@ export function runsDir(root = RUNS_ROOT) {
 /** The canonical runs directory every consumer resolves to; `OPERATION_RUNS_DIR` wins when set. */
 export function resolveRunsDir() {
   const env = process.env.OPERATION_RUNS_DIR;
-  return env && env.trim() ? resolve(env.trim()) : runsDir();
+  return env && env.trim() ? resolve(env.trim()) : coordinationPaths(resolveCoordinationRoot()).runs;
 }
 
 /** The on-disk path of one run. Refuses an id that is not filename-safe. */
@@ -75,8 +75,9 @@ export function newRunId(prefix = 'run') {
  */
 export function tryReadRun(id, dir = resolveRunsDir()) {
   const path = runPath(id, dir);
-  if (!existsSync(path)) return null;
-  const parsed = parseRunRecord(readFileSync(path, 'utf8'));
+  let text;
+  try { text = readFileSync(path, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  const parsed = parseRunRecord(text);
   if (!parsed.ok) {
     throw new Error(
       `operations: refusing to read run ${id} — ${parsed.reason} (${path}). ` +
@@ -109,8 +110,9 @@ export function writeRun(record, dir = resolveRunsDir()) {
 
 /** Every run id currently on disk (sorted). Temp files and stray names are ignored. */
 export function listRunIds(dir = resolveRunsDir()) {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  let names;
+  try { names = readdirSync(dir); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  return names
     .filter((f) => f.endsWith('.json'))
     .map((f) => f.slice(0, -'.json'.length))
     .filter(isValidRunId)
@@ -132,6 +134,7 @@ export function deleteRun(id, dir = resolveRunsDir()) {
  */
 export function createFileRunStore(dir = resolveRunsDir()) {
   return {
+    dir,
     read: (id) => tryReadRun(id, dir),
     write: (record) => { writeRun(record, dir); return record; },
     delete: (id) => deleteRun(id, dir),

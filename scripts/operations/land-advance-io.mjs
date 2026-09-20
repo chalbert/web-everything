@@ -160,7 +160,7 @@ export function createLandAdvanceReader(ports = {}) {
   };
 }
 export function createLandAdvanceApplier(ports = {}) {
-  const { run = runDefault, now = Date.now, home = homedir(), dispatchReview = realDispatchReview, dispatchFix = realDispatchFix,
+  const { actions, run = runDefault, now = Date.now, home = homedir(), dispatchReview = realDispatchReview, dispatchFix = realDispatchFix,
     readCapacity = () => ({ sessions: readLiveSessions({ run }), freeLanes: run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n').filter(Boolean).length,
       load: loadavg()[0] / cpus().length }),
     pickFixLane = () => { const path = run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n')[0]; const n = path?.match(/lane-(\d+)\/?$/)?.[1]; if (!n) throw new Error('No numbered fix lane'); return Number(n); },
@@ -182,8 +182,9 @@ export function createLandAdvanceApplier(ports = {}) {
         if (!remaining || !capacity.budget) { deferred.push({ target: row.subject, reason: 'capacity' }); break; }
         const kind = row.owedAction === 'dispatch-review' ? 'review' : 'fix', extraArgs = [allowedToolsArg(kind)];
         const launchTime = now();
-        const result = kind === 'review' ? await dispatchReview({ pr: row.pr, repo: row.slug, extraArgs })
-          : await dispatchFix({ ...row.fixPlan, lane: await pickFixLane() }, { extraArgs });
+        const result = kind === 'review' ? await dispatchReview({ pr: row.pr, repo: row.slug, extraArgs, actions })
+          : await dispatchFix({ ...row.fixPlan, lane: await pickFixLane() }, { extraArgs, actions, repo: row.slug });
+        if (result?.held) { deferred.push({ target: row.subject, reason: result.reason === 'unavailable' ? 'coordination-unavailable' : 'held-by-action-record' }); continue; }
         if (result?.ok === false || result?.error) throw new Error(result.error ?? 'dispatch failed');
         const session = result?.agentId ?? null;
         const launchedAt = new Date(launchTime).toISOString();

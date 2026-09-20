@@ -782,12 +782,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // and the only bookkeeping this operation actually earns. Null on a non-dispatch.
     dispatchedGuard: raw.dispatchedGuard && typeof raw.dispatchedGuard === 'object' ? raw.dispatchedGuard : null,
     expectedWithinMinutes: Number(expectedWithinMinutes) > 0 ? Number(expectedWithinMinutes) : DEFAULT_EXPECTED_WITHIN_MINUTES,
-    // HOW PARTIAL THE DOUBLE-DISPATCH GUARD WAS. `inFlightDispatchesFor` skips a run record it cannot read
-    // rather than wedging every dispatch behind one corrupt file — a real trade, and its docblock promised the
-    // count "rides the result so a caller can see the guard was partial". It did not: the number was read and
-    // dropped (PR #1211 review, F4). It rides `base` now, so it reaches the verdict on EVERY exit, dispatch or
-    // not. The guard's failure mode is two agents in one lane clone; a silently-partial one is the last thing
-    // that should be invisible.
+    // #3383: an unreadable record blocks dispatch; retain the count for diagnosis.
     unreadableRunRecords: Number(inFlight.unreadable) > 0 ? Number(inFlight.unreadable) : 0,
     // WHERE THE HOLD'S LIVENESS ANSWER CAME FROM (PR #1211 round 2, G1). `claude-agents` means each in-flight
     // record was checked against the real session listing; `unreadable` means the listing could not be read at
@@ -808,6 +803,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // #3462 — the item's still-open `blockedBy` targets, or `[]` on every exit except the one branch below
     // that actually refuses on them.
     openBlockers: [],
+  };
+
+  // #3383: a corrupt unrelated record deliberately blocks every dispatch.
+  if (inFlight.listFailed || inFlight.readFailed || inFlight.unreadable > 0) return {
+    ...base, dispatching: false, lane: null, sessionSlug: null, prompt: null, briefUnknownTokens: [],
+    itemSpecPath: null, scope: [], dispatchedGuard: null, inFlightRuns: [], agedOutRuns: [],
+    hold: 'store-unreadable', holdReason: `store-unreadable: ${inFlight.error ?? 'operation run store could not be read'}`,
   };
 
   // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, checked BEFORE the launch — because the case it covers is

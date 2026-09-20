@@ -325,11 +325,11 @@ describe('the fs shell', () => {
     expect(listRunIds(join(dir, 'nope'))).toEqual([]);
   });
 
-  it('resolves the sidecar by SCRIPT location, and OPERATION_RUNS_DIR overrides it', () => {
+  it('resolves the shared coordination sidecar, and OPERATION_RUNS_DIR overrides it', () => {
     const previous = process.env.OPERATION_RUNS_DIR;
     try {
       delete process.env.OPERATION_RUNS_DIR;
-      expect(resolveRunsDir()).toBe(runsDir());
+      expect(resolveRunsDir()).toBe(join(process.env.WE_COORDINATION_ROOT, 'runs'));
       expect(runsDir()).toMatch(/[/\\]\.operations[/\\]runs$/);
       process.env.OPERATION_RUNS_DIR = dir;
       expect(resolveRunsDir()).toBe(dir);

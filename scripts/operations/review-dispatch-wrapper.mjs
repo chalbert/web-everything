@@ -76,6 +76,10 @@
  * IMPURE: `node:child_process` (via the shared module's `run`), `node:crypto` (a fresh session id). Every
  * impure call is injectable, mirroring `we:scripts/operations/review-dispatch.mjs`'s own convention.
  */
+import { guardedDispatch } from './action-dispatch.mjs';
+import { createActionStore } from './action-store.mjs';
+import { actionResource } from './action-record.mjs';
+import { DRIVER_ID } from './tick-mutex.mjs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -367,27 +371,43 @@ export function dispatchReviewMechanical({
   return { ...planned, lanePath, classified, raw };
 }
 
-const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (IS_CLI) {
-  const argv = process.argv.slice(2);
+/** #3383 — Injectable standalone CLI, sharing the same blocked-review release as review-dispatch. */
+export function dispatchReviewWrapperCli(argv = [], {
+  dispatchMechanical = dispatchReviewMechanical, now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID,
+  write = (text) => writeAllSync(1, text), writeErr = (line) => writeLineSync(2, line),
+} = {}) {
   const flag = (name) => {
     const hit = argv.find((a) => a.startsWith(`--${name}=`));
     return hit ? hit.slice(name.length + 3) : undefined;
   };
   try {
-    const result = dispatchReviewMechanical({
-      pr: flag('pr'),
-      repo: flag('repo'),
-      // #xu2pp2m — a bare `--codex-advisory` (no `=`), with the ambient env var as the fallback.
-      codexAdvisory: argv.includes('--codex-advisory') || process.env[CODEX_ADVISORY_ENV] === '1',
-      // #3383 mechanical-dispatcher Gap 2 fix — same bare-flag-with-ambient-fallback shape, one seat later
-      // each, closing the "no flag exists at all" hole a real PR #2177 trial found.
-      correctnessAdvisory: argv.includes('--correctness-advisory') || process.env[CORRECTNESS_ADVISORY_ENV] === '1',
-      antigravityReview: argv.includes('--antigravity-review') || process.env[ANTIGRAVITY_REVIEW_ENV] === '1',
+    // #3383: the standalone wrapper CLI must obey the same resource exclusion as review-dispatch.
+    const guarded = guardedDispatch({ resource: actionResource(flag('repo'), { type: 'pr', id: flag('pr') }),
+      kind: 'review', owner, actions, now,
+      effect: () => {
+        const result = dispatchMechanical({
+          pr: flag('pr'),
+          repo: flag('repo'),
+          // #xu2pp2m — a bare `--codex-advisory` (no `=`), with the ambient env var as the fallback.
+          codexAdvisory: argv.includes('--codex-advisory') || process.env[CODEX_ADVISORY_ENV] === '1',
+          // #3383 mechanical-dispatcher Gap 2 fix — same bare-flag-with-ambient-fallback shape, one seat later
+          // each, closing the "no flag exists at all" hole a real PR #2177 trial found.
+          correctnessAdvisory: argv.includes('--correctness-advisory') || process.env[CORRECTNESS_ADVISORY_ENV] === '1',
+          antigravityReview: argv.includes('--antigravity-review') || process.env[ANTIGRAVITY_REVIEW_ENV] === '1',
+        });
+        if (result.classified?.outcome === BLOCKED_ON_INFRA) return { notStarted: true, value: result };
+        return { handle: result.classified?.runId, value: result };
+      },
     });
-    writeAllSync(1, `${JSON.stringify(result, null, 2)}\n`);
+    if (guarded.held) { write(`${JSON.stringify(guarded)}\n`); return 75; }
+    write(`${JSON.stringify(guarded.result.value, null, 2)}\n`);
+    if (guarded.notStarted) { writeErr('dispatch-review: could NOT review — blocked-on-infra'); return 1; }
+    return 0;
   } catch (e) {
-    writeLineSync(2, `error: ${String(e?.message ?? e)}`);
-    process.exitCode = 1;
+    writeErr(`error: ${String(e?.message ?? e)}`);
+    return 1;
   }
 }
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) process.exitCode = dispatchReviewWrapperCli(process.argv.slice(2));

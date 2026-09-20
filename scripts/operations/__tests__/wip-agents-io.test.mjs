@@ -92,7 +92,7 @@ it.each([['--model=sonnet'], ['-m', 'claude-exact'], ['--model', 'opus']])('reco
   // Vitest expands array cases into positional arguments.
   const extraArgs = args;
   const sink = createDispatchSinks({ root: '/tmp/wip-primary', provider: () => 'pid:123', extraArgs });
-  const result = await sink[DISPATCH_EFFECT]({ launchKind: 'build' });
+  const result = await sink[DISPATCH_EFFECT]({ launchKind: 'build', num: '7' });
   expect(result.dispatch.route).toBe('detached');
   expect(result.dispatch.supervisorModel).toBe(extraArgs.length === 1 ? 'sonnet' : extraArgs[1]);
   expect(result.dispatch.executor).toBeNull();

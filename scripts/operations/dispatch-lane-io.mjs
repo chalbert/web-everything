@@ -52,6 +52,11 @@
 // file afterwards; it was never one of the three, and four sibling lanes each about to edit the same `if`
 // inside it is why it moved. See `THE MECHANICAL DISPATCH SEAM` banner further down for the full argument.
 
+import { resolveRunsDir } from './run-store.mjs';
+import { guardedDispatch } from './action-dispatch.mjs';
+import { createActionStore } from './action-store.mjs';
+import { actionResource } from './action-record.mjs';
+import { DRIVER_ID } from './tick-mutex.mjs';
 import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -364,12 +369,9 @@ export function defaultRunNode(argv, opts = {}, { exec = execFileSync } = {}) {
  * start an agent for this item and never see it finish?" — from the only place that can answer it after a
  * restart.
  *
- * FAIL-SOFT PER RECORD, and the trade is stated: one unreadable run record is skipped rather than blocking
- * every dispatch (the store REFUSES a corrupt record, so one bad file would otherwise wedge the whole
- * operation), and the count of skipped records rides the result so a caller can see the guard was partial. It
- * rides it all the way onto the VERDICT as `unreadableRunRecords` — the first version of this sentence was a
- * claim wider than the code, because the count reached `shapeDispatchRead` and was dropped there (PR #1211
- * review, F4).
+ * #3383 FAIL CLOSED: list/read failures retain their diagnostic path and refuse the dispatch.
+ * A corrupt unrelated record deliberately blocks every dispatch until visibility is restored.
+ * `unreadableRunRecords` remains on the verdict, alongside the distinct store-unreadable hold.
  *
  * `expectedBy` rides each row for the same kind of reason: the declaration ages a stale hold out
  * (`dispatchStillHolds`), and it cannot do that without the deadline the sink recorded.
@@ -382,10 +384,12 @@ export function inFlightDispatchesFor(key, { store = createFileRunStore() } = {}
   const runs = [];
   let unreadable = 0;
   let ids;
-  try { ids = store.list(); } catch { return { runs, unreadable: 0 }; }
+  let readFailed = false, error;
+  try { ids = store.list(); if (!Array.isArray(ids)) throw new Error("Invalid run store listing"); }
+  catch (e) { return { runs, unreadable: 0, listFailed: true, error: `${store.dir ?? resolveRunsDir()}: ${e.message}` }; }
   for (const id of Array.isArray(ids) ? ids : []) {
     let run;
-    try { run = store.read(id); } catch { unreadable += 1; continue; }
+    try { run = store.read(id); if (!run) throw new Error("Listed run is missing"); } catch (e) { unreadable += 1; readFailed = true; error = `${store.dir ?? resolveRunsDir()}/${id}.json: ${e.message}`; continue; }
     for (const e of (run && Array.isArray(run.effects) ? run.effects : [])) {
       if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT) continue;
       if (normNum(e.payload?.num) !== key) continue;
@@ -401,7 +405,7 @@ export function inFlightDispatchesFor(key, { store = createFileRunStore() } = {}
       });
     }
   }
-  return { runs, unreadable };
+  return { runs, unreadable, ...(readFailed ? { readFailed, error } : {}) };
 }
 
 /**
@@ -499,7 +503,7 @@ export function isHandleListed(handle, sessions) {
 export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidAlive } = {}) {
   const rows = Array.isArray(inFlight?.runs) ? inFlight.runs : [];
   const unreadable = Number(inFlight?.unreadable) > 0 ? Number(inFlight.unreadable) : 0;
-  if (!rows.length) return { runs: [], unreadable, livenessSource: 'not-needed' };
+  if (!rows.length) return { ...inFlight, runs: [], unreadable, livenessSource: 'not-needed' };
 
   // #3645 — A MECHANICAL BUILD'S HANDLE IS A PID, AND THE KERNEL ANSWERS IT. When EVERY row in flight is one of
   // those, no `claude agents` listing is needed at all — and asking for one would mean an unreadable/absent
@@ -508,6 +512,7 @@ export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidA
   // ask about handles it has never heard of.
   if (rows.every((r) => !r.handle || detachedHandlePid(r.handle) !== null)) {
     return {
+      ...inFlight,
       runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, [], { isPidAlive }) : null })),
       unreadable,
       livenessSource: 'wrapper-pid',
@@ -521,7 +526,7 @@ export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidA
     sessions = null;
   }
   if (!Array.isArray(sessions)) {
-    return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
+    return { ...inFlight, runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
   }
   const listed = listedSessionIds(sessions);
   // A NON-EMPTY LISTING THAT YIELDED NOTHING MATCHABLE IS A READ THAT FAILED, not a world with no agents in
@@ -535,9 +540,10 @@ export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidA
   // SUCCEEDED and found nothing running — the ordinary state of an idle machine — and must still stamp
   // `live: false`. Only elements-in, ids-out is the shape nobody understands.
   if (sessions.length && !listed.size) {
-    return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
+    return { ...inFlight, runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
   }
   return {
+      ...inFlight,
     // PREFIX match (#3331), not `listed.has(...)` — `listed` above is still the full-id Set, kept only for the
     // shape guard; `r.handle` is the short id `parseBackgroundedHandle` stored at dispatch time, and equality
     // against a full `sessionId` would never match it. See {@link isHandleListed}.
@@ -1116,6 +1122,9 @@ export function createDispatchSinks({
     registry,
     agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
   }),
+  actions,
+  repo = 'we',
+  owner = DRIVER_ID,
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
@@ -1128,41 +1137,53 @@ export function createDispatchSinks({
   // the real function in.
   freshenCheckout = () => {},
 } = {}) {
+  actions ??= createActionStore({ now });
   return {
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
       freshenCheckout(root);
       const sessionId = String(mintSessionId());
       let handle;
+      // #3383 — a dispatch that cannot be keyed to an owner-qualified item/PR resource is refused BEFORE any
+      // spawn (supervisor edit): `notApplied` keeps it a retryable non-dispatch, not an "UNKNOWN" indeterminate.
+      let resource;
+      try { resource = actionResource(payload?.repo ?? repo, { type: payload?.pr ? 'pr' : 'item', id: payload?.pr ?? payload?.num }); }
+      catch (e) { throw notApplied(`dispatch has no resource identity, refusing before any spawn: ${e.message}`, { sessionId }); }
       try {
-        handle = await provider({
-          sessionId,
-          cwd: root,
-          prompt: payload?.prompt,
-          sessionSlug: payload?.sessionSlug,
-          num: payload?.num,
-          // #3105 — which KIND of mechanical dispatch this is (build / fix / ci-heal). Part of the port's
-          // request rather than a Claude detail: every provider needs to tell the agent it starts what it was
-          // started FOR. `defaultClaudeProvider` carries it across as the `WE_DISPATCH_KIND` env var.
-          launchKind: payload?.launchKind,
-          // #3645 — THE LANE AND ITS SCOPE, already on the effect payload (`dispatch-lane.mjs`'s `dispatch`
-          // step) and until now read only by the brief's own fill. The mechanical build provider needs them as
-          // DATA, because it is the wrapper — not an agent reading a brief — that runs `lane-pool acquire`.
-          // Part of the port's request rather than a wrapper detail: "which lane, under what scope" is
-          // CLI-independent, exactly like `launchKind`.
-          lane: payload?.lane,
-          scope: payload?.scope,
-          // #3640 — THE PR A REPAIR DISPATCH REPAIRS, and (CI-heal only) WHY. Already on the effect payload
-          // since #3332 and until now read only by the brief's own fill; a PR-KEYED mechanical provider needs
-          // them as DATA, because it is the wrapper — not an agent reading a brief — that runs `gh pr view`.
-          // Part of the port's request for the same reason `lane`/`scope` are: "which PR, and why" is
-          // CLI-independent. `null` for build/prepare/prepare-decision/investigate, which never have one.
-          // `reason` is forwarded here rather than by #3642 so that lane adds a ROW and nothing else.
-          pr: payload?.pr,
-          reason: payload?.reason,
-          extraArgs,
-          systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+        const guarded = await guardedDispatch({
+          resource,
+          kind: payload?.launchKind ?? 'build', owner, actions, now, evidence: { sessionSlug: payload?.sessionSlug, num: payload?.num },
+          effect: () => provider({
+            sessionId,
+            cwd: root,
+            prompt: payload?.prompt,
+            sessionSlug: payload?.sessionSlug,
+            num: payload?.num,
+            // #3105 — which KIND of mechanical dispatch this is (build / fix / ci-heal). Part of the port's
+            // request rather than a Claude detail: every provider needs to tell the agent it starts what it was
+            // started FOR. `defaultClaudeProvider` carries it across as the `WE_DISPATCH_KIND` env var.
+            launchKind: payload?.launchKind,
+            // #3645 — THE LANE AND ITS SCOPE, already on the effect payload (`dispatch-lane.mjs`'s `dispatch`
+            // step) and until now read only by the brief's own fill. The mechanical build provider needs them as
+            // DATA, because it is the wrapper — not an agent reading a brief — that runs `lane-pool acquire`.
+            // Part of the port's request rather than a wrapper detail: "which lane, under what scope" is
+            // CLI-independent, exactly like `launchKind`.
+            lane: payload?.lane,
+            scope: payload?.scope,
+            // #3640 — THE PR A REPAIR DISPATCH REPAIRS, and (CI-heal only) WHY. Already on the effect payload
+            // since #3332 and until now read only by the brief's own fill; a PR-KEYED mechanical provider needs
+            // them as DATA, because it is the wrapper — not an agent reading a brief — that runs `gh pr view`.
+            // Part of the port's request for the same reason `lane`/`scope` are: "which PR, and why" is
+            // CLI-independent. `null` for build/prepare/prepare-decision/investigate, which never have one.
+            // `reason` is forwarded here rather than by #3642 so that lane adds a ROW and nothing else.
+            pr: payload?.pr,
+            reason: payload?.reason,
+            extraArgs,
+            systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+          }),
         });
+        if (guarded.held) return guarded;
+        handle = guarded.result;
       } catch (e) {
         // A validation failure `buildAgentArgv` already proved happened before any process existed (e.g. an
         // empty prompt) carries `.notApplied` — rethrow it as-is rather than reclassifying it as indeterminate.

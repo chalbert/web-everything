@@ -1,3 +1,22 @@
+import { beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// #3383: isolate tests from home AND from each other's durable action holds.
+const ownsCoordinationRoot = process.env.WE_COORDINATION_ROOT === undefined;
+let testCoordinationRoot: string | undefined;
+if (ownsCoordinationRoot) process.env.WE_COORDINATION_ROOT = mkdtempSync(join(tmpdir(), 'we-coord-test-'));
+beforeEach(() => {
+  if (ownsCoordinationRoot) {
+    testCoordinationRoot = mkdtempSync(join(tmpdir(), 'we-coord-test-'));
+    process.env.WE_COORDINATION_ROOT = testCoordinationRoot;
+  }
+});
+afterEach(() => {
+  if (testCoordinationRoot) rmSync(testCoordinationRoot, { recursive: true, force: true });
+});
+
 // #3383 bugfix: default the delivery-telemetry recorder OFF for the whole unit/integration test run, so
 // wrapper tests (`deliver-item-wrapper.test.mjs` and siblings, plus the real-subprocess integration suite)
 // that exercise the real dispatch wrappers through `createTelemetryRecorder()`/`recorderFor()` — with

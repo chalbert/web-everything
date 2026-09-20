@@ -145,6 +145,10 @@
  * shapes individually is the game this file was already losing.
  */
 
+import { guardedDispatch } from './action-dispatch.mjs';
+import { createActionStore } from './action-store.mjs';
+import { actionResource, normalizeRepo } from './action-record.mjs';
+import { DRIVER_ID } from './tick-mutex.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -431,6 +435,7 @@ export function dispatchReview({
   extraArgs = [],
   checkStaleness,
   judgeProvider = 'claude',
+  now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID,
 } = {}) {
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
@@ -443,7 +448,7 @@ export function dispatchReview({
   if (!JUDGE_PROVIDER_NAMES.includes(judgeProvider)) {
     throw new Error(`review-dispatch: \`judgeProvider\` must be one of ${JUDGE_PROVIDER_NAMES.join('|')}, got ${JSON.stringify(judgeProvider)}`);
   }
-  const planned = planReviewDispatch({ pr, repo });
+  const planned = planReviewDispatch({ pr, repo: normalizeRepo(repo) });
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
     PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
   });
@@ -469,8 +474,11 @@ export function dispatchReview({
   // concluded no session had started — while the real session (findable by its `-n` slug) was running the
   // review to completion. `agentId` is the id that actually addresses it; `sessionId` is kept on the result
   // only so an existing caller reading that field still gets the old, documented shape.
-  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
-  const agentId = parseBackgroundedId(stdout);
+  const guarded = guardedDispatch({ resource: actionResource(planned.repo, { type: 'pr', id: planned.pr }),
+    kind: 'review', owner, actions, now, evidence: { sessionSlug: planned.sessionSlug },
+    effect: () => { const stdout = String(spawnAgent(argv, { cwd: root }) ?? ''); return { handle: parseBackgroundedId(stdout) }; } });
+  if (guarded.held) return guarded;
+  const agentId = guarded.result.handle;
   return {
     sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
     unknownTokens,
@@ -516,6 +524,7 @@ export const CODEX_JUDGE_PROVIDER_REFUSAL =
  */
 export function dispatchReviewCli(argv = [], {
   dispatchMechanical = dispatchReviewMechanical,
+  now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID,
   dispatchAgent = dispatchReview,
   write = (text) => writeAllSync(1, text),
   writeErr = (line) => writeLineSync(2, line),
@@ -539,8 +548,9 @@ export function dispatchReviewCli(argv = [], {
       // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
       // case, not a gap.
       const result = dispatchAgent({
-        pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider,
+        pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider, actions, owner, now,
       });
+      if (result?.held) { writeErr(`dispatch-review: ${result.reason}`); return { code: 75, mode: 'held', result }; }
       // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
       // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
       // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
@@ -560,18 +570,27 @@ export function dispatchReviewCli(argv = [], {
       return { code: 0, mode: 'agent', result };
     }
 
-    const result = dispatchMechanical({
-      pr: flag('pr'),
-      repo: flag('repo'),
-      codexAdvisory: argv.includes('--codex-advisory'),
-      // #3383 mechanical-dispatcher Gap 2 fix — the fourth (Codex correctness-lensed) and fifth (Antigravity)
-      // seats' own flags, one seat later each than `--codex-advisory` above. A real PR #2177 trial found
-      // NEITHER had a flag anywhere on this CLI — the only way to seat either was an ambient env var nothing
-      // here surfaced, which is exactly the "undocumented and unrepeatable" defect `--codex-advisory` itself
-      // was added to close (see this file's own `CODEX_JUDGE_PROVIDER_REFUSAL` docblock for that history).
-      correctnessAdvisory: argv.includes('--correctness-advisory'),
-      antigravityReview: argv.includes('--antigravity-review'),
+    const guarded = guardedDispatch({ resource: actionResource(flag('repo'), { type: 'pr', id: flag('pr') }),
+      kind: 'review', owner, actions, now, evidence: { sessionSlug: reviewSessionSlug(flag('pr')) },
+      effect: () => {
+        const result = dispatchMechanical({
+          pr: flag('pr'),
+          repo: normalizeRepo(flag('repo')),
+          codexAdvisory: argv.includes('--codex-advisory'),
+          // #3383 mechanical-dispatcher Gap 2 fix — the fourth (Codex correctness-lensed) and fifth (Antigravity)
+          // seats' own flags, one seat later each than `--codex-advisory` above. A real PR #2177 trial found
+          // NEITHER had a flag anywhere on this CLI — the only way to seat either was an ambient env var nothing
+          // here surfaced, which is exactly the "undocumented and unrepeatable" defect `--codex-advisory` itself
+          // was added to close (see this file's own `CODEX_JUDGE_PROVIDER_REFUSAL` docblock for that history).
+          correctnessAdvisory: argv.includes('--correctness-advisory'),
+          antigravityReview: argv.includes('--antigravity-review'),
+        });
+        if (result.classified?.outcome === BLOCKED_ON_INFRA) return { notStarted: true, value: result };
+        return { handle: result.classified?.runId ?? null, value: result };
+      },
     });
+    if (guarded.held) { writeErr(`dispatch-review: ${guarded.reason}`); return { code: 75, mode: 'held', result: guarded }; }
+    const result = guarded.result.value;
     const { outcome, verdict, loopOutcome, runId } = result.classified ?? {};
     // #xu2pp2m — `blocked-on-infra` IS A NON-ZERO EXIT, and that is the one deliberate sharpening of this
     // file's exit contract. `we:skills-src/conveyor/runner.mjs` treats exit 0 as "dispatched" and advances the

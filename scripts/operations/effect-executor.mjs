@@ -367,6 +367,19 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
       const result = await lookup(live.type)(live.payload, {
         key: live.key, runId: current.id, type: live.type, stepIndex: live.stepIndex, step: live.step, index: live.index,
       });
+      // #3383: a resource hold is a non-dispatch, never a successful spawn or error stack.
+      if (live.dispatch && result?.held === true && result.dispatched === false) {
+        current = withEntry(current, live.key, { status: 'applied', result, error: null });
+        current = { ...current, verdict: { ...current.verdict, dispatching: false,
+          reason: result.reason === 'unavailable' ? `coordination-unavailable: ${result.error ?? ''}` : 'held-by-action-record',
+          holdReason: result.reason === 'unavailable' ? 'coordination-unavailable' : 'held-by-action-record',
+          dispatchedGuard: null }, findings: { ...current.findings,
+            read: { ...current.findings?.read, dispatching: false, dispatchedGuard: null },
+            plan: { ...current.findings?.plan, dispatching: false, reason: result.reason, dispatchedGuard: null } } };
+        store.write(current);
+        skipped.push(live.key);
+        continue;
+      }
       if (isInFlightResult(result)) {
         if (!live.dispatch) {
           throw new Error(

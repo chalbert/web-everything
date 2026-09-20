@@ -64,7 +64,7 @@ async function agentPathStampFor(launchKind) {
     mintSessionId: () => 'sess-1',
   });
   await sinks[DISPATCH_EFFECT]({
-    num: '3629', pr: 2108, lane: 5, sessionSlug: `${launchKind}-2108`, prompt: '# go', launchKind,
+    num: `3629-${launchKind}`, pr: 2108 + LAUNCH_KINDS.indexOf(launchKind), lane: 5, sessionSlug: `${launchKind}-2108`, prompt: '# go', launchKind,
   });
   return calls[0].env.WE_DISPATCH_KIND;
 }

@@ -54,6 +54,7 @@ import {
   stampLiveness,
 } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT, LIVENESS_SOURCES } from '../dispatch-lane.mjs';
+import { createActionStore } from '../action-store.mjs';
 import { PREPARE_SCOPE_RUN_SCRIPT, prepareScopeDetachedProvider } from '../dispatch-providers/prepare.mjs';
 import { parsePrepareScopeRunArgv, runPrepareScopeCli } from '../prepare-scope-run.mjs';
 
@@ -97,7 +98,7 @@ describe('#3641 — the prepare dispatch is MECHANICAL by default', () => {
     // module boundary above, so the "real" path still starts nothing. `root` is still pinned to a fixed,
     // non-lane-shaped fake path (see `PRIMARY` above) — this is REAL in every other respect, but not in where
     // it happens to be checked out on disk.
-    const sinks = createDispatchSinks({ root: PRIMARY });
+    const sinks = createDispatchSinks({ root: PRIMARY, actions: createActionStore({ fs: await vi.importActual('node:fs') }) });
 
     const result = await sinks[DISPATCH_EFFECT](preparePayload());
 
@@ -116,7 +117,7 @@ describe('#3641 — the prepare dispatch is MECHANICAL by default', () => {
   it('`WE_PREPARE_DISPATCH_MODE=agent` restores the pre-#3641 `claude --bg` spawn with the old brief', async () => {
     vi.stubEnv('WE_PREPARE_DISPATCH_MODE', 'agent');
     try {
-      const sinks = createDispatchSinks({ root: PRIMARY });
+      const sinks = createDispatchSinks({ root: PRIMARY, actions: createActionStore({ fs: await vi.importActual('node:fs') }) });
       const result = await sinks[DISPATCH_EFFECT](preparePayload());
       expect(spawned).toEqual([]);
       expect(execFileSyncCalls).toHaveLength(1);

@@ -53,6 +53,10 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
+import { guardedDispatch } from '../operations/action-dispatch.mjs';
+import { createActionStore } from '../operations/action-store.mjs';
+import { actionResource } from '../operations/action-record.mjs';
+import { DRIVER_ID } from '../operations/tick-mutex.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -156,6 +160,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     planned.push({
       attributionKind: itemNum ? 'WE' : 'PR', attributionNum: itemNum ?? String(pr),
       itemNum, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
+      ...(entry.repo || entry.slug ? { repo: entry.slug ?? entry.repo } : {}),
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
@@ -335,6 +340,7 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  */
 export function tryResumeFix(planned, {
   root = REPO_ROOT,
+  now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID, repo = planned.repo ?? 'we',
   spawnAgent = defaultSpawnAgent,
   listAgentsAll = () => defaultListAgents({ all: true }),
   stop = stopSession,
@@ -386,44 +392,54 @@ export function tryResumeFix(planned, {
     payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
     resumeSessionId: candidate,
   });
-  let stdout = '';
-  try { stdout = String(spawnAgent(resumeArgv, { cwd: root }) ?? ''); } catch { stdout = ''; }
-  const printedId = parseBackgroundedId(stdout);
+  const guarded = guardedDispatch({ resource: actionResource(repo, { type: 'pr', id: planned.pr }),
+    kind: 'fix', owner, actions, now, evidence: { sessionSlug: `fix-${planned.pr}`, candidate, num: planned.itemNum },
+    effect: () => {
+      const resume = () => {
+        const stdout = String(spawnAgent(resumeArgv, { cwd: root }) ?? '');
+        const printedId = parseBackgroundedId(stdout);
 
-  // Hardening (2) — see the docblock above. A bounded retry, not an unbounded poll: each attempt is a
-  // fresh `claude agents --json --all` read, so a listing that lags the CLI's real state by one tick still
-  // resolves correctly on the next attempt, without ever risking stopping a genuinely resumed session on
-  // the strength of a single early read.
-  let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
-  for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
-    outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
-    if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
-    wait(RESUME_CONFIRM_WAIT_MS);
-  }
-  if (outcome.resumed) {
-    return {
-      resumed: true,
-      result: {
-        sessionId: candidate, sessionSlug: null, pr: planned.pr, itemNum: planned.itemNum, lane: null,
-        unknownTokens: [], resumed: true,
-      },
-    };
-  }
-  // NOT a genuine resume: `resumeSucceeded` only answers true when a fresh listing confirms the requested
-  // session is what actually resumed. Whatever process the CLI just started under `printedId` is therefore
-  // either an accidental copy or unidentifiable — stop it (never the resumed target, which this branch by
-  // construction did not reach) and fall through to a fresh dispatch, which the caller performs (and which
-  // is the first point a lane is ever popped for this entry). `outcome.anomaly` (#3541) rides onto the record
-  // here rather than being read for a verdict — see `resumeSucceeded`'s own docblock for why no fallback acts
-  // on it.
-  if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
-  return {
-    resumed: false,
-    resumeAttempt: {
-      attempted: true, candidate, forked: Boolean(printedId),
-      ...(outcome.anomaly ? { anomaly: outcome.anomaly } : {}),
-    },
-  };
+        // Hardening (2) — see the docblock above. A bounded retry, not an unbounded poll: each attempt is a
+        // fresh `claude agents --json --all` read, so a listing that lags the CLI's real state by one tick still
+        // resolves correctly on the next attempt, without ever risking stopping a genuinely resumed session on
+        // the strength of a single early read.
+        let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
+        for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
+          outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
+          if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
+          wait(RESUME_CONFIRM_WAIT_MS);
+        }
+        if (outcome.resumed) {
+          return {
+            resumed: true,
+            result: {
+              sessionId: candidate, sessionSlug: null, pr: planned.pr, itemNum: planned.itemNum, lane: null,
+              unknownTokens: [], resumed: true,
+            },
+          };
+        }
+        // NOT a genuine resume: `resumeSucceeded` only answers true when a fresh listing confirms the requested
+        // session is what actually resumed. Whatever process the CLI just started under `printedId` is therefore
+        // either an accidental copy or unidentifiable — stop it (never the resumed target, which this branch by
+        // construction did not reach). #3383: preserve the action hold; requesting stop alone is not proof
+        // that the effect is absent, so the caller cannot fall through to a fresh dispatch. `outcome.anomaly` (#3541) rides onto the record
+        // here rather than being read for a verdict — see `resumeSucceeded`'s own docblock for why no fallback acts
+        // on it.
+        if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
+        return {
+          resumed: false,
+          resumeAttempt: {
+            attempted: true, candidate, forked: Boolean(printedId),
+            ...(outcome.anomaly ? { anomaly: outcome.anomaly } : {}),
+          },
+        };
+      };
+      const value = resume();
+      return { handle: value.result?.sessionId ?? null, value };
+    } });
+  if (guarded.held) return { ...guarded, resumed: false };
+  const value = guarded.result.value;
+  return value.resumed ? value : { ...value, held: true, reason: 'held:indeterminate' };
 }
 
 /**
@@ -459,6 +475,7 @@ export function tryResumeFix(planned, {
  */
 export function dispatchFix(planned, {
   root = REPO_ROOT,
+  now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID, repo = planned.repo ?? 'we',
   readBrief = (r) => readFileSync(fixBriefPath(r), 'utf8'),
   mintSessionId = () => randomUUID(),
   spawnAgent = defaultSpawnAgent,
@@ -490,9 +507,12 @@ export function dispatchFix(planned, {
   // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
   // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
   // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
-  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+  const guarded = guardedDispatch({ resource: actionResource(repo, { type: 'pr', id: planned.pr }),
+    kind: 'fix', owner, actions, now, evidence: { sessionSlug, num: planned.itemNum },
+    effect: () => ({ handle: parseBackgroundedId(String(spawnAgent(argv, { cwd: root }) ?? '')) }) });
+  if (guarded.held) return guarded;
   return {
-    sessionId, agentId: parseBackgroundedId(stdout),
+    sessionId, agentId: guarded.result.handle,
     sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
     resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
   };
@@ -523,6 +543,7 @@ export function dispatchFix(planned, {
  */
 export function runReconcileFixDispatch({
   root = REPO_ROOT,
+  actions = createActionStore(),
   repo = null,
   findItemFn = findItem,
   loadItems = () => defaultLoadItems(root),
@@ -555,11 +576,12 @@ export function runReconcileFixDispatch({
     if (entry.isConflict) {
       let attempt;
       try {
-        attempt = tryResume(entry, { root });
+        attempt = tryResume(entry, { root, repo: entry.repo ?? repo ?? 'we', actions });
       } catch (e) {
         refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
         continue;
       }
+      if (attempt.held) { refusals.push({ pr: entry.pr, kind: 'held', why: attempt.reason }); continue; }
       if (attempt.resumed) {
         dispatched.push(attempt.result);
         continue; // no lane ever popped for this entry
@@ -573,7 +595,9 @@ export function runReconcileFixDispatch({
     }
     const lane = lanes.shift();
     try {
-      dispatched.push(dispatch({ ...entry, lane }, { root, extraArgs: agentArgsFromEnv(), resumeAttempt }));
+      const result = dispatch({ ...entry, lane }, { root, repo: entry.repo ?? repo ?? 'we', actions, extraArgs: agentArgsFromEnv(), resumeAttempt });
+      if (result?.held) { refusals.push({ pr: entry.pr, kind: 'held', why: result.reason }); lanes.unshift(lane); }
+      else dispatched.push(result);
     } catch (e) {
       refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
     }

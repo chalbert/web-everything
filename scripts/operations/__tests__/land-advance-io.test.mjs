@@ -95,7 +95,7 @@ describe('apply uses injected effects only', () => {
   it('routes fix arguments and invokes reaper once for summary rows', async () => {
     const p = ports(); p.dispatchFix = vi.fn(() => ({ agentId: 'f', sessionSlug: 'fix-1' })); p.pickFixLane = () => 7;
     const data = planLandAdvance({ now, freeLanes: 1, prs: [{ ...prs[0], labels: ['review:changes'] }], fixPlans: { 'we#1': { planned: { pr: 1, itemNum: '3140', scope: ['we:scripts/'] } } }, sessions: [{ liveness: 'dead-record' }] });
-    await createLandAdvanceApplier(p)(data); expect(p.reap).toHaveBeenCalledOnce(); expect(p.dispatchFix).toHaveBeenCalledWith(expect.objectContaining({ lane: 7 }), { extraArgs: [allowedToolsArg('fix')] });
+    await createLandAdvanceApplier(p)(data); expect(p.reap).toHaveBeenCalledOnce(); expect(p.dispatchFix).toHaveBeenCalledWith(expect.objectContaining({ lane: 7 }), expect.objectContaining({ extraArgs: [allowedToolsArg('fix')], repo: 'chalbert/web-everything' }));
   });
 });
 describe('tools and escalation packets', () => {

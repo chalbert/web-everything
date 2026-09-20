@@ -159,7 +159,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
   it('never spawns when the plan itself refuses (bad PR/repo caught before any fs/spawn call)', () => {
     let readBriefCalls = 0;
     expect(() => dispatchReview({
-      pr: -1, repo: 'o/r', root: '/repo',
+      pr: -1, repo: 'chalbert/web-everything', root: '/repo',
       readBrief: () => { readBriefCalls += 1; return REAL_TEMPLATE_STUB; },
       spawnAgent: () => { throw new Error('must not be called'); },
       checkStaleness: FRESH,
@@ -477,7 +477,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
 
   it('`--agent` still reaches the old spawn path, unchanged — the fallback is real, not vestigial', () => {
     const agentCalls = [];
-    const res = dispatchReviewCli(['--pr=7', '--repo=o/r', '--agent'], {
+    const res = dispatchReviewCli(['--pr=7', '--repo=chalbert/web-everything', '--agent'], {
       dispatchMechanical: () => { throw new Error('the mechanical path must NOT run under --agent'); },
       dispatchAgent: (o) => {
         agentCalls.push(o);
@@ -494,7 +494,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
 
   it('`blocked-on-infra` exits NON-ZERO — `runner.mjs` must not advance a round label for a review that never ran', () => {
     const out = [];
-    const res = dispatchReviewCli(['--pr=2122', '--repo=o/r'], {
+    const res = dispatchReviewCli(['--pr=2122', '--repo=chalbert/web-everything'], {
       dispatchMechanical: () => CLASSIFIED('blocked-on-infra', { runId: null }),
       dispatchAgent: () => { throw new Error('unreachable'); },
       write: (t) => out.push(t),
@@ -505,7 +505,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
 
   it('a REAL verdict — bounced or parked, not only accepted — exits ZERO', () => {
     for (const outcome of ['bounced', 'parked', 'auto-cleared']) {
-      const res = dispatchReviewCli(['--pr=1', '--repo=o/r'], {
+      const res = dispatchReviewCli([`--pr=${['bounced', 'parked', 'auto-cleared'].indexOf(outcome) + 1}`, '--repo=chalbert/web-everything'], {
         dispatchMechanical: () => CLASSIFIED(outcome),
         dispatchAgent: () => { throw new Error('unreachable'); },
         write: () => {},
@@ -516,7 +516,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
 
   it('`--codex-advisory` is forwarded to the wrapper as the opt-in third seat', () => {
     const seen = [];
-    dispatchReviewCli(['--pr=1', '--repo=o/r', '--codex-advisory'], {
+    dispatchReviewCli(['--pr=1', '--repo=chalbert/web-everything', '--codex-advisory'], {
       dispatchMechanical: (o) => { seen.push(o.codexAdvisory); return CLASSIFIED('auto-cleared'); },
       dispatchAgent: () => { throw new Error('unreachable'); },
       write: () => {},
@@ -530,7 +530,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
   // one seat later each.
   it('`--correctness-advisory` is forwarded to the wrapper as the opt-in fourth seat', () => {
     const seen = [];
-    dispatchReviewCli(['--pr=1', '--repo=o/r', '--correctness-advisory'], {
+    dispatchReviewCli(['--pr=1', '--repo=chalbert/web-everything', '--correctness-advisory'], {
       dispatchMechanical: (o) => { seen.push(o.correctnessAdvisory); return CLASSIFIED('auto-cleared'); },
       dispatchAgent: () => { throw new Error('unreachable'); },
       write: () => {},
@@ -540,7 +540,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
 
   it('`--antigravity-review` is forwarded to the wrapper as the opt-in fifth seat', () => {
     const seen = [];
-    dispatchReviewCli(['--pr=1', '--repo=o/r', '--antigravity-review'], {
+    dispatchReviewCli(['--pr=1', '--repo=chalbert/web-everything', '--antigravity-review'], {
       dispatchMechanical: (o) => { seen.push(o.antigravityReview); return CLASSIFIED('auto-cleared'); },
       dispatchAgent: () => { throw new Error('unreachable'); },
       write: () => {},
@@ -550,7 +550,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
 
   it('all three optional seats are independently toggleable in the SAME invocation', () => {
     const seen = [];
-    dispatchReviewCli(['--pr=1', '--repo=o/r', '--codex-advisory', '--correctness-advisory', '--antigravity-review'], {
+    dispatchReviewCli(['--pr=1', '--repo=chalbert/web-everything', '--codex-advisory', '--correctness-advisory', '--antigravity-review'], {
       dispatchMechanical: (o) => {
         seen.push({ codexAdvisory: o.codexAdvisory, correctnessAdvisory: o.correctnessAdvisory, antigravityReview: o.antigravityReview });
         return CLASSIFIED('auto-cleared');
@@ -566,7 +566,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
     // tool-bearing, and `createDefaultJudge` structurally refuses codex + tools (#3581) — so this always died
     // minutes in, at the first judge step, on a constraint the operator never asked to violate.
     const errs = [];
-    const res = dispatchReviewCli(['--pr=1', '--repo=o/r', '--judge-provider=codex'], {
+    const res = dispatchReviewCli(['--pr=1', '--repo=chalbert/web-everything', '--judge-provider=codex'], {
       dispatchMechanical: () => { throw new Error('must not reach the wrapper'); },
       dispatchAgent: () => { throw new Error('must not reach the agent path'); },
       write: () => {},
@@ -580,7 +580,7 @@ describe('dispatchReviewCli — the mechanical wrapper is the DEFAULT live path'
   });
 
   it('`--judge-provider=claude` is untouched — the refusal is codex-only', () => {
-    const res = dispatchReviewCli(['--pr=1', '--repo=o/r', '--judge-provider=claude'], {
+    const res = dispatchReviewCli(['--pr=1', '--repo=chalbert/web-everything', '--judge-provider=claude'], {
       dispatchMechanical: () => CLASSIFIED('auto-cleared'),
       dispatchAgent: () => { throw new Error('unreachable'); },
       write: () => {},

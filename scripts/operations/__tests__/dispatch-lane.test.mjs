@@ -415,12 +415,11 @@ describe('the lane comes from the tick core or nowhere', () => {
 
   // ── PR #1211 review, F4 — a claim wider than the code: the partial-guard count was read and dropped ────────
 
-  it('SURFACES a partial double-dispatch guard on the verdict — an unreadable run record is not a clean zero', () => {
-    // `inFlightDispatchesFor` skips a corrupt record rather than wedging every dispatch. That trade is only
-    // acceptable if the caller can SEE it, and the guard's failure mode (two agents in one lane clone) is the
-    // last thing that should degrade silently.
+  it('REFUSES an unreadable run store and surfaces the failing record count', () => {
+    // #3383: even an unrelated corrupt record blocks dispatch until visibility is restored.
     const { run } = runTo(tickRead({ inFlightDispatches: { runs: [], unreadable: 2, livenessSource: 'not-needed' } }));
-    expect(run.verdict.dispatching).toBe(true);
+    expect(run.verdict.dispatching).toBe(false);
+    expect(run.verdict.reason).toMatch(/store-unreadable/);
     expect(run.verdict.unreadableRunRecords).toBe(2);
     // …and on a HOLD too, which is the exit that used to drop it as well.
     const held = runTo(tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()], { unreadable: 3 }) })).run;
