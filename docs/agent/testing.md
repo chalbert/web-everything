@@ -420,3 +420,15 @@ local/remote branch tree, otherwise `unresolvable` (potentially dead, not proven
 unfetched). Dry-run returns the same diagnostics without changing numbering state. The fallback
 visits explicit reference syntax, preserving bare birth-hash prose and `resolutionNote` quotes;
 the older local-ledger blind-rewrite behavior is unchanged.
+
+### Operator notification probes
+
+`operator-notify` consumes only `operator-queue`'s `ready` rows. Tests inject the notifier,
+including child CLI probes; never exercise real desktop delivery in this suite. Persisted
+successes deduplicate until an item leaves NEEDS YOU; queue errors preserve all prior keys.
+The operations IO fidelity gate requires the shared real-repo fixture even for filesystem
+state: the notifier test proves its external state path leaves that checkout clean.
+
+A core file that dynamically imports its CLI cannot await that import at module scope when
+its CLI statically imports the core. A staged Node probe of that cycle exits 13 with unsettled
+top-level await. Defer the import with `.then(...)`, and test both entry paths as subprocesses.
