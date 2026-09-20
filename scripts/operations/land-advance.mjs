@@ -2,7 +2,9 @@
  * @file land-advance.mjs
  * What is owed is independent of what can launch. Capacity is computed first;
  * oldest waits consume it first, with refusals retained as visible rows.
- * Precedence: fold > operator > drain/escalate > fix > review > stale > none.
+ * Precedence: fold > operator > conflict-fix > ci-heal > drain/escalate > fix > review > stale > none.
+ * The two repair rows (land-advance-repair.mjs) are PR-closing work: capped retries, a spent cap or a hard refusal is an
+ * `escalate` packet (never an operator row), and neither ever touches a `review:*` label.
  * Session rows use the mechanical verdict of conveyor/session-verdicts.mjs when the reader attached one.
  * Follow-up verdict rules (first match): explicit closed/moved target => moved-on;
  * result/done => finished; uncertain identity => ambiguous; absent process => dead;
@@ -15,8 +17,9 @@ import { compute } from './step-kinds.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { capToConcurrency } from '../lib/lane-concurrency.mjs';
 import { extractManifestFromBody } from '../readiness/lane-manifest.mjs';
+import { repairOwed, queueFirstHold, orderForHold, deferralReason, REPAIR_RETRY_CAP } from './land-advance-repair.mjs';
 export const LAND_ADVANCE_OP = 'land-advance';
-export const OWED_ACTIONS = Object.freeze(['dispatch-review', 'dispatch-fix', 'fold-into-prototype', 'wait-on-drain', 'stale-label', 'needs-operator', 'escalate', 'none', 'graduation-owed', 'reap-owed', 'delegation-trial-owed']);
+export const OWED_ACTIONS = Object.freeze(['dispatch-review', 'dispatch-fix', 'dispatch-ci-heal', 'dispatch-conflict-fix', 'fold-into-prototype', 'wait-on-drain', 'stale-label', 'needs-operator', 'escalate', 'none', 'graduation-owed', 'reap-owed', 'delegation-trial-owed']);
 export const FOLLOW_UP_VERDICTS = Object.freeze(['progressing', 'finished', 'stalled', 'dead', 'waiting-permission', 'target-moved-on', 'ambiguous']);
 export const STALE_LABEL_RULES = Object.freeze([Object.freeze({ label: 'checking', thresholdMs: 3600000, mergeStateStatus: 'CLEAN' })]);
 export function repoKeyFromSlug(value) {
@@ -71,7 +74,7 @@ export function drainWait(p, history = [], capped = false) {
 }
 export function planLandAdvance(inputs) {
   const { now, prs = [], sessions = [], followUps = [], history = [], results = [], trials = [], fixPlans = {}, errors = [] } = inputs;
-  const capacity = capacityFor(inputs), rows = [];
+  const capacity = capacityFor(inputs), rows = [], hold = queueFirstHold(prs, now), prsByKey = new Map(prs.map((p) => [`${p.repo}#${p.number}`, p]));
   const add = (subject, owedAction, evidence, since, extra = {}) => {
     const age = typeof since === 'number' ? since : Date.parse(since);
     rows.push({ repo: null, pr: null, subject, owedAction, evidence, waitingSince: Number.isFinite(age) ? new Date(age).toISOString() : null,
@@ -81,10 +84,24 @@ export function planLandAdvance(inputs) {
     const subject = `${p.repo}#${p.number}`, ls = labels(p), wait = drainWait(p, history, inputs.historyCapped);
     let action = 'none', evidence = [ls.includes('review:accepted') ? 'review:accepted, ready-to-merge — drain owns landing' : 'nothing owed'], since = p.updatedAt, extra = {};
     const worker = (kind) => sessions.filter((s) => isLive(s) && s.name?.startsWith(`${kind}-`)).map((s) => sessionMatch(s, p, prs, followUps));
+    // A finished session whose process lingers holds no slot: it must not hide a repair the PR still owes.
+    const repairWorkers = sessions.filter((s) => holdsSlot(s) && /^(?:fix|ci-heal)-/.test(s.name ?? '')).map((s) => sessionMatch(s, p, prs, followUps));
+    const repair = repairOwed(p, ls, { liveWorker: repairWorkers.includes('matched') || (inputs.detached ?? []).includes(subject), subject, followUps, repairEvidence: inputs.repairEvidence, retryCap: inputs.repairRetryCap ?? REPAIR_RETRY_CAP });
     if (ls.includes('review:accepted') && p.baseRefName === 'lane/mechanical-dispatcher') {
       action = 'fold-into-prototype'; evidence = ['base lane/mechanical-dispatcher; operator/fold worker'];
     } else if (ls.includes('review:human') && ls.includes('advisory:accepted')) {
       action = 'needs-operator'; evidence = ['review:human + advisory:accepted'];
+    } else if (repair) {
+      const fix = fixPlans[subject], what = repair.kind === 'conflict-fix' ? `merge conflict (${p.mergeStateStatus ?? p.mergeable}); ${ls.filter((l) => l.startsWith('review:')).join(', ') || 'no review label'}` : 'ci:failed';
+      if (repair.exhausted) {
+        action = 'escalate'; evidence = [`${what}; ${repair.exhausted.why}`]; extra = { kind: `${repair.kind}-exhausted`, verdict: 'repair not re-dispatched' };
+      } else {
+        action = repair.owedAction; evidence = [`${what}; no live fixer`];
+        extra = { fixPlan: fix?.planned, refusal: fix?.refusal ?? (!fix?.planned ? { kind: 'missing-fix-plan', why: 'fix planner evidence unavailable' } : undefined) };
+        if (repairWorkers.includes('ambiguous')) extra.refusal = { kind: 'ambiguous', why: 'name-only session matches multiple repositories' };
+        // A hard refusal (no scope, unsupported repo, no plan) will not clear by waiting: hand it to triage as a packet.
+        if (extra.refusal && extra.refusal.kind !== 'ambiguous') { evidence.push(extra.refusal.why); action = 'escalate'; extra = { kind: `${repair.kind}-refused`, verdict: 'repair dispatch refused', refusal: undefined }; }
+      }
     } else if (wait) {
       since = wait.since; action = Number(now) - Date.parse(since) >= (inputs.drainThresholdMs ?? 7200000) && wait.count >= (inputs.drainThresholdPasses ?? 90) ? 'escalate' : 'wait-on-drain';
       evidence = [...wait.reasons, `${wait.passes} consecutive passes since ${since}`];
@@ -133,15 +150,15 @@ export function planLandAdvance(inputs) {
   }
   rows.sort((a, b) => (b.ageMs ?? -1) - (a.ageMs ?? -1));
   const proposed = [], deferred = [];
-  for (const row of rows.filter((r) => r.owedAction.startsWith('dispatch-'))) {
+  for (const row of orderForHold(rows.filter((r) => r.owedAction.startsWith('dispatch-')), { hold, now, prsByKey })) {
     if (row.dispatchable && proposed.length < capacity.budget) proposed.push(row);
-    else deferred.push({ ...row, reason: row.refusal?.kind ?? (row.dispatchable ? 'capacity' : 'draft') });
+    else deferred.push({ ...row, reason: deferralReason(row, { hold, proposed, now, prsByKey }) });
   }
   for (const r of rows.filter((r) => r.owedAction === 'escalate')) {
     r.packetId = `${r.kind}-${r.subject}`.replace(/[^a-zA-Z0-9_-]/g, '-');
     r.packet = `would-write ${inputs.escalationsDir ?? '~/.operations/escalations'}/${r.packetId}.json`;
   }
-  return { generatedAt: new Date(now).toISOString(), capacity, rows, proposed, deferred, errors, prototype: inputs.prototype ?? null, escalations: inputs.escalations ?? [], alerts: inputs.alerts ?? [] };
+  return { generatedAt: new Date(now).toISOString(), capacity, queueFirst: hold, rows, proposed, deferred, errors, prototype: inputs.prototype ?? null, escalations: inputs.escalations ?? [], alerts: inputs.alerts ?? [] };
 }
 export function renderTable(plan) {
   const safe = (x) => String(x).replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');

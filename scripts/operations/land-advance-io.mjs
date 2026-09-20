@@ -16,6 +16,11 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from '../conveyor/driver-watchdog.mjs';
 import { planFixesFromReconcile, dispatchFix as realDispatchFix } from '../conveyor/reconcile-fix-dispatch.mjs';
+import { CONFLICT_LABEL } from '../conveyor/parked-pr-conflict-watch.mjs';
+import { countCiHealComments } from '../conveyor/ci-heal-mark.mjs';
+import { countStandDownComments } from '../conveyor/stand-down.mjs';
+import { dispatchCiHeal as realDispatchCiHeal } from './ci-heal-pr-dispatch.mjs';
+import { isConflicting, followUpKindFor } from './land-advance-repair.mjs';
 import { defaultLoadItems, findItem } from './dispatch-lane-io.mjs';
 import { dispatchReview as realDispatchReview } from './review-dispatch.mjs';
 import { createFileRunStore, newRunId, newRunRecord } from './run-store.mjs';
@@ -82,7 +87,8 @@ export function createLandAdvanceReader(ports = {}) {
     sweptReposPath = join(ROOT, 'scripts/lib/swept-repos.json'),
     readSessions = () => readLiveSessions({ run }), findItemFn = findItem, loadItems = () => defaultLoadItems(ROOT),
     resolveFallbackScope = (pr) => run('gh', ['pr', 'diff', String(pr), '--repo', 'chalbert/web-everything', '--name-only']).trim().split('\n').filter(Boolean).map((p) => `we:${p}`),
-    followUpEvidence, refreshPrototype = false, readPrototype,
+    followUpEvidence, refreshPrototype = false, readPrototype, isPidAlive = defaultIsPidAlive,
+    readPrComments = (pr) => JSON.parse(run('gh', ['pr', 'view', String(pr.number), '--repo', pr.slug, '--json', 'comments'])).comments ?? [],
     sessionEvidence = (followUps) => makeEvidenceResolver({ followUps, jobsDir, home }) } = ports;
   return function readInputs() {
     const errors = [], get = (source, fn, fallback) => { try { return fn(); } catch (e) { errors.push({ source, message: String(e.message ?? e) }); return fallback; } };
@@ -107,15 +113,30 @@ export function createLandAdvanceReader(ports = {}) {
       return { ahead, behind, refreshed: refreshPrototype, reason: refreshPrototype ? 'fetched origin' : 'cached refs; plan does not fetch' };
     }), { status: 'unknown' });
     const fixPlans = {};
-    for (const p of prs.filter((p) => p.labels.some((l) => (l.name ?? l) === 'review:changes'))) {
+    // One planner for every repair row: a bounce (`review:changes`), a merge conflict (any review label) and a red `ci:failed` PR
+    // all get their item-number-free plan (attribution `PR #<n>`, scope from the PR diff) from `planFixesFromReconcile`.
+    const needsPlan = (p) => p.labels.some((l) => ['review:changes', 'ci:failed'].includes(l.name ?? l)) || isConflicting(p);
+    for (const p of prs.filter(needsPlan)) {
       const target = `${p.repo}#${p.number}`;
       if (p.repo !== 'we') { fixPlans[target] = { refusal: { kind: 'unsupported-repo', why: 'fix planner supports we only' } }; continue; }
       fixPlans[target] = get(`fix:${target}`, () => {
-        const result = planFixesFromReconcile([{ ...p, kind: 'fix', prNumber: p.number, labels: p.labels.map((l) => l.name ?? l) }], findItemFn, loadItems, resolveFallbackScope);
+        const names = p.labels.map((l) => l.name ?? l);
+        const result = planFixesFromReconcile([{ ...p, kind: 'fix', prNumber: p.number, labels: isConflicting(p) && !names.includes(CONFLICT_LABEL) ? [...names, CONFLICT_LABEL] : names }], findItemFn, loadItems, resolveFallbackScope);
         return { planned: result.planned[0], refusal: result.refusals[0] };
       }, { refusal: { kind: 'source-failed', why: 'fix planner source failed' } });
     }
+    // The durable repair evidence: the PR's own CI-heal and stand-down comments (only read for a PR that owes a repair).
+    const repairEvidence = {};
+    for (const p of prs.filter((p) => p.repo === 'we' && (isConflicting(p) || p.labels.some((l) => (l.name ?? l) === 'ci:failed')))) {
+      repairEvidence[`${p.repo}#${p.number}`] = get(`repair-evidence:${p.repo}#${p.number}`, () => {
+        const comments = readPrComments(p); return { ciHealComments: countCiHealComments(comments), standDownComments: countStandDownComments(comments) };
+      }, {});
+    }
     const ledger = get('follow-ups', () => readFollowUps({ store }), []);
+    // A mechanical ci-heal runs as a detached wrapper (`pid:<n>` handle), invisible to `claude agents`: liveness is the kernel's.
+    const pidOf = (entry) => /^pid:(\d+)$/.exec(entry.session ?? '')?.[1];
+    const detachedAlive = (entry) => Boolean(pidOf(entry)) && Number(capturedAt) < Date.parse(entry.deadline) && isPidAlive(Number(pidOf(entry)));
+    const detached = ledger.filter(detachedAlive).map((e) => e.target);
     // The mechanical session verdict (`conveyor/session-verdicts.mjs`), attached once so the pure planner stays pure.
     // No PR lookups here (plan never adds network); the reaper's own pass adds them when it applies.
     sessions = get('session-verdicts', () => {
@@ -129,7 +150,8 @@ export function createLandAdvanceReader(ports = {}) {
       const s = sessions.find((s) => [s.id, s.sessionId].includes(entry.session));
       const p = prs.find((p) => `${p.repo}#${p.number}` === entry.target);
       const ls = (p?.labels ?? []).map((l) => l.name ?? l);
-      let observed = { ambiguous: !entry.session, targetMovedOn: Boolean(p && ((entry.kind === 'review' && !ls.includes('review:pending')) || (entry.kind === 'fix' && !ls.includes('review:changes')))),
+      let observed = { ambiguous: !entry.session, targetMovedOn: Boolean(p && ((entry.kind === 'review' && !ls.includes('review:pending')) || (entry.kind === 'fix' && !ls.includes('review:changes'))
+        || (entry.kind === 'ci-heal' && !ls.includes('ci:failed')) || (entry.kind === 'conflict-fix' && !isConflicting(p)))),
         drainWait: p ? drainWait(p, history.entries, history.capped) : null };
       if (followUpEvidence) observed = { ...observed, ...followUpEvidence(entry, { sessions, prs }) };
       else {
@@ -149,18 +171,18 @@ export function createLandAdvanceReader(ports = {}) {
         resultPresent = !shared && record?.status === 'done' && Date.parse(record.startedAt) >= Date.parse(entry.launchedAt);
         if (shared) observed.ambiguous = true;
       }
-      return { ...entry, evidence: { liveness: s?.liveness ?? (errors.some((e) => e.source === 'sessions') ? undefined : 'dead-record'), waitingFor: s?.waitingFor,
+      return { ...entry, evidence: { liveness: s?.liveness ?? (pidOf(entry) ? (detachedAlive(entry) ? 'live-active' : 'dead-record') : errors.some((e) => e.source === 'sessions') ? undefined : 'dead-record'), waitingFor: s?.waitingFor,
         resultPresent, targetState: p ? 'OPEN' : undefined,
         ...observed } };
     }, { ...entry, evidence: { ambiguous: true } }));
     const load = get('load', machineLoad, null);
     return { now: capturedAt, prs, sessions, history: history.entries, historyCapped: history.capped, alerts, trials, results, prototype,
-      fixPlans, followUps, escalationsDir, jobsDir, escalations: get('escalations', () => listEscalations({ dir: escalationsDir, fs: io }), []),
+      fixPlans, repairEvidence, detached, followUps, escalationsDir, jobsDir, escalations: get('escalations', () => listEscalations({ dir: escalationsDir, fs: io }), []),
       freeLanes: errors.some((e) => e.source === 'sessions') ? 'unknown' : lanes?.length ?? 'unknown', cap, load, loadThreshold, errors };
   };
 }
 export function createLandAdvanceApplier(ports = {}) {
-  const { actions, run = runDefault, now = Date.now, home = homedir(), dispatchReview = realDispatchReview, dispatchFix = realDispatchFix,
+  const { actions, run = runDefault, now = Date.now, home = homedir(), dispatchReview = realDispatchReview, dispatchFix = realDispatchFix, dispatchCiHeal = realDispatchCiHeal,
     readCapacity = () => ({ sessions: readLiveSessions({ run }), freeLanes: run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n').filter(Boolean).length,
       load: loadavg()[0] / cpus().length }),
     pickFixLane = () => { const path = run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n')[0]; const n = path?.match(/lane-(\d+)\/?$/)?.[1]; if (!n) throw new Error('No numbered fix lane'); return Number(n); },
@@ -180,9 +202,11 @@ export function createLandAdvanceApplier(ports = {}) {
         target = row.subject;
         const capacity = capacityFor({ ...plan.capacity, ...await readCapacity() });
         if (!remaining || !capacity.budget) { deferred.push({ target: row.subject, reason: 'capacity' }); break; }
-        const kind = row.owedAction === 'dispatch-review' ? 'review' : 'fix', extraArgs = [allowedToolsArg(kind)];
+        const kind = followUpKindFor(row.owedAction), extraArgs = [allowedToolsArg(kind)];
         const launchTime = now();
+        // `fix` and `conflict-fix` share the reconcile fix dispatch; `ci-heal` goes through the tick's own sink (ci-heal-pr-dispatch.mjs).
         const result = kind === 'review' ? await dispatchReview({ pr: row.pr, repo: row.slug, extraArgs, actions })
+          : kind === 'ci-heal' ? await dispatchCiHeal({ ...row.fixPlan, reason: 'red-ci', lane: await pickFixLane() }, { extraArgs, actions, repo: row.slug })
           : await dispatchFix({ ...row.fixPlan, lane: await pickFixLane() }, { extraArgs, actions, repo: row.slug });
         if (result?.held) { deferred.push({ target: row.subject, reason: result.reason === 'unavailable' ? 'coordination-unavailable' : 'held-by-action-record' }); continue; }
         if (result?.ok === false || result?.error) throw new Error(result.error ?? 'dispatch failed');

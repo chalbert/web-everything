@@ -16,6 +16,9 @@ export const ALLOWED_TOOLS_BY_KIND = Object.freeze({
     'Bash(node scripts/lane-pool.mjs acquire:*)', // brief's bounded lane acquisition
     'Bash(node scripts/lane-pool.mjs release:*)']), // release that lane on completion
   fix: Object.freeze([...build]), build: Object.freeze([...build]),
+  // The two repair rows edit and push a PR's own branch as a fix does, minus `gh pr edit`: no direct label edit is granted.
+  // The only label swap left reachable is `rearm-review.mjs`'s guarded one, which refuses unless the PR carries `review:changes`.
+  'ci-heal': Object.freeze(build.filter((t) => t !== 'Bash(gh pr edit:*)')), 'conflict-fix': Object.freeze(build.filter((t) => t !== 'Bash(gh pr edit:*)')),
 });
 export function allowedToolsArg(kind) {
   if (!Object.hasOwn(ALLOWED_TOOLS_BY_KIND, kind)) throw new TypeError(`Unknown dispatch kind: ${kind}`);

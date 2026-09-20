@@ -100,7 +100,7 @@ describe('apply uses injected effects only', () => {
 });
 describe('tools and escalation packets', () => {
   it('closes tool kinds and disallows unbounded shell grants', () => {
-    expect(Object.keys(ALLOWED_TOOLS_BY_KIND)).toEqual(['review','fix','build']);
+    expect(Object.keys(ALLOWED_TOOLS_BY_KIND)).toEqual(['review','fix','build','ci-heal','conflict-fix']);
     for (const [kind, tools] of Object.entries(ALLOWED_TOOLS_BY_KIND)) {
       expect(Object.isFrozen(tools)).toBe(true); expect(allowedToolsArg(kind)).toBe(`--allowedTools=${tools.join(',')}`);
       for (const tool of tools) { expect(tool).not.toMatch(/dangerously|git push --force/); expect(['Bash','Bash(*)']).not.toContain(tool); }
