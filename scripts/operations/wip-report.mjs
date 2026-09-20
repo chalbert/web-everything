@@ -39,22 +39,48 @@ export const PR_STATES = Object.freeze([
 // `waiting-for-reviewer`: a reviewer IS assigned, it has stopped making progress, and the nested session row says `stalled`.
 
 /**
- * The CLOSED Attention rule table. `remedy` is `auto` when a handler for the problem exists in the mechanism (the
- * runner has to be live for it to run: the header says when it is not) and `no-handler` when nothing mechanical
- * picks it up. Flip an entry here when a handler is built; nothing else needs to change.
+ * The CLOSED remedy vocabulary of an Attention row (what auto-handles it, or what to run):
+ * - `auto`: a live executor acts on it (the runner is live).
+ * - `auto (runner down)` / `auto (runner unknown)`: a handler exists but only the runner runs it, and the runner is not
+ *   live / its state could not be read. Never `auto` then: nothing would act.
+ * - `run: session-reaper`: a foreground command handles it while the runner is down (see {@link FOREGROUND_REMEDY}).
+ * - `start: /conveyor`: the runner-down row itself: the command that brings the runner up.
+ * - `no-handler`: nothing mechanical picks it up.
+ */
+export const REMEDIES = Object.freeze(['auto', 'auto (runner down)', 'auto (runner unknown)', 'run: session-reaper', 'start: /conveyor', 'no-handler']);
+/** A rule whose `auto` handler an operator can also run in the foreground: named instead of `auto (runner down)`. */
+const FOREGROUND_REMEDY = Object.freeze({ 'session-finished-unreaped': 'run: session-reaper' });
+
+/**
+ * The CLOSED Attention rule table. `remedy` is the rule's BASE remedy: `auto` when a handler for the problem exists in the
+ * mechanism and `no-handler` when nothing mechanical picks it up. An `auto` base is resolved against the runner's liveness
+ * when a row is added ({@link resolveRemedy}): it only reads `auto` while the runner is live. Flip an entry here when a
+ * handler is built; nothing else needs to change.
  */
 export const ATTENTION_RULES = Object.freeze({
-  'ci-failed-no-fixer': { remedy: 'no-handler', words: 'CI failed and no fixer is running' },
-  'conflict-no-fix-in-flight': { remedy: 'no-handler', words: 'merge conflict and no fix is running' },
+  'ci-failed-no-fixer': { remedy: 'auto', words: 'CI failed and no fixer is running' }, // land-advance dispatch-ci-heal; the row passes dispatchRemedy (a deferred/refused row is `no-handler`)
+  'conflict-no-fix-in-flight': { remedy: 'auto', words: 'merge conflict and no fix is running' }, // land-advance dispatch-conflict-fix; same dispatchRemedy
   'changes-requested-no-fixer': { remedy: 'auto', words: 'changes requested and no fixer is running' }, // land-advance dispatch-fix
   'review-pending-no-reviewer': { remedy: 'auto', words: 'waiting for a review and no reviewer is running' }, // land-advance dispatch-review
   'stale-tag': { remedy: 'auto', words: 'review-status label disagrees with the live sessions' }, // review-status-tag rides the runner tick
-  'session-stalled': { remedy: 'no-handler', words: 'session is stuck' }, // 'auto' only once its ladder reaches escalate (see remedyFor)
-  'session-finished-unreaped': { remedy: 'auto', words: 'finished sessions still running' }, // session-reaper
+  'session-stalled': { remedy: 'no-handler', words: 'session is stuck' }, // `auto` only once its ladder reaches escalate (see the add() call)
+  'session-finished-unreaped': { remedy: 'auto', words: 'finished sessions still running' }, // session-reaper (runner tick §4d; `run: session-reaper` when the runner is down)
   'pre-today-pr-open': { remedy: 'no-handler', words: 'PRs opened before today are still open' },
   'over-capacity': { remedy: 'no-handler', words: 'more workers running than the cap allows' },
-  'runner-not-live': { remedy: 'no-handler', words: 'the runner is not running' },
+  'runner-not-live': { remedy: 'no-handler', words: 'the runner is not running' }, // the row itself always reads `start: /conveyor`
 });
+/**
+ * The remedy an Attention row shows. A base of `auto` needs a live executor: with the runner live it stays `auto`; else the
+ * rule's foreground command, else `auto (runner down)` (or `auto (runner unknown)` when the runner's state was unreadable).
+ * Any other base is returned as is.
+ * @param {string} rule
+ * @param {string} base one of {@link REMEDIES}
+ * @param {'live'|'not live'|'unknown'} runner the header's runner value
+ */
+export function resolveRemedy(rule, base, runner) {
+  if (base !== 'auto' || runner === 'live') return base;
+  return FOREGROUND_REMEDY[rule] ?? (runner === 'not live' ? 'auto (runner down)' : 'auto (runner unknown)');
+}
 /** Sort order of the Attention block: most urgent first. */
 const RULE_ORDER = Object.keys(ATTENTION_RULES);
 
@@ -254,15 +280,17 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
 
   // Attention: the closed rule table, computed mechanically.
   const attention = [];
-  const add = (rule, item, what, sinceMs, remedy) => attention.push({ rule, item, what, since: finite(sinceMs) ? sinceMs : null, remedy: remedy ?? ATTENTION_RULES[rule].remedy });
+  const runnerLive = input.runner?.state === 'alive-and-idle', runnerKnown = input.runner && input.runner.state !== 'unknown';
+  const runnerStatus = input.runner ? (runnerLive ? 'live' : runnerKnown ? 'not live' : 'unknown') : 'unknown';
+  const add = (rule, item, what, sinceMs, remedy) => attention.push({ rule, item, what, since: finite(sinceMs) ? sinceMs : null, remedy: resolveRemedy(rule, remedy ?? ATTENTION_RULES[rule].remedy, runnerStatus) });
   for (const p of prs) {
     const ls = labelsOf(p), mine = bound(p), ref = prRef(p), planRow = planRows.get(`${p.repo}#${p.number}`);
     const fixer = mine.some((x) => ['fix', 'ci-heal'].includes(x.binding.role)), reviewer = mine.some((x) => x.binding.role === 'review');
     const updated = toMs(p.updatedAt);
     // Dispatch handlers exist only when the owed table says one can act (a refusal is "no handler").
     const dispatchRemedy = planRow?.owedAction?.startsWith('dispatch-') && planRow.dispatchable ? 'auto' : 'no-handler';
-    if (ls.includes('ci:failed') && !fixer) add('ci-failed-no-fixer', ref, 'CI failed (ci:failed label) and no fixer is running', updated);
-    if ((p.mergeStateStatus === 'DIRTY' || p.mergeable === 'CONFLICTING') && !fixer) add('conflict-no-fix-in-flight', ref, `merge conflict (${p.mergeStateStatus ?? 'CONFLICTING'}) and no fix is running`, updated);
+    if (ls.includes('ci:failed') && !fixer) add('ci-failed-no-fixer', ref, 'CI failed (ci:failed label) and no fixer is running', updated, dispatchRemedy);
+    if ((p.mergeStateStatus === 'DIRTY' || p.mergeable === 'CONFLICTING') && !fixer) add('conflict-no-fix-in-flight', ref, `merge conflict (${p.mergeStateStatus ?? 'CONFLICTING'}) and no fix is running`, updated, dispatchRemedy);
     if (ls.includes('review:changes') && !fixer) add('changes-requested-no-fixer', ref, 'changes requested (review:changes) and no fixer is running', updated, dispatchRemedy);
     if (ls.includes('review:pending') && !reviewer) add('review-pending-no-reviewer', ref, 'waiting for a review (review:pending) and no reviewer is running', toMs(p.createdAt), dispatchRemedy);
     const tagFixing = ls.some((l) => ['review-status:fixing', 'review-status:fix-stalled'].includes(l)), tagReviewing = ls.some((l) => ['review-status:reviewing', 'review-status:review-stalled'].includes(l));
@@ -284,8 +312,12 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
   // sessions whose verdict holds a slot). Without a plan, fall back to the live dispatch-named sessions counted here.
   const workers = capacity ? capacity.live : live.filter((x) => x.binding).length;
   if (capacity && workers > capacity.cap) add('over-capacity', `${workers} workers`, `${workers} workers are running and the cap is ${capacity.cap}`, null);
-  const runnerLive = input.runner?.state === 'alive-and-idle', runnerKnown = input.runner && input.runner.state !== 'unknown';
-  if (runnerKnown && !runnerLive) add('runner-not-live', 'conveyor runner', input.runner.stalledReason ?? `runner state ${input.runner.state}`, null);
+  if (runnerKnown && !runnerLive) {
+    // How long it has been down: the newest sign of life the runner report carries (last tick or heartbeat). No source -> unknown.
+    const lastAlive = Math.max(...[input.runner.lastTick?.at, input.runner.runner?.heartbeatAt].map(toMs).filter(finite), -Infinity);
+    const reason = input.runner.stalledReason ?? `runner state ${input.runner.state}`;
+    add('runner-not-live', 'conveyor runner', finite(lastAlive) ? `${reason} Down since its last tick or heartbeat.` : `${reason} How long it has been down: unknown.`, finite(lastAlive) ? lastAlive : null, 'start: /conveyor');
+  }
   attention.sort((a, b) => RULE_ORDER.indexOf(a.rule) - RULE_ORDER.indexOf(b.rule) || (a.since ?? Infinity) - (b.since ?? Infinity) || a.item.localeCompare(b.item));
 
   // Done since the last /wip (or the fallback window).
@@ -307,7 +339,7 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
   const header = {
     time: stamp(now), load: finite(input.load) ? input.load : null, cores: input.cores ?? null,
     workers: capacity ? { live: workers, cap: capacity.cap } : null,
-    runner: input.runner ? (runnerLive ? 'live' : runnerKnown ? 'not live' : 'unknown') : 'unknown',
+    runner: runnerStatus,
     preToday: { count: pre.length, oldest: oldest ? { ref: prRef(oldest), ageMs: now - toMs(oldest.createdAt) } : null, known: input.prs != null },
     operatorQueue: needsYou == null ? 'unknown' : needsYou.length ? `${needsYou.length}` : 'none', checkedAt: clock(now),
   };
@@ -321,7 +353,7 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
 // ONE output for a phone and a desktop terminal: plain markdown, no tables, no HTML, no flag, no width detection. Every
 // fact is a short bullet, and a bullet longer than WRAP_AT columns wraps onto continuation lines indented under its text
 // (markdown reads those as the same paragraph). `## Needs you` is the operator queue's own text and is never wrapped.
-const remedyWords = (r) => (r === 'auto' ? 'auto' : 'no handler');
+const remedyWords = (r) => (r === 'no-handler' ? 'no handler' : r);
 /** Wrap width in columns; a single word longer than this stays whole on its own line. */
 export const WRAP_AT = 42;
 /** Word-wrap `text`: the first line starts with `lead`, continuation lines with `hang` (default: as wide as `lead`, blank). */

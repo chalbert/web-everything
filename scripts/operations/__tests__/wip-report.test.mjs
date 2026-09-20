@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   composeInput, buildReport, renderReport, derivePrState, parseNeedsYou, defaultBindSession, isLiveSession,
-  PR_STATES, ATTENTION_RULES, DONE_FALLBACK_MS,
+  PR_STATES, ATTENTION_RULES, REMEDIES, DONE_FALLBACK_MS, resolveRemedy,
 } from '../wip-report.mjs';
 
 const RAW = JSON.parse(readFileSync(resolve('scripts/operations/__fixtures__/wip-report/raw-2026-09-20.json'), 'utf8'));
@@ -15,7 +15,6 @@ const clone = () => structuredClone(RAW);
 /** Collapse every run of whitespace: a bullet that wrapped onto continuation lines reads as one line again. */
 const flat = (t) => t.replace(/\s+/g, ' ');
 const run = (raw, opts) => { const report = buildReport(composeInput(raw), opts); return { report, text: renderReport(report) }; };
-const REMEDIES = ['auto', 'no-handler'];
 const STATE_RE = /^(reviewing|waiting-for-reviewer|fixing|waiting-CI|waiting-merge|needs-operator|landed|unknown|blocked-on:.+)$/;
 
 /** The operator saw `review-148` blocked for two hours; the capture caught its transcript freshly touched, so age it. */
@@ -30,7 +29,7 @@ const rowsFor = (report, rule) => report.attention.filter((a) => a.rule === rule
 describe('the fixture state (2026-09-20)', () => {
   const { report, text } = run(withStalledReview());
 
-  it('flags #2349: ci:failed with no fixer, and no handler exists for it', () => {
+  it('flags #2349: ci:failed with no fixer, and no handler for it (the plan escalates it: not a dispatchable row)', () => {
     const rows = rowsFor(report, 'ci-failed-no-fixer');
     expect(rows.map((r) => r.item)).toEqual(['web-everything#2349']);
     expect(rows[0].remedy).toBe('no-handler');
@@ -283,7 +282,7 @@ describe('Needs you (operator-queue lines, verbatim)', () => {
 });
 
 describe('one layout for a phone and a desktop terminal (stacked bullets, no tables)', () => {
-  const remedy = (r) => (r === 'auto' ? 'auto' : 'no handler');
+  const remedy = (r) => (r === 'no-handler' ? 'no handler' : r);
   /** `#2344` and `#2349` under review, each with a live review session nested under its PR (a second tonight shape). */
   function withReviewingChildren() {
     const raw = { now: Date.parse('2026-09-20T17:07:00Z'), runner: { state: 'down', stalledReason: 'No singleton runner lease exists; no runner is registered.' },
@@ -381,5 +380,134 @@ describe('one layout for a phone and a desktop terminal (stacked bullets, no tab
     const raw = withReviewingChildren(); raw.operatorQueueText = `NEEDS YOU (x):\n${line}\nPENDING — y:\n(none)\n`;
     const { text } = run(raw);
     expect(text.split('\n## Needs you\n')[1]).toBe(`- ${line}`);
+  });
+});
+
+describe('a remedy reads auto only when a live executor can act (runner liveness)', () => {
+  const RUNNERS = {
+    live: { state: 'alive-and-idle' },
+    down: { state: 'down', stalledReason: 'No singleton runner lease exists; no runner is registered.' },
+    unknown: { state: 'unknown' },
+  };
+  const base = (runner) => ({ now: Date.parse('2026-09-20T15:00:00Z'), runner, operatorQueueText: 'NEEDS YOU (x):\n(none)\nPENDING — y:\n(none)\n', merged: [], completions: [], errors: [],
+    wipData: { agents: [], facts: {} }, landInputs: { prs: [], sessions: [], cap: 3, freeLanes: 9, load: 0.2, loadThreshold: 1.5 } });
+  const label = (...n) => n.map((name) => ({ name }));
+  const pr = (over) => ({ repo: 'we', slug: 'chalbert/web-everything', number: 7, title: 't', labels: [], baseRefName: 'main', createdAt: '2026-09-20T14:00:00Z', updatedAt: '2026-09-20T14:30:00Z', mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE', isDraft: false, ...over });
+  /** `plan: false` leaves out the fix planner's scope for the PR, so land-advance REFUSES the dispatch (a refused row has no handler). */
+  const withPr = (runner, over, { plan = true } = {}) => {
+    const raw = base(runner); raw.landInputs.prs = [pr(over)];
+    if (plan) raw.landInputs.fixPlans = { 'we#7': { planned: { attributionKind: 'PR', attributionNum: '7', itemNum: null, pr: 7, laneRef: 'lane/t', scope: ['we:scripts/x.mjs'], scopeSource: 'pr-diff', isConflict: false, body: 'b' } } };
+    return raw;
+  };
+  /** One PR that trips each `auto`-based rule by itself. */
+  const PR_RULES = {
+    'ci-failed-no-fixer': { labels: label('ci:failed') },
+    'conflict-no-fix-in-flight': { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING', labels: label('review:accepted') },
+    'changes-requested-no-fixer': { labels: label('review:changes') },
+    'review-pending-no-reviewer': { labels: label('review:pending', 'review-status:reviewing') },
+  };
+  const remedyOf = (raw, rule) => { const rows = rowsFor(buildReport(composeInput(raw)), rule); expect(rows.length).toBeGreaterThan(0); return rows[0].remedy; };
+
+  for (const [rule, over] of Object.entries(PR_RULES)) {
+    it(`${rule}: auto with a live runner, auto (runner down) when it is down, auto (runner unknown) when unreadable`, () => {
+      expect(remedyOf(withPr(RUNNERS.live, over), rule)).toBe('auto');
+      expect(remedyOf(withPr(RUNNERS.down, over), rule)).toBe('auto (runner down)');
+      expect(remedyOf(withPr(RUNNERS.unknown, over), rule)).toBe('auto (runner unknown)');
+    });
+  }
+  it('stale-tag rides the runner tick: auto only while the runner is live', () => {
+    const over = { labels: label('review:pending', 'review-status:fixing') };
+    expect(remedyOf(withPr(RUNNERS.live, over), 'stale-tag')).toBe('auto');
+    expect(remedyOf(withPr(RUNNERS.down, over), 'stale-tag')).toBe('auto (runner down)');
+    expect(remedyOf(withPr(RUNNERS.unknown, over), 'stale-tag')).toBe('auto (runner unknown)');
+  });
+  it('a dispatch the plan refuses (no fix scope) is `no-handler` even with a live runner', () => {
+    for (const rule of Object.keys(PR_RULES).filter((r) => r !== 'review-pending-no-reviewer')) {
+      expect(remedyOf(withPr(RUNNERS.live, PR_RULES[rule], { plan: false }), rule)).toBe('no-handler');
+    }
+  });
+  it('a draft PR is not dispatchable: ci-failed and conflict stay `no-handler` whatever the runner does', () => {
+    for (const runner of Object.values(RUNNERS)) {
+      expect(remedyOf(withPr(runner, { isDraft: true, labels: label('ci:failed') }), 'ci-failed-no-fixer')).toBe('no-handler');
+      expect(remedyOf(withPr(runner, { isDraft: true, mergeStateStatus: 'DIRTY' }), 'conflict-no-fix-in-flight')).toBe('no-handler');
+    }
+  });
+  it('a ci-failed / conflicting PR the plan escalates (not a dispatch row) stays `no-handler` (fixture #2349)', () => {
+    const raw = withStalledReview(); raw.runner = RUNNERS.live;
+    expect(rowsFor(buildReport(composeInput(raw)), 'ci-failed-no-fixer')).toMatchObject([{ item: 'web-everything#2349', remedy: 'no-handler' }]);
+  });
+  it('a finished-but-unreaped group reads `auto` with a live runner and names the foreground command otherwise', () => {
+    const at = (runner) => { const raw = withStalledReview(); raw.runner = runner; return remedyOf(raw, 'session-finished-unreaped'); };
+    expect(at(RUNNERS.live)).toBe('auto');
+    expect(at(RUNNERS.down)).toBe('run: session-reaper');
+    expect(at(RUNNERS.unknown)).toBe('run: session-reaper');
+  });
+  it('rows that were never auto do not change with the runner', () => {
+    for (const runner of Object.values(RUNNERS)) {
+      const raw = withStalledReview(); raw.runner = runner;
+      const report = buildReport(composeInput(raw));
+      expect(rowsFor(report, 'pre-today-pr-open')[0].remedy).toBe('no-handler');
+      expect(rowsFor(report, 'session-stalled')[0].remedy).toBe('no-handler');
+    }
+  });
+  it('the down runner row names the start command', () => {
+    const [row] = rowsFor(buildReport(composeInput(base(RUNNERS.down))), 'runner-not-live');
+    expect(row.remedy).toBe('start: /conveyor');
+    expect(rowsFor(buildReport(composeInput(base(RUNNERS.live))), 'runner-not-live')).toHaveLength(0);
+    expect(rowsFor(buildReport(composeInput(base(RUNNERS.unknown))), 'runner-not-live')).toHaveLength(0);
+  });
+  it('the down runner row carries how long it has been down from the last tick or heartbeat, else says unknown', () => {
+    const now = Date.parse('2026-09-20T15:00:00Z');
+    const rowFor = (runner) => { const raw = base(runner); const report = buildReport(composeInput(raw)); return { row: rowsFor(report, 'runner-not-live')[0], text: renderReport(report) }; };
+    const tick = rowFor({ ...RUNNERS.down, lastTick: { at: '2026-09-19T23:00:00Z' } });
+    expect(tick.row.since).toBe(Date.parse('2026-09-19T23:00:00Z'));
+    expect(tick.row.what).toContain('Down since its last tick or heartbeat.');
+    expect(flat(tick.text)).toMatch(/since 09-19 19:00 \(16h 0m\)/);
+    expect(flat(tick.text)).toContain('remedy: start: /conveyor');
+    // the newer of the last tick and the heartbeat is the start
+    const both = rowFor({ state: 'dead', runner: { heartbeatAt: '2026-09-20T13:00:00Z' }, lastTick: { at: '2026-09-20T12:00:00Z' } });
+    expect(both.row.since).toBe(Date.parse('2026-09-20T13:00:00Z'));
+    expect(now - both.row.since).toBe(2 * 3600000);
+    // no source: unknown, never invented
+    const none = rowFor({ ...RUNNERS.down, lastTick: { at: null } });
+    expect(none.row.since).toBeNull();
+    expect(none.row.what).toContain('How long it has been down: unknown.');
+    expect(flat(none.text)).toContain('since unknown');
+    const noReader = rowFor(RUNNERS.down);
+    expect(noReader.row.since).toBeNull();
+  });
+  it('the rendered text shows the runner-aware remedy, never a bare `auto` while the runner is down', () => {
+    const raw = withPr(RUNNERS.down, PR_RULES['conflict-no-fix-in-flight']);
+    const text = flat(renderReport(buildReport(composeInput(raw))));
+    expect(text).toContain('remedy: auto (runner down)');
+    expect(text).not.toMatch(/remedy: auto(?! \()/);
+    const live = flat(renderReport(buildReport(composeInput(withPr(RUNNERS.live, PR_RULES['conflict-no-fix-in-flight'])))));
+    expect(live).toMatch(/remedy: auto(?! \()/);
+  });
+  it('keeps the remedy vocabulary closed: every value is pinned, phone-short, and no row ever leaves it', () => {
+    expect(REMEDIES).toEqual(['auto', 'auto (runner down)', 'auto (runner unknown)', 'run: session-reaper', 'start: /conveyor', 'no-handler']);
+    expect(REMEDIES.filter((r) => r.length > 24)).toEqual([]);
+    for (const a of Object.values(ATTENTION_RULES)) expect(REMEDIES).toContain(a.remedy);
+    for (const runner of Object.values(RUNNERS)) {
+      const seen = [withStalledReview(), ...Object.values(PR_RULES).map((over) => withPr(runner, over))].flatMap((raw) => buildReport(composeInput({ ...raw, runner })).attention);
+      expect(seen.length).toBeGreaterThan(10);
+      for (const a of seen) expect(REMEDIES).toContain(a.remedy);
+    }
+  });
+  it('resolveRemedy: only an `auto` base is changed, and only while the runner is not live', () => {
+    expect(resolveRemedy('stale-tag', 'auto', 'live')).toBe('auto');
+    expect(resolveRemedy('stale-tag', 'auto', 'not live')).toBe('auto (runner down)');
+    expect(resolveRemedy('stale-tag', 'auto', 'unknown')).toBe('auto (runner unknown)');
+    expect(resolveRemedy('session-finished-unreaped', 'auto', 'not live')).toBe('run: session-reaper');
+    for (const runner of ['live', 'not live', 'unknown']) {
+      expect(resolveRemedy('over-capacity', 'no-handler', runner)).toBe('no-handler');
+      expect(resolveRemedy('runner-not-live', 'start: /conveyor', runner)).toBe('start: /conveyor');
+    }
+  });
+  it('is deterministic: identical input gives byte-identical output for each runner state', () => {
+    for (const runner of Object.values(RUNNERS)) {
+      const raw = withStalledReview(); raw.runner = runner;
+      expect(renderReport(buildReport(composeInput(structuredClone(raw))))).toBe(renderReport(buildReport(composeInput(structuredClone(raw)))));
+    }
   });
 });
