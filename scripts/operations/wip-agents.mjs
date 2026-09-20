@@ -3,7 +3,8 @@
  * @description Process-backed session liveness and drain health, with evidence for delegation.
  * This declaration is read-only: both steps compute, with no sinks or ambient IO.
  * Missing evidence remains unknown. JSON retains every session; the table groups
- * dead records and hides done sessions only when their process is not alive.
+ * dead records and never lists done sessions as rows: those whose process is still alive
+ * (the reaper has not stopped them yet) become one trailing "Finished, not yet reaped" line.
  * Dispatch facts outrank transcript observations, while absence of delegation is
  * asserted only after a complete scan. The shell owns clocks, files and processes.
  */
@@ -148,12 +149,12 @@ export function renderTable(rows) {
   const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
   const lines = ['| Item | Detail | Supervisor | Executor |', '| --- | --- | --- | --- |'];
   const add = (cells) => lines.push('| ' + cells.map(cell).join(' | ') + ' |');
-  const order = ['live-active', 'waiting', 'live-idle', 'done'];
-  const live = rows.filter((r) => r.liveness !== 'dead-record' && (r.liveness !== 'done' || r.pidAlive === true))
+  const order = ['live-active', 'waiting', 'live-idle'];
+  const live = rows.filter((r) => r.liveness !== 'dead-record' && r.liveness !== 'done')
     .sort((a, b) => order.indexOf(a.liveness) - order.indexOf(b.liveness) || (b.ageMs ?? Infinity) - (a.ageMs ?? Infinity));
   for (const r of live) add([
     `\`${r.name}\` (${r.id}) · ${r.target ?? r.kind}`,
-    `${r.liveness === 'waiting' ? `⚠ waiting on: ${r.waitingFor} · ` : ''}${r.liveness === 'done' ? 'done (process still alive)' : r.liveness} · state ${r.state} · ${age(r.ageMs)} · transcript ${r.transcriptAgeMs == null ? 'unknown' : `${age(r.transcriptAgeMs)} ago`}`,
+    `${r.liveness === 'waiting' ? `⚠ waiting on: ${r.waitingFor} · ` : ''}${r.liveness} · state ${r.state} · ${age(r.ageMs)} · transcript ${r.transcriptAgeMs == null ? 'unknown' : `${age(r.transcriptAgeMs)} ago`}`,
     r.supervisor.model,
     r.executor.providers.length ? r.executor.providers.map((p) => `${p.provider} (${p.model || 'unknown'}${p.cliVersion ? `, cli ${p.cliVersion}` : ''})`).join(' + ')
       : r.executor.source === 'unknown' ? 'unknown' : 'none',
@@ -170,6 +171,8 @@ export function renderTable(rows) {
     g.names.slice(0, 6).map((n) => `\`${n}\``).join(', ') + (g.names.length > 6 ? ` +${g.names.length - 6} more (see --json)` : ''), '—', '—',
   ]);
   if (!rows.some((r) => r.liveness !== 'done')) add(['—', 'No live agents.', '—', '—']);
+  const unreaped = rows.filter((r) => r.liveness === 'done' && r.pidAlive === true);
+  if (unreaped.length) lines.push(`Finished, not yet reaped: ${unreaped.length} (${unreaped.slice(0, 6).map((r) => `\`${r.name}\``).join(', ')}${unreaped.length > 6 ? ` +${unreaped.length - 6} more` : ''})`);
   const hidden = rows.filter((r) => r.liveness === 'done' && r.pidAlive !== true).length;
   if (hidden) lines.push(`${hidden} done (not shown)`);
   return lines.join('\n');

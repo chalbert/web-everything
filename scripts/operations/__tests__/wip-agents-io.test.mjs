@@ -142,7 +142,8 @@ it('isolates process, transcript and mtime failures, including done sessions and
   expect(rows.find((r) => r.id === '0')).toMatchObject({ pidAlive: false, transcriptAgeMs: null });
   expect(rows.find((r) => r.id === '1')).toMatchObject({ transcriptAgeMs: 0, executor: { source: 'unknown' }, supervisor: { model: 'unknown' } });
   expect(rows.find((r) => r.id === 'missing')).toMatchObject({ liveness: 'dead-record', pid: null, pidAlive: null, transcriptAgeMs: null, executor: { source: 'unknown' }, supervisor: { model: 'unknown' } });
-  expect(renderTable(rows)).toContain('done (process still alive)');
+  expect(renderTable(rows)).not.toContain('done (process still alive)');
+  expect(renderTable(rows)).toContain('Finished, not yet reaped: 1 (`unknown`)');
   expect(data.drain).toEqual({ passes: null, alerts: [] });
 });
 it('default process probe accepts EPERM and rejects dead or invalid pids', () => {
@@ -176,4 +177,18 @@ it('CLI JSON retains all dead records while stdout groups them and appends drain
   expect(output).toContain('dead-record (was working) ×30');
   expect(output).toContain('+24 more (see --json)');
   expect(output).toContain('\n\nWork in flight (not agents):\ndrain: unknown (history.jsonl unreadable)');
+});
+
+it('CLI table prints two rows and one finished line for the not-reaped fixture, while --json keeps all five sessions', async () => {
+  const data = JSON.parse(readFileSync(resolve('scripts/operations/__fixtures__/wip-agents/finished-not-reaped.json'), 'utf8'));
+  const readAgents = async () => ({ ...data, drain: { passes: [], alerts: [] } });
+  let output = '';
+  expect(await main({ argv: [], readAgents, stdout: (s) => { output = s; } })).toBe(0);
+  expect(output.split('\n').filter((l) => l.startsWith('| `'))).toHaveLength(2);
+  expect(output.match(/^Finished, not yet reaped: .*$/gm)).toEqual(['Finished, not yet reaped: 3 (`conveyor-11`, `conveyor-12`, `review-13`)']);
+  expect(output).not.toContain('process still alive');
+  expect(await main({ argv: ['--json'], readAgents, stdout: (s) => { output = s; } })).toBe(0);
+  const json = JSON.parse(output);
+  expect(json.rows).toHaveLength(5);
+  expect(json.rows.filter((r) => r.liveness === 'done')).toHaveLength(3);
 });

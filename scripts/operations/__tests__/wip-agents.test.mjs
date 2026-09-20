@@ -1,5 +1,6 @@
 /** Mechanical facts: no judgment filters, no inferred default for Gemini. */
 import { it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { classifyAgents, classifyLiveness, ACTIVE_WINDOW_MS, classifyDrain, renderDrain, renderTable, extractDelegations, lastAssistantModel, pickSupervisor, pickExecutor, wipAgentsOperation } from '../wip-agents.mjs';
 import { sessionTarget } from '../../conveyor/session-reaper.mjs';
 import { CODEX_MODEL } from '../../codex-direct-task.mjs';
@@ -89,7 +90,7 @@ it('collapses dead records by state and age, retaining all names in rows', () =>
   for (const line of table.split('\n').filter((l) => l.includes('dead-record'))) expect(line.split('|')[2]).not.toMatch(/\bworking\b|\bblocked\b/);
   expect(renderTable(classifyAgents({ agents: [{}], now }))).toContain('dead-record ×1 · age unknown');
 });
-it('orders live groups by liveness then oldest start and keeps a done live process visible', () => {
+it('orders live groups by liveness then oldest start and reports a done live process only in the trailing line', () => {
   const agents = ['idle', 'wait', 'active-new', 'active-old', 'done-live', 'done-dead'].map((name, i) => ({ name, sessionId: name, pid: i + 1, startedAt: name === 'active-old' ? 0 : 1, state: name.startsWith('done') ? 'done' : 'working', waitingFor: name === 'wait' ? 'human' : null }));
   const facts = Object.fromEntries(agents.map((a) => [a.sessionId, { pidAlive: a.name !== 'done-dead', transcriptMtimeMs: a.name.startsWith('active') ? 1000 : null }]));
   const rows = classifyAgents({ agents, facts, now: 1000 }), table = renderTable(rows);
@@ -97,7 +98,9 @@ it('orders live groups by liveness then oldest start and keeps a done live proce
   expect(table.indexOf('`active-old`')).toBeLessThan(table.indexOf('`active-new`'));
   expect(table.indexOf('`active-new`')).toBeLessThan(table.indexOf('`wait`'));
   expect(table.indexOf('`wait`')).toBeLessThan(table.indexOf('`idle`'));
-  expect(table).toContain('done (process still alive)');
+  expect(table).not.toContain('done (process still alive)');
+  expect(table).not.toContain('`done-live` (');
+  expect(table).toContain('\nFinished, not yet reaped: 1 (`done-live`)\n');
   expect(table).toMatch(/1 done \(not shown\)$/);
   expect(rows.find((r) => r.name === 'active-old')).toMatchObject({ pid: 4, pidAlive: true, transcriptAgeMs: 0, wasState: 'working' });
 });
@@ -136,4 +139,31 @@ it('uses each dead-record age band at its boundary and clamps future transcript 
   const rows = classifyAgents({ agents: ages.map((ms, i) => ({ sessionId: `s${i}`, name: `n${i}`, startedAt: ms == null ? undefined : now - ms })), now, facts: { s0: { transcriptMtimeMs: now + 1 } } });
   for (const b of ['<1h', '1h-1d', '1d-7d', '7d+', 'unknown']) expect(renderTable(rows)).toContain(`age ${b}`);
   expect(rows.find((r) => r.sessionId === 's0').transcriptAgeMs).toBe(0);
+});
+
+const fixture = JSON.parse(readFileSync('scripts/operations/__fixtures__/wip-agents/finished-not-reaped.json', 'utf8'));
+it('lists finished sessions with a live process as one trailing line, never as rows', () => {
+  const rows = classifyAgents(fixture);
+  expect(rows).toHaveLength(5);
+  const lines = renderTable(rows).split('\n');
+  expect(lines).toHaveLength(5);
+  expect(lines.filter((l) => l.startsWith('| `'))).toHaveLength(2);
+  expect(lines.at(-1)).toBe('Finished, not yet reaped: 3 (`conveyor-11`, `conveyor-12`, `review-13`)');
+  expect(lines.join('\n')).not.toMatch(/done \(process still alive\)|\bdone\b.*state done/);
+});
+it('caps the finished-not-reaped names at six and counts the rest', () => {
+  const agents = Array.from({ length: 9 }, (_, i) => ({ sessionId: `d${i}`, name: `n${i}`, state: 'done', pid: i + 1, startedAt: i }));
+  const facts = Object.fromEntries(agents.map((a) => [a.sessionId, { pidAlive: true }]));
+  const table = renderTable(classifyAgents({ agents, facts, now: 0 }));
+  expect(table).toContain('| — | No live agents. | — | — |');
+  expect(table.split('\n').at(-1)).toBe('Finished, not yet reaped: 9 (`n0`, `n1`, `n2`, `n3`, `n4`, `n5` +3 more)');
+});
+it('omits the finished line when no done session has a live process', () => {
+  const { agents, facts, now } = fixture;
+  const live = { agents: agents.filter((a) => a.state !== 'done'), facts, now };
+  expect(renderTable(classifyAgents(live))).not.toContain('Finished, not yet reaped');
+  const dead = { agents: [...live.agents, { sessionId: 'gone', state: 'done', pid: 9 }], facts: { ...facts, gone: { pidAlive: false } }, now };
+  const table = renderTable(classifyAgents(dead));
+  expect(table).not.toContain('Finished, not yet reaped');
+  expect(table).toMatch(/1 done \(not shown\)$/);
 });

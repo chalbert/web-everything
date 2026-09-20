@@ -1,0 +1,17 @@
+{
+  "now": 1000000,
+  "agents": [
+    { "id": "d1", "sessionId": "done-1", "name": "conveyor-11", "kind": "background", "state": "done", "startedAt": 1, "pid": 501 },
+    { "id": "d2", "sessionId": "done-2", "name": "conveyor-12", "kind": "background", "state": "done", "startedAt": 2, "pid": 502 },
+    { "id": "d3", "sessionId": "done-3", "name": "review-13", "kind": "background", "state": "done", "startedAt": 3, "pid": 503 },
+    { "id": "a1", "sessionId": "active-1", "name": "conveyor-21", "kind": "background", "state": "working", "startedAt": 4, "pid": 601 },
+    { "id": "a2", "sessionId": "active-2", "name": "fix-22", "kind": "background", "state": "working", "startedAt": 5, "pid": 602 }
+  ],
+  "facts": {
+    "done-1": { "pidAlive": true },
+    "done-2": { "pidAlive": true },
+    "done-3": { "pidAlive": true },
+    "active-1": { "pidAlive": true, "transcriptMtimeMs": 999000 },
+    "active-2": { "pidAlive": true, "transcriptMtimeMs": 999000 }
+  }
+}
