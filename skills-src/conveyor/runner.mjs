@@ -316,6 +316,9 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
       // or accumulated through any path other than a normal release. See that file's own header for the full
       // 2026-09-07 "0 of 48 lanes acquirable" incident this pass exists to prevent from recurring.
       runQuiet('conveyor/lane-pool-health-watch.mjs');
+      // Mechanical, no model: the only push to the operator after the advisory sweep.
+      // Only NEEDS YOU items notify; operator-queue owns readiness.
+      runQuiet('operations/operator-notify.mjs', ['--once']);
       // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
       // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
       // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
