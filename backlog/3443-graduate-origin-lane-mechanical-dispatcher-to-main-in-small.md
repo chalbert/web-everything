@@ -228,7 +228,7 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
     that imports from it) — `we:scripts/conveyor/driver-watchdog.mjs` is still not on `main`; the chain has to
     graduate as its own increment, in order.
   - The `we:skills-src/conveyor/runner.mjs` reconcile-pass wiring (#3486) and everything layered on it — still
-    the highest-scrutiny piece; both former hold-backs (#3437 resolved, `supervisor.mjs` on `main` via #3483) are
+    the highest-scrutiny piece; both former hold-backs (#3437 resolved, `we:supervisor.mjs` on `main` via #3483) are
     clear, but it needs its own single-tick-validated PR.
   - The `test` heavy-admission / telemetry / usage-report / provider-registry / Antigravity commits — a large
     layered body of #3383 delivery machinery, not standalone; not sliced this pass.
@@ -256,30 +256,30 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
   and this session's commit `session-reaper: resolve repo-less PR names across the constellation; name the no-handler gap`.
   `42f96a8f5`/`fe04eca38` still list as ahead but landed as #2337 (test-only) and are NOT part of this slice.
 
-  **Not a cherry-pick.** `main`'s `session-reaper.mjs` moved on: its `sessionTarget` uses `parseSessionSlug`
-  (`scripts/conveyor/session-slug.mjs`, repo-marker grammar `review-pa-148`) and its `groundTruthForPr` takes `repo`
+  **Not a cherry-pick.** `main`'s `we:session-reaper.mjs` moved on: its `sessionTarget` uses `parseSessionSlug`
+  (`we:scripts/conveyor/session-slug.mjs`, repo-marker grammar `review-pa-148`) and its `groundTruthForPr` takes `repo`
   (default `we`). The branch has neither the grammar file nor the `repo` field on a target, so the slice is a hand-port
-  onto `main`'s reaper. Two things must be re-derived there: `session-verdicts.mjs#dispatchGrammar` duplicates the name
+  onto `main`'s reaper. Two things must be re-derived there: `we:session-verdicts.mjs#dispatchGrammar` duplicates the name
   grammar and must call `parseSessionSlug` instead; and the repo-less resolution (below) needs the "unmarked" case
   told apart from "explicitly `we`", which `parseSessionSlug` does not do today (both give `repo: 'we'`).
 
   **What `main` lacks for the slice** (import closure checked file by file against `origin/main`):
-  1. `scripts/conveyor/driver-watchdog.mjs` (890 lines) + `driver-mode.mjs` (145). The reaper imports
+  1. `we:scripts/conveyor/driver-watchdog.mjs` (890 lines) + `we:driver-mode.mjs` (145). The reaper imports
      `resolvePidAlive`/`scanPsOutput`/`defaultIsPidAlive`. Self-contained: every other import (`queue-store`,
      `resolve-runner-checkout`, `runner-lock`, `branch-sync`'s five named exports) is already on `main`. Commits
      `5fbc2dd53`, `39b88e26f`, `6bc909866`, `9e6f02578`. This is the "watchdog chain" earlier increments skipped; it can
      graduate first, alone, and also unblocks `a035ab9e` (lease-reaper liveness read).
-  2. `scripts/operations/land-advance-tools.mjs` (26 lines, no imports) for `session-verdicts.mjs`.
-  3. `scripts/conveyor/session-verdicts.mjs` + `session-verdicts-io.mjs` + their two test files.
-  4. **The real blocker: `readFollowUps`.** The reaper imports it from `scripts/operations/land-advance-io.mjs`, which is
+  2. `we:scripts/operations/land-advance-tools.mjs` (26 lines, no imports) for `we:session-verdicts.mjs`.
+  3. `we:scripts/conveyor/session-verdicts.mjs` + `we:session-verdicts-io.mjs` + their two test files.
+  4. **The real blocker: `readFollowUps`.** The reaper imports it from `we:scripts/operations/land-advance-io.mjs`, which is
      not on `main` and imports 18 modules (the whole land-advance machinery). The reaper's full static import closure is 218
      files; 110 are missing from `main` (51) or differ from it (59). The function itself is 5 lines over `createFileRunStore` + `DISPATCH_EFFECT`, both on `main`.
-  Tests to carry: `session-reaper.test.mjs`, `session-reaper-cli.test.mjs`, `session-verdicts.test.mjs`,
-  `session-verdicts-io.test.mjs`, the driver-watchdog tests, plus `scripts/conveyor/__tests__` and
+  Tests to carry: `we:session-reaper.test.mjs`, `we:session-reaper-cli.test.mjs`, `we:session-verdicts.test.mjs`,
+  `we:session-verdicts-io.test.mjs`, the driver-watchdog tests, plus `scripts/conveyor/__tests__` and
   `scripts/operations/__tests__` whole.
 
   **Needs an operator decision before anyone builds the slice (graduation tooling has no card for it yet):**
-  - *Fork A, `readFollowUps`:* (a) extract it to a small `follow-up-ledger.mjs` on the branch first, leaving
+  - *Fork A, `readFollowUps`:* (a) extract it to a small `we:follow-up-ledger.mjs` on the branch first, leaving
     `land-advance-io` re-exporting it, then graduate that leaf (recommended: keeps the slice small and the reaper
     independent of land-advance); (b) graduate land-advance first (large, and it is the "named-busy" runner-adjacent
     area). No slice card is filed: filing goes through `file-item` and lands on `main` as a PR, which this task must not open.
