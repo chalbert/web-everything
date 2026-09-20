@@ -102,6 +102,8 @@
  * `kind !== 'background'` guard above, but "should never happen" is not the same as "cannot happen".
  */
 
+import { parseSessionSlug } from './session-slug.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -155,15 +157,13 @@ export function classifySessionReap(session) {
  * name identify", and for `fix`/`ci-heal` the number is a PR, not an item; conflating the two would ask the
  * wrong ground-truth question (a PR number happening to also be a valid item number, or vice versa).
  * @param {string|null|undefined} name
- * @returns {{kind:'item', id:string}|{kind:'pr', id:string}|null}
+ * @returns {{kind:'item', id:string}|{kind:'pr', id:string, repo:string}|null}
  */
 export function sessionTarget(name) {
-  const s = String(name ?? '');
-  let m = s.match(/^(?:conveyor|prepare-decision|prepare)-(\d+)[a-z]?$/i);
-  if (m) return { kind: 'item', id: m[1] };
-  m = s.match(/^(?:review|fix|ci-heal)-(\d+)[a-z]?$/i);
-  if (m) return { kind: 'pr', id: m[1] };
-  return null;
+  const parsed = parseSessionSlug(name);
+  if (!parsed) return null;
+  return parsed.itemKind ? { kind: 'item', id: parsed.id }
+    : { kind: 'pr', id: parsed.id, repo: parsed.repo };
 }
 
 /**
@@ -255,14 +255,16 @@ export function groundTruthForItem(id, { backlogDir = DEFAULT_BACKLOG_DIR, readd
  * failure (no `gh`, PR not found, timeout) answers `null` (unknown) rather than throwing — a best-effort
  * check, matching every other `gh`-shelling function in this codebase's own fail-soft convention.
  * @param {string|number} pr
- * @param {{exec?:Function, env?:object}} [io]
+ * @param {{exec?:Function, env?:object, repo?:string}} [io]
  * @returns {{resolved:boolean, evidence?:string}|null}
  */
-export function groundTruthForPr(pr, { exec = execFileSync, env = process.env } = {}) {
+export function groundTruthForPr(pr, { exec = execFileSync, env = process.env, repo = 'we' } = {}) {
+  const slug = Object.hasOwn(CONSTELLATION_REPOS, repo) ? CONSTELLATION_REPOS[repo].slug : null;
+  if (!slug) return null;
   try {
     // Reuses `dispatch-lane-io.mjs`'s own `prListTimeoutMs` bound rather than inventing a second knob for the
     // same class of cost (one bounded `gh pr view` network call) — see the file header's "COST DISCIPLINE".
-    const out = exec('gh', ['pr', 'view', String(pr), '--json', 'state,mergedAt'], {
+    const out = exec('gh', ['pr', 'view', String(pr), '--repo', slug, '--json', 'state,mergedAt'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 1024 * 1024,
@@ -296,7 +298,8 @@ export function makeGroundTruthResolver({
   const cache = new Map();
   let prViewCalls = 0;
   return function groundTruthFor(target) {
-    const key = `${target.kind}:${target.id}`;
+    const repo = target.repo === undefined ? 'we' : target.repo;
+    const key = target.kind === 'pr' ? `pr:${repo}:${target.id}` : `${target.kind}:${target.id}`;
     if (cache.has(key)) return cache.get(key);
     let result;
     if (target.kind === 'item') {
@@ -306,7 +309,7 @@ export function makeGroundTruthResolver({
         result = null; // bounded — left unresolved this tick rather than an unbounded `gh` burst; retried next tick
       } else {
         prViewCalls++;
-        result = groundTruthForPr(target.id, { exec, env });
+        result = groundTruthForPr(target.id, { exec, env, repo: target.repo });
       }
     } else {
       result = null;

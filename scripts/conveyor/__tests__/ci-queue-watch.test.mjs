@@ -411,3 +411,23 @@ describe('ci-queue-watch.mjs CLI — real subprocess, fake gh, real sidecar file
     expect(out.status).toBe('watch'); // any wait > 0 trips a 0s watch line; a `> 0` bug would fall back to the 60s default and read `ok`
   });
 });
+
+it('keeps separate per-repo histories and preserves the WE filename', async () => {
+  const { resolveCiQueueHistoryPath } = await import('../ci-queue-watch.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'ci-repos-'));
+  const previous = process.env.CONVEYOR_CI_QUEUE_FILE;
+  try {
+    process.env.CONVEYOR_CI_QUEUE_FILE = join(dir, 'history.json');
+    for (const [repo, suffix, count] of [['chalbert/web-everything', '', 1], ['chalbert/frontierui', '-frontierui', 2], ['chalbert/plateau-app', '-plateau-app', 3]]) {
+      for (let i = 0; i < count; i++) sweepCiQueue({ repo, listRuns: () => [], now: () => repo });
+      const path = resolveCiQueueHistoryPath(repo);
+      expect(path).toBe(join(dir, `history${suffix}.json`));
+      expect(readHistory(path)).toHaveLength(count);
+    }
+    expect(readHistory(resolveCiQueueHistoryPath())).toHaveLength(1);
+  } finally {
+    if (previous === undefined) delete process.env.CONVEYOR_CI_QUEUE_FILE;
+    else process.env.CONVEYOR_CI_QUEUE_FILE = previous;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

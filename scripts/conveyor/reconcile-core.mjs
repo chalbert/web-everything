@@ -110,14 +110,7 @@ import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
-// `sessionSlugFor` (not a NEW pure slug file, unlike `review-session-slug.mjs`) — `we:scripts/operations/
-// dispatch-lane.mjs` has NO `node:` import of its own (its whole static graph is `./registry.mjs` +
-// `./step-kinds.mjs`, per that file's own header), so it is exactly as safe for this PURE module to import as
-// `review-session-slug.mjs` already is. Reused rather than duplicated: `fix-<pr>` is ALREADY the session-slug
-// convention `dispatch-lane.mjs`'s own tick-core-driven fix dispatch fills `{{SESSION_SLUG}}` with (#3332), and
-// `we:scripts/conveyor/reconcile-fix-dispatch.mjs` (#3438) names its own spawned fix sessions with the same
-// function — a second definition of `fix-<pr>` here would be the exact drift risk `review-session-slug.mjs`'s
-// own file header was written to avoid for the review slug.
+// Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 
 /**
@@ -282,7 +275,7 @@ export function countFindings(comments) {
  * @param {Array<object>} agents
  * @returns {Array<{agent:object, cwd:string, sha:string}>}
  */
-export function bindAgents(pr, agents) {
+export function bindAgents(pr, agents, repo = 'we') {
   const sha = String(pr?.headRefOid ?? '');
   const list = Array.isArray(agents) ? agents : [];
   const bound = new Map();
@@ -300,7 +293,7 @@ export function bindAgents(pr, agents) {
     // #3438 — BOTH name-based slugs, unioned the same way path 1 and path 2 already are: a PR can legitimately
     // have a live review agent OR a live fix agent bound to it by name, and this pass must refuse dispatching
     // whichever kind is already running.
-    const slugs = [reviewSessionSlug(prNumber), sessionSlugFor(prNumber, 'fix')];
+    const slugs = [reviewSessionSlug(prNumber, repo), sessionSlugFor(prNumber, 'fix', null, '', repo)];
     for (const a of list) {
       if (a && slugs.includes(String(a.name ?? ''))) {
         bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
@@ -409,7 +402,7 @@ export function assessLiveness(bound) {
  *   `we:scripts/lib/jury-core.mjs` rather than re-declared here.
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
-export function planReconcile({ prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP } = {}) {
+export function planReconcile({ repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP } = {}) {
   const dispatch = [];
   const refusals = [];
   const notes = [];
@@ -446,7 +439,7 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
 
     // ── REFUSAL 4 — liveness, from a live process. The binding is derived and its evidence travels with the
     // refusal, because the derivation itself has been observed to be wrong (#3283).
-    const live = assessLiveness(bindAgents(pr, agents));
+    const live = assessLiveness(bindAgents(pr, agents, repo));
     if (live) {
       refuse(live.kind, {
         pid: live.pid, cwd: live.cwd, sha: live.sha, sessionId: live.sessionId, why: live.why,

@@ -1,0 +1,22 @@
+[
+  {
+    "file": "scripts/conveyor/status-artifact.mjs",
+    "reason": "The status board joins local WE backlog numbers and WE commit subjects to the WE lane plan; its PR links belong to that backlog."
+  },
+  {
+    "file": "scripts/operations/dispatch-lane-io.mjs",
+    "reason": "Build/fix dispatch observers read WE PRs by WE backlog item key and WE lane head refs (`gh pr list/view` in the WE checkout); build dispatch is item-keyed and WE-only by construction, and a non-WE fix/ci-heal is refused upstream as `unsupported-repo` before reaching this file."
+  },
+  {
+    "file": "scripts/lib/constellation-repos.mjs",
+    "reason": "This is the ONE authoritative table where constellation owner-qualified repository slugs are defined for all consumers."
+  },
+  {
+    "file": "scripts/lib/converge-daemon-schedulers.mjs",
+    "reason": "The systemd Documentation URL points to the daemon source hosted in WE; the scheduled target repository is separately supplied through cfg.repo."
+  },
+  {
+    "file": "scripts/lib/forge-land-provider.mjs",
+    "reason": "The `pr-land` argv builders run gh with `cwd` bound to the checkout being landed from, so gh infers the repo from that checkout's git remote (any repo, not a hard-coded one); adding `--repo` would break the byte-identical argv `pr-land.mjs` executed before this port."
+  }
+]

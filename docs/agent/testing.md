@@ -23,6 +23,16 @@ agreement, not proof that two reviews covered identical content, and it does not
 Tests redirect `WE_VERDICT_LEDGER_DIR` and `CONVEYOR_JURY_DIR` into temporary directories and drive the
 runner with a read-only `gh` fixture; a file in place of the ledger directory probes real append failure.
 
+## Constellation conveyor probes
+
+Inject `exec` and `fetchOpenPrs` into `makeCliMechanicalPasses` to inspect each repo's argv
+and snapshot lifetime without spawning workers. Review briefs select the checkout with
+`--repo` on the pool `acquire`; release stays `--all-pools --session=<slug>` (it sweeps every pool).
+The fix and review refusal writers preserve each other's actions in `unsupported-repo.json`.
+CI history keeps WE's filename and adds the constellation key for sibling repos, including
+when `CONVEYOR_CI_QUEUE_FILE` supplies the base path. Subprocess tests that use fake `gh`
+still acquire the throttle lock; set `LANE_POOL_ROOT` to a temporary directory in a sandbox.
+
 ## Runner activity report
 
 `node scripts/operations/run.mjs runner-activity --json` reports driver health in `verdict` using
@@ -420,3 +430,14 @@ local/remote branch tree, otherwise `unresolvable` (potentially dead, not proven
 unfetched). Dry-run returns the same diagnostics without changing numbering state. The fallback
 visits explicit reference syntax, preserving bare birth-hash prose and `resolutionNote` quotes;
 the older local-ledger blind-rewrite behavior is unchanged.
+
+### Multi-repo check contract
+
+`scripts/__tests__/multi-repo-checks.test.mjs` scans non-test JS/TS sources in
+`scripts/conveyor`, `scripts/operations`, `skills-src/conveyor`, and `scripts/lib`.
+The pure TypeScript-AST scanner ignores comments, checks repository scoping on gh
+calls, and rejects duplicated constellation slugs. Specific exceptions live in
+`scripts/lib/we-only-checks.json`; an exception with no remaining finding fails
+with “remove this entry”. This is a Vitest contract, not a standards-gate rule.
+The isolated parked-review workflow cannot import the shared table; its table is
+pinned to `CONSTELLATION_REPOS` by `scripts/lib/__tests__/review-core.test.mjs`.

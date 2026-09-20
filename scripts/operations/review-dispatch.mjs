@@ -111,9 +111,11 @@
  * shapes individually is the game this file was already losing.
  */
 
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -161,7 +163,7 @@ export function reviewBriefPath(root = REPO_ROOT) {
  *  `JUDGE_PROVIDER` (#xqa9ttq) is ALWAYS filled, even when nobody asked for anything but the default: see
  *  `dispatchReview`'s own `judgeProvider = 'claude'` default — never blank, so `fillReviewBrief`'s
  *  every-declared-placeholder-must-have-a-value refusal never fires for the ordinary, opt-out case. */
-export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
+export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO']);
 
 /** #xqa9ttq (PR #2115 review, CONFIRMED) - judge providers that are TOOL-FREE ONLY (#3581) and so can never serve review-pr's judge steps, every one of which is tool-bearing (REVIEW_JUROR_TOOLS, by ratified design). */
 export const TOOL_FREE_ONLY_JUDGE_PROVIDERS = Object.freeze(['codex']);
@@ -341,22 +343,24 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {})
 }
 
 /**
- * SHAPE one dispatch request. PURE — separated from the actual fill/spawn so a caller (and a test) can see
- * exactly what would be sent before anything is filled or spawned.
+ * Shape one dispatch request and verify the selected checkout before filling or spawning.
  *
  * @param {{pr: number|string, repo: string}} o
  * @returns {{pr: number, repo: string, sessionSlug: string}}
  */
-export function planReviewDispatch({ pr, repo } = {}) {
+export function planReviewDispatch({ pr, repo, checkoutExists = existsSync, home = homedir() } = {}) {
   const prNum = Number(pr);
   if (!Number.isInteger(prNum) || prNum <= 0) {
     throw new Error(`review-dispatch: --pr must be a positive integer, got ${JSON.stringify(pr)}`);
   }
   const repoStr = String(repo ?? '').trim();
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repoStr)) {
-    throw new Error(`review-dispatch: --repo must be an \`owner/repo\` slug, got ${JSON.stringify(repo)}`);
+  const repoKey = repoKeyForSlug(repoStr);
+  if (repoKey === null) throw new Error(`review-dispatch: --repo ${repoStr} is not a constellation repo`);
+  const laneRepo = repoKey === 'we' ? '.' : resolve(CONSTELLATION_REPOS[repoKey].path.replace(/^\$HOME(?=\/|$)/, home));
+  if (repoKey !== 'we' && !checkoutExists(laneRepo)) {
+    throw new Error(`unsupported-repo: ${repoKey} checkout does not exist at ${laneRepo}`);
   }
-  return { pr: prNum, repo: repoStr, sessionSlug: reviewSessionSlug(prNum) };
+  return { pr: prNum, repo: CONSTELLATION_REPOS[repoKey].slug, repoKey, laneRepo, sessionSlug: reviewSessionSlug(prNum, repoKey) };
 }
 
 /**
@@ -394,7 +398,9 @@ export function dispatchReview({
   extraArgs = [],
   checkStaleness,
   judgeProvider = 'claude',
+  checkoutExists = existsSync, home = homedir(),
 } = {}) {
+  const planned = planReviewDispatch({ pr, repo, checkoutExists, home });
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
   // `checkStaleness` undefined here falls straight through to that function's own default — no need to
@@ -414,9 +420,8 @@ export function dispatchReview({
       + 'Opt in with REVIEW_PR_CODEX_ADVISORY=1 in the environment instead.',
     );
   }
-  const planned = planReviewDispatch({ pr, repo });
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
-    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
+    PR: planned.pr, REPO: planned.repo, LANE_REPO: planned.laneRepo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
   });
   const sessionId = String(mintSessionId());
   // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
@@ -443,7 +448,7 @@ export function dispatchReview({
   const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
   const agentId = parseBackgroundedId(stdout);
   return {
-    sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
+    sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, repoKey: planned.repoKey, prompt,
     unknownTokens, judgeProvider,
   };
 }

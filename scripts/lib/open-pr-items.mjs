@@ -12,6 +12,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 import { isAnnotationPr } from '../backlog-stranded-sweep.mjs'; // #3441 round 2 — reused (identical shape, not mirrored) to exclude a scope-authoring/prepare-decision PR from crediting a delivery
 
 /** Default gh runner — spawnSync (returns non-zero without throwing). */
@@ -260,14 +261,31 @@ export function extractItemNums(prs) {
 }
 
 /**
- * List OPEN PRs via `gh` and map them to the backlog item numbers they land. Fail-soft.
- * @param {{run?:typeof ghRun}} o
- * @returns {{nums:string[]}|{nums:string[],unavailable:true,reason:string}}
+ * List OPEN PRs in EVERY constellation repo via `gh` and map them to the backlog item numbers they land. An item
+ * whose implementation half is open in frontierui / plateau-app is just as in-flight as one open in WE (backlog
+ * item numbers are WE ids, and a couple's impl PR lives in the sibling repo), so a WE-only read would re-offer it.
+ * Fail-soft: the WE read failing → `unavailable` (as before); a SIBLING repo failing keeps the numbers already
+ * read and names the repo under `partial`, never silently dropping it.
+ * @param {{run?:typeof ghRun, repos?:string[]}} o  `repos` = gh `owner/repo` slugs (default: the constellation table).
+ * @returns {{nums:string[], partial?:Array<{repo:string, reason:string}>}|{nums:string[],unavailable:true,reason:string}}
  */
-export function openPrItemNums({ run = ghRun } = {}) {
-  const r = run(['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'headRefName,title']);
-  if (r.status !== 0) return { nums: [], unavailable: true, reason: (r.stderr || 'gh unavailable').trim().split('\n')[0] };
-  let prs;
-  try { prs = JSON.parse(r.stdout || '[]'); } catch { return { nums: [], unavailable: true, reason: 'unparseable gh output' }; }
-  return { nums: extractItemNums(prs) };
+export function openPrItemNums({ run = ghRun, repos = Object.values(CONSTELLATION_REPOS).map((r) => r.slug) } = {}) {
+  const nums = new Set();
+  const partial = [];
+  for (const [i, repo] of repos.entries()) {
+    const r = run(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json', 'headRefName,title']);
+    let prs = null;
+    let reason = null;
+    if (r.status !== 0) reason = (r.stderr || 'gh unavailable').trim().split('\n')[0];
+    else {
+      try { prs = JSON.parse(r.stdout || '[]'); } catch { reason = 'unparseable gh output'; }
+    }
+    if (reason !== null) {
+      if (i === 0) return { nums: [], unavailable: true, reason }; // the primary repo is the source of truth
+      partial.push({ repo, reason });
+      continue;
+    }
+    for (const n of extractItemNums(prs)) nums.add(n);
+  }
+  return partial.length ? { nums: [...nums], partial } : { nums: [...nums] };
 }
