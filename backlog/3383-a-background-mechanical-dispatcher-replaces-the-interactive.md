@@ -3927,3 +3927,15 @@ The operator asked (2026-09-20) that every issue and fix from the session be tra
 - `/prepare` for the two filed decision cards (family and benchmark prior; approval carry-over).
 - The collector design review result, when it lands.
 - Correction recorded: the operator memory rule that the main session delegates edits and investigation was not followed this session (the orchestrator wrote code, cards and notes itself); future work of that kind is dispatched.
+
+## Session update (2026-09-20) — five design-first stories filed under this epic (PR 2357, uncleared): orchestrator-only guard, planner null row, branch health, normalizeHandle copies, /wip command drift
+
+Filed five design-first stories under this epic, all UNCLEARED, in one pull request to main: PR #2357 (lane/file-batch2, not merged). The cards carry hash ids until the drain numbers them at land.
+
+- xx87ew1, size 5: orchestrator-only guard. A PreToolUse hook that denies the main session's own edits, commits and mutating shell commands. Finding: #2749 (resolved) rejected an identity-keyed guard, and the worker marker built for tick-once is negative (unset means orchestrator), so it cannot be reused as is. The documented `agent_id` on hook events (hooks docs, read via a summarising fetch) separates subagents. Not confirmed live: that the marker reaches the hook from a `claude --bg` worker.
+- x0uufm6, size 2: the reaper planner throws on a null or undefined row when a verdict resolver is given. Reproduced on the branch tip 95aae605b.
+- xntmgs1, size 5: branch health. `check:standards` on the tip gives 15 errors (4 duplicate ids 3663 to 3666, 3 hand-picked ids 2260, 2261, 3180 that main holds as 3637, 3636, 3635, 2 cards with 105 and 16 bare paths, 4 dead cites in memory notes, 2 missing real-mechanism tests). Corrections to earlier notes: the placeholder `test` git identity is on 1285 commits on main too (machine config), and 215 of the 219 branch-only commits carry it.
+- x50pw3d, size 2: `normalizeHandle` has three copies, not two (the explore io module has one too).
+- x9mic7n, size 2: the deployed /wip command was hand-edited (it runs the report CLI from a personal clone) and the tracked source is the stale one; the bootstrap's next commands deploy would overwrite the working command.
+
+Owed: settle the design calls in each card, then clear them. The branch is 398 commits behind main and needs the health card before anything graduates.
