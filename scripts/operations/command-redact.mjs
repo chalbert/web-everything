@@ -27,24 +27,35 @@
 /** The marker substituted for a masked value. */
 export const REDACTED = '[REDACTED]';
 
+/** Bound work before any regex runs; callers still apply their own display/storage length limit. */
+export const MAX_REDACT_INPUT = 4096;
+
 /** Substring that makes a flag / variable NAME credential-bearing (case-insensitive). Over-matching (e.g.
  *  `--keyboard`) errs toward masking a harmless value, which is the safe direction for a diagnostic label. */
-const SENSITIVE_NAME = '(?:token|key|secret|passw(?:or)?d|pwd|auth|credential|cookie|bearer)';
+const SENSITIVE_NAME_RE = /token|key|secret|passw(?:or)?d|pwd|auth|credential|cookie|bearer/i;
 /** A quoted or bare value. Quoted forms are kept whole so `--token="a b"` masks the entire argument. */
 const VALUE = '(?:"[^"]*"|\'[^\']*\'|[^\\s"\']+)';
 
 // `name=value` — flag (`--api-key=…`) or env-style assignment (`GITHUB_TOKEN=…`), any separator-free form.
-const ASSIGNED = new RegExp(`([\\w.-]*${SENSITIVE_NAME}[\\w.-]*)=(${VALUE})`, 'gi');
+// Match each maximal name once, then classify it in the callback. Embedding the sensitive-name
+// alternation between unbounded name quantifiers makes repeated `token` words catastrophically slow.
+const ASSIGNED = new RegExp(`(?<![\\w.?-])([\\w.?-]+)=(${VALUE})`, 'gi');
 // `--name value` — the space-separated flag form. The value must not itself look like a flag (`-…`), so a
 // boolean `--no-auth --verbose` does not swallow its neighbour.
-const FLAG_SPACED = new RegExp(`(--?[\\w-]*${SENSITIVE_NAME}[\\w-]*)(\\s+)(?!-)(${VALUE})`, 'gi');
+const FLAG_SPACED = new RegExp(`(?<![\\w.?-])(--?[\\w.?-]+)(\\s+)(?!-)(${VALUE})`, 'gi');
 // `Authorization: Bearer xyz` / `Authorization: xyz` (the header form, usually inside a quoted -H argument).
 const AUTH_HEADER = /(authorization\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?[^\s'"]+/gi;
 // A bare `Bearer xyz` / `Basic xyz` with no header name in front of it.
 const BARE_SCHEME = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+// Header names are scanned once. Sticky value patterns consume only a sensitive header's value;
+// cookies consume through the next quote/end, including semicolons and spaces.
+const HEADER_NAME = /(?<![\w.?-])([\w.?-]+)(\s*:\s*)/g;
+const HEADER_VALUE = /(?:(?:bearer|basic|token)\s+)?[^\s'"]+/iy;
+const COOKIE_VALUE = /[^'"]+/y;
 // `scheme://user:pass@host` — mask the password; and `scheme://TOKEN@host` — mask the lone userinfo.
-const URL_USER_PASS = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi;
-const URL_USER_ONLY = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+)@/gi;
+// A word boundary alone retries the entire scheme at every dot in `a.a.a.…`.
+const URL_USER_PASS = /(?<![a-z0-9+.-])\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi;
+const URL_USER_ONLY = /(?<![a-z0-9+.-])\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+)@/gi;
 // Well-known credential prefixes — a credential is a credential wherever in argv it sits.
 const KNOWN_PREFIXES = [
   /\bgh[posru]_[A-Za-z0-9]{16,}/g,
@@ -53,36 +64,72 @@ const KNOWN_PREFIXES = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
   /\bAKIA[0-9A-Z]{12,}/g,
   /\bAIza[0-9A-Za-z_-]{30,}/g,
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/g,
+  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/g,
 ];
 // C0 (0x00–0x1F), DEL (0x7F) and C1 (0x80–0x9F) control characters.
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 
+function redactHeaders(s) {
+  const parts = [];
+  let keptThrough = 0;
+  HEADER_NAME.lastIndex = 0;
+  for (let match; (match = HEADER_NAME.exec(s));) {
+    const name = match[1].replace(/\?/g, '');
+    if (!SENSITIVE_NAME_RE.test(name)) continue;
+    const value = /cookie/i.test(name) ? COOKIE_VALUE : HEADER_VALUE;
+    value.lastIndex = HEADER_NAME.lastIndex;
+    const found = value.exec(s);
+    if (!found) continue;
+    HEADER_NAME.lastIndex = value.lastIndex;
+    // Preserve the exact spelling already emitted by AUTH_HEADER / BARE_SCHEME.
+    if (/^(?:(?:bearer|basic|token)\s+)?\[REDACTED\]$/i.test(found[0])) continue;
+    parts.push(s.slice(keptThrough, found.index), REDACTED);
+    keptThrough = value.lastIndex;
+  }
+  parts.push(s.slice(keptThrough));
+  return parts.join('');
+}
+
 /**
  * PURE, total, never throws. Return `command` with credential-shaped values masked and control characters
  * replaced, ready to persist and print. Rules, applied in this order:
- *   1. `Authorization: <scheme> <value>` headers and bare `Bearer`/`Basic <value>` → value masked.
- *   2. `scheme://user:pass@host` → password masked; `scheme://TOKEN@host` → userinfo masked.
- *   3. `name=value` where `name` contains token/key/secret/password/pwd/auth/credential/cookie/bearer
+ *   1. Cap input at MAX_REDACT_INPUT, retreating to whitespace in its final 256 characters (or dropping
+ *      that window if none exists), and append `…` when truncated. Then neutralise controls to `?`.
+ *   2. `Authorization: <scheme> <value>` headers and bare `Bearer`/`Basic <value>` → value masked.
+ *   3. Sensitive-name colon headers → optional bearer/basic/token scheme and one word masked; cookie
+ *      headers → everything through the next quote/end masked. Already-redacted values stay unchanged.
+ *      This covers quoted headers and quote-stripped ps argv, not arbitrary multiline HTTP syntax or
+ *      unmarked headers. Non-cookie values containing multiple words are not parsed as a whole.
+ *   4. `scheme://user:pass@host` → password masked; `scheme://TOKEN@host` → userinfo masked.
+ *   5. `name=value` where `name` contains token/key/secret/password/pwd/auth/credential/cookie/bearer
  *      (a `--flag=value` or an env assignment) → value masked.
- *   4. `--flag value` for the same names → value masked (not when the next word is itself a flag).
- *   5. Known credential prefixes (`ghp_…`, `github_pat_…`, `sk-…`, `xox…`, `AKIA…`, `AIza…`, JWTs) → masked.
- *   6. Control characters → `?`.
- * Order matters: the control-character pass runs LAST so an escape sequence cannot be used to hide a marker
- * from the earlier rules, and the redaction runs on the FULL string — callers must truncate AFTER this, or a
- * secret straddling the cut would be left half-visible.
+ *   6. `--flag value` for the same names → value masked (not when the next word is itself a flag).
+ *   7. Known credential prefixes (`ghp_…`, `github_pat_…`, `sk-…`, `xox…`, `AKIA…`, `AIza…`, JWTs) → masked.
+ * Order matters: controls are neutralised FIRST so they cannot split a value or hide a sensitive name
+ * (name classification ignores `?`). Callers must apply their smaller truncation limit AFTER redaction,
+ * or a secret straddling that cut would be left half-visible.
  * @param {*} command
  * @returns {string}
  */
 export function redactCommandLine(command) {
   let s = String(command ?? '');
+  const truncated = s.length > MAX_REDACT_INPUT;
+  if (truncated) {
+    const windowStart = MAX_REDACT_INPUT - 256;
+    let cut = MAX_REDACT_INPUT - 1;
+    // Inspect at most 256 characters, before running any regex on the input.
+    while (cut >= windowStart && s[cut].trim() !== '') cut--;
+    s = s.slice(0, Math.max(cut, windowStart));
+  }
+  s = s.replace(CONTROL_CHARS, '?');
   s = s.replace(AUTH_HEADER, `$1${REDACTED}`);
   s = s.replace(BARE_SCHEME, `$1 ${REDACTED}`);
+  s = redactHeaders(s);
   s = s.replace(URL_USER_PASS, `$1$2:${REDACTED}@`);
   s = s.replace(URL_USER_ONLY, `$1${REDACTED}@`);
-  s = s.replace(ASSIGNED, `$1=${REDACTED}`);
-  s = s.replace(FLAG_SPACED, `$1$2${REDACTED}`);
+  s = s.replace(ASSIGNED, (match, name) => SENSITIVE_NAME_RE.test(name.replace(/\?/g, '')) ? `${name}=${REDACTED}` : match);
+  s = s.replace(FLAG_SPACED, (match, name, space) => SENSITIVE_NAME_RE.test(name.replace(/\?/g, '')) ? `${name}${space}${REDACTED}` : match);
   for (const re of KNOWN_PREFIXES) s = s.replace(re, REDACTED);
-  return s.replace(CONTROL_CHARS, '?');
+  return s + (truncated ? '…' : '');
 }

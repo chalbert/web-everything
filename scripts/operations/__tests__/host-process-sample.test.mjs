@@ -276,3 +276,49 @@ describe('readProcessSample — the one IO edge, with `ps` MOCKED (no real shell
     expect(() => processSnapshotMetrics(buildProcessSnapshot(rows))).not.toThrow();
   });
 });
+
+
+import { DEFAULT_SUBSTANTIAL_CPU_PCT, DEFAULT_SUBSTANTIAL_MEM_BYTES } from '../telemetry.mjs';
+
+describe('processSnapshotMetrics — finding 1 redact before the 480-character cut', () => {
+  it.each([
+    ['bare Bearer', `${'x'.repeat(466)} Bearer abcdefghijkl`],
+    ['assigned token', `${'x'.repeat(466)} --token=abcdefghijkl`],
+    ['Authorization Bearer', `${'x'.repeat(450)} Authorization: Bearer abcdefghijkl`],
+  ])('does not emit even a token prefix when the cut crosses %s', (_name, command) => {
+    // The cut really is inside the token, with at least four characters exposed before it.
+    expect(command.slice(0, 480)).toContain('abcd');
+    expect(command.slice(0, 480)).not.toContain('abcdefghijkl');
+    const metrics = processSnapshotMetrics(buildProcessSnapshot([
+      { pid: 701, pcpu: 3, rssKb: 1, command },
+    ])).filter((metric) => metric.name.startsWith('host.process.entry.'));
+    expect(metrics).toHaveLength(2);
+    for (const metric of metrics) {
+      expect(metric.attributes.command).not.toContain('abcd');
+      expect(metric.attributes.command).not.toContain('abc');
+      expect(metric.attributes.command.length).toBeLessThanOrEqual(480);
+    }
+  });
+});
+
+describe('buildProcessSnapshot — finding 2 storage floor and reporting bar agree', () => {
+  it('pins both defaults together without adding an IO import to telemetry.mjs', () => {
+    expect(DEFAULT_PROCESS_CPU_PCT).toBe(DEFAULT_SUBSTANTIAL_CPU_PCT);
+    expect(DEFAULT_PROCESS_MEM_BYTES).toBe(DEFAULT_SUBSTANTIAL_MEM_BYTES);
+  });
+
+  it.each([
+    ['CPU exactly at floor', 2, 1, false],
+    ['memory exactly at floor', 0, 200 * 1024, false],
+    ['CPU just above floor', 2.01, 1, true],
+    ['memory just above floor', 0, 200 * 1024 + 1, true],
+  ])('uses strict > for %s', (_name, pcpu, rssKb, stored) => {
+    const snapshot = buildProcessSnapshot([{ pid: 702, command: 'boundary-helper', pcpu, rssKb }]);
+    expect(snapshot.processes).toEqual(stored
+      ? [{ pid: 702, command: 'boundary-helper', cpuPct: pcpu, memBytes: rssKb * 1024 }]
+      : []);
+    expect(snapshot.belowFloor).toEqual(stored
+      ? { count: 0, cpuPct: 0, memBytes: 0 }
+      : { count: 1, cpuPct: pcpu, memBytes: rssKb * 1024 });
+  });
+});

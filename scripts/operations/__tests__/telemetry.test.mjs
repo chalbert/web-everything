@@ -1338,3 +1338,27 @@ describe('newSpanStart / newSpanEnd / newMetric — constructor defaults', () =>
     expect(newMetric({ name: 'lane.pool.free', value: 3, timestamp: 'x' }).traceId).toBeNull();
   });
 });
+
+
+describe('summarizeHostProcesses — finding 2 strict reporting boundary', () => {
+  it.each([
+    ['CPU exactly at bar', 2, 1024, false],
+    ['memory exactly at bar', 0, 200 * 1024 * 1024, false],
+    ['CPU just above bar', 2.01, 1024, true],
+    ['memory just above bar', 0, 200 * 1024 * 1024 + 1024, true],
+  ])('uses strict > for %s', (_name, cpuPct, memBytes, substantial) => {
+    // Feed stored events directly: routing through buildProcessSnapshot would hide a reporting bug.
+    const attributes = { pid: 703, command: 'boundary-helper', tick: 1 };
+    const events = [
+      { event: 'metric', name: 'host.process.entry.cpu_pct', value: cpuPct, attributes },
+      { event: 'metric', name: 'host.process.entry.mem_bytes', value: memBytes, attributes },
+    ];
+    const summary = summarizeHostProcesses(events);
+    expect(summary.substantial).toHaveLength(substantial ? 1 : 0);
+    if (substantial) {
+      expect(summary.substantial[0]).toMatchObject({ label: 'boundary-helper', pids: [703], meanCpuPct: cpuPct, meanMemBytes: memBytes });
+    }
+    expect(summary.belowThresholdRemainder.meanCpuPct).toBe(substantial ? 0 : cpuPct);
+    expect(summary.belowThresholdRemainder.meanMemBytes).toBe(substantial ? 0 : memBytes);
+  });
+});
