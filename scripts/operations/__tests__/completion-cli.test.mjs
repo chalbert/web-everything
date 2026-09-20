@@ -124,3 +124,16 @@ describe('a crashed dispatched agent still leaves a completion record (done-when
     expect(record.startedAt).toBe('2026-09-03T02:00:00.000Z');
   });
 });
+
+it('resolves completion repo keys and slugs', () => {
+  expect(sessionSlugForCompletion({ kind: 'review', pr: 49, repo: 'frontierui' })).toBe('review-fui-49');
+  expect(sessionSlugForCompletion({ kind: 'fix', pr: 49, repo: 'chalbert/plateau-app' })).toBe('fix-pa-49');
+  expect(() => sessionSlugForCompletion({ kind: 'fix', pr: 49, repo: 'other/repo' })).toThrow(/unknown repo/);
+});
+
+it('reports and shows repo-specific records independently', () => {
+  const sibling = runReport({ kind: 'review', pr: '49', repo: 'chalbert/frontierui', status: 'started' });
+  expect(sibling.record.session).toBe('review-fui-49');
+  expect(runShow({ kind: 'review', pr: '49', repo: 'frontierui' }).found).toBe(true);
+  expect(runShow({ kind: 'review', pr: '49' }).found).toBe(false);
+});

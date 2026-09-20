@@ -48,6 +48,8 @@
  * `parked-pr-conflict-watch.mjs` and `duplicate-pr-watch.mjs` lines — the same "piggyback on a pass the
  * headless runner already ticks" shape, so neglect is checked every tick with no new cron/daemon.
  */
+import { mintSessionSlug } from './session-slug.mjs';
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -132,9 +134,9 @@ export function isParkedCandidate(pr) {
  * @param {{pr:number|string, agents?:Array<{name?:string}>}} o
  * @returns {boolean}
  */
-export function everDispatchedReviewOrFix({ pr, agents = [] } = {}) {
-  const reviewName = `review-${pr}`;
-  const fixName = `fix-${pr}`;
+export function everDispatchedReviewOrFix({ pr, agents = [], repo = 'we' } = {}) {
+  const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
+  const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   return (Array.isArray(agents) ? agents : []).some((a) => a?.name === reviewName || a?.name === fixName);
 }
 
@@ -192,14 +194,14 @@ export function labeledAtFor(events, labelName) {
  * @returns {boolean}
  */
 export function isNeglectedPr({
-  pr, labels = [], agents = [], labelEvents = [], now = Date.now(),
+  pr, repo = 'we', labels = [], agents = [], labelEvents = [], now = Date.now(),
   thresholdHours = DEFAULT_NEGLECT_THRESHOLD_HOURS, hours,
 } = {}) {
   if (!isParkedCandidate({ labels })) return false; // covers both the dedup skip and "not parked at all"
   const holdLabel = currentHoldLabel(labels);
   const h = hours === undefined ? parkedHours(labeledAtFor(labelEvents, holdLabel), now) : hours;
   if (h === null || h < thresholdHours) return false;
-  return !everDispatchedReviewOrFix({ pr, agents });
+  return !everDispatchedReviewOrFix({ pr, agents, repo });
 }
 
 /**
@@ -316,6 +318,8 @@ export function watchNeglectedPrs({
   listLabelEvents = defaultListLabelEvents, postFinding = defaultPostFinding, dryRun = false,
 } = {}) {
   const threshold = thresholdHours ?? neglectThresholdHours(env);
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`parked-pr-progress-watch: --repo ${repo} is not a constellation repo`);
   const prs = listPrs({ repo });
   const candidates = prs.filter(isParkedCandidate);
   const results = [];
@@ -344,7 +348,7 @@ export function watchNeglectedPrs({
     // Computed ONCE here and handed to `isNeglectedPr` (via its `hours` override) rather than recomputed
     // internally — the two must never disagree about the same fact.
     const hours = parkedHours(labeledAtFor(events, holdLabel), now);
-    const neglected = isNeglectedPr({ pr: pr.number, labels: pr.labels, agents, hours, thresholdHours: threshold });
+    const neglected = isNeglectedPr({ repo: repoKey, pr: pr.number, labels: pr.labels, agents, hours, thresholdHours: threshold });
     if (!neglected) continue;
     const entry = { pr: pr.number, holdLabel, parkedHours: hours, neglected: true, posted: false };
     if (dryRun) { results.push(entry); continue; }

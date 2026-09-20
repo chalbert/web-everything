@@ -473,3 +473,11 @@ describe('reapPlan — maps classifyReap over candidates, splitting reap vs keep
     expect(reapPlan(null, { nowMs: NOW })).toEqual({ reap: [], keep: [] });
   });
 });
+
+it('never treats a sibling PR as a WE item', () => {
+  expect(itemNumFromSession('fix-fui-49')).toBeNull();
+  expect(itemNumFromSession('fix-pa-49')).toBeNull();
+  expect(itemNumFromSession('fix-49')).toBe('49');
+  expect(itemNumFromSession('review-49')).toBeNull();
+  expect(itemNumFromSession('ci-heal-49')).toBeNull();
+});

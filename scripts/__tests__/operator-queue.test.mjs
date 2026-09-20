@@ -9,6 +9,8 @@ vi.mock('node:child_process', () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/** A path that never exists, so `main` never reads the real `.conveyor/unsupported-repo.json` sidecar. */
+const NO_UNSUPPORTED = '/nonexistent-operator-queue-test/unsupported-repo.json';
 const HEAD = 'fd37ce270aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const BASE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 /** A LEGACY advisory comment (no `**Advisory outcome:**` line) — the verdict line is all a reader had. */
@@ -191,7 +193,7 @@ describe('main', () => {
       .mockReturnValueOnce(JSON.stringify([
         fixture({ number: 1, labels: [] }), fixture(), fixture({ number: 43, labels: [HUMAN] }),
       ]));
-    main(['--repo=owner/broken', '--repo=owner/good', '--json']);
+    main(['--repo=owner/broken', '--repo=owner/good', '--json'], { unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
       ready: [{ repo: 'owner/good', number: 42, title: 'Ready for review' }],
       pending: [],
@@ -200,6 +202,7 @@ describe('main', () => {
         reasons: ['label/comment disagreement: advisory comment says accept on this head but advisory:accepted is absent'],
       }],
       errors: ['owner/broken: unavailable'],
+      unsupported: [],
     });
     expect(execFileSync).toHaveBeenLastCalledWith('gh', [
       'pr', 'list', '--repo', 'owner/good', '--state', 'open', '--limit', '200', '--json',
@@ -213,9 +216,9 @@ describe('main', () => {
     list(fixture({ number: 43, mergeable: 'UNKNOWN' }));
     vi.mocked(execFileSync).mockReturnValueOnce(JSON.stringify({ mergeable: 'UNKNOWN' }))
       .mockReturnValueOnce(JSON.stringify({ mergeable: 'MERGEABLE' }));
-    main(['--repo=o/n', '--json'], { sleep });
+    main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], errors: [],
+      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], errors: [], unsupported: [],
     });
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1000, 2000]);
   });
@@ -225,9 +228,9 @@ describe('main', () => {
     const sleep = vi.fn();
     list(fixture({ number: 43, mergeable: 'UNKNOWN' }));
     vi.mocked(execFileSync).mockReturnValue(JSON.stringify({ mergeable: 'UNKNOWN' }));
-    main(['--repo=o/n', '--json'], { sleep });
+    main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], errors: [],
+      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], errors: [], unsupported: [],
     });
     expect(sleep).toHaveBeenCalledTimes(4);
   });
@@ -236,7 +239,7 @@ describe('main', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const sleep = vi.fn();
     list(fixture({ number: 43, mergeable: 'UNKNOWN', labels: [HUMAN, ACCEPTED, PENDING] }));
-    main(['--repo=o/n', '--json'], { sleep });
+    main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(sleep).not.toHaveBeenCalled();
     expect(execFileSync).toHaveBeenCalledTimes(1);
     expect(JSON.parse(log.mock.calls[0][0]).notReady[0].reasons).toEqual(['review:pending label (advisory not accepted yet)']);
@@ -246,10 +249,11 @@ describe('main', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     list(fixture({ number: 43, mergeable: 'UNKNOWN' }));
     vi.mocked(execFileSync).mockReturnValue(JSON.stringify({ mergeable: 'UNKNOWN' }));
-    main(['--repo=o/n'], { sleep: vi.fn() });
+    main(['--repo=o/n'], { sleep: vi.fn(), unsupportedPath: NO_UNSUPPORTED });
     expect(log.mock.calls.map(([line]) => line)).toEqual([
       'NEEDS YOU (review:human + advisory:accepted, all gates pass):', '(none)',
       'PENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):', 'o/n#43  Ready for review',
+      'UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:', '(none)',
       'NOT READY — agent work (review:human but gates fail):', '(none)',
     ]);
   });
@@ -257,10 +261,11 @@ describe('main', () => {
   it('prints exactly the empty sections and queries all default repos', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.mocked(execFileSync).mockReset().mockReturnValue('[]');
-    main([]);
+    main([], { unsupportedPath: NO_UNSUPPORTED });
     expect(log.mock.calls.map(([line]) => line)).toEqual([
       'NEEDS YOU (review:human + advisory:accepted, all gates pass):', '(none)',
       'PENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):', '(none)',
+      'UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:', '(none)',
       'NOT READY — agent work (review:human but gates fail):', '(none)',
     ]);
     expect(vi.mocked(execFileSync).mock.calls.map(([, args]) => args[3])).toEqual([

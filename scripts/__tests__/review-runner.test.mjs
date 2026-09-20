@@ -23,7 +23,7 @@ import { readVerdictLedger, foldVerdictLedger } from '../lib/verdict-ledger.mjs'
 import { readLockEntry } from '../readiness/file-locks.mjs';
 import { resolveDispositionConfig } from '../lib/review-policy.mjs';
 import { VERDICTS, MANDATORY_LENSES } from '../lib/jury-core.mjs';
-import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 
 const CONFIG = resolveDispositionConfig();
 
@@ -75,6 +75,7 @@ describe('#3217 durable shadow observations', () => {
     writeFileSync(join(root, 'bin', 'gh'), `#!/bin/sh
 echo "$1 $2" >> "$WE_TEST_GH_CALLS"
 if [ "$1 $2" = "pr list" ]; then
+  [ "$3" = "--repo" ] && [ "$4" = "${CONSTELLATION_REPOS.we.slug}" ] || exit 98
   echo '[{"number":42,"labels":[{"name":"review:pending"}]}]'
 else
   exit 99
@@ -196,4 +197,9 @@ describe('repoKeyForSlug — the #2830 M3 slug↔key mapper (fail-closed)', () =
     expect(repoKeyForSlug('')).toBeNull();
     expect(repoKeyForSlug(undefined)).toBeNull();
   });
+});
+
+it('recognizes owner-qualified sibling slugs', () => {
+  expect(repoKeyForSlug('chalbert/frontierui')).toBe('frontierui');
+  expect(repoKeyForSlug('chalbert/plateau-app')).toBe('plateau-app');
 });

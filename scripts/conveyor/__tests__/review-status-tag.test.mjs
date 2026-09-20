@@ -104,31 +104,40 @@ describe('tagReviewStatus — IO shell over injected fakes (no claude/gh process
   it('tags a PR whose review is actively working, ensuring the label exists first', () => {
     const provider = fakeProvider([]);
     const listAgents = () => [{ name: 'review-42', state: 'working' }];
-    const result = tagReviewStatus({ pr: 42, repo: 'o/n', listAgents, provider });
+    const result = tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider });
     expect(result).toEqual({ changed: true, label: 'review-status:reviewing', removed: [] });
     expect(provider.calls).toEqual([
-      ['readLabels', 'o/n', 42],
-      ['ensureLabel', 'o/n', 'review-status:reviewing'],
-      ['setLabels', 'o/n', 42, { add: 'review-status:reviewing', remove: [] }],
+      ['readLabels', 'chalbert/web-everything', 42],
+      ['ensureLabel', 'chalbert/web-everything', 'review-status:reviewing'],
+      ['setLabels', 'chalbert/web-everything', 42, { add: 'review-status:reviewing', remove: [] }],
     ]);
   });
 
   it('clears a stale status label once the session is gone, adding nothing back (no ensureLabel call)', () => {
     const provider = fakeProvider([{ name: 'review-status:reviewing' }]);
     const listAgents = () => [];
-    const result = tagReviewStatus({ pr: 42, repo: 'o/n', listAgents, provider });
+    const result = tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider });
     expect(result).toEqual({ changed: true, label: null, removed: ['review-status:reviewing'] });
     expect(provider.calls).toEqual([
-      ['readLabels', 'o/n', 42],
-      ['setLabels', 'o/n', 42, { add: undefined, remove: ['review-status:reviewing'] }],
+      ['readLabels', 'chalbert/web-everything', 42],
+      ['setLabels', 'chalbert/web-everything', 42, { add: undefined, remove: ['review-status:reviewing'] }],
     ]);
   });
 
   it('is idempotent — no write call when the label already matches live state', () => {
     const provider = fakeProvider([{ name: 'review-status:fixing' }]);
     const listAgents = () => [{ name: 'fix-42', state: 'working' }];
-    const result = tagReviewStatus({ pr: 42, repo: 'o/n', listAgents, provider });
+    const result = tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider });
     expect(result).toEqual({ changed: false, label: 'review-status:fixing', removed: [] });
-    expect(provider.calls).toEqual([['readLabels', 'o/n', 42]]);
+    expect(provider.calls).toEqual([['readLabels', 'chalbert/web-everything', 42]]);
   });
+});
+
+it('tags only the matching repo session', () => {
+  const agents = [{ name: 'review-fui-49', state: 'working' }];
+  expect(deriveReviewStatus({ pr: 49, agents })).toBeNull();
+  expect(deriveReviewStatus({ pr: 49, agents, repo: 'frontierui' })).toEqual({ role: 'review', state: 'reviewing' });
+  const provider = { readLabels: () => [], ensureLabel: () => {}, setLabels: () => {} };
+  expect(tagReviewStatus({ pr: 49, repo: 'chalbert/frontierui', listAgents: () => agents, provider }).label).toBe('review-status:reviewing');
+  expect(() => tagReviewStatus({ pr: 49, repo: 'other/repo' })).toThrow(/not a constellation repo/);
 });

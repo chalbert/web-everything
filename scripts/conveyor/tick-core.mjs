@@ -135,6 +135,7 @@
  *   `blocked` — had NO other surface at all before this.
  */
 
+import { mintSessionSlug } from './session-slug.mjs';
 import { normNum } from './queue-store.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
 
@@ -385,6 +386,7 @@ function clearedQueueNums(queue) {
  *  The agreement is asserted by a test instead (`__tests__/tick-core.test.mjs`, cross-checked against
  *  `sessionSlugFor`'s own output). Only the BUILD kind matches — `fix-`, `prepare-`, `prepare-decision-`, and
  *  `ci-heal-` sessions are deliberately excluded, since conflating them would durably-guard the wrong loop's num. */
+// Build sessions identify WE items only.
 const BUILD_SESSION_RE = /^conveyor-(\d+)[a-z]?$/i;
 
 /**
@@ -831,9 +833,7 @@ export function clearTerminalCiHealAttempts(ciHealAttempts, prs) {
  */
 export function releaseSessionForNum(num, prepareKindByNum) {
   const kind = prepareKindByNum instanceof Map ? prepareKindByNum.get(normNum(num)) : undefined;
-  if (kind === 'prepare-decision') return `prepare-decision-${num}`;
-  if (kind === 'prepare') return `prepare-${num}`;
-  return `conveyor-${num}`;
+  return mintSessionSlug({ kind: ['prepare', 'prepare-decision'].includes(kind) ? kind : 'conveyor', id: num });
 }
 
 /**

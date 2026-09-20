@@ -34,19 +34,19 @@ const REAL_TEMPLATE_STUB = [
 describe('planReviewDispatch', () => {
   it('derives a distinct, review-only session slug', () => {
     expect(planReviewDispatch({ pr: 1234, repo: 'chalbert/web-everything' })).toEqual({
-      pr: 1234, repo: 'chalbert/web-everything', sessionSlug: 'review-1234',
+      pr: 1234, repo: 'chalbert/web-everything', repoKey: 'we', laneRepo: '.', sessionSlug: 'review-1234',
     });
   });
 
   it('refuses a non-positive-integer PR', () => {
-    expect(() => planReviewDispatch({ pr: 0, repo: 'o/r' })).toThrow(/positive integer/);
-    expect(() => planReviewDispatch({ pr: 'abc', repo: 'o/r' })).toThrow(/positive integer/);
-    expect(() => planReviewDispatch({ pr: -5, repo: 'o/r' })).toThrow(/positive integer/);
+    expect(() => planReviewDispatch({ pr: 0, repo: 'chalbert/web-everything' })).toThrow(/positive integer/);
+    expect(() => planReviewDispatch({ pr: 'abc', repo: 'chalbert/web-everything' })).toThrow(/positive integer/);
+    expect(() => planReviewDispatch({ pr: -5, repo: 'chalbert/web-everything' })).toThrow(/positive integer/);
   });
 
   it('refuses a repo that is not an owner/repo slug', () => {
-    expect(() => planReviewDispatch({ pr: 1, repo: 'not-a-slug' })).toThrow(/owner\/repo/);
-    expect(() => planReviewDispatch({ pr: 1, repo: '' })).toThrow(/owner\/repo/);
+    expect(() => planReviewDispatch({ pr: 1, repo: 'not-a-slug' })).toThrow(/not a constellation repo/);
+    expect(() => planReviewDispatch({ pr: 1, repo: '' })).toThrow(/not a constellation repo/);
   });
 });
 
@@ -62,7 +62,7 @@ describe('reviewSessionSlug', () => {
 
 describe('fillReviewBrief', () => {
   const values = {
-    PR: 1234, REPO: 'chalbert/web-everything', SESSION_SLUG: 'review-1234', JUDGE_PROVIDER: 'claude',
+    PR: 1234, REPO: 'chalbert/web-everything', SESSION_SLUG: 'review-1234', JUDGE_PROVIDER: 'claude', LANE_REPO: '.',
   };
 
   it('substitutes the placeholders the template actually uses, and reports (never refuses) an unrelated '
@@ -78,7 +78,7 @@ describe('fillReviewBrief', () => {
   });
 
   it('refuses a missing value', () => {
-    expect(() => fillReviewBrief('{{PR}} {{REPO}} {{SESSION_SLUG}}', { PR: 1, REPO: 'o/r' }))
+    expect(() => fillReviewBrief('{{PR}} {{REPO}} {{SESSION_SLUG}}', { PR: 1, REPO: 'chalbert/web-everything' }))
       .toThrow(/no value for the brief placeholder \{\{SESSION_SLUG\}\}/);
   });
 
@@ -99,12 +99,12 @@ describe('fillReviewBrief', () => {
   });
 
   it('the placeholder roster is exactly PR, REPO, SESSION_SLUG, JUDGE_PROVIDER (#xqa9ttq)', () => {
-    expect(REVIEW_BRIEF_PLACEHOLDERS).toEqual(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
+    expect(REVIEW_BRIEF_PLACEHOLDERS).toEqual(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO']);
   });
 
   it('refuses a missing JUDGE_PROVIDER value exactly like any other declared placeholder (#xqa9ttq)', () => {
     expect(() => fillReviewBrief('{{PR}} {{REPO}} {{SESSION_SLUG}} {{JUDGE_PROVIDER}}', {
-      PR: 1, REPO: 'o/r', SESSION_SLUG: 'review-1',
+      PR: 1, REPO: 'chalbert/web-everything', SESSION_SLUG: 'review-1',
     })).toThrow(/no value for the brief placeholder \{\{JUDGE_PROVIDER\}\}/);
   });
 });
@@ -144,7 +144,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {
     expect(() => dispatchReview({
-      pr: 1, repo: 'o/r', root: '/some/path/.lanes/web-everything/lane-3',
+      pr: 1, repo: 'chalbert/web-everything', root: '/some/path/.lanes/web-everything/lane-3',
       readBrief: () => REAL_TEMPLATE_STUB,
       spawnAgent: () => { throw new Error('must not be called'); },
       checkStaleness: FRESH,
@@ -154,7 +154,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
   it('never spawns when the plan itself refuses (bad PR/repo caught before any fs/spawn call)', () => {
     let readBriefCalls = 0;
     expect(() => dispatchReview({
-      pr: -1, repo: 'o/r', root: '/repo',
+      pr: -1, repo: 'chalbert/web-everything', root: '/repo',
       readBrief: () => { readBriefCalls += 1; return REAL_TEMPLATE_STUB; },
       spawnAgent: () => { throw new Error('must not be called'); },
       checkStaleness: FRESH,
@@ -251,7 +251,7 @@ describe('dispatchReview — judgeProvider (#xqa9ttq)', () => {
 
   it('premise pin: review-pr\'s REAL judge request is tool-bearing, which is why codex is refused (fails if review-pr ever grows a tool-free-only roster)', () => {
     const read = {
-      repo: 'o/r', pr: 1, title: 't', body: '', netChangedFiles: ['a.mjs'], diffText: 'diff',
+      repo: 'chalbert/web-everything', pr: 1, title: 't', body: '', netChangedFiles: ['a.mjs'], diffText: 'diff',
     };
     const request = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
     expect(Array.isArray(request.allowedTools) && request.allowedTools.length > 0).toBe(true);
@@ -432,4 +432,34 @@ describe('#3331 — dispatchReview reports the id `claude --bg` assigned, not th
     });
     expect(result.agentId).toBeNull();
   });
+});
+
+it('plans tagged sibling reviews and rejects unknown owner slugs', () => {
+  expect(planReviewDispatch({ pr: 49, repo: 'chalbert/frontierui', home: '/home/test', checkoutExists: () => true })).toEqual({ pr: 49, repo: 'chalbert/frontierui', repoKey: 'frontierui', laneRepo: '/home/test/workspace/frontierui', sessionSlug: 'review-fui-49' });
+  expect(() => planReviewDispatch({ pr: 49, repo: 'other/repo' })).toThrow(/not a constellation repo/);
+});
+
+it('fills the real brief with the selected repo pool on acquire and release', async () => {
+  const { readFileSync } = await import('node:fs');
+  const template = readFileSync('skills-src/review/review-agent-brief.md', 'utf8');
+  for (const [repo, laneRepo, sessionSlug] of [
+    ['we', '.', 'review-49'], ['frontierui', '/home/test/workspace/frontierui', 'review-fui-49'],
+  ]) {
+    const result = dispatchReview({ pr: 49, repo, root: '/repo', home: '/home/test', checkoutExists: () => true,
+      checkStaleness: FRESH, readBrief: () => template, spawnAgent: () => '', mintSessionId: () => 'session',
+    });
+    expect(result.sessionSlug).toBe(sessionSlug);
+    expect(result.prompt).toContain(`lane-pool.mjs acquire --repo=${laneRepo}`);
+    expect(result.prompt).toContain(`lane-pool.mjs release --all-pools --session=${sessionSlug}`);
+    expect(result.unknownTokens).not.toContain('{{LANE_REPO}}');
+  }
+});
+
+it('refuses a missing foreign checkout before spawning', () => {
+  const calls = [];
+  const options = { pr: 49, repo: 'plateau-app', home: '/missing', checkoutExists: () => false };
+  expect(() => planReviewDispatch(options)).toThrow(/unsupported-repo.*plateau-app.*\/missing\/workspace\/plateau-app/);
+  expect(() => dispatchReview({ ...options, root: '/repo', checkStaleness: FRESH, spawnAgent: (...args) => calls.push(args) })).toThrow(/unsupported-repo/);
+  expect(calls).toEqual([]);
+  expect(() => fillReviewBrief('{{lane-repo}}', { PR: 49, REPO: 'chalbert/plateau-app', SESSION_SLUG: 'review-pa-49', JUDGE_PROVIDER: 'claude', LANE_REPO: '/home/test/workspace/plateau-app' })).toThrow(/MISSPELLED/);
 });

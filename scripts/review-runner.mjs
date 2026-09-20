@@ -79,7 +79,7 @@ export const RUNNER_LEASE_MINUTES = DEFAULT_LEASE_MINUTES;
  *  prove the acquire/release owner-match round-trips (a drift in this format would make release a silent no-op). */
 export function runnerOwner() { return `${hostname()}:${process.pid}:review-runner`; }
 
-const DEFAULT_REPO_SLUG = 'chalbert/web-everything';
+const DEFAULT_REPO_SLUG = CONSTELLATION_REPOS.we.slug;
 
 // ── tiny flags parser (matches review-core-cli.mjs) ───────────────────────────────────────────────────────────
 function parseFlags(argv) {

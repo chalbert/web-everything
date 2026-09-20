@@ -14,16 +14,15 @@
  *     mints one directly when it does not (a brief that skipped the `started` report, or a race) — either way
  *     a `done` report always leaves a record behind.
  *   `show` — read. Resolve a session either directly (`--session=`) or by `--pr=` + `--kind=` using the SAME
- *     `review-<pr>` / `fix-<pr>` grammar `we:scripts/operations/dispatch-lane.mjs#sessionSlugFor` and
- *     `we:scripts/conveyor/session-reaper.mjs#sessionTarget` already mint/parse (duplicated here, not
- *     imported — the same "re-derive, never share the binding" choice `session-reaper.mjs`'s own header makes
- *     for its unrelated liveness axis). Prints the record as JSON, or `{"found":false}` when none exists.
+ *     shared session-slug grammar, with optional `--repo=<slug|key>`. Prints JSON or `{"found":false}`.
  *
  * SCRIPT, NOT PROSE (#2607/#3296's own precedent — see `we:scripts/conveyor/stand-down.mjs`'s header). The
  * write must happen even when the agent following the brief is under stress (about to crash, about to be
  * refused an effect); asking it to also *remember* to hand-author a record is the exact write-back-onto-prose
  * hazard #3296 already named for a fixer's own stand-down marker.
  */
+import { mintSessionSlug } from '../conveyor/session-slug.mjs';
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,10 +30,10 @@ import { applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCom
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The SAME two grammars `dispatch-lane.mjs#sessionSlugFor` (fix) and `review-dispatch.mjs` (review) mint. */
-export function sessionSlugForCompletion({ kind, pr }) {
+export function sessionSlugForCompletion({ kind, pr, repo = 'we' }) {
   if (kind !== 'review' && kind !== 'fix') throw new TypeError(`operations: completion --kind must be review or fix, got ${JSON.stringify(kind)}`);
   if (pr === undefined || pr === null || String(pr).trim() === '') throw new TypeError('operations: completion --pr is required when --session is not given');
-  return `${kind}-${String(pr).trim()}`;
+  return mintSessionSlug({ kind, id: pr, repo: repoKeyForSlug(repo) });
 }
 
 /**
@@ -63,7 +62,7 @@ export function runReport(flags) {
   const kind = flags.kind;
   const pr = flags.pr ?? null;
   const item = flags.item ?? null;
-  const session = flags.session || (kind && pr ? sessionSlugForCompletion({ kind, pr }) : undefined);
+  const session = flags.session || (kind && pr ? sessionSlugForCompletion({ kind, pr, repo: flags.repo }) : undefined);
   if (!session) throw new Error('usage: completion-cli.mjs report --session=<slug>|--kind=review|fix --pr=<n> --status=started|done [...]');
   if (flags.status !== 'started' && flags.status !== 'done') throw new Error('report requires --status=started|done');
 
@@ -101,7 +100,7 @@ export function runReport(flags) {
 }
 
 export function runShow(flags) {
-  const session = flags.session || (flags.kind && flags.pr ? sessionSlugForCompletion({ kind: flags.kind, pr: flags.pr }) : undefined);
+  const session = flags.session || (flags.kind && flags.pr ? sessionSlugForCompletion({ kind: flags.kind, pr: flags.pr, repo: flags.repo }) : undefined);
   if (!session) throw new Error('usage: completion-cli.mjs show --session=<slug>|--kind=review|fix --pr=<n>');
   const record = tryReadCompletion(session);
   return record ? { found: true, ...record } : { found: false, session };
