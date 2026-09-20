@@ -3939,3 +3939,13 @@ Filed five design-first stories under this epic, all UNCLEARED, in one pull requ
 - x9mic7n, size 2: the deployed /wip command was hand-edited (it runs the report CLI from a personal clone) and the tracked source is the stale one; the bootstrap's next commands deploy would overwrite the working command.
 
 Owed: settle the design calls in each card, then clear them. The branch is 398 commits behind main and needs the health card before anything graduates.
+
+## Session update (2026-09-20) — one design-first epic filed under this epic (PR 2358, uncleared): a design-review operation with a clearing gate
+
+Filed one design-first epic under this epic, UNCLEARED, in one pull request to main: PR #2358 (lane/file-design-review-op, not merged). The card carries the hash id xscm8rl until the drain numbers it at land.
+
+- xscm8rl, epic: a declared `design-review` operation. It derives the care level from the card's own fields, runs the jury panel directly and writes the panel result to a file read by path (no launcher subagent relaying it), records verdict, care level, rounds, spend and a design hash on the card, and feeds a gate so a design-first card cannot be cleared until a review accepted its current design. It maps the jury verdicts to card states and adds a distinct relay-failed and not-run state that never reads as accepted. Six slices are proposed in the card, not filed. It names 12 open design points, each with a leaning, and five executable acceptance checks.
+- Findings that shaped it: `review-prep` already exists (one tool-bearing juror, a note, no gate), so the new operation is a separate sibling and the card says why. Clearing lives in a gitignored session sidecar and `we:scripts/conveyor/queue.mjs add` only warns, so the gate needs three refusal points plus a launch-side check. No code knows a design-first marker today, so the epic defines one. Panel jurors are tool-free (#3158 ruling), so the panel cannot check claims about live code; that is an open point.
+- Verify: the full unit suite passed except the two known docker-registry tests in `container-exec`; `check:standards` gave 0 errors after one lead-paragraph fix. The PR title says story because the brief named it so; the card is an epic.
+
+Owed: design-review the card itself, settle its open points, then file and review its slices. It touches `planQueueing` that #3746 also changes, so those two must be sequenced.
