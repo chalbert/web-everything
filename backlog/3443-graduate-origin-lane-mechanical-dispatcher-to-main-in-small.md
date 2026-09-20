@@ -208,3 +208,41 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
   **Ahead-count:** 176 before; 177 after this tracker commit. Merging #2337 will NOT lower it — a cherry-pick lands
   as new SHAs on `main`, so the raw count only falls if the branch is later reconciled with `main`. Done-when #1 is
   still tracked by slice completion, not by the raw count.
+
+- **2026-09-20 (graduation increment 2, PR #2344).** Measured before starting (after a fetch):
+  `git rev-list --left-right --count origin/main...origin/lane/mechanical-dispatcher` → **321 behind / 180
+  ahead**. The previous increment (#2337: `7760e8f1`, `42f96a8f`, `fe04eca3`) merged 2026-09-19 (23:20Z).
+
+  **Landed as one small PR (#2344, `review:pending`, not merged by this session):**
+  - `1024822db` (#3634) — `we:scripts/conveyor/reconcile-fix-dispatch.mjs`: when a resolved item carries no
+    file-level scope (an epic, e.g. #3383), `planFixesFromReconcile` falls back to the PR's own changed files
+    (new `fetchPrDiffScope`, one `gh pr diff --name-only` call) as the fix-agent scope fence instead of silently
+    refusing. Cherry-picked with `-x`, applied clean. A PR whose branch number is a REVIEWED PR rather than a
+    delivered item stays refused (regression test pins it). Gate: 45/45 in its own test file; 73 files / 2254
+    tests across it and its dependents (reconcile-core/pass/finding, parked-pr-conflict watch + integration,
+    duplicate-pr-watch, all `scripts/operations/__tests__`); `check-standards` 0 errors. Behavioural (adds a `gh`
+    call), so it went alone.
+
+  **Deliberately skipped:**
+  - `6bc909866`, `9e6f02578` and the rest of the watchdog chain (and `a035ab9e`, the lease-reaper liveness read
+    that imports from it) — `we:scripts/conveyor/driver-watchdog.mjs` is still not on `main`; the chain has to
+    graduate as its own increment, in order.
+  - The `we:skills-src/conveyor/runner.mjs` reconcile-pass wiring (#3486) and everything layered on it — still
+    the highest-scrutiny piece; both former hold-backs (#3437 resolved, `supervisor.mjs` on `main` via #3483) are
+    clear, but it needs its own single-tick-validated PR.
+  - The `test` heavy-admission / telemetry / usage-report / provider-registry / Antigravity commits — a large
+    layered body of #3383 delivery machinery, not standalone; not sliced this pass.
+  - The `backlog/`-only session-log / filing / drain-renumber commits — branch-local narrative.
+
+  **Lane-pool bugs — still NO fix on the branch.** No non-merge commit ahead of `main` touches
+  `we:scripts/lane-pool.mjs` or `we:scripts/lib/lane-lease.mjs`. Both (`refresh --lane=N` refreshing all lanes
+  and dying with `Permission denied (publickey)` on an SSH-remote lane; a lane with any commit its local
+  `origin/main` ref lacks reading as busy) need fresh work on `main`, not graduation.
+
+  **Ahead-count:** 180 before this pass's start; **189 at tracker-commit time** (325 behind) — the branch grew by
+  concurrent sessions' pushes while this ran, not by this pass. Merging #2344 will NOT lower it (a cherry-pick
+  lands as new SHAs); Done-when #1 remains tracked by slice completion, not the raw count.
+
+  **Friction:** the lane's `git checkout -b` is blocked by the single-branch guard, so this pass delivered from a
+  throwaway full clone (with `node_modules` symlinked from the primary) — the task's "or your own throwaway clone"
+  path. `git worktree add` is blocked too, so the prototype-branch tracker edit needed a second clone.

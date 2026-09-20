@@ -3751,3 +3751,7 @@ Folded PR #2220 (`lane/3383-host-process-granularity`, "per-process host samples
 - Missing or unreadable transcript prints `unknown`, never `none` (test added for a dead-record with no transcript).
 - Live run: 62 sessions = 9 live-active, 2 waiting, 3 live-idle, 4 done (all with live pid), 44 dead-record shown as 4 summary rows.
 - Authored by Codex (`codex-direct-task.mjs`), reviewed and verified by Claude Sonnet 5. Known limit: a dead record whose pid was reused by an unrelated process reads as alive.
+
+## Session update (2026-09-20) — graduation increment 2 — PR #2344 (reconcile-fix-dispatch PR-diff scope, #3634)
+
+Advanced epic #3443 (graduate this branch to `main`) by one more increment: PR #2344 graduates `1024822db` (#3634, reconcile-fix-dispatch falls back to PR-diff scope) as its own small `review:pending` PR. The previous increment (#2337) merged 2026-09-19. Skipped: the watchdog chain (`driver-watchdog.mjs` still not on `main`), the #3486 runner wiring, and the layered delivery-machinery commits. No fix exists on this branch for the two lane-pool bugs (`refresh --lane=N` SSH failure; busy-lane rule). Ahead-count 180 → 189 (concurrent pushes, not this pass). Full entry in the #3443 card.
