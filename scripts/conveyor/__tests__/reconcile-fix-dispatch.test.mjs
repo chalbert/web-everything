@@ -7,7 +7,10 @@
  * `we:scripts/operations/__tests__/review-dispatch.test.mjs`'s own style for the sibling operation this file's
  * `dispatchFix` composition was mirrored from.
  */
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createActionStore } from '../../operations/action-store.mjs';
 import { describe, it, expect, vi } from 'vitest';
 import {
   dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
@@ -791,6 +794,8 @@ describe('null-item dispatch composition', () => {
       const result = dispatchFix({ itemNum, pr: 2347, laneRef: 'lane/multi-repo-checks', scope: ['we:scripts/'], lane: 4, ...attribution }, {
         root: '/repo', readBrief: () => readFileSync('skills-src/conveyor/fix-agent-brief.md', 'utf8'),
         mintSessionId: () => '11111111-1111-4111-8111-111111111111', spawnAgent,
+        // #3383 — one action store per iteration: the same PR dispatched twice is (correctly) held by the record.
+        actions: createActionStore({ root: mkdtempSync(join(tmpdir(), 'we-coord-null-item-')) }),
       });
       const prompt = spawnAgent.mock.calls[0][0].at(-1);
       expect(prompt).toContain(`${kind} #${num}: address review:changes on PR #2347`);
