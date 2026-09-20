@@ -785,3 +785,46 @@ describe('#3606 — dispatchFix always passes the dispatched-agent system prompt
     expect(argv[argv.length - 1]).toContain('fix brief for 1764');
   });
 });
+
+it('refuses a direct sibling fix before spawning', () => {
+  const calls = [];
+  expect(() => dispatchFix({ itemNum: '3438', pr: 49, laneRef: 'lane/3438-x', scope: ['we:x'], lane: 9 }, {
+    root: '/repo', repo: 'frontierui', readBrief: () => REAL_TEMPLATE_STUB,
+    mintSessionId: () => 'session', spawnAgent: (argv) => { calls.push(argv); return ''; },
+  })).toThrow(/unsupported-repo/);
+  expect(calls).toEqual([]);
+});
+
+it('refuses foreign fixes and CI-heals without touching a lane or dispatch sink', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { recordUnsupported, readUnsupported } = await import('../unsupported-repo.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'fix-refusals-'));
+  const unsupportedPath = join(dir, 'rows.json');
+  const calls = [];
+  try {
+    recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'review', prNumber: 9 }], path: unsupportedPath });
+    const options = { root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+      reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 49, headRefName: 'lane/3438-wire-reconcile-pass', labels: ['review:changes'] }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
+      findItemFn: findItemStub, loadItems: () => [], pickFreeLanes: () => { calls.push('pool'); return [2]; },
+      tryResume: () => calls.push('resume'), dispatch: () => calls.push('dispatch'),
+    };
+    const result = runReconcileFixDispatch(options);
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual(['fix', 'ci-heal'].map((action, i) => ({ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 49 + i, action, why: expect.any(String) })));
+    expect(calls).toEqual([]);
+    expect(readUnsupported({ path: unsupportedPath })).toHaveLength(3);
+    runReconcileFixDispatch({ ...options, reconcile: () => ({ dispatch: [], refusals: [] }) });
+    expect(readUnsupported({ path: unsupportedPath })).toEqual([expect.objectContaining({ action: 'review', prNumber: 9 })]);
+    expect(() => runReconcileFixDispatch({ repo: 'unknown/repo' })).toThrow(/not a constellation repo/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('refuses a foreign resume before listing or spawning agents', () => {
+  const calls = [];
+  expect(() => tryResumeFix({ pr: 49, isConflict: true }, { repo: 'frontierui', root: '/repo',
+    listAgentsAll: () => { calls.push('list'); return []; }, spawnAgent: () => calls.push('spawn'),
+  })).toThrow(/unsupported-repo/);
+  expect(calls).toEqual([]);
+});

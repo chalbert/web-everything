@@ -108,9 +108,9 @@ describe('sessionTarget — the dispatcher-minted grammar a session name encodes
     expect(sessionTarget('prepare-decision-3457')).toEqual({ kind: 'item', id: '3457' });
   });
   it('PR-kind names (review / fix / ci-heal) — a PR number, never an item number', () => {
-    expect(sessionTarget('review-1871')).toEqual({ kind: 'pr', id: '1871' });
-    expect(sessionTarget('fix-1852')).toEqual({ kind: 'pr', id: '1852' });
-    expect(sessionTarget('ci-heal-1852c')).toEqual({ kind: 'pr', id: '1852' });
+    expect(sessionTarget('review-1871')).toEqual({ kind: 'pr', id: '1871', repo: 'we' });
+    expect(sessionTarget('fix-1852')).toEqual({ kind: 'pr', id: '1852', repo: 'we' });
+    expect(sessionTarget('ci-heal-1852c')).toEqual({ kind: 'pr', id: '1852', repo: 'we' });
   });
   it('an unrecognized name (a stray operator label, no grammar) yields null — never a guess', () => {
     expect(sessionTarget('test-dontask')).toBeNull();
@@ -365,4 +365,42 @@ describe('stopSessionWithRetry — recovers a transient `claude stop` failure in
     expect(calls).toBe(1);
     expect(slept).toBe(0);
   });
+});
+
+describe('repo-aware ground truth', () => {
+  it('keeps separate cached answers and sends explicit gh repos', () => {
+    expect(sessionTarget('review-fui-49')).toEqual({ kind: 'pr', id: '49', repo: 'frontierui' });
+    const calls = [];
+    const groundTruthFor = makeGroundTruthResolver({ exec: (file, args) => {
+      calls.push([file, args]);
+      return JSON.stringify({ state: args.includes('chalbert/frontierui') ? 'OPEN' : 'MERGED' });
+    } });
+    const listing = ['review-49', 'review-fui-49', 'fix-fui-49'].map((name) => bg({ name, sessionId: name, state: 'working' }));
+    const { reap, keep } = sessionReapPlan(listing, { groundTruthFor });
+    expect(reap.map((r) => r.session.name)).toEqual(['review-49']);
+    expect(keep.map((r) => r.session.name)).toEqual(['review-fui-49', 'fix-fui-49']);
+    expect(calls).toEqual(['chalbert/web-everything', 'chalbert/frontierui'].map((repo) => ['gh', ['pr', 'view', '49', '--repo', repo, '--json', 'state,mergedAt']]));
+  });
+  it('keeps sessions on unknown repo or gh failure', () => {
+    const listing = [bg({ name: 'review-fui-49', state: 'working' })];
+    const exec = () => { throw new Error('gh failed'); };
+    expect(groundTruthForPr(49, { repo: 'unknown', exec: () => { throw new Error('must not call'); } })).toBeNull();
+    for (const groundTruthFor of [makeGroundTruthResolver({ exec }), () => groundTruthForPr(49, { repo: 'unknown', exec })]) {
+      const plan = sessionReapPlan(listing, { groundTruthFor });
+      expect(plan.reap).toEqual([]);
+      expect(plan.keep).toHaveLength(1);
+    }
+  });
+});
+
+it('shares the lookup cap across repos', () => {
+  let calls = 0;
+  const groundTruthFor = makeGroundTruthResolver({ maxPrViewCalls: 1, exec: () => {
+    calls++; return '{"state":"MERGED"}';
+  } });
+  const sessions = ['review-49', 'review-fui-49'].map((name) => bg({ name, state: 'working' }));
+  const plan = sessionReapPlan(sessions, { groundTruthFor });
+  expect(calls).toBe(1);
+  expect(plan.reap.map((r) => r.session.name)).toEqual(['review-49']);
+  expect(plan.keep.map((r) => r.session.name)).toEqual(['review-fui-49']);
 });

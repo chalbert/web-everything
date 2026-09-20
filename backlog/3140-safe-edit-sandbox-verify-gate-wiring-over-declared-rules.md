@@ -3,7 +3,7 @@ bornAs: xv0j8db
 kind: story
 size: 5
 parent: "1650"
-status: open
+status: resolved
 locus: plateau-app
 blockedBy: ["3139"]
 scope:
@@ -11,6 +11,8 @@ scope:
   - plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts
   - plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts
 dateOpened: "2026-08-15"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 tags: [dev-browser, safe-edit, sandbox, epic-1650, autofix]
 ---
 

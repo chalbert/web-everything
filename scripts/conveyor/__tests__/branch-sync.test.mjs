@@ -243,7 +243,15 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
 // ── 3. the CLI — a REAL throwaway git conflict fixture, no network ─────────────────────────────────────────────
 
 const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-const runOnce = (cwd, extra = []) => JSON.parse(execFileSync('node', [SYNC_CLI, 'once', '--json', ...extra], { cwd, encoding: 'utf8' }));
+// Inject a fake desktop spawn into child CLI probes as well as in-process tests.
+const fakeDesktop = 'data:text/javascript,' + encodeURIComponent(`
+  import cp from 'node:child_process';
+  import { syncBuiltinESMExports } from 'node:module';
+  const original = cp.spawn;
+  cp.spawn = (command, ...args) => command === 'osascript' ? { unref() {} } : original(command, ...args);
+  syncBuiltinESMExports();
+`);
+const runOnce = (cwd, extra = []) => JSON.parse(execFileSync('node', ['--import', fakeDesktop, SYNC_CLI, 'once', '--json', ...extra], { cwd, encoding: 'utf8' }));
 
 let root;
 beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'we-branch-sync-cli-')); });
@@ -487,5 +495,31 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     expect(r).toMatchObject({ status: 'synced', behind: 2 });
     expect(existsSync(join(clone, 'm1.txt'))).toBe(true);
     expect(existsSync(join(clone, 'm2.txt'))).toBe(true);
+  });
+});
+
+// Checked notifier tests inject every spawn; no desktop notification is sent.
+describe('notifyDesktopChecked', () => {
+  it('shares escaped argv and confirms only exit zero', async () => {
+    const { osascriptNotifyArgs, notifyDesktopChecked } = await import('../branch-sync.mjs');
+    const notification = { title: 'say "hello"', body: 'path\\file' };
+    expect(osascriptNotifyArgs(notification)).toEqual(['-e', 'display notification "path\\\\file" with title "say \\"hello\\""']);
+    const calls = [];
+    expect(notifyDesktopChecked(notification, { platform: 'darwin', spawnSyncFn: (...args) => { calls.push(args); return { status: 0 }; } })).toEqual({ ok: true });
+    expect(calls).toEqual([['osascript', osascriptNotifyArgs(notification), { encoding: 'utf8', timeout: 10000 }]]);
+  });
+  it.each([
+    { status: 1, stderr: 'denied' },
+    { status: null, error: Error('ETIMEDOUT'), stderr: 'denied' },
+    { status: null, error: Error('ENOENT'), stderr: 'denied' },
+  ])('surfaces failure and stderr: %j', async (result) => {
+    const { notifyDesktopChecked } = await import('../branch-sync.mjs');
+    expect(notifyDesktopChecked({ title: 'x', body: 'y' }, { platform: 'darwin', spawnSyncFn: () => result })).toMatchObject({ ok: false, error: expect.stringContaining('denied') });
+  });
+  it('reports throws and unsupported platforms', async () => {
+    const { notifyDesktopChecked } = await import('../branch-sync.mjs');
+    const spawnSyncFn = () => { throw Error('spawn failed'); };
+    expect(notifyDesktopChecked({}, { platform: 'darwin', spawnSyncFn })).toEqual({ ok: false, error: 'spawn failed' });
+    expect(notifyDesktopChecked({}, { platform: 'linux', spawnSyncFn })).toEqual({ ok: false, error: 'Desktop notifications unsupported on linux' });
   });
 });

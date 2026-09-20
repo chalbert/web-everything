@@ -8,6 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, '..', '..');
@@ -48,7 +49,7 @@ export function hotFileCut(commitCount) {
  * @param {{repo?: string, limit?: number}} [o]
  * @returns {Array<object>} raw `gh` records.
  */
-export function readMergedPrs({ repo = 'chalbert/web-everything', limit = 300 } = {}) {
+export function readMergedPrs({ repo = CONSTELLATION_REPOS.we.slug, limit = 300 } = {}) {
   const out = execFileSync('gh', [
     'pr', 'list', '--repo', repo, '--state', 'merged', '--limit', String(limit),
     '--json', 'number,title,labels,mergedAt,mergeCommit,additions,deletions,changedFiles',
@@ -152,7 +153,7 @@ export function joinHistory({ prs, commits, classify, windowDays = FOLLOW_WINDOW
  * @param {{repo?: string, root?: string, classify: (s: string) => string|null}} o
  * @returns {(input: {limit?: number, windowDays?: number}) => object}
  */
-export function createHistoryReader({ repo = 'chalbert/web-everything', root = REPO_ROOT, classify } = {}) {
+export function createHistoryReader({ repo = CONSTELLATION_REPOS.we.slug, root = REPO_ROOT, classify } = {}) {
   if (typeof classify !== 'function') {
     throw new TypeError('gate-health-io: `classify` is required — pass `classifyFollowUp` from we:scripts/lib/gate-health.mjs');
   }

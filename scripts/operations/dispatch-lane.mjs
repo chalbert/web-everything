@@ -36,8 +36,8 @@
  * ── IO IS INJECTED, AND THIS FILE REACHES NOTHING ───────────────────────────────────────────────────────────
  *
  * Same split as {@link ./review-pr.mjs} / {@link ./review-pr-io.mjs}: the declaration is the WHAT, and
- * {@link ./dispatch-lane-io.mjs} is the only place it touches the world. Its whole static import graph is
- * `./registry.mjs` + `./step-kinds.mjs` — no `node:` specifier at all, so the step fns hold no spawner in
+ * {@link ./dispatch-lane-io.mjs} is the only place it touches the world. Its static import graph is
+ * `./registry.mjs` + `./step-kinds.mjs` + the pure session-slug helper — no `node:` specifier at all, so the step fns hold no spawner in
  * lexical scope and the fill below is unit-testable with a two-line stub.
  *
  * That is also why {@link planTickCoreSelection the selection} happens in the io shell rather than here: item
@@ -62,6 +62,7 @@
  * PURE. No fs, no clock, no process, no network in this file.
  */
 
+import { mintSessionSlug, PR_KINDS } from '../conveyor/session-slug.mjs';
 import { op } from './registry.mjs';
 // #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
 // consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
@@ -321,10 +322,7 @@ export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
  * once fix/ci-heal dispatch is reachable at all — which is what THIS item (#3332) does — so `#xm33exe` is
  * filed rather than silently left for the next reader to rediscover.
  *
- * MIRRORED, NOT IMPORTED, and deliberately: this file reaches nothing (its whole import graph is
- * `./registry.mjs` + `./step-kinds.mjs`), and importing the core here would put the conveyor's tick machinery
- * inside the pure declaration. The agreement is asserted instead, against the core's OWN function, in
- * `we:scripts/operations/__tests__/dispatch-lane.test.mjs`.
+ * Minting is shared with the core through the pure session-slug module.
  *
  * ATTEMPT-TAGGED BUILD SLUGS (#3110): `attempt` rides the SAME trailing slot this file's own reap-side sibling
  * already tolerated (`we:scripts/conveyor/lease-reaper.mjs`'s `conveyor-2500b` example) — `''` for a first
@@ -337,20 +335,17 @@ export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
  * @param {'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
  *   pre-#3165 caller is byte-identical.
  * @param {string|number|null} [pr] - the PR number, required in practice for `fix`/`ci-heal` (#3332). Falls
- *   back to `num` when absent so this function never throws — the refusal for a genuinely missing PR belongs
- *   to `fillBrief`'s "no value for {{PR_NUM}}" check, not here.
+ *   back to `num` when absent.
  * @param {string} [attempt] - this dispatch's attempt tag (#3110; see {@link attemptTagFor}), `''` for a first
  *   attempt. Only ever non-empty for `kind === 'build'`.
+ * @param {string} [repo] - constellation repo key; item kinds require WE.
  * @returns {string}
  */
-export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '') {
+export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '', repo = 'we') {
   const id = `${String(num).trim()}${attempt}`;
-  if (kind === 'prepare-decision') return `prepare-decision-${id}`;
-  if (kind === 'prepare') return `prepare-${id}`;
   if (kind === 'investigate') return `investigate-${id}`;
-  if (kind === 'fix') return `fix-${String(pr ?? num).trim()}`;
-  if (kind === 'ci-heal') return `ci-heal-${String(pr ?? num).trim()}`;
-  return `conveyor-${id}`;
+  return mintSessionSlug({ kind: kind === 'build' ? 'conveyor' : kind,
+    id: PR_KINDS.includes(kind) ? pr ?? num : num, attempt, repo });
 }
 
 /**

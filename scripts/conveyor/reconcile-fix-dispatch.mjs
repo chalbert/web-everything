@@ -53,6 +53,7 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -70,6 +71,8 @@ import { BRIEF_REQUIRED_BY_KIND, fillBrief, sessionSlugFor } from '../operations
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
+import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
@@ -374,6 +377,7 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * @returns {{resumed:boolean, result?:{sessionId:string, sessionSlug:null, pr:number, itemNum:string, lane:null, unknownTokens:string[], resumed:true}, resumeAttempt?:object|null}}
  */
 export function tryResumeFix(planned, {
+  repo = 'we',
   root = REPO_ROOT,
   spawnAgent = defaultSpawnAgent,
   listAgentsAll = () => defaultListAgents({ all: true }),
@@ -381,6 +385,7 @@ export function tryResumeFix(planned, {
   resolveHead = resolveLaneHead,
   wait = defaultConfirmWait,
 } = {}) {
+  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
   assertNotALaneCheckout(root);
   if (!planned.isConflict) return { resumed: false, resumeAttempt: null };
 
@@ -404,7 +409,7 @@ export function tryResumeFix(planned, {
   // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
   const candidateCwd = candidateRow?.cwd || null;
   const candidateHead = candidateCwd ? resolveHead(candidateCwd) : null;
-  const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix')]);
+  const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix', null, '', repo)]);
   const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
   const headConfirmed = Boolean(planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
   const ownershipConfirmed = headConfirmed && nameConfirmed;
@@ -498,6 +503,7 @@ export function tryResumeFix(planned, {
  * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object}}
  */
 export function dispatchFix(planned, {
+  repo = 'we',
   root = REPO_ROOT,
   readBrief = (r) => readFileSync(fixBriefPath(r), 'utf8'),
   mintSessionId = () => randomUUID(),
@@ -505,9 +511,10 @@ export function dispatchFix(planned, {
   extraArgs = [],
   resumeAttempt = null,
 } = {}) {
+  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
   assertNotALaneCheckout(root);
 
-  const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr);
+  const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
     ITEM_NUM: planned.itemNum,
     PR_NUM: planned.pr,
@@ -570,9 +577,22 @@ export function runReconcileFixDispatch({
   reconcile = runReconcilePass,
   resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root }),
   checkStaleness,
+  prsFile, unsupportedPath,
 } = {}) {
-  assertMainNotStale(root, checkStaleness);
-  const reconciled = reconcile({ repo });
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
+  if (repoKey === 'we') assertMainNotStale(root, checkStaleness);
+  const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
+  if (repoKey !== 'we') {
+    // Foreign fixes need their own brief and gate; never consult or lease the WE pool.
+    const refusals = (reconciled.dispatch ?? []).filter((entry) => ['fix', 'ci-heal'].includes(entry.kind)).map((entry) => ({
+      kind: 'unsupported-repo', repo: repoKey, prNumber: entry.prNumber, action: entry.kind,
+      why: 'Fix and CI-heal dispatch require a repo-specific brief and gate; the existing worker is WE-only.',
+    }));
+    const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
+    recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
+    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
+  }
   const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope);
 
   const lanes = [...pickFreeLanes()];
@@ -593,7 +613,7 @@ export function runReconcileFixDispatch({
     if (entry.isConflict) {
       let attempt;
       try {
-        attempt = tryResume(entry, { root });
+        attempt = tryResume(entry, { root, repo: repoKey });
       } catch (e) {
         refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
         continue;
@@ -611,7 +631,7 @@ export function runReconcileFixDispatch({
     }
     const lane = lanes.shift();
     try {
-      dispatched.push(dispatch({ ...entry, lane }, { root, extraArgs: agentArgsFromEnv(), resumeAttempt }));
+      dispatched.push(dispatch({ ...entry, lane }, { root, repo: repoKey, extraArgs: agentArgsFromEnv(), resumeAttempt }));
     } catch (e) {
       refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
     }
@@ -631,7 +651,7 @@ if (IS_CLI) {
   }
   let result;
   try {
-    result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null });
+    result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] });
   } catch (e) {
     process.stderr.write(`✗ reconcile-fix-dispatch failed: ${String((e && e.message) || e).split('\n')[0]}\n`);
     process.exit(1);
@@ -647,7 +667,7 @@ if (IS_CLI) {
       const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
       lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
     }
-    for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
+    for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');
   }
 }

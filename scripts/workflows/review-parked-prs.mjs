@@ -127,8 +127,8 @@ export const meta = {
 // a variable expansion bash DOES perform inside an argument, yielding an absolute path.
 const REPOS = {
   we: { slug: 'chalbert/web-everything', path: '' },
-  frontierui: { slug: 'frontierui', path: '$HOME/workspace/frontierui' },
-  'plateau-app': { slug: 'plateau-app', path: '$HOME/workspace/plateau-app' },
+  frontierui: { slug: 'chalbert/frontierui', path: '$HOME/workspace/frontierui' },
+  'plateau-app': { slug: 'chalbert/plateau-app', path: '$HOME/workspace/plateau-app' },
 };
 const DEFAULT_REPO = 'we';
 
@@ -603,11 +603,8 @@ function discoverPrompt() {
     'You are the DISCOVER step of the review-parked-prs workflow. Produce the list of PARKED pull requests to',
     'review, each with its CURRENT label names. You do READ-ONLY gh calls only — never edit, label, comment, or merge.',
     '',
-    'For the `we` repo (the common case) run in THIS checkout (your cwd):',
-    `  gh pr list --repo ${REPOS.we.slug} --label ${REVIEW_PENDING} --json number,labels`,
-    'For the other constellation repos (best-effort — a repo whose checkout is absent or has no pending PR simply',
-    'contributes nothing), run `gh pr list --label ' + REVIEW_PENDING + ' --json number,labels` in that repo\'s',
-    'checkout path if it exists.',
+    'For EVERY constellation repo run the following queries; discovery does not require a local checkout:',
+    ...Object.values(REPOS).map(({ slug }) => `  gh pr list --repo ${slug} --label ${REVIEW_PENDING} --json number,labels`),
     '',
     `Constellation repos (id → gh slug / checkout path): ${JSON.stringify(repoList)}.`,
     '',
