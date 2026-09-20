@@ -3974,3 +3974,32 @@ IMPROVEMENTS NOTED:
 6. Unresolved question: whether main card 3485 and the branch's fold-the-gate card are the same card (reported by the batch2 worker, unconfirmed).
 
 Owed: settle the design calls in each new card, then clear them; merge #2359 so the three edits reach main.
+
+## Session update (2026-09-20) — the three design-first filing pull requests merged; prototype PR 1853 is closed; reaper stop does not clear dead session rows
+
+The three design-first filing pull requests are on main, the prototype pull request is closed, and a reaper run showed that its stop leaves dead session rows in the list. Facts 1 and 2 were re-checked live against GitHub and `origin/main` when this was written; facts 3 and 4 are the operator's 18:37 and 18:38 ET readings and could not be re-run (see the end).
+
+**Merged to main (verified with `gh pr view`):** PR #2357 (lane/file-batch2) at 2026-09-20T22:01:51Z, PR #2358 (lane/file-design-review-op) at 22:24:16Z, PR #2359 (lane/file-batch3) at 22:34:49Z. The drain numbered the hash-id cards at land (drain commits d8dd2de24, 00eadec34, 4f0930eda). Titles were matched against `git ls-tree origin/main backlog/`:
+- x0uufm6 → #3765 (reaper planner null row)
+- x50pw3d → #3766 (`normalizeHandle` copied in three places)
+- x9mic7n → #3767 (deployed /wip command hand-edited)
+- xntmgs1 → #3768 (prototype branch health, `check:standards` 15 errors)
+- xx87ew1 → #3769 (orchestrator-only guard)
+- xscm8rl → #3770 (design-review operation epic)
+- x0y6xk4 → #3771 (background workflow runs die silently)
+- xl8pvh7 → #3772 (prototype branch drifts from main, merge policy)
+- xn4kil9 → #3773 (review-dispatch briefs carry a double-brace token)
+- xvwin4v → #3774 (docs-only changes run the full local suite)
+- xyzbwsw → #3775 (orchestrator status view)
+
+The eleven cards stay UNCLEARED (design-first; their design calls are still open). The three edits to 3739, 3741 and 3752 are now on main (commit 2a2e0d5df, part of #2359). The "Edits owed" line in the PR 2359 note is therefore done. Earlier notes that name the cards by hash id now map through the list above.
+
+**Prototype PR #1853 is closed, not merged.** `gh pr view 1853` reads state CLOSED, `closedAt` 2026-09-19T21:21:10Z, `mergedAt` null, `mergeStateStatus` DIRTY, title "dispatch-lane: widen to fix/ci-heal launch kinds (#3383)". It was closed unmerged, so its content never reached main. The branch `lane/mechanical-dispatcher` has no open pull request now; none was opened or reopened. The branch is DIRTY against main, which is what card #3772 (was xl8pvh7) is about.
+
+**The reaper's stop does not clear dead `working` rows.** Operator reading at 18:37 ET, from an up-to-date lane clone: the reaper listed 714 sessions, stopped 569, kept 145. `claude agents --json` showed 38 rows before and 38 after (31 working, 2 busy, 5 idle; only 7 rows have a pid). So a stop does not remove dead rows from the list, and the row count cannot be used to tell that a stop worked. This feeds card #3744 (session reaper cannot verify a stop took effect and re-stops finished sessions). At 18:43 ET the same command showed 39 rows (32 working, 4 blocked, 3 with no state; 8 with a pid), so the list is still full of rows with no live process.
+
+**Queue state at 18:38 ET (operator script):** NEEDS YOU none, PENDING none, NOT READY none. No pull requests were open in web-everything or frontierui; re-checked at 18:43 ET with `gh pr list`, both empty.
+
+Not verified here: the 714 / 569 / 145 reaper counts and the 38-row before-and-after figures (they describe a run that has finished; only the current row count was re-read); the operator-queue script output (this clone's branch does not carry that script, as the PR 2359 note already said).
+
+Owed: settle the design calls in the eleven cards, then clear them; sequence xscm8rl (#3770) with #3746, since both change `planQueueing`; decide the branch merge policy (xl8pvh7, #3772) now that the branch has no open PR.
