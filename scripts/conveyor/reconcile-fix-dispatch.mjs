@@ -215,12 +215,15 @@ export function isSafeFallbackScopeEntry(entry) {
  * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
  * as it did before this fallback existed, never throws the whole pass over one bad read.
  * @param {number} pr
- * @param {{exec?:Function, root?:string}} [o]
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug) pins the `gh` call
+ *   to that repo, the same `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use.
  * @returns {string[]}
  */
-export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT } = {}) {
+export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT, repo = null } = {}) {
   try {
-    const out = exec('gh', ['pr', 'diff', String(pr), '--name-only'], {
+    const argv = ['pr', 'diff', String(pr), '--name-only'];
+    if (repo) argv.push('--repo', repo);
+    const out = exec('gh', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
     });
     return String(out || '')
@@ -575,7 +578,7 @@ export function runReconcileFixDispatch({
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
-  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root }),
+  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
   checkStaleness,
   prsFile, unsupportedPath,
 } = {}) {

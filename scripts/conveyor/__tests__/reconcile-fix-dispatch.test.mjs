@@ -184,6 +184,13 @@ describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
     expect(calls).toEqual([{ file: 'gh', argv: ['pr', 'diff', '2220', '--name-only'], cwd: '/repo' }]);
   });
 
+  it('pins the `gh` call to the given repo with `--repo` (the multi-repo guard requires it)', () => {
+    const calls = [];
+    const exec = (file, argv) => { calls.push(argv); return 'a.mjs\n'; };
+    fetchPrDiffScope(7, { exec, root: '/repo', repo: 'owner/name' });
+    expect(calls).toEqual([['pr', 'diff', '7', '--name-only', '--repo', 'owner/name']]);
+  });
+
   it('drops blank lines (a trailing newline must not become an empty `we:` path)', () => {
     const exec = () => 'one/file.mjs\n\n\n';
     expect(fetchPrDiffScope(1, { exec, root: '/repo' })).toEqual(['we:one/file.mjs']);
