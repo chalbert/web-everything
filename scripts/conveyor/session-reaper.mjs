@@ -15,10 +15,11 @@
  *     ground-truth, terminal-state, `kind` guard and verdict axes.
  *   • `session-reap-evidence.mjs` — the ground-truth resolver (backlog-card reads, bounded `gh pr view`, the repo-less
  *     PR-name resolution). Its header holds COST DISCIPLINE.
- *   • `session-reap-stop.mjs`     — the stop mechanics (`stopSessionWithRetry`, the #77683 `clear-stuck-session` repair).
- *     Its header holds the "stop success is a hint" and "#77683 repair" reasoning.
- * This file keeps `parseFlags` / `main` (the ONE `claude agents --json --all` read, the `ps aux` pid probe, the stop loop,
- * the report) and RE-EXPORTS every name it always exported, so every import site is unchanged.
+ *   • `session-reap-stop.mjs`     — the stop mechanics (`stopSessionWithRetry`, the verified stop pass `runStopPass`, the
+ *     #77683 `clear-stuck-session` repair). Its header holds the "stop success is a hint" (#3744: confirm against a re-read
+ *     registry, never re-stop a terminal row) and "#77683 repair" reasoning.
+ * This file keeps `parseFlags` / `main` (the `claude agents --json --all` read, the `ps aux` pid probe, the stop pass wiring,
+ * the four-count report) and RE-EXPORTS every name it always exported, so every import site is unchanged.
  *
  * WHY `id`, NOT `sessionId` — the near-universal `claude stop` FAILURE `we:backlog/3435-*.md`'s "Found live"
  * finding 3 recorded (all five sessions, including `conveyor-3421b`, came back "No job matching" on `claude
@@ -59,7 +60,10 @@ import { readFollowUps } from '../operations/land-advance-io.mjs';
 
 import { sessionReapPlan, attentionRows, REDISPATCH_ACTIONS } from './session-reap-plan.mjs';
 import { makeGroundTruthResolver } from './session-reap-evidence.mjs';
-import { stopSessionWithRetry, attemptClearStuckSession, STOP_RETRY_ATTEMPTS } from './session-reap-stop.mjs';
+import {
+  stopSessionWithRetry, attemptClearStuckSession, STOP_RETRY_ATTEMPTS, STOP_MAX_RETRIES,
+  partitionAlreadyTerminal, isTerminalRow, parseConfirmWaitMs, runStopPass,
+} from './session-reap-stop.mjs';
 
 // Re-export every name this file exported before the split, so `skills-src/conveyor/runner.mjs`, `wip-agents.test`,
 // `session-verdicts.test` and every other import site work unchanged.
@@ -167,13 +171,24 @@ async function main(argv) {
   const noHandler = attention.filter((a) => a.handler === 'none').length;
   if (noHandler) log(`  ${noHandler} attention row(s) have no handler: nothing executes ${[...REDISPATCH_ACTIONS].join(' / ')} yet — they stay listed until an operator acts`);
 
-  let stopped = 0;
+  // #3744 — a row already done / stopped / failed needs no stop: counted, never called. Only LIVE rows reach `claude stop`.
+  const { live, alreadyTerminal: reapedTerminal } = partitionAlreadyTerminal(reap);
+  // A `stopped` row is never planned for reap (it is `keep`, reason `already-stopped`) but is just as terminal: count it with the
+  // already-terminal rows, not with the live ones this reaper is leaving alone.
+  const keptTerminal = keep.filter((r) => isTerminalRow(r.session)).length;
+  const alreadyTerminalCount = reapedTerminal.length + keptTerminal;
+  const keptCount = keep.length - keptTerminal;
+  const confirmWaitMs = parseConfirmWaitMs(flags['confirm-wait-ms']);
   let alreadyGone = 0;
   let cleared = 0;
   let failures = 0;
   let anomalies = 0;
+  let confirmedCount = 0;
   const done = [];
-  for (const { session, reason } of reap) {
+  const unconfirmedIds = [];
+  const candidates = [];
+  for (const cand of live) {
+    const { session, reason } = cand;
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
     // header's "WHY `id`, NOT `sessionId`" section. Every row here already passed `classifySessionReap`'s
     // `kind !== 'background'` guard, and every `kind: 'background'` row measured (live and in the checked-in
@@ -190,15 +205,36 @@ async function main(argv) {
       log(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       continue;
     }
-    try {
-      // Retried — see {@link stopSessionWithRetry}'s own doc for why: a `claude stop` failure found live
-      // 2026-09-04 was a transient CLI-internal hiccup, not a hard bug, and usually clears within a beat.
-      const res = stopSessionWithRetry({ handle, exec: execFileSync });
-      if (res.alreadyGone) alreadyGone++;
-      else stopped++;
-      log(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
-      done.push({ id: handle, sessionId: normalizeHandle(session.sessionId) || null, name: session.name ?? null, reason, alreadyGone: res.alreadyGone });
-    } catch (e) {
+    candidates.push({ ...cand, handle });
+  }
+
+  if (!dryRun) {
+    // #3744 — stop, wait, re-read the registry once, and only then say what happened (see `session-reap-stop.mjs`'s header).
+    // Retried per call — see {@link stopSessionWithRetry}'s own doc: a `claude stop` failure found live 2026-09-04 was a
+    // transient CLI-internal hiccup, not a hard bug, and usually clears within a beat.
+    const pass = runStopPass({
+      candidates,
+      stopOne: (c) => stopSessionWithRetry({ handle: c.handle, exec: execFileSync }),
+      listAgents: () => defaultListAgents({ exec: execFileSync, all: true }),
+      confirmWaitMs,
+    });
+    const record = (c, res, extra = {}) => done.push({ id: c.handle, sessionId: normalizeHandle(c.session.sessionId) || null, name: c.session.name ?? null, reason: c.reason, alreadyGone: res?.alreadyGone === true, ...extra });
+    const resOf = new Map(pass.stopped.map((s) => [s.candidate, s.res]));
+    for (const c of pass.confirmed) {
+      confirmedCount++;
+      const res = resOf.get(c);
+      if (res?.alreadyGone) alreadyGone++;
+      log(`  ${res?.alreadyGone ? 'already gone' : 'stopped'} ${c.handle} — confirmed (${c.reason}; ${c.session.name ?? 'unnamed'})`);
+      record(c, res, { confirmed: true });
+    }
+    for (const c of pass.unconfirmed) {
+      unconfirmedIds.push(c.handle);
+      log(`  ⚠ ${c.handle}: \`claude stop\` reported success but the registry still lists it non-terminal — UNCONFIRMED (${c.reason}; ${c.session.name ?? 'unnamed'})`);
+      record(c, resOf.get(c), { confirmed: false });
+    }
+    if (pass.readError) log(`  ⚠ registry re-read failed (${pass.readError}) — every stop this pass is unconfirmed`);
+    for (const { candidate: c, error: e } of pass.failed) {
+      const { session, reason, handle } = c;
       // ONE session's stop failing never blocks the rest of the pass (Done-when #3) — the same
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
       // as per-candidate, not pass-fatal. Reaches here only after `STOP_RETRY_ATTEMPTS` all failed, so this IS
@@ -236,16 +272,20 @@ async function main(argv) {
       JSON.stringify(
         {
           scanned: sessions.length,
-          stopped: dryRun ? 0 : stopped,
+          // #3744 — four separate counts. `confirmed` = a stop the re-read registry bears out; it is NOT `claude stop`'s own word.
+          confirmed: dryRun ? 0 : confirmedCount,
+          unconfirmed: dryRun ? 0 : unconfirmedIds.length,
+          unconfirmedIds: dryRun ? [] : unconfirmedIds,
+          alreadyTerminal: alreadyTerminalCount,
           alreadyGone: dryRun ? 0 : alreadyGone,
           cleared: dryRun ? 0 : cleared,
           failures: dryRun ? 0 : failures,
           anomalies,
           wouldStop: dryRun
-            ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
+            ? live.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
             : undefined,
           collected: dryRun ? undefined : done,
-          kept: keep.length,
+          kept: keptCount,
           attention,
         },
         null,
@@ -253,10 +293,15 @@ async function main(argv) {
       ) + '\n',
     );
   } else {
+    // #3744 — confirmed / unconfirmed / already-terminal / kept, always all four, always in this order.
+    const extras = `${alreadyGone ? `, ${alreadyGone} already gone` : ''}${cleared ? `, ${cleared} cleared via clear-stuck-session` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`;
     log(
       `session-reaper: ${sessions.length} session(s) listed · ` +
-        `${dryRun ? `${reap.length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${cleared ? `, ${cleared} cleared via clear-stuck-session` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${keep.length} kept`,
+        (dryRun
+          ? `${live.length} would stop, ${alreadyTerminalCount} already-terminal (no call), ${keptCount} kept`
+          : `${confirmedCount} confirmed, ${unconfirmedIds.length} unconfirmed, ${alreadyTerminalCount} already-terminal, ${keptCount} kept${extras}`),
     );
+    if (unconfirmedIds.length) log(`session-reaper: unconfirmed after ${STOP_MAX_RETRIES} retries (still listed non-terminal): ${unconfirmedIds.join(', ')}`);
   }
   // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its
   // `id` (the anomaly case — see the loop above) — mirrors lease-reaper.mjs's own convention, so a cron/loop

@@ -7,12 +7,18 @@
  *   genuinely fails. It never decides WHICH sessions to reap — `session-reap-plan.mjs` does — and the CLI
  *   (`session-reaper.mjs`) only calls into here for a candidate the plan already chose.
  *
- * `claude stop`'S REPORTED SUCCESS IS A HINT, NOT A CERTAINTY (found live 2026-09-02, confirmed against
+ *  * `claude stop`'S REPORTED SUCCESS IS A HINT, NOT A CERTAINTY (found live 2026-09-02, confirmed against
  * upstream `anthropics/claude-code` issues #65925/#45250/#41461): a stop can report success while the local
- * listing keeps reporting the session unchanged. This reaper does not re-poll to confirm — that would add a
- * second `claude agents --json` read (and a race) for a confirmation this repo already knows is unreliable —
- * it logs {@link stopSession}'s own `alreadyGone` distinction and moves on, exactly as best-effort as
- * `lease-reaper.mjs`'s own per-candidate try/catch.
+ * listing keeps reporting the session unchanged (2026-09-20: 28 sessions 13-19 days old still listed `working` after a
+ * "successful" stop). So a stop is NEVER counted done on `claude stop`'s own word (#3744): after the stop pass
+ * {@link runStopPass} waits {@link STOP_CONFIRM_WAIT_MS}, re-reads the registry ONCE (the same `claude agents --json --all`
+ * the CLI already reads — a bounded second read, not a poll loop) and reports each stopped session as CONFIRMED (its
+ * row is gone, or its state is terminal — done / stopped / failed) or UNCONFIRMED (still listed and non-terminal). An
+ * unconfirmed one goes on an IN-MEMORY retry list: re-stopped and re-read at most {@link STOP_MAX_RETRIES} more times
+ * this run, then reported by id. Nothing is persisted across runs in this slice. The same terminal set decides the
+ * other half of #3744: a row that is ALREADY done / stopped / failed before the pass is counted `already-terminal`
+ * and gets NO stop call ({@link partitionAlreadyTerminal}) — re-stopping ~570 finished sessions every run made the
+ * stopped count meaningless and the run one subprocess per row.
  *
  * THE #77683 REPAIR — WHEN `claude stop`/`claude rm` GENUINELY FAIL, NOT MERELY REPORT UNRELIABLY. A DIFFERENT
  * known upstream bug (GitHub #77683) leaves a session listed forever, its job directory never cleaned up, and
@@ -44,6 +50,8 @@
 import { execFileSync } from 'node:child_process';
 
 import { stopSession } from '../operations/dispatch-abort.mjs';
+import { normalizeHandle } from '../operations/dispatch-lane-io.mjs';
+import { TERMINAL_REAP_STATES, ALREADY_STOPPED_STATES } from './session-reap-plan.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 // THE #77683 REPAIR (see the file header) — driving `clear-stuck-session` end to end, in-process, with a
 // TRUSTED `proceed` this reaper's own call path supplies. Nothing here is a second implementation of that
@@ -104,6 +112,118 @@ export function stopSessionWithRetry({ handle, exec = execFileSync, sleep = slee
     }
   }
   throw lastErr;
+}
+
+// ── #3744 — VERIFY A STOP TOOK EFFECT, NEVER RE-STOP A TERMINAL SESSION ────────────────────────────────────
+
+/** How long the pass waits after stopping before it re-reads the registry (ms). A named default the CLI overrides with
+ *  `--confirm-wait-ms=N` and a test injects as `0`. Chosen by the orchestrator (#3744), open to review: long enough for
+ *  the local listing to catch a stop that did take effect, short enough not to stall the tick. */
+export const STOP_CONFIRM_WAIT_MS = 5000;
+
+/** How many times an UNCONFIRMED stop is re-stopped and re-read within one run before it is reported (#3744). */
+export const STOP_MAX_RETRIES = 2;
+
+/** States that mean "nothing left to stop": the two the reaper reaps plus `stopped`. */
+export const TERMINAL_ROW_STATES = new Set([...TERMINAL_REAP_STATES, ...ALREADY_STOPPED_STATES]);
+
+/** Is this registry row already terminal (done / stopped / failed)? */
+export function isTerminalRow(row) {
+  return TERMINAL_ROW_STATES.has(row?.state);
+}
+
+/**
+ * Split the planner's `reap` list into rows that need a stop call (`live`) and rows already terminal before the pass
+ * (`alreadyTerminal`, no call — #3744). PURE. The planner still reaps a `done`/`failed` row (its terminal axis is
+ * unchanged); this is where that stops costing a subprocess per row.
+ * @param {Array<{session: object}>} reap
+ * @returns {{live: object[], alreadyTerminal: object[]}}
+ */
+export function partitionAlreadyTerminal(reap) {
+  const live = [];
+  const alreadyTerminal = [];
+  for (const r of Array.isArray(reap) ? reap : []) (isTerminalRow(r?.session) ? alreadyTerminal : live).push(r);
+  return { live, alreadyTerminal };
+}
+
+/** `--confirm-wait-ms` → a non-negative integer, or the default for anything unparseable (never NaN, never negative). */
+export function parseConfirmWaitMs(value) {
+  if (value === undefined || value === true || value === '') return STOP_CONFIRM_WAIT_MS;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : STOP_CONFIRM_WAIT_MS;
+}
+
+/** The registry row for `session` in `listing`, matched on the short `id` or the full `sessionId`; `null` when gone. */
+function findRow(listing, session) {
+  const handle = normalizeHandle(session?.id);
+  const full = normalizeHandle(session?.sessionId);
+  for (const row of listing) {
+    if (!row || typeof row !== 'object') continue;
+    if (handle && normalizeHandle(row.id) === handle) return row;
+    if (full && normalizeHandle(row.sessionId) === full) return row;
+  }
+  return null;
+}
+
+/**
+ * THE STOP PASS WITH VERIFICATION (#3744). Stops each candidate once, then confirms against a re-read registry (see the
+ * file header). Synchronous and side-effect-free apart from the injected `stopOne` / `listAgents` / `sleep`, so a test
+ * drives it with a fake runner and a fake clock — it never shells `claude` or sleeps for real.
+ *
+ * A candidate whose FIRST `stopOne` throws is reported in `failed` and never confirmed (the CLI then tries the #77683
+ * repair on it). A candidate whose stop call succeeded is CONFIRMED when its row is absent from the re-read or its state
+ * is terminal, else UNCONFIRMED; unconfirmed candidates are re-stopped and re-read up to `maxRetries` more times. A retry
+ * whose stop throws leaves the candidate unconfirmed. If the re-read itself throws, everything still pending is
+ * unconfirmed (`readError` set) and no further retry is attempted — there is nothing to verify against.
+ *
+ * @param {object} o
+ * @param {Array<{session: object, reason: string}>} o.candidates - live rows only (see {@link partitionAlreadyTerminal}).
+ * @param {(c: {session: object, reason: string}) => {alreadyGone?: boolean}} o.stopOne - throws on a failed stop.
+ * @param {() => object[]} o.listAgents - the registry reader (`claude agents --json --all`).
+ * @param {(ms: number) => void} [o.sleep]
+ * @param {number} [o.confirmWaitMs]
+ * @param {number} [o.maxRetries]
+ * @returns {{stopped: Array<{candidate: object, res: object}>, failed: Array<{candidate: object, error: unknown}>, confirmed: object[], unconfirmed: object[], retried: number, readError: (string|null)}}
+ */
+export function runStopPass({ candidates, stopOne, listAgents, sleep = sleepSyncMs, confirmWaitMs = STOP_CONFIRM_WAIT_MS, maxRetries = STOP_MAX_RETRIES } = {}) {
+  const stopped = [];
+  const failed = [];
+  for (const candidate of candidates ?? []) {
+    try {
+      stopped.push({ candidate, res: stopOne(candidate) });
+    } catch (error) {
+      failed.push({ candidate, error });
+    }
+  }
+  const confirmed = [];
+  let pending = stopped.map((s) => s.candidate);
+  let retried = 0;
+  let readError = null;
+  // No stop call succeeded ⇒ nothing to verify ⇒ no wait and no second registry read.
+  for (let round = 0; pending.length; round++) {
+    sleep(confirmWaitMs);
+    let listing;
+    try {
+      const rows = listAgents();
+      listing = Array.isArray(rows) ? rows : [];
+    } catch (e) {
+      readError = String(e?.message || e).split('\n')[0];
+      break;
+    }
+    const stillListed = [];
+    for (const c of pending) {
+      const row = findRow(listing, c.session);
+      if (!row || isTerminalRow(row)) confirmed.push(c);
+      else stillListed.push(c);
+    }
+    pending = stillListed;
+    if (!pending.length || round >= maxRetries) break;
+    for (const c of pending) {
+      retried++;
+      try { stopOne(c); } catch { /* still unconfirmed — the next read decides */ }
+    }
+  }
+  return { stopped, failed, confirmed, unconfirmed: pending, retried, readError };
 }
 
 // ── THE #77683 REPAIR — clear-stuck-session, driven with a TRUSTED `proceed` (see the file header) ───────────

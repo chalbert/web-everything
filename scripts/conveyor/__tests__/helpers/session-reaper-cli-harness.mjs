@@ -7,7 +7,7 @@
  *   `ghArgvFile` / `runsDir` exports exactly as it read the old module-level variables.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -43,7 +43,12 @@ export function installReaperCliHarness() {
         '#!/bin/sh',
         'printf \'%s\\n\' "$*" >> "$STUB_ARGV_FILE"',
         'case "$1" in',
-        '  agents) printf \'%s\' "$STUB_AGENTS" ;;',
+        // `agents` answers `STUB_AGENTS`, or — once a `stop` has SUCCEEDED (marker file) and the test set
+        // `STUB_AGENTS_AFTER_STOP` — that second listing: a registry that caught up with the stop (#3744). Unset ⇒
+        // the listing never changes, which IS the lagging-listing shape (`claude stop` "succeeds", the row stays).
+        '  agents)',
+        '    if [ -f "$STUB_STOP_COUNT_DIR/stop-succeeded" ] && [ -n "${STUB_AGENTS_AFTER_STOP+x}" ]; then printf \'%s\' "$STUB_AGENTS_AFTER_STOP"; else printf \'%s\' "$STUB_AGENTS"; fi',
+        '    ;;',
         // `stop` optionally fails its first `STUB_STOP_FAIL_TIMES` invocations PER id (a per-id counter file
         // under `STUB_STOP_COUNT_DIR`, default unset ⇒ 0 ⇒ succeeds immediately, byte-identical to the old
         // unconditional `exit 0`) — proves `stopSessionWithRetry` (WE #3479, found live 2026-09-04) actually
@@ -62,6 +67,7 @@ export function installReaperCliHarness() {
         '      echo "stub: transient claude-stop failure, attempt $n" >&2',
         '      exit 7',
         '    fi',
+        '    : > "$STUB_STOP_COUNT_DIR/stop-succeeded"',
         '    exit 0 ;;',
         'esac',
       ].join('\n') + '\n',
@@ -106,13 +112,13 @@ export function installReaperCliHarness() {
   });
 }
 
-/** Run the REAL `session-reaper.mjs` CLI in a child whose `PATH` holds only the stub `claude`/`gh`. */
-export function runReaperCli(args = [], { agents = '[]', env = {} } = {}) {
-  return execFileSync(process.execPath, [REAPER_CLI, ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: EXEC_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
+/** The child's argv and env, shared by {@link runReaperCli} and {@link spawnReaperCli}. */
+function reaperInvocation(args, agents, env) {
+  // `--confirm-wait-ms=0` unless the test says otherwise: the reaper waits 5 s before its confirming re-read (#3744), and a
+  // test must never sleep for real. The stub `claude` answers instantly, so the wait buys nothing here.
+  const argv = args.some((a) => a.startsWith('--confirm-wait-ms')) ? args : ['--confirm-wait-ms=0', ...args];
+  return {
+    argv: [REAPER_CLI, ...argv],
     env: {
       HOME: process.env.HOME,
       PATH: binDir,
@@ -123,8 +129,33 @@ export function runReaperCli(args = [], { agents = '[]', env = {} } = {}) {
       OPERATION_RUNS_DIR: runsDir,
       ...env,
     },
+  };
+}
+
+/** Run the REAL `session-reaper.mjs` CLI in a child whose `PATH` holds only the stub `claude`/`gh`. Returns stdout; throws on a
+ *  non-zero exit (with `e.stderr` / `e.stdout` / `e.status`). */
+export function runReaperCli(args = [], { agents = '[]', env = {} } = {}) {
+  const inv = reaperInvocation(args, agents, env);
+  return execFileSync(process.execPath, inv.argv, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: EXEC_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+    env: inv.env,
   });
 }
+
+/** Same child, but never throws and always returns `{ stdout, stderr, status }` — for a test that reads the summary line on stderr
+ *  of a run that exits 0 (`execFileSync` returns stdout only on success). */
+export function spawnReaperCli(args = [], { agents = '[]', env = {} } = {}) {
+  const inv = reaperInvocation(args, agents, env);
+  const r = spawnSync(process.execPath, inv.argv, { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS, killSignal: 'SIGKILL', env: inv.env });
+  return { stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''), status: r.status };
+}
+
+/** A pid no process holds (max int32 − 1), so `kill(pid, 0)` says ESRCH and the row reaps as `pid-dead` — the fixture for a
+ *  LIVE (`working`) row the reaper stops. A terminal (`done`) row is NOT a live row: the reaper no longer calls stop on it (#3744). */
+export const DEAD_PID = 2147483646;
 
 /** A throwaway backlog dir holding exactly the item cards a test needs, for `WE_BACKLOG_DIR`. */
 export function makeBacklogDir(items) {

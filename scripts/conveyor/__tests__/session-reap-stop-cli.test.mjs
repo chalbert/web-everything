@@ -9,24 +9,25 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
-import { EXEC_TIMEOUT_MS, argvFile, binDir, installReaperCliHarness, makeBacklogDir, runReaperCli } from './helpers/session-reaper-cli-harness.mjs';
+import { DEAD_PID, EXEC_TIMEOUT_MS, argvFile, binDir, installReaperCliHarness, makeBacklogDir, runReaperCli, spawnReaperCli } from './helpers/session-reaper-cli-harness.mjs';
 
 installReaperCliHarness();
 
 describe('the stop loop retries a transient `claude stop` failure — WE #3479, found live 2026-09-04', () => {
   it('recovers within the retry budget: 2 transient failures then success ⇒ clean pass, 3 real `stop` calls', () => {
-    const agents = JSON.stringify([{ id: 'flaky01', sessionId: 'flaky-01-full-uuid', kind: 'background', state: 'done', name: 'conveyor-1' }]);
-    const out = runReaperCli(['--json'], { agents, env: { STUB_STOP_FAIL_TIMES: '2' } });
+    const agents = JSON.stringify([{ id: 'flaky01', sessionId: 'flaky-01-full-uuid', kind: 'background', state: 'working', pid: DEAD_PID, name: 'conveyor-1' }]);
+    const out = runReaperCli(['--json'], { agents, env: { STUB_STOP_FAIL_TIMES: '2', STUB_AGENTS_AFTER_STOP: '[]' } });
     const report = JSON.parse(out);
-    // Recovered — counts as a real stop, no failure at all, despite two underlying `claude stop` errors.
-    expect(report.stopped).toBe(1);
+    // Recovered — counts as a real (confirmed) stop, no failure at all, despite two underlying `claude stop` errors.
+    expect(report.confirmed).toBe(1);
     expect(report.failures).toBe(0);
     const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
-    expect(calls).toEqual(['agents --json --all', 'stop flaky01', 'stop flaky01', 'stop flaky01']);
+    // The last `agents` call is the #3744 confirming re-read, after the one stop that finally succeeded.
+    expect(calls).toEqual(['agents --json --all', 'stop flaky01', 'stop flaky01', 'stop flaky01', 'agents --json --all']);
   }, EXEC_TIMEOUT_MS);
 
   it('a failure that never clears is still a real failure after exhausting the retry budget — bounded, not silent', () => {
-    const agents = JSON.stringify([{ id: 'stuck01', sessionId: 'stuck-01-full-uuid', kind: 'background', state: 'done', name: 'conveyor-2' }]);
+    const agents = JSON.stringify([{ id: 'stuck01', sessionId: 'stuck-01-full-uuid', kind: 'background', state: 'working', pid: DEAD_PID, name: 'conveyor-2' }]);
     let stderr = '';
     let status = 0;
     try {
@@ -45,6 +46,75 @@ describe('the stop loop retries a transient `claude stop` failure — WE #3479, 
     // Exactly 3 attempts — the retry budget bounds it, it never spins forever on a truly stuck candidate.
     const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
     expect(calls).toEqual(['agents --json --all', 'stop stuck01', 'stop stuck01', 'stop stuck01']);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('#3744 — a stop is only reported done when the re-read registry bears it out, through the REAL CLI', () => {
+  /** The stub `claude` succeeds every `stop`; the listing either never changes (lagging) or, with `STUB_AGENTS_AFTER_STOP`, catches up. */
+  const run = (args, opts) => {
+    const r = spawnReaperCli(args, opts);
+    return { out: r.stdout, stderr: r.stderr, status: r.status };
+  };
+
+  it('a LAGGING listing reports the session UNCONFIRMED, not stopped — after 2 bounded retries', () => {
+    const agents = JSON.stringify([{ id: 'lag01', sessionId: 'lag-01-full-uuid', kind: 'background', state: 'working', pid: DEAD_PID, name: 'conveyor-1' }]);
+    const { out } = run(['--json'], { agents });
+    const report = JSON.parse(out);
+    expect(report).toMatchObject({ confirmed: 0, unconfirmed: 1, unconfirmedIds: ['lag01'], alreadyTerminal: 0, failures: 0 });
+    expect(report.collected).toMatchObject([{ id: 'lag01', confirmed: false }]);
+    // 1 stop + 2 retries, each followed by a registry re-read — bounded, never a 4th stop.
+    const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
+    expect(calls).toEqual(['agents --json --all', 'stop lag01', 'agents --json --all', 'stop lag01', 'agents --json --all', 'stop lag01', 'agents --json --all']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('a registry that catches up confirms the stop after ONE re-read', () => {
+    const agents = JSON.stringify([{ id: 'ok01', sessionId: 'ok-01-full-uuid', kind: 'background', state: 'working', pid: DEAD_PID, name: 'conveyor-1' }]);
+    const { out } = run(['--json'], { agents, env: { STUB_AGENTS_AFTER_STOP: JSON.stringify([{ id: 'ok01', sessionId: 'ok-01-full-uuid', kind: 'background', state: 'stopped' }]) } });
+    expect(JSON.parse(out)).toMatchObject({ confirmed: 1, unconfirmed: 0, unconfirmedIds: [] });
+    expect(readFileSync(argvFile, 'utf8').trim().split('\n')).toEqual(['agents --json --all', 'stop ok01', 'agents --json --all']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('a 700-row listing makes `claude stop` calls ONLY for the live rows', () => {
+    const rows = [
+      ...Array.from({ length: 500 }, (_, i) => ({ id: `d${i}`, sessionId: `d${i}-uuid`, kind: 'background', state: 'done' })),
+      ...Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, sessionId: `s${i}-uuid`, kind: 'background', state: 'stopped' })),
+      ...Array.from({ length: 90 }, (_, i) => ({ id: `f${i}`, sessionId: `f${i}-uuid`, kind: 'background', state: 'failed' })),
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `w${i}`, sessionId: `w${i}-uuid`, kind: 'background', state: 'working', pid: DEAD_PID })),
+      ...Array.from({ length: 2 }, (_, i) => ({ id: `k${i}`, sessionId: `k${i}-uuid`, kind: 'background', state: 'working' })),
+    ];
+    expect(rows).toHaveLength(700);
+    const { stderr } = run([], { agents: JSON.stringify(rows), env: { STUB_AGENTS_AFTER_STOP: '[]' } });
+    const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
+    const stops = calls.filter((c) => c.startsWith('stop '));
+    expect(stops).toEqual(Array.from({ length: 8 }, (_, i) => `stop w${i}`));
+    // The summary line separates the four counts (#3744): 8 confirmed, 0 unconfirmed, 690 already-terminal, 2 kept.
+    expect(stderr).toMatch(/700 session\(s\) listed · 8 confirmed, 0 unconfirmed, 690 already-terminal, 2 kept/);
+  }, EXEC_TIMEOUT_MS);
+
+  it('the summary line carries the four separate counts and names the unconfirmed ids on one line', () => {
+    const agents = JSON.stringify([
+      { id: 'done1', sessionId: 'done-1-uuid', kind: 'background', state: 'done' },
+      { id: 'stop1', sessionId: 'stop-1-uuid', kind: 'background', state: 'stopped' },
+      { id: 'lag01', sessionId: 'lag-01-uuid', kind: 'background', state: 'working', pid: DEAD_PID },
+      { id: 'live1', sessionId: 'live-1-uuid', kind: 'background', state: 'working' },
+    ]);
+    const { stderr } = run([], { agents });
+    expect(stderr).toMatch(/4 session\(s\) listed · 0 confirmed, 1 unconfirmed, 2 already-terminal, 1 kept/);
+    expect(stderr).toMatch(/unconfirmed after 2 retries \(still listed non-terminal\): lag01\n/);
+    // Only the live row was ever stopped.
+    expect(readFileSync(argvFile, 'utf8')).not.toMatch(/stop (done1|stop1)/);
+  }, EXEC_TIMEOUT_MS);
+
+  it('an unconfirmed stop is not a failure: exit 0 (the next tick sees the row again)', () => {
+    const agents = JSON.stringify([{ id: 'lag01', sessionId: 'lag-01-uuid', kind: 'background', state: 'working', pid: DEAD_PID }]);
+    expect(run(['--json'], { agents }).status).toBe(0);
+  }, EXEC_TIMEOUT_MS);
+
+  it('`--confirm-wait-ms` is honoured: a bare run with only finished rows makes no stop call and no second listing', () => {
+    const agents = JSON.stringify([{ id: 'done1', sessionId: 'done-1-uuid', kind: 'background', state: 'done' }]);
+    const { out } = run(['--json', '--confirm-wait-ms=0'], { agents });
+    expect(JSON.parse(out)).toMatchObject({ confirmed: 0, unconfirmed: 0, alreadyTerminal: 1 });
+    expect(readFileSync(argvFile, 'utf8').trim()).toBe('agents --json --all');
   }, EXEC_TIMEOUT_MS);
 });
 

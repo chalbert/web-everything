@@ -86,9 +86,10 @@ describe('the ground-truth axis, end to end through the real CLI wiring — the 
   it('a real (non-dry-run) pass ground-truth-reaps AND actually calls `claude stop <id>` (the SHORT form)', () => {
     backlogDir = makeBacklogDir({ 3451: 'resolved' });
     const agents = JSON.stringify([{ id: 'blocked1', sessionId: 'blocked-1-full-uuid', kind: 'background', state: 'blocked', name: 'conveyor-3451' }]);
-    runReaperCli([], { agents, env: { WE_BACKLOG_DIR: backlogDir } });
+    // `STUB_AGENTS_AFTER_STOP`: the registry catches up, so the #3744 confirming re-read is the trailing `agents` call.
+    runReaperCli([], { agents, env: { WE_BACKLOG_DIR: backlogDir, STUB_AGENTS_AFTER_STOP: '[]' } });
     const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
-    expect(calls).toEqual(['agents --json --all', 'stop blocked1']);
+    expect(calls).toEqual(['agents --json --all', 'stop blocked1', 'agents --json --all']);
   }, EXEC_TIMEOUT_MS);
 });
 
@@ -159,9 +160,10 @@ describe('the ground-truth axis, end to end through the real CLI wiring — the 
   it('a real (non-dry-run) pass ground-truth-reaps AND actually calls `claude stop <id>` (the SHORT form)', () => {
     backlogDir = makeBacklogDir({ 3451: 'resolved' });
     const agents = JSON.stringify([{ id: 'blocked1', sessionId: 'blocked-1-full-uuid', kind: 'background', state: 'blocked', name: 'conveyor-3451' }]);
-    runReaperCli([], { agents, env: { WE_BACKLOG_DIR: backlogDir } });
+    // `STUB_AGENTS_AFTER_STOP`: the registry catches up, so the #3744 confirming re-read is the trailing `agents` call.
+    runReaperCli([], { agents, env: { WE_BACKLOG_DIR: backlogDir, STUB_AGENTS_AFTER_STOP: '[]' } });
     const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
-    expect(calls).toEqual(['agents --json --all', 'stop blocked1']);
+    expect(calls).toEqual(['agents --json --all', 'stop blocked1', 'agents --json --all']);
   }, EXEC_TIMEOUT_MS);
 });
 
@@ -219,11 +221,11 @@ describe('repo-less PR session names — review-148 is plateau-app#148 (merged),
     expect(prViews).toEqual(['pr view 148 --repo chalbert/plateau-app --json state,mergedAt']);
   }, EXEC_TIMEOUT_MS);
 
-  it('`--dry-run --json` keeps its shape: the same top-level keys and `wouldStop` entry keys as before this change', () => {
+  it('`--dry-run --json` keeps its shape: pinned top-level keys (the #3744 counts replace `stopped`) and the `wouldStop` entry keys', () => {
     const report = JSON.parse(run({ STUB_GH_PR_148: MERGED }));
-    expect(Object.keys(report)).toEqual(['scanned', 'stopped', 'alreadyGone', 'cleared', 'failures', 'anomalies', 'wouldStop', 'kept', 'attention']);
+    expect(Object.keys(report)).toEqual(['scanned', 'confirmed', 'unconfirmed', 'unconfirmedIds', 'alreadyTerminal', 'alreadyGone', 'cleared', 'failures', 'anomalies', 'wouldStop', 'kept', 'attention']);
     expect(Object.keys(report.wouldStop[0])).toEqual(['id', 'sessionId', 'name', 'reason']);
-    expect(report).toMatchObject({ scanned: 1, stopped: 0, failures: 0, anomalies: 0, kept: 0, attention: [] });
+    expect(report).toMatchObject({ scanned: 1, confirmed: 0, unconfirmed: 0, alreadyTerminal: 0, failures: 0, anomalies: 0, kept: 0, attention: [] });
   }, EXEC_TIMEOUT_MS);
 
   it('is deterministic: two identical passes print byte-identical reports', () => {
@@ -232,8 +234,8 @@ describe('repo-less PR session names — review-148 is plateau-app#148 (merged),
   }, EXEC_TIMEOUT_MS);
 
   it('a real (non-dry-run) pass stops the unambiguous one with the SHORT id, and never touches an ambiguous one', () => {
-    run({ STUB_GH_PR_148_WE: MERGED, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }, { args: [] });
-    expect(readFileSync(argvFile, 'utf8').trim().split('\n')).toEqual(['agents --json --all', 'stop 9eff9f54']);
+    run({ STUB_GH_PR_148_WE: MERGED, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }, { args: [], env: { STUB_AGENTS_AFTER_STOP: '[]' } });
+    expect(readFileSync(argvFile, 'utf8').trim().split('\n')).toEqual(['agents --json --all', 'stop 9eff9f54', 'agents --json --all']);
     rmSync(argvFile);
     run({ STUB_GH_PR_148_WE: OPEN, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }, { args: [] });
     expect(readFileSync(argvFile, 'utf8').trim().split('\n')).toEqual(['agents --json --all']);
