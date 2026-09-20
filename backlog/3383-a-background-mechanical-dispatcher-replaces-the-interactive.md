@@ -3732,3 +3732,11 @@ Operator ask (2026-09-19): `/wip`'s Doing section must always list every live ag
 **Dispatch-time record added.** `inFlight()` now accepts an optional plain-JSON `dispatch` field that the executor persists on the effect entry, and `createDispatchSinks` records `{supervisorModel (from --model in extraArgs), launchKind, route, executor: null}`. The executor stays `null` at dispatch on purpose: the mechanical build provider resolves its delivery agent internally and returns only a handle, so re-reading the marker at the sink would duplicate routing. The reader prefers a dispatch record when present and falls back to the transcript.
 
 **Open.** (1) `gemini-direct-task.mjs` exists on main but not on this branch (316 commits behind); it drives `agy`, has no default model pin, so a Gemini delegation without `--model` prints `Gemini (unknown)`. No Antigravity-named direct-task script exists, so that label is not emitted yet. (2) The `/wip` prompt still needs the replacement paragraph (proposal is in the job result file); the classifier blocks editing `~/.claude/commands/wip.md` from a background job. (3) Neighbouring slice x8i6rsg (decisions in flight for `/wip` and `/status`, PR #2340) should share this one declared operation rather than build a second one.
+
+## Session update (2026-09-20) — fold #2220 (host-process identity telemetry) into the prototype branch
+
+Folded PR #2220 (`lane/3383-host-process-granularity`, "per-process host samples keep real identity instead of vscode/chrome/other") directly into `lane/mechanical-dispatcher` per the 2026-09-19 operator rule: prototype work commits straight to the branch with no PR of its own, and an independent review decides whether it is good. #2220 already carried an independent `review:accepted` verdict.
+
+- Merge was clean (`--no-ff`, no conflicts). Touched: `scripts/operations/{host-process-sample,telemetry,telemetry-cli,command-redact}.mjs` (+ their tests) and `skills-src/conveyor/runner.mjs`.
+- Vitest over `scripts/operations/__tests__`, `scripts/conveyor/__tests__`, `skills-src/conveyor/__tests__`, and the gate-config / gate-invariants tests: 146 files, 4711 tests, all passing.
+- No code changes beyond the merge itself. PR #2220 closed with a pointer to the fold commit.
