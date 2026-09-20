@@ -335,3 +335,9 @@ prFileContract({
   reader: 'defaultListParkedPrs', run: 'watchNeglectedPrs',
   fields: 'number,headRefName,labels', progress: true,
 });
+
+it('keeps sibling review history separate from WE', () => {
+  const agents = [{ name: 'fix-pa-49' }];
+  expect(everDispatchedReviewOrFix({ pr: 49, agents })).toBe(false);
+  expect(everDispatchedReviewOrFix({ pr: 49, agents, repo: 'plateau-app' })).toBe(true);
+});

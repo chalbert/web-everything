@@ -2591,3 +2591,8 @@ describe('#3637 — deliveryTarget resolves to the brief\'s {{DELIVERY_BASE}}', 
     expect(BRIEF_VALUE_RE.test('lane/mechanical-dispatcher')).toBe(true);
   });
 });
+
+it('tags sibling PR dispatches', () => {
+  expect(sessionSlugFor(3, 'fix', 49, '', 'frontierui')).toBe('fix-fui-49');
+  expect(sessionSlugFor(3, 'ci-heal', 49, '', 'plateau-app')).toBe('ci-heal-pa-49');
+});

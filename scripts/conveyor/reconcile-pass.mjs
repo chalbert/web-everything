@@ -42,6 +42,7 @@
  * cannot corrupt anything, and a lease taken inside a one-shot read is a lease nothing releases when the process
  * is killed.
  */
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
@@ -235,9 +236,11 @@ export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
   now = Date.now(), repo = null,
 } = {}) {
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
   const prs = readPrs({ repo });
   const agents = enrich(readAgents({}));
-  const plan = planReconcile({ prs, agents, durableCounts: durableCountsFrom(prs), now });
+  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now });
   return { ...plan, prs: prs.length, agents: agents.length };
 }
 

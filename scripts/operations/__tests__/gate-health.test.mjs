@@ -16,7 +16,7 @@ import {
   assessCriteria, censor, clusterEffectiveN, requiredNPerGroup, zForAlpha, SIZE_BANDS,
 } from '../../lib/gate-health.mjs';
 import { joinHistory, hotFileCut, HOT_FILE_MIN, createHistoryReader } from '../gate-health-io.mjs';
-import { gateHealthOperation, GATE_HEALTH_OP, clampLimit, shapeHistoryFinding } from '../gate-health.mjs';
+import { gateHealthOperation, GATE_HEALTH_REPOS, GATE_HEALTH_OP, clampLimit, shapeHistoryFinding } from '../gate-health.mjs';
 import { OPERATIONS } from '../run.mjs';
 
 const NOW = 1_800_000_000;
@@ -724,4 +724,12 @@ describe('the declaration', () => {
       expect(run.findings.assess.verdict.blockers.join(' ')).not.toMatch(/unsizeable effect/);
     });
   });
+});
+
+it('gate-health accepts exactly the shared constellation slugs', async () => {
+  const { CONSTELLATION_REPOS } = await import('../../lib/constellation-repos.mjs');
+  expect(GATE_HEALTH_REPOS).toEqual(Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug));
+  const reader = createHistoryReader({ classify: classifyFollowUp });
+  expect(() => reader({ repo: CONSTELLATION_REPOS.frontierui.slug }))
+    .toThrow(`bound to ${CONSTELLATION_REPOS.we.slug}`);
 });

@@ -38,6 +38,7 @@
  *   gate can be layered on top of the persisted history later, once there is an actual trend to gate on.
  */
 
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import {
   existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync, statSync, unlinkSync,
 } from 'node:fs';
@@ -201,9 +202,12 @@ export function ciQueueHistoryPath(root = CI_QUEUE_ROOT) {
 
 /** The canonical sidecar path every consumer resolves to — `CONVEYOR_CI_QUEUE_FILE` override wins, else
  *  script-location (never CWD, so writer and readers can't diverge). */
-export function resolveCiQueueHistoryPath() {
+export function resolveCiQueueHistoryPath(repo = null) {
   const env = process.env.CONVEYOR_CI_QUEUE_FILE;
-  return env && env.trim() ? env.trim() : ciQueueHistoryPath();
+  const path = env && env.trim() ? env.trim() : ciQueueHistoryPath();
+  const key = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (!key) throw new Error(`unsupported-repo: ${repo} is not a constellation repo`);
+  return key === 'we' ? path : path.replace(/(\.json)?$/, `-${key}$1`);
 }
 
 /** Read + parse the sidecar → the sample array (empty on a missing/corrupt file). */
@@ -284,7 +288,7 @@ export function withHistoryLock(path, fn, { staleMs = DEFAULT_HISTORY_LOCK_STALE
  */
 export function sweepCiQueue({
   repo = null, limit = DEFAULT_SAMPLE_LIMIT, listRuns = defaultListRuns,
-  historyPath = resolveCiQueueHistoryPath(), now = () => new Date().toISOString(),
+  historyPath = resolveCiQueueHistoryPath(repo), now = () => new Date().toISOString(),
   watchThresholdSec = DEFAULT_WATCH_THRESHOLD_SEC, blockedThresholdSec = DEFAULT_BLOCKED_THRESHOLD_SEC,
   maxEntries = DEFAULT_MAX_HISTORY, persist = true,
 } = {}) {
@@ -333,7 +337,7 @@ async function main(argv) {
   const flags = parseFlags(verbRaw && !verbRaw.startsWith('--') ? rest : argv);
   const repo = typeof flags.repo === 'string' && flags.repo ? flags.repo : null;
   const asJson = !!flags.json;
-  const historyPath = resolveCiQueueHistoryPath();
+  const historyPath = resolveCiQueueHistoryPath(repo);
 
   if (verb === 'check') {
     const history = readHistory(historyPath);

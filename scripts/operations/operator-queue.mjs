@@ -25,7 +25,8 @@ import {
   ADVISORY_LABELS, ADVISORY_OUTCOMES, advisoryCoversHead, latestAdvisory,
 } from '../lib/advisory-labels.mjs';
 
-const DEFAULT_REPOS = ['chalbert/web-everything', 'chalbert/frontierui', 'chalbert/plateau-app'];
+import { CONSTELLATION_REPOS, repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { readUnsupported } from '../conveyor/unsupported-repo.mjs';
 const hasLabel = (pr, name) => (pr.labels ?? []).some((label) => label.name === name);
 
 /** How many times an UNKNOWN mergeability is re-polled, and the first backoff (doubling each attempt). */
@@ -115,10 +116,13 @@ export function pollMergeable({
   return mergeable;
 }
 
-export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDelayMs } = {}) {
+export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDelayMs, unsupportedPath } = {}) {
   const requested = args.filter((arg) => arg.startsWith('--repo=')).map((arg) => arg.slice(7));
-  const report = { ready: [], pending: [], notReady: [], errors: [] };
-  for (const repo of requested.length ? requested : DEFAULT_REPOS) {
+  const unsupported = readUnsupported({ path: unsupportedPath }).filter(
+    (row) => !requested.length || requested.some((repo) => repoKeyForSlug(repo) === row.repo),
+  );
+  const report = { ready: [], pending: [], notReady: [], errors: [], unsupported };
+  for (const repo of requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug)) {
     try {
       const prs = JSON.parse(execFileSync('gh', [
         'pr', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json',
@@ -153,6 +157,8 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
     console.log(report.ready.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}`).join('\n') || '(none)');
     console.log('PENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):');
     console.log(report.pending.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}`).join('\n') || '(none)');
+    console.log('UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:');
+    console.log(report.unsupported.map((row) => `${row.repo}#${row.prNumber}  ${row.action}  ${row.why}`).join('\n') || '(none)');
     console.log('NOT READY — agent work (review:human but gates fail):');
     console.log(report.notReady.map((pr) => `${pr.repo}#${pr.number}  ${pr.reasons.join('; ')}`).join('\n') || '(none)');
   }

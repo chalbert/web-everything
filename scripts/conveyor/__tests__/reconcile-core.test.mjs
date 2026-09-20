@@ -591,3 +591,13 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates(undefined, undefined)).toEqual([]);
   });
 });
+
+it('binds names only for the invocation repo', () => {
+  const agents = ['review-49', 'review-fui-49', 'fix-fui-49', 'review-pa-49'].map((name) => ({ name }));
+  expect(bindAgents({ number: 49 }, agents, 'frontierui').map((b) => b.agent.name)).toEqual(['review-fui-49', 'fix-fui-49']);
+  expect(bindAgents({ number: 49 }, agents).map((b) => b.agent.name)).toEqual(['review-49']);
+  const pr = pr1563({ number: 49 });
+  const live = [{ name: 'review-fui-49', pidAlive: true, pid: 1 }];
+  expect(planReconcile({ prs: [pr], agents: live, repo: 'frontierui' }).refusals.some((r) => r.kind === 'live-process')).toBe(true);
+  expect(planReconcile({ prs: [pr], agents: live }).dispatch).toHaveLength(1);
+});
