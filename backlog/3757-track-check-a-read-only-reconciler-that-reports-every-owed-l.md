@@ -1,9 +1,10 @@
 ---
+bornAs: xv9vans
 kind: story
 size: 5
 parent: "3740"
 status: open
-blockedBy: ["x6549sd", "xkbcdq0"]
+blockedBy: ["3746", "3753"]
 scope: ["we:scripts/track-check.mjs", "we:scripts/lib/track-reconcile.mjs", "we:scripts/__tests__/track-reconcile.test.mjs"]
 dateOpened: "2026-09-20"
 tags: []

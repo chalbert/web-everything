@@ -1,9 +1,10 @@
 ---
+bornAs: xh9gzqw
 kind: story
 size: 5
 parent: "3740"
 status: open
-blockedBy: ["xa5m4cy"]
+blockedBy: ["3758"]
 scope: ["we:scripts/operations/track-ledger.mjs", "we:scripts/operations/track-io.mjs", "we:scripts/operations/__tests__/track-ledger.test.mjs"]
 dateOpened: "2026-09-20"
 tags: []

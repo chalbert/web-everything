@@ -1,9 +1,10 @@
 ---
+bornAs: x86pcnf
 kind: story
 size: 5
 parent: "3740"
 status: open
-blockedBy: ["xa5m4cy", "x6549sd", "xkbcdq0"]
+blockedBy: ["3758", "3746", "3753"]
 scope: ["we:scripts/operations/track-source-handoff.mjs", "we:scripts/operations/__tests__/track-source-handoff.test.mjs", "we:.claude/commands/handoff.md", "we:.claude/commands/continue.md"]
 dateOpened: "2026-09-20"
 tags: []

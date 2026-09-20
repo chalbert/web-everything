@@ -1,9 +1,10 @@
 ---
+bornAs: xtw95zt
 kind: story
 size: 5
 parent: "3740"
 status: open
-blockedBy: ["xa5m4cy", "x6549sd", "xkbcdq0"]
+blockedBy: ["3758", "3746", "3753"]
 scope: ["we:scripts/operations/track-source-records.mjs", "we:scripts/operations/__tests__/track-source-records.test.mjs", "we:skills-src/harvest-learnings/SKILL.md", "we:scripts/converge-cli.mjs"]
 dateOpened: "2026-09-20"
 tags: []

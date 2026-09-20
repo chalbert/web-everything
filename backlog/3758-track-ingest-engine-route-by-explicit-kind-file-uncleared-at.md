@@ -1,9 +1,10 @@
 ---
+bornAs: xa5m4cy
 kind: story
 size: 5
 parent: "3740"
 status: open
-blockedBy: ["x6549sd", "xkbcdq0", "xv9vans"]
+blockedBy: ["3746", "3753", "3757"]
 scope: ["we:scripts/operations/track.mjs", "we:scripts/operations/track-io.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/track.test.mjs", "we:skills-src/track/SKILL.md"]
 dateOpened: "2026-09-20"
 tags: []

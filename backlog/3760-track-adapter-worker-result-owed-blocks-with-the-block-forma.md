@@ -1,9 +1,10 @@
 ---
+bornAs: xexl655
 kind: story
 size: 5
 parent: "3740"
 status: open
-blockedBy: ["xa5m4cy", "x6549sd", "xkbcdq0"]
+blockedBy: ["3758", "3746", "3753"]
 scope: ["we:scripts/operations/track-source-owed.mjs", "we:scripts/operations/__tests__/track-source-owed.test.mjs", "we:skills-src/conveyor/delivery-agent-brief.md", "we:skills-src/conveyor/delivery-agent-brief-v2.md"]
 dateOpened: "2026-09-20"
 tags: []
