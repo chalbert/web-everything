@@ -9,7 +9,7 @@ tags: []
 
 # Mechanise the orchestrator turn: one derived state read, one set of operations, shared by sessions and the runner
 
-Umbrella for turning the per-turn checks a live session re-derives by hand (what landed, what is owed, what needs the operator, stale labels, finished sessions, lane capacity, job records, handoff) into declared operations that the session, the runner and a completion trigger all call. Slice 1 is the completion trigger; slices 2-11 close the cheap gaps and take three model judgments (provider choice, docket refresh, which decisions matter) off the session; one decision rules whether session and runner are one system.
+Umbrella for turning the per-turn checks a live session re-derives by hand (what landed, what is owed, what needs the operator, stale labels, finished sessions, lane capacity, job records, handoff) into declared operations that the session, the runner and a completion trigger all call. Slice 1 is the completion trigger; slices 2-12 close the cheap gaps (including a failing drain-clone refresh) and take three model judgments (provider choice, docket refresh, which decisions matter) off the session; one decision rules whether session and runner are one system.
 
 **The operator's ask (2026-09-19 19:00):** "explore using hooks better to mechanise most of the turn checks — what landed, what is next, review, conflicts — and eventually the underlying system of this session should be compatible with the runner, and both could add work and handle stuff in the exact same way." Priority added at 19:05: "queuing next work mechanically as others land" ships first.
 
@@ -68,7 +68,8 @@ Each is model judgment today that should not be: the model decides whether to de
 9. **#xcqg649** — the turn-digest operation.
 10. **#xf02nzj** — deliver the digest by hook, and derive the handoff (blocked by #xcqg649).
 11. **#x8i6rsg** — decisions bearing on the work in flight, printed by `/wip` and `/status`.
-12. **#xaypr56** — the decision: one system or two? Independent of the slices; it shapes how far slices 9 to 11 and the runner's own loop are simplified afterwards.
+12. **#xrhnxmu** — repair the drain daemon's failing clone refresh and make repeated failure an alert. **Urgent regardless of order, and a precondition for using the drain as a landing-event source (slice 1, shape a):** the daemon is 47 commits behind and has been deciding on a stale checkout.
+13. **#xaypr56** — the decision: one system or two? Independent of the slices; it shapes how far slices 9 to 11 and the runner's own loop are simplified afterwards.
 
 Corrections to the brief's guess that items 7 and 8 are the two cheapest wins: **7 is cheap** but is an extension of an existing module, not new work, and the real cost is verifying that review and fix agents report `done` on every exit. **8 is not the cheapest**: it needs a new operation, because `dispatch-lane` has no generic "run this brief file" kind. Cheaper than 8 are #xeaxqvw and #xmgv6bx (small, well-located changes).
 
@@ -76,9 +77,12 @@ Corrections to the brief's guess that items 7 and 8 are the two cheapest wins: *
 
 #3070 (open decision) is choosing what unattended thing calls `advance` on parked operation runs; its in-session lean is a dedicated `StartInterval` job. Slice 1 (#x994927) is also a completion-triggered caller. They are different operations (`wake` versus `land-advance`) but they compete for the same "one unattended caller" slot, and #3070's Fork 1 default-rejected the drain as a caller. Rule #3070 with slice 1 in view before wiring any trigger that is not a session hook or the runner tick.
 
+**The drain is available, not blocked.** The drain daemon is running and already observes every landing it makes. What stands between it and being a trigger is a policy choice the operator can revisit, not a technical barrier: its README's "no agent spawning" non-goal, and the cross-repo boundary. If the answer is no, the trigger needs another home. Slice 1 states the two shapes: **(a)** the drain emits a landing event and something else consumes it (keeps the non-goal, recommended unless the operator says otherwise), or **(b)** the drain calls `land-advance` directly (needs the non-goal relaxed).
+
 ## Flags for the operator
 
 - **Nothing here may become an unattended runner by the back door.** The runner is stopped but not machine-readably paused; the landing operation defaults to plan-only and needs an explicit opt-in to dispatch (details in #x994927).
+- **The drain daemon has been running on a stale, corrupt clone** (#xrhnxmu): its refresh failed on 167 of 215 passes on 2026-09-19 and it is 47 commits behind `main`. The cause is a corrupt commit-graph, not SSH (SSH reads work). The repair is an operator action on the daemon's own clone; it was not done here.
 - Slice 10 edits the harness-wide `we:.claude/settings.json`; slice 1 also adds a `Stop` hook there. Both need the operator's explicit review of the settings diff.
 - #x1ojdxq turns the graduation model in #3690 (still an open decision) into a dispatch gate; ratify #3690 if the operator's stated intent is the ruling.
 - #x8i6rsg found that the deployed `/wip` command is ahead of the tracked one (32 lines the source lacks) and that neither copy mentions the operator queue. Reconcile before any redeploy.
