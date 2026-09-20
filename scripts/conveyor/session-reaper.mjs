@@ -136,6 +136,18 @@
  * describes. `--no-clear-stuck` is the same kind of rollback/A-B escape hatch `--no-ground-truth` already is
  * for the axis above, for the same reason.
  *
+ * THE VERDICT AXIS (#3383 tracker item 11, 2026-09-20 — "blocked should be mechanically handled"). Three sessions
+ * (`unstick-2072`, `fold-2220`, the old `fix-2347`) read `state: blocked, status: idle, waitingFor: null` with a live pid
+ * AND a finished `~/workspace/.operations/jobs/<name>.result.md`: done, sitting at the prompt, never reaped. The
+ * pure classifier `session-verdicts.mjs#classifySession` now decides, from injected ground truth, whether a live
+ * non-terminal row is `finished-unreaped` (result file / completion record / a new review verdict on its PR, all
+ * NEWER than the session's start) or `target-moved-on`, and this reaper reaps on both — through the classifier, not a
+ * second rule. It ADDS to every rule above and never widens them: the `kind` guard, the terminal-state and `pid-dead`
+ * axes still come first, and `--dry-run` / `--no-ground-truth` / `--no-clear-stuck` behave as before. `--no-verdicts`
+ * is the rollback for this axis alone. `stalled` / `waiting-permission` rows are never stopped here (this file only
+ * stops sessions whose work is done); they are reported as `attention` so land-advance can redispatch or escalate.
+ * THIS REAPER REMAINS THE ONLY STOPPER — nothing hand-runs `claude stop`.
+ *
  * WHY `id`, NOT `sessionId` — the near-universal `claude stop` FAILURE `we:backlog/3435-*.md`'s "Found live"
  * finding 3 recorded (all five sessions, including `conveyor-3421b`, came back "No job matching" on `claude
  * stop <sessionId>`) was read at the time as a CLI/registry-staleness limitation, the same family as the
@@ -183,6 +195,11 @@ import { createRegistry } from '../operations/registry.mjs';
 import { createFileRunStore, newRunId } from '../operations/run-store.mjs';
 import { CLEAR_STUCK_SESSION_OP, clearStuckSessionOperation } from '../operations/clear-stuck-session.mjs';
 import { createClearStuckSessionReader, createClearStuckSessionSinks } from '../operations/clear-stuck-session-io.mjs';
+// #3383 item 11 — the pure verdict classifier, its evidence resolver and the follow-up ledger reader: REUSED, none
+// re-derived (the resolver lives apart from this file so land-advance-io can share it without an import cycle).
+import { classifySession, DEFAULT_STALL_MINUTES } from './session-verdicts.mjs';
+import { makeEvidenceResolver, prSignalFromGh } from './session-verdicts-io.mjs';
+import { readFollowUps } from '../operations/land-advance-io.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -279,20 +296,51 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor) {
 }
 
 /**
- * Map {@link classifySessionReapWithGroundTruth} over a full `claude agents --json` listing. Passing no
- * `groundTruthFor` (the default) makes this byte-identical to mapping {@link classifySessionReap} alone —
+ * {@link classifySessionReap}'s verdict, extended by the {@link classifySession} VERDICT AXIS (see the file header):
+ * a live, non-terminal row is reaped when the classifier says `finished-unreaped` or `target-moved-on` — the latter
+ * from the SAME injected `groundTruthFor` resolver, so the ground-truth answer is asked once, not re-derived. The
+ * result carries `verdict`/`action`/`why` so a caller can report the rows it kept (`stalled`, `waiting-permission`).
+ * Every existing reason string is preserved (`ground-truth-<kind>:<evidence>` for a moved-on target).
+ *
+ * Without `evidenceFor` this is byte-identical to {@link classifySessionReapWithGroundTruth}.
+ *
+ * @param {object|null} session - carrying `pidAlive`, as resolved by the IO shell.
+ * @param {{groundTruthFor?:Function|null, evidenceFor?:((session:object)=>object)|null, now?:number, stallMinutes?:number}} [opts]
+ * @returns {{reap:boolean, reason:string, verdict?:string, action?:string, why?:string}}
+ */
+export function classifySessionReapWithVerdict(session, { groundTruthFor = null, evidenceFor = null, now, stallMinutes = DEFAULT_STALL_MINUTES } = {}) {
+  if (typeof evidenceFor !== 'function') return classifySessionReapWithGroundTruth(session, groundTruthFor);
+  const base = classifySessionReap(session);
+  if (base.reap || base.reason !== 'not-terminal') return base;
+  const target = typeof groundTruthFor === 'function' ? sessionTarget(session?.name) : null;
+  const truth = target ? groundTruthFor(target) : null;
+  let gathered;
+  try { gathered = evidenceFor(session) ?? {}; } catch { gathered = {}; } // unreadable evidence = unknown, never a reap
+  const result = classifySession(session, { ...gathered, pidAlive: session.pidAlive, targetMovedOn: truth }, { now, stallMinutes });
+  const fields = { verdict: result.verdict, action: result.action, why: result.why };
+  if (result.action !== 'reap') return { ...base, ...fields };
+  const reason = result.verdict === 'target-moved-on'
+    ? `ground-truth-${target.kind}:${truth.evidence || target.id}`
+    : `${result.verdict}:${result.why}`;
+  return { reap: true, reason, ...fields };
+}
+
+/**
+ * Map {@link classifySessionReapWithVerdict} over a full `claude agents --json` listing. Passing no `groundTruthFor`
+ * and no `evidenceFor` (the default) makes this byte-identical to mapping {@link classifySessionReap} alone —
  * every existing caller/test is unaffected.
  * @param {unknown[]} sessions
- * @param {{groundTruthFor?: ((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null}} [opts]
- * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
+ * @param {{groundTruthFor?: Function|null, evidenceFor?: Function|null, now?: number, stallMinutes?: number}} [opts]
+ * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason` (and, when the verdict
+ *   axis ran, `verdict`/`action`/`why`).
  */
-export function sessionReapPlan(sessions, { groundTruthFor = null } = {}) {
+export function sessionReapPlan(sessions, { groundTruthFor = null, evidenceFor = null, now, stallMinutes } = {}) {
   const reap = [];
   const keep = [];
   for (const session of Array.isArray(sessions) ? sessions : []) {
-    const verdict = classifySessionReapWithGroundTruth(session, groundTruthFor);
-    const row = { session, reason: verdict.reason };
-    (verdict.reap ? reap : keep).push(row);
+    const { reap: doReap, reason, verdict, action, why } = classifySessionReapWithVerdict(session, { groundTruthFor, evidenceFor, now, stallMinutes });
+    const row = { session, reason, ...(verdict ? { verdict, action, why } : {}) };
+    (doReap ? reap : keep).push(row);
   }
   return { reap, keep };
 }
@@ -564,6 +612,9 @@ async function main(argv) {
   // `claude stop` failure attempts the `clear-stuck-session` repair (see the file header's "THE #77683 REPAIR")
   // unless this flag disables it, in which case a failed stop is reported exactly as it always was.
   const clearStuck = !flags['no-clear-stuck'];
+  // `--no-verdicts` is the rollback for the VERDICT AXIS alone (see the file header): back to the ground-truth and
+  // state/pid axes exactly as they were before #3383 item 11.
+  const useVerdicts = !flags['no-verdicts'];
 
   let sessions;
   try {
@@ -595,7 +646,20 @@ async function main(argv) {
       : s
   ));
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor });
+  // #3383 item 11 — the verdict axis's evidence: result files / completion records / (review, fix) PR signals /
+  // transcript mtimes / the follow-up ledger. Best-effort: an unreadable ledger is an empty one, never a failure.
+  let evidenceFor = null;
+  if (useVerdicts) {
+    let followUps = [];
+    try { followUps = readFollowUps(); } catch { /* unreadable ledger = no redispatch history, never a reap */ }
+    evidenceFor = makeEvidenceResolver({ followUps, prSignalFor: flags['no-ground-truth'] ? null : (pr, slug) => prSignalFromGh(pr, slug) });
+  }
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, evidenceFor, now: Date.now() });
+  // Live rows the verdict axis found stuck but does NOT stop here (stalled / waiting-permission): reported so
+  // land-advance can redispatch or escalate them. This reaper only stops sessions whose work is done.
+  const attention = keep.filter((r) => r.verdict === 'stalled' || r.verdict === 'waiting-permission')
+    .map((r) => ({ id: normalizeHandle(r.session.id) || null, name: r.session.name ?? null, verdict: r.verdict, action: r.action, why: r.why }));
+  for (const a of attention) log(`  attention ${a.id ?? '?'} (${a.verdict} → ${a.action}; ${a.name ?? 'unnamed'}): ${a.why}`);
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -676,6 +740,7 @@ async function main(argv) {
             : undefined,
           collected: dryRun ? undefined : done,
           kept: keep.length,
+          attention,
         },
         null,
         2,

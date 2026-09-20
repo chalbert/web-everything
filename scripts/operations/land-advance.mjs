@@ -3,6 +3,7 @@
  * What is owed is independent of what can launch. Capacity is computed first;
  * oldest waits consume it first, with refusals retained as visible rows.
  * Precedence: fold > operator > drain/escalate > fix > review > stale > none.
+ * Session rows use the mechanical verdict of conveyor/session-verdicts.mjs when the reader attached one.
  * Follow-up verdict rules (first match): explicit closed/moved target => moved-on;
  * result/done => finished; uncertain identity => ambiguous; absent process => dead;
  * permission wait => waiting-permission; observed activity before deadline =>
@@ -108,7 +109,16 @@ export function planLandAdvance(inputs) {
   if (inputs.prototype?.ahead > 0 && !prs.some((p) => p.repo === 'we' && /^lane\/graduate-3443-/.test(p.headRefName)) && !sessions.some((s) => isLive(s) && /^(graduate-3443|conveyor-3443$)/.test(s.name ?? ''))) add('we:graduation-3443', 'graduation-owed', [`ahead ${inputs.prototype.ahead}, behind ${inputs.prototype.behind}`, inputs.prototype.reason ?? 'branch state supplied']);
   const dead = sessions.filter((s) => s.liveness === 'dead-record');
   if (dead.length) add('sessions:dead-records', 'reap-owed', [`${dead.length} dead records: ${dead.slice(0, 10).map((s) => s.name).join(', ')}`], null, { count: dead.length });
-  for (const s of sessions.filter((s) => s.liveness === 'done')) add(`session:${s.id ?? s.sessionId}`, 'reap-owed', ['done; collect result and reap'], s.startedAt);
+  // Reap owed comes from the mechanical session verdict (`conveyor/session-verdicts.mjs`) when the reader attached one:
+  // finished-unreaped (a `blocked`/idle session with a fresh result) and target-moved-on, not just registry `done`.
+  // A session with no verdict (an older reader, a bare fixture) keeps the registry-`done` rule.
+  for (const s of sessions) {
+    const reap = s.verdict ? ['finished-unreaped', 'target-moved-on'].includes(s.verdict) && s.liveness !== 'dead-record' : s.liveness === 'done';
+    if (reap) add(`session:${s.id ?? s.sessionId}`, 'reap-owed', [s.why ?? 'done; collect result and reap'], s.startedAt);
+    // The ladder's second rung: a live session that is stalled / waiting on a permission prompt AFTER its one redispatch
+    // is an escalation packet (agent triage), never an operator row. The first rung (redispatch-once) is not a row yet.
+    if (s.verdict && s.action === 'escalate') add(`session:${s.name ?? s.id ?? s.sessionId}`, 'escalate', [s.why], s.startedAt, { kind: `session-${s.verdict}`, verdict: s.verdict });
+  }
   for (const r of results) if (r.provider && !trials.some((t) => t.result === r.path && String(t.provider).toLowerCase() === r.provider.toLowerCase())) add(r.path, 'delegation-trial-owed', [`${r.provider} authorship; missing trial record`], r.mtime);
   for (const e of followUps) {
     const verdict = followUpVerdict(e, e.evidence, now);

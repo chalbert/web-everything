@@ -7,11 +7,16 @@
  * is still alive (the reaper has not stopped them) become one trailing "Finished, not yet
  * reaped" line; dead records become one "Dead records (no process)" line counted by state.
  * Trailing order: Finished, Dead records, then "N done (not shown)".
+ * Every row also carries the mechanical verdict of `conveyor/session-verdicts.mjs`: a live session the registry calls
+ * `blocked`/idle whose result file (or completion record) is newer than its start is `finished-unreaped` and counts
+ * into the same "Finished, not yet reaped" line, never a row; a live session quiet past the stall threshold with no
+ * result is `stalled` and stays a row, labelled `stalled`.
  * Dispatch facts outrank transcript observations, while absence of delegation is
  * asserted only after a complete scan. The shell owns clocks, files and processes.
  */
 import { op } from './registry.mjs';
 import { compute } from './step-kinds.mjs';
+import { classifySession } from '../conveyor/session-verdicts.mjs';
 export const WIP_AGENTS_OP = 'wip-agents';
 
 // Mirrored from session-reaper: importing it would contaminate the read-only graph.
@@ -128,6 +133,15 @@ export function classifyLiveness(agent, { pidAlive, transcriptMtimeMs, now }) {
   if (agent.waitingFor) return 'waiting';
   return Number.isFinite(transcriptMtimeMs) && elapsed(now, transcriptMtimeMs) <= ACTIVE_WINDOW_MS ? 'live-active' : 'live-idle';
 }
+// The mechanical verdict for one row. Same pid rule as `classifyLiveness`: no `pid` key is no process.
+function verdictOf(agent, f, now) {
+  const hasPid = Object.hasOwn(agent ?? {}, 'pid');
+  const { verdict, action } = classifySession(agent, {
+    pidAlive: hasPid ? (typeof f.pidAlive === 'boolean' ? f.pidAlive : null) : false,
+    transcriptMtimeMs: f.transcriptMtimeMs, resultFiles: f.resultFiles, completion: f.completion, redispatchAttempts: f.redispatchAttempts,
+  }, { now });
+  return { verdict, action };
+}
 export function classifyAgents({ agents, facts = {}, now }) {
   const fact = (id) => facts instanceof Map ? facts.get(id) : facts[id];
   return agents.slice().sort((a, b) =>
@@ -136,7 +150,7 @@ export function classifyAgents({ agents, facts = {}, now }) {
       const f = fact(a?.sessionId) ?? {};
       return { id: a?.id ?? (typeof a?.sessionId === 'string' && a.sessionId ? a.sessionId.slice(0, 8) : 'unknown'), sessionId: a?.sessionId ?? 'unknown', name: a?.name ?? 'unknown',
         kind: a?.kind ?? 'unknown', target: target(a?.name), state: rawState(a) || 'unknown', wasState: rawState(a),
-        liveness: classifyLiveness(a, { ...f, now }), pid: Number.isFinite(a?.pid) ? a.pid : null,
+        liveness: classifyLiveness(a, { ...f, now }), ...verdictOf(a, f, now), pid: Number.isFinite(a?.pid) ? a.pid : null,
         pidAlive: typeof f.pidAlive === 'boolean' ? f.pidAlive : null, transcriptAgeMs: elapsed(now, f.transcriptMtimeMs),
         ageMs: elapsed(now, a?.startedAt),
         waitingFor: a?.waitingFor ?? null, supervisor: pickSupervisor(f.dispatch, f.transcriptModel),
@@ -151,17 +165,18 @@ export function renderTable(rows) {
   const lines = ['| Item | Detail | Supervisor | Executor |', '| --- | --- | --- | --- |'];
   const add = (cells) => lines.push('| ' + cells.map(cell).join(' | ') + ' |');
   const order = ['live-active', 'waiting', 'live-idle'];
-  const live = rows.filter((r) => r.liveness !== 'dead-record' && r.liveness !== 'done')
+  const finished = (r) => r.pidAlive === true && (r.liveness === 'done' || r.verdict === 'finished-unreaped');
+  const live = rows.filter((r) => r.liveness !== 'dead-record' && r.liveness !== 'done' && !finished(r))
     .sort((a, b) => order.indexOf(a.liveness) - order.indexOf(b.liveness) || (b.ageMs ?? Infinity) - (a.ageMs ?? Infinity));
   for (const r of live) add([
     `\`${r.name}\` (${r.id}) · ${r.target ?? r.kind}`,
-    `${r.liveness === 'waiting' ? `⚠ waiting on: ${r.waitingFor} · ` : ''}${r.liveness} · state ${r.state} · ${age(r.ageMs)} · transcript ${r.transcriptAgeMs == null ? 'unknown' : `${age(r.transcriptAgeMs)} ago`}`,
+    `${r.liveness === 'waiting' ? `⚠ waiting on: ${r.waitingFor} · ` : ''}${r.verdict === 'stalled' ? 'stalled' : r.liveness} · state ${r.state} · ${age(r.ageMs)} · transcript ${r.transcriptAgeMs == null ? 'unknown' : `${age(r.transcriptAgeMs)} ago`}`,
     r.supervisor.model,
     r.executor.providers.length ? r.executor.providers.map((p) => `${p.provider} (${p.model || 'unknown'}${p.cliVersion ? `, cli ${p.cliVersion}` : ''})`).join(' + ')
       : r.executor.source === 'unknown' ? 'unknown' : 'none',
   ]);
   if (!live.length) add(['—', 'No live agents.', '—', '—']);
-  const unreaped = rows.filter((r) => r.liveness === 'done' && r.pidAlive === true);
+  const unreaped = rows.filter(finished);
   if (unreaped.length) lines.push(`Finished, not yet reaped: ${unreaped.length} (${unreaped.slice(0, 6).map((r) => `\`${r.name}\``).join(', ')}${unreaped.length > 6 ? ` +${unreaped.length - 6} more` : ''})`);
   const dead = new Map();
   for (const r of rows.filter((r) => r.liveness === 'dead-record')) {

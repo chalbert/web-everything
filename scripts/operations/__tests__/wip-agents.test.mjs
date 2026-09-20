@@ -184,3 +184,34 @@ it('omits both trailing lines when there is nothing finished or dead', () => {
   expect(lines).toHaveLength(4);
   expect(lines.join('\n')).not.toMatch(/Finished, not yet reaped|Dead records/);
 });
+
+// #3383 item 11 — the four live `state: blocked, status: idle` sessions (2026-09-20 ~10:21 ET) through `/wip`.
+const LIVE_NOW = 1789914060000, LIVE_MIN = 60000;
+const liveBlocked = (name, sessionId, startedAt) => ({ pid: 1000 + sessionId.length, id: sessionId.slice(0, 8), kind: 'background', name, sessionId, startedAt, status: 'idle', state: 'blocked', waitingFor: null });
+const liveAgents = [
+  liveBlocked('unstick-2072', '071785de-bdfc', 1789905594683), liveBlocked('fold-2220', 'f8d07388-ef41', 1789905921587),
+  liveBlocked('fix-2347', 'c0404eca-d462', 1789910758110), liveBlocked('review-148', '9eff9f54-d1d3', 1789907660043),
+];
+const liveFacts = {
+  '071785de-bdfc': { pidAlive: true, transcriptMtimeMs: LIVE_NOW - 120 * LIVE_MIN, resultFiles: [{ path: 'unstick-2072.result.md', mtimeMs: 1789905594683 + 142000 }] },
+  'f8d07388-ef41': { pidAlive: true, transcriptMtimeMs: LIVE_NOW - 110 * LIVE_MIN, resultFiles: [{ path: 'fold-2220.result.md', mtimeMs: 1789905921587 + 247000 }] },
+  'c0404eca-d462': { pidAlive: true, transcriptMtimeMs: LIVE_NOW - 50 * LIVE_MIN, resultFiles: [{ path: 'fix-2347.result.md', mtimeMs: 1789910758110 + 40000 }] },
+  '9eff9f54-d1d3': { pidAlive: true, transcriptMtimeMs: LIVE_NOW - 107 * LIVE_MIN, resultFiles: [] },
+};
+it('/wip: finished-unreaped sessions join the Finished line and stalled ones stay as rows labelled stalled', () => {
+  const rows = classifyAgents({ agents: liveAgents, facts: liveFacts, now: LIVE_NOW });
+  expect(rows.map((r) => [r.name, r.verdict, r.action])).toEqual([
+    ['unstick-2072', 'finished-unreaped', 'reap'], ['fold-2220', 'finished-unreaped', 'reap'],
+    ['review-148', 'stalled', 'redispatch-once'], ['fix-2347', 'finished-unreaped', 'reap'],
+  ]);
+  const lines = renderTable(rows).split('\n');
+  expect(lines.filter((l) => l.startsWith('| `'))).toEqual([expect.stringContaining('`review-148`')]);
+  expect(lines.find((l) => l.startsWith('| `review-148`'))).toMatch(/\| stalled · state blocked ·/);
+  expect(lines.at(-1)).toBe('Finished, not yet reaped: 3 (`unstick-2072`, `fold-2220`, `fix-2347`)');
+});
+it('/wip: with no result evidence and a fresh transcript the same rows stay ordinary live rows', () => {
+  const facts = Object.fromEntries(Object.entries(liveFacts).map(([k, v]) => [k, { ...v, resultFiles: [], transcriptMtimeMs: LIVE_NOW - 2 * LIVE_MIN }]));
+  const rows = classifyAgents({ agents: liveAgents, facts, now: LIVE_NOW });
+  expect(rows.every((r) => r.verdict === 'progressing')).toBe(true);
+  expect(renderTable(rows)).not.toMatch(/Finished, not yet reaped|stalled/);
+});

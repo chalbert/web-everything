@@ -140,3 +140,28 @@ it('completion evidence must belong to this launch, not an old same-name session
     expect(data.followUps[0].evidence.resultPresent).toBe(expected);
   }
 });
+describe('mechanical session verdicts (#3383 item 11)', () => {
+  const started = now - 3 * 3600000;
+  const idle = (name, id) => ({ pid: 9, id, sessionId: `${id}-uuid`, kind: 'background', name, startedAt: started, status: 'idle', state: 'blocked', waitingFor: null, liveness: 'live-idle' });
+  const evidenceBy = { fin: { resultFiles: [{ path: '/jobs/unstick-2072.result.md', mtimeMs: started + 1000 }], transcriptMtimeMs: now - 7200000 }, stuck: { resultFiles: [], transcriptMtimeMs: now - 6420000, redispatchAttempts: 1 }, once: { resultFiles: [], transcriptMtimeMs: now - 6420000 } };
+  const sessions = [idle('unstick-2072', 'fin'), idle('review-148', 'stuck'), idle('review-149', 'once')];
+  const sessionEvidence = () => (s) => evidenceBy[s.id];
+  const readSessions = () => sessions;
+  it('attaches the verdict to each session, and the plan owes a reap for the finished one and an escalation for the exhausted one', () => {
+    const inputs = createLandAdvanceReader(readerPorts({ readSessions, sessionEvidence }))();
+    expect(inputs.sessions.map((s) => [s.name, s.verdict, s.action])).toEqual([['unstick-2072', 'finished-unreaped', 'reap'], ['review-148', 'stalled', 'escalate'], ['review-149', 'stalled', 'redispatch-once']]);
+    const p = planLandAdvance(inputs);
+    expect(p.rows.filter((r) => r.owedAction === 'reap-owed').map((r) => r.subject)).toEqual(['session:fin']);
+    const esc = p.rows.find((r) => r.owedAction === 'escalate');
+    expect(esc).toMatchObject({ subject: 'session:review-148', kind: 'session-stalled', verdict: 'stalled' });
+    expect(esc.packetId).toBe('session-stalled-session-review-148');
+    // the first rung (redispatch-once) is not a row yet, and nothing here is an operator row
+    expect(p.rows.some((r) => r.subject === 'session:review-149')).toBe(false);
+    expect(p.rows.some((r) => r.owedAction === 'needs-operator')).toBe(false);
+  });
+  it('an unreadable evidence source degrades to no verdict, recorded as a source error', () => {
+    const inputs = createLandAdvanceReader(readerPorts({ readSessions, sessionEvidence: () => { throw new Error('jobs dir gone'); } }))();
+    expect(inputs.errors.some((e) => e.source === 'session-verdicts')).toBe(true);
+    expect(inputs.sessions.every((s) => s.verdict === undefined)).toBe(true);
+  });
+});

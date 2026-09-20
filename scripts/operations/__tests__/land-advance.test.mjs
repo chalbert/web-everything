@@ -94,3 +94,20 @@ it('does not redispatch an unresolved prior launch', () => {
   const p = plan({ prs: [pr(1)], followUps: [{ session: null, target: 'we#1', evidence: { ambiguous: true } }] });
   expect(p.proposed).toHaveLength(0); expect(p.deferred[0].reason).toBe('ambiguous');
 });
+describe('session verdict rows (#3383 item 11)', () => {
+  const s = (over) => ({ id: 'x1', name: 'fold-2220', kind: 'background', liveness: 'live-idle', startedAt: '2026-09-19T00:00:00Z', ...over });
+  it('reap-owed for finished-unreaped and target-moved-on sessions; registry `done` without a verdict still counts', () => {
+    const rows = plan({ sessions: [s({ verdict: 'finished-unreaped', why: 'fold-2220: blocked at its prompt, result file r.md' }), s({ id: 'x2', verdict: 'target-moved-on' }), s({ id: 'x3', liveness: 'done' }), s({ id: 'x4', verdict: 'progressing' })] }).rows;
+    expect(rows.filter((r) => r.owedAction === 'reap-owed').map((r) => r.subject).sort()).toEqual(['session:x1', 'session:x2', 'session:x3']);
+    expect(rows.find((r) => r.subject === 'session:x1').evidence[0]).toContain('result file');
+  });
+  it('a dead record with a stale verdict is never a per-session reap row (it collapses into the dead-records summary)', () => {
+    expect(plan({ sessions: [s({ liveness: 'dead-record', verdict: 'finished-unreaped' })] }).rows.map((r) => r.subject)).toEqual(['sessions:dead-records']);
+  });
+  it('escalate only on the ladder\'s second rung, as a packet row that never names the operator', () => {
+    const p = plan({ sessions: [s({ verdict: 'stalled', action: 'redispatch-once' }), s({ id: 'x2', verdict: 'waiting-permission', action: 'escalate', why: 'blocked on permission prompt' })] });
+    expect(p.rows.map((r) => [r.subject, r.owedAction])).toEqual([['session:fold-2220', 'escalate']]);
+    expect(p.rows[0]).toMatchObject({ kind: 'session-waiting-permission', packetId: 'session-waiting-permission-session-fold-2220' });
+    expect(p.rows.some((r) => r.owedAction === 'needs-operator')).toBe(false);
+  });
+});

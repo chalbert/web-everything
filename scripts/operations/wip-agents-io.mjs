@@ -19,6 +19,8 @@ import { createFileRunStore } from './run-store.mjs';
 import { normalizeHandle, isHandleListed } from './dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT } from './dispatch-lane.mjs';
 import { extractDelegations, lastAssistantModel } from './wip-agents.mjs';
+import { makeEvidenceResolver } from '../conveyor/session-verdicts-io.mjs';
+import { readFollowUps } from './land-advance-io.mjs';
 const CAP = 64 * 1024 * 1024;
 const parse = (line) => { try { return JSON.parse(line); } catch { return null; } };
 
@@ -117,6 +119,13 @@ export function createWipAgentsReader({
   cliVersion = version, now = Date.now, homeDir = homedir, pidAlive = processAlive,
   statTranscript = (file) => { try { return statSync(file).mtimeMs; } catch { return null; } },
   readDrainHistory = readDrainLog, readDrainAlerts = readDrainLog,
+  // Result files / completion records for the mechanical verdict (`session-verdicts.mjs`). No PR lookups: this report
+  // stays local and fast. The follow-up ledger is best effort; without it the redispatch count is simply unknown.
+  readEvidence = () => {
+    let followUps = [];
+    try { followUps = readFollowUps(); } catch { /* unreadable ledger = no redispatch history */ }
+    return makeEvidenceResolver({ followUps, home: typeof homeDir === 'function' ? homeDir() : homeDir });
+  },
 } = {}) {
   return function readAgents() {
     let agents;
@@ -128,6 +137,8 @@ export function createWipAgentsReader({
     let records;
     try { records = readDispatchRecords(); } catch { records = new Map(); }
     const facts = Object.create(null), versions = new Map();
+    let evidenceFor = () => ({});
+    try { evidenceFor = readEvidence() ?? evidenceFor; } catch { /* unknown evidence for every session */ }
     for (const agent of agents) {
       let f = {}, file = null, alive = null, mtime = null;
       if (Object.hasOwn(agent ?? {}, 'pid')) {
@@ -139,6 +150,10 @@ export function createWipAgentsReader({
       } catch { /* unknown evidence for only this session */ }
       try { if (file) mtime = statTranscript(file, agent); } catch { /* unknown mtime */ }
       f.pidAlive = alive; f.transcriptMtimeMs = Number.isFinite(mtime) ? mtime : null;
+      try {
+        const ev = evidenceFor(agent) ?? {};
+        f.resultFiles = ev.resultFiles; f.completion = ev.completion; f.redispatchAttempts = ev.redispatchAttempts;
+      } catch { /* unknown evidence for only this session */ }
       const entries = records instanceof Map ? records.entries() : Object.entries(records ?? {});
       for (const [handle, record] of entries) {
         if (isHandleListed(handle, [agent]) || (normalizeHandle(handle) && normalizeHandle(handle) === normalizeHandle(agent?.id))) { f.dispatch = record; break; }

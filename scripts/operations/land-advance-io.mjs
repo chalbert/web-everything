@@ -24,6 +24,8 @@ import { inFlight } from './effect-executor.mjs';
 import { DISPATCH_EFFECT } from './dispatch-lane.mjs';
 import { repoKeyFromSlug, capacityFor, drainWait } from './land-advance.mjs';
 import { allowedToolsArg, ALLOWED_TOOLS_BY_KIND } from './land-advance-tools.mjs';
+import { classifySession } from '../conveyor/session-verdicts.mjs';
+import { makeEvidenceResolver } from '../conveyor/session-verdicts-io.mjs';
 import { listEscalations, buildEscalationPacket, writeEscalationPacket } from './land-advance-escalations.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runDefault = (program, args) => String(execFileSync(program, args, { cwd: ROOT, encoding: 'utf8', timeout: 30000, stdio: 'pipe' }));
@@ -80,7 +82,8 @@ export function createLandAdvanceReader(ports = {}) {
     sweptReposPath = join(ROOT, 'scripts/lib/swept-repos.json'),
     readSessions = () => readLiveSessions({ run }), findItemFn = findItem, loadItems = () => defaultLoadItems(ROOT),
     resolveFallbackScope = (pr) => run('gh', ['pr', 'diff', String(pr), '--repo', 'chalbert/web-everything', '--name-only']).trim().split('\n').filter(Boolean).map((p) => `we:${p}`),
-    followUpEvidence, refreshPrototype = false, readPrototype } = ports;
+    followUpEvidence, refreshPrototype = false, readPrototype,
+    sessionEvidence = (followUps) => makeEvidenceResolver({ followUps, jobsDir, home }) } = ports;
   return function readInputs() {
     const errors = [], get = (source, fn, fallback) => { try { return fn(); } catch (e) { errors.push({ source, message: String(e.message ?? e) }); return fallback; } };
     const slugs = JSON.parse(io.readFileSync(sweptReposPath, 'utf8'));
@@ -88,7 +91,7 @@ export function createLandAdvanceReader(ports = {}) {
       const repo = repoKeyFromSlug(slug);
       return get(`prs:${repo}`, () => JSON.parse(run('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '200', '--json', 'number,title,labels,baseRefName,headRefName,headRefOid,createdAt,updatedAt,mergeable,mergeStateStatus,isDraft,body'])).map((p) => ({ ...p, repo, slug })), []);
     });
-    const sessions = get('sessions', readSessions, []);
+    let sessions = get('sessions', readSessions, []);
     const capturedAt = now();
     const lanes = get('lanes', () => run('node', ['scripts/lane-pool.mjs', 'list', '--acquirable']).trim().split('\n').filter(Boolean), null);
     const history = get('drain-history', () => readJsonlTail(join(drainDir, 'history.jsonl'), { fs: io }), { entries: [], capped: false });
@@ -113,6 +116,15 @@ export function createLandAdvanceReader(ports = {}) {
       }, { refusal: { kind: 'source-failed', why: 'fix planner source failed' } });
     }
     const ledger = get('follow-ups', () => readFollowUps({ store }), []);
+    // The mechanical session verdict (`conveyor/session-verdicts.mjs`), attached once so the pure planner stays pure.
+    // No PR lookups here (plan never adds network); the reaper's own pass adds them when it applies.
+    sessions = get('session-verdicts', () => {
+      const evidenceFor = sessionEvidence(ledger);
+      return sessions.map((s) => {
+        const { verdict, action, why } = classifySession(s, { ...evidenceFor(s), pidAlive: s.liveness !== 'dead-record' }, { now: capturedAt });
+        return { ...s, verdict, action, why };
+      });
+    }, sessions);
     const followUps = ledger.map((entry) => get(`follow-up:${entry.target}`, () => {
       const s = sessions.find((s) => [s.id, s.sessionId].includes(entry.session));
       const p = prs.find((p) => `${p.repo}#${p.number}` === entry.target);
