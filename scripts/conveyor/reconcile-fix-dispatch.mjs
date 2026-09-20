@@ -113,8 +113,9 @@ export function defaultConfirmWait(ms) {
  *     (`sanctioned-pack-phase-cli-retype...`). Extracting it and stamping `WE #2206:` on this PR's fix commits
  *     would be an honest-looking but WRONG attribution — worse than the refusal it replaces. There is no
  *     general, safe derivation of `{{ITEM_NUM}}` for this population; it stays a hard refusal.
- *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (deleted item, or one
- *     scaffolded with no `scope:` frontmatter — measured live #3634: EVERY currently-open `kind:'fix'` entry
+ *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (an item
+ *     scaffolded with no `scope:` frontmatter; an UNRESOLVABLE number — deleted/ghost card — is refused outright
+ *     and never reaches the fallback — measured live #3634: EVERY currently-open `kind:'fix'` entry
  *     whose item number resolves hits this, epics included, e.g. `#2220` on `lane/3383-host-process-granularity`
  *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own). Unlike
  *     `no-item-num`, THIS one has a safe fallback: {@link resolveFallbackScope}, called with `(pr, itemNum)`,
@@ -147,13 +148,19 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     const item = findItemFn(itemNum, loadItems);
     let scope = item && Array.isArray(item.scope) ? item.scope : [];
     let scopeSource = 'item';
-    if (!scope.length) {
-      // `#3634` — no declared scope (missing item, or one — an epic, typically — with none of its own). Try the
-      // PR's own already-changed files before refusing outright; see this function's own docblock for why that
-      // fallback is always safe (never a looser fence than a declared scope would have been).
+    if (item && !scope.length) {
+      // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
+      // already-changed files before refusing outright; see this function's own docblock for why that fallback is
+      // safe (never a looser fence than a declared scope would have been). Gated on `item` being non-null: an
+      // UNRESOLVABLE item number (a ghost/deleted card, a PR number in the branch name, or a transient
+      // `loadItems` failure that `findItem` swallows into null) stays the `no-scope` refusal it was before — the
+      // fallback must not widen what gets dispatched, and must not stamp `WE #<n>:` with a number naming no item.
       let fallback = [];
       try { fallback = resolveFallbackScope(pr, itemNum) || []; } catch { fallback = []; }
-      if (Array.isArray(fallback) && fallback.length) {
+      // The filenames are PR-author-controlled and `dispatchFix` joins `scope` with ',' into the agent's brief,
+      // so keep only entries that cannot smuggle extra fence entries or brief text (see isSafeFallbackScopeEntry).
+      fallback = Array.isArray(fallback) ? fallback.filter(isSafeFallbackScopeEntry) : [];
+      if (fallback.length) {
         scope = fallback;
         scopeSource = 'pr-diff';
       }
@@ -176,6 +183,25 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     });
   }
   return { planned, refusals };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#isSafeFallbackScopeEntry — may this PR-diff filename become a
+ * scope-fence entry? PURE. A PR author controls its filenames, and `dispatchFix` joins `scope` with ',' into the
+ * fix agent's `SCOPE:` token, so a name like `x,we:scripts` would read as TWO fence entries (the second a whole
+ * directory the PR never touched) and free text in a name would land in the brief. Rejects: `,`, any whitespace
+ * or control character, a `..` path segment, a leading `/`, and glob metacharacters (`* ? [ ] { }`). A rejected
+ * file is DROPPED from the fallback fence (never a looser fence, only a narrower one); if none survive the
+ * caller reports `no-scope`. Declared item `scope:` (trusted backlog frontmatter) is not filtered.
+ * @param {string} entry - a `we:`-prefixed path.
+ * @returns {boolean}
+ */
+export function isSafeFallbackScopeEntry(entry) {
+  if (typeof entry !== 'string') return false;
+  const path = entry.replace(/^[a-z][a-z0-9-]*:/i, '');
+  if (!path || path.startsWith('/')) return false;
+  if (/[,\s*?[\]{}]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return false;
+  return !path.split('/').includes('..');
 }
 
 /**

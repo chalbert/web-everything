@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
+  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
@@ -118,6 +118,41 @@ describe('planFixesFromReconcile', () => {
       const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => { throw new Error('gh unreachable'); });
       expect(planned).toEqual([]);
       expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+  });
+
+  describe('#3634 review — fallback is gated on a RESOLVED item and filters hostile filenames', () => {
+    const epic3383 = { num: '3383', slug: 's', specPath: 'backlog/3383-x.md', scope: [] };
+    const findEpicStub = (key) => (key === '3383' ? epic3383 : null);
+
+    it('refuses `no-scope` for an UNRESOLVABLE item even when the fallback has files, and never calls the fallback', () => {
+      const calls = [];
+      const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, () => null, () => [], () => { calls.push(1); return ['we:some/file.mjs']; });
+      expect(calls).toEqual([]);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 99, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
+    });
+
+    it('drops hostile PR-diff filenames from the fence instead of passing them into the brief', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const fallback = () => ['we:ok/file.mjs', 'we:x,we:scripts', 'we:a b.md', 'we:../escape.mjs', 'we:dir/*.mjs', 'we:bad\nname.md', 'we:/abs.mjs'];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], fallback);
+      expect(refusals).toEqual([]);
+      expect(planned[0].scope).toEqual(['we:ok/file.mjs']);
+      expect(planned[0].scopeSource).toBe('pr-diff');
+    });
+
+    it('refuses `no-scope` when EVERY fallback filename is hostile', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => ['we:x,we:scripts']);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+
+    it('isSafeFallbackScopeEntry accepts ordinary repo paths and rejects comma/space/control/`..`/glob/leading-slash', () => {
+      for (const ok of ['we:scripts/conveyor/a-b_c.mjs', 'we:docs/x.v2.md', 'we:.github/workflows/ci.yml']) expect(isSafeFallbackScopeEntry(ok)).toBe(true);
+      for (const bad of ['we:x,we:scripts', 'we:a b', 'we:a\tb', 'we:a\u0000b', 'we:a/../b', 'we:a/*.js', 'we:a/{b,c}', 'we:a/[b]', 'we:/abs', 'we:', '', null]) expect(isSafeFallbackScopeEntry(bad)).toBe(false);
     });
   });
 
