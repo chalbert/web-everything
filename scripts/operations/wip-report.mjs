@@ -4,7 +4,8 @@
  * processes. No fs, clock, env, network or `gh`: every fact is injected, so identical input gives byte-identical
  * output. The IO shell that gathers the facts is `wip-report-io.mjs`; the CLI is `wip-report-cli.mjs`.
  *
- * Shape (in this order): one header line, `## Attention`, `## Work items`, `## Done since <last-wip>`, `## Next`,
+ * Shape (in this order): a short header (the time, then one bullet each for load + workers, runner, old PRs and the operator
+ * queue), `## Attention`, `## Work items`, `## Done since <last-wip>`, `## Next`,
  * `## Needs you`. Nothing here is composed by a model. Rows are per WORK ITEM (a PR, or an item that live sessions work
  * on), and the live sessions nest under it. Decisions live in the docket, never here: the report only says how many are open
  * (a count line, flagged when the docket file is over 24 h old) and never presents a decision as operator work.
@@ -80,8 +81,8 @@ export const age = (ms) => (!finite(ms) ? 'unknown' : ms >= 86400000 ? `${Math.f
   : ms >= 3600000 ? `${Math.floor(ms / 3600000)}h ${Math.floor(ms / 60000) % 60}m` : `${Math.floor(ms / 60000)}m`);
 /** `since 12:34 (2h 10m)`; `unknown` when the start is not known. */
 const since = (ms, now) => (finite(ms) ? `${when(ms, now)} (${age(Math.max(0, now - ms))})` : 'unknown');
-const clip = (s, n = 70) => (String(s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s));
-const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+const clip = (s, n = 36) => (String(s).length > n ? `${String(s).slice(0, n - 1).trimEnd()}…` : String(s));
+const oneLine = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ');
 const repoName = (slug) => String(slug ?? '').split('/').at(-1);
 const prRef = (p) => `${repoName(p.slug ?? p.repo)}#${p.number}`;
 const labelsOf = (p) => (p.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
@@ -317,57 +318,97 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────────────────────────
+// ONE output for a phone and a desktop terminal: plain markdown, no tables, no HTML, no flag, no width detection. Every
+// fact is a short bullet, and a bullet longer than WRAP_AT columns wraps onto continuation lines indented under its text
+// (markdown reads those as the same paragraph). `## Needs you` is the operator queue's own text and is never wrapped.
 const remedyWords = (r) => (r === 'auto' ? 'auto' : 'no handler');
+/** Wrap width in columns; a single word longer than this stays whole on its own line. */
+export const WRAP_AT = 42;
+/** Word-wrap `text`: the first line starts with `lead`, continuation lines with `hang` (default: as wide as `lead`, blank). */
+function wrap(text, lead = '', hang = ' '.repeat(lead.length)) {
+  const words = String(text ?? '').split(/\s+/).filter(Boolean), lines = [];
+  let line = lead, first = true;
+  for (const w of words) {
+    if (!first && line.length + 1 + w.length > WRAP_AT) { lines.push(line); line = hang + w; } else line += (first ? '' : ' ') + w;
+    first = false;
+  }
+  lines.push(line.trimEnd());
+  return lines;
+}
+/** A bullet at `depth` (0 = top level, 1 = a sub-bullet, ...). */
+const bullet = (text, depth = 0) => wrap(text, `${'  '.repeat(depth)}- `);
+/** A landed/finished row is `<head> — <detail>`: the head stays on the bullet, the detail goes on the next indented line. */
+const splitDone = (text) => { const i = text.indexOf(' — '); return i < 0 ? [text, ''] : [text.slice(0, i), text.slice(i + 3)]; };
+
 export function renderReport(r) {
   const { header: h } = r, now = Date.parse(r.generatedAt);
   const out = [];
-  const parts = [h.time,
-    h.load == null ? 'load unknown' : `load ${h.load.toFixed(2)} on ${h.cores ?? '?'} cores`,
-    h.workers ? `workers ${h.workers.live} of ${h.workers.cap}` : 'workers unknown',
-    `runner: ${h.runner}${h.runner === 'not live' ? ' — Attention items are NOT auto-handled' : h.runner === 'unknown' ? ' (source unavailable)' : ''}`,
-    !h.preToday.known ? 'pre-today PRs: unknown' : h.preToday.count ? `${h.preToday.count} PR${h.preToday.count === 1 ? '' : 's'} open from before today, oldest ${h.preToday.oldest.ref} (${age(h.preToday.oldest.ageMs)})` : 'no PRs open from before today',
-    h.operatorQueue === 'none' ? `operator queue: none (checked ${h.checkedAt})` : h.operatorQueue === 'unknown' ? 'operator queue: unknown (could not read it)' : `operator queue: ${h.operatorQueue} waiting on you`];
-  out.push(parts.join(' · '), '');
+  out.push(h.time);
+  out.push(...bullet([h.load == null ? 'load unknown' : `load ${h.load.toFixed(2)} on ${h.cores ?? '?'} cores`, h.workers ? `workers ${h.workers.live} of ${h.workers.cap}` : 'workers unknown'].join(' · ')));
+  out.push(...bullet(`runner: ${h.runner}${h.runner === 'unknown' ? ' (source unavailable)' : ''}`));
+  if (h.runner === 'not live') out.push(...bullet('Attention items are NOT auto-handled', 1));
+  if (!h.preToday.known) out.push(...bullet('pre-today PRs: unknown'));
+  else if (!h.preToday.count) out.push(...bullet('no PRs open from before today'));
+  else out.push(...bullet(`${h.preToday.count} PR${h.preToday.count === 1 ? '' : 's'} open from before today`), ...bullet(`oldest ${h.preToday.oldest.ref} (${age(h.preToday.oldest.ageMs)})`, 1));
+  out.push(...bullet(h.operatorQueue === 'none' ? `operator queue: none (checked ${h.checkedAt})` : h.operatorQueue === 'unknown' ? 'operator queue: unknown' : `operator queue: ${h.operatorQueue} waiting on you`));
+  if (h.operatorQueue === 'unknown') out.push(...bullet('could not read it', 1));
+  out.push('');
 
   out.push('## Attention');
   const c = r.attentionCounts;
   if (!r.attention.length) out.push('Nothing needs attention.');
   else {
-    out.push('| Item | What is wrong | Since | Remedy |', '| --- | --- | --- | --- |');
-    for (const a of r.attention) out.push(`| ${cell(a.item)} | ${cell(a.what)} | ${a.since == null ? 'unknown' : cell(since(a.since, now))} | ${remedyWords(a.remedy)} |`);
+    for (const a of r.attention) {
+      out.push(...bullet(`**${oneLine(a.item)}**`), ...bullet(oneLine(a.what), 1), ...bullet(`since ${a.since == null ? 'unknown' : since(a.since, now)}`, 1), ...bullet(`remedy: ${remedyWords(a.remedy)}`, 1));
+    }
   }
-  if (c.dead) out.push('', `${c.dead} dead session record${c.dead === 1 ? '' : 's'} (no process): nothing to act on.`);
+  if (c.dead) out.push('', ...wrap(`${c.dead} dead session record${c.dead === 1 ? '' : 's'} (no process): nothing to act on.`));
   out.push('');
 
   out.push('## Work items');
   if (!r.workItems.length) out.push('No open PRs or live sessions.');
   else {
-    out.push('| Item | State | Agent | Since | Next |', '| --- | --- | --- | --- | --- |');
+    const sinceLine = (ms) => (ms == null || !Number.isFinite(ms) ? [] : bullet(`since ${since(ms, now)}`, 1));
     for (const w of r.workItems) {
-      out.push(`| ${cell(`${w.ref}${w.title ? ` ${clip(w.title)}` : ''}`)} | ${cell(w.state)} | ${w.type === 'session' ? cell(w.sessions[0].agent) : '—'} | ${w.since == null || !Number.isFinite(w.since) ? '—' : cell(since(w.since, now))} | ${cell(w.next)} |`);
-      if (w.type !== 'session') for (const s of w.sessions) out.push(`| ↳ ${cell(s.name)} | ${cell(s.state)} | ${cell(s.agent)} | ${s.since == null ? '—' : cell(since(s.since, now))} | |`);
+      out.push(...bullet(`**${oneLine(w.ref)}** ${oneLine(w.state)}`));
+      if (w.title) out.push(...bullet(clip(oneLine(w.title)), 1));
+      if (w.type === 'session') out.push(...bullet(oneLine(w.sessions[0].agent), 1));
+      out.push(...sinceLine(w.since));
+      if (w.next && w.next !== '—') out.push(...bullet(`next: ${oneLine(w.next)}`, 1));
+      if (w.type !== 'session') {
+        for (const s of w.sessions) {
+          out.push(...bullet(`↳ ${oneLine(s.name)} ${oneLine(s.state)}`, 1), ...bullet(oneLine(s.agent), 2));
+          if (s.since != null && Number.isFinite(s.since)) out.push(...bullet(`since ${since(s.since, now)}`, 2));
+        }
+      }
     }
   }
-  if (!r.docketAvailable) out.push('', 'Open decisions: not listed (no decision docket data on this machine).');
-  else out.push('', `${r.docket.total} open decision${r.docket.total === 1 ? '' : 's'} in the docket (built ${Number.isFinite(r.docket.generatedAt) ? stamp(r.docket.generatedAt) : 'unknown date'})${r.docket.stale ? ' — docket may be stale' : ''}`);
+  if (!r.docketAvailable) out.push('', ...wrap('Open decisions: not listed (no decision docket data on this machine).'));
+  else out.push('', ...wrap(`${r.docket.total} open decision${r.docket.total === 1 ? '' : 's'} in the docket (built ${Number.isFinite(r.docket.generatedAt) ? stamp(r.docket.generatedAt) : 'unknown date'})${r.docket.stale ? ' — docket may be stale' : ''}`));
   out.push('');
 
+  // The heading is verbatim and may exceed WRAP_AT (a heading wraps by itself in any viewer).
   out.push(r.done.fallback ? `## Done since ${stamp(r.done.since)} (last 3 h; no earlier /wip stamp)` : `## Done since ${stamp(r.done.since)}`);
-  if (!r.done.merged) out.push('Merged PRs: unknown (could not list them).');
-  if (!r.done.rows.length) out.push(r.done.merged ? 'Nothing landed or finished in this window.' : 'No finished-session records in this window.');
-  for (const d of r.done.rows) out.push(`- ${clock(d.at)} ${d.text}`);
+  if (!r.done.merged) out.push(...wrap('Merged PRs: unknown (could not list them).'));
+  if (!r.done.rows.length) out.push(...wrap(r.done.merged ? 'Nothing landed or finished in this window.' : 'No finished-session records in this window.'));
+  for (const d of r.done.rows) {
+    const [head, detail] = splitDone(oneLine(d.text));
+    out.push(...bullet(`${clock(d.at)} ${head}`));
+    if (detail) out.push(...wrap(detail, '  '));
+  }
   out.push('');
 
   out.push('## Next');
   if (r.next == null) out.push('Unknown (land-advance could not run).');
   else if (!r.next.length) out.push('Nothing owed.');
-  else for (const n of r.next) out.push(`- ${n.text}${n.reason === 'capacity' ? ` (${capacityWords(r.capacity)})` : ''}`);
+  else for (const n of r.next) out.push(...bullet(`${n.text}${n.reason === 'capacity' ? ` (${capacityWords(r.capacity)})` : ''}`));
   out.push('');
 
+  // The operator queue's own lines, verbatim and unwrapped.
   out.push('## Needs you');
   if (r.needsYou == null) out.push('Needs you: unknown (operator queue could not be read)');
   else if (!r.needsYou.length) out.push('Needs you: none');
   else for (const line of r.needsYou) out.push(`- ${line}`);
-  for (const e of r.errors) out.push('', `Source error: ${e.source}: ${e.message}`);
+  for (const e of r.errors) out.push('', ...wrap(`Source error: ${e.source}: ${e.message}`));
   return out.join('\n');
 }
