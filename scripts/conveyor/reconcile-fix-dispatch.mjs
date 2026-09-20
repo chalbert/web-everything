@@ -66,7 +66,7 @@ import {
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
-import { BRIEF_REQUIRED_BY_KIND, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
+import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
@@ -101,36 +101,25 @@ export function defaultConfirmWait(ms) {
  * act on, and NAME why each one it drops cannot be (mirroring `reconcile-core.mjs`'s own REFUSAL_KINDS
  * discipline: a refusal a reader cannot audit is exactly the defect this whole chain exists to remove).
  *
- * TWO THINGS CAN MAKE AN OTHERWISE-OWED FIX UNDISPATCHABLE, BOTH NAMED:
- *   `no-item-num` — the PR's head ref carries no conveyor item number (`laneRefItemNum` returns `null` — not
- *     every open PR is a `lane/<NUM>-<slug>` branch; a hand-opened or externally-branched PR is not). Without an
- *     item number there is no `{{ITEM_NUM}}` and no honest `WE #<n>:` commit prefix for the fix-agent-brief to
- *     use — undispatchable, not a bug to route around. `#3634` — checked live against every `no-item-num` PR on
- *     `lane/mechanical-dispatcher` on 2026-09-14 (`#2210`, `lane/file-2206-review-findings`; `#2212`,
- *     `lane/agent-capability-parity-principle`; `#2170`, `lane/stuck-session-op-docs`): NONE of these numbers,
- *     even where one is present (`file-2206`), names the item this PR actually delivers — `2206` there is the
- *     REVIEWED PR's number, not an item this PR builds, and backlog item `#2206` is a real, unrelated card
- *     (`sanctioned-pack-phase-cli-retype...`). Extracting it and stamping `WE #2206:` on this PR's fix commits
- *     would be an honest-looking but WRONG attribution — worse than the refusal it replaces. There is no
- *     general, safe derivation of `{{ITEM_NUM}}` for this population; it stays a hard refusal.
- *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (deleted item, or one
- *     scaffolded with no `scope:` frontmatter — measured live #3634: EVERY currently-open `kind:'fix'` entry
- *     whose item number resolves hits this, epics included, e.g. `#2220` on `lane/3383-host-process-granularity`
- *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own). Unlike
- *     `no-item-num`, THIS one has a safe fallback: {@link resolveFallbackScope}, called with `(pr, itemNum)`,
- *     may return the PR's OWN already-changed files (`we:`-prefixed) as the fence instead. This is never a
- *     LOOSER fence than a declared `scope:` would have been — a fix agent can only touch what this PR already
- *     touches — so it is safe exactly where a declared scope is unknown. Only when the fallback ALSO comes back
- *     empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN scope-refusal (`itemScope.length`
- *     check) for exactly the same reason: a fix agent with no fence at all is undispatchable.
+ * A MISSING ITEM NUMBER IS NOT A REFUSAL. When `laneRefItemNum` returns null, skip the backlog lookup,
+ * use only the PR's own changed files as scope, and attribute the repair honestly as `PR #<n>`.
+ * `#3634` — `2206` in `lane/file-2206-review-findings` (PR #2210) is the REVIEWED PR's number;
+ * backlog #2206 is a real, unrelated card. An item number is NEVER derived from incidental branch digits:
+ * stamping `WE #2206:` would be an honest-looking but WRONG attribution. Keep `itemNum: null` instead.
+ *
+ * `no-scope` remains a refusal: a fix agent with no fence is undispatchable. An item may have no declared
+ * scope (a deleted card or an epic, e.g. PR #2220's item #3383), or the PR may name no item at all.
+ * In either case {@link resolveFallbackScope}, called with `(pr, itemNum)`, may supply the PR's OWN
+ * already-changed files (`we:`-prefixed). A declared item scope always takes precedence; the fallback is
+ * used only when it is absent. An empty or failed fallback leaves a named `no-scope` refusal.
  * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
  * @param {Function} loadItems
- * @param {(pr:number, itemNum:string)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
- *   caller with nothing better to offer degrades to the pre-#3634 behaviour byte-for-byte); the real binding is
+ * @param {(pr:number, itemNum:string|null)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
+ *   caller with nothing better to offer refuses `no-scope`); the real binding is
  *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default.
- * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
+ * @returns {{planned:Array<{itemNum:string|null,attributionKind:('WE'|'PR'),attributionNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
 export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => []) {
   const planned = [];
@@ -140,11 +129,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     const pr = Number(entry.prNumber);
     const headRefName = entry.headRefName ?? null;
     const itemNum = laneRefItemNum(headRefName);
-    if (!itemNum) {
-      refusals.push({ pr, kind: 'no-item-num', why: `PR #${pr}'s head ref (${headRefName ?? '?'}) carries no conveyor item number — nothing to fill {{ITEM_NUM}}/{{SCOPE}} with` });
-      continue;
-    }
-    const item = findItemFn(itemNum, loadItems);
+    const item = itemNum ? findItemFn(itemNum, loadItems) : null;
     let scope = item && Array.isArray(item.scope) ? item.scope : [];
     let scopeSource = 'item';
     if (!scope.length) {
@@ -159,7 +144,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       }
     }
     if (!scope.length) {
-      refusals.push({ pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope, and the PR's own changed-file fallback found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
+      refusals.push({ pr, kind: 'no-scope', why: `${itemNum ? `item #${itemNum} (PR #${pr})` : `PR #${pr} (no item number)`} has no declared scope, and the PR's own changed-file fallback found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
       continue;
     }
     // #xu2krte Fork 1 — a `fix` dispatch caused by the parked-PR conflict watch still carries the
@@ -169,6 +154,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
+      attributionKind: itemNum ? 'WE' : 'PR', attributionNum: itemNum ?? String(pr),
       itemNum, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
@@ -235,12 +221,12 @@ export function findResumeCandidate({ body, agentsAll }) {
  * SAME brief's own conflict-handling + escalation rules by reference, rather than duplicating them here — a
  * second, drifting copy of "how to resolve a conflict" is exactly the twin-template risk this whole item's Fork
  * 4 argues against one file over.
- * @param {{pr:number, itemNum:string, cwd?:string|null}} o
+ * @param {{pr:number, itemNum:string|null, cwd?:string|null}} o
  * @returns {string}
  */
 export function buildResumePrompt({ pr, itemNum, cwd = null }) {
   return [
-    `New work on PR #${pr} (item #${itemNum}), which you previously worked: it has drifted into a real merge `
+    `New work on PR #${pr}${itemNum ? ` (item #${itemNum})` : ''}, which you previously worked: it has drifted into a real merge `
       + 'conflict against `main` since your last commit here — GitHub reports `mergeable: CONFLICTING`.',
     '',
     cwd
@@ -342,10 +328,10 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * unmanaged (not recoverable without a person noticing). What DID change: `resumeSucceeded` now surfaces an
  * `anomaly` diagnostic when this never-yet-observed shape is actually hit, so it is visible on the record
  * (threaded onto the returned `resumeAttempt` below) rather than indistinguishable from an ordinary fork.
- * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned -
+ * @param {{itemNum:string|null, pr:number, laneRef:string, scope:string[], isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned -
  *   NOTE: deliberately no `lane` field — this runs before one is ever assigned.
  * @param {object} [o]
- * @returns {{resumed:boolean, result?:{sessionId:string, sessionSlug:null, pr:number, itemNum:string, lane:null, unknownTokens:string[], resumed:true}, resumeAttempt?:object|null}}
+ * @returns {{resumed:boolean, result?:{sessionId:string, sessionSlug:null, pr:number, itemNum:string|null, lane:null, unknownTokens:string[], resumed:true}, resumeAttempt?:object|null}}
  */
 export function tryResumeFix(planned, {
   root = REPO_ROOT,
@@ -378,7 +364,7 @@ export function tryResumeFix(planned, {
   // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
   const candidateCwd = candidateRow?.cwd || null;
   const candidateHead = candidateCwd ? resolveHead(candidateCwd) : null;
-  const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix')]);
+  const expectedNames = new Set([...(planned.itemNum ? [sessionSlugFor(planned.itemNum, 'build')] : []), sessionSlugFor(planned.pr, 'fix')]);
   const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
   const headConfirmed = Boolean(planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
   const ownershipConfirmed = headConfirmed && nameConfirmed;
@@ -465,11 +451,11 @@ export function tryResumeFix(planned, {
  * remedy had never been wired into. The delivery-side file is the right one here (not the review twin): a fix
  * agent IS a `dispatch-lane`-shaped delivery agent — it acquires a lane, works an item, pushes to a PR.
  *
- * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
+ * @param {{itemNum:string|null, attributionKind?:('WE'|'PR'), attributionNum?:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
  * @param {object} [o]
  * @param {object|null} [o.resumeAttempt] - carried forward from a prior {@link tryResumeFix} call for this same
  *   entry, purely for reporting on the returned result (this function never attempts a resume itself).
- * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object}}
+ * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string|null, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object}}
  */
 export function dispatchFix(planned, {
   root = REPO_ROOT,
@@ -483,13 +469,15 @@ export function dispatchFix(planned, {
 
   const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
-    ITEM_NUM: planned.itemNum,
+    ITEM_NUM: planned.itemNum ?? '',
+    ATTRIBUTION_KIND: planned.attributionKind ?? (planned.itemNum ? 'WE' : 'PR'),
+    ATTRIBUTION_NUM: planned.attributionNum ?? (planned.itemNum || String(planned.pr)),
     PR_NUM: planned.pr,
     LANE_REF: planned.laneRef,
     LANE: planned.lane,
     SESSION_SLUG: sessionSlug,
     SCOPE: planned.scope.join(','),
-  }, BRIEF_REQUIRED_BY_KIND.fix);
+  }, BRIEF_REQUIRED_BY_KIND.fix, [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM']);
   const sessionId = String(mintSessionId());
   const argv = buildAgentArgv({
     sessionId,
@@ -619,7 +607,7 @@ if (IS_CLI) {
       // #3331 — report the ADDRESSABLE id (`claude logs/stop` take it) when we have one; a resume reports the
       // session it continued, and an unparseable spawn falls back to the slug, which `claude agents` carries.
       const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
-      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
+      lines.push(`  → fix    PR #${d.pr} (${d.itemNum ? `item #${d.itemNum}` : 'no item number'}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
     }
     for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');

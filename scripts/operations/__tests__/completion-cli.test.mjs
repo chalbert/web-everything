@@ -51,6 +51,12 @@ describe('report --status=started', () => {
     expect(runShow({ kind: 'review', pr: '701' })).toEqual({ found: true, ...record });
   });
 
+  it.each(['', '   ', true, undefined, ' 3383 '])('normalizes the optional item flag %j before recording a fix', (item) => {
+    const { record } = runReport({ kind: 'fix', pr: '2347', item, status: 'started' });
+    expect(record.item).toBe(item === ' 3383 ' ? '3383' : null);
+    expect(tryReadCompletion('fix-2347').item).toBe(record.item);
+  });
+
   it('is idempotent — a retried `started` report never clobbers the first one', () => {
     const first = runReport({ session: 'fix-5', kind: 'fix', status: 'started' }).record;
     const second = runReport({ session: 'fix-5', kind: 'fix', status: 'started' });

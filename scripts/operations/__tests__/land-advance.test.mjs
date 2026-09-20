@@ -30,7 +30,7 @@ describe('what is owed', () => {
     expect(p.rows[0].evidence.join(' ')).toContain('UNKNOWN');
   });
   it('retains fix refusals', () => {
-    for (const kind of ['no-item-num', 'no-scope', 'unsupported-repo']) {
+    for (const kind of ['no-scope', 'unsupported-repo']) {
       const p = plan({ prs: [pr(2170, { labels: ['review:changes'] })], fixPlans: { 'we#2170': { refusal: { kind, why: kind } } } });
       expect(p.rows[0]).toMatchObject({ owedAction: 'dispatch-fix', dispatchable: false, refusal: { kind } });
       expect(p.deferred[0].reason).toBe(kind);

@@ -40,12 +40,14 @@
 
 | Placeholder | What the conveyor fills it with |
 |---|---|
-| `{{ITEM_NUM}}` | the backlog item number the bounced PR delivers — e.g. `2608` |
+| `{{ITEM_NUM}}` | the backlog item number the bounced PR delivers — BLANK when the branch names none (never guessed from digits in the branch) |
+| `{{ATTRIBUTION_KIND}}` | `WE` when the PR delivers a known backlog item, `PR` when its branch names none |
+| `{{ATTRIBUTION_NUM}}` | item number for `WE`, the bounced PR's own number for `PR` |
 | `{{PR_NUM}}` | the bounced PR's number (the one carrying `review:changes`) — e.g. `701` |
-| `{{LANE_REF}}` | the PR's head ref — `lane/{{ITEM_NUM}}-<slug>` (`gh pr view {{PR_NUM}} --json headRefName`) |
+| `{{LANE_REF}}` | the PR's head ref — `lane/<slug>` (`gh pr view {{PR_NUM}} --json headRefName`) |
 | `{{LANE}}` | a FREE lane id the conveyor assigned this repair (a fresh clone; the repair is reconstituted from `{{LANE_REF}}`, not the original lease) |
 | `{{SESSION_SLUG}}` | a stable per-repair session slug, e.g. `fix-{{PR_NUM}}` (ties `acquire`↔`release`) |
-| `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
+| `{{SCOPE}}` | the item's declared scope, or the PR's changed files when none is declared, repo-qualified & comma-joined |
 
 > **`{{LIKE_THIS}}`** are **conveyor-injected** (the table above). **`<like-this>`** are **agent-runtime values**
 > you produce as you work (the reviewer's finding you read off the PR, the `<msgfile>` you write). Do not expect
@@ -88,7 +90,7 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-fix
 - `--base={{LANE_REF}}` lands the clone on the pushed lane tip (via `checkout -B main <ref>`), so you **reuse
   the ~done work** — you are repairing a diff, not redoing the item. If `--base` fails to resolve (the ref was
   deleted / the PR was force-closed), report the completion record (`--status=done --outcome=not-applicable`)
-  and stop and report `#{{ITEM_NUM}} → fix not-applicable (lane ref gone)`:
+  and stop and report `{{ATTRIBUTION_KIND}} #{{ATTRIBUTION_NUM}} → fix not-applicable (lane ref gone)`:
   ```bash
   node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
   ```
@@ -106,7 +108,7 @@ gh pr view {{PR_NUM}} --json title,body,comments --repo <owner/name>
 
 Take the **latest** changes-requested comment as the authoritative ask. If the finding is ambiguous or needs a
 judgment you cannot safely make, do **NOT** guess. **Record the stand-down on the PR first**, then leave the PR
-`review:changes` (do **not** re-arm) and RETURN `#{{ITEM_NUM}} → fix escalated (finding needs human judgment)`:
+`review:changes` (do **not** re-arm) and RETURN `{{ATTRIBUTION_KIND}} #{{ATTRIBUTION_NUM}} → fix escalated (finding needs human judgment)`:
 
 ```bash
 node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=needs-judgment \
@@ -142,7 +144,7 @@ node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=conflict \
 node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 ```
 
-Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
+Then report `{{ATTRIBUTION_KIND}} #{{ATTRIBUTION_NUM}} → fix escalated (conflict with main)`.
 
 **Build-brief discipline applies to the repair too** (statute:
 [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
@@ -171,7 +173,7 @@ Only `green` clears you to proceed. (`verify-lane` runs the item's own locus gat
 `LOCI[item.locus]` in `check-standards-rules.mjs` — you never name it yourself.)
 
 A red gate is a hard stop. Record the stand-down on the PR, leave it `review:changes` (do **not** re-arm), and
-RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
+RETURN `{{ATTRIBUTION_KIND}} #{{ATTRIBUTION_NUM}} → fix gate-red`. Do not re-push a red diff.
 
 ```bash
 node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=gate-red \
@@ -198,7 +200,7 @@ then push HEAD to `{{LANE_REF}}` — this **updates the existing PR**, it does n
 `gh pr create`, never `pr-land` — the PR already exists; you are pushing a new head to it):
 
 ```bash
-printf '%s\n' "WE #{{ITEM_NUM}}: address review:changes on PR #{{PR_NUM}} — <one-line what you fixed>" "" \
+printf '%s\n' "{{ATTRIBUTION_KIND}} #{{ATTRIBUTION_NUM}}: address review:changes on PR #{{PR_NUM}} — <one-line what you fixed>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
 git push origin HEAD:refs/heads/{{LANE_REF}}
@@ -206,7 +208,8 @@ git push origin HEAD:refs/heads/{{LANE_REF}}
 
 Write the commit message to a file and `commit -F` it — a heredoc runs backticks (e.g. `` `scope:` ``) as a
 subshell (`bad substitution`); a message file has no such footgun. Pushing to `lane/*` is allowed by the
-single-branch guard; pushing to `main` is not.
+single-branch guard; pushing to `main` is not. No commit-msg hook or CI check enforces a `WE #` prefix;
+`.githooks/pre-commit` checks locus, and pre-push guards check the branch/tracker.
 
 ### 7. Re-arm the review — hand back for re-review (NEVER self-clear the human gate)
 
@@ -253,7 +256,7 @@ Skip only if you genuinely hit no generalizable friction.
 `review:accepted`. Your process EXIT is the signal you are done; the conveyor's merge watcher
 (`scripts/conveyor/pr-watch.mjs {{PR_NUM}}`) is re-armed by the conveyor skill, sees the PR return to
 `review:pending` (still parked, exit 2), and surfaces it for `/review`. Return a one-line result:
-`#{{ITEM_NUM}} → PR #{{PR_NUM}} (re-armed review:pending | fix escalated <reason> | fix gate-red)`. A red gate /
+`{{ATTRIBUTION_KIND}} #{{ATTRIBUTION_NUM}} → PR #{{PR_NUM}} (re-armed review:pending | fix escalated <reason> | fix gate-red)`. A red gate /
 red CI is NOT watcher-visible — your one-line RETURN is the only signal that surfaces it, so always report it.
 
 ---

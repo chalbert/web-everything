@@ -510,3 +510,11 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown — argv sha
     expect(capturedArgv).toContain('--repo=o/n');
   });
 });
+
+
+it('already detects PR #2347: accepted + DIRTY + ready-to-merge (#3383)', () => {
+  expect(isParkedConflictTarget({
+    mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY',
+    labels: [{ name: 'review:accepted' }, { name: 'ready-to-merge' }],
+  })).toBe(true);
+});

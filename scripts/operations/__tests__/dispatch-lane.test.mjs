@@ -1983,9 +1983,9 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'fix', lane: 5, sessionSlug: 'fix-701' });
     const prompt = spawned[0].argv[spawned[0].argv.length - 1];
     expect(prompt).toBe(expectedPrompt('fix', {
-      ITEM_NUM: '2608', PR_NUM: 701, LANE_REF: FAKE_LANE_REF, LANE: 5, SESSION_SLUG: 'fix-701', SCOPE: 'we:scripts/operations/',
+      ATTRIBUTION_KIND: 'WE', ATTRIBUTION_NUM: '2608', ITEM_NUM: '2608', PR_NUM: 701, LANE_REF: FAKE_LANE_REF, LANE: 5, SESSION_SLUG: 'fix-701', SCOPE: 'we:scripts/operations/',
     }));
-    // NONE OF THE SIX REQUIRED TOKENS REMAIN — the exact failure #3332's card names: an unfilled token is
+    // NONE OF THE REQUIRED TOKENS REMAIN — the exact failure #3332's card names: an unfilled token is
     // reported, never fatal, so a fix agent dispatched before this landed would have received the literal
     // string `{{PR_NUM}}`. (The brief's OWN prose still carries `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` —
     // documentation, reported below, same as the delivery brief's #3165 test.)

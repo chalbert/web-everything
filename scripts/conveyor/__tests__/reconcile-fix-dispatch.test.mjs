@@ -7,7 +7,8 @@
  * `we:scripts/operations/__tests__/review-dispatch.test.mjs`'s own style for the sibling operation this file's
  * `dispatchFix` composition was mirrored from.
  */
-import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
 import {
   dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
@@ -37,6 +38,7 @@ describe('planFixesFromReconcile', () => {
     const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
+      attributionKind: 'WE', attributionNum: '3438',
       itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: false, body: null, headRefOid: null,
     }]);
@@ -49,16 +51,37 @@ describe('planFixesFromReconcile', () => {
     }];
     const { planned } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(planned).toEqual([{
+      attributionKind: 'WE', attributionNum: '3438',
       itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: true, body: 'a PR body', headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
 
-  it('refuses `no-item-num` for a PR whose head ref carries no conveyor item number', () => {
-    const entries = [{ kind: 'fix', prNumber: 42, headRefName: 'some-hand-opened-branch' }];
-    const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
-    expect(planned).toEqual([]);
-    expect(refusals).toEqual([{ pr: 42, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
+  it.each([
+    [2170, 'lane/stuck-session-op-docs', false],
+    [2347, 'lane/multi-repo-checks', true],
+  ])('plans PR #%s without inventing an item number', (pr, headRefName, isConflict) => {
+    const findItemFn = vi.fn(() => { throw new Error('must not look up an item'); });
+    const fallback = vi.fn(() => ['we:scripts/operations/dispatch-lane.mjs']);
+    const { planned, refusals } = planFixesFromReconcile([
+      { kind: 'fix', prNumber: pr, headRefName, labels: ['review:changes', ...(isConflict ? [CONFLICT_LABEL] : [])] },
+    ], findItemFn, () => [], fallback);
+    expect(refusals).toEqual([]);
+    expect(planned).toEqual([{
+      itemNum: null, attributionKind: 'PR', attributionNum: String(pr), pr, laneRef: headRefName,
+      scope: ['we:scripts/operations/dispatch-lane.mjs'], scopeSource: 'pr-diff', isConflict, body: null, headRefOid: null,
+    }]);
+    expect(findItemFn).not.toHaveBeenCalled();
+    expect(fallback).toHaveBeenCalledWith(pr, null);
+  });
+
+  it.each([() => [], () => { throw new Error('diff unavailable'); }])('refuses no-scope without an item when fallback is empty or fails', (fallback) => {
+    const findItemFn = vi.fn(() => { throw new Error('must not look up an item'); });
+    const result = planFixesFromReconcile([{ kind: 'fix', prNumber: 2170, headRefName: 'lane/stuck-session-op-docs' }], findItemFn, () => [], fallback);
+    expect(result.planned).toEqual([]);
+    expect(result.refusals).toEqual([{ pr: 2170, kind: 'no-scope', why: expect.stringContaining('PR #2170 (no item number) has no declared scope') }]);
+    expect(result.refusals[0].why).toContain('changed-file fallback found nothing');
+    expect(findItemFn).not.toHaveBeenCalled();
   });
 
   it('refuses `no-scope` for an item the loader cannot resolve, or one with an empty scope, when the fallback ALSO finds nothing', () => {
@@ -93,6 +116,7 @@ describe('planFixesFromReconcile', () => {
       expect(refusals).toEqual([]);
       expect(calls).toEqual([{ pr: 2220, itemNum: '3383' }]);
       expect(planned).toEqual([{
+        attributionKind: 'WE', attributionNum: '3383',
         itemNum: '3383', pr: 2220, laneRef: 'lane/3383-host-process-granularity',
         scope: ['we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs'],
         scopeSource: 'pr-diff', isConflict: true, body: null, headRefOid: null,
@@ -121,18 +145,17 @@ describe('planFixesFromReconcile', () => {
     });
   });
 
-  describe('#3634 — PR #2210-shaped: a `lane/file-<PR-reviewed>-...` branch — CONFIRMED NOT the same bug, must stay refused', () => {
-    it('still refuses `no-item-num` for `lane/file-2206-review-findings` — the trailing number is the REVIEWED PR, not an item this PR delivers, and backlog item #2206 is a real, unrelated card', () => {
-      const entries = [{ kind: 'fix', prNumber: 2210, headRefName: 'lane/file-2206-review-findings', labels: ['review:changes', 'checking', 'merge-status:conflicting'] }];
-      // Even a findItemFn/fallback that WOULD happily resolve "2206" must never be consulted — proof the
-      // no-item-num refusal fires before any lookup, so it can never be fooled into a wrong attribution.
-      const findCalls = [];
-      const findItemSpy = (key) => { findCalls.push(key); return null; };
-      const { planned, refusals } = planFixesFromReconcile(entries, findItemSpy, () => [], () => ['we:should/not/be/used.mjs']);
-      expect(findCalls).toEqual([]);
-      expect(planned).toEqual([]);
-      expect(refusals).toEqual([{ pr: 2210, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
-    });
+  it('#3634 — attributes lane/file-2206-review-findings to PR #2210, never WE #2206', () => {
+    const findItemFn = vi.fn(() => { throw new Error('must not look up the reviewed PR as an item'); });
+    const fallback = vi.fn(() => ['we:docs/agent/testing.md']);
+    const { planned, refusals } = planFixesFromReconcile([
+      { kind: 'fix', prNumber: 2210, headRefName: 'lane/file-2206-review-findings' },
+    ], findItemFn, () => [], fallback);
+    expect(refusals).toEqual([]);
+    expect(planned[0]).toMatchObject({ itemNum: null, attributionKind: 'PR', attributionNum: '2210', scopeSource: 'pr-diff' });
+    expect(planned[0].attributionKind).not.toBe('WE');
+    expect(findItemFn).not.toHaveBeenCalled();
+    expect(fallback).toHaveBeenCalledWith(2210, null);
   });
 });
 
@@ -495,8 +518,8 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       checkStaleness: FRESH,
     });
     expect(dispatched).toEqual([
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
-      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
+      { attributionKind: 'WE', attributionNum: '3438', itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
+      { attributionKind: 'WE', attributionNum: '3438', itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);
@@ -754,5 +777,43 @@ describe('#3606 — dispatchFix always passes the dispatched-agent system prompt
     // Order matters the same way it does for every other dispatch: identity, then operator flags, then prompt.
     expect(at).toBeLessThan(argv.indexOf('--model'));
     expect(argv[argv.length - 1]).toContain('fix brief for 1764');
+  });
+});
+
+
+describe('null-item dispatch composition', () => {
+  it.each([
+    [null, 'PR', '2347'],
+    ['3383', 'WE', '3383'],
+  ])('fills the real brief with honest attribution for item %s, including legacy callers', (itemNum, kind, num) => {
+    for (const attribution of [{}, { attributionKind: kind, attributionNum: num }]) {
+      const spawnAgent = vi.fn(() => '');
+      const result = dispatchFix({ itemNum, pr: 2347, laneRef: 'lane/multi-repo-checks', scope: ['we:scripts/'], lane: 4, ...attribution }, {
+        root: '/repo', readBrief: () => readFileSync('skills-src/conveyor/fix-agent-brief.md', 'utf8'),
+        mintSessionId: () => '11111111-1111-4111-8111-111111111111', spawnAgent,
+      });
+      const prompt = spawnAgent.mock.calls[0][0].at(-1);
+      expect(prompt).toContain(`${kind} #${num}: address review:changes on PR #2347`);
+      expect(prompt).not.toMatch(/WE #null|#undefined|\{\{ITEM_NUM\}\}/);
+      expect(result.unknownTokens.join(' ')).not.toContain('ATTRIBUTION');
+      expect(result.sessionSlug).toBe('fix-2347');
+      if (!itemNum) expect(prompt).toContain('--item= --status=started');
+    }
+  });
+
+  it('offers only fix-<pr> as the expected ownership name when there is no item', () => {
+    const result = tryResumeFix({ itemNum: null, pr: 2347, isConflict: true, body: buildAuthorActorMarker('candidate'), headRefOid: 'abc' }, {
+      root: '/repo', listAgentsAll: () => [{ sessionId: 'candidate', name: 'unrelated', cwd: '/lane' }],
+      resolveHead: () => 'abc', spawnAgent: () => { throw new Error('must not spawn'); },
+    });
+    expect(result.resumeAttempt.refused).toBe('ownership-unconfirmed');
+    expect(result.resumeAttempt.why).toContain('["fix-2347"]');
+    expect(result.resumeAttempt.why).not.toContain('conveyor-null');
+  });
+
+  it('omits the item clause from a null-item resume prompt', () => {
+    const prompt = buildResumePrompt({ pr: 2347, itemNum: null });
+    expect(prompt).toContain('New work on PR #2347,');
+    expect(prompt).not.toMatch(/item #|undefined|null/);
   });
 });

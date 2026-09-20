@@ -66,7 +66,8 @@ function parseFlags(argv) {
 export function runReport(flags) {
   const kind = flags.kind;
   const pr = flags.pr ?? null;
-  const item = flags.item ?? null;
+  // #3383: fix dispatch for a PR whose branch names no item passes --item= blank.
+  const item = typeof flags.item === 'string' && flags.item.trim() ? flags.item.trim() : null;
   const session = flags.session || (kind && pr ? sessionSlugForCompletion({ kind, pr }) : undefined);
   if (!session) throw new Error('usage: completion-cli.mjs report --session=<slug>|--kind=review|fix|ci-heal --pr=<n> --status=started|done [...]');
   if (flags.status !== 'started' && flags.status !== 'done') throw new Error('report requires --status=started|done');

@@ -111,6 +111,7 @@ export const BRIEF_PLACEHOLDERS = Object.freeze([
   // `deliveryTarget:` names one. It had to be REGISTERED here, not just typed into the brief: `fillBrief`
   // strictly refuses an unknown placeholder, which is exactly the blocker #3637's survey named (#2 of five).
   'DELIVERY_BASE',
+  'ATTRIBUTION_KIND', 'ATTRIBUTION_NUM',
 ]);
 
 /**
@@ -149,7 +150,7 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   // `investigate` (#3567) fills the SAME five names as the two prepare kinds — it targets an ITEM (not an
   // existing PR), same as `prepare`/`prepare-decision`, so it has no `PR_NUM`/`LANE_REF` to give either.
   investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
-  fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
+  fix: ['ATTRIBUTION_KIND', 'ATTRIBUTION_NUM', 'ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON'],
 });
 
@@ -478,8 +479,8 @@ export function attemptTagFor(priorAttempts) {
  *
  * The brief is a TEMPLATE, not a prompt — `we:skills-src/conveyor/delivery-agent-brief.md` says so in its first
  * line, and the skill's §3 says its tokens "are the whole fill — do not rewrite its prose". So this substitutes
- * exactly `requiredNames` and nothing else — five tokens for a build/prepare/prepare-decision brief, six or
- * seven for a fix/ci-heal one (#3332; see {@link BRIEF_REQUIRED_BY_KIND}).
+ * exactly `requiredNames` and nothing else — including the two attribution tokens for a fix brief;
+ * eight tokens for a fix and seven for a ci-heal one (#3332; see {@link BRIEF_REQUIRED_BY_KIND}).
  *
  * ONE PASS, NOT ONE PER PLACEHOLDER. A sequential substitute-per-placeholder expands a token that appeared
  * inside an EARLIER value on a later iteration, which is both a wrong fill and one no leftover check can see
@@ -1008,6 +1009,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       LANE: launch.lane,
       SESSION_SLUG: sessionSlug,
       SCOPE: scope.join(','),
+      ...(launchKind === 'fix' ? { ATTRIBUTION_KIND: 'WE', ATTRIBUTION_NUM: resolvedNum } : {}),
       ...(launchKind === 'ci-heal' ? { REASON: launch.reason } : {}),
     }
     : {

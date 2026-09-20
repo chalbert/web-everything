@@ -45,15 +45,32 @@ describe('evidence IO', () => {
   });
   it.each(['Provider used: CODEX-direct-task', '## Authorship\nGemini wrote it', '**Provider used:** Codex'])('parses section %s', (text) => expect(resultProvider(text)).toMatch(/Codex|Gemini/));
   it('does not treat an incidental mention as authorship', () => expect(resultProvider('Maybe use codex tomorrow')).toBeNull());
-  it('calls the existing fix planner and retains both refusal shapes', () => {
+  it('calls the existing fix planner and retains no-scope refusals', () => {
     const run = (cmd, args) => cmd === 'gh' ? (args.includes('chalbert/web-everything') ? JSON.stringify([
       { number: 2170, labels: ['review:changes'], headRefName: 'lane/stuck-session-op-docs' },
       { number: 2108, labels: ['review:changes'], headRefName: 'lane/3140-fix' },
     ]) : '[]') : cmd === 'git' ? '0 1' : '/lane-1';
     const inputs = createLandAdvanceReader(readerPorts({ run, findItemFn: () => null, loadItems: () => [], resolveFallbackScope: () => [] }))();
-    expect(inputs.fixPlans['we#2170'].refusal.kind).toBe('no-item-num'); expect(inputs.fixPlans['we#2108'].refusal.kind).toBe('no-scope');
+    expect(inputs.fixPlans['we#2170'].refusal.kind).toBe('no-scope'); expect(inputs.fixPlans['we#2108'].refusal.kind).toBe('no-scope');
     const yes = createLandAdvanceReader(readerPorts({ run, findItemFn: () => ({ scope: ['we:scripts/'] }), loadItems: () => [] }))();
     expect(yes.fixPlans['we#2108'].planned.scope).toEqual(['we:scripts/']);
+  });
+  it('carries a null-item fix plan through the reader and dispatch-fix row', async () => {
+    const findItemFn = vi.fn(() => { throw new Error('must not look up an item'); });
+    const resolveFallbackScope = vi.fn(() => ['we:docs/agent/testing.md']);
+    const run = (cmd, args) => cmd === 'gh' ? (args.includes('chalbert/web-everything') ? JSON.stringify([
+      { number: 2170, labels: ['review:changes'], headRefName: 'lane/stuck-session-op-docs' },
+    ]) : '[]') : cmd === 'git' ? '0 0' : '/lane-1';
+    const inputs = createLandAdvanceReader(readerPorts({ run, findItemFn, loadItems: () => [], resolveFallbackScope }))();
+    const plan = planLandAdvance(inputs);
+    const row = plan.rows.find((r) => r.pr === 2170);
+    expect(row).toMatchObject({ owedAction: 'dispatch-fix', dispatchable: true, fixPlan: { itemNum: null, attributionKind: 'PR', attributionNum: '2170' } });
+    expect(row.refusal).toBeFalsy();
+    expect(resolveFallbackScope).toHaveBeenCalledWith(2170, null);
+    expect(findItemFn).not.toHaveBeenCalled();
+    const dispatchFix = vi.fn(() => ({ agentId: 'f', sessionSlug: 'fix-2170' }));
+    await createLandAdvanceApplier({ dispatchFix, pickFixLane: () => 7, readCapacity: () => ({ freeLanes: 1 }), writeLedger: () => {}, now: () => now })(plan);
+    expect(dispatchFix).toHaveBeenCalledWith(expect.objectContaining({ itemNum: null, attributionKind: 'PR', attributionNum: '2170', lane: 7 }), expect.any(Object));
   });
   it('round-trips follow-ups through the real run schema', () => {
     const store = createMemoryRunStore(), entry = { session: 'session-123', kind: 'review', target: 'frontierui#49', launchedAt: new Date(now).toISOString(), deadline: new Date(now + 1000).toISOString(), expectedResultPath: '/jobs/review-49.result.md', permissionsGranted: ['Read'] };
