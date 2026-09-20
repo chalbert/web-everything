@@ -58,6 +58,21 @@ not the intended everyday path.
    a page you wrote yourself (same discipline `we:skills-src/progress-board/SKILL.md` states for its
    own page): the generator is the only thing that may produce this page's markup.
 
+## Keep the priority order current (whoever touches a #3383 card)
+
+The card's `## Priority order` section is the ONE maintained, ordered list of open work under the epic;
+its own rules say how a card is placed, so nobody re-prioritises from memory.
+
+- **Whoever files, resolves, re-scopes or blocks a #3383 card updates that section in the same push:**
+  insert a new card by the section's rules, delete a resolved card's line, move a re-scoped or newly
+  blocked card by its new band and `blockedBy`. Replace the section in place, never append a dated
+  copy, and refresh its `Updated:` line.
+- **Check before you push:** `node scripts/prototype-tracker.mjs check-priority --ref=origin/main --strict`
+  must pass (a plain run only prints the drift and exits 0).
+- **The orchestrator dispatches from the top of band A and never chooses order.** If the list looks
+  wrong, an agent re-applies the section's rules (or the operator pins a line); the orchestrator does
+  not reorder it.
+
 ## What this is not
 
 - **Not the "Dispatch Scaling Roadmap"** — that page synthesizes research (provider pricing,
