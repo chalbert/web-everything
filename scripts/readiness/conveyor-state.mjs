@@ -486,21 +486,25 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  * sets, and the skill's §3b would aim a prepare-scope agent at a container — the very hazard #2645 closes (and the
  * exact regression a cleared `kind:feature` reached before #2998's fix, since only `epic` was excluded here).
  * A `kind:decision` is excluded for the SAME reason (#2647): it is held `needs-decision` before the scope gate (a
- * decision is prepared/presented, never scope-authored), and surfaces ONLY in {@link deriveDecisions}. So the two
- * surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
+ * decision is prepared/presented, never scope-authored), and surfaces ONLY in {@link deriveDecisions}. A
+ * `kind:investigation` is excluded too (#3567): it is held `needs-investigation` before the scope gate and is
+ * spawned straight off `plan.held`, never scope-authored. So the surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
  * `clearedNums` is injected (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator
  * cleared this session. Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope+kind-enriched by the shell)
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-grouping, non-decision rows (spelling kept)
+ * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-grouping, non-decision, non-investigation rows (spelling kept)
  */
 export function deriveUnshaped(buildQueue, clearedNums = null) {
   return shapeQueue(buildQueue, clearedNums)
     // Grouping kinds (epic/feature) are held `needs-slice` and decisions `needs-decision`, both BEFORE the scope
     // gate (see deriveNeedsSlice / deriveDecisions) — exclude both so a scope-less container/decision is not
     // double-surfaced as unshaped (which would drive §3b to prepare-scope a container #2645/#2998, or a decision
-    // that needs no build scope #2647).
-    .filter((r) => r.buildQueued && !isGroupingKind(r.kind) && r.kind !== 'decision' && normScope(r.scope).length === 0)
+    // that needs no build scope #2647). A `kind:investigation` is excluded for the same reason (#3567): the
+    // dispatcher holds it `needs-investigation` before the scope gate, and `planPrepareSpawns` shares ONE guard set
+    // across both lists — so surfacing it here would spawn a wrong-kind prepare-scope agent and silently swallow
+    // the real investigate spawn.
+    .filter((r) => r.buildQueued && !isGroupingKind(r.kind) && r.kind !== 'decision' && r.kind !== 'investigation' && normScope(r.scope).length === 0)
     .map((r) => ({ num: r.num, scope: r.scope }));
 }
 
