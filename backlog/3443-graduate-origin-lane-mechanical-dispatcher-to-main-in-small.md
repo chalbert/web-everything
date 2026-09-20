@@ -163,3 +163,48 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
   dispatch instructions) was deliberately NOT attempted this pass — it needs the dedicated, low-contention,
   most-scrutiny turn its own card calls for, not a slot in a night this saturated. **#3487** stays
   `blockedBy: 3483, 3486` as before, now half-unblocked (3483 landed).
+
+- **2026-09-19 (graduation increment, PR #2337).** Re-measured fresh after a fetch:
+  `git rev-list --left-right --count origin/main...origin/lane/mechanical-dispatcher` → **299 behind / 176
+  ahead** (was 30 ahead on 2026-09-04; the branch has grown mostly through the #3383 delivery/telemetry/watchdog
+  work and folded-in PRs #2156/#2223). `git cherry` finds only 8 of the 176 patch-equivalent on `main`; a
+  read-only scan (temp index, `git apply --check` forward/reverse against `origin/main`) put the non-merge
+  commits at 23 applying cleanly, 9 already landed (reverse-applies), the rest conflicting/entangled.
+
+  **Landed as one small PR (#2337, `review:pending`, not merged by this session):**
+  - `7760e8f1` — `we:scripts/conveyor/verify-dispatch.mjs` stops mislabelling an external kill as a ceiling
+    timeout (trusts `spawnGateBounded`'s own `timedOutPhase`) + regression test. The ceiling itself was already
+    on `main`.
+  - `42f96a8f` + `fe04eca3` — `we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs` ground-truth-axis
+    coverage + its short-`id` fixture fix. Test-only: the reaper implementation is already on `main`
+    (`ed9728c8d`/`436a83e56`). The two must go together — `42f96a8f` alone fails 3 tests against `main`'s reaper
+    (fixtures lack `id`).
+  Gate: 74/74 on the three covering vitest files; `check-standards` 8 errors, all pre-existing stranded-hash
+  backlog files on `main`, none from this diff.
+
+  **The card's named candidates are already done:** `34302e2c3`/`d37731fd7` (lane-pool retry fetch + flag
+  validation) landed as #3481 (`a57be8a09`), and `3faf739c5` (verify-lane request/check + verify-dispatch) landed
+  as #3484 — neither is still ahead. **Two corrections to the task framing:**
+  `we:skills-src/conveyor/supervisor.mjs` is NOT absent from `main` any more (landed with #3483/PR #1978), and
+  #3437 is `status: resolved` on `main`, so neither "held back" rule blocks anything now.
+
+  **Deliberately skipped this increment:**
+  - `1024822d` (#3634, reconcile-fix-dispatch falls back to PR-diff scope) — applies cleanly and stands alone, but
+    it changes live fix-dispatch behaviour (adds a `gh pr diff` call); wants its own PR/scrutiny, next candidate.
+  - `a035ab9e` (lease-reaper real-liveness read) — imports `resolvePidAlive`/`scanPsOutput` from
+    `we:scripts/conveyor/driver-watchdog.mjs`, which is not on `main`; blocked on graduating the watchdog first.
+  - The `we:skills-src/conveyor/runner.mjs` reconcile-pass wiring (#3486) and everything layered on it — still
+    the highest-scrutiny piece, unchanged from the 2026-09-07 note.
+  - The ~19 `backlog/`-only session-log/filing commits — branch-local narrative, not graduation slices.
+
+  **Lane-pool bugs — no fix on the branch.** `we:scripts/lane-pool.mjs` has no non-merge commit ahead of `main`,
+  and a diff of it between `origin/main` and the branch shows only `main`'s own newer changes. So neither is
+  fixed on the branch: (1) `refresh --lane=N` refreshing all lanes and dying with `Permission denied
+  (publickey)` on an SSH-remote lane; (2) a lane with any commit its local `origin/main` ref lacks reading as busy
+  (only 1-2 of ~70 acquirable). Both need fresh work on `main`. Also seen this pass: `acquire` from the primary
+  checkout failed once with `fatal: bad object refs/heads/lane/3026-…` on its `git fetch origin --prune`, and
+  succeeded on an immediate retry.
+
+  **Ahead-count:** 176 before; 177 after this tracker commit. Merging #2337 will NOT lower it — a cherry-pick lands
+  as new SHAs on `main`, so the raw count only falls if the branch is later reconciled with `main`. Done-when #1 is
+  still tracked by slice completion, not by the raw count.

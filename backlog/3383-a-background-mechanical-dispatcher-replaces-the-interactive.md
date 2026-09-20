@@ -3694,3 +3694,7 @@ to the branch, no PR of its own). #2223 now carries an independent `review:accep
 folded as-is: merge commit `0817a539`, no conflicts, no code changed in the fold. It touches
 `we:scripts/readiness/heavy-admission.mjs`, `we:scripts/readiness/file-locks.mjs` and their two test files.
 Nine vitest files covering the touched scripts pass (274 tests). The PR is closed with a pointer to this commit.
+
+## Session update (2026-09-19) — graduated one #3443 increment (PR #2337) — verify-dispatch external-kill fix + session-reaper CLI tests; branch 176 ahead
+
+Advanced epic #3443 (graduate this branch to `main`) by one increment: PR #2337 graduates `7760e8f1` (verify-dispatch external-kill mislabel fix + test) and `42f96a8f`+`fe04eca3` (session-reaper ground-truth CLI test coverage) — small, inert, no runner wiring. Card #3443 has the full detail: what was skipped and why (`1024822d`, `a035ab9e`, the runner wiring), the fresh count (299 behind / 176 ahead before this commit; a cherry-pick PR does not lower the raw count), and that the branch carries no fix for the two lane-pool bugs (`refresh --lane=N` touching all lanes and dying on SSH remotes; near-zero lanes acquirable because of a stale local `origin/main` ref). Correction to earlier framing: the conveyor supervisor and #3437's fix are both on `main` now.
