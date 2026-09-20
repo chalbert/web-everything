@@ -1,10 +1,11 @@
 ---
+bornAs: x994927
 kind: story
 size: 5
 priority: high
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["3070", "3609", "x9rppp9", "xjsj7pg", "xaypr56", "xc1u3pi", "x1ojdxq", "xrhnxmu"]
+relatedTo: ["3070", "3609", "3721", "3727", "3722", "3723", "3717", "3731"]
 scope: ["we:scripts/operations/land-advance.mjs", "we:scripts/operations/land-advance-io.mjs", "we:scripts/land-advance-hook.mjs", "we:skills-src/conveyor/runner.mjs", "we:.claude/settings.json", "we:scripts/operations/__tests__/land-advance.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -21,10 +22,10 @@ The operator's ask (2026-09-19): "queue next work mechanically as others land", 
 `land-advance` is pure composition. It owns no rule of its own except the load gate (step 1). Each decision below already has an owner; the operation calls it and never re-derives it ([#deterministic-core-thin-judgment](../docs/agent/platform-decisions.md#deterministic-core-thin-judgment), [#operations-declared-once-callers-generated](../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)).
 
 1. **Capacity first, every call.** Budget N = free acquirable lanes, minus live dispatched sessions, capped by the ceiling, and 0 while machine load is over a threshold.
-   - Free lanes: `we:scripts/lane-pool.mjs` `list --acquirable` (see #xeaxqvw — today it under-reports).
+   - Free lanes: `we:scripts/lane-pool.mjs` `list --acquirable` (see #3725 — today it under-reports).
    - Ceiling and live count: `we:scripts/lib/lane-concurrency.mjs` — the same resolver `dispatch-plan` and `planTick` already share, so this call and the tick can never sum past one budget.
    - **New, small, and the only new rule:** a load gate. `os.loadavg()[0] / os.cpus().length` over a threshold means budget 0. Today's ceiling is deliberately hardware-blind (its own header defers to the unlanded hardware-aware project), and load reached 28 on 12 cores on 2026-09-19, so a count cap alone is not enough.
-   - N is computed once and passed down as a hard budget to every dispatch below; nothing dispatches past it. A burst of completions therefore cannot oversubscribe the machine even before #xjsj7pg caps the other callers.
+   - N is computed once and passed down as a hard budget to every dispatch below; nothing dispatches past it. A burst of completions therefore cannot oversubscribe the machine even before #3727 caps the other callers.
 2. **Plan under the existing rules — never a looser path.**
    - Owed PR work (review, fix): `we:scripts/conveyor/reconcile-pass.mjs` (through `we:scripts/conveyor/reconcile-core.mjs` `planReconcile`) decides what is owed and every refusal (`stood-down`, `no-findings`, `cap-exhausted`, `live-process`, `awaiting-permission`, `liveness-unknown`). A refusal is reported, never overridden.
    - Next ready item: `we:scripts/readiness/conveyor-state.mjs` then `we:scripts/readiness/dispatch-plan.mjs`. It already owns: the `unshaped-no-scope` hold (an item with no declared `scope:` is REFUSED, the same rule `we:scripts/conveyor/reconcile-fix-dispatch.mjs` applies as `no-scope`), `overlaps lane-N` (an active lease's scope, or a higher-ranked item just launched), `blockedBy` order, the `capacity-cap` hold, and the pause hold. The scope-lease and partition logic sit behind it in `we:scripts/readiness/scope-lease.mjs`, `we:scripts/readiness/scope-lease-collect.mjs` and `we:scripts/readiness/lane-partition.mjs`; reuse them by calling `dispatch-plan`, not by importing them.
@@ -39,7 +40,7 @@ The operator's ask (2026-09-19): "queue next work mechanically as others land", 
 - **The drain observes every landing it makes, today.** The resident drain daemon is running (pid 53121, ticking about every 80 seconds; it landed every approved PR on 2026-09-19), so it is available and already the one thing that sees a landing at the moment it happens. It is not a harness hook and not git (its clone refresh is `fetch` + `reset --hard`, which fires no `post-merge`); the seam is the daemon's per-pass record, which already lists `mergedPrs` in its history file. **Whether the drain may also TRIGGER work is an operator and design call, not a technical barrier:** its README lists "no agent spawning" as a deliberate non-goal (parked PRs are surfaced, never cleared), it lives in another repo (plateau-app), and #3070 Fork 1 default-rejected the drain as a caller of an unrelated operation. If the answer is no, the trigger needs another home. Two shapes, side by side:
   - **(a) [recommended unless the operator says otherwise] The drain emits a landing EVENT and something else consumes it.** Keeps the non-goal intact and still gives the exact moment of a landing. It may need no drain change at all, since the per-pass history record already carries `mergedPrs`; the alternative is one small append to a queue file the drain writes after a merge. The consumer is whatever fires `land-advance` from a file change: the `Stop` hook or runner tick reading pending events, or a launchd `WatchPaths` job on the event file (a real event, not a clock, but a new job that competes with #3070 for the "one unattended caller" slot). **Blind spot:** a landing that bypasses the daemon (a `/pr` or `/finish` single-PR fast drain, or a hand merge) emits no event, so the `Stop` hook and runner-tick callers above still cover those.
   - **(b) The drain calls `land-advance` directly** at end of pass in `we:scripts/merge-ai-prs.mjs`. Simplest wiring and no consumer to build, but it needs the "no agent spawning" non-goal relaxed and puts a dispatch side effect inside the sole writer to `main`.
-  - **The drain must be healthy to be trusted as the observer:** as of 2026-09-20 its clone refresh has been failing on most passes and it is 47 commits behind (#xrhnxmu). An event source that decides on a stale checkout is exactly what this operation must not inherit; `land-advance` re-derives from GitHub, never from the event's payload.
+  - **The drain must be healthy to be trusted as the observer:** as of 2026-09-20 its clone refresh has been failing on most passes and it is 47 commits behind (#3731). An event source that decides on a stale checkout is exactly what this operation must not inherit; `land-advance` re-derives from GitHub, never from the event's payload.
 - **A PR merging on GitHub** → no local event exists. A webhook could only wake something local, and a wake is never a trusted order.
 
 The events are wake signals only. `land-advance` re-derives everything from GitHub, the lanes and the run records on each call, which is how [#event-driven-land-is-wake-only](../docs/agent/platform-decisions.md#event-driven-land-is-wake-only) says a wake must be treated. That is also why it is safe to fire twice.
@@ -48,13 +49,13 @@ The events are wake signals only. `land-advance` re-derives everything from GitH
 
 `land-advance` is the one place a completion event fans out to mechanical consumers. Two are filed as their own slices so this one stays small:
 
-- **The Decision Docket refresh** (#xc1u3pi): read-only, needs no lane and no session, so it does not count against the worker budget. It is the cheapest consumer and the best first proof that the trigger fires at all; build it against a manual call first and wire it here once the trigger exists.
-- **Provider routing** (#x1ojdxq): the provider and supervision level for every dispatch this operation makes come from that slice's router wiring, never from a brief. Until it lands, this operation dispatches exactly as `dispatch-lane` does today.
+- **The Decision Docket refresh** (#3723): read-only, needs no lane and no session, so it does not count against the worker budget. It is the cheapest consumer and the best first proof that the trigger fires at all; build it against a manual call first and wire it here once the trigger exists.
+- **Provider routing** (#3717): the provider and supervision level for every dispatch this operation makes come from that slice's router wiring, never from a brief. Until it lands, this operation dispatches exactly as `dispatch-lane` does today.
 
 ## Idempotence and safety
 
 - Safe to fire twice for one landing: state is re-derived, and dispatch is guarded by `dispatch-lane`'s run-record in-flight guard, `claim` and the lane lease. Add a single-flight lease (reuse the `runner-lock` or `drain-lock` primitive; do not mint a new one) so concurrent callers exit `busy` instead of racing to plan.
-- Never double-dispatches over a live session: `reconcile-core` refuses `live-process`. **Does the reaper slice (#x9rppp9) block this one? Not for safety** — the refusal fails safe. **It does for value:** while a finished review session still lists alive, reconcile refuses that PR forever, so the review and fix half of this operation is inert for it. The item-pull half does not depend on session liveness. Ship this slice plan-only first and land #x9rppp9 next.
+- Never double-dispatches over a live session: `reconcile-core` refuses `live-process`. **Does the reaper slice (#3721) block this one? Not for safety** — the refusal fails safe. **It does for value:** while a finished review session still lists alive, reconcile refuses that PR forever, so the review and fix half of this operation is inert for it. The item-pull half does not depend on session liveness. Ship this slice plan-only first and land #3721 next.
 - Every call records a run record (it is a declared operation), so a plan-only run is auditable.
 
 ## FLAG FOR THE OPERATOR — this must not become an unattended runner by the back door
@@ -63,7 +64,7 @@ The runner is stopped, not machine-readably paused: `we:.conveyor/dispatch-pause
 
 - **Default `--mode=plan`:** compute and record what it would dispatch; dispatch nothing.
 - `--mode=dispatch` requires BOTH an explicit operator opt-in (a durable setting the operator writes, not a flag an agent passes) AND the pause marker (`we:scripts/readiness/dispatch-pause.mjs`) being unset. The operator can make a pause real today with `dispatch-pause set`.
-- **Where the marker and the opt-in are read matters.** `dispatch-pause` resolves `.conveyor/` from the SCRIPT'S own location and fails OPEN when the file is missing. A hook firing inside a lane clone would read that clone's empty `.conveyor/` and see "not paused". Read both from one canonical checkout: the live runner's (`we:scripts/conveyor/resolve-runner-checkout.mjs`), else the primary checkout. Never the caller's own clone. This is the per-checkout-sidecar problem that decision #xaypr56 rules on properly.
+- **Where the marker and the opt-in are read matters.** `dispatch-pause` resolves `.conveyor/` from the SCRIPT'S own location and fails OPEN when the file is missing. A hook firing inside a lane clone would read that clone's empty `.conveyor/` and see "not paused". Read both from one canonical checkout: the live runner's (`we:scripts/conveyor/resolve-runner-checkout.mjs`), else the primary checkout. Never the caller's own clone. This is the per-checkout-sidecar problem that decision #3722 rules on properly.
 - Item-pull (starting new work) is the riskiest half. Give it its own opt-in, separate from review and fix dispatch of work already in flight.
 
 ## Done when

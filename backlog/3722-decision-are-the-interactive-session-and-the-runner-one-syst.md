@@ -1,8 +1,9 @@
 ---
+bornAs: xaypr56
 kind: decision
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["3383", "3031", "2615", "2701", "2612", "3070", "3639", "x994927"]
+relatedTo: ["3383", "3031", "2615", "2701", "2612", "3070", "3639", "3720"]
 dateOpened: "2026-09-19"
 tags: []
 ---
@@ -27,7 +28,7 @@ The operator wants a live session and the runner to add work and handle it ident
 | Plan | `we:scripts/conveyor/tick-core.mjs` `planTick`; `we:scripts/conveyor/reconcile-pass.mjs` (stateless, keyed by PR) | `planTick`'s build, prepare and fix guards are bookkeeping piped in over STDIN, session-ephemeral. Only a process that carries it forward (the runner) uses them; a session re-derives by hand. |
 | Add work | `we:scripts/operations/file-item.mjs` | the queue it writes to is `we:.conveyor/queue.json`, resolved from the CALLER's script location, so a session in a lane clone and the runner in another checkout write and read different files (#3478's resolver only answers while a runner is live) |
 | Claim | `we:scripts/operations/claim.mjs`, lane lease in `we:scripts/lane-pool.mjs` | none |
-| Dispatch | `we:scripts/operations/dispatch-lane.mjs`, `we:scripts/operations/review-dispatch.mjs`, `we:scripts/conveyor/reconcile-fix-dispatch.mjs` | hand-launched workers (no operation for "run this brief"; #xn4cgvr) |
+| Dispatch | `we:scripts/operations/dispatch-lane.mjs`, `we:scripts/operations/review-dispatch.mjs`, `we:scripts/conveyor/reconcile-fix-dispatch.mjs` | hand-launched workers (no operation for "run this brief"; #3730) |
 | Settle | `we:scripts/operations/operator-queue.mjs` | the runner's tick output and the operator queue are separate surfaces |
 | Alive? | three models | see Fork 3 |
 
@@ -36,7 +37,7 @@ The operator wants a live session and the runner to add work and handle it ident
 **Real differences** (keep them, and design for them):
 
 - A person is present in a session and the runner has none. A stood-down agent is a question only a person can answer; ratifying a decision needs an explicit human utterance; a semantic merge conflict, a duplicate-PR keeper and "what should we build next" are judgment. The runner must escalate these, never guess. That is what `we:scripts/operations/operator-queue.mjs` is for.
-- Authority and cost. Unattended dispatch spends money and load with nobody watching, so it needs a pause, a capacity gate and an opt-in (see #x994927). A session's dispatch is supervised by construction.
+- Authority and cost. Unattended dispatch spends money and load with nobody watching, so it needs a pause, a capacity gate and an opt-in (see #3720). A session's dispatch is supervised by construction.
 
 **Merely historical** (remove them):
 
@@ -48,7 +49,7 @@ The operator wants a live session and the runner to add work and handle it ident
 
 ## Fork 1 — who owns the loop (plan, claim, dispatch, settle)
 
-- **(a) [default] One loop, expressed as operations; every actor is a caller.** The steps are declared operations (`land-advance` for plan and dispatch #x994927, reconcile, the session reaper, the operator queue for settle). The runner becomes an optional scheduler that calls them on a clock; a completion hook calls them on events; a session calls them on demand. No caller carries its own copy of the loop. The session's own job is adding work (`file-item`), answering what the operator queue surfaces, and judgment. Cost: the tick's STDIN-carried guards must become derivable from durable facts (Fork 2).
+- **(a) [default] One loop, expressed as operations; every actor is a caller.** The steps are declared operations (`land-advance` for plan and dispatch #3720, reconcile, the session reaper, the operator queue for settle). The runner becomes an optional scheduler that calls them on a clock; a completion hook calls them on events; a session calls them on demand. No caller carries its own copy of the loop. The session's own job is adding work (`file-item`), answering what the operator queue surfaces, and judgment. Cost: the tick's STDIN-carried guards must become derivable from durable facts (Fork 2).
 - **(b) Two systems that share leaf operations.** The runner keeps `planTick` with in-process guards; the session keeps a by-hand loop; both call the same `dispatch-lane`. This is today. Cheapest now. But it is the shape #3296 was filed to escape: a proxy (session memory) standing in for a fact, and two loops that drift.
 - **(c) Runner only; the session may not dispatch at all.** The purest reading of #3383's end state. Rejected as a default: the operator deliberately runs the runner stopped, ad-hoc and exploratory work would have no path, and a human could no longer intervene faster than a tick.
 
@@ -64,7 +65,7 @@ The operator wants a live session and the runner to add work and handle it ident
 
 Today: `claude agents --json` (thin, and the PR-to-session binding is a proxy: lane `HEAD` against the PR's `headRefOid`), the lane lease's pid heartbeat, and the run record's liveness stamp. Idle-but-finished sessions poison the first, which froze the fix pipeline on 2026-09-19.
 
-- **(a) [default] The completion record says "finished", the listing plus run record says "alive", and a session that is alive but finished is reaped** (#x9rppp9). Reconcile's `live-process` refusal is then trustworthy because idle-finished sessions cannot persist.
+- **(a) [default] The completion record says "finished", the listing plus run record says "alive", and a session that is alive but finished is reaped** (#3721). Reconcile's `live-process` refusal is then trustworthy because idle-finished sessions cannot persist.
 - **(b) Do not leave them alive: launch workers so they exit on completion.** The spawn argv in `we:scripts/operations/dispatch-lane-io.mjs` uses `--bg`, which keeps a session resident. If a non-interactive one-shot launch exists that exits when the agent is done, "alive" would mean "working" and no reaper is needed. Possibly the better root fix, but it is unverified (#3381 and #3624 show `--bg` sessions idling at a prompt) and changes how every worker is launched. Research it before ruling; it does not have to block (a), which is small and works either way.
 
 ## Concrete code to read before ruling
@@ -73,4 +74,4 @@ Today: `claude agents --json` (thin, and the PR-to-session binding is a proxy: l
 
 ## Done when
 
-1. **Executable** — TODO: ratified by the operator and recorded in a `## Ruling` section; the forks it settles are then carved into slices under #x4v2xe4 or the ruling's stated home.
+1. **Executable** — TODO: ratified by the operator and recorded in a `## Ruling` section; the forks it settles are then carved into slices under #3718 or the ruling's stated home.

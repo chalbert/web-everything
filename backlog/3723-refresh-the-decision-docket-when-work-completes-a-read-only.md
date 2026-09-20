@@ -1,9 +1,10 @@
 ---
+bornAs: xc1u3pi
 kind: story
 size: 3
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["3562", "3277", "x994927", "x8i6rsg"]
+relatedTo: ["3562", "3277", "3720", "3719"]
 scope: ["we:scripts/operations/docket-refresh.mjs", "we:scripts/operations/docket-refresh-io.mjs", "we:scripts/gen-decision-docket.mjs", "we:scripts/operations/__tests__/docket-refresh.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -11,7 +12,7 @@ tags: []
 
 # Refresh the Decision Docket when work completes: a read-only, capacity-free land-advance consumer that publishes only when the data changed
 
-The Decision Docket's RECORD is already mechanical: `node we:scripts/gen-decision-docket.mjs all --ref=origin/main` picks a new decision up from `main` by itself. What is not mechanical is the REFRESH (nothing triggers it, there is no standing pass) and the PUBLISH (it still needs a session to run the `Artifact` tool by hand). This is "state changes only when something lands", the exact pattern the landing trigger (#x994927) exists for, and it is the cheapest possible consumer of that trigger.
+The Decision Docket's RECORD is already mechanical: `node we:scripts/gen-decision-docket.mjs all --ref=origin/main` picks a new decision up from `main` by itself. What is not mechanical is the REFRESH (nothing triggers it, there is no standing pass) and the PUBLISH (it still needs a session to run the `Artifact` tool by hand). This is "state changes only when something lands", the exact pattern the landing trigger (#3720) exists for, and it is the cheapest possible consumer of that trigger.
 
 ## Worked example (measured by the driving session on 2026-09-19; reported here, not re-run)
 
@@ -19,7 +20,7 @@ The Decision Docket's RECORD is already mechanical: `node we:scripts/gen-decisio
 
 ## Shape
 
-A `docket-refresh` declared operation, called by the completion trigger like any other consumer (#x994927):
+A `docket-refresh` declared operation, called by the completion trigger like any other consumer (#3720):
 
 1. Fetch `origin/main`, then run the generator's data step against it (`--ref=origin/main`; it already accepts `--out` and `--data`).
 2. **Write outputs outside every checkout, and never commit them.** The generator's default paths are `we:reports/decision-docket-data.json` (git-tracked, with a history of "regenerate data" commits) and `we:reports/decision-docket.html` (untracked). Running it in place leaves both dirty. So the operation passes `--out` paths under the operations state root (resolved the way `we:scripts/operations/run-store.mjs` resolves it) and leaves the tree clean.

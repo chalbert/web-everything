@@ -1,9 +1,10 @@
 ---
+bornAs: xn4cgvr
 kind: story
 size: 3
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["xaypr56", "3628"]
+relatedTo: ["3722", "3628"]
 scope: ["we:scripts/operations/dispatch-task.mjs", "we:scripts/operations/dispatch-task-io.mjs", "we:scripts/operations/runner-activity-io.mjs", "we:scripts/operations/__tests__/dispatch-task.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -17,7 +18,7 @@ The session writes one job file per hand-launched worker into the operator's `.o
 
 Nothing in the repo reads or writes that jobs folder (a repo-wide search finds no hit). The job files (`kind`, `item`, `session`, `agentId`, `launchedAt`, `brief`, `result`, `state`, `note`) are the operator's own hand-kept parallel record. The repo's real record is the run record: `we:scripts/operations/run-record.mjs` and `we:scripts/operations/run-store.mjs`, which `we:scripts/operations/runner-activity-io.mjs` already reads (in-flight and completed dispatches, stamped with liveness from `claude agents`).
 
-So the two "cheapest wins" are not equally cheap. Stopping finished sessions (#x9rppp9) extends an existing module. This one needs a new operation, because `dispatch-lane` has no generic "run this brief file" kind: its kinds (`build`, `prepare`, `prepare-decision`, `fix`, `ci-heal`) are each tied to a backlog item and a fixed brief template (`BRIEF_REQUIRED_BY_KIND` in `we:scripts/operations/dispatch-lane.mjs`).
+So the two "cheapest wins" are not equally cheap. Stopping finished sessions (#3721) extends an existing module. This one needs a new operation, because `dispatch-lane` has no generic "run this brief file" kind: its kinds (`build`, `prepare`, `prepare-decision`, `fix`, `ci-heal`) are each tied to a backlog item and a fixed brief template (`BRIEF_REQUIRED_BY_KIND` in `we:scripts/operations/dispatch-lane.mjs`).
 
 ## Shape
 

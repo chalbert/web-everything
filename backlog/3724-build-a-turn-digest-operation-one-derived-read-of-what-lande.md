@@ -1,9 +1,10 @@
 ---
+bornAs: xcqg649
 kind: story
 size: 5
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["3677", "2612", "xaypr56"]
+relatedTo: ["3677", "2612", "3722"]
 scope: ["we:scripts/operations/turn-digest.mjs", "we:scripts/operations/turn-digest-io.mjs", "we:scripts/operations/__tests__/turn-digest.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -24,14 +25,14 @@ From the 2026-09-19 session: fetch `main`; list open PRs with labels and `mergeS
 | What needs the operator | `we:scripts/operations/operator-queue.mjs` (hardened by #2338) | none; call it |
 | What is owed | `we:scripts/conveyor/reconcile-pass.mjs` | none; call it |
 | Conflict, and a stale `merge-status:conflicting` label | `we:scripts/conveyor/parked-pr-conflict-watch.mjs` detects (merge-tree, no checkout) and self-clears, but only inside the runner tick, and only for review-parked PRs | the digest REPORTS a label that disagrees with current mergeability; it does not write |
-| Live sessions and lanes | `we:scripts/operations/runner-activity-io.mjs`, `lane-pool list --acquirable` | depends on #xeaxqvw and #x9rppp9 to be trustworthy |
+| Live sessions and lanes | `we:scripts/operations/runner-activity-io.mjs`, `lane-pool list --acquirable` | depends on #3725 and #3721 to be trustworthy |
 
 ## Shape
 
 - A `compute`-only declared operation (no effects, no model), `turn-digest [--since=<cursor>] [--repos=…]`, that calls the reads above and returns one structured verdict: `landed[]`, `needsOperator[]`, `owed[]` (dispatch and refusals), `staleLabels[]`, `live` (sessions, in-flight dispatches, free lanes), `runner` (up, down, paused), and `generatedAt`.
 - **The one new piece — a landed-since cursor.** `landed` = the first-parent merge commits on `origin/main` after the cursor sha (each is `Merge pull request #N …`), a pure git read that needs no `gh` call. The cursor is stored per consumer (a session id), so two sessions each get their own "since", and a first call with no cursor returns the last N.
-- Read-only, so it is safe to run every turn, and it can be the plan step of other operations (#x994927 calls the same reads for capacity and ownership).
-- Persist the last result as a snapshot file with `generatedAt`, written atomically under the operations state root (the way `we:scripts/operations/run-store.mjs` resolves it, with an env override), never committed. The delivery hook (#xf02nzj) reads only this file.
+- Read-only, so it is safe to run every turn, and it can be the plan step of other operations (#3720 calls the same reads for capacity and ownership).
+- Persist the last result as a snapshot file with `generatedAt`, written atomically under the operations state root (the way `we:scripts/operations/run-store.mjs` resolves it, with an env override), never committed. The delivery hook (#3726) reads only this file.
 
 ## Irreducible judgment stays out
 

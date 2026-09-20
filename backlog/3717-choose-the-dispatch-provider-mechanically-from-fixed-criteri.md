@@ -1,10 +1,11 @@
 ---
+bornAs: x1ojdxq
 kind: story
 size: 5
 priority: high
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["3690", "3695", "3696", "3443", "3658", "x994927", "xn4cgvr"]
+relatedTo: ["3690", "3695", "3696", "3443", "3658", "3720", "3730"]
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -41,7 +42,7 @@ All 26 scorecard records carry `dispatchKind: 'session-delegation'`. None come f
 ## Proposed shape
 
 1. A new pure `we:scripts/lib/dispatch-task-type.mjs`: `taskTypeFor({ kind, cause, scopePaths })` returns a router `taskType` or `null`. **`null` refuses the dispatch** with a named reason; there is no default and the router's silent `bugfix` default must be unreachable from this call site.
-2. One shared wrapper `chooseProvider(dispatch, { override })`: load the scorecards at the IO edge, call `selectProvider` and `selectSupervisionLevel`, return `{ provider, level, taskType, reasons }`. Called by `dispatch-lane`, `review-dispatch`, `reconcile-fix-dispatch` and `dispatch-task` (#xn4cgvr) **before** the spawn.
+2. One shared wrapper `chooseProvider(dispatch, { override })`: load the scorecards at the IO edge, call `selectProvider` and `selectSupervisionLevel`, return `{ provider, level, taskType, reasons }`. Called by `dispatch-lane`, `review-dispatch`, `reconcile-fix-dispatch` and `dispatch-task` (#3730) **before** the spawn.
 3. **The run record stores both `routed` and `executed`.** A dispatch records the provider it actually used, so a silent fallback (routed `codex`, executed `claude`) is visible in the trial data instead of corrupting it.
 4. **The override is an explicit, recorded input** at the call site (`--provider-override=<p> --override-reason=<text>`), stored in the run record. It is never a sentence in a brief telling an agent to "prefer" something.
 5. **The criteria are written down where a human can audit them:** one table of `{dispatch kind → taskType → routing decision given today's scorecards}`, generated from the same pure functions and checked into `we:docs/agent/dispatcher-runbook.md`, with a test that fails when the checked-in table drifts from what the code produces. That table is also what makes a wrong route debuggable.
@@ -49,7 +50,7 @@ All 26 scorecard records carry `dispatchKind: 'session-delegation'`. None come f
 
 ## Could a PreToolUse hook enforce it?
 
-Only partly, and it is not the gate. A hook sees the command string, so it can require a routing flag on a `dispatch-lane` call or flag a raw `claude --bg` worker launch, but it cannot tell whether a decision was computed or typed. **The deterministic half is the operation itself refusing to spawn without a derived `taskType` and a recorded decision.** A warn-level `we:scripts/guard-bash.mjs` rule for a raw launch that bypassed the operation is an optional backstop, and it shares the follow-on named in #xn4cgvr.
+Only partly, and it is not the gate. A hook sees the command string, so it can require a routing flag on a `dispatch-lane` call or flag a raw `claude --bg` worker launch, but it cannot tell whether a decision was computed or typed. **The deterministic half is the operation itself refusing to spawn without a derived `taskType` and a recorded decision.** A warn-level `we:scripts/guard-bash.mjs` rule for a raw launch that bypassed the operation is an optional backstop, and it shares the follow-on named in #3730.
 
 ## Flag for the operator: this encodes a graduation model nobody has ratified
 

@@ -1,10 +1,11 @@
 ---
+bornAs: xrhnxmu
 kind: story
 size: 2
 priority: high
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["2449", "x994927", "xeaxqvw"]
+relatedTo: ["2449", "3720", "3725"]
 scope: ["plateau:tools/drain-daemon/daemon.mjs", "plateau:tools/drain-daemon/lib.mjs", "plateau:tools/drain-daemon/lib.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -34,7 +35,7 @@ The daemon's log records only `Command failed: git fetch --quiet origin main`. T
 
 ## Why it matters for the landing trigger
 
-The daemon runs each pass on the old tree: its copy of `we:scripts/merge-ai-prs.mjs`, its gates, and any mergeability or conflict read it makes are from that clone. Its README says the refresh is also how it picks up new drain code, so newer drain logic on `main` has not been running. Whether any merge in this period was wrong because of it is unknown; an audit of the merges since 2026-09-19 against current `main` is optional and not in this slice. This is the class of bug `land-advance` (#x994927) must not inherit: **it must fail closed on a stale checkout, not warn and continue.** The same "a failing refresh degrades silently" shape hit `we:scripts/lane-pool.mjs` `refresh` in #xeaxqvw (there the unverified cause was an SSH-remote lane; the per-lane isolation fix stands regardless).
+The daemon runs each pass on the old tree: its copy of `we:scripts/merge-ai-prs.mjs`, its gates, and any mergeability or conflict read it makes are from that clone. Its README says the refresh is also how it picks up new drain code, so newer drain logic on `main` has not been running. Whether any merge in this period was wrong because of it is unknown; an audit of the merges since 2026-09-19 against current `main` is optional and not in this slice. This is the class of bug `land-advance` (#3720) must not inherit: **it must fail closed on a stale checkout, not warn and continue.** The same "a failing refresh degrades silently" shape hit `we:scripts/lane-pool.mjs` `refresh` in #3725 (there the unverified cause was an SSH-remote lane; the per-lane isolation fix stands regardless).
 
 ## Fix shape
 

@@ -1,9 +1,10 @@
 ---
+bornAs: xmgv6bx
 kind: story
 size: 3
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["2421", "x994927"]
+relatedTo: ["2421", "3720"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []

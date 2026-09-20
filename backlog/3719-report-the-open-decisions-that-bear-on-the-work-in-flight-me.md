@@ -1,9 +1,10 @@
 ---
+bornAs: x8i6rsg
 kind: story
 size: 5
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["xc1u3pi", "xcqg649", "xaypr56"]
+relatedTo: ["3723", "3724", "3722"]
 scope: ["we:scripts/operations/decisions-in-flight.mjs", "we:scripts/operations/decisions-in-flight-io.mjs", "we:.claude/commands/wip.md", "we:.claude/commands/status.md", "we:scripts/operations/__tests__/decisions-in-flight.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []

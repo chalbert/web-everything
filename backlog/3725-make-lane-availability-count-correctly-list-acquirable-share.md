@@ -1,9 +1,10 @@
 ---
+bornAs: xeaxqvw
 kind: story
 size: 3
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-relatedTo: ["2323", "3625", "x994927"]
+relatedTo: ["2323", "3625", "3720"]
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/lib/lane-lease.mjs", "we:scripts/lib/__tests__/lane-lease.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -30,7 +31,7 @@ Only 1-2 of about 70 lanes read acquirable on 2026-09-19. Two defects, both conf
 
 ## Why it is in this programme
 
-Lane capacity is step 1 of the landing trigger (#x994927): its budget is "free acquirable lanes". A dispatcher that under-counts lanes throttles itself, and a maintenance command that dies on one lane leaves the pool stale, which is what marked the lanes busy in the first place.
+Lane capacity is step 1 of the landing trigger (#3720): its budget is "free acquirable lanes". A dispatcher that under-counts lanes throttles itself, and a maintenance command that dies on one lane leaves the pool stale, which is what marked the lanes busy in the first place.
 
 ## Done when
 

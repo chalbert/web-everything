@@ -1,10 +1,11 @@
 ---
+bornAs: xf02nzj
 kind: story
 size: 3
-parent: "x4v2xe4"
+parent: "3718"
 status: open
-blockedBy: ["xcqg649"]
-relatedTo: ["xaypr56"]
+blockedBy: ["3724"]
+relatedTo: ["3722"]
 scope: ["we:scripts/turn-digest-hook.mjs", "we:.claude/settings.json", "we:scripts/__tests__/turn-digest-hook.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -12,7 +13,7 @@ tags: []
 
 # Deliver the turn digest into the session by hook: read a cached snapshot at SessionStart and prompt time, and derive the handoff from it
 
-A hook is the delivery seam and the operation is the content. Once `turn-digest` (#xcqg649) exists, a hook injects its output as context, so a session starts each turn already knowing what landed and what is owed, without model recall.
+A hook is the delivery seam and the operation is the content. Once `turn-digest` (#3724) exists, a hook injects its output as context, so a session starts each turn already knowing what landed and what is owed, without model recall.
 
 ## Why hooks are this narrow
 
@@ -20,7 +21,7 @@ Hooks fire on harness events inside a session (`SessionStart`, `UserPromptSubmit
 
 ## Shape
 
-- `we:scripts/turn-digest-hook.mjs`: at `SessionStart` and `UserPromptSubmit`, read the cached snapshot from #xcqg649 and print it as additional context. **No network and no `gh` call inside the hook**: a hook runs before every prompt and a network call there adds latency and spends rate limit on every message.
+- `we:scripts/turn-digest-hook.mjs`: at `SessionStart` and `UserPromptSubmit`, read the cached snapshot from #3724 and print it as additional context. **No network and no `gh` call inside the hook**: a hook runs before every prompt and a network call there adds latency and spends rate limit on every message.
 - **Staleness is stated, never hidden:** the snapshot carries `generatedAt`; over a threshold the hook says "digest is N min old" and starts a detached, single-flight refresh (the operation) instead of blocking. A missing or unreadable snapshot prints one line saying so; it never fails the prompt.
 - Quiet by default: print only when something changed since the last injection (new landings, a new needs-operator item, a new owed dispatch), so it is not a wall of text every turn.
 - **Handoff:** the handoff is currently prose the model writes from memory (`/handoff`, a file outside the repo). Most of it is derivable: in-flight workers (run records plus `claude agents`), open PR states, the operator queue, the runner state. The handoff embeds the digest and keeps prose only for what cannot be derived: the goal, decisions taken in the conversation, and what the operator said.
