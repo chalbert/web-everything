@@ -1,0 +1,4794 @@
+{
+ "now": 1789916260605,
+ "load": 8.20849609375,
+ "cores": 12,
+ "runner": {
+  "observedAt": "2026-09-20T14:57:55.940Z",
+  "checkout": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+  "staleAfterMs": 900000,
+  "runner": {
+   "present": false,
+   "pid": null,
+   "alive": false,
+   "heartbeatAt": null,
+   "source": "/Users/nicolasgilbert/.claude/conveyor-runner-locks/21615d01a39a19b2/lock.json",
+   "livenessSource": "singleton lease absent"
+  },
+  "lastTick": {
+   "number": null,
+   "at": null,
+   "source": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54/.conveyor/driver-status.json",
+   "proxy": false,
+   "stalled": [],
+   "statusLine": "",
+   "plannedDispatch": null
+  },
+  "inFlightDispatches": [],
+  "dispatchLiveness": "not-needed",
+  "completedDispatches": [],
+  "completedAvailable": 0,
+  "historySource": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54/.operations/runs",
+  "unreadableRunRecords": 0,
+  "state": "down",
+  "stalled": false,
+  "stalledReason": "No singleton runner lease exists; no runner is registered.",
+  "dispatching": false
+ },
+ "wipData": {
+  "agents": [
+   {
+    "id": "f111cbf6",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-3",
+    "kind": "background",
+    "startedAt": 1788260544818,
+    "sessionId": "f111cbf6-9f62-43da-a6b3-6a57c319a7de",
+    "name": "conveyor-3412",
+    "state": "working"
+   },
+   {
+    "id": "59fc54a1",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788291249125,
+    "sessionId": "59fc54a1-3b02-4cf6-a86e-586a209a7340",
+    "name": "prepare-3438",
+    "state": "working"
+   },
+   {
+    "id": "25b9666e",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788292761547,
+    "sessionId": "25b9666e-3324-4d7d-8298-d593ee2d10ba",
+    "name": "prepare-3441",
+    "state": "working"
+   },
+   {
+    "id": "6200d873",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788292765161,
+    "sessionId": "6200d873-a5f8-4038-bde6-28d80d30a412",
+    "name": "conveyor-3442",
+    "state": "working"
+   },
+   {
+    "id": "79c99d58",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296136048,
+    "sessionId": "79c99d58-368d-467d-9e85-540acad71012",
+    "name": "prepare-3436",
+    "state": "working"
+   },
+   {
+    "id": "d6ed22f5",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296422449,
+    "sessionId": "d6ed22f5-7096-498e-8c0f-ebed37a39ec8",
+    "name": "prepare-3399",
+    "state": "working"
+   },
+   {
+    "id": "b956264b",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296781229,
+    "sessionId": "b956264b-05b0-46c1-95f3-0fe43d1d9987",
+    "name": "prepare-3401",
+    "state": "working"
+   },
+   {
+    "id": "1e4fe00c",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296822074,
+    "sessionId": "1e4fe00c-e555-435b-b144-60a74fc63fa4",
+    "name": "prepare-decision-3402",
+    "state": "working"
+   },
+   {
+    "id": "f3820f6a",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788312792649,
+    "sessionId": "f3820f6a-441b-4ff9-960a-d81e7fc39aaa",
+    "name": "conveyor-2786",
+    "state": "working"
+   },
+   {
+    "id": "b3e069f3",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788312934352,
+    "sessionId": "b3e069f3-8de0-4816-9f81-df29904c6fe7",
+    "name": "conveyor-3439",
+    "state": "working"
+   },
+   {
+    "id": "b8f87031",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788312975294,
+    "sessionId": "b8f87031-d07f-48f2-a56e-6862dfa976e9",
+    "name": "conveyor-3445",
+    "state": "working"
+   },
+   {
+    "id": "684aa5a7",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788367321509,
+    "sessionId": "684aa5a7-5521-47fc-be00-b5766e98f28c",
+    "name": "prepare-3454",
+    "state": "working"
+   },
+   {
+    "id": "52b9a167",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788370642307,
+    "sessionId": "52b9a167-3007-4fb9-8e7d-57d82aa12552",
+    "name": "conveyor-3411b",
+    "state": "working"
+   },
+   {
+    "id": "09b1dc8d",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788374098850,
+    "sessionId": "09b1dc8d-541a-46b9-b867-f1ec23064778",
+    "name": "prepare-3452",
+    "state": "working"
+   },
+   {
+    "id": "bbda3334",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788377687752,
+    "sessionId": "bbda3334-2b44-4826-af24-712cdef8f4f3",
+    "name": "prepare-decision-3457",
+    "state": "working"
+   },
+   {
+    "id": "974c5670",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788383345824,
+    "sessionId": "974c5670-d56d-42cb-ab29-1092e2aa5e06",
+    "name": "conveyor-3447c",
+    "state": "working"
+   },
+   {
+    "id": "5e9cb760",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788397278424,
+    "sessionId": "5e9cb760-69f3-4561-8f17-ca9ccc798989",
+    "name": "conveyor-3452",
+    "state": "working"
+   },
+   {
+    "id": "d5f50b9c",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788433708355,
+    "sessionId": "d5f50b9c-1463-494d-a32d-4323afd53b14",
+    "name": "conveyor-3435",
+    "state": "working"
+   },
+   {
+    "id": "b271062d",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788438218576,
+    "sessionId": "b271062d-9896-4880-b6c2-dc414f16b3f8",
+    "name": "conveyor-3443",
+    "state": "working"
+   },
+   {
+    "id": "fb1fd3da",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788439238334,
+    "sessionId": "fb1fd3da-44ed-46e5-bbcd-3c91ef2e2f17",
+    "name": "conveyor-3448",
+    "state": "working"
+   },
+   {
+    "id": "01b0902f",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788451850175,
+    "sessionId": "01b0902f-b222-4cbe-8396-d1fd8fab5b74",
+    "name": "conveyor-3438",
+    "state": "working"
+   },
+   {
+    "id": "1d6b2d6e",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788462058189,
+    "sessionId": "1d6b2d6e-c1c0-4f8b-b380-166ed44472a6",
+    "name": "conveyor-3436",
+    "state": "working"
+   },
+   {
+    "id": "b918e6c8",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788547819325,
+    "sessionId": "b918e6c8-30ff-437b-8a71-76bf044c65b1",
+    "name": "conveyor-3464z",
+    "state": "working"
+   },
+   {
+    "id": "f99ebf5c",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788551885082,
+    "sessionId": "f99ebf5c-03cd-4408-8142-979b6367e4be",
+    "name": "prepare-2768",
+    "state": "working"
+   },
+   {
+    "id": "2a324929",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788568108463,
+    "sessionId": "2a324929-813e-46c9-822f-0d61966ac29b",
+    "name": "conveyor-3484",
+    "state": "working"
+   },
+   {
+    "id": "c40f5e70",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788581227706,
+    "sessionId": "c40f5e70-9097-42ee-8084-5c2952e54496",
+    "name": "conveyor-3481b",
+    "state": "working"
+   },
+   {
+    "id": "1f4952dd",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788755506829,
+    "sessionId": "1f4952dd-4ae9-4714-b9d9-01fb3f8ff762",
+    "name": "conveyor-3554b",
+    "state": "working"
+   },
+   {
+    "id": "af787019",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788843147150,
+    "sessionId": "af787019-adf6-4595-a324-f49cee0250fa",
+    "name": "conveyor-2416b",
+    "state": "working"
+   },
+   {
+    "id": "cfd898ad",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-18",
+    "kind": "background",
+    "startedAt": 1789327517442,
+    "sessionId": "cfd898ad-cc10-4025-9c80-ca926b744723",
+    "name": "fix-2003",
+    "state": "working"
+   },
+   {
+    "id": "3e63a0f4",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789437317665,
+    "sessionId": "3e63a0f4-139e-493b-ae9b-93dde45fb1da",
+    "name": "fix-2115",
+    "state": "working"
+   },
+   {
+    "id": "3a95799b",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789465069648,
+    "sessionId": "3a95799b-13e1-4736-bbdd-b6cd7649e8e3",
+    "name": "fix-2267",
+    "state": "working"
+   },
+   {
+    "id": "4b0511cc",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789790577068,
+    "sessionId": "4b0511cc-3625-444c-8280-120753757e58",
+    "name": "conveyor-3360u",
+    "state": "blocked"
+   },
+   {
+    "id": "7f8b88bb",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789798886270,
+    "sessionId": "7f8b88bb-df22-4381-91d1-2abda64e740d",
+    "name": "fix-2298",
+    "state": "blocked"
+   },
+   {
+    "id": "44485e2f",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789810744831,
+    "sessionId": "44485e2f-926c-4b4f-b857-bf35c644ea4f",
+    "name": "conveyor-2892c",
+    "state": "blocked"
+   },
+   {
+    "id": "69843c01",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789848662047,
+    "sessionId": "69843c01-d59c-4351-b1d2-013f3f8a8956",
+    "name": "review-2108",
+    "state": "blocked"
+   },
+   {
+    "pid": 49278,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1789850613957,
+    "sessionId": "11cff6aa-9f39-549a-b465-4cd71e0ac00d",
+    "name": "webeverything-21",
+    "status": "idle"
+   },
+   {
+    "id": "d751d671",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789854568444,
+    "sessionId": "d751d671-c730-4848-9435-2e94c83fac72",
+    "name": "lane-salvage",
+    "state": "blocked"
+   },
+   {
+    "id": "3e5e10ca",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789854613398,
+    "sessionId": "3e5e10ca-0d02-47b7-87a5-b1271aa4d1a3",
+    "name": "fix-operator-queue-path",
+    "state": "blocked"
+   },
+   {
+    "id": "d1d9ce47",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789856651256,
+    "sessionId": "d1d9ce47-ad4a-4d74-b772-f292b083579b",
+    "name": "graduate-3443",
+    "state": "blocked"
+   },
+   {
+    "id": "3fc1293e",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789857080005,
+    "sessionId": "3fc1293e-bb18-4f27-aecc-eac7929f7342",
+    "name": "log-trials",
+    "state": "blocked"
+   },
+   {
+    "id": "6c77e1a9",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789857226592,
+    "sessionId": "6c77e1a9-ae1f-4601-b79d-29de3c1aa507",
+    "name": "prepare-3675",
+    "state": "blocked"
+   },
+   {
+    "id": "ef1bc240",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789858917703,
+    "sessionId": "ef1bc240-87c3-424b-b400-7c87282b7059",
+    "name": "explore-turn-mech",
+    "state": "blocked"
+   },
+   {
+    "id": "98e86298",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789861724214,
+    "sessionId": "98e86298-14bc-453f-aa37-ca2455a04092",
+    "name": "fix-stranded-ids",
+    "state": "blocked"
+   },
+   {
+    "pid": 21484,
+    "id": "2499e747",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789868091960,
+    "sessionId": "2499e747-6a75-46cb-914c-0098f0f4d104",
+    "name": "proto-note",
+    "status": "idle",
+    "state": "working"
+   },
+   {
+    "id": "21b50cb0",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789868819984,
+    "sessionId": "21b50cb0-4130-448a-8c2c-82774758f39c",
+    "name": "memory-tracker-rule2",
+    "state": "blocked"
+   },
+   {
+    "pid": 61294,
+    "id": "071785de",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789905594683,
+    "sessionId": "071785de-bdfc-4050-8e83-a4d4b4afcf1b",
+    "name": "unstick-2072",
+    "status": "idle",
+    "state": "blocked"
+   },
+   {
+    "pid": 74942,
+    "id": "f8d07388",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789905921587,
+    "sessionId": "f8d07388-ef41-46d7-9fbf-fac0783f6160",
+    "name": "fold-2220",
+    "status": "idle",
+    "state": "blocked"
+   },
+   {
+    "pid": 62849,
+    "id": "9eff9f54",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789907660043,
+    "sessionId": "9eff9f54-d1d3-44ff-883d-91d4072f17ca",
+    "name": "review-148",
+    "status": "idle",
+    "state": "blocked"
+   },
+   {
+    "pid": 22009,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1789908170032,
+    "sessionId": "4d3e7887-b5e4-5612-a6ff-5980f482bb63",
+    "name": "Continuation",
+    "status": "idle"
+   },
+   {
+    "pid": 23457,
+    "id": "c0404eca",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789910758110,
+    "sessionId": "c0404eca-d462-408d-8fb6-a3218894b8c8",
+    "name": "fix-2347",
+    "status": "idle",
+    "state": "blocked"
+   },
+   {
+    "pid": 42507,
+    "id": "189637a8",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789911047463,
+    "sessionId": "189637a8-4b72-480d-95ab-29e9574cea3d",
+    "name": "shared-tick-1",
+    "status": "busy",
+    "state": "working"
+   },
+   {
+    "pid": 47721,
+    "id": "d94f5f8e",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789912238914,
+    "sessionId": "d94f5f8e-2248-4385-95dd-445f28893af9",
+    "name": "wip-no-done",
+    "status": "idle",
+    "state": "done"
+   },
+   {
+    "pid": 32213,
+    "id": "a2dee38d",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789912898414,
+    "sessionId": "a2dee38d-28be-4923-adf3-7ef25b018488",
+    "name": "graduation-1",
+    "status": "idle",
+    "state": "done"
+   },
+   {
+    "pid": 38315,
+    "id": "6e8c2b6e",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913006395,
+    "sessionId": "6e8c2b6e-bf21-430f-b936-cc603a6bc3b7",
+    "name": "fix-2347",
+    "status": "idle",
+    "state": "working"
+   },
+   {
+    "pid": 41633,
+    "id": "2870d8ed",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913007054,
+    "sessionId": "2870d8ed-29fa-4807-bbd1-78971a31ffa4",
+    "name": "fix-2344",
+    "status": "idle",
+    "state": "done"
+   },
+   {
+    "pid": 41734,
+    "id": "b031479d",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913677207,
+    "sessionId": "b031479d-faf6-452e-83ca-9afea37f3bdd",
+    "name": "file-graduation-prior",
+    "status": "idle",
+    "state": "done"
+   },
+   {
+    "pid": 90953,
+    "id": "fd6eaca6",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913763957,
+    "sessionId": "fd6eaca6-5eab-48fa-8633-f133accf0794",
+    "name": "fix-2108",
+    "status": "idle",
+    "state": "blocked"
+   },
+   {
+    "pid": 93561,
+    "id": "31c37249",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913764486,
+    "sessionId": "31c37249-83b2-4ea8-91ce-c13a99363d58",
+    "name": "graduate-clear-stuck",
+    "status": "idle",
+    "state": "working"
+   },
+   {
+    "pid": 93660,
+    "id": "cceac73e",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789914388246,
+    "sessionId": "cceac73e-69d2-4bbb-b513-e6b889a5257c",
+    "name": "session-verdicts",
+    "status": "idle",
+    "state": "working"
+   },
+   {
+    "pid": 14994,
+    "id": "2a95143d",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789915686368,
+    "sessionId": "2a95143d-ee46-4ab7-938a-9f606eb0dccd",
+    "name": "wip-report",
+    "status": "busy",
+    "state": "working"
+   }
+  ],
+  "facts": {
+   "f111cbf6-9f62-43da-a6b3-6a57c319a7de": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788285900030.175,
+    "resultFiles": []
+   },
+   "59fc54a1-3b02-4cf6-a86e-586a209a7340": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788298372020.899,
+    "resultFiles": []
+   },
+   "25b9666e-3324-4d7d-8298-d593ee2d10ba": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788298373676.4363,
+    "resultFiles": []
+   },
+   "6200d873-a5f8-4038-bde6-28d80d30a412": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788304468569.114,
+    "resultFiles": []
+   },
+   "79c99d58-368d-467d-9e85-540acad71012": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788298375113.4182,
+    "resultFiles": []
+   },
+   "d6ed22f5-7096-498e-8c0f-ebed37a39ec8": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788306238222.6677,
+    "resultFiles": []
+   },
+   "b956264b-05b0-46c1-95f3-0fe43d1d9987": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788306282440.8438,
+    "resultFiles": []
+   },
+   "1e4fe00c-e555-435b-b144-60a74fc63fa4": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788306283116.1892,
+    "resultFiles": []
+   },
+   "f3820f6a-441b-4ff9-960a-d81e7fc39aaa": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788349718538.5981,
+    "resultFiles": []
+   },
+   "b3e069f3-8de0-4816-9f81-df29904c6fe7": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788349718890.0857,
+    "resultFiles": []
+   },
+   "b8f87031-d07f-48f2-a56e-6862dfa976e9": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788349719227.3972,
+    "resultFiles": []
+   },
+   "684aa5a7-5521-47fc-be00-b5766e98f28c": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788373475460.513,
+    "resultFiles": []
+   },
+   "52b9a167-3007-4fb9-8e7d-57d82aa12552": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788381946588.1208,
+    "resultFiles": []
+   },
+   "09b1dc8d-541a-46b9-b867-f1ec23064778": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788382387994.5522,
+    "resultFiles": []
+   },
+   "bbda3334-2b44-4826-af24-712cdef8f4f3": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788381514934.0303,
+    "resultFiles": []
+   },
+   "974c5670-d56d-42cb-ab29-1092e2aa5e06": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788396154281.7388,
+    "resultFiles": []
+   },
+   "5e9cb760-69f3-4561-8f17-ca9ccc798989": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788456693970.902,
+    "resultFiles": []
+   },
+   "d5f50b9c-1463-494d-a32d-4323afd53b14": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788443350628.452,
+    "resultFiles": []
+   },
+   "b271062d-9896-4880-b6c2-dc414f16b3f8": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788456694714.0896,
+    "resultFiles": []
+   },
+   "fb1fd3da-44ed-46e5-bbcd-3c91ef2e2f17": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788456695214.8,
+    "resultFiles": []
+   },
+   "01b0902f-b222-4cbe-8396-d1fd8fab5b74": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788456695604.062,
+    "resultFiles": []
+   },
+   "1d6b2d6e-c1c0-4f8b-b380-166ed44472a6": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788495445175.7842,
+    "resultFiles": []
+   },
+   "b918e6c8-30ff-437b-8a71-76bf044c65b1": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788578390974.8184,
+    "resultFiles": []
+   },
+   "f99ebf5c-03cd-4408-8142-979b6367e4be": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788703599401,
+    "resultFiles": []
+   },
+   "2a324929-813e-46c9-822f-0d61966ac29b": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788701309662,
+    "resultFiles": []
+   },
+   "c40f5e70-9097-42ee-8084-5c2952e54496": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788703628324,
+    "resultFiles": []
+   },
+   "1f4952dd-4ae9-4714-b9d9-01fb3f8ff762": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788758461983.6052,
+    "resultFiles": []
+   },
+   "af787019-adf6-4595-a324-f49cee0250fa": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1788850198465.0525,
+    "resultFiles": []
+   },
+   "cfd898ad-cc10-4025-9c80-ca926b744723": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789550786069.3867,
+    "resultFiles": []
+   },
+   "3e63a0f4-139e-493b-ae9b-93dde45fb1da": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789550786390.2556,
+    "resultFiles": [],
+    "completion": {
+     "status": "started",
+     "startedAt": "2026-09-14T21:06:21.271Z",
+     "updatedAt": "2026-09-14T21:06:21.271Z"
+    }
+   },
+   "3a95799b-13e1-4736-bbdd-b6cd7649e8e3": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789471077064.7786,
+    "resultFiles": [],
+    "completion": {
+     "status": "done",
+     "startedAt": "2026-09-15T09:37:57.598Z",
+     "updatedAt": "2026-09-15T11:02:17.257Z"
+    }
+   },
+   "4b0511cc-3625-444c-8280-120753757e58": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789819438235.0803,
+    "resultFiles": []
+   },
+   "7f8b88bb-df22-4381-91d1-2abda64e740d": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789827778522.0696,
+    "resultFiles": [],
+    "completion": {
+     "status": "started",
+     "startedAt": "2026-09-19T06:21:29.637Z",
+     "updatedAt": "2026-09-19T06:21:29.637Z"
+    }
+   },
+   "44485e2f-926c-4b4f-b857-bf35c644ea4f": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789843919033.6138,
+    "resultFiles": []
+   },
+   "69843c01-d59c-4351-b1d2-013f3f8a8956": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789877519812.299,
+    "resultFiles": [],
+    "completion": {
+     "status": "done",
+     "startedAt": "2026-09-19T20:12:32.620Z",
+     "updatedAt": "2026-09-19T20:22:04.967Z"
+    }
+   },
+   "11cff6aa-9f39-549a-b465-4cd71e0ac00d": {
+    "transcriptModel": "claude-opus-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789850614707.9841,
+    "resultFiles": []
+   },
+   "d751d671-c730-4848-9435-2e94c83fac72": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789884000003.1377,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/lane-salvage.result.md",
+      "mtimeMs": 1789855150341.272
+     }
+    ]
+   },
+   "3e5e10ca-0d02-47b7-87a5-b1271aa4d1a3": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789883579996.2593,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/fix-operator-queue-path.result.md",
+      "mtimeMs": 1789854750473.2036
+     }
+    ]
+   },
+   "d1d9ce47-ad4a-4d74-b772-f292b083579b": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789885920054.1392,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/graduate-3443.result.md",
+      "mtimeMs": 1789857058630.1047
+     }
+    ]
+   },
+   "3fc1293e-bb18-4f27-aecc-eac7929f7342": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789886160064.0093,
+    "resultFiles": []
+   },
+   "6c77e1a9-ae1f-4601-b79d-29de3c1aa507": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789888620136.0242,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/prepare-3675.result.md",
+      "mtimeMs": 1789859796274.3586
+     }
+    ]
+   },
+   "ef1bc240-87c3-424b-b400-7c87282b7059": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789891920235.2983,
+    "resultFiles": []
+   },
+   "98e86298-14bc-453f-aa37-ca2455a04092": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "found",
+     "providers": [
+      {
+       "provider": "Codex",
+       "model": "gpt-6-astra",
+       "cliVersion": "0.155.1"
+      }
+     ]
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789892820263.0718,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/fix-stranded-ids.result.md",
+      "mtimeMs": 1789863982185.1755
+     }
+    ]
+   },
+   "2499e747-6a75-46cb-914c-0098f0f4d104": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789914891863,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/proto-note.result.md",
+      "mtimeMs": 1789868190251.423
+     }
+    ]
+   },
+   "21b50cb0-4130-448a-8c2c-82774758f39c": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": null,
+    "transcriptMtimeMs": 1789898580429.9233,
+    "resultFiles": []
+   },
+   "071785de-bdfc-4050-8e83-a4d4b4afcf1b": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789912794618,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/unstick-2072.result.md",
+      "mtimeMs": 1789905737974.5408
+     }
+    ]
+   },
+   "f8d07388-ef41-46d7-9fbf-fac0783f6160": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789913121528,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/fold-2220.result.md",
+      "mtimeMs": 1789906169538.3503
+     }
+    ]
+   },
+   "9eff9f54-d1d3-44ff-883d-91d4072f17ca": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789914859969,
+    "resultFiles": []
+   },
+   "4d3e7887-b5e4-5612-a6ff-5980f482bb63": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "found",
+     "providers": [
+      {
+       "provider": "Codex",
+       "model": "gpt-6-astra",
+       "cliVersion": "0.155.1"
+      }
+     ]
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915700152.5054,
+    "resultFiles": []
+   },
+   "c0404eca-d462-408d-8fb6-a3218894b8c8": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789914358032,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/fix-2347.result.md",
+      "mtimeMs": 1789910798909.6433
+     }
+    ]
+   },
+   "189637a8-4b72-480d-95ab-29e9574cea3d": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "found",
+     "providers": [
+      {
+       "provider": "Codex",
+       "model": "gpt-6-astra",
+       "cliVersion": "0.155.1"
+      }
+     ]
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915976058.1702,
+    "resultFiles": []
+   },
+   "d94f5f8e-2248-4385-95dd-445f28893af9": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915838839,
+    "resultFiles": []
+   },
+   "a2dee38d-28be-4923-adf3-7ef25b018488": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "found",
+     "providers": [
+      {
+       "provider": "Codex",
+       "model": "gpt-6-astra",
+       "cliVersion": "0.155.1"
+      }
+     ]
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915962948.254,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/graduation-1.result.md",
+      "mtimeMs": 1789915951240.016
+     }
+    ]
+   },
+   "6e8c2b6e-bf21-430f-b936-cc603a6bc3b7": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789913477304.4722,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/fix-2347.result.md",
+      "mtimeMs": 1789910798909.6433
+     }
+    ]
+   },
+   "2870d8ed-29fa-4807-bbd1-78971a31ffa4": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789913554529.2935,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/fix-2344.result.md",
+      "mtimeMs": 1789909063745.686
+     }
+    ]
+   },
+   "b031479d-faf6-452e-83ca-9afea37f3bdd": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "found",
+     "providers": [
+      {
+       "provider": "Codex",
+       "model": "gpt-6-astra",
+       "cliVersion": "0.155.1"
+      }
+     ]
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915118287.0486,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/file-graduation-prior.result.md",
+      "mtimeMs": 1789915110602.8489
+     }
+    ]
+   },
+   "fd6eaca6-5eab-48fa-8633-f133accf0794": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "found",
+     "providers": [
+      {
+       "provider": "Codex",
+       "model": "gpt-6-astra",
+       "cliVersion": "0.155.1"
+      }
+     ]
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915110070.5728,
+    "resultFiles": []
+   },
+   "31c37249-83b2-4ea8-91ce-c13a99363d58": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789913948106.0393,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/graduate-clear-stuck.result.md",
+      "mtimeMs": 1789913942111.059
+     }
+    ]
+   },
+   "cceac73e-69d2-4bbb-b513-e6b889a5257c": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789915496894.787,
+    "resultFiles": [
+     {
+      "path": "/Users/nicolasgilbert/workspace/.operations/jobs/session-verdicts.result.md",
+      "mtimeMs": 1789915482965.5603
+     }
+    ]
+   },
+   "2a95143d-ee46-4ab7-938a-9f606eb0dccd": {
+    "transcriptModel": "claude-sonnet-5",
+    "transcriptScan": {
+     "status": "none"
+    },
+    "pidAlive": true,
+    "transcriptMtimeMs": 1789916258765.4656,
+    "resultFiles": []
+   }
+  },
+  "now": 1789916274687,
+  "drain": {
+   "passes": null,
+   "alerts": null
+  }
+ },
+ "landInputs": {
+  "now": 1789916262176,
+  "prs": [
+   {
+    "baseRefName": "main",
+    "createdAt": "2026-09-20T14:18:51Z",
+    "headRefName": "lane/graduate-3443-clear-stuck-session",
+    "headRefOid": "d42c6d1b70c30369e7694f77c3e6e62057af9bbf",
+    "isDraft": false,
+    "labels": [
+     {
+      "id": "LA_kwDORBt1-c8AAAACrQ29sQ",
+      "name": "ci:failed",
+      "description": "Required check failed — the producer must fix and re-push (#2281)",
+      "color": "D93F0B"
+     }
+    ],
+    "mergeStateStatus": "BLOCKED",
+    "mergeable": "MERGEABLE",
+    "number": 2349,
+    "title": "graduate #3443: clear-stuck-session operation (unblocks #2170)",
+    "updatedAt": "2026-09-20T14:22:02Z",
+    "repo": "we",
+    "slug": "chalbert/web-everything"
+   },
+   {
+    "baseRefName": "main",
+    "createdAt": "2026-09-20T12:08:10Z",
+    "headRefName": "lane/graduate-3443-fix-dispatch-pr-diff-scope",
+    "headRefOid": "138d2e37250dc9db3c8a29ce8f2160663cdf1d33",
+    "isDraft": false,
+    "labels": [
+     {
+      "id": "LA_kwDORBt1-c8AAAACqLiM1w",
+      "name": "review:changes",
+      "description": "reviewer wants changes → the author lane fixes + re-pushes",
+      "color": "d93f0b"
+     },
+     {
+      "id": "LA_kwDORBt1-c8AAAACz17vRg",
+      "name": "review-status:fixing",
+      "description": "informative: a reviewer/fixer is currently working this PR, or stuck (auto-managed)",
+      "color": "c5def5"
+     }
+    ],
+    "mergeStateStatus": "DIRTY",
+    "mergeable": "CONFLICTING",
+    "number": 2344,
+    "title": "graduate #3443: reconcile-fix-dispatch PR-diff scope fallback (#3634)",
+    "updatedAt": "2026-09-20T14:12:51Z",
+    "repo": "we",
+    "slug": "chalbert/web-everything"
+   },
+   {
+    "baseRefName": "main",
+    "createdAt": "2026-09-13T17:19:38Z",
+    "headRefName": "lane/stuck-session-op-docs",
+    "headRefOid": "24758bb5951d32c75eca3cd8f7c91cd0a0230212",
+    "isDraft": false,
+    "labels": [
+     {
+      "id": "LA_kwDORBt1-c8AAAACqLiM1w",
+      "name": "review:changes",
+      "description": "reviewer wants changes → the author lane fixes + re-pushes",
+      "color": "d93f0b"
+     },
+     {
+      "id": "LA_kwDORBt1-c8AAAACzQP_Cg",
+      "name": "review-round:1",
+      "description": "informative: how many review rounds this PR has been through (auto-managed)",
+      "color": "ededed"
+     }
+    ],
+    "mergeStateStatus": "UNSTABLE",
+    "mergeable": "MERGEABLE",
+    "number": 2170,
+    "title": "docs: point stuck-session cleanup at clear-stuck-session, not the manual workaround",
+    "updatedAt": "2026-09-19T21:59:11Z",
+    "repo": "we",
+    "slug": "chalbert/web-everything"
+   },
+   {
+    "baseRefName": "main",
+    "createdAt": "2026-09-09T16:46:54Z",
+    "headRefName": "lane/3390-guard-bash-sed-tee-perl-corpus-fp",
+    "headRefOid": "27b0592ab4c66668a6acdc08bf6cd4111dc3afb0",
+    "isDraft": false,
+    "labels": [
+     {
+      "id": "LA_kwDORBt1-c8AAAACqLiM1w",
+      "name": "review:changes",
+      "description": "reviewer wants changes → the author lane fixes + re-pushes",
+      "color": "d93f0b"
+     },
+     {
+      "id": "LA_kwDORBt1-c8AAAACzQP_Cg",
+      "name": "review-round:1",
+      "description": "informative: how many review rounds this PR has been through (auto-managed)",
+      "color": "ededed"
+     },
+     {
+      "id": "LA_kwDORBt1-c8AAAACz17vRg",
+      "name": "review-status:fixing",
+      "description": "informative: a reviewer/fixer is currently working this PR, or stuck (auto-managed)",
+      "color": "c5def5"
+     }
+    ],
+    "mergeStateStatus": "UNSTABLE",
+    "mergeable": "MERGEABLE",
+    "number": 2108,
+    "title": "fix(guard-bash): sed/tee/perl backlog|reports check matches real write targets, not raw text",
+    "updatedAt": "2026-09-20T14:30:59Z",
+    "repo": "we",
+    "slug": "chalbert/web-everything"
+   },
+   {
+    "baseRefName": "main",
+    "createdAt": "2026-09-07T19:26:59Z",
+    "headRefName": "lane/2717-ft-webcases-registry",
+    "headRefOid": "ff1e3a8ee68044ed21776c9d11b4f5580f3643a7",
+    "isDraft": false,
+    "labels": [
+     {
+      "id": "LA_kwDORY_udc8AAAACqjra3g",
+      "name": "review:pending",
+      "description": "Drain parked this PR — an independent review is owed before it merges (#2171)",
+      "color": "FBCA04"
+     }
+    ],
+    "mergeStateStatus": "CLEAN",
+    "mergeable": "MERGEABLE",
+    "number": 148,
+    "title": "WE #2717: FT webcases registry — graduate 115 cases + conformance test",
+    "updatedAt": "2026-09-07T19:29:07Z",
+    "repo": "plateau-app",
+    "slug": "chalbert/plateau-app"
+   }
+  ],
+  "sessions": [
+   {
+    "id": "f111cbf6",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-3",
+    "kind": "background",
+    "startedAt": 1788260544818,
+    "sessionId": "f111cbf6-9f62-43da-a6b3-6a57c319a7de",
+    "name": "conveyor-3412",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3412: no live process (registry says working)"
+   },
+   {
+    "id": "59fc54a1",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788291249125,
+    "sessionId": "59fc54a1-3b02-4cf6-a86e-586a209a7340",
+    "name": "prepare-3438",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3438: no live process (registry says working)"
+   },
+   {
+    "id": "25b9666e",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788292761547,
+    "sessionId": "25b9666e-3324-4d7d-8298-d593ee2d10ba",
+    "name": "prepare-3441",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3441: no live process (registry says working)"
+   },
+   {
+    "id": "6200d873",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788292765161,
+    "sessionId": "6200d873-a5f8-4038-bde6-28d80d30a412",
+    "name": "conveyor-3442",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3442: no live process (registry says working)"
+   },
+   {
+    "id": "79c99d58",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296136048,
+    "sessionId": "79c99d58-368d-467d-9e85-540acad71012",
+    "name": "prepare-3436",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3436: no live process (registry says working)"
+   },
+   {
+    "id": "d6ed22f5",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296422449,
+    "sessionId": "d6ed22f5-7096-498e-8c0f-ebed37a39ec8",
+    "name": "prepare-3399",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3399: no live process (registry says working)"
+   },
+   {
+    "id": "b956264b",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296781229,
+    "sessionId": "b956264b-05b0-46c1-95f3-0fe43d1d9987",
+    "name": "prepare-3401",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3401: no live process (registry says working)"
+   },
+   {
+    "id": "1e4fe00c",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788296822074,
+    "sessionId": "1e4fe00c-e555-435b-b144-60a74fc63fa4",
+    "name": "prepare-decision-3402",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-decision-3402: no live process (registry says working)"
+   },
+   {
+    "id": "f3820f6a",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788312792649,
+    "sessionId": "f3820f6a-441b-4ff9-960a-d81e7fc39aaa",
+    "name": "conveyor-2786",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-2786: no live process (registry says working)"
+   },
+   {
+    "id": "b3e069f3",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788312934352,
+    "sessionId": "b3e069f3-8de0-4816-9f81-df29904c6fe7",
+    "name": "conveyor-3439",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3439: no live process (registry says working)"
+   },
+   {
+    "id": "b8f87031",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1788312975294,
+    "sessionId": "b8f87031-d07f-48f2-a56e-6862dfa976e9",
+    "name": "conveyor-3445",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3445: no live process (registry says working)"
+   },
+   {
+    "id": "684aa5a7",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788367321509,
+    "sessionId": "684aa5a7-5521-47fc-be00-b5766e98f28c",
+    "name": "prepare-3454",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3454: no live process (registry says working)"
+   },
+   {
+    "id": "52b9a167",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788370642307,
+    "sessionId": "52b9a167-3007-4fb9-8e7d-57d82aa12552",
+    "name": "conveyor-3411b",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3411b: no live process (registry says working)"
+   },
+   {
+    "id": "09b1dc8d",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788374098850,
+    "sessionId": "09b1dc8d-541a-46b9-b867-f1ec23064778",
+    "name": "prepare-3452",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3452: no live process (registry says working)"
+   },
+   {
+    "id": "bbda3334",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788377687752,
+    "sessionId": "bbda3334-2b44-4826-af24-712cdef8f4f3",
+    "name": "prepare-decision-3457",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-decision-3457: no live process (registry says working)"
+   },
+   {
+    "id": "974c5670",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788383345824,
+    "sessionId": "974c5670-d56d-42cb-ab29-1092e2aa5e06",
+    "name": "conveyor-3447c",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3447c: no live process (registry says working)"
+   },
+   {
+    "id": "5e9cb760",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788397278424,
+    "sessionId": "5e9cb760-69f3-4561-8f17-ca9ccc798989",
+    "name": "conveyor-3452",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3452: no live process (registry says working)"
+   },
+   {
+    "id": "d5f50b9c",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788433708355,
+    "sessionId": "d5f50b9c-1463-494d-a32d-4323afd53b14",
+    "name": "conveyor-3435",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3435: no live process (registry says working)"
+   },
+   {
+    "id": "b271062d",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788438218576,
+    "sessionId": "b271062d-9896-4880-b6c2-dc414f16b3f8",
+    "name": "conveyor-3443",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3443: no live process (registry says working)"
+   },
+   {
+    "id": "fb1fd3da",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788439238334,
+    "sessionId": "fb1fd3da-44ed-46e5-bbcd-3c91ef2e2f17",
+    "name": "conveyor-3448",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3448: no live process (registry says working)"
+   },
+   {
+    "id": "01b0902f",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788451850175,
+    "sessionId": "01b0902f-b222-4cbe-8396-d1fd8fab5b74",
+    "name": "conveyor-3438",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3438: no live process (registry says working)"
+   },
+   {
+    "id": "1d6b2d6e",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788462058189,
+    "sessionId": "1d6b2d6e-c1c0-4f8b-b380-166ed44472a6",
+    "name": "conveyor-3436",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3436: no live process (registry says working)"
+   },
+   {
+    "id": "b918e6c8",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788547819325,
+    "sessionId": "b918e6c8-30ff-437b-8a71-76bf044c65b1",
+    "name": "conveyor-3464z",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3464z: no live process (registry says working)"
+   },
+   {
+    "id": "f99ebf5c",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788551885082,
+    "sessionId": "f99ebf5c-03cd-4408-8142-979b6367e4be",
+    "name": "prepare-2768",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-2768: no live process (registry says working)"
+   },
+   {
+    "id": "2a324929",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788568108463,
+    "sessionId": "2a324929-813e-46c9-822f-0d61966ac29b",
+    "name": "conveyor-3484",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3484: no live process (registry says working)"
+   },
+   {
+    "id": "c40f5e70",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788581227706,
+    "sessionId": "c40f5e70-9097-42ee-8084-5c2952e54496",
+    "name": "conveyor-3481b",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3481b: no live process (registry says working)"
+   },
+   {
+    "id": "1f4952dd",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788755506829,
+    "sessionId": "1f4952dd-4ae9-4714-b9d9-01fb3f8ff762",
+    "name": "conveyor-3554b",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3554b: no live process (registry says working)"
+   },
+   {
+    "id": "af787019",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-4",
+    "kind": "background",
+    "startedAt": 1788843147150,
+    "sessionId": "af787019-adf6-4595-a324-f49cee0250fa",
+    "name": "conveyor-2416b",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-2416b: no live process (registry says working)"
+   },
+   {
+    "id": "cfd898ad",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-scratch-dispatcher-18",
+    "kind": "background",
+    "startedAt": 1789327517442,
+    "sessionId": "cfd898ad-cc10-4025-9c80-ca926b744723",
+    "name": "fix-2003",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "fix-2003: no live process (registry says working)"
+   },
+   {
+    "id": "3e63a0f4",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789437317665,
+    "sessionId": "3e63a0f4-139e-493b-ae9b-93dde45fb1da",
+    "name": "fix-2115",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "fix-2115: no live process (registry says working)"
+   },
+   {
+    "id": "3a95799b",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789465069648,
+    "sessionId": "3a95799b-13e1-4736-bbdd-b6cd7649e8e3",
+    "name": "fix-2267",
+    "state": "working",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "fix-2267: no live process (registry says working)"
+   },
+   {
+    "id": "4b0511cc",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789790577068,
+    "sessionId": "4b0511cc-3625-444c-8280-120753757e58",
+    "name": "conveyor-3360u",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-3360u: no live process (registry says blocked)"
+   },
+   {
+    "id": "7f8b88bb",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789798886270,
+    "sessionId": "7f8b88bb-df22-4381-91d1-2abda64e740d",
+    "name": "fix-2298",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "fix-2298: no live process (registry says blocked)"
+   },
+   {
+    "id": "44485e2f",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789810744831,
+    "sessionId": "44485e2f-926c-4b4f-b857-bf35c644ea4f",
+    "name": "conveyor-2892c",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "conveyor-2892c: no live process (registry says blocked)"
+   },
+   {
+    "id": "69843c01",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1789848662047,
+    "sessionId": "69843c01-d59c-4351-b1d2-013f3f8a8956",
+    "name": "review-2108",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "review-2108: no live process (registry says blocked)"
+   },
+   {
+    "pid": 49278,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1789850613957,
+    "sessionId": "11cff6aa-9f39-549a-b465-4cd71e0ac00d",
+    "name": "webeverything-21",
+    "status": "idle",
+    "liveness": "live-idle",
+    "verdict": "progressing",
+    "action": "none",
+    "why": "webeverything-21: not a background session — never acted on"
+   },
+   {
+    "id": "d751d671",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789854568444,
+    "sessionId": "d751d671-c730-4848-9435-2e94c83fac72",
+    "name": "lane-salvage",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "lane-salvage: no live process (registry says blocked)"
+   },
+   {
+    "id": "3e5e10ca",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789854613398,
+    "sessionId": "3e5e10ca-0d02-47b7-87a5-b1271aa4d1a3",
+    "name": "fix-operator-queue-path",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "fix-operator-queue-path: no live process (registry says blocked)"
+   },
+   {
+    "id": "d1d9ce47",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789856651256,
+    "sessionId": "d1d9ce47-ad4a-4d74-b772-f292b083579b",
+    "name": "graduate-3443",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "graduate-3443: no live process (registry says blocked)"
+   },
+   {
+    "id": "3fc1293e",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789857080005,
+    "sessionId": "3fc1293e-bb18-4f27-aecc-eac7929f7342",
+    "name": "log-trials",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "log-trials: no live process (registry says blocked)"
+   },
+   {
+    "id": "6c77e1a9",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789857226592,
+    "sessionId": "6c77e1a9-ae1f-4601-b79d-29de3c1aa507",
+    "name": "prepare-3675",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "prepare-3675: no live process (registry says blocked)"
+   },
+   {
+    "id": "ef1bc240",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789858917703,
+    "sessionId": "ef1bc240-87c3-424b-b400-7c87282b7059",
+    "name": "explore-turn-mech",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "explore-turn-mech: no live process (registry says blocked)"
+   },
+   {
+    "id": "98e86298",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789861724214,
+    "sessionId": "98e86298-14bc-453f-aa37-ca2455a04092",
+    "name": "fix-stranded-ids",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "fix-stranded-ids: no live process (registry says blocked)"
+   },
+   {
+    "pid": 21484,
+    "id": "2499e747",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789868091960,
+    "sessionId": "2499e747-6a75-46cb-914c-0098f0f4d104",
+    "name": "proto-note",
+    "status": "idle",
+    "state": "working",
+    "liveness": "live-active",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "proto-note: working at its prompt, result file /Users/nicolasgilbert/workspace/.operations/jobs/proto-note.result.md"
+   },
+   {
+    "id": "21b50cb0",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789868819984,
+    "sessionId": "21b50cb0-4130-448a-8c2c-82774758f39c",
+    "name": "memory-tracker-rule2",
+    "state": "blocked",
+    "liveness": "dead-record",
+    "verdict": "dead-record",
+    "action": "clear-record",
+    "why": "memory-tracker-rule2: no live process (registry says blocked)"
+   },
+   {
+    "pid": 61294,
+    "id": "071785de",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789905594683,
+    "sessionId": "071785de-bdfc-4050-8e83-a4d4b4afcf1b",
+    "name": "unstick-2072",
+    "status": "idle",
+    "state": "blocked",
+    "liveness": "live-idle",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "unstick-2072: blocked at its prompt, result file /Users/nicolasgilbert/workspace/.operations/jobs/unstick-2072.result.md"
+   },
+   {
+    "pid": 74942,
+    "id": "f8d07388",
+    "cwd": "/Users/nicolasgilbert/workspace/.operations/jobs",
+    "kind": "background",
+    "startedAt": 1789905921587,
+    "sessionId": "f8d07388-ef41-46d7-9fbf-fac0783f6160",
+    "name": "fold-2220",
+    "status": "idle",
+    "state": "blocked",
+    "liveness": "live-idle",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "fold-2220: blocked at its prompt, result file /Users/nicolasgilbert/workspace/.operations/jobs/fold-2220.result.md"
+   },
+   {
+    "pid": 62849,
+    "id": "9eff9f54",
+    "cwd": "/Users/nicolasgilbert/workspace/wev-conflict-2130",
+    "kind": "background",
+    "startedAt": 1789907660043,
+    "sessionId": "9eff9f54-d1d3-44ff-883d-91d4072f17ca",
+    "name": "review-148",
+    "status": "idle",
+    "state": "blocked",
+    "liveness": "live-idle",
+    "verdict": "progressing",
+    "action": "none",
+    "why": "review-148: live, quiet but within threshold or idle time unknown"
+   },
+   {
+    "pid": 22009,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1789908170032,
+    "sessionId": "4d3e7887-b5e4-5612-a6ff-5980f482bb63",
+    "name": "Continuation",
+    "status": "idle",
+    "liveness": "live-idle",
+    "verdict": "progressing",
+    "action": "none",
+    "why": "Continuation: not a background session — never acted on"
+   },
+   {
+    "pid": 23457,
+    "id": "c0404eca",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789910758110,
+    "sessionId": "c0404eca-d462-408d-8fb6-a3218894b8c8",
+    "name": "fix-2347",
+    "status": "idle",
+    "state": "blocked",
+    "liveness": "live-idle",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "fix-2347: blocked at its prompt, result file /Users/nicolasgilbert/workspace/.operations/jobs/fix-2347.result.md"
+   },
+   {
+    "pid": 42507,
+    "id": "189637a8",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789911047463,
+    "sessionId": "189637a8-4b72-480d-95ab-29e9574cea3d",
+    "name": "shared-tick-1",
+    "status": "busy",
+    "state": "working",
+    "liveness": "live-active",
+    "verdict": "progressing",
+    "action": "none",
+    "why": "shared-tick-1: live, working"
+   },
+   {
+    "pid": 47721,
+    "id": "d94f5f8e",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789912238914,
+    "sessionId": "d94f5f8e-2248-4385-95dd-445f28893af9",
+    "name": "wip-no-done",
+    "status": "idle",
+    "state": "done",
+    "liveness": "done",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "wip-no-done: registry says done, process still alive"
+   },
+   {
+    "pid": 32213,
+    "id": "a2dee38d",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789912898414,
+    "sessionId": "a2dee38d-28be-4923-adf3-7ef25b018488",
+    "name": "graduation-1",
+    "status": "idle",
+    "state": "done",
+    "liveness": "done",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "graduation-1: registry says done, process still alive"
+   },
+   {
+    "pid": 38315,
+    "id": "6e8c2b6e",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913006395,
+    "sessionId": "6e8c2b6e-bf21-430f-b936-cc603a6bc3b7",
+    "name": "fix-2347",
+    "status": "idle",
+    "state": "working",
+    "liveness": "live-active",
+    "verdict": "stalled",
+    "action": "redispatch-once",
+    "why": "fix-2347: idle 46 min (threshold 30), no result"
+   },
+   {
+    "pid": 41633,
+    "id": "2870d8ed",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913007054,
+    "sessionId": "2870d8ed-29fa-4807-bbd1-78971a31ffa4",
+    "name": "fix-2344",
+    "status": "idle",
+    "state": "done",
+    "liveness": "done",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "fix-2344: registry says done, process still alive"
+   },
+   {
+    "pid": 41734,
+    "id": "b031479d",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913677207,
+    "sessionId": "b031479d-faf6-452e-83ca-9afea37f3bdd",
+    "name": "file-graduation-prior",
+    "status": "idle",
+    "state": "done",
+    "liveness": "done",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "file-graduation-prior: registry says done, process still alive"
+   },
+   {
+    "pid": 90953,
+    "id": "fd6eaca6",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913763957,
+    "sessionId": "fd6eaca6-5eab-48fa-8633-f133accf0794",
+    "name": "fix-2108",
+    "status": "idle",
+    "state": "blocked",
+    "liveness": "live-idle",
+    "verdict": "progressing",
+    "action": "none",
+    "why": "fix-2108: live, quiet but within threshold or idle time unknown"
+   },
+   {
+    "pid": 93561,
+    "id": "31c37249",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789913764486,
+    "sessionId": "31c37249-83b2-4ea8-91ce-c13a99363d58",
+    "name": "graduate-clear-stuck",
+    "status": "idle",
+    "state": "working",
+    "liveness": "live-active",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "graduate-clear-stuck: working at its prompt, result file /Users/nicolasgilbert/workspace/.operations/jobs/graduate-clear-stuck.result.md"
+   },
+   {
+    "pid": 93660,
+    "id": "cceac73e",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789914388246,
+    "sessionId": "cceac73e-69d2-4bbb-b513-e6b889a5257c",
+    "name": "session-verdicts",
+    "status": "idle",
+    "state": "working",
+    "liveness": "live-active",
+    "verdict": "finished-unreaped",
+    "action": "reap",
+    "why": "session-verdicts: working at its prompt, result file /Users/nicolasgilbert/workspace/.operations/jobs/session-verdicts.result.md"
+   },
+   {
+    "pid": 14994,
+    "id": "2a95143d",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-54",
+    "kind": "background",
+    "startedAt": 1789915686368,
+    "sessionId": "2a95143d-ee46-4ab7-938a-9f606eb0dccd",
+    "name": "wip-report",
+    "status": "busy",
+    "state": "working",
+    "liveness": "live-active",
+    "verdict": "progressing",
+    "action": "none",
+    "why": "wip-report: live, working"
+   }
+  ],
+  "history": [
+   {
+    "at": "2026-09-20T14:54:27.592Z",
+    "ms": 13876,
+    "exit": 0,
+    "noop": false,
+    "considered": 0,
+    "merged": 0,
+    "mergedPrs": [],
+    "consideredPrs": [],
+    "deferredPrs": [],
+    "failed": 0,
+    "deferred": 0,
+    "skippedPrs": [],
+    "failedPrs": [],
+    "deferredDetail": [],
+    "parked": []
+   },
+   {
+    "at": "2026-09-20T14:55:43.060Z",
+    "ms": 13354,
+    "exit": 0,
+    "noop": false,
+    "considered": 0,
+    "merged": 0,
+    "mergedPrs": [],
+    "consideredPrs": [],
+    "deferredPrs": [],
+    "failed": 0,
+    "deferred": 0,
+    "skippedPrs": [],
+    "failedPrs": [],
+    "deferredDetail": [],
+    "parked": []
+   },
+   {
+    "at": "2026-09-20T14:56:57.203Z",
+    "ms": 13145,
+    "exit": 0,
+    "noop": false,
+    "considered": 0,
+    "merged": 0,
+    "mergedPrs": [],
+    "consideredPrs": [],
+    "deferredPrs": [],
+    "failed": 0,
+    "deferred": 0,
+    "skippedPrs": [],
+    "failedPrs": [],
+    "deferredDetail": [],
+    "parked": []
+   }
+  ],
+  "historyCapped": false,
+  "alerts": [],
+  "trials": [],
+  "results": [],
+  "prototype": {
+   "status": "unknown"
+  },
+  "fixPlans": {
+   "we#2344": {
+    "planned": {
+     "attributionKind": "PR",
+     "attributionNum": "2344",
+     "itemNum": null,
+     "pr": 2344,
+     "laneRef": "lane/graduate-3443-fix-dispatch-pr-diff-scope",
+     "scope": [
+      "we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs",
+      "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs",
+      "we:scripts/conveyor/reconcile-fix-dispatch.mjs"
+     ],
+     "scopeSource": "pr-diff",
+     "isConflict": false,
+     "body": "Epic #3443, increment 2: graduates ONE standalone commit from `origin/lane/mechanical-dispatcher` (cherry-picked with `-x`, applied clean, no conflicts).\n\n## What\n`1024822db` (#3634) — `scripts/conveyor/reconcile-fix-dispatch.mjs`: the fix-agent scope fence required a resolved backlog item with a declared scope, so PRs delivering an epic (no file-level scope) were silently refused. `planFixesFromReconcile` now falls back to the PR's own already-changed files (new `fetchPrDiffScope`, one `gh pr diff --name-only` call) as the fence. Never looser than a declared scope. A PR whose branch number is a *reviewed* PR (not a delivered item) stays refused; a regression test pins it.\n\n## Behaviour note for review\nThis changes live fix-dispatch behaviour: one extra `gh pr diff` call when a resolved item has no scope; it fails soft on a `gh` error.\n\n## Verification\n- `reconcile-fix-dispatch.test.mjs`: 45/45.\n- Plus dependents (reconcile-core/pass/finding, parked-pr-conflict watch + integration, duplicate-pr-watch, all `scripts/operations/__tests__`): 73 files / 2254 tests pass.\n- `node scripts/check-standards.mjs`: 0 errors.\n\n## Not in this PR\nNo lane-pool changes. The prototype branch has no fix for `lane-pool refresh --lane=N` or the busy-lane rule. No watchdog chain (`driver-watchdog.mjs` not on main).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+     "headRefOid": "138d2e37250dc9db3c8a29ce8f2160663cdf1d33"
+    }
+   },
+   "we#2170": {
+    "planned": {
+     "attributionKind": "PR",
+     "attributionNum": "2170",
+     "itemNum": null,
+     "pr": 2170,
+     "laneRef": "lane/stuck-session-op-docs",
+     "scope": [
+      "we:agent-memory-src/stuck-claude-sessions-known-issue-workaround.md",
+      "we:docs/agent/dispatcher-runbook.md",
+      "we:scripts/conveyor/reconcile-core.mjs"
+     ],
+     "scopeSource": "pr-diff",
+     "isConflict": false,
+     "body": "## Summary\n\n`clear-stuck-session` (#3383, commit `81d5c9745`) mechanizes the GH #77683 zombie-session workaround — a\n`claude agents` entry that stays listed with no live process, where `claude stop`/`claude rm` fail or\nsilently no-op. This updates every place in the repo that still described the old manual fix (retrying\n`claude stop`/`claude rm`, or moving `~/.claude/jobs/<id>/` aside by hand) to point at the operation as the\npreferred path, keeping the manual move only as the documented fallback for if the operation itself is\nunavailable or fails.\n\n- `agent-memory-src/stuck-claude-sessions-known-issue-workaround.md` — restructured so\n  `node scripts/operations/run.mjs clear-stuck-session --session=<id>` (or `--pr=<n>`) is the preferred fix;\n  the manual jobs-directory move is now the documented fallback.\n- `docs/agent/dispatcher-runbook.md` — \"Closing out a stuck `--bg` dispatched agent\" now names\n  `clear-stuck-session` for a row whose `stop`/`rm` actually fail (the #77683 case), keeping `claude stop` /\n  `dispatch-abort.mjs` for a session that just needs stopping (not hitting that bug).\n- `scripts/conveyor/reconcile-core.mjs` — the `liveness-unknown` refusal's docblocks (`REFUSAL_KINDS` and\n  `assessLiveness`) now point a reader at `clear-stuck-session` for a session confirmed stuck by other means,\n  instead of leaving no pointer at all.\n\n**Checked, left unchanged:** `skills-src/mechanical-delivery-doctrine/SKILL.md` — its rule 8 documents a\ndifferent, already-fixed bug (`claude stop`/`rm` failing because the full `sessionId` UUID was passed\ninstead of the short `id`), not this zombie-listing issue, so it doesn't describe the workaround this PR\nreplaces. `skills-src/conveyor/SKILL.md` already links to `dispatcher-runbook.md` for this exact scenario\n(§2, \"Operating it, not building it?\"), so updating the runbook itself is the one place discoverability\nneeded to change.\n\n## Test plan\n\n- [x] `node scripts/check-standards.mjs` — 0 errors (pre-existing unrelated warnings only)\n- [x] `node scripts/check-memory.mjs` — memory index within budget\n- [x] `node scripts/verify-lane.mjs` — green (see run output)\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n\n<!-- authored-by-actor: 69ab4417-5ed3-4c04-866d-3d30d452688e -->\n\n\n## Escalation reason\n\n- blast-radius (agent-memory-src/stuck-claude-sessions-known-issue-workaround.md, scripts/conveyor/reconcile-core.mjs)\n\n<!-- policy-set: v1 87688229b08c -->\n",
+     "headRefOid": "24758bb5951d32c75eca3cd8f7c91cd0a0230212"
+    }
+   },
+   "we#2108": {
+    "planned": {
+     "attributionKind": "WE",
+     "attributionNum": "3390",
+     "itemNum": "3390",
+     "pr": 2108,
+     "laneRef": "lane/3390-guard-bash-sed-tee-perl-corpus-fp",
+     "scope": [
+      "we:scripts/lane-pool.mjs"
+     ],
+     "scopeSource": "item",
+     "isConflict": false,
+     "body": "## Summary\n\n`scripts/guard-bash.mjs`'s `reason()` had a false-positive: the `backlog|reports`\nappend/in-place-edit deny arm (around line 1889) tested `CORPUS_MD` against the\nWHOLE raw command string for any `sed`/`tee`/`perl` invocation, so a purely\nread-only command that merely *mentioned* a `backlog/`/`reports/` path (e.g.\n`sed -n '1,200p' backlog/123-foo.md`, `perl -ne 'print' backlog/123-foo.md`) was\ndenied with a message about bypassing the locus-prefix write hook — reproduced\nlive twice in one session on two different files.\n\nThe fix reuses `fileWriteTargets(s)` — the same real-write-target extractor\n`primaryTreeWriteReason` already calls on this exact segment elsewhere in the\nsame function — so the check now tests only ACTUAL write targets (a real\n`-i`/`--in-place` edit, or a real `tee` write) against `CORPUS_MD`, never the\nraw command text. The unrelated `>>`/redirect half of the OR is untouched.\n\n- `scripts/guard-bash.mjs`: swap `atCommand(/^(?:sed|tee|perl)\\b/) &&\n  CORPUS_MD.test(s)` for `atCommand(/^(?:sed|tee|perl)\\b/) &&\n  fileWriteTargets(s).some((f) => CORPUS_MD.test(f))`\n- `scripts/__tests__/guard-bash.test.mjs`: new describe block\n  `sed/tee/perl backlog|reports write vs. mere-mention (#3390)` — negative\n  cases (read-only sed/tee/perl mentioning a backlog/reports path must NOT be\n  denied) alongside the existing/extended positive cases (a real `-i`/`--in-place`\n  edit or `tee` write must still be denied)\n\n## Test plan\n\n- [x] `npx vitest run scripts/__tests__/guard-bash.test.mjs` — 223 tests pass,\n      including new negative cases (read-only sed/tee/perl on backlog/reports\n      paths allowed) and existing/extended positive cases (real writes still\n      denied)\n- [x] `npm run check:standards` — 0 errors\n- [x] `node scripts/operations/run.mjs verify --checkout=<lane>` — green marker\n      recorded for the commit (`npm run test:unit && npm run check:standards`)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n<!-- authored-by-actor: 1c29fed5-6848-43ae-92ae-f779400c1250 -->\n\n\n## Escalation reason\n\n- blast-radius (scripts/__tests__/guard-bash.test.mjs, scripts/guard-bash.mjs)\n\n<!-- policy-set: v1 87688229b08c -->\n",
+     "headRefOid": "27b0592ab4c66668a6acdc08bf6cd4111dc3afb0"
+    }
+   }
+  },
+  "followUps": [],
+  "escalationsDir": "/Users/nicolasgilbert/workspace/.operations/escalations",
+  "jobsDir": "/Users/nicolasgilbert/workspace/.operations/jobs",
+  "escalations": [],
+  "freeLanes": 12,
+  "cap": 3,
+  "load": 0.7073567708333334,
+  "loadThreshold": 1.5,
+  "errors": []
+ },
+ "merged": [
+  {
+   "mergedAt": "2026-09-20T14:37:39Z",
+   "number": 2350,
+   "title": "backlog: file decision — may family/benchmark data act as a capped prior toward supervision graduation?",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T13:19:31Z",
+   "number": 2348,
+   "title": "operator-notify: notify the operator when a review:human PR is ready",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T14:18:15Z",
+   "number": 2347,
+   "title": "Make the conveyor's checks multi-repo, and guard against single-repo checks",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T13:16:45Z",
+   "number": 2346,
+   "title": "memory: drain old PR queue before new work; search for an operation before asking the operator",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T12:42:07Z",
+   "number": 2345,
+   "title": "backlog: file x4e6oux — drain deferral names the blocking impl PR instead of couple-carrier:unknown",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T12:03:38Z",
+   "number": 2343,
+   "title": "memory: prototype findings go in the epic tracker, not full items",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T01:56:51Z",
+   "number": 2342,
+   "title": "file backlog item: close the three advisory gaps in investigation dispatch (#3567 follow-up)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T12:06:48Z",
+   "number": 2341,
+   "title": "File decision x2len1z: where backlog ids are assigned so a hash id cannot reach main",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-20T01:51:47Z",
+   "number": 2340,
+   "title": "File the turn-mechanisation programme under #3383 (umbrella, 11 slices, 1 decision)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T23:22:17Z",
+   "number": 2339,
+   "title": "WE #3675: prepare the review-seat tool-surface decision (4 forks, live probes)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T22:39:21Z",
+   "number": 2338,
+   "title": "WE #xhr0lj8: advisory:accepted / advisory:changes labels + operator-queue gate",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T23:20:50Z",
+   "number": 2337,
+   "title": "graduate #3443: verify-dispatch external-kill fix + session-reaper ground-truth CLI tests",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T22:01:22Z",
+   "number": 2336,
+   "title": "fix(operator-queue): resolve argv[1] in the CLI entry guard",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T20:53:13Z",
+   "number": 2335,
+   "title": "backlog: number stranded xoywo06 → #3707 (unbreaks main's gate)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T20:20:18Z",
+   "number": 2334,
+   "title": "operator-queue: surface human review only when every readiness gate passes",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T17:56:47Z",
+   "number": 2333,
+   "title": "epic: Stateless durable-job orchestration",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T14:38:47Z",
+   "number": 2332,
+   "title": "fix(conveyor): bind the round cap for review:human PRs on advisory rounds, not re-arm comments (#3383 port)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T18:09:41Z",
+   "number": 2331,
+   "title": "docs+guard: correct the bypassPermissions TTY claim, route reviewer spawn through review-dispatch.mjs, close dispatch.mjs's dead-code bypass risk",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T17:56:41Z",
+   "number": 2330,
+   "title": "WE #2903: hash-ref rewrite falls back to bornAs across clones",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T13:59:06Z",
+   "number": 2329,
+   "title": "WE #2902: git-branch guard resolves the real target repo, allows throwaway clones",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T14:16:14Z",
+   "number": 2328,
+   "title": "docs: rewire gap-sweep-rerun and review-program skills onto the declared gap-sweep-status operation (#3551)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T13:20:26Z",
+   "number": 2327,
+   "title": "file-item: PR #2325 independent-review follow-up findings (xhahb1v)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T13:13:26Z",
+   "number": 2326,
+   "title": "fix: heavy-admission tryAcquireSlot forwards selfPid, not raw pid, to reserve() (#3679)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T13:08:11Z",
+   "number": 2325,
+   "title": "fix(agent-usage-report): redact prompt/command content, confine transcript paths to PROJECTS_DIR",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T12:15:58Z",
+   "number": 2324,
+   "title": "conveyor: log 4 graduation trials for PRs #2320-#2323",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T11:58:08Z",
+   "number": 2323,
+   "title": "Opt-in feedback capture: tenant-ready schema + scrub gate + preview (#2774)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T11:51:23Z",
+   "number": 2322,
+   "title": "Story preparation gets preparedAgainstSha alongside preparedDate (#3108)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T11:54:48Z",
+   "number": 2321,
+   "title": "Shadow reviewer appends would-clear decisions to the verdict ledger (#3217)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T11:42:53Z",
+   "number": 2320,
+   "title": "Add per-diff branch-coverage attribution as a self-approval gate (#2876)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T11:47:55Z",
+   "number": 2319,
+   "title": "Add durable agent-usage telemetry: extract Claude subagent dispatch data (task, model tier, Codex/Gemini delegation, PR outcome) from real transcripts into a local day-sharded log, with a --report summary mode",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T22:08:17Z",
+   "number": 2318,
+   "title": "WE #2892: isPrincipleSurface composition + leash-pin gate + first @invariant markers",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T10:42:21Z",
+   "number": 2317,
+   "title": "WE #2835: author scope: for #2835",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T07:57:19Z",
+   "number": 2316,
+   "title": "file-item: PR #2313 independent review follow-up findings",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T05:10:04Z",
+   "number": 2315,
+   "title": "fix(#3383): SubagentStop reads its own transcript; flag unresolved Monitor watches",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T03:55:22Z",
+   "number": 2314,
+   "title": "WE #1762: author scope: for #1762",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T07:49:14Z",
+   "number": 2313,
+   "title": "feat: auto-log session-delegation trials on review-pr acceptance (#3690)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T03:03:53Z",
+   "number": 2312,
+   "title": "File quality incident #xpkuwjm: we:review-pr.mjs returns REJECT with fabricated findings",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T03:15:08Z",
+   "number": 2311,
+   "title": "file: document recurring merge-conflict pattern on three hot shared files",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T02:27:14Z",
+   "number": 2310,
+   "title": "data: log antigravity/gemini-3.8-flash-low conflict-resolution trial for PR #2292 (#3694)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T18:13:03Z",
+   "number": 2309,
+   "title": "File task: Lane-clone commit push gap",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T01:55:36Z",
+   "number": 2308,
+   "title": "File decision item: defer event-driven GitHub polling architecture until next rate-limit hit",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T01:24:25Z",
+   "number": 2307,
+   "title": "conveyor: record 3 graduation-trial run-scorecards for PRs #2299-#2301",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T01:06:51Z",
+   "number": 2306,
+   "title": "File two backlog items from PR #2304 review findings",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T01:14:50Z",
+   "number": 2305,
+   "title": "fix: resolve gray-matter's real node_modules for scope-reconcile test clone",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T00:50:23Z",
+   "number": 2304,
+   "title": "guard: hard-deny backgrounded direct-task dispatch; block passive-wait stops with real evidence (#3383)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T02:08:00Z",
+   "number": 2303,
+   "title": "fix: consolidate 4 conveyor gh pr list calls into one shared fetch per tick",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-18T23:09:32Z",
+   "number": 2302,
+   "title": "WE #2456: delivery build",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-18T23:30:12Z",
+   "number": 2301,
+   "title": "fix: isCleanRecord gates on outcome, not mere findings presence (#3690)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-18T22:00:15Z",
+   "number": 2300,
+   "title": "docs: document Gemini/Antigravity execution-only dispatch principle (#3694)",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-18T21:18:53Z",
+   "number": 2299,
+   "title": "fix: resolve container mount cwd and exact-match container image lookup",
+   "slug": "chalbert/web-everything"
+  },
+  {
+   "mergedAt": "2026-09-19T18:09:35Z",
+   "number": 50,
+   "title": "FUI #2762: native PHP SSR renderer foundation + if/switch directives",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-09-20T02:01:49Z",
+   "number": 49,
+   "title": "FUI #2756: Rust SSR renderer — switch HTML parse to Servo html5ever",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-09-08T08:04:37Z",
+   "number": 48,
+   "title": "WE #3194: FUI absorbs the four WE-only router deltas orphaned by the #3154 slice",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-09-14T15:45:27Z",
+   "number": 45,
+   "title": "FUI #2755: native Go SSR renderer foundation + if/switch (#2069)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-09-06T21:53:14Z",
+   "number": 44,
+   "title": "FUI: the review transport, both directions (#xaoja7a, WE #3261)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-09-06T21:39:43Z",
+   "number": 43,
+   "title": "FUI #2756: native Rust SSR renderer foundation + if/switch (#2069)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-28T14:08:46Z",
+   "number": 42,
+   "title": "FUI #2383: native .NET SSR renderer foundation + if/switch",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-28T11:23:43Z",
+   "number": 41,
+   "title": "FUI #2369: JVM SSR renderer — resource:loader + defer directives",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-25T21:18:04Z",
+   "number": 40,
+   "title": "FUI #2543: swimlane graph layout + demo",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-25T21:16:42Z",
+   "number": 39,
+   "title": "FUI #2542: scale-ruler block (impl of the scale-ruler intent)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-25T21:16:39Z",
+   "number": 38,
+   "title": "FUI #2540: semantic-zoom block — representational level-of-detail zoom",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-23T16:34:36Z",
+   "number": 37,
+   "title": "FUI #2539: progress block secondary/comparison track (both presentations)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-22T01:17:48Z",
+   "number": 36,
+   "title": "FUI #2523: js-windowing list-virtualization strategy + dimension resolution",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:46:14Z",
+   "number": 35,
+   "title": "backlog: resolve #2375 — 2375-drain-the-fui-site-a11y-mirror-gate-seed-its-empty-enforced-",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:46:10Z",
+   "number": 34,
+   "title": "backlog: resolve #1761 - 1761-workbench-functional-live-mount-cross-origin-import-same-doc",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:17:53Z",
+   "number": 33,
+   "title": "backlog: resolve #2372 — 2372-enterprise-telemetry-policy-precedence-layer-we-devmetricspo",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:17:50Z",
+   "number": 32,
+   "title": "Playwright e2e for the workbench live-test panel (#1031)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:42:40Z",
+   "number": 31,
+   "title": "backlog: resolve #2359 — 2359-native-python-ssr-renderer-for-directive-regions",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:40:13Z",
+   "number": 30,
+   "title": "backlog: resolve #2368 — 2368-jvm-ssr-renderer-foundation-if-switch-directives",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-10T00:07:04Z",
+   "number": 29,
+   "title": "fix: cut node:fs/promises out of the workbench browser graph (#2308)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T22:45:04Z",
+   "number": 28,
+   "title": "feat(#1030): workbench same-document live-test mount (cross-origin React/Vue into the stage)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T21:51:33Z",
+   "number": 27,
+   "title": "backlog: resolve #1988 — migrate-portal-off-the-is-customized-built-in-to-the-type-ty",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T21:39:19Z",
+   "number": 26,
+   "title": "backlog: resolve #1860 — webbehaviors-webregistries-unplugged-members-drive-definelaz",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T19:16:28Z",
+   "number": 25,
+   "title": "feat(#1545): re-enable root customElements swap (root-scoped, native-delegate)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T13:40:23Z",
+   "number": 24,
+   "title": "backlog: resolve #2023 — 2023-author-material-3-flavor-and-parity-gap-list",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T13:40:19Z",
+   "number": 23,
+   "title": "feat(#2186): DelimiterCollisionError + injector-scoped delimiter registry for webexpressions",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T13:28:48Z",
+   "number": 22,
+   "title": "backlog: resolve #2295 — 2295-author-the-we-webprocess-conformance-binding-and-vector-corp",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T13:28:45Z",
+   "number": 21,
+   "title": "backlog: resolve #2067 — 2067-streaming-ssr-for-directive-regions-block-until-end-open-reg",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-09T13:03:26Z",
+   "number": 20,
+   "title": "docs(deck): fix stale conformanceVectors pointer to plateau conformance-engine",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-08T01:14:39Z",
+   "number": 19,
+   "title": "backlog: resolve #2294 — relocate-the-webprocess-runtime-to-fui",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-08T01:12:01Z",
+   "number": 18,
+   "title": "backlog: resolve #2066 — client-hydrate-root-adopt-path-for-ssr-directive-regions-sha",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-07T12:28:47Z",
+   "number": 17,
+   "title": "refactor(#2125): text-field + number-input persistent host (off transient self-erasure)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-07T12:23:52Z",
+   "number": 16,
+   "title": "refactor(#2124): temporal presets persistent wrapper (off transient self-erasure)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-07T12:19:45Z",
+   "number": 15,
+   "title": "refactor(#2122): we-filter-chip persistent wrapper (off transient self-erasure)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-07T12:12:13Z",
+   "number": 14,
+   "title": "refactor(#2121): we-button persistent wrapper (off transient self-erasure)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-07T11:23:55Z",
+   "number": 13,
+   "title": "wire @webeverything/contracts/webprocess resolution (we:#2293)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-07T00:19:33Z",
+   "number": 12,
+   "title": "ci: add CI workflow with a required test check (we:#2316)",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-06T13:49:43Z",
+   "number": 11,
+   "title": "backlog: resolve #2146 — 2146-build-the-content-security-directive-pair-sanitize-content-t",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-06T13:49:08Z",
+   "number": 10,
+   "title": "feat(#2114): Handlebars/Mustache delimiter bundle over the #2074 CustomNode recipe model",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:58Z",
+   "number": 9,
+   "title": "backlog: resolve #2115 — 2115-liquid-jinja-delimiter-bundle",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:55Z",
+   "number": 8,
+   "title": "backlog: resolve #2144 — 2144-build-the-snippet-directive-pair-snippet-define-typed-templa",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:52Z",
+   "number": 7,
+   "title": "backlog: resolve #2140 — 2140-author-full-fluent-2-flavor-and-parity-gap-list",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:50Z",
+   "number": 6,
+   "title": "backlog: resolve #2111 — 2111-add-the-region-live-recipe-children-live-element-host-render",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:47Z",
+   "number": 5,
+   "title": "backlog: resolve #2141 — 2141-author-full-carbon-flavor-and-parity-gap-list",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:44Z",
+   "number": 4,
+   "title": "backlog: resolve #2118 — 2118-svelte-delimiter-bundle",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:42Z",
+   "number": 3,
+   "title": "backlog: resolve #2116 — 2116-blade-delimiter-bundle-if-endif-sigil-grammar",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:39Z",
+   "number": 2,
+   "title": "backlog: resolve #1974 — 1974-expose-transient-vs-light-dom-as-a-configurable-per-project-",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-07-04T01:36:36Z",
+   "number": 1,
+   "title": "backlog: resolve #2065 - directive-state serialization for SSR resume",
+   "slug": "chalbert/frontierui"
+  },
+  {
+   "mergedAt": "2026-09-20T13:16:40Z",
+   "number": 155,
+   "title": "converge fixes — bound headShaChurnCount by passes examined, not SHAs collected",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-09-20T12:18:09Z",
+   "number": 153,
+   "title": "WE #3140: safe-edit sandbox verify-gate wired over declared rules",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-09-20T13:19:26Z",
+   "number": 150,
+   "title": "Capture dated design snapshots per feature-tracker epic (WE #2688)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-09-20T13:19:22Z",
+   "number": 149,
+   "title": "WE #2759: provenance-tier spine — three-tier enum, agent-asserted base tier, proof bundle + gate min-tier knob",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-09-02T01:24:05Z",
+   "number": 147,
+   "title": "daemon: key the daemon's own drain lease per-repo, matching the child pass",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-28T17:29:20Z",
+   "number": 146,
+   "title": "drain-daemon: preserve WHY in the action ledger, not just WHAT",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-24T14:18:50Z",
+   "number": 145,
+   "title": "ci: this repo applies its own review verdicts (WE #3261)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-24T14:21:22Z",
+   "number": 144,
+   "title": "drain-daemon: decide the hold invariant with the receiving CLI's flag semantics (WE #2859)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-17T23:11:38Z",
+   "number": 143,
+   "title": "WE #3036: mount the generated operation surface, delete the review-detail hop",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-16T23:27:14Z",
+   "number": 142,
+   "title": "Dev-browser shell scaffold: Chromium shell + WE-conformance probe on load (#1753)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-16T21:31:40Z",
+   "number": 141,
+   "title": "Add safe-edit sandbox buffer (#3139, slice 1 of epic #1650)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-15T18:40:36Z",
+   "number": 140,
+   "title": "Pass --channel from the review console so accepts name it again (WE #3059)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-16T11:51:28Z",
+   "number": 139,
+   "title": "WE #2829: extract shared laneColsFloorViolation predicate",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-12T00:02:07Z",
+   "number": 138,
+   "title": "WE #xrw6xn5: the intl judge graded nothing — read the shape the binding emits",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-11T11:23:03Z",
+   "number": 137,
+   "title": "WE #1917/#1920: grade the intl conformance loop — the missing plateau-hosted runner",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-02T20:36:32Z",
+   "number": 136,
+   "title": "WE #2832: enforce label/hold self-consistency in the resident drain daemon",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-02T15:02:50Z",
+   "number": 135,
+   "title": "Remediate /console-board real-route fidelity — flip the #2811 oracle RED → GREEN",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-02T14:22:51Z",
+   "number": 134,
+   "title": "WE #2811: real-route conformance test — assembled /console-board oracle (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-02T13:49:18Z",
+   "number": 133,
+   "title": "WE #2810: geometry + theme assertion lib (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-01T16:45:24Z",
+   "number": 132,
+   "title": "WE #2809: real-route fidelity render harness (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-01T11:42:56Z",
+   "number": 131,
+   "title": "Resolve #2808: product seed seam for the live console board",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-01T02:01:51Z",
+   "number": 130,
+   "title": "WE #2799: remove the all-37 card-state reference gallery from the console board",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-08-01T01:51:52Z",
+   "number": 129,
+   "title": "plateau-app: expose /console-cases in the Plateau Loop nav (WE #2798)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T22:19:11Z",
+   "number": 128,
+   "title": "WE #2796: regenerate the console-board visual baseline from canon, retire v68 (plateau-app impl)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T21:47:56Z",
+   "number": 127,
+   "title": "WE #2792: console board cross-cutting — rival badge glyph + canonical panel-consistency chrome (plateau-app impl)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T21:16:01Z",
+   "number": 126,
+   "title": "WE #2793: console board center — progressive-crossing history window (plateau-app impl)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T20:55:32Z",
+   "number": 125,
+   "title": "WE #2710: console board cell fidelity — height/Σ-ETA always on, sub-steps (plateau-app impl)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T20:36:32Z",
+   "number": 124,
+   "title": "WE #2713: console board center realizes >=2 multi-lane columns at the ratified width",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T15:48:56Z",
+   "number": 123,
+   "title": "WE #2712: console board cross-lane span bar conforms to canonical §6/#2554 (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T15:37:58Z",
+   "number": 122,
+   "title": "WE #2715: console board needs-strip + horizon convergence nits (canonical §6/#2554)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T14:21:28Z",
+   "number": 121,
+   "title": "WE #2790: console board Lane pool region conforms to canonical grammar",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T14:03:46Z",
+   "number": 120,
+   "title": "WE #2714: composer conforms to canonical §6/#2554 face — size + blockedBy two-up",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T13:22:13Z",
+   "number": 119,
+   "title": "WE #2791: console board header brand mark + wordmark (match canonical)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T12:52:10Z",
+   "number": 118,
+   "title": "WE #2795: console-board token foundation (§6/#2554 palette + state-color map)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-31T12:28:19Z",
+   "number": 117,
+   "title": "WE #2789: console-board card-grammar core — the single ratified card box",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-28T02:48:36Z",
+   "number": 116,
+   "title": "WE #2648: conveyor present feed → the #2565 console ruling surface (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-28T02:20:59Z",
+   "number": 115,
+   "title": "WE #2716: FT taxonomy reconcile + SPEC allow-list refreeze R1 (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-27T22:57:17Z",
+   "number": 114,
+   "title": "WE #2665: micro-decision read port + durable challenge/question record (plateau-app)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-27T21:12:24Z",
+   "number": 113,
+   "title": "plateau-app #2605: drain-daemon nudge + push notifications over SSE",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-27T11:56:47Z",
+   "number": 112,
+   "title": "plateau-app #xb5ma0r: rework lane-board shell to the ratified v68 mock",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-26T19:40:40Z",
+   "number": 111,
+   "title": "plateau-app #2670: visual baseline capture harness + committed design-mock baselines",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-26T14:30:29Z",
+   "number": 110,
+   "title": "plateau #2660: lane board renders infra-blocked lanes distinctly (outage banner)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-26T13:12:29Z",
+   "number": 109,
+   "title": "WE #2604: backlog gating-status lens + authored blockedReason (plateau-app impl)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-26T19:06:31Z",
+   "number": 108,
+   "title": "WE #2500: persist the review-pipeline ledger to a panel-reachable .drain-daemon/ artifact",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-26T20:23:08Z",
+   "number": 107,
+   "title": "dev-browser: named seed & scenario loader (#1696)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-26T19:01:08Z",
+   "number": 106,
+   "title": "WE #2650: micro-decision surface + challenge loop (plateau-app console)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-23T14:09:45Z",
+   "number": 105,
+   "title": "console-board: paint a loading skeleton, not fixtures, on first mount (#2628)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-22T18:49:30Z",
+   "number": 104,
+   "title": "plateau-app #2550: persist webcase review verdicts (coalesced flush → committed ledger)",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-22T11:29:32Z",
+   "number": 103,
+   "title": "plateau-app #x8vx79a: fix open items stuck at 'landed — resolving' on the console board",
+   "slug": "chalbert/plateau-app"
+  },
+  {
+   "mergedAt": "2026-07-22T02:46:00Z",
+   "number": 102,
+   "title": "plateau-app #2591: extract + regression-test the #2524 sticky-reveal state machine",
+   "slug": "chalbert/plateau-app"
+  }
+ ],
+ "operatorQueueText": "NEEDS YOU (review:human + advisory:accepted, all gates pass):\n(none)\nPENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):\n(none)\nUNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:\n(none)\nNOT READY — agent work (review:human but gates fail):\n(none)\n",
+ "completions": [
+  {
+   "session": "fix-1932",
+   "kind": "fix",
+   "pr": "1932",
+   "item": "2969",
+   "status": "done",
+   "outcome": "escalated-needs-judgment",
+   "updatedAt": "2026-09-07T02:42:05.684Z"
+  },
+  {
+   "session": "fix-1942",
+   "kind": "fix",
+   "pr": "1942",
+   "item": "3478",
+   "status": "done",
+   "outcome": "escalated-needs-judgment",
+   "updatedAt": "2026-09-05T13:31:56.923Z"
+  },
+  {
+   "session": "fix-1985",
+   "kind": "fix",
+   "pr": "1985",
+   "item": "x7wehz2",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-14T22:07:07.533Z"
+  },
+  {
+   "session": "fix-2047",
+   "kind": "fix",
+   "pr": "2047",
+   "item": "2688",
+   "status": "done",
+   "outcome": "gate-red",
+   "updatedAt": "2026-09-08T01:25:26.616Z"
+  },
+  {
+   "session": "fix-2057",
+   "kind": "fix",
+   "pr": "2057",
+   "item": "2755",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-14T16:32:12.077Z"
+  },
+  {
+   "session": "fix-2115",
+   "kind": "fix",
+   "pr": "2115",
+   "item": "xqa9ttq",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-14T21:06:21.271Z"
+  },
+  {
+   "session": "fix-2117",
+   "kind": "fix",
+   "pr": "2117",
+   "item": "xqa9ttq",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-14T21:06:20.431Z"
+  },
+  {
+   "session": "fix-2127",
+   "kind": "fix",
+   "pr": "2127",
+   "item": "3371",
+   "status": "done",
+   "outcome": "re-armed",
+   "updatedAt": "2026-09-12T01:57:10.660Z"
+  },
+  {
+   "session": "fix-2220",
+   "kind": "fix",
+   "pr": "2220",
+   "item": "3383",
+   "status": "done",
+   "outcome": "escalated-needs-judgment",
+   "updatedAt": "2026-09-15T04:27:31.583Z"
+  },
+  {
+   "session": "fix-2223",
+   "kind": "fix",
+   "pr": "2223",
+   "item": "3383",
+   "status": "done",
+   "outcome": "escalated-needs-judgment",
+   "updatedAt": "2026-09-15T20:35:51.088Z"
+  },
+  {
+   "session": "fix-2225",
+   "kind": "fix",
+   "pr": "2225",
+   "item": "3016",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-14T16:31:49.467Z"
+  },
+  {
+   "session": "fix-2239",
+   "kind": "fix",
+   "pr": "2239",
+   "item": "3383",
+   "status": "done",
+   "outcome": "re-armed",
+   "updatedAt": "2026-09-14T21:46:32.311Z"
+  },
+  {
+   "session": "fix-2259",
+   "kind": "fix",
+   "pr": "2259",
+   "item": null,
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-15T03:30:45.631Z"
+  },
+  {
+   "session": "fix-2265",
+   "kind": "fix",
+   "pr": "2265",
+   "item": "3389",
+   "status": "done",
+   "outcome": "escalated-needs-judgment",
+   "updatedAt": "2026-09-15T09:38:54.369Z"
+  },
+  {
+   "session": "fix-2266",
+   "kind": "fix",
+   "pr": "2266",
+   "item": "3389",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-15T09:37:59.356Z"
+  },
+  {
+   "session": "fix-2267",
+   "kind": "fix",
+   "pr": "2267",
+   "item": "3690",
+   "status": "done",
+   "outcome": "escalated-rearm-refused",
+   "updatedAt": "2026-09-15T11:02:17.257Z"
+  },
+  {
+   "session": "fix-2268",
+   "kind": "fix",
+   "pr": "2268",
+   "item": "3522",
+   "status": "done",
+   "outcome": "escalated-rearm-refused",
+   "updatedAt": "2026-09-15T11:14:49.096Z"
+  },
+  {
+   "session": "fix-2270",
+   "kind": "fix",
+   "pr": "2270",
+   "item": "3522",
+   "status": "done",
+   "outcome": "escalated-needs-judgment",
+   "updatedAt": "2026-09-15T10:17:32.153Z"
+  },
+  {
+   "session": "fix-2273",
+   "kind": "fix",
+   "pr": "2273",
+   "item": "3521",
+   "status": "done",
+   "outcome": "not-applicable",
+   "updatedAt": "2026-09-15T11:11:08.990Z"
+  },
+  {
+   "session": "fix-2295",
+   "kind": "fix",
+   "pr": "2295",
+   "item": "3383",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-15T18:00:25.702Z"
+  },
+  {
+   "session": "fix-2298",
+   "kind": "fix",
+   "pr": "2298",
+   "item": "2892",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-19T06:21:29.637Z"
+  },
+  {
+   "session": "fix-2301",
+   "kind": "fix",
+   "pr": "2301",
+   "item": "3690",
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-18T22:28:49.316Z"
+  },
+  {
+   "session": "review-1888",
+   "kind": "review",
+   "pr": "1888",
+   "item": null,
+   "status": "done",
+   "outcome": "already-merged",
+   "updatedAt": "2026-09-04T01:22:23.356Z"
+  },
+  {
+   "session": "review-1899",
+   "kind": "review",
+   "pr": "1899",
+   "item": null,
+   "status": "done",
+   "outcome": "refused-pr-already-merged",
+   "updatedAt": "2026-09-04T18:08:40.723Z"
+  },
+  {
+   "session": "review-1901",
+   "kind": "review",
+   "pr": "1901",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T17:31:47.019Z"
+  },
+  {
+   "session": "review-1902",
+   "kind": "review",
+   "pr": "1902",
+   "item": null,
+   "status": "done",
+   "outcome": "already-merged",
+   "updatedAt": "2026-09-04T18:15:58.833Z"
+  },
+  {
+   "session": "review-1903",
+   "kind": "review",
+   "pr": "1903",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T18:28:20.739Z"
+  },
+  {
+   "session": "review-1905",
+   "kind": "review",
+   "pr": "1905",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T19:48:14.992Z"
+  },
+  {
+   "session": "review-1906",
+   "kind": "review",
+   "pr": "1906",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T19:21:34.573Z"
+  },
+  {
+   "session": "review-1908",
+   "kind": "review",
+   "pr": "1908",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T19:52:39.640Z"
+  },
+  {
+   "session": "review-1910",
+   "kind": "review",
+   "pr": "1910",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T19:52:21.424Z"
+  },
+  {
+   "session": "review-1913",
+   "kind": "review",
+   "pr": "1913",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-04T20:06:53.144Z"
+  },
+  {
+   "session": "review-1914",
+   "kind": "review",
+   "pr": "1914",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T20:26:54.458Z"
+  },
+  {
+   "session": "review-1917",
+   "kind": "review",
+   "pr": "1917",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T20:50:05.927Z"
+  },
+  {
+   "session": "review-1918",
+   "kind": "review",
+   "pr": "1918",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-04T21:08:09.781Z"
+  },
+  {
+   "session": "review-1919",
+   "kind": "review",
+   "pr": "1919",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T00:43:22.548Z"
+  },
+  {
+   "session": "review-1920",
+   "kind": "review",
+   "pr": "1920",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-07T00:31:40.407Z"
+  },
+  {
+   "session": "review-1921",
+   "kind": "review",
+   "pr": "1921",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T01:26:35.314Z"
+  },
+  {
+   "session": "review-1924",
+   "kind": "review",
+   "pr": "1924",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T02:53:22.920Z"
+  },
+  {
+   "session": "review-1926",
+   "kind": "review",
+   "pr": "1926",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T02:14:28.953Z"
+  },
+  {
+   "session": "review-1927",
+   "kind": "review",
+   "pr": "1927",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T02:35:14.793Z"
+  },
+  {
+   "session": "review-1930",
+   "kind": "review",
+   "pr": "1930",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-07T02:07:24.462Z"
+  },
+  {
+   "session": "review-1932",
+   "kind": "review",
+   "pr": "1932",
+   "item": null,
+   "status": "done",
+   "outcome": "bounced",
+   "updatedAt": "2026-09-07T02:29:56.982Z"
+  },
+  {
+   "session": "review-1936",
+   "kind": "review",
+   "pr": "1936",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-05T11:20:47.077Z"
+  },
+  {
+   "session": "review-1940",
+   "kind": "review",
+   "pr": "1940",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-05T11:21:58.226Z"
+  },
+  {
+   "session": "review-1942",
+   "kind": "review",
+   "pr": "1942",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-05T11:15:05.234Z"
+  },
+  {
+   "session": "review-1943",
+   "kind": "review",
+   "pr": "1943",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T12:12:10.756Z"
+  },
+  {
+   "session": "review-1944",
+   "kind": "review",
+   "pr": "1944",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T12:40:10.030Z"
+  },
+  {
+   "session": "review-1945",
+   "kind": "review",
+   "pr": "1945",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T11:54:05.659Z"
+  },
+  {
+   "session": "review-1946",
+   "kind": "review",
+   "pr": "1946",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T12:12:41.896Z"
+  },
+  {
+   "session": "review-1947",
+   "kind": "review",
+   "pr": "1947",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T12:07:56.643Z"
+  },
+  {
+   "session": "review-1949",
+   "kind": "review",
+   "pr": "1949",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T13:05:48.787Z"
+  },
+  {
+   "session": "review-1951",
+   "kind": "review",
+   "pr": "1951",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-05T13:25:28.607Z"
+  },
+  {
+   "session": "review-1966",
+   "kind": "review",
+   "pr": "1966",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-07T00:13:30.747Z"
+  },
+  {
+   "session": "review-1968",
+   "kind": "review",
+   "pr": "1968",
+   "item": null,
+   "status": "done",
+   "outcome": "effect-halted",
+   "updatedAt": "2026-09-07T01:08:35.722Z"
+  },
+  {
+   "session": "review-1970",
+   "kind": "review",
+   "pr": "1970",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T02:53:13.301Z"
+  },
+  {
+   "session": "review-1971",
+   "kind": "review",
+   "pr": "1971",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T01:24:16.247Z"
+  },
+  {
+   "session": "review-1972",
+   "kind": "review",
+   "pr": "1972",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T02:05:21.732Z"
+  },
+  {
+   "session": "review-1974",
+   "kind": "review",
+   "pr": "1974",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-07T01:53:23.094Z"
+  },
+  {
+   "session": "review-1985",
+   "kind": "review",
+   "pr": "1985",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-14T23:46:42.659Z"
+  },
+  {
+   "session": "review-1994",
+   "kind": "review",
+   "pr": "1994",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T13:26:22.734Z"
+  },
+  {
+   "session": "review-2013",
+   "kind": "review",
+   "pr": "2013",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-07T15:37:17.033Z"
+  },
+  {
+   "session": "review-2014",
+   "kind": "review",
+   "pr": "2014",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T15:47:25.188Z"
+  },
+  {
+   "session": "review-2019",
+   "kind": "review",
+   "pr": "2019",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T16:42:04.169Z"
+  },
+  {
+   "session": "review-2020",
+   "kind": "review",
+   "pr": "2020",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T16:48:08.124Z"
+  },
+  {
+   "session": "review-2027",
+   "kind": "review",
+   "pr": "2027",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T19:31:14.064Z"
+  },
+  {
+   "session": "review-2035",
+   "kind": "review",
+   "pr": "2035",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T15:44:00.115Z"
+  },
+  {
+   "session": "review-2044",
+   "kind": "review",
+   "pr": "2044",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-07T23:40:15.555Z"
+  },
+  {
+   "session": "review-2058",
+   "kind": "review",
+   "pr": "2058",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-13T16:25:28.774Z"
+  },
+  {
+   "session": "review-2060",
+   "kind": "review",
+   "pr": "2060",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-13T16:17:44.471Z"
+  },
+  {
+   "session": "review-2066",
+   "kind": "review",
+   "pr": "2066",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-08T11:25:34.359Z"
+  },
+  {
+   "session": "review-2067",
+   "kind": "review",
+   "pr": "2067",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-08T12:15:15.811Z"
+  },
+  {
+   "session": "review-2072",
+   "kind": "review",
+   "pr": "2072",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-08T12:53:28.092Z"
+  },
+  {
+   "session": "review-2108",
+   "kind": "review",
+   "pr": "2108",
+   "item": null,
+   "status": "done",
+   "outcome": "bounced",
+   "updatedAt": "2026-09-19T20:22:04.967Z"
+  },
+  {
+   "session": "review-2112",
+   "kind": "review",
+   "pr": "2112",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-09T19:22:13.762Z"
+  },
+  {
+   "session": "review-2114",
+   "kind": "review",
+   "pr": "2114",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-11T20:15:38.881Z"
+  },
+  {
+   "session": "review-2115",
+   "kind": "review",
+   "pr": "2115",
+   "item": null,
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-19T19:49:06.830Z"
+  },
+  {
+   "session": "review-2116",
+   "kind": "review",
+   "pr": "2116",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-11T20:16:44.990Z"
+  },
+  {
+   "session": "review-2117",
+   "kind": "review",
+   "pr": "2117",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-15T19:13:45.486Z"
+  },
+  {
+   "session": "review-2118",
+   "kind": "review",
+   "pr": "2118",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-11T20:15:00.543Z"
+  },
+  {
+   "session": "review-2121",
+   "kind": "review",
+   "pr": "2121",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-11T21:14:53.296Z"
+  },
+  {
+   "session": "review-2122",
+   "kind": "review",
+   "pr": "2122",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-11T21:14:35.619Z"
+  },
+  {
+   "session": "review-2125",
+   "kind": "review",
+   "pr": "2125",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-11T22:30:46.675Z"
+  },
+  {
+   "session": "review-2126",
+   "kind": "review",
+   "pr": "2126",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-11T22:39:23.175Z"
+  },
+  {
+   "session": "review-2127",
+   "kind": "review",
+   "pr": "2127",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T02:10:57.917Z"
+  },
+  {
+   "session": "review-2128",
+   "kind": "review",
+   "pr": "2128",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T00:16:54.031Z"
+  },
+  {
+   "session": "review-2129",
+   "kind": "review",
+   "pr": "2129",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T01:13:11.667Z"
+  },
+  {
+   "session": "review-2131",
+   "kind": "review",
+   "pr": "2131",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T11:02:19.078Z"
+  },
+  {
+   "session": "review-2132",
+   "kind": "review",
+   "pr": "2132",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T13:28:01.349Z"
+  },
+  {
+   "session": "review-2134",
+   "kind": "review",
+   "pr": "2134",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T14:42:47.894Z"
+  },
+  {
+   "session": "review-2135",
+   "kind": "review",
+   "pr": "2135",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T15:01:01.808Z"
+  },
+  {
+   "session": "review-2136",
+   "kind": "review",
+   "pr": "2136",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-12T15:44:28.888Z"
+  },
+  {
+   "session": "review-2143",
+   "kind": "review",
+   "pr": "2143",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-12T21:28:58.985Z"
+  },
+  {
+   "session": "review-2151",
+   "kind": "review",
+   "pr": "2151",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T02:29:27.816Z"
+  },
+  {
+   "session": "review-2154",
+   "kind": "review",
+   "pr": "2154",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T11:02:32.211Z"
+  },
+  {
+   "session": "review-2155",
+   "kind": "review",
+   "pr": "2155",
+   "item": null,
+   "status": "done",
+   "outcome": "bounced",
+   "updatedAt": "2026-09-13T12:45:10.155Z"
+  },
+  {
+   "session": "review-2162",
+   "kind": "review",
+   "pr": "2162",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T14:58:57.413Z"
+  },
+  {
+   "session": "review-2169",
+   "kind": "review",
+   "pr": "2169",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T17:22:39.501Z"
+  },
+  {
+   "session": "review-2170",
+   "kind": "review",
+   "pr": "2170",
+   "item": null,
+   "status": "done",
+   "outcome": "bounced",
+   "updatedAt": "2026-09-19T19:28:36.179Z"
+  },
+  {
+   "session": "review-2172",
+   "kind": "review",
+   "pr": "2172",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T17:41:08.932Z"
+  },
+  {
+   "session": "review-2174",
+   "kind": "review",
+   "pr": "2174",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T19:16:16.358Z"
+  },
+  {
+   "session": "review-2176",
+   "kind": "review",
+   "pr": "2176",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T19:21:45.517Z"
+  },
+  {
+   "session": "review-2177",
+   "kind": "review",
+   "pr": "2177",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T22:57:53.533Z"
+  },
+  {
+   "session": "review-2190",
+   "kind": "review",
+   "pr": "2190",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-13T23:04:29.792Z"
+  },
+  {
+   "session": "review-2193",
+   "kind": "review",
+   "pr": "2193",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T00:59:54.862Z"
+  },
+  {
+   "session": "review-2195",
+   "kind": "review",
+   "pr": "2195",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-14T11:31:06.119Z"
+  },
+  {
+   "session": "review-2204",
+   "kind": "review",
+   "pr": "2204",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T12:05:46.727Z"
+  },
+  {
+   "session": "review-2206",
+   "kind": "review",
+   "pr": "2206",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T12:07:43.698Z"
+  },
+  {
+   "session": "review-2209",
+   "kind": "review",
+   "pr": "2209",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T13:37:24.711Z"
+  },
+  {
+   "session": "review-2211",
+   "kind": "review",
+   "pr": "2211",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-14T13:33:17.953Z"
+  },
+  {
+   "session": "review-2212",
+   "kind": "review",
+   "pr": "2212",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T13:44:52.118Z"
+  },
+  {
+   "session": "review-2213",
+   "kind": "review",
+   "pr": "2213",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T15:19:42.466Z"
+  },
+  {
+   "session": "review-2216",
+   "kind": "review",
+   "pr": "2216",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T15:11:58.114Z"
+  },
+  {
+   "session": "review-2218",
+   "kind": "review",
+   "pr": "2218",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T15:09:41.376Z"
+  },
+  {
+   "session": "review-2219",
+   "kind": "review",
+   "pr": "2219",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T15:06:37.726Z"
+  },
+  {
+   "session": "review-2221",
+   "kind": "review",
+   "pr": "2221",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T15:03:48.407Z"
+  },
+  {
+   "session": "review-2222",
+   "kind": "review",
+   "pr": "2222",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-14T15:02:16.452Z"
+  },
+  {
+   "session": "review-2223",
+   "kind": "review",
+   "pr": "2223",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T20:23:32.181Z"
+  },
+  {
+   "session": "review-2225",
+   "kind": "review",
+   "pr": "2225",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-14T17:36:17.886Z"
+  },
+  {
+   "session": "review-2229",
+   "kind": "review",
+   "pr": "2229",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T17:25:28.771Z"
+  },
+  {
+   "session": "review-2230",
+   "kind": "review",
+   "pr": "2230",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-14T17:21:52.251Z"
+  },
+  {
+   "session": "review-2231",
+   "kind": "review",
+   "pr": "2231",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T18:17:16.527Z"
+  },
+  {
+   "session": "review-2232",
+   "kind": "review",
+   "pr": "2232",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-14T18:03:40.030Z"
+  },
+  {
+   "session": "review-2234",
+   "kind": "review",
+   "pr": "2234",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T18:31:40.487Z"
+  },
+  {
+   "session": "review-2235",
+   "kind": "review",
+   "pr": "2235",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-14T19:29:13.328Z"
+  },
+  {
+   "session": "review-2236",
+   "kind": "review",
+   "pr": "2236",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T19:35:45.734Z"
+  },
+  {
+   "session": "review-2237",
+   "kind": "review",
+   "pr": "2237",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T19:56:45.899Z"
+  },
+  {
+   "session": "review-2239",
+   "kind": "review",
+   "pr": "2239",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-14T22:12:14.613Z"
+  },
+  {
+   "session": "review-2245",
+   "kind": "review",
+   "pr": "2245",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T00:35:28.418Z"
+  },
+  {
+   "session": "review-2246",
+   "kind": "review",
+   "pr": "2246",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T01:07:30.041Z"
+  },
+  {
+   "session": "review-2257",
+   "kind": "review",
+   "pr": "2257",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T03:33:01.642Z"
+  },
+  {
+   "session": "review-2258",
+   "kind": "review",
+   "pr": "2258",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T03:05:45.271Z"
+  },
+  {
+   "session": "review-2259",
+   "kind": "review",
+   "pr": "2259",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-15T03:53:30.766Z"
+  },
+  {
+   "session": "review-2262",
+   "kind": "review",
+   "pr": "2262",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T08:14:49.880Z"
+  },
+  {
+   "session": "review-2268",
+   "kind": "review",
+   "pr": "2268",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-15T09:51:08.077Z"
+  },
+  {
+   "session": "review-2269",
+   "kind": "review",
+   "pr": "2269",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T09:46:02.812Z"
+  },
+  {
+   "session": "review-2271",
+   "kind": "review",
+   "pr": "2271",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-15T10:21:28.912Z"
+  },
+  {
+   "session": "review-2275",
+   "kind": "review",
+   "pr": "2275",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T12:01:03.254Z"
+  },
+  {
+   "session": "review-2280",
+   "kind": "review",
+   "pr": "2280",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T13:02:36.716Z"
+  },
+  {
+   "session": "review-2281",
+   "kind": "review",
+   "pr": "2281",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T13:02:29.697Z"
+  },
+  {
+   "session": "review-2282",
+   "kind": "review",
+   "pr": "2282",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-15T13:40:39.930Z"
+  },
+  {
+   "session": "review-2283",
+   "kind": "review",
+   "pr": "2283",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T15:13:33.482Z"
+  },
+  {
+   "session": "review-2284",
+   "kind": "review",
+   "pr": "2284",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T15:11:03.456Z"
+  },
+  {
+   "session": "review-2288",
+   "kind": "review",
+   "pr": "2288",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-18T22:07:41.226Z"
+  },
+  {
+   "session": "review-2290",
+   "kind": "review",
+   "pr": "2290",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T16:04:25.295Z"
+  },
+  {
+   "session": "review-2291",
+   "kind": "review",
+   "pr": "2291",
+   "item": null,
+   "status": "started",
+   "outcome": null,
+   "updatedAt": "2026-09-15T18:40:54.632Z"
+  },
+  {
+   "session": "review-2292",
+   "kind": "review",
+   "pr": "2292",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T02:29:48.714Z"
+  },
+  {
+   "session": "review-2293",
+   "kind": "review",
+   "pr": "2293",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-15T16:47:06.590Z"
+  },
+  {
+   "session": "review-2294",
+   "kind": "review",
+   "pr": "2294",
+   "item": null,
+   "status": "done",
+   "outcome": "bounced",
+   "updatedAt": "2026-09-15T18:06:33.952Z"
+  },
+  {
+   "session": "review-2296",
+   "kind": "review",
+   "pr": "2296",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-15T19:31:06.440Z"
+  },
+  {
+   "session": "review-2297",
+   "kind": "review",
+   "pr": "2297",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-18T21:03:41.226Z"
+  },
+  {
+   "session": "review-2298",
+   "kind": "review",
+   "pr": "2298",
+   "item": null,
+   "status": "done",
+   "outcome": "parked",
+   "updatedAt": "2026-09-18T20:57:33.138Z"
+  },
+  {
+   "session": "review-2299",
+   "kind": "review",
+   "pr": "2299",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-18T21:12:13.011Z"
+  },
+  {
+   "session": "review-2300",
+   "kind": "review",
+   "pr": "2300",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-18T21:57:07.512Z"
+  },
+  {
+   "session": "review-2301",
+   "kind": "review",
+   "pr": "2301",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-18T23:27:48.684Z"
+  },
+  {
+   "session": "review-2305",
+   "kind": "review",
+   "pr": "2305",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T01:10:20.636Z"
+  },
+  {
+   "session": "review-2307",
+   "kind": "review",
+   "pr": "2307",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T01:21:04.880Z"
+  },
+  {
+   "session": "review-2308",
+   "kind": "review",
+   "pr": "2308",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T01:51:35.164Z"
+  },
+  {
+   "session": "review-2310",
+   "kind": "review",
+   "pr": "2310",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T02:23:44.661Z"
+  },
+  {
+   "session": "review-2313",
+   "kind": "review",
+   "pr": "2313",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T07:44:49.374Z"
+  },
+  {
+   "session": "review-2319",
+   "kind": "review",
+   "pr": "2319",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T11:44:20.251Z"
+  },
+  {
+   "session": "review-2322",
+   "kind": "review",
+   "pr": "2322",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T11:48:17.075Z"
+  },
+  {
+   "session": "review-2331",
+   "kind": "review",
+   "pr": "2331",
+   "item": null,
+   "status": "done",
+   "outcome": "blocked-on-infra",
+   "updatedAt": "2026-09-19T14:13:17.409Z"
+  },
+  {
+   "session": "review-2332",
+   "kind": "review",
+   "pr": "2332",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T14:35:46.229Z"
+  },
+  {
+   "session": "review-2334",
+   "kind": "review",
+   "pr": "2334",
+   "item": null,
+   "status": "done",
+   "outcome": "auto-cleared",
+   "updatedAt": "2026-09-19T20:13:47.357Z"
+  }
+ ],
+ "lastWip": null,
+ "docket": {
+  "generatedAt": "2026-09-14T18:32:51.732Z",
+  "items": [
+   {
+    "id": "2249",
+    "title": "Decide the system-wide visual language — flat-minimal vs rich-dimensional",
+    "prepared": true
+   },
+   {
+    "id": "2209",
+    "title": "Ratify the constellation branding system — philosophy, naming, marks, icon rules",
+    "prepared": true
+   },
+   {
+    "id": "3114",
+    "title": "Extend §6e — mint UC-A16, the escalated scope-breach amber Resolve card",
+    "prepared": true
+   },
+   {
+    "id": "2446",
+    "title": "Where does Plateau Loop live — plateau-app module, own repo, or product line inside Plateau",
+    "prepared": true
+   },
+   {
+    "id": "2224",
+    "title": "Side-by-side design-compare tool — scope + shape",
+    "prepared": true
+   },
+   {
+    "id": "2938",
+    "title": "How wide should the blast-radius net over the agent-instruction surfaces be — enumerate named paths, or invert the we:.claude/ anchor to default-deny?",
+    "prepared": true
+   },
+   {
+    "id": "3043",
+    "title": "/converge's editor is not care-gated — decide whether #2908 applies to the lane-working-tree loop too",
+    "prepared": true
+   },
+   {
+    "id": "3115",
+    "title": "Declared-conformance drift signal for the standard-aware review assistant (#1640 slices)",
+    "prepared": true
+   }
+  ]
+ },
+ "errors": []
+}
