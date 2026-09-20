@@ -50,9 +50,9 @@ function stubReader({ labels = ['review:pending'] } = {}) {
  * the `advise` step's `awaiting-effect` suspend along the way (#xlw02hw), which only fires for a `review:human`
  * PR (its ADVISORY_NOTE effect); an ordinary PR resolves `advise` inline with zero effects.
  */
-async function runAtConfirm({ id = 'run-3540', labels = ['review:pending'] } = {}) {
+async function runAtConfirm({ id = 'run-3540', labels = ['review:pending'], codexAdvisory = false } = {}) {
   const registry = createRegistry();
-  registry.register(reviewPrOperation({ readPr: stubReader({ labels }) }));
+  registry.register(reviewPrOperation({ readPr: stubReader({ labels }), codexAdvisory }));
   const store = createMemoryRunStore();
   let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id, input: BASE_INPUT, registry }), { registry });
   for (;;) {
@@ -62,7 +62,7 @@ async function runAtConfirm({ id = 'run-3540', labels = ['review:pending'] } = {
       continue;
     }
     if (status === 'awaiting-effect') {
-      ({ run } = await applyPendingEffects(run, { sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) }, store }));
+      ({ run } = await applyPendingEffects(run, { sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) }, store }));
       run = advanceWhileRunning(run, { registry });
       continue;
     }
@@ -133,6 +133,50 @@ describe('#3540 advanceReviewPrToWriteUp — the local, gh-free half of driving 
     const { sinks } = stubWriteUpSinks();
     await expect(advanceReviewPrToWriteUp(run, { to: 'accepted', store, sinks }))
       .rejects.toThrow(/gate-self: review:human is human-ceremony-only/);
+  });
+
+  it('PR #2117 review: a 3-seat run started with the advisory seat is resumed against the SAVED roster even when REVIEW_PR_CODEX_ADVISORY is NOT set now', async () => {
+    const { run } = await runAtConfirm({ id: 'run-adv-roster-1', codexAdvisory: true });
+    expect(Object.prototype.hasOwnProperty.call(run.findings, 'judgeAdvisory')).toBe(true);
+    const prevEnv = process.env.REVIEW_PR_CODEX_ADVISORY;
+    delete process.env.REVIEW_PR_CODEX_ADVISORY;
+    try {
+      const store = createMemoryRunStore();
+      store.write(run);
+      const { calls, sinks } = stubWriteUpSinks();
+      const advanced = await advanceReviewPrToWriteUp(run, { to: 'accepted', store, sinks });
+      expect(calls).toHaveLength(1);
+      expect(advanced.pending.step).toBe('record');
+      expect(advanced.findings.stageVerdict).toMatchObject({ applied: true });
+    } finally {
+      if (prevEnv === undefined) {
+        delete process.env.REVIEW_PR_CODEX_ADVISORY;
+      } else {
+        process.env.REVIEW_PR_CODEX_ADVISORY = prevEnv;
+      }
+    }
+  });
+
+  it('PR #2117 review: a saved 2-seat run is resumed against the SAVED roster even when REVIEW_PR_CODEX_ADVISORY IS set now', async () => {
+    const { run } = await runAtConfirm({ id: 'run-adv-roster-2' });
+    expect(Object.prototype.hasOwnProperty.call(run.findings, 'judgeAdvisory')).toBe(false);
+    const prevEnv = process.env.REVIEW_PR_CODEX_ADVISORY;
+    process.env.REVIEW_PR_CODEX_ADVISORY = '1';
+    try {
+      const store = createMemoryRunStore();
+      store.write(run);
+      const { calls, sinks } = stubWriteUpSinks();
+      const advanced = await advanceReviewPrToWriteUp(run, { to: 'accepted', store, sinks });
+      expect(calls).toHaveLength(1);
+      expect(advanced.pending.step).toBe('record');
+      expect(advanced.findings.stageVerdict).toMatchObject({ applied: true });
+    } finally {
+      if (prevEnv === undefined) {
+        delete process.env.REVIEW_PR_CODEX_ADVISORY;
+      } else {
+        process.env.REVIEW_PR_CODEX_ADVISORY = prevEnv;
+      }
+    }
   });
 });
 

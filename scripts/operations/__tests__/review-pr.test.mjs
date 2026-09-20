@@ -39,6 +39,7 @@ import {
   renderJudgeInput,
   renderVerdictWriteUp,
   renderAdvisoryNote,
+  deriveAdvisoryOutcome,
   overridesJuror,
   reviewPrOperation,
   shapeReadFinding,
@@ -60,6 +61,13 @@ import {
   // #3540 — the shared record-decision core and the record-verdict vocabulary mapping.
   planRecordDecision,
   confirmAnswerFor,
+  // #xqa9ttq — the opt-in third (Codex, advisory) seat.
+  ADVISORY_JUDGE_LENS,
+  ADVISORY_JUDGE_SEAT,
+  buildReviewAdvisoryJudgeRequest,
+  codexAdvisoryFromEnv,
+  codexAdvisoryFromRun,
+  CODEX_ADVISORY_ENV_VAR,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -67,6 +75,7 @@ import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-sp
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
 import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
 import { ADVISORY_LENSES, CITATION_SCOPES, MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
+import { ADVISORY_LABELS, parseAdvisories } from '../../lib/advisory-labels.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -75,6 +84,9 @@ const GH_ONLY_PATH = 'a-sibling-lane-file-that-already-landed.md';
 /** A stub `readPr`. `labels` decides gate-self; `netReason` forces an unscored basis. */
 function stubReader({
   labels = ['review:pending'], netScored = true, netReason = undefined, title = 'a parked PR',
+  // The net basis' head. Defaults to the short, UNPINNED value every existing test was written against; the
+  // `advisory:*` label tests pass a full 40-hex sha, which is what `pinnedSha` accepts.
+  netRev = 'def456',
   // #xwp8ioh — a reviewable PR is OPEN. Defaulted so every OTHER test keeps describing the case it was
   // written for; overridden only by the liveness tests.
   state = 'OPEN',
@@ -103,15 +115,20 @@ function stubReader({
     headRefName: 'lane/thing',
     body,
     net: netScored
-      ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
+      ? { paths: NET_PATHS, base: 'abc123', rev: netRev, scored: true }
       : { paths: [], base: null, rev: null, scored: false, reason: netReason },
     diff: netScored ? { text: '--- a/x\n+++ b/x\n+one line\n', scored: true } : { text: '', scored: false, reason: netReason },
   });
 }
 
-/** A registry holding one freshly-built declaration over a stub reader. */
-function registryFor(readerOptions) {
-  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions) });
+/**
+ * A registry holding one freshly-built declaration over a stub reader.
+ * @param {object} readerOptions - forwarded to `stubReader`.
+ * @param {{codexAdvisory?: boolean}} [opOptions] - #xqa9ttq — forwarded to `reviewPrOperation`. Defaulted to
+ *   `false` so every EXISTING caller of this helper keeps building today's two-seat declaration unchanged.
+ */
+function registryFor(readerOptions, { codexAdvisory = false } = {}) {
+  const declaration = reviewPrOperation({ readPr: stubReader(readerOptions), codexAdvisory });
   const registry = createRegistry();
   registry.register(declaration);
   return { declaration, registry };
@@ -153,7 +170,7 @@ function atConfirm({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 
  */
 async function atConfirmDrainingAdvisory({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 'run-rp' }) {
   const store = createMemoryRunStore();
-  const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) };
+  const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) };
   let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id, input, registry }), { registry });
   const requests = {};
   for (;;) {
@@ -719,7 +736,10 @@ describe('#xlw02hw the advise step posts an advisory note on review:human, befor
     const { registry } = registryFor({ labels: ['review:human'] });
     const store = createMemoryRunStore();
     const posted = [];
-    const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; } };
+    const sinks = {
+      [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; },
+      [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }),
+    };
     const out = await driveRun({
       run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-1', input: BASE_INPUT, registry }),
       registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
@@ -763,6 +783,94 @@ describe('#xlw02hw the advise step posts an advisory note on review:human, befor
     expect(advisory).toContain('ADVISORY REVIEW, NOT A RECORDED VERDICT');
     expect(advisory).toMatch(/still needs the human ceremony/);
     expect(recorded).not.toContain('ADVISORY REVIEW');
+  });
+});
+
+// ── THE `advisory:*` LABEL — the operator's "tag to tell me the advisory accepted" ─────────────────────────────
+// `verdict.verdict` is `needs-human` for EVERY gate-self PR, so it cannot say whether the advisory found anything.
+// These pin the outcome derivation, the comment line the queue reads back, and the ordering/never-touch rules.
+const PINNED_HEAD = 'fd37ce270'.padEnd(40, 'a');
+
+/** Drive a `review:human` run past `advise`, capturing every effect the sinks were handed. */
+async function driveAdvisory({ answer = CLEAN_ANSWER, netRev = PINNED_HEAD, id = 'run-advl' } = {}) {
+  const { registry } = registryFor({ labels: ['review:human'], netRev });
+  const applied = [];
+  const sinks = {
+    [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { applied.push({ type: REVIEW_EFFECTS.ADVISORY_NOTE, payload }); return { ok: true }; },
+    [REVIEW_EFFECTS.ADVISORY_LABEL]: async (payload) => { applied.push({ type: REVIEW_EFFECTS.ADVISORY_LABEL, payload }); return { ok: true }; },
+  };
+  const out = await driveRun({
+    run: startRun({ op: REVIEW_PR_OP, id, input: BASE_INPUT, registry }),
+    registry, store: createMemoryRunStore(), sinks, judge: async () => judgeOutcome(answer, {}),
+  });
+  return { out, applied };
+}
+
+describe('the advise step applies the `advisory:*` label', () => {
+  it('a clean advisory on a pinned head declares `accept` — note first, label second', async () => {
+    const { out, applied } = await driveAdvisory();
+    expect(out.stopped).toBe('confirm');
+    expect(applied.map((a) => a.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE, REVIEW_EFFECTS.ADVISORY_LABEL]);
+    expect(applied[1].payload).toEqual({
+      pr: BASE_INPUT.pr, repo: BASE_INPUT.repo, outcome: 'accept', reviewedHead: PINNED_HEAD,
+    });
+    // The run's own verdict is UNCHANGED by all of this: still the gate-self `needs-human`.
+    expect(out.run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('a blocking advisory declares `changes`, though the run verdict is still `needs-human`', async () => {
+    const { out, applied } = await driveAdvisory({ answer: BLOCKING_ANSWER, id: 'run-advl-2' });
+    expect(out.run.verdict.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(applied[1].payload).toMatchObject({ outcome: 'changes', reviewedHead: PINNED_HEAD });
+    expect(applied[0].payload.body).toContain('**Advisory outcome:** `changes`');
+  });
+
+  it('the note it posts round-trips through the parser `operator-queue` reads: outcome AND head', async () => {
+    for (const [answer, outcome] of [[CLEAN_ANSWER, 'accept'], [BLOCKING_ANSWER, 'changes']]) {
+      const { applied } = await driveAdvisory({ answer, id: `run-advl-rt-${outcome}` });
+      const [parsed] = parseAdvisories([{ body: applied[0].payload.body, createdAt: '2026-09-19T12:00:00Z' }]);
+      expect(parsed).toMatchObject({ outcome, head: PINNED_HEAD });
+    }
+  });
+
+  it('declares NO label effect when the basis is unpinned — there is no head to describe', async () => {
+    const { applied } = await driveAdvisory({ netRev: 'def456', id: 'run-advl-3' });
+    expect(applied.map((a) => a.type)).toEqual([REVIEW_EFFECTS.ADVISORY_NOTE]);
+  });
+
+  it('a `review:pending` PR still declares nothing — the ordinary path is byte-identical', async () => {
+    const { registry } = registryFor({ labels: ['review:pending'], netRev: PINNED_HEAD });
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-advl-4', input: BASE_INPUT, registry }),
+      registry, store: createMemoryRunStore(), sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.run.effects).toEqual([]);
+  });
+
+  it('never declares anything but an `advisory:*` label — no `review:*` swap, ever', async () => {
+    const { applied } = await driveAdvisory({ id: 'run-advl-5' });
+    const wire = JSON.stringify(applied);
+    expect(wire).not.toContain('review:accepted');
+    expect(wire).not.toContain('addLabel');
+    expect(applied.some((a) => a.type === REVIEW_EFFECTS.LABEL)).toBe(false);
+    expect(Object.values(ADVISORY_LABELS)).toEqual(['advisory:accepted', 'advisory:changes']);
+  });
+});
+
+describe('deriveAdvisoryOutcome', () => {
+  const lensVerdicts = (v) => Object.fromEntries(MANDATORY_LENSES.map((l) => [l, v]));
+
+  it('is `accept` when every mandatory lens accepts, whatever the gate-self verdict says', () => {
+    expect(deriveAdvisoryOutcome({ verdict: 'needs-human', lensVerdicts: lensVerdicts('accept'), admittedFindings: [] })).toBe('accept');
+  });
+
+  it('is `changes` when any mandatory lens asks for changes', () => {
+    expect(deriveAdvisoryOutcome({ verdict: 'needs-human', lensVerdicts: lensVerdicts('changes'), admittedFindings: [] })).toBe('changes');
+  });
+
+  it('is null — no label — when no outcome can be honestly derived', () => {
+    expect(deriveAdvisoryOutcome(undefined)).toBeNull();
+    expect(deriveAdvisoryOutcome({ lensVerdicts: {} })).toBeNull();
   });
 });
 
@@ -817,7 +925,8 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     expect(record.cursor).toBe(6);
     expect(record.findings.confirm).toBe('accept');
     expect(record.effects.filter((e) => e.step === 'stageVerdict' || e.step === 'record')).toEqual([]);
-    expect(record.effects.map((e) => e.step)).toEqual(['advise']);
+    // `advise` declares its note AND (once the basis is pinned) its `advisory:*` label; neither is this invariant's.
+    expect([...new Set(record.effects.map((e) => e.step))]).toEqual(['advise']);
   });
 
   it('is idempotent — a repeat --resume produces byte-identical output and the same exit code', async () => {
@@ -1594,7 +1703,7 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
       store,
       // A `humanRequired` PR now runs `advise` (#xlw02hw) on the way to `confirm`, which needs a sink even
       // though this test's whole point is about the LATER `confirm` suspend, not this earlier one.
-      sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) },
+      sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }), [REVIEW_EFFECTS.ADVISORY_LABEL]: async () => ({ ok: true }) },
       judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
       autoConfirm: agentOnly,
     });
@@ -2526,5 +2635,188 @@ describe('#3335 the write-up states what was EARNED beside what SAT', () => {
     expect(body).toContain('did NOT run and are not reported as unjudged');
     const absent = PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l));
     expect(body).toContain(`The other ${absent.length} panel lens(es) (${absent.join(', ')})`);
+  });
+});
+
+// ── #xqa9ttq — THE OPT-IN THIRD SEAT: A TOOL-FREE CODEX JUROR ON AN ADVISORY LENS ────────────────────────────
+describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
+  describe('codexAdvisoryFromEnv', () => {
+    it('is false when the env var is unset, or set to anything other than the literal string "1"', () => {
+      expect(codexAdvisoryFromEnv({})).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: 'true' })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '0' })).toBe(false);
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '' })).toBe(false);
+    });
+
+    it('is true only for the exact literal "1"', () => {
+      expect(codexAdvisoryFromEnv({ [CODEX_ADVISORY_ENV_VAR]: '1' })).toBe(true);
+    });
+  });
+
+  describe('codexAdvisoryFromRun', () => {
+    it('reads the roster off the saved run: true only when findings carries judgeAdvisory', () => {
+      expect(codexAdvisoryFromRun({ findings: { judgeAdvisory: {} } })).toBe(true);
+      expect(codexAdvisoryFromRun({ findings: { judge: {} } })).toBe(false);
+      expect(codexAdvisoryFromRun({})).toBe(false);
+      expect(codexAdvisoryFromRun(null)).toBe(false);
+      expect(codexAdvisoryFromRun(undefined)).toBe(false);
+    });
+  });
+
+  describe('buildReviewAdvisoryJudgeRequest', () => {
+    it('carries no allowedTools, no model, and pins providerName to codex', () => {
+      const request = buildReviewAdvisoryJudgeRequest({
+        read: { netChangedFiles: NET_PATHS, title: 'a PR' },
+      });
+      expect(request.allowedTools).toBeUndefined();
+      expect(request.model).toBeUndefined();
+      expect(request.providerName).toBe('codex');
+      expect(request.lens).toBe(ADVISORY_JUDGE_LENS);
+      expect(ADVISORY_JUDGE_LENS).toBe(ADVISORY_LENSES[0]);
+    });
+
+    it('the mandate carries the same diff/description the two existing seats get (#2336 context isolation)', () => {
+      const read = { netChangedFiles: NET_PATHS, title: 'the PR title' };
+      const advisory = buildReviewAdvisoryJudgeRequest({ read });
+      const correctness = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+      expect(advisory.input).toBe(correctness.input);
+    });
+  });
+
+  it('is NOT declared by default — the default declaration is byte-identical to before this card', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(judgeSteps).not.toContain('judgeAdvisory');
+    // The module-level roster is untouched — every OTHER test in this file keeps reading exactly this.
+    expect(JUDGE_SEATS).toHaveLength(2);
+  });
+
+  it('when opted in, declares a THIRD judge step, in order, after judgeSecurity and before reduce', () => {
+    const { declaration } = registryFor({}, { codexAdvisory: true });
+    const names = declaration.steps.map((s) => s.name);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    const advisoryStep = declaration.steps.find((s) => s.name === 'judgeAdvisory');
+    expect(advisoryStep.step.kind).toBe('judge');
+    // It is isolated exactly like `judgeSecurity`: it reads neither sibling juror's findings.
+    expect(advisoryStep.step.reads).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('the seated request is tool-free and pinned to codex, on ADVISORY_JUDGE_LENS', () => {
+    const { registry } = registryFor({}, { codexAdvisory: true });
+    const { requests } = atConfirm({
+      registry, input: BASE_INPUT, id: 'run-codex-request',
+      answers: { [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeAdvisory: CLEAN_ANSWER },
+    });
+    const request = requests.judgeAdvisory;
+    expect(request.lens).toBe(ADVISORY_JUDGE_LENS);
+    expect(request.providerName).toBe('codex');
+    expect(request.allowedTools).toBeUndefined();
+    expect(request.model).toBeUndefined();
+    // The two EXISTING seats are UNTOUCHED — still tool-bearing, still no `providerName` (they use whatever
+    // provider the RUN's own `--provider`/factory default is).
+    expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[0]].providerName).toBeUndefined();
+    expect(requests[JUDGE_STEPS[1]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+    expect(requests[JUDGE_STEPS[1]].providerName).toBeUndefined();
+  });
+
+  it('the registration-time roster check still holds for the 3-seat build (no drift, no throw)', () => {
+    // `reviewPrOperation({ codexAdvisory: true })` not throwing at registration IS the assertion: the roster
+    // check at the bottom of that function throws if the declared `judge` steps ever stop matching the local
+    // `seats` array this card added. A regression here would fail EVERY test in this describe block, but this
+    // one names the property directly.
+    expect(() => registryFor({}, { codexAdvisory: true })).not.toThrow();
+  });
+
+  describe('THE CORE PROPERTY: an advisory-lens Codex finding cannot flip the verdict to `changes` on its own', () => {
+    it('mandatory lenses accept, the advisory seat reports a blocker — the panel verdict is still `accept`', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-cannot-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          // The Codex seat reports a BLOCKER-shaped finding — exactly the shape that flips a MANDATORY lens's
+          // own per-lens verdict to `changes` (see `reduceWith` above). Seated on an advisory lens, it must not
+          // be able to do the same to the PANEL verdict.
+          judgeAdvisory: BLOCKING_ANSWER,
+        },
+      });
+      // The per-lens verdict is honestly `changes` — the finding is not hidden or downgraded.
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('changes');
+      // …but the PANEL verdict, reduced only over `mandatoryLenses`, is still `accept`.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
+      // The finding still SURFACES — advisory means "informs", not "invisible". `buildPanelFindings` tags a
+      // finding's LENS into `category` (`${lens}/${category}`, or bare `lens` with none) — see `jury-core.mjs`.
+      expect(run.verdict.findings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+    });
+
+    it('a MANDATORY lens reporting the identical blocker DOES flip the verdict — proving the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-mandatory-does-block',
+        answers: {
+          [JUDGE_STEPS[0]]: BLOCKING_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('changes');
+    });
+
+    const PREVENTION_ANSWER = {
+      summary: 'one resolved carve-out that names a guard',
+      findings: [{
+        summary: 'a resolved carve-out with an uncaptured prevention guard',
+        disposition: 'carve-out',
+        introduced: false,
+        worseThanBase: false,
+        parallelizable: true,
+        prevention: 'a check:standards rule over the reason table',
+        preventionCaptured: false,
+        impactIfUnfixed: 'broken',
+      }],
+    };
+
+    it('an advisory-lens finding that names an UNCAPTURED prevention guard cannot flip the panel verdict to `prevention-outstanding` either (PR #2117 review)', () => {
+      expect(deriveVerdict({ findings: PREVENTION_ANSWER.findings })).toBe('prevention-outstanding');
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-cannot-prevention-block',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: PREVENTION_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('prevention-outstanding');
+      expect(run.verdict.findings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+      expect(run.verdict.admittedFindings.some((f) => f.category === ADVISORY_JUDGE_LENS)).toBe(true);
+    });
+
+    it('the SAME prevention-shaped finding from a MANDATORY seat DOES yield `prevention-outstanding` - the test above is not vacuous', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-mandatory-does-prevention-block',
+        answers: {
+          [JUDGE_STEPS[0]]: PREVENTION_ANSWER,
+          [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: CLEAN_ANSWER,
+        },
+      });
+      expect(run.verdict.verdict).toBe('prevention-outstanding');
+    });
+
+    it('`decideLensFloor` over a 3-seat roster: the advisory seat is counted as advisory, never mandatory', () => {
+      const seats = Object.freeze([...JUDGE_SEATS, ADVISORY_JUDGE_SEAT]);
+      const floor = decideLensFloor({ lens: DEFAULT_LENS, seats });
+      expect(floor.seated).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
+      expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+      expect(floor.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
+      expect(floor.seatsFloor).toBe(true);
+    });
   });
 });

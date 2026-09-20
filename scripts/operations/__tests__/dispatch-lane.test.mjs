@@ -698,17 +698,23 @@ describe('the declared effect is a dispatch', () => {
 describe('what the sink actually runs', () => {
   const payload = { num: '3037', sessionSlug: 'conveyor-3037', prompt: '# build #3037' };
 
-  it('pins the handle with --session-id instead of racing to discover it', () => {
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).toEqual([
-      '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037', '# build #3037',
-    ]);
+  it('#3331 — does NOT pass --session-id, because `claude --bg` discards it', () => {
+    // This assertion is INVERTED from what it said before #3331 ("pins the handle with --session-id instead of
+    // racing to discover it"). The real CLI answers `warning: --bg manages the session id; ignoring
+    // --session-id` and assigns its own — measured 3/3 at 2.1.246 by #3331's probe, 2/2 at 2.1.269 with the
+    // real dispatch argv. Passing it bought nothing and encoded a false premise the rest of the file read as
+    // fact; the handle now comes from the id the CLI prints (`parseBackgroundedId`).
+    const argv = buildAgentArgv({ sessionId: 'sess-c3', payload });
+    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '# build #3037']);
+    expect(argv).not.toContain('--session-id');
+    expect(argv).not.toContain('sess-c3');
   });
 
   it('#xqyyoje — appends --append-system-prompt-file only when the caller passes one, ahead of extraArgs', () => {
     expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).not.toContain('--append-system-prompt-file');
     const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'] });
     expect(argv).toEqual([
-      '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037',
+      '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', '/path/to/identity.md',
       '--model', 'sonnet', '# build #3037',
     ]);
@@ -1690,6 +1696,21 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(run.findings.read.dispatchedGuard).toEqual({ num: '3150', kind: 'prepare-decision', lane: 6, spawnedTick: 3, sawPr: false });
   });
 
+  // ── criterion 2b (#3567) ────────────────────────────────────────────────────────────────────────────────
+  it('a `spawnInvestigations` entry SPAWNS ONCE, with the investigation brief', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnInvestigations', { num: '3150', lane: 9 }), items: [UNSCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'investigate', lane: 9, sessionSlug: 'investigate-3150' });
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('investigate', {
+      ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 9, SESSION_SLUG: 'investigate-3150', SCOPE: `we:${SPEC_PATH}`,
+    }));
+    expect(prompt).toContain('--purpose=conveyor-investigate');
+    expect(run.findings.read.dispatchedGuard).toBeNull();
+  });
+
   // ── criterion 3 ──────────────────────────────────────────────────────────────────────────────────────────
   it('a BUILD is byte-identical to before — the same brief, the same slug, the same argv', async () => {
     // The additive claim, TESTED rather than asserted in a comment. If any of these three moved, every caller
@@ -1708,7 +1729,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // is the sink's own standing-identity flag, always present on a real dispatch — see
     // `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`.
     expect(spawned[0].argv).toEqual([
-      '--bg', '--session-id', 'sess-3165', '-n', 'conveyor-3037',
+      '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
@@ -1729,10 +1750,10 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // …and the pure half refuses a reader that hands it one, rather than shaping a read around it.
     expect(() => shapeDispatchRead(tickRead({ launchKind: 'prepare-scope' }), { num: '3037' }))
       .toThrow(/unknown `launchKind`/);
-    // The five that ARE wired all resolve, and to five DISTINCT files (#3332 grew this from three to five) —
-    // one map entry pointing at the wrong brief is the same failure with a quieter face.
+    // The six that ARE wired all resolve, and to six DISTINCT files (#3332 grew this from three to five,
+    // #3567 to six) — one map entry pointing at the wrong brief is the same failure with a quieter face.
     const paths = LAUNCH_KINDS.map((k) => briefPath(REPO_ROOT, k));
-    expect(new Set(paths).size).toBe(5);
+    expect(new Set(paths).size).toBe(6);
     for (const path of paths) expect(readFileSync(path, 'utf8').trim()).not.toBe('');
   });
 
@@ -1766,7 +1787,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     tick.decisions.spawnPrepareScope.push({ num: '9999', lane: 7 });
     const { spawned } = await dispatchThrough({ num: '3150', tick, items: [UNSCOPED, { num: '9999', slug: 'other' }] });
     expect(spawned).toHaveLength(1);
-    expect(spawned[0].argv[4]).toBe('prepare-3150');
+    expect(spawned[0].argv[2]).toBe('prepare-3150');
   });
 
   it('a num in NO list still says so, and now names all three', async () => {

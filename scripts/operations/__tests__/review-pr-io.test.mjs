@@ -346,6 +346,78 @@ describe('the advisory-note sink', () => {
 });
 
 /**
+ * `advise`'s second effect — the `advisory:accepted` / `advisory:changes` label. The forge port is injected exactly
+ * as `postComment` is above, so every case runs with no `gh` and asserts the label writes it WOULD make.
+ */
+describe('the advisory-label sink', () => {
+  const HEAD = 'fd37ce270'.padEnd(40, 'a');
+  const CTX_LABEL = { ...CTX, type: REVIEW_EFFECTS.ADVISORY_LABEL, step: 'advise', index: 1 };
+
+  /** A recording provider: `state` is what the live PR looks like; every write is captured. */
+  function provider(state) {
+    const calls = { ensure: [], set: [] };
+    return {
+      calls,
+      readPrState: () => state,
+      ensureLabel: (repo, name, meta) => { calls.ensure.push({ repo, name, meta }); },
+      setLabels: (repo, pr, spec) => { calls.set.push({ repo, pr, spec }); },
+    };
+  }
+  const apply = (labelProvider, payload) => createReviewPrSinks({ root, labelProvider })[REVIEW_EFFECTS.ADVISORY_LABEL](
+    { pr: 9, repo: 'o/n', outcome: 'accept', reviewedHead: HEAD, ...payload }, CTX_LABEL,
+  );
+
+  it('accept: adds advisory:accepted (creating it first) and drops review:pending, touching nothing else', async () => {
+    const p = provider({ headRefOid: HEAD, labels: [{ name: 'review:human' }, { name: 'review:pending' }] });
+    expect(await apply(p, {})).toEqual({ applied: true, added: 'advisory:accepted', removed: ['review:pending'] });
+    expect(p.calls.ensure).toEqual([{ repo: 'o/n', name: 'advisory:accepted', meta: expect.objectContaining({ color: '0e8a16' }) }]);
+    expect(p.calls.set).toEqual([{ repo: 'o/n', pr: 9, spec: { add: 'advisory:accepted', remove: ['review:pending'] } }]);
+  });
+
+  it('changes: adds advisory:changes and removes the opposite label', async () => {
+    const p = provider({ headRefOid: HEAD, labels: [{ name: 'review:human' }, { name: 'review:pending' }, { name: 'advisory:accepted' }] });
+    expect(await apply(p, { outcome: 'changes' })).toEqual({
+      applied: true, added: 'advisory:changes', removed: ['advisory:accepted', 'review:pending'],
+    });
+    expect(p.calls.ensure[0].name).toBe('advisory:changes');
+  });
+
+  it('never removes review:human and never adds review:accepted, whatever the outcome', async () => {
+    for (const outcome of ['accept', 'changes']) {
+      const p = provider({ headRefOid: HEAD, labels: [{ name: 'review:human' }, { name: 'review:pending' }] });
+      await apply(p, { outcome });
+      const written = JSON.stringify([...p.calls.ensure, ...p.calls.set]);
+      expect(written).not.toContain('review:accepted');
+      expect(p.calls.set[0].spec.remove).not.toContain('review:human');
+    }
+  });
+
+  it('refuses quietly when the head has MOVED since the panel judged it — the label would describe a dead head', async () => {
+    const p = provider({ headRefOid: 'b'.repeat(40), labels: [{ name: 'review:human' }] });
+    expect(await apply(p, {})).toEqual({ applied: false, reason: 'head-moved' });
+    expect(p.calls.set).toEqual([]);
+    expect(p.calls.ensure).toEqual([]);
+  });
+
+  it('refuses when the PR is no longer human-gated, or the basis is unpinned', async () => {
+    expect(await apply(provider({ headRefOid: HEAD, labels: [{ name: 'review:pending' }] }), {}))
+      .toEqual({ applied: false, reason: 'not-human-gated' });
+    expect(await apply(provider({ headRefOid: HEAD, labels: [{ name: 'review:human' }] }), { reviewedHead: null }))
+      .toEqual({ applied: false, reason: 'unpinned-basis' });
+  });
+
+  it('is a no-op when the PR already shows exactly the desired state', async () => {
+    const p = provider({ headRefOid: HEAD, labels: [{ name: 'review:human' }, { name: 'advisory:accepted' }] });
+    expect(await apply(p, {})).toEqual({ applied: false, reason: 'already-current' });
+    expect(p.calls.set).toEqual([]);
+  });
+
+  it('defaults to the real provider when none is injected (building the sink map must not throw)', () => {
+    expect(typeof createReviewPrSinks({ root })[REVIEW_EFFECTS.ADVISORY_LABEL]).toBe('function');
+  });
+});
+
+/**
  * THE ROUND NUMBER IS ROUNDS SINCE THE LAST CLEAR, not rows ever written (#3072; PR #1178 review, finding 3).
  *
  * `history` holds every verdict a PR has ever carried, including rows from an already-CONVERGED loop, so

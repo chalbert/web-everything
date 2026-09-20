@@ -68,3 +68,25 @@ owns the engine's registration contract (#3029), not to this card.
 2. **Executable** — the `review-pr` declaration's own step listing (via `we:scripts/operations/run.mjs`)
    reports a lens set that is not hard-coded to two members.
 3. The run footer stops reporting a STRUCTURAL shortfall for a lens the touch-set earned.
+
+## Confirmed again, still open (2026-09-14) — a second real PR reported the same structural shortfall
+
+**The opening claim is still accurate.** Checked against current `main`: `JUDGE_SEATS` in
+`we:scripts/operations/review-pr.mjs` lists exactly two seats, `judge` (caller-chosen lens, `correctness` in
+practice) and `judgeSecurity`. No third seat, advisory seat, or extra named judge step exists there, so
+`Done when` #1, #2 and #3 above are all still false. This note changes no count on this card.
+
+**Fresh evidence, PR #2206 (`readiness: heavy-command-pool container POC`, epic #3383).** The independent jury
+review of that PR scored its touch-set care `elevated` (blast-radius + size). Its verdict recorded the same
+failure class this card names: the earned lenses `standards-conformance` and `claim-accuracy` did not sit,
+because *"the step list is fixed at registration (#3319)"*, and the run stated that shortfall rather than
+implying it away. That is a second real PR, weeks after this card was filed, where a lens the touch-set earned
+had no declared step to run in. (The verdict file was not re-read for this note; only the shortfall wording is
+carried over. Do not rely on this note for that run's exact seat roster.)
+
+**Why this still matters beyond one PR.** The caller declared no `--careLevel` on that run, so nothing checked
+the seated shape against what the touch-set earned (`#3335`'s declared-shape check only refuses an
+UNDER-declaration; it does not add a seat). Any PR whose care level asks for `standards-conformance` or
+`claim-accuracy` gets a lighter review than its own care dial says it should, silently, because the record
+only states what ran. `claim-accuracy` is the lens built for this class (see the PR #1680 evidence above).
+Not resolved by this note.

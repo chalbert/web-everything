@@ -32,13 +32,19 @@
  * for a comparably-scoped, standalone dispatch action, and the one this file follows.
  *
  * WHAT ACTUALLY MAKES THE SPAWNED SESSION INDEPENDENT. Not a derived id, not an env-var override on this
- * process — a BRAND NEW random UUID, minted here and handed to `claude --bg --session-id=<uuid>`
+ * process — a genuinely SEPARATE OS process started by `claude --bg`
  * (`we:scripts/operations/dispatch-lane-io.mjs#defaultSpawnAgent` / `#buildAgentArgv`, reused verbatim rather
- * than re-implemented). `claude -p`/`--bg` does NOT adopt an inherited `CLAUDE_CODE_SESSION_ID` — supplying
- * `--session-id` makes the spawned session's identity exactly that value, deterministically, which is the same
- * mechanism `we:scripts/lib/judge-spawn.mjs` already relies on for a juror's independence (that file derives its
- * seed from the run; this one has no run to derive from, so a fresh random UUID is the honest equivalent — the
- * property needed is "not the author's", and a random 122-bit value is that with overwhelming probability).
+ * than re-implemented), which gets a fresh session identity of its own and does NOT adopt an inherited
+ * `CLAUDE_CODE_SESSION_ID`. That separateness is the whole property needed — "not the author's" — and it comes
+ * from the spawn, not from any id this file chooses.
+ *
+ * CORRECTED 2026-09-11 (#3331). This paragraph used to say the independence came from "a BRAND NEW random
+ * UUID, minted here and handed to `claude --bg --session-id=<uuid>` … supplying `--session-id` makes the
+ * spawned session's identity exactly that value, deterministically". `claude --bg` DISCARDS `--session-id` and
+ * assigns its own, so that sentence described a mechanism that was not running. The CONCLUSION was never in
+ * danger — a `--bg` spawn is independent whoever names it — but the id this file then REPORTED belonged to no
+ * session, which is a real defect and is fixed in `dispatchReview` below. The `we:scripts/lib/judge-spawn.mjs`
+ * comparison the old text drew is NOT affected: jurors spawn with `claude -p`, and `-p` honours `--session-id`.
  *
  * WHAT THIS FILE DOES NOT DO. It does not run the review itself (that is `review-loop-cli.mjs`, which the
  * dispatched session runs FOR ITSELF, inside its own freshly-minted session — see the brief). It does not
@@ -112,7 +118,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
+  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, parseBackgroundedId, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
 // #xqa9ttq — the single source of truth for the `claude`/`codex` juror-provider enum, shared with
 // `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
@@ -404,7 +410,8 @@ export function dispatchReview({
     throw new Error(
       `review-dispatch: \`judgeProvider: ${JSON.stringify(judgeProvider)}\` is refused - it is a TOOL-FREE-only provider (#3581) and every judge step review-pr runs is tool-bearing, `
       + 'so a dispatched review would be refused at its first judge step. Use the default `claude`. '
-      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag.',
+      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag. '
+      + 'Opt in with REVIEW_PR_CODEX_ADVISORY=1 in the environment instead.',
     );
   }
   const planned = planReviewDispatch({ pr, repo });
@@ -425,10 +432,19 @@ export function dispatchReview({
     systemPromptFile: REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
     extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
   });
-  spawnAgent(argv, { cwd: root });
+  // #3331 — THE HANDLE COMES BACK OFF STDOUT, it is not the uuid minted above. `claude --bg` DISCARDS
+  // `--session-id` (it says so on stderr; measured 3/3 at CLI 2.1.246 by #3331's probe and 2/2 at 2.1.269 with
+  // this exact argv) and assigns its own id, which it prints as `backgrounded · <id> · <name>`. Reporting the
+  // minted uuid instead is what made a WORKING dispatch look like a silent failure: `claude agents --json |
+  // grep <that uuid>` is always empty and no transcript exists under it, so every operator who checked
+  // concluded no session had started — while the real session (findable by its `-n` slug) was running the
+  // review to completion. `agentId` is the id that actually addresses it; `sessionId` is kept on the result
+  // only so an existing caller reading that field still gets the old, documented shape.
+  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+  const agentId = parseBackgroundedId(stdout);
   return {
-    sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens,
-    judgeProvider,
+    sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
+    unknownTokens, judgeProvider,
   };
 }
 
@@ -450,11 +466,21 @@ if (IS_CLI) {
     const result = dispatchReview({
       pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
     });
+    // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
+    // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
+    // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
+    // that will not be found — the session slug is still a real handle in that case (`claude agents --json`
+    // carries `-n` verbatim).
     writeAllSync(
       1,
-      `dispatch-review: started session ${result.sessionId} (slug ${result.sessionSlug}) reviewing `
-      + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
-      + `watch it: claude agents --json | grep ${result.sessionId}\n`
+      (result.agentId
+        ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
+          + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
+          + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
+        : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
+          + `(judge provider: ${result.judgeProvider}), `
+          + 'but could NOT read its id off `claude --bg`\'s output\n'
+          + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
       + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
     );
   } catch (e) {

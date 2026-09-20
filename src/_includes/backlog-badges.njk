@@ -28,7 +28,7 @@
    `epic`/`task` self-name here (they replaced the old unsized-stand-in `workItemBadge`); a `story` shows
    its kind alongside the size badge; a `decision` keeps the indigo it had as a `type`. #}
 {% macro kindBadge(kind, scale='sm') %}{# #1208: KIND taxonomy → FUI `<we-tag>` categorical (set,value) mode (#1670); per-value palette in we:src/css/style.css. `scale` kept for call-site compat but no longer sizes the pill (the FUI tag owns its geometry). #}
-<we-tag set="kind" value="{{ kind }}" title="{% if kind == 'feature' %}feature — the grouping tier above epic; rolls up its child epics (#2691){% elif kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% else %}story — an independently valuable, sized deliverable{% endif %}">{{ kind }}</we-tag>
+<we-tag set="kind" value="{{ kind }}" title="{% if kind == 'feature' %}feature — the grouping tier above epic; rolls up its child epics (#2691){% elif kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% elif kind == 'investigation' %}investigation — a dispatched investigator; investigate, synthesize, report (#3567){% else %}story — an independently valuable, sized deliverable{% endif %}">{{ kind }}</we-tag>
 {% endmacro %}
 
 {# Status Indicator surface (#1621 status half) — lifecycle state → FUI `<we-badge>` (transient CE, loaded

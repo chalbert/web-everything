@@ -496,6 +496,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/branch-drift.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=owner/repo',
+      'node /scripts/conveyor/advisory-label-sweep.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=owner/repo',
       'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
@@ -505,16 +506,18 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
 });
 
 
-// Emulate only the four named subprocesses' discovery at the mocked boundary. The separate
+// Emulate only the five named subprocesses' discovery at the mocked boundary. The separate
 // reconcile-fix-dispatch invocation deliberately remains opaque and contributes no calls here.
 import { defaultListOpenPrs } from '../../../scripts/conveyor/duplicate-pr-watch.mjs';
 import { defaultListParkedPrs as listConflicts } from '../../../scripts/conveyor/parked-pr-conflict-watch.mjs';
 import { defaultListParkedPrs as listProgress } from '../../../scripts/conveyor/parked-pr-progress-watch.mjs';
+import { defaultListPrs as listAdvisory } from '../../../scripts/conveyor/advisory-label-sweep.mjs';
 import { defaultReadPrs } from '../../../scripts/conveyor/reconcile-pass.mjs';
 import { OPEN_PR_LIST_FIELDS } from '../../../scripts/conveyor/open-pr-fetch.mjs';
 
 const consumers = {
   'parked-pr-conflict-watch.mjs': listConflicts,
+  'advisory-label-sweep.mjs': listAdvisory,
   'reconcile-pass.mjs': defaultReadPrs,
   'duplicate-pr-watch.mjs': defaultListOpenPrs,
   'parked-pr-progress-watch.mjs': listProgress,
@@ -563,7 +566,7 @@ describe('one open-PR snapshot per mechanical tick', () => {
     return calls.filter(([cmd, script]) => cmd === 'node' && consumers[script.split('/').pop()]);
   }
 
-  it('fetches exactly once and invokes all four consumers once with the same live file, then deletes it', async () => {
+  it('fetches exactly once and invokes all five consumers once with the same live file, then deletes it', async () => {
     const { calls, files } = await tick();
     const fetches = calls.filter(([cmd, ...args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'list');
     expect(fetches).toEqual([['gh', 'pr', 'list', '--state', 'open', '--limit', '200', '--json', OPEN_PR_LIST_FIELDS, '--repo', 'owner/repo']]);
@@ -572,7 +575,7 @@ describe('one open-PR snapshot per mechanical tick', () => {
       expect(call.some((a) => a.startsWith('--prs-file='))).toBe(false);
     }
     expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
-    expect(files).toHaveLength(4);
+    expect(files).toHaveLength(5);
     expect(new Set(files).size).toBe(1);
     for (const call of consumed) {
       expect(call).toContain(`--prs-file=${files[0]}`);
@@ -581,21 +584,21 @@ describe('one open-PR snapshot per mechanical tick', () => {
     expect(existsSync(files[0])).toBe(false);
   });
 
-  it('warns once on shared-fetch failure and all four consumers perform their standalone discovery without a flag', async () => {
+  it('warns once on shared-fetch failure and all five consumers perform their standalone discovery without a flag', async () => {
     const { calls, files, warnings } = await tick({ fetchThrows: true });
     const consumed = consumerCalls(calls);
     expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
     expect(consumed.flat().some((a) => a.startsWith('--prs-file='))).toBe(false);
     expect(files).toEqual([]);
-    expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(5); // failed shared attempt + four fallbacks
+    expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(6); // failed shared attempt + five fallbacks
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('mechanical pass open-pr-fetch failed (non-fatal): shared discovery failed');
   });
 
   it('cleans up even when consumers fail, still invoking every consumer', async () => {
     const { calls, files } = await tick({ consumerThrows: true });
-    expect(consumerCalls(calls)).toHaveLength(4);
-    expect(files).toHaveLength(4);
+    expect(consumerCalls(calls)).toHaveLength(5);
+    expect(files).toHaveLength(5);
     for (const file of files) expect(existsSync(file)).toBe(false);
   });
 

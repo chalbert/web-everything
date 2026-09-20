@@ -15,6 +15,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isCliEntry } from '../operator-queue.mjs';
 
 const SOURCE = join(dirname(fileURLToPath(import.meta.url)), '..', 'operator-queue.mjs');
+// The queue imports its advisory parser from `../lib/`, so a copy is only runnable with that leaf beside it in
+// the same `operations/` + `lib/` layout — stage both, then run the copy under `<root>/operations/`.
+const LEAF = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', 'advisory-labels.mjs');
+const stage = (root) => {
+  mkdirSync(join(root, 'operations'), { recursive: true });
+  mkdirSync(join(root, 'lib'), { recursive: true });
+  copyFileSync(SOURCE, join(root, 'operations', 'operator-queue.mjs'));
+  copyFileSync(LEAF, join(root, 'lib', 'advisory-labels.mjs'));
+};
 
 let dir;
 let env;
@@ -32,18 +41,17 @@ const run = (scriptPath) => spawnSync(process.execPath, [scriptPath, '--repo=x/y
 
 describe('operator-queue CLI entry guard', () => {
   it('runs main() when invoked through a symlinked directory', () => {
-    mkdirSync(join(dir, 'real'));
-    copyFileSync(SOURCE, join(dir, 'real', 'operator-queue.mjs'));
+    stage(join(dir, 'real'));
     symlinkSync(join(dir, 'real'), join(dir, 'link'));
-    const result = run(join(dir, 'link', 'operator-queue.mjs'));
+    const result = run(join(dir, 'link', 'operations', 'operator-queue.mjs'));
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('NEEDS YOU');
   });
 
   it('runs main() when invoked through a symlink to the file and a doubled slash', () => {
-    copyFileSync(SOURCE, join(dir, 'operator-queue.mjs'));
-    symlinkSync(join(dir, 'operator-queue.mjs'), join(dir, 'alias.mjs'));
-    const result = run(`${dir}//alias.mjs`);
+    stage(join(dir, 'real'));
+    symlinkSync(join(dir, 'real', 'operations', 'operator-queue.mjs'), join(dir, 'real', 'operations', 'alias.mjs'));
+    const result = run(`${dir}/real//operations//alias.mjs`);
     expect(result.stdout).toContain('NEEDS YOU');
   });
 

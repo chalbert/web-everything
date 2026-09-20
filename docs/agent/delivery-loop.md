@@ -48,6 +48,18 @@ Only two things genuinely stop and wait for a person:
 2. **A genuine fork in the work itself** — two readings of the request that lead to materially different
    diffs. Ask about *that*, not about permission to run the loop.
 
+**Which `review:human` PRs are worth opening — the `advisory:*` labels.** The independent advisory on a
+`review:human` PR records no verdict (it cannot — see above), so it used to leave a clean review and a never-run one
+looking identical (`review:human` + `review:pending`). The advisory path now applies a real, machine-maintained label:
+`advisory:accepted` (no blocking findings on the current head) or `advisory:changes`, removes the opposite, and drops
+`review:pending`. It never touches `review:human` and never sets `review:accepted`. Both labels are dropped when a new
+commit lands (`we:scripts/conveyor/advisory-label-sweep.mjs`, on the runner tick), so they always describe the
+current head. **The operator's rule: don't open a human PR until it carries `advisory:accepted` and has no
+`review:changes` / `review:pending`.** `we:scripts/operations/operator-queue.mjs` is the sole authority on that list:
+a hard label gate, cross-checked against the parsed advisory comment (any label/comment disagreement is reported in
+NOT READY), with GitHub's transient `mergeable: UNKNOWN` re-polled and, if unresolved, shown in a separate PENDING
+bucket rather than NOT READY. Definitions live in `we:scripts/lib/advisory-labels.mjs`.
+
 > **Observed 2026-08-24, both directions in one session.** An agent recorded `accept` on its own
 > `review:pending` PR (correct — that is this rule), then talked itself out of it, wrote the *inverse* rule
 > into `vm-sessions.md`, and began asking the operator to clear every PR. The rule was in

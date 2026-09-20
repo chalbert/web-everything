@@ -1,7 +1,8 @@
 ---
+bornAs: xfxt77w
 kind: story
 size: 5
-parent: "xyp1wsl"
+parent: "3716"
 status: open
 scope: ["we:scripts/guard-lane.mjs", "we:scripts/lib/lane-lease.mjs", "we:scripts/readiness/scope-lease.mjs", "we:scripts/conveyor/lease-reaper.mjs"]
 dateOpened: "2026-09-07"
