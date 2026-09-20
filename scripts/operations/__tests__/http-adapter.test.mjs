@@ -50,6 +50,7 @@ import { CLAIM_OP } from '../claim.mjs';
 import { RESOLVE_OP } from '../resolve.mjs';
 import { SCAFFOLD_OP } from '../scaffold.mjs';
 import { FILE_ITEM_OP } from '../file-item.mjs';
+import { CLEAR_STUCK_SESSION_OP } from '../clear-stuck-session.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
@@ -373,6 +374,11 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // only `registry.mjs` and `step-kinds.mjs`, and the `readStore()` call lives in
     // `graduation-progress-report-io.mjs` behind the injected `readScorecards` reader.
     [GRADUATION_PROGRESS_REPORT_OP]: 'graduation-progress-report.mjs',
+    // #3383 — `clear-stuck-session`'s `authorize` step is a `confirm` and its `move` step is an `effect`, so
+    // it is NOT read-only; listed here for map coverage. The declaring module still reaches nothing that can
+    // act — `fs`, `claude agents`, `ps` and the run-store all live in `clear-stuck-session-io.mjs`, behind the
+    // `readStuckFacts` reader and the sink `../run.mjs` wires through.
+    [CLEAR_STUCK_SESSION_OP]: 'clear-stuck-session.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {

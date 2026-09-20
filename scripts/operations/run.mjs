@@ -81,6 +81,8 @@ import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { gapSweepStatusOperation, GAP_SWEEP_STATUS_OP } from './gap-sweep-status.mjs';
 import { createGapSweepSinks } from './gap-sweep-status-io.mjs';
+import { clearStuckSessionOperation, CLEAR_STUCK_SESSION_OP } from './clear-stuck-session.mjs';
+import { createClearStuckSessionReader, createClearStuckSessionSinks } from './clear-stuck-session-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -139,6 +141,16 @@ export const OPERATIONS = Object.freeze({
   [GAP_SWEEP_STATUS_OP]: () => ({
     declaration: gapSweepStatusOperation(),
     sinks: createGapSweepSinks(),
+  }),
+  // #3383 — mechanizes the GH #77683 zombie-session workaround: a background session whose process has died
+  // but whose `<config-dir>/jobs/<id>/` directory is never cleaned up, so `claude agents --json --all` lists
+  // it forever and `claude stop`/`claude rm` both fail against it. `read`→`assess` replay the EXACT liveness
+  // rule `reconcile-core.mjs#assessLiveness` already uses (imported, never re-derived); `authorize` is a real
+  // human `confirm` because the effect touches `~/.claude`, not this repo's own tree; `move` quarantines the
+  // job directory (never deletes it) and is a no-op unless BOTH the verdict and the human agree.
+  [CLEAR_STUCK_SESSION_OP]: () => ({
+    declaration: clearStuckSessionOperation({ readStuckFacts: createClearStuckSessionReader() }),
+    sinks: createClearStuckSessionSinks(),
   }),
   // #xrrpfo7 — `claim`'s sibling: the CLOSE of the lifecycle whose OPEN #3034 declared. Same shape (read →
   // plan → write), same guarded writer, and the guards are REPLAYED from `we:scripts/backlog.mjs`'s
