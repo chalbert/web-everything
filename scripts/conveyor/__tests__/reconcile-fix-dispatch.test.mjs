@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  dispatchFix, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
+  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
@@ -37,7 +37,7 @@ describe('planFixesFromReconcile', () => {
     const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
-      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
+      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: false, body: null, headRefOid: null,
     }]);
   });
@@ -49,7 +49,7 @@ describe('planFixesFromReconcile', () => {
     }];
     const { planned } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(planned).toEqual([{
-      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
+      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: true, body: 'a PR body', headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
@@ -61,9 +61,9 @@ describe('planFixesFromReconcile', () => {
     expect(refusals).toEqual([{ pr: 42, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
   });
 
-  it('refuses `no-scope` for an item the loader cannot resolve, or one with an empty scope', () => {
+  it('refuses `no-scope` for an item the loader cannot resolve, or one with an empty scope, when the fallback ALSO finds nothing', () => {
     const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
-    const { planned, refusals } = planFixesFromReconcile(entries, () => null, () => []);
+    const { planned, refusals } = planFixesFromReconcile(entries, () => null, () => [], () => []);
     expect(planned).toEqual([]);
     expect(refusals).toEqual([{ pr: 99, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
   });
@@ -72,6 +72,133 @@ describe('planFixesFromReconcile', () => {
     const { planned, refusals } = planFixesFromReconcile([{ kind: 'review', prNumber: 1, headRefName: 'lane/1-x' }], findItemStub, () => []);
     expect(planned).toEqual([]);
     expect(refusals).toEqual([]);
+  });
+
+  // #3634 — real root-cause fixtures: two PRs (#2210, #2220 on `lane/mechanical-dispatcher`) reported as
+  // silently refused by reconcile-fix-dispatch despite clearly needing a fix. Both were independently
+  // re-verified live on 2026-09-14 (see the function's own docblock for the full evidence) and turned out to be
+  // TWO GENUINELY DIFFERENT shapes, not one shared regex bug:
+  describe('#3634 — PR #2220-shaped: item number resolves to an epic with no scope of its own', () => {
+    const epic3383 = { num: '3383', slug: 'a-background-mechanical-dispatcher-replaces-the-interactive', specPath: 'backlog/3383-x.md', scope: [] };
+    const findEpicStub = (key) => (key === '3383' ? epic3383 : null);
+
+    it('falls back to the PR\'s own changed files (we:-prefixed) instead of refusing `no-scope`', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity', labels: ['review:changes', 'checking', 'merge-status:conflicting'] }];
+      const calls = [];
+      const resolveFallbackScope = (pr, itemNum) => {
+        calls.push({ pr, itemNum });
+        return ['we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs'];
+      };
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], resolveFallbackScope);
+      expect(refusals).toEqual([]);
+      expect(calls).toEqual([{ pr: 2220, itemNum: '3383' }]);
+      expect(planned).toEqual([{
+        itemNum: '3383', pr: 2220, laneRef: 'lane/3383-host-process-granularity',
+        scope: ['we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs'],
+        scopeSource: 'pr-diff', isConflict: true, body: null, headRefOid: null,
+      }]);
+    });
+
+    it('still refuses `no-scope` when the epic has no scope AND the PR-diff fallback also comes back empty', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => []);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+
+    it('never even calls the fallback when the item already carries a real scope (no wasted IO)', () => {
+      const calls = [];
+      const entries = [{ kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass' }];
+      planFixesFromReconcile(entries, findItemStub, () => [], () => { calls.push(1); return ['we:should/not/be/used.mjs']; });
+      expect(calls).toEqual([]);
+    });
+
+    it('isolates a THROWING fallback to a `no-scope` refusal, not a crash of the whole pass', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => { throw new Error('gh unreachable'); });
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+  });
+
+  describe('#3634 review — fallback is gated on a RESOLVED item and filters hostile filenames', () => {
+    const epic3383 = { num: '3383', slug: 's', specPath: 'backlog/3383-x.md', scope: [] };
+    const findEpicStub = (key) => (key === '3383' ? epic3383 : null);
+
+    it('refuses `no-scope` for an UNRESOLVABLE item even when the fallback has files, and never calls the fallback', () => {
+      const calls = [];
+      const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, () => null, () => [], () => { calls.push(1); return ['we:some/file.mjs']; });
+      expect(calls).toEqual([]);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 99, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
+    });
+
+    it('drops hostile PR-diff filenames from the fence instead of passing them into the brief', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const fallback = () => ['we:ok/file.mjs', 'we:x,we:scripts', 'we:a b.md', 'we:../escape.mjs', 'we:dir/*.mjs', 'we:bad\nname.md', 'we:/abs.mjs'];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], fallback);
+      expect(refusals).toEqual([]);
+      expect(planned[0].scope).toEqual(['we:ok/file.mjs']);
+      expect(planned[0].scopeSource).toBe('pr-diff');
+    });
+
+    it('refuses `no-scope` when EVERY fallback filename is hostile', () => {
+      const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+      const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => ['we:x,we:scripts']);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+    });
+
+    it('isSafeFallbackScopeEntry accepts ordinary repo paths and rejects comma/space/control/`..`/glob/leading-slash', () => {
+      for (const ok of ['we:scripts/conveyor/a-b_c.mjs', 'we:docs/x.v2.md', 'we:.github/workflows/ci.yml']) expect(isSafeFallbackScopeEntry(ok)).toBe(true);
+      for (const bad of ['we:x,we:scripts', 'we:a b', 'we:a\tb', 'we:a\u0000b', 'we:a/../b', 'we:a/*.js', 'we:a/{b,c}', 'we:a/[b]', 'we:/abs', 'we:', '', null]) expect(isSafeFallbackScopeEntry(bad)).toBe(false);
+    });
+  });
+
+  describe('#3634 — PR #2210-shaped: a `lane/file-<PR-reviewed>-...` branch — CONFIRMED NOT the same bug, must stay refused', () => {
+    it('still refuses `no-item-num` for `lane/file-2206-review-findings` — the trailing number is the REVIEWED PR, not an item this PR delivers, and backlog item #2206 is a real, unrelated card', () => {
+      const entries = [{ kind: 'fix', prNumber: 2210, headRefName: 'lane/file-2206-review-findings', labels: ['review:changes', 'checking', 'merge-status:conflicting'] }];
+      // Even a findItemFn/fallback that WOULD happily resolve "2206" must never be consulted — proof the
+      // no-item-num refusal fires before any lookup, so it can never be fooled into a wrong attribution.
+      const findCalls = [];
+      const findItemSpy = (key) => { findCalls.push(key); return null; };
+      const { planned, refusals } = planFixesFromReconcile(entries, findItemSpy, () => [], () => ['we:should/not/be/used.mjs']);
+      expect(findCalls).toEqual([]);
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 2210, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
+    });
+  });
+});
+
+describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
+  it('reduces `gh pr diff <pr> --name-only` to a `we:`-prefixed path list', () => {
+    const calls = [];
+    const exec = (file, argv, opts) => {
+      calls.push({ file, argv, cwd: opts?.cwd });
+      return 'scripts/operations/host-process-sample.mjs\nscripts/operations/telemetry.mjs\n';
+    };
+    expect(fetchPrDiffScope(2220, { exec, root: '/repo' })).toEqual([
+      'we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs',
+    ]);
+    expect(calls).toEqual([{ file: 'gh', argv: ['pr', 'diff', '2220', '--name-only'], cwd: '/repo' }]);
+  });
+
+  it('pins the `gh` call to the given repo with `--repo` (the multi-repo guard requires it)', () => {
+    const calls = [];
+    const exec = (file, argv) => { calls.push(argv); return 'a.mjs\n'; };
+    fetchPrDiffScope(7, { exec, root: '/repo', repo: 'owner/name' });
+    expect(calls).toEqual([['pr', 'diff', '7', '--name-only', '--repo', 'owner/name']]);
+  });
+
+  it('drops blank lines (a trailing newline must not become an empty `we:` path)', () => {
+    const exec = () => 'one/file.mjs\n\n\n';
+    expect(fetchPrDiffScope(1, { exec, root: '/repo' })).toEqual(['we:one/file.mjs']);
+  });
+
+  it('fails soft to `[]` on any `gh` failure — never throws the whole pass over one bad read', () => {
+    const exec = () => { throw new Error('gh: PR not found'); };
+    expect(fetchPrDiffScope(404, { exec, root: '/repo' })).toEqual([]);
   });
 });
 
@@ -404,8 +531,8 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       checkStaleness: FRESH,
     });
     expect(dispatched).toEqual([
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, isConflict: false, body: null, headRefOid: null, lane: 2 },
-      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, isConflict: false, body: null, headRefOid: null, lane: 9 },
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
+      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);

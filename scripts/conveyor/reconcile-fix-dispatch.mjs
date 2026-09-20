@@ -97,26 +97,46 @@ export function defaultConfirmWait(ms) {
 }
 
 /**
- * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planFixesFromReconcile — PURE. Narrow `reconcile-pass.mjs`'s
- * `kind:'fix'` dispatch entries down to the ones this file can actually act on, and NAME why each one it drops
- * cannot be (mirroring `reconcile-core.mjs`'s own REFUSAL_KINDS discipline: a refusal a reader cannot audit is
- * exactly the defect this whole chain exists to remove).
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planFixesFromReconcile — PURE (the one impurity is calling the
+ * INJECTED `resolveFallbackScope`, exactly the same idiom `findItemFn` already uses — a real caller hands in a
+ * function that does IO, a test hands in a stub, and this function itself still touches no `fs`/`gh`/`git`
+ * directly). Narrow `reconcile-pass.mjs`'s `kind:'fix'` dispatch entries down to the ones this file can actually
+ * act on, and NAME why each one it drops cannot be (mirroring `reconcile-core.mjs`'s own REFUSAL_KINDS
+ * discipline: a refusal a reader cannot audit is exactly the defect this whole chain exists to remove).
  *
  * TWO THINGS CAN MAKE AN OTHERWISE-OWED FIX UNDISPATCHABLE, BOTH NAMED:
  *   `no-item-num` — the PR's head ref carries no conveyor item number (`laneRefItemNum` returns `null` — not
  *     every open PR is a `lane/<NUM>-<slug>` branch; a hand-opened or externally-branched PR is not). Without an
- *     item number there is no `{{ITEM_NUM}}`, no scope lookup, and no honest `WE #<n>:` commit prefix for the
- *     fix-agent-brief to use — undispatchable, not a bug to route around.
- *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (deleted item, or one
- *     scaffolded with no `scope:` frontmatter). Mirrors `dispatch-lane.mjs`'s OWN scope-refusal
- *     (`itemScope.length` check) for exactly the same reason: a fix agent with no declared scope has no fence.
+ *     item number there is no `{{ITEM_NUM}}` and no honest `WE #<n>:` commit prefix for the fix-agent-brief to
+ *     use — undispatchable, not a bug to route around. `#3634` — checked live against every `no-item-num` PR on
+ *     `lane/mechanical-dispatcher` on 2026-09-14 (`#2210`, `lane/file-2206-review-findings`; `#2212`,
+ *     `lane/agent-capability-parity-principle`; `#2170`, `lane/stuck-session-op-docs`): NONE of these numbers,
+ *     even where one is present (`file-2206`), names the item this PR actually delivers — `2206` there is the
+ *     REVIEWED PR's number, not an item this PR builds, and backlog item `#2206` is a real, unrelated card
+ *     (`sanctioned-pack-phase-cli-retype...`). Extracting it and stamping `WE #2206:` on this PR's fix commits
+ *     would be an honest-looking but WRONG attribution — worse than the refusal it replaces. There is no
+ *     general, safe derivation of `{{ITEM_NUM}}` for this population; it stays a hard refusal.
+ *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (an item
+ *     scaffolded with no `scope:` frontmatter; an UNRESOLVABLE number — deleted/ghost card — is refused outright
+ *     and never reaches the fallback — measured live #3634: EVERY currently-open `kind:'fix'` entry
+ *     whose item number resolves hits this, epics included, e.g. `#2220` on `lane/3383-host-process-granularity`
+ *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own). Unlike
+ *     `no-item-num`, THIS one has a safe fallback: {@link resolveFallbackScope}, called with `(pr, itemNum)`,
+ *     may return the PR's OWN already-changed files (`we:`-prefixed) as the fence instead. This is never a
+ *     LOOSER fence than a declared `scope:` would have been — a fix agent can only touch what this PR already
+ *     touches — so it is safe exactly where a declared scope is unknown. Only when the fallback ALSO comes back
+ *     empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN scope-refusal (`itemScope.length`
+ *     check) for exactly the same reason: a fix agent with no fence at all is undispatchable.
  * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
  * @param {Function} loadItems
- * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
+ * @param {(pr:number, itemNum:string)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
+ *   caller with nothing better to offer degrades to the pre-#3634 behaviour byte-for-byte); the real binding is
+ *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default.
+ * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
-export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
+export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => []) {
   const planned = [];
   const refusals = [];
   for (const entry of Array.isArray(dispatchEntries) ? dispatchEntries : []) {
@@ -129,8 +149,27 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
       continue;
     }
     const item = findItemFn(itemNum, loadItems);
-    if (!item || !item.scope.length) {
-      refusals.push({ pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope — refusing to dispatch a fix agent with no fence` });
+    let scope = item && Array.isArray(item.scope) ? item.scope : [];
+    let scopeSource = 'item';
+    if (item && !scope.length) {
+      // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
+      // already-changed files before refusing outright; see this function's own docblock for why that fallback is
+      // safe (never a looser fence than a declared scope would have been). Gated on `item` being non-null: an
+      // UNRESOLVABLE item number (a ghost/deleted card, a PR number in the branch name, or a transient
+      // `loadItems` failure that `findItem` swallows into null) stays the `no-scope` refusal it was before — the
+      // fallback must not widen what gets dispatched, and must not stamp `WE #<n>:` with a number naming no item.
+      let fallback = [];
+      try { fallback = resolveFallbackScope(pr, itemNum) || []; } catch { fallback = []; }
+      // The filenames are PR-author-controlled and `dispatchFix` joins `scope` with ',' into the agent's brief,
+      // so keep only entries that cannot smuggle extra fence entries or brief text (see isSafeFallbackScopeEntry).
+      fallback = Array.isArray(fallback) ? fallback.filter(isSafeFallbackScopeEntry) : [];
+      if (fallback.length) {
+        scope = fallback;
+        scopeSource = 'pr-diff';
+      }
+    }
+    if (!scope.length) {
+      refusals.push({ pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope, and the PR's own changed-file fallback found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
       continue;
     }
     // #xu2krte Fork 1 — a `fix` dispatch caused by the parked-PR conflict watch still carries the
@@ -140,13 +179,61 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
-      itemNum, pr, laneRef: headRefName, scope: item.scope, isConflict, body: entry.body ?? null,
+      itemNum, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
     });
   }
   return { planned, refusals };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#isSafeFallbackScopeEntry — may this PR-diff filename become a
+ * scope-fence entry? PURE. A PR author controls its filenames, and `dispatchFix` joins `scope` with ',' into the
+ * fix agent's `SCOPE:` token, so a name like `x,we:scripts` would read as TWO fence entries (the second a whole
+ * directory the PR never touched) and free text in a name would land in the brief. Rejects: `,`, any whitespace
+ * or control character, a `..` path segment, a leading `/`, and glob metacharacters (`* ? [ ] { }`). A rejected
+ * file is DROPPED from the fallback fence (never a looser fence, only a narrower one); if none survive the
+ * caller reports `no-scope`. Declared item `scope:` (trusted backlog frontmatter) is not filtered.
+ * @param {string} entry - a `we:`-prefixed path.
+ * @returns {boolean}
+ */
+export function isSafeFallbackScopeEntry(entry) {
+  if (typeof entry !== 'string') return false;
+  const path = entry.replace(/^[a-z][a-z0-9-]*:/i, '');
+  if (!path || path.startsWith('/')) return false;
+  if (/[,\s*?[\]{}]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return false;
+  return !path.split('/').includes('..');
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchPrDiffScope — `#3634`'s real fallback-scope reader: ONE
+ * `gh pr diff <pr> --name-only` call, reduced to the `we:`-prefixed path list {@link planFixesFromReconcile}'s
+ * `resolveFallbackScope` wants (the SAME repo-qualified form the canonical loader already produces for a
+ * declared `scope:` — see `dispatch-lane-io.mjs#findItem`'s own comment). Best-effort: any `gh` failure (no
+ * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
+ * as it did before this fallback existed, never throws the whole pass over one bad read.
+ * @param {number} pr
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug) pins the `gh` call
+ *   to that repo, the same `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use.
+ * @returns {string[]}
+ */
+export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT, repo = null } = {}) {
+  try {
+    const argv = ['pr', 'diff', String(pr), '--name-only'];
+    if (repo) argv.push('--repo', repo);
+    const out = exec('gh', argv, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
+    });
+    return String(out || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((p) => `we:${p}`);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -477,6 +564,9 @@ export function dispatchFix(planned, {
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.
  * @param {Function} [o.tryResume] - injectable, defaults to the real {@link tryResumeFix}.
+ * @param {Function} [o.resolveFallbackScope] - injectable, defaults to the real {@link fetchPrDiffScope} (one
+ *   `gh pr diff --name-only` per entry that reaches it — see {@link planFixesFromReconcile}'s own docblock for
+ *   why this is only ever called once a declared `scope:` has already come back empty, never unconditionally).
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
  */
 export function runReconcileFixDispatch({
@@ -488,6 +578,7 @@ export function runReconcileFixDispatch({
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
+  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
   checkStaleness,
   prsFile, unsupportedPath,
 } = {}) {
@@ -505,7 +596,7 @@ export function runReconcileFixDispatch({
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
     return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
   }
-  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems);
+  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope);
 
   const lanes = [...pickFreeLanes()];
   const dispatched = [];
