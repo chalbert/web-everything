@@ -74,7 +74,7 @@ import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRAC
 // #3645, generalised — the detached primitives and the per-kind provider table. ONE-WAY: this file imports
 // them, neither of them imports this file. See the `THE MECHANICAL DISPATCH SEAM` banner below for why the
 // per-kind bodies live there and why that is not a split of this file's `@cohesive:` triple.
-import { defaultIsPidAlive, deliveryDispatchLogPath, detachedHandlePid } from './detached-dispatch.mjs';
+import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, detachedHandlePid } from './detached-dispatch.mjs';
 import {
   DISPATCH_PROVIDER_REGISTRY,
   dispatchModeFor,
@@ -397,6 +397,7 @@ export function inFlightDispatchesFor(key, { store = createFileRunStore() } = {}
         // the declaration is pure and can only use what it is handed. Absent on any entry never yet seen
         // alive, and the guard falls back to `startedAt` there.
         lastSeenLiveAt: e.lastSeenLiveAt ?? null,
+        dispatch: e.dispatch ?? null,
       });
     }
   }
@@ -1179,7 +1180,20 @@ export function createDispatchSinks({
       const minutes = Number(payload.expectedWithinMinutes) > 0
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
+      let supervisorModel = null;
+      for (let i = 0; i < extraArgs.length; i++) {
+        const arg = String(extraArgs[i]);
+        if (arg.startsWith('--model=')) supervisorModel = arg.slice(8) || null;
+        else if (arg === '--model' || arg === '-m') supervisorModel = extraArgs[++i] ?? null;
+      }
       return inFlight({
+        dispatch: {
+          supervisorModel, launchKind: payload?.launchKind ?? 'build',
+          route: String(handle ?? '').startsWith(DETACHED_HANDLE_PREFIX) ? 'detached' : 'claude-bg',
+          // The provider resolves delivery-agent internally and returns only a handle.
+          // Re-reading its marker here would duplicate routing and race that resolution.
+          executor: null,
+        },
         // #3331: NEVER the minted `sessionId` for Claude — `defaultClaudeProvider` reads the real handle off
         // the spawn's own confirmation and REFUSES (throws, landing the entry `in-flight` with a null handle)
         // when it cannot. The `sessionId` fallback below is reachable only for a NON-Claude `provider` that

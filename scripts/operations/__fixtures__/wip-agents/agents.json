@@ -1,0 +1,58 @@
+[
+  {
+    "id": "0",
+    "sessionId": "session-0",
+    "cwd": "/Users/x/workspace/.operations/jobs",
+    "name": "conveyor-0",
+    "kind": "background",
+    "state": "working",
+    "startedAt": 0
+  },
+  {
+    "id": "1",
+    "sessionId": "session-1",
+    "cwd": "/Users/x/workspace/.operations/jobs",
+    "name": "conveyor-1",
+    "kind": "background",
+    "state": "working",
+    "startedAt": 1
+  },
+  {
+    "id": "2",
+    "sessionId": "session-2",
+    "cwd": "/Users/x/workspace/.operations/jobs",
+    "name": "conveyor-2",
+    "kind": "background",
+    "state": "working",
+    "startedAt": 2
+  },
+  {
+    "id": "3",
+    "sessionId": "session-3",
+    "cwd": "/Users/x/workspace/.operations/jobs",
+    "name": "conveyor-3",
+    "kind": "background",
+    "state": "working",
+    "startedAt": 3
+  },
+  {
+    "id": "4",
+    "sessionId": "session-4",
+    "cwd": "/Users/x/workspace/.operations/jobs",
+    "name": "conveyor-4",
+    "kind": "background",
+    "state": "working",
+    "startedAt": 4
+  },
+  {
+    "id": "missing",
+    "sessionId": "missing",
+    "kind": "interactive",
+    "status": "waiting",
+    "waitingFor": "dialog open"
+  },
+  {
+    "id": "done",
+    "state": "done"
+  }
+]

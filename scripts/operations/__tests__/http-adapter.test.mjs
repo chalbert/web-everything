@@ -55,6 +55,7 @@ import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
 import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
+import { WIP_AGENTS_OP } from '../wip-agents.mjs';
 import { PR_STATUS_OP } from '../pr-status.mjs';
 import { ROUTE_PR_OUTCOME_OP } from '../route-pr-outcome.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
@@ -334,6 +335,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // `registry.mjs` and `step-kinds.mjs`, and every `gh` call lives in `pr-status-io.mjs` behind the
     // injected reader. It reads PRs; it can act on none of them.
     [PR_STATUS_OP]: 'pr-status.mjs',
+    [WIP_AGENTS_OP]: 'wip-agents.mjs',
     // #xrpo1 — READ-ONLY and genuinely so: both steps are `compute`, the declaring module imports only
     // `registry.mjs` and `step-kinds.mjs`, and the `deriveReviewDisposition`/`parseEscalationReason` calls
     // live in `route-pr-outcome-io.mjs` behind the injected reader — see that file's header for why the call
@@ -380,7 +382,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([WIP_AGENTS_OP, GATE_HEALTH_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)

@@ -44,6 +44,8 @@ import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
+import { wipAgentsOperation, WIP_AGENTS_OP } from './wip-agents.mjs';
+import { createWipAgentsReader } from './wip-agents-io.mjs';
 import { createPrReader } from './pr-status-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
@@ -96,6 +98,7 @@ import { writeAllSync } from '../lib/write-all-sync.mjs';
  * declaration is what {@link ./http-adapter.mjs} derives a route table from, with no third entry anywhere.
  */
 export const OPERATIONS = Object.freeze({
+  [WIP_AGENTS_OP]: () => ({ declaration: wipAgentsOperation({ readAgents: createWipAgentsReader() }), sinks: {} }),
   // `json` is the ONE operation-table entry that reads its `resolveOperation(name, opts)` opts at all — every
   // other builder below still takes none, and passing the extra argument to a zero-arg arrow is a harmless
   // no-op for them. See `createReviewPrSinks`'s own `json` doc (`we:scripts/operations/review-pr-io.mjs`) for

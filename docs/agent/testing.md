@@ -38,6 +38,14 @@ applies to every "does it work / why is it broken" moment, not just to written t
   run the 11ty build, so render-layer bugs stay green-invisible — smoke template changes with a real
   build/probe too.
 
+### Read-only operation readers
+
+The operation engine executes `compute` functions synchronously. An IO reader used by a
+compute-only declaration must return its data directly, not a Promise; test the registered
+`run.mjs <operation> --json` route as well as the reader. For transcript reports, use bounded
+chunked reads for full scans and reuse the agent-health `tailLines` helper for model tails.
+A no-hit truncated scan means `unknown`, not proof that no delegation occurred.
+
 ### Nested CLI isolation probes
 
 Establish an ordinary child CLI baseline before attributing failure to isolation. In #3371 Probe 10,
