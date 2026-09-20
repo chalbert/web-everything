@@ -491,6 +491,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/session-reaper.mjs --repo=chalbert/web-everything',
       'node /scripts/conveyor/branch-drift.mjs sweep --repo=chalbert/web-everything',
       'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=chalbert/web-everything',
+      'node /scripts/operations/operator-notify.mjs --once --repo=chalbert/web-everything',
       'node /scripts/conveyor/reconcile-fix-dispatch.mjs --repo=chalbert/web-everything',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=chalbert/web-everything',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=chalbert/web-everything',

@@ -293,6 +293,9 @@ export function makeCliMechanicalPasses({
     run('conveyor/branch-drift.mjs', ['sweep'], 'we', repo);
     // WE-only: cleans litter in the WE lane pool.
     run('conveyor/lane-pool-health-watch.mjs', [], 'we', repo);
+    // Repo-agnostic: notifies from one cross-repo operator queue and ignores --repo, so run once.
+    // Mechanical, no model: the only push to the operator after the advisory sweep.
+    run('operations/operator-notify.mjs', ['--once'], 'we', repo);
     // pr-watch is armed by tick-core for item-keyed conveyor builds/prepares in WE only.
     const explicitKey = repo === null ? null : repoKeyForSlug(repo);
     const selected = repo === null ? Object.entries(repos)

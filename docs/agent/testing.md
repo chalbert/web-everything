@@ -441,3 +441,15 @@ calls, and rejects duplicated constellation slugs. Specific exceptions live in
 with “remove this entry”. This is a Vitest contract, not a standards-gate rule.
 The isolated parked-review workflow cannot import the shared table; its table is
 pinned to `CONSTELLATION_REPOS` by `scripts/lib/__tests__/review-core.test.mjs`.
+
+### Operator notification probes
+
+`operator-notify` consumes only `operator-queue`'s `ready` rows. Tests inject the notifier,
+including child CLI probes; never exercise real desktop delivery in this suite. Persisted
+successes deduplicate until an item leaves NEEDS YOU; queue errors preserve all prior keys.
+The operations IO fidelity gate requires the shared real-repo fixture even for filesystem
+state: the notifier test proves its external state path leaves that checkout clean.
+
+A core file that dynamically imports its CLI cannot await that import at module scope when
+its CLI statically imports the core. A staged Node probe of that cycle exits 13 with unsettled
+top-level await. Defer the import with `.then(...)`, and test both entry paths as subprocesses.

@@ -142,13 +142,30 @@ export function defaultAppendLog(logPath, line) {
 }
 
 /** Wrap a string as a double-quoted AppleScript literal (same escaping as the unlanded `supervisor.mjs`'s `q`). */
-function q(s) { return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`; }
+export function q(s) { return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`; }
+
+/** Shared AppleScript argv for both best-effort and checked delivery. */
+export function osascriptNotifyArgs({ title, body }) {
+  return ['-e', `display notification ${q(body)} with title ${q(title)}`];
+}
+
+/** Checked delivery: unsupported platforms and stderr must not disappear as success. */
+export function notifyDesktopChecked(notification, { spawnSyncFn = spawnSync, platform = process.platform } = {}) {
+  if (platform !== 'darwin') return { ok: false, error: `Desktop notifications unsupported on ${platform}` };
+  try {
+    const result = spawnSyncFn('osascript', osascriptNotifyArgs(notification), { encoding: 'utf8', timeout: 10_000 });
+    if (result.error || result.status !== 0) {
+      return { ok: false, error: `osascript: ${result.error?.message ?? `exit ${result.status}`} ${result.stderr ?? ''}`.trim() };
+    }
+    return { ok: true };
+  } catch (error) { return { ok: false, error: String(error?.message ?? error) }; }
+}
 
 /** Best-effort desktop notification (mirrors `supervisor.mjs`'s own `notifyDesktop`, #3398). macOS-only; a
  *  no-op elsewhere, and a spawn failure must never break the sync loop. */
 export function notifyDesktop({ title, body }) {
   if (process.platform !== 'darwin') return;
-  try { spawn('osascript', ['-e', `display notification ${q(body)} with title ${q(title)}`], { stdio: 'ignore', detached: true }).unref(); }
+  try { spawn('osascript', osascriptNotifyArgs({ title, body }), { stdio: 'ignore', detached: true }).unref(); }
   catch { /* best-effort */ }
 }
 
