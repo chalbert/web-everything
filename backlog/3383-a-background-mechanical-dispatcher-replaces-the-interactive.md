@@ -3949,3 +3949,28 @@ Filed one design-first epic under this epic, UNCLEARED, in one pull request to m
 - Verify: the full unit suite passed except the two known docker-registry tests in `container-exec`; `check:standards` gave 0 errors after one lead-paragraph fix. The PR title says story because the brief named it so; the card is an epic.
 
 Owed: design-review the card itself, settle its open points, then file and review its slices. It touches `planQueueing` that #3746 also changes, so those two must be sequenced.
+
+## Session update (2026-09-20) — five more design-first stories filed and three cards edited (PR 2359, uncleared): status view, selective docs-only verify, prototype branch merge policy, review brief token, workflow liveness
+
+Filed five more design-first stories under this epic and made three edits to existing cards, all UNCLEARED and in one pull request to main: PR #2359 (lane/file-batch3, not merged). The new cards carry hash ids until the drain numbers them at land.
+
+New cards:
+- xyzbwsw, size 5: orchestrator status view, one read-only operation that says what is building, what is stuck and what is next (reuses `we:scripts/conveyor/status-board.mjs`, `we:scripts/operations/pr-status.mjs`, the wip card xdq6hx5 and the `track` epic; forks none of them).
+- xvwin4v, size 3: docs-only changes run the full local test suite. Found that diff-driven selection already exists (`we:scripts/readiness/test-selection.mjs`) but `backlog/` is a glob-discovered root and is not on the shrink allow-list, so backlog and memory diffs always run everything; the card is about a sound narrow class for them.
+- xl8pvh7, size 3: prototype branch drifts from main. Measured 220 branch-only and 406 main-only commits (merge base ca7e68b71); the branch lacks the operator-queue and runner-activity files; the merge policy is the open question.
+- xn4kil9, size 2: review-dispatch briefs carry a literal double-brace token (`PLACEHOLDERS`) in the template header prose; the reviewer does see it; the tests use a stub, not the real template.
+- x0y6xk4, size 5: background workflow runs die silently (heartbeat, dead-run detection, resume path, subscribe-with-retry helper).
+
+Edits made (targets were on main): 3739 gained the jury design-review section from run wf_de7a8ca4-29f (nine findings, plus the findings that rest on unchecked assumptions); 3741 gained the recurrence on round 2 of the same run; 3752 gained the subscribe-retry finding. Edits owed: none, but they do not exist on main until #2359 merges.
+
+Not confirmed by the worker: that the many `working` agent rows are dead (only the counts were confirmed); the exporter retry behaviour and the live collector's plist and node path; whether the running collector has the data-root override the branch code has.
+
+IMPROVEMENTS NOTED:
+1. Verification of finished workers by a read-only agent works and costs about 36k tokens per check, so a mechanical status view (card xyzbwsw) would replace it.
+2. Jury reviews should share one operation with a hash-gated clearing rule (the design-review operation card, xscm8rl).
+3. Local verification of docs-only changes should be selective (card xvwin4v); today the standards half of the gate does not even run when one environmental test fails, because the gate is `test:unit && check:standards`, so a card-only PR needs `check:standards` run by hand to be checked at all.
+4. Idle notices proved that idle is not done, so a worker completion convention (result file plus idle notice) belongs in the dispatch card (3752), which now says so.
+5. The reviewer of the two parked PRs auto-cleared them at round 2 of 5, so parked backlog PRs need no operator time.
+6. Unresolved question: whether main card 3485 and the branch's fold-the-gate card are the same card (reported by the batch2 worker, unconfirmed).
+
+Owed: settle the design calls in each new card, then clear them; merge #2359 so the three edits reach main.
