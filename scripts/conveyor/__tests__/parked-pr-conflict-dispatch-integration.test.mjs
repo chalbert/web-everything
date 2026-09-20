@@ -138,7 +138,7 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     const { planned, refusals } = planFixesFromReconcile(plan.dispatch, (key) => (key === '9099' ? item : null), () => []);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
-      itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture', scope: item.scope,
+      itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture', scope: item.scope, scopeSource: 'item',
       isConflict: true, body: prBody, headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
