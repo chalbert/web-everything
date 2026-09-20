@@ -4,23 +4,23 @@ kind: decision
 parent: "3383"
 status: open
 scope: ["we:scripts/lib/poc-branches.mjs", "we:scripts/lib/poc-branches.json", "we:scripts/backlog.mjs", "we:scripts/check-standards.mjs", "we:docs/agent/backlog-workflow.md", "we:skills-src/mechanical-delivery-doctrine/SKILL.md"]
-relatedTo: ["2260", "3639", "3443", "3638", "3643"]
+relatedTo: ["3637", "3639", "3443", "3638", "3643"]
 dateOpened: "2026-09-12"
 tags: []
 ---
 
 # How a POC branch keeps its own lightweight running record: outstanding work, small decisions, and what is blocked on what
 
-`#2260` ruled where a POC branch's work lands and when review happens, never how a branch keeps its OWN running
+`#3637` ruled where a POC branch's work lands and when review happens, never how a branch keeps its OWN running
 record. Today that is "append another `## Session update` to whatever epic card exists" — `we:backlog/3383-*.md`
 is 1647 lines across 12 such sections and 55 commits in 9 days, and only 3 of ~3600 cards use the pattern. This
 decides the standard shape for N POC branches. The decisive criterion is not readability but
 graduation-decomposability: `#3443` already did that decomposition by hand, and the record it worked from cost
 it eight un-graduatable commits. Six forks and a recommendation below.
 
-## Why this is not already answered by `#2260` or `#3639` — checked, not assumed
+## Why this is not already answered by `#3637` or `#3639` — checked, not assumed
 
-**`#2260` (resolved).** Read end to end. It rules five forks — transport (`A′`, the lock-serialized
+**`#3637` (resolved).** Read end to end. It rules five forks — transport (`A′`, the lock-serialized
 fast-forward lander), completion signal (git ancestry, `startedAt`-guarded), how the target is declared
 (`deliveryTarget:` frontmatter), scope (bootstrap + registry together), and whether doctrine rule 10 is amended
 (yes). Its output is a registry entry shape — `branch`, `purpose`, `owner`, `dateOpened`, `target`, `scope`,
@@ -36,7 +36,7 @@ different things, and this is a third:
 |---|---|---|
 | Instance | which items may a *runner* touch, and how do two runners avoid colliding | `#3639` Forks 1–4, 6–7 |
 | Batch | which items form a named unit that can be shelved / planned / handed to another machine | `#3639` Fork 5 + its session update (cases 1–3) |
-| Delivery target | WHERE an item's work lands | `#2260` |
+| Delivery target | WHERE an item's work lands | `#3637` |
 | **Branch record** | **what has happened on this POC branch, what is left, and how it decomposes at graduation** | **this card** |
 
 `#3639`'s Fork 6 already ruled instance and `deliveryTarget` orthogonal, with the reasoning "a changeset scopes
@@ -66,7 +66,7 @@ item — and compose for free. Fork 2(A) would fork them apart, which is the mai
 
 **What worked, and should be preserved by whatever replaces it.** It is durable and git-tracked; it cites real
 evidence at `file:line` rather than asserting; it records *changes of mind* explicitly rather than overwriting
-them (`#2260`'s "SUPERSEDED, kept for the record" blocks are the best example in the repo); and its doctrine
+them (`#3637`'s "SUPERSEDED, kept for the record" blocks are the best example in the repo); and its doctrine
 sections had a working promotion path out — rule 10 was set in-card 2026-09-04, amended in-card 2026-09-12, and
 lives in `we:skills-src/mechanical-delivery-doctrine/SKILL.md`, per that skill's own stated amendment path.
 
@@ -82,7 +82,7 @@ lives in `we:skills-src/mechanical-delivery-doctrine/SKILL.md`, per that skill's
    had to be hand-reconciled. That is not a projected risk; it is a bill already paid.
 3. **It presumes an epic card exists.** Rule 10(c) requires a POC branch to name an `owner:` item, but that item
    may be a story. A 1647-line `## Progress` is not what the convention means.
-4. **It is a single append point.** `#2260` exists to allow N fast concurrent landings into one branch; one
+4. **It is a single append point.** `#3637` exists to allow N fast concurrent landings into one branch; one
    append-point document reintroduces a serialisation point at exactly the seam the design removed. 55 commits
    in 9 days came from ONE serialised session.
 5. **It mixes three kinds of content** — narrative, doctrine, and punch-list — under one heading vocabulary, so a
@@ -212,13 +212,13 @@ truth about "what is left" that can disagree, with a silent failure mode.
 its concern. A decision that would bind `main` — a doctrine rule, anything that would earn a `codifiedIn:`, and
 anything reaching `we:docs/agent/platform-decisions.md` — goes through a real decision card, unchanged.
 
-This is `#2260`'s own test applied one axis over: skip the ceremony *inside* the branch, pay it in full at the
+This is `#3637`'s own test applied one axis over: skip the ceremony *inside* the branch, pay it in full at the
 boundary. It preserves "one place decisions live" exactly where the property is load-bearing — memory rule 25
 makes the platform-decisions statute layer binding, and nothing should reach it without a ruling — while not
 demanding a `preparedDate` and a ratification turn for "which env key distinguishes the two `fix` spawners."
 
 (A) alone is too loose: `#3383`'s ten `## Working doctrine` sections show in-card rules that genuinely bound
-`main`'s behaviour for days before being promoted. (B) alone contradicts `#2260`'s ruling — per-increment
+`main`'s behaviour for days before being promoted. (B) alone contradicts `#3637`'s ruling — per-increment
 ceremony is the latency the POC mode exists to remove.
 
 # Fork 4 — Does the registry point at the record?
@@ -231,7 +231,7 @@ ceremony is the latency the POC mode exists to remove.
 derivable from a branch name, so (B) would force either a glob or a break from the convention. (C) conflates "who
 graduates this branch" with "where its record is" — only accidentally the same today.
 
-**The cost is small but real, and is not the same as adding a backlog field.** `#2260`'s survey found backlog
+**The cost is small but real, and is not the same as adding a backlog field.** `#3637`'s survey found backlog
 frontmatter has no closed schema, so `deliveryTarget:` cost nothing to introduce. The registry is the opposite:
 `we:scripts/lib/poc-branches.mjs`'s `normalizeRegistry` builds a **fixed object literal**, so unknown fields are
 silently dropped. A `trackingDoc:` needs `validatePocBranch`, `normalizeRegistry`, `writeRegistry`'s projection
@@ -303,7 +303,7 @@ where today it is one file you can read top to bottom, and the command that woul
 (`poc status <branch>` → open items plus newest ledger entries) is not proposed here. If the operator values
 single-artifact readability above graduation-decomposability, Fork 1(A) with everything else unchanged is a
 coherent ruling — and its price is that `#3443`'s manual re-decomposition recurs for every POC branch, once per
-graduation. Given `#2260` ruled N concurrent POC branches, that price is paid N times, which is the strongest
+graduation. Given `#3637` ruled N concurrent POC branches, that price is paid N times, which is the strongest
 reason I do not recommend it.
 
 **What this card does not claim.** It does not argue for building a general "work-record" system, and it does not
@@ -312,11 +312,11 @@ this design composes with it rather than competing — both key on the backlog i
 
 ## Relationships
 
-- **Parent `#3383`**, deliberately, matching `#2260` and `#3639` rather than nesting under `#2260`. Reasons:
-  `#2260` is `status: resolved` and already has its build child (`#3638`), so a new decision under it reads as
+- **Parent `#3383`**, deliberately, matching `#3637` and `#3639` rather than nesting under `#3637`. Reasons:
+  `#3637` is `status: resolved` and already has its build child (`#3638`), so a new decision under it reads as
   re-opening a closed ruling; and rule 10 — the doctrine this governs — lives in `#3383`'s own scoped doctrine
   skill. Standing it as a sibling keeps the three POC-mode decisions readable as one set.
-- **`#2260`** — ruled the delivery mode this card records the state of. Not superseded, not duplicated.
+- **`#3637`** — ruled the delivery mode this card records the state of. Not superseded, not duplicated.
 - **`#3639`** — adjacent on the batch axis, confirmed distinct above. Its Fork 5 / session-update "batch object"
   is the one place the two could converge, and Fork 2(B) here is what keeps them composable.
 - **`#3443`** — the graduation epic. Supplies the hardest evidence on this card (the 8 un-graduatable session-log

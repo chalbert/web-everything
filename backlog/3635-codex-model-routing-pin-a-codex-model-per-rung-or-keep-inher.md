@@ -15,7 +15,7 @@ tags: [operations, dispatch, multi-provider, model-routing, cost]
 
 we:agent-memory-src/always-set-subagent-model-explicitly.md makes an explicit, right-sized model mandatory on
 every Claude spawn, but the Codex provider (we:scripts/lib/codex-judge-spawn.mjs, in flight on
-`origin/lane/xqa9ttq-review-pr-codex-advisory-seat`, not yet on `main`) pushes `-m` only `if (model !==
+`origin/lane/3704-review-pr-codex-advisory-seat`, not yet on `main`) pushes `-m` only `if (model !==
 undefined)` and no caller supplies one — so every Codex run today silently inherits the CLI default, measured
 live as `gpt-6-astra`, the top rung. This decides whether Codex gets its own pinned ladder and what maps to
 what, on measured evidence rather than name similarity. **Headline finding: the Claude-style three-rung
@@ -262,8 +262,8 @@ first. Implemented as `collectAndClearRolloutQuota` in we:scripts/codex-direct-t
 
 **Implementation note (scope discrepancy, recorded rather than silently resolved).** This card's `scope`
 names we:scripts/lib/codex-judge-spawn.mjs as the file whose `-m`/`--ephemeral` handling motivated this
-decision — that file is real (`#xqa9ttq`, its own header explicitly discusses hardcoding `--ephemeral` and a
-local `CODEX_EFFORT_MAP` copy) but lives only on the unmerged `origin/lane/xqa9ttq-review-pr-codex-advisory-
+decision — that file is real (`#3704`, its own header explicitly discusses hardcoding `--ephemeral` and a
+local `CODEX_EFFORT_MAP` copy) but lives only on the unmerged `origin/lane/3704-review-pr-codex-advisory-
 seat` branch as of this ratification's landing, not on `main` or this lane. The ratified constants
 (`CODEX_MODEL`, `CODEX_TIER_EFFORT`, `resolveCodexEffort`) and the quota mechanism
 (`collectAndClearRolloutQuota`/`readRolloutQuota`/`findRolloutFile`/`parseRolloutQuota`) are implemented on
@@ -322,18 +322,3 @@ contradicted the catalogue table above.
 Also in that PR: the `codifiedIn` link in the doc shipped with a `.md` suffix the site permalink does not
 serve, and we:skills-src/use-codex/SKILL.md documented neither `--tier` nor `--clear-rollout-after-run`.
 Both fixed.
-
----
-
-_Numbering note (2026-09-13 merge):_ this item, `bornAs: x8wbivt`, was JIT-numbered independently on two
-branches before they diverged — `#3635` on `origin/main`, `#3654` on `lane/mechanical-dispatcher` —
-surfacing as a byte-identical duplicate `bornAs` twin at the `lane/mechanical-dispatcher` ↔ `origin/main`
-merge (epic `#3383`). Since every other reference to this decision across the repo (`we:docs/agent/backlog-workflow.md`,
-`we:skills-src/use-codex/SKILL.md`, `we:agent-memory-src/new-review-seats-must-earn-their-place.md`,
-`we:agent-memory-src/delegate-work-to-codex-when-feasible.md`, and every `we:scripts/` citation) already used
-`origin/main`'s number, `#3635` is kept as this decision's sole surviving number; `lane/mechanical-dispatcher`'s
-`#3654` was reclaimed by the distinct, unrelated "graduation criteria for exiting probation" decision
-(`origin/main`'s own `#3654`, `bornAs: xeagmug`) once the two branches merged — a genuine numeric collision
-(different `bornAs`, same NNN), resolved in `origin/main`'s favor since it landed and was cited first. Both
-copies of this decision were already `status: resolved`, so `check:standards`' `duplicateBornAs` rule reads
-this as a harmless audit-trail smudge, not a live-cost duplicate.
