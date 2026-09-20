@@ -291,10 +291,13 @@ function lockIdSafe(owner) {
 }
 
 /** Mark `owner` as waiting for a slot. Best-effort — a write failure never blocks the caller's retry loop. */
-export function markWaiting({ lockRoot, owner, lane = null, num = null, nowIso }) {
+export function markWaiting({ lockRoot, owner, lane = null, num = null, nowIso, pid = process.pid }) {
   try {
     mkdirSync(waitingDir(lockRoot), { recursive: true });
-    writeFileSync(waitingFile(lockRoot, owner), JSON.stringify({ owner: String(owner), lane, num, requestedAt: nowIso }, null, 2) + '\n', 'utf8');
+    // `pid` (host-sampler fix): a waiter killed mid-poll (SIGKILL, a crashed lane) never runs the `finally`
+    // that clears its marker, so the marker outlives it forever. Recording the pid is what lets a reader
+    // prove the waiter is gone ({@link partitionWaiting}) instead of counting a ghost as a live waiter.
+    writeFileSync(waitingFile(lockRoot, owner), JSON.stringify({ owner: String(owner), lane, num, pid, requestedAt: nowIso }, null, 2) + '\n', 'utf8');
   } catch { /* best-effort — the wait itself must never fail on a marker write */ }
 }
 
@@ -317,6 +320,45 @@ export function listWaiting(lockRoot) {
     } catch { /* corrupt marker — skip, never surface as a phantom waiter */ }
   }
   return out;
+}
+
+/** Slack past the poll timeout before an aged marker is called stale — a live waiter gives up (and clears its
+ *  own marker) at `timeoutMs`, so a marker older than `timeoutMs + this` cannot belong to a live waiter. */
+export const WAITING_STALE_GRACE_MS = 60_000;
+
+/**
+ * PURE (liveness probe injectable). Split waiting markers into LIVE waiters and STALE ghosts.
+ *
+ * WHY (host-sampler, #3383): `heavy.admission.waiting` read > 0 in 150/150 telemetry samples (values 2-6, mostly
+ * 4) while a slot was FREE. It was not a count of waiters: `status` returned every marker file, and a waiter
+ * that dies without running its `finally` (SIGKILL, crashed lane clone) leaves its marker behind forever — the
+ * live host held four such ghosts dated 2026-09-04 and 2026-09-14. A marker is stale when its recorded pid is
+ * provably dead (`kill(pid,0)` → ESRCH), or, for a marker with no pid (written before this fix) or an
+ * unprovable one, when it is older than the poll timeout plus {@link WAITING_STALE_GRACE_MS}.
+ *
+ * @param {Array<{owner:string,pid?:number|null,requestedAt?:string}>} markers
+ * @param {{nowMs:number, timeoutMs?:number, graceMs?:number, pidLiveness?:(pid:number|null)=>('dead'|'alive'|'unknown')}} o
+ * @returns {{live:object[], stale:object[]}}
+ */
+export function partitionWaiting(markers, { nowMs, timeoutMs = DEFAULT_TIMEOUT_MS, graceMs = WAITING_STALE_GRACE_MS, pidLiveness = (pid) => probeSlotHolderLiveness(pid, process.pid) } = {}) {
+  const live = [];
+  const stale = [];
+  for (const m of Array.isArray(markers) ? markers : []) {
+    const pid = Number.isInteger(m?.pid) ? m.pid : null;
+    const requestedMs = Date.parse(m?.requestedAt);
+    const aged = Number.isFinite(requestedMs) && Number.isFinite(nowMs) && nowMs - requestedMs > timeoutMs + graceMs;
+    const dead = pid != null && pidLiveness(pid) === 'dead';
+    if (dead || aged) stale.push(m); else live.push(m);
+  }
+  return { live, stale };
+}
+
+/** Remove stale markers (dead pid / aged out). Best-effort and idempotent; only ever deletes a marker
+ *  {@link partitionWaiting} proves belongs to no live waiter, so it is safe beside a live runner. */
+export function pruneStaleWaiting({ lockRoot, nowMs, timeoutMs, graceMs, pidLiveness }) {
+  const { stale } = partitionWaiting(listWaiting(lockRoot), { nowMs, timeoutMs, graceMs, pidLiveness });
+  for (const m of stale) clearWaiting({ lockRoot, owner: m.owner });
+  return stale.length;
 }
 
 // ── the blocking wait primitive a heavy-command call site uses ─────────────────────────────────────────
@@ -348,7 +390,8 @@ export async function acquireSlotBlocking({
   const first = tryAcquireSlot({ lockRoot, cap, owner, nowMs: startedAt, nowIso: new Date(startedAt).toISOString(), pid, leaseMinutes });
   if (first.ok) return { ok: true, slot: first.slot, timedOut: false, waitedMs: 0 };
 
-  markWaiting({ lockRoot, owner, lane, num, nowIso: new Date(startedAt).toISOString() });
+  pruneStaleWaiting({ lockRoot, nowMs: startedAt, timeoutMs });
+  markWaiting({ lockRoot, owner, lane, num, pid, nowIso: new Date(startedAt).toISOString() });
   try {
     for (;;) {
       const nowMs = now();
@@ -419,10 +462,16 @@ export async function runUnderAdmission({
 
 // ── status — what `tick-core.mjs` reads for the `waiting-for-capacity` note ────────────────────────────
 
-export function admissionStatus({ lockRoot, cap }) {
+/**
+ * `waiting` is LIVE waiters only (see {@link partitionWaiting}); provably-dead/aged-out markers are reported
+ * separately as `staleWaiting` so the ghosts stay visible without being counted as queue depth.
+ * `heavy.admission.waiting` (the runner's per-tick metric) and the `waiting-for-capacity` notes both read
+ * `waiting`, so both now mean "callers blocked on a slot right now".
+ */
+export function admissionStatus({ lockRoot, cap, nowMs = Date.now(), timeoutMs = resolveTimeoutMs(), pidLiveness }) {
   const held = heldSlots({ lockRoot, cap });
-  const waiting = listWaiting(lockRoot);
-  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting };
+  const { live, stale } = partitionWaiting(listWaiting(lockRoot), { nowMs, timeoutMs, pidLiveness });
+  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting: live, staleWaiting: stale };
 }
 
 /** Re-quote a single already-split argv word for a shell command line — a no-op for a plain word,
@@ -463,7 +512,7 @@ async function main(argv) {
   const mode = positionals[0] || 'status';
 
   if (mode === 'status') {
-    if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [] }); return; }
+    if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [], staleWaiting: [] }); return; }
     emit(admissionStatus({ lockRoot, cap }));
     return;
   }

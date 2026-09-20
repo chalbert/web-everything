@@ -60,6 +60,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
+import { gunzipSync } from 'node:zlib';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -302,7 +303,8 @@ export function createFileTelemetryStore({ dir = telemetryDir() } = {}) {
     days() {
       try {
         if (!existsSync(dir)) return [];
-        return readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).map((f) => f.slice(0, 10)).sort();
+        // `<day>.jsonl.gz` is a rolled-over day (`host-sampler-retention.mjs`): history stays readable, never dropped.
+        return [...new Set(readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl(\.gz)?$/.test(f)).map((f) => f.slice(0, 10)))].sort();
       } catch {
         return [];
       }
@@ -311,8 +313,10 @@ export function createFileTelemetryStore({ dir = telemetryDir() } = {}) {
     readDay(day) {
       try {
         const p = join(dir, `${day}.jsonl`);
-        if (!existsSync(p)) return { events: [], corrupt: 0 };
-        return parseTelemetryLines(readFileSync(p, 'utf8'));
+        if (existsSync(p)) return parseTelemetryLines(readFileSync(p, 'utf8'));
+        const gz = `${p}.gz`;
+        if (existsSync(gz)) return parseTelemetryLines(gunzipSync(readFileSync(gz)).toString('utf8'));
+        return { events: [], corrupt: 0 };
       } catch {
         return { events: [], corrupt: 0 };
       }

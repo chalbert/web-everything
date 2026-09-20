@@ -146,7 +146,7 @@ export const DURABLE_SPAN_NAMES = Object.freeze(['dispatch', 'agent.turn', 'veri
  * (which belong to no single item) and `unknown` as the never-throw fallback.
  */
 export const DISPATCH_KINDS = Object.freeze([
-  'build', 'fix', 'prepare', 'prepare-decision', 'ci-heal', 'review', 'runner', 'unknown',
+  'build', 'fix', 'prepare', 'prepare-decision', 'ci-heal', 'review', 'runner', 'sampler', 'unknown',
 ]);
 
 /**
@@ -164,6 +164,9 @@ export const DISPATCH_KINDS = Object.freeze([
 export const METRIC_NAMES = Object.freeze([
   // lane pool (saturation)
   'lane.pool.total', 'lane.pool.free', 'lane.pool.leased', 'lane.pool.utilization',
+  // a lease that is unexpired by TTL but has NO live process behind it (host-sampler reconciliation) —
+  // reported apart from `leased` so a ghost never reads as concurrency.
+  'lane.pool.stale_leases',
   // heavy-command admission semaphore (saturation + queue wait)
   'heavy.admission.cap', 'heavy.admission.held', 'heavy.admission.waiting', 'heavy.admission.wait_ms',
   // dispatch decisions (traffic + saturation)
@@ -246,6 +249,27 @@ export const METRIC_NAMES = Object.freeze([
   // names, not one name with a `metric` attribute — this file's own established convention (see
   // `dispatch.tokens.*` / `host.process.*` above) so a plain sum-by-name rollup needs no attribute filter.
   'gh.throttle.rate_limited', 'gh.throttle.backoff_ms', 'gh.throttle.exhausted',
+  // ── INDEPENDENT HOST SAMPLER (#3383, `host-sampler.mjs`) — written by the sampler on its OWN cadence, not on
+  // runner ticks, so a burst between ticks is captured. Every sampler record carries `attributes.source =
+  // 'host-sampler'` and a shared `attributes.sample` id (metrics of one sample do NOT share a timestamp otherwise).
+  // Per-FAMILY figures are ONE record per axis with the family in the attribute KEYS (`cpu.vitest`, `n.vitest`,
+  // `mem.vitest`), not one metric name per family: 12 families x 3 axes as separate lines would triple the file
+  // growth for the same information. `value` is the all-family total.
+  'host.family.cpu_pct', 'host.family.count', 'host.family.mem_bytes',
+  // Live agent sessions (`claude agents --json` + the session-verdicts classifier); `value` = sessions with a live
+  // pid, attributes `verdict.<verdict>` counts.
+  'host.sessions.live',
+  // Direct saturation probes: wall-clock ms to spawn+reap `node -e 0`, and how far a fixed 50 ms busy-wait
+  // overshot its deadline (an off-CPU stall). Both rise when the host cannot schedule us promptly.
+  'host.probe.spawn_ms', 'host.probe.spin_overshoot_ms',
+  // Memory pressure / swap / compressor, disk and CPU throttling (`host-sampler-extras.mjs`). `available_bytes` is
+  // free + inactive + speculative + purgeable pages; `pressure_level` is macOS `kern.memorystatus_vm_pressure_level`
+  // (1 normal, 2 warn, 4 critical); `thermal_limit_pct` is `pmset -g therm` CPU_Speed_Limit (100 = unthrottled).
+  'host.mem.available_bytes', 'host.mem.compressed_bytes', 'host.mem.swap_used_bytes', 'host.mem.pressure_level',
+  'host.disk.free_bytes', 'host.disk.io_bytes_per_s', 'host.cpu.thermal_limit_pct',
+  // ANY limit change (lane cap, worker cap, heavy-admission size) emits one of these — `value` is the NEW value,
+  // attributes carry `limit`, `old`, `new`, `reason`, `who` — so before/after windows can be compared later.
+  'config.limit.changed',
 ]);
 
 /** Metric units — kept tiny and explicit so a renderer never has to guess whether 1200 is ms or a count.

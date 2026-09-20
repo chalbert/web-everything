@@ -868,6 +868,8 @@ function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
  *   • `heavy.admission.waiting` — how many lanes are queued on the heavy-command semaphore
  *     (`readiness/heavy-admission.mjs`, cap 2 by default). Surfaced today as one `waiting-for-capacity` note
  *     that is re-derived and discarded every tick, so the wait is visible for 120 seconds and then gone.
+ *     Counts LIVE waiters only: `admissionStatus` now drops markers left by dead/aged-out waiters (they made this
+ *     read 2-6 in 150/150 samples while a slot was free — see `partitionWaiting`).
  *   • `lane.pool.leased` — lanes withheld because the concurrent-lane cap was reached (`capacity-cap` notes),
  *     the pool-pressure counterpart to the admission counter.
  *   • `queue.depth` / `queue.ready` / `dispatch.inflight` — the TRAFFIC terms, straight off `counts`.

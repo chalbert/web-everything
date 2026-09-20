@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import {
   DEFAULT_ADMISSION_CAP, DEFAULT_TIMEOUT_MS, ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, slotPath,
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
-  markWaiting, clearWaiting, listWaiting,
+  markWaiting, clearWaiting, listWaiting, partitionWaiting, pruneStaleWaiting, WAITING_STALE_GRACE_MS, DEFAULT_TIMEOUT_MS,
   acquireSlotBlocking, admissionStatus,
   runUnderAdmission, shellQuoteWord,
 } from '../heavy-admission.mjs';
@@ -293,8 +293,8 @@ describe('admissionStatus — the shape tick-core.mjs reads', () => {
   it('reports cap, held/free counts, and live waiting entries', () => {
     tryAcquireSlot({ lockRoot, cap: 2, owner: 'A', nowMs: T0, nowIso: iso(T0) });
     markWaiting({ lockRoot, owner: 'B', lane: '5', nowIso: iso(T0) });
-    const s = admissionStatus({ lockRoot, cap: 2 });
-    expect(s).toMatchObject({ cap: 2, heldCount: 1, freeCount: 1 });
+    const s = admissionStatus({ lockRoot, cap: 2, nowMs: T0 + 1000 });
+    expect(s).toMatchObject({ cap: 2, heldCount: 1, freeCount: 1, staleWaiting: [] });
     expect(s.held).toHaveLength(1);
     expect(s.waiting).toHaveLength(1);
     expect(s.waiting[0]).toMatchObject({ owner: 'B', lane: '5' });
@@ -425,5 +425,59 @@ describe('shellQuoteWord — re-quoting the `run` CLI\'s post-`--` argv tail int
 
   it('escapes an embedded single quote the POSIX way', () => {
     expect(shellQuoteWord("it's")).toBe(`'it'\\''s'`);
+  });
+});
+
+describe('host-sampler fix — heavy.admission.waiting counted ghost markers, not waiters', () => {
+  const dead = () => 'dead';
+  const alive = () => 'alive';
+  const OLD = iso(T0 - DEFAULT_TIMEOUT_MS - WAITING_STALE_GRACE_MS - 1000);
+
+  it('REGRESSION: markers left by dead/aged-out waiters no longer read as queue depth while a slot is free', () => {
+    // The live host: 1 of 2 slots held, FOUR ghost markers (2026-09-04 / 2026-09-14) → the old status said waiting=4.
+    tryAcquireSlot({ lockRoot, cap: 2, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    markWaiting({ lockRoot, owner: 'ghost-old-1', lane: '1', pid: null, nowIso: OLD });
+    markWaiting({ lockRoot, owner: 'ghost-old-2', lane: '2', pid: null, nowIso: OLD });
+    markWaiting({ lockRoot, owner: 'ghost-dead-3', lane: '3', pid: 999999, nowIso: iso(T0) });
+    markWaiting({ lockRoot, owner: 'ghost-dead-4', lane: '4', pid: 999998, nowIso: iso(T0) });
+    const s = admissionStatus({ lockRoot, cap: 2, nowMs: T0 + 5000, pidLiveness: dead });
+    expect(s.waiting).toEqual([]);
+    expect(s.staleWaiting).toHaveLength(4);
+    expect(s).toMatchObject({ heldCount: 1, freeCount: 1 });
+  });
+
+  it('a genuinely live, fresh waiter still counts', () => {
+    markWaiting({ lockRoot, owner: 'LIVE', lane: '9', pid: 4242, nowIso: iso(T0) });
+    const s = admissionStatus({ lockRoot, cap: 2, nowMs: T0 + 5000, pidLiveness: alive });
+    expect(s.waiting.map((w) => w.owner)).toEqual(['LIVE']);
+    expect(s.staleWaiting).toEqual([]);
+  });
+
+  it('markWaiting records the waiter pid; partitionWaiting is age-only for a pid-less marker', () => {
+    markWaiting({ lockRoot, owner: 'P', nowIso: iso(T0), pid: 777 });
+    expect(listWaiting(lockRoot)[0].pid).toBe(777);
+    const fresh = { owner: 'a', requestedAt: iso(T0) };
+    const aged = { owner: 'b', requestedAt: OLD };
+    const { live, stale } = partitionWaiting([fresh, aged], { nowMs: T0 + 1000, pidLiveness: dead });
+    expect(live).toEqual([fresh]);
+    expect(stale).toEqual([aged]);
+  });
+
+  it('an aged-out marker whose pid is unprovable is still stale, a fresh unknown-pid marker is live', () => {
+    const unknown = () => 'unknown';
+    const { live, stale } = partitionWaiting(
+      [{ owner: 'a', pid: 5, requestedAt: iso(T0) }, { owner: 'b', pid: 6, requestedAt: OLD }],
+      { nowMs: T0 + 1000, pidLiveness: unknown },
+    );
+    expect(live.map((m) => m.owner)).toEqual(['a']);
+    expect(stale.map((m) => m.owner)).toEqual(['b']);
+  });
+
+  it('pruneStaleWaiting deletes only provably-stale markers', () => {
+    markWaiting({ lockRoot, owner: 'gone', pid: 31337, nowIso: iso(T0) });
+    markWaiting({ lockRoot, owner: 'here', pid: 4242, nowIso: iso(T0) });
+    const n = pruneStaleWaiting({ lockRoot, nowMs: T0 + 1000, pidLiveness: (pid) => (pid === 31337 ? 'dead' : 'alive') });
+    expect(n).toBe(1);
+    expect(listWaiting(lockRoot).map((w) => w.owner)).toEqual(['here']);
   });
 });
