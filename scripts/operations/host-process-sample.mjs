@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * @file scripts/operations/host-process-sample.mjs
- * @description #3383 follow-on (per-process attribution) — CATEGORIZE every process on the host into the six
- * named buckets `telemetry.mjs#METRIC_NAMES` reserves for `host.process.*`, from a `ps` snapshot. Sibling to
+ * @description #3383 follow-on (per-process attribution), REDESIGNED (#3383 telemetry-granularity follow-on —
+ * "any process taking substantial capacity should have its own entry"). Sibling to
  * `skills-src/conveyor/runner.mjs#hostMetrics`/`#readHostSample`: SAME pure-core/one-IO-edge split, same
  * never-throw discipline, sampled at the SAME once-per-tick cadence.
  *
@@ -13,28 +13,40 @@
  * the reason it does not attempt this. This file is that follow-on, kept SEPARATE from the pure `os.*` reads
  * so the no-subprocess discipline documented there still describes exactly what it always did.
  *
- * THE SIX CATEGORIES (mirrors `telemetry.mjs#METRIC_NAMES`'s own `host.process.*` comment — restated here
- * because this is where the actual matching rules live):
- *   • `conveyor`           — the driver/runner process itself and anything under `skills-src/conveyor/`.
- *   • `drain`               — the drain/merge-queue daemon (`scripts/lane-drain.mjs` and its own readiness
- *                             helpers under `scripts/readiness/drain-*`).
- *   • `dispatched_agents`   — a live `claude`/`codex` CHILD spawned BY this system's own dispatch wrappers —
- *                             matched on the exact, distinctive argv shape those wrappers always pass (see
- *                             {@link isDispatchedAgentCommand}), never on the bare binary name alone, because
- *                             the OPERATOR'S OWN interactive `claude` session is also, honestly, a `claude`
- *                             process and must NOT be double-counted into this bucket.
- *   • `vscode` / `chrome`   — the two heaviest, most common desktop consumers on the operator's own machine,
- *                             named explicitly so a capacity read is not "everything else" muddied by them.
- *   • `other`               — the deliberately-honest catch-all. Never omitted, never silently absorbed into
- *                             one of the five named buckets — see {@link summarizeProcessSample}'s own note on
- *                             why the categories must sum to the WHOLE snapshot, not just the interesting part.
+ * WHAT CHANGED, AND WHY (the granularity follow-on). The ORIGINAL six-bucket version of this file categorized
+ * every process into `conveyor` / `drain` / `dispatched_agents` / `vscode` / `chrome` / `other` AT COLLECTION
+ * TIME, before anything hit disk. On a real capture on this host, `other` alone summed 888 processes into ONE
+ * entry (612.7% CPU, 33.6GB) with zero per-process identity retained — a single named app disappearing inside
+ * `other` looked identical to a genuine unknown regardless of how much capacity it actually took. Confirmed:
+ * that collapse happened AT AGGREGATION, not at `ps` — the raw `ps` snapshot always had full identity; the old
+ * `summarizeProcessSample` just never kept it past one function call.
+ *
+ * THE FIX, per the operator's own direction: collect broadly, categorize LATER, as a separate step.
+ *   1. `conveyor` / `drain` / `dispatched_agents` are UNCHANGED — those are this system's OWN processes and
+ *      were never the problem; see {@link isConveyorCommand}/{@link isDrainCommand}/
+ *      {@link isDispatchedAgentCommand} below, identical to the original file.
+ *   2. Everything else (previously silently flattened into `vscode`/`chrome`/`other`) is now kept as
+ *      INDIVIDUAL per-process rows — `{pid, command, cpuPct, memBytes}` — real identity, not a bucket label.
+ *      See {@link buildProcessSnapshot}.
+ *   3. Those individual rows are stored (via {@link processSnapshotMetrics}, called once per tick from
+ *      `runner.mjs#emitTickMetrics` exactly like before) ONLY when they clear {@link DEFAULT_PROCESS_CPU_PCT}/
+ *      {@link DEFAULT_PROCESS_MEM_BYTES} — see that constant's own docblock for the real-data sizing math
+ *      behind why this floor exists and where the number came from. Below it, they are summed into one
+ *      `belowFloor` remainder — never dropped, never silently absorbed the way `other` used to be.
+ *   4. WHO GETS "THEIR OWN NAMED ENTRY" IN A REPORT is a SEPARATE, later question, answered by
+ *      `telemetry.mjs#summarizeHostProcesses` reading the stored rows back — not decided here. This file's job
+ *      ends at "collect real per-process detail, cheaply, and don't throw most of it away before it's even
+ *      written." Splitting it this way is what lets the reporting bar be revisited (a query-time
+ *      `cpuThresholdPct`/`memThresholdBytes` argument) without needing a second collection pass or a schema
+ *      migration — see that function's own docblock for why it is capped at what THIS file already stored
+ *      rather than free to go arbitrarily fine-grained.
  *
  * MATCHING IS ON THE FULL COMMAND LINE (`ps ... command=`), not the short `comm` name — `comm` truncates to
  * the executable's own basename with no arguments, which cannot distinguish the operator's own interactive
  * `claude` session from a dispatched one, nor "any process under `skills-src/conveyor/`" from an unrelated
  * `node` invocation. Every pattern below was checked against a REAL `ps -Awwo pid=,pcpu=,rss=,command=` capture
- * on this machine (Darwin) while several of the six categories were genuinely running side by side — see the
- * accompanying test's fixtures, which are that real capture, trimmed.
+ * on this machine (Darwin) while several of the three fixed categories were genuinely running side by side —
+ * see the accompanying test's fixtures, which are that real capture, trimmed.
  *
  * PURE except {@link readProcessSample}, the one IO edge — mirrors `runner.mjs#readHostSample`'s own shape and
  * its own stated reason: keeping the categorization logic (the part with real decisions in it) testable
@@ -43,12 +55,14 @@
 
 import { execFileSync } from 'node:child_process';
 
-/** The closed set of buckets every process on the host is filed into — mirrors
- *  `telemetry.mjs#METRIC_NAMES`'s own `host.process.*` list; the two must never drift apart, and the wiring
- *  test asserts they do not. */
-export const PROCESS_CATEGORIES = Object.freeze([
-  'conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other',
-]);
+import { redactCommandLine } from './command-redact.mjs';
+
+/** The THREE project-specific categories that stay fixed at collection time, unchanged from the original
+ *  design — these are THIS SYSTEM's own processes, always worth a named total regardless of how big or small
+ *  any one tick's sample is. Mirrors `telemetry.mjs#METRIC_NAMES`'s own `host.process.<category>.*` list for
+ *  these three; the two must never drift apart, and `telemetry.test.mjs` asserts they do not.
+ *  `vscode`/`chrome`/`other` are GONE from this list on purpose — see the module docblock's "what changed". */
+export const FIXED_PROCESS_CATEGORIES = Object.freeze(['conveyor', 'drain', 'dispatched_agents']);
 
 /**
  * PURE. Parse `ps -Awwo pid=,pcpu=,rss=,command=` output (the `=` suffix on every field name suppresses BSD
@@ -60,6 +74,9 @@ export const PROCESS_CATEGORIES = Object.freeze([
  * `command` is the REST of the line (everything after the third whitespace-delimited field), not a fourth
  * split token — a command line very often contains its own internal spaces (flags, quoted arguments), and
  * splitting naively on whitespace would silently truncate it to its first word.
+ *
+ * UNCHANGED from the original file — this parse was never the problem; every process was always captured
+ * here. It is the step AFTER this one that used to throw identity away.
  * @param {string} text
  * @returns {Array<{pid: number, pcpu: number, rssKb: number, command: string}>}
  */
@@ -79,7 +96,7 @@ export function parsePsOutput(text) {
   return rows;
 }
 
-// ── CATEGORY MATCHERS — checked in this order; first match wins ────────────────────────────────────────
+// ── FIXED-CATEGORY MATCHERS — unchanged from the original file; checked in this order, first match wins ──
 
 /** The conveyor driver itself, or any process running a script under `skills-src/conveyor/` — the runner's
  *  own tick loop, and every mechanical pass it shells out to from that directory. */
@@ -109,91 +126,150 @@ function isDispatchedAgentCommand(s) {
   return /\bclaude\b/.test(s) && /--restricted\b/.test(s) && /--strict-mcp-config\b/.test(s);
 }
 
-/** Visual Studio Code and every one of its Electron helper processes (GPU/utility/renderer/extension host) —
- *  all of them carry `Visual Studio Code` or `Code Helper` somewhere in their full command line, verified
- *  against a real capture on this machine. */
-function isVscodeCommand(s) {
-  return /Visual Studio Code/.test(s) || /Code Helper/.test(s);
-}
-
-/** Google Chrome and every one of its helper/renderer/GPU processes — same shape as the VS Code matcher. */
-function isChromeCommand(s) {
-  return /Google Chrome/.test(s);
-}
-
 /**
- * PURE. Categorize ONE command line into exactly one of {@link PROCESS_CATEGORIES}, checked in a fixed
- * priority order (`conveyor` and `drain` first, since both are THIS system's own processes and must never be
- * miscounted as `other`; `dispatched_agents` next, ahead of the two desktop-app buckets, since nothing in this
- * system's own dispatch shape could ever also match `Visual Studio Code`/`Google Chrome`). `other` is the
- * default for anything that matches none of the five named patterns — see {@link summarizeProcessSample} for
- * why that bucket is load-bearing rather than a shrug.
+ * PURE. Categorize ONE command line into one of {@link FIXED_PROCESS_CATEGORIES}, or `null` when it matches
+ * none of the three — `null` means "this process keeps its own identity downstream" (see
+ * {@link buildProcessSnapshot}), never "discard it". Checked in a fixed priority order (`conveyor` and `drain`
+ * first, since both are THIS system's own processes; `dispatched_agents` last of the three, since nothing in
+ * this system's own dispatch shape could ever also match the other two).
  * @param {*} command
- * @returns {string} one of {@link PROCESS_CATEGORIES}
+ * @returns {string|null} one of {@link FIXED_PROCESS_CATEGORIES}, or `null`
  */
 export function categorizeProcess(command) {
   const s = String(command ?? '');
   if (isConveyorCommand(s)) return 'conveyor';
   if (isDrainCommand(s)) return 'drain';
   if (isDispatchedAgentCommand(s)) return 'dispatched_agents';
-  if (isVscodeCommand(s)) return 'vscode';
-  if (isChromeCommand(s)) return 'chrome';
-  return 'other';
+  return null;
 }
 
 /**
- * PURE. Bucket an already-parsed `ps` row list into per-category CPU/memory totals: `cpuPct` is the RAW SUM of
- * `ps`'s own `%CPU` column across every process in the bucket (so it is expressed in "percent of one core" —
- * 100 means one fully-busy core, and a multi-process/multi-thread bucket can legitimately exceed 100 on a
- * multi-core host; never normalized against core count here, because `runner.mjs#hostMetrics`'s own
- * `host.cpu.count` sample already carries the core count a later reader divides by). `memBytes` is
- * `rssKb * 1024` summed, matching `host.mem.*`'s own raw-bytes convention (a ratio is one division away; raw
- * is not recoverable from a ratio).
+ * THE STORAGE FLOOR — below this, on BOTH axes, a process is folded into `belowFloor` rather than recorded as
+ * its own row. Deliberately set EQUAL to `telemetry.mjs`'s own default "substantial" reporting bar
+ * (`DEFAULT_SUBSTANTIAL_CPU_PCT`/`DEFAULT_SUBSTANTIAL_MEM_BYTES`), not lower — this is the sizing tradeoff
+ * from #3383's storage-bloat finding, and the number is not a guess:
  *
- * EVERY category in {@link PROCESS_CATEGORIES} is always present in the result, even at zero — the same
- * "emitted even when zero" rule `runner.mjs#tickMetrics` documents, and for the identical reason: a bucket
- * that caught nothing this tick is a real, load-bearing observation (the category exists but nothing matched
- * it right now), not an absent key a reader has to special-case.
+ * A REAL capture on this host (954 live processes, 2026-09-14) was tested against three candidate floors:
+ *   • 0.5% CPU / 20MB  → 302 processes/tick →  ~259 KB/tick → ~182 MB/DAY at the runner's 120s cadence.
+ *   • 1.0% CPU / 100MB → 68 processes/tick  →   ~66 KB/tick →  ~46 MB/day.
+ *   • 2.0% CPU / 200MB → 40 processes/tick  →   ~37 KB/tick →  ~26 MB/day.
+ * A typical day of the EXISTING telemetry file (every span + every other metric combined, this feature not yet
+ * added) runs 0.3–3.7MB — the file `#3383`'s own test-pollution bug had already caused to balloon once
+ * tonight, which is exactly the failure mode a low floor here would reproduce by a different mechanism. A
+ * separate, materially LOWER "worth recording" tier was considered (per-process, decoupled from the reporting
+ * bar) and rejected on this evidence: the extra ~260 processes it would add over the 200MB/2% tier are
+ * overwhelmingly small system/helper daemons sitting at 20–150MB from having a framework loaded, not
+ * "large real users" the way the original `other` bucket's missing 888 processes were — i.e. the marginal
+ * processes a lower floor buys are exactly the ones this feature does NOT need to individually name. Even the
+ * chosen 2%/200MB tier is a real, ~7–25x increase in this feature's own daily footprint (this file's rows
+ * only) versus what the six fixed-bucket version wrote — accepted because it is the minimum needed to actually
+ * answer "what is `other`", and because the operator's own suggested bar (">2% CPU or >200MB") independently
+ * landed on the same number.
  *
- * THE CATCH-ALL IS THE HONESTY CHECK. `other`'s sum is not a shrug — added to the five named buckets, it must
- * equal the sample's own total, which is what lets a reader audit these six numbers against the whole-machine
- * `os.loadavg()`/`os.freemem()` figures already recorded: if the six categories' `cpuPct` sum is far below
- * `host.cpu.load1 * 100`, something is either idle-but-blocked (disk/network wait) or mis-sampled — a question
- * this file can raise but never answer on its own (see the module docblock's own "what remains uncaptured").
- * @param {Array<{pcpu?: number, rssKb?: number, command?: string}>} rows
- * @returns {Record<string, {cpuPct: number, memBytes: number, count: number}>}
+ * THE CONSEQUENCE OF COLLAPSING THE TWO TIERS INTO ONE, STATED PLAINLY: `telemetry.mjs#summarizeHostProcesses`
+ * can raise its OWN reporting bar above this floor at query time with no new storage (e.g. "only show me what
+ * cleared 5%") — every row it would need is already on disk. It CANNOT lower the bar below this floor —
+ * detail for a process that never cleared 2%/200MB on the tick it was sampled was never written, by design,
+ * and is recoverable only by raising this collection-time floor (a deliberate, re-evaluatable tradeoff, not an
+ * oversight) and re-sampling from then on.
  */
-export function summarizeProcessSample(rows) {
-  const totals = {};
-  for (const cat of PROCESS_CATEGORIES) totals[cat] = { cpuPct: 0, memBytes: 0, count: 0 };
+export const DEFAULT_PROCESS_CPU_PCT = 2;
+/** @see DEFAULT_PROCESS_CPU_PCT — 200MB, in bytes. */
+export const DEFAULT_PROCESS_MEM_BYTES = 200 * 1024 * 1024;
+
+/**
+ * PURE. The collection-time split: bucket a parsed `ps` row list into (a) the three FIXED-category aggregate
+ * totals, unchanged in shape from the original file's `summarizeProcessSample`, (b) an array of INDIVIDUAL
+ * per-process rows for everything else that clears the storage floor — real `{pid, command, cpuPct, memBytes}`
+ * identity, not a category label — and (c) one `belowFloor` aggregate for everything else that does not.
+ *
+ * THE HONESTY INVARIANT, carried over from the original file's `other` bucket and now spread across THREE
+ * places instead of one: `categories` (3) + `processes` (however many cleared the floor) + `belowFloor` must
+ * always account for the WHOLE sample — see the accompanying test. This is what makes the six-figure — now
+ * N-figure — breakdown auditable against the whole-machine `host.cpu.load1`/`host.mem.free_bytes` samples
+ * recorded alongside it, exactly the property the original module docblock called out for `other`.
+ * @param {Array<{pcpu?: number, rssKb?: number, command?: string, pid?: number}>} rows
+ * @param {{cpuFloorPct?: number, memFloorBytes?: number}} [opts] injectable for tests; production always uses
+ *   the defaults (kept equal to `telemetry.mjs`'s reporting bar — see {@link DEFAULT_PROCESS_CPU_PCT}).
+ * @returns {{categories: Record<string, {cpuPct: number, memBytes: number, count: number}>,
+ *   processes: Array<{pid: number|null, command: string, cpuPct: number, memBytes: number}>,
+ *   belowFloor: {cpuPct: number, memBytes: number, count: number}}}
+ */
+export function buildProcessSnapshot(rows, { cpuFloorPct = DEFAULT_PROCESS_CPU_PCT, memFloorBytes = DEFAULT_PROCESS_MEM_BYTES } = {}) {
+  const categories = {};
+  for (const cat of FIXED_PROCESS_CATEGORIES) categories[cat] = { cpuPct: 0, memBytes: 0, count: 0 };
+  const processes = [];
+  const belowFloor = { cpuPct: 0, memBytes: 0, count: 0 };
+
   for (const r of Array.isArray(rows) ? rows : []) {
     if (!r || typeof r !== 'object') continue;
-    const cat = categorizeProcess(r.command);
-    const bucket = totals[cat] || totals.other;
-    bucket.cpuPct += Number.isFinite(r.pcpu) ? r.pcpu : 0;
-    bucket.memBytes += Number.isFinite(r.rssKb) ? r.rssKb * 1024 : 0;
-    bucket.count += 1;
+    const cpuPct = Number.isFinite(r.pcpu) ? r.pcpu : 0;
+    const memBytes = Number.isFinite(r.rssKb) ? r.rssKb * 1024 : 0;
+    const fixed = categorizeProcess(r.command);
+    if (fixed) {
+      const b = categories[fixed];
+      b.cpuPct += cpuPct;
+      b.memBytes += memBytes;
+      b.count += 1;
+      continue;
+    }
+    if (cpuPct > cpuFloorPct || memBytes > memFloorBytes) {
+      processes.push({ pid: Number.isFinite(r.pid) ? r.pid : null, command: String(r.command ?? ''), cpuPct, memBytes });
+    } else {
+      belowFloor.cpuPct += cpuPct;
+      belowFloor.memBytes += memBytes;
+      belowFloor.count += 1;
+    }
   }
-  return totals;
+  return { categories, processes, belowFloor };
 }
 
+/** Max characters of a `command` kept in a metric's `attributes` — matches `telemetry.mjs#MAX_VALUE_LENGTH`
+ *  (500) with headroom for the recorder's own truncation marker; kept here too so a caller inspecting
+ *  {@link processSnapshotMetrics}'s OWN output (before it ever reaches the recorder) sees the same bound. */
+const MAX_COMMAND_LENGTH = 480;
+
 /**
- * PURE. Shape {@link summarizeProcessSample}'s totals into the metric-sample array
- * `skills-src/conveyor/runner.mjs#emitTickMetrics` records — TWO metrics per category (`cpu_pct` unit
- * `percent`, `mem_bytes` unit `bytes`), matching `telemetry.mjs#METRIC_NAMES`'s `host.process.<category>.*`
- * naming exactly, plus a `processCount` attribute on each sample so a reader can see how many processes fed a
- * given number without a second lookup.
- * @param {Record<string, {cpuPct: number, memBytes: number, count: number}>} totals
+ * PURE. Shape {@link buildProcessSnapshot}'s output into the metric-sample array
+ * `skills-src/conveyor/runner.mjs#emitTickMetrics` records:
+ *   • the 3 fixed categories → 2 metrics each (`cpu_pct`/`mem_bytes`), IDENTICAL shape and names to the
+ *     original file — `host.process.<category>.cpu_pct`/`.mem_bytes`.
+ *   • each individual process row → 2 metrics under the SAME low-cardinality name for every process,
+ *     `host.process.entry.cpu_pct`/`.mem_bytes` — never a per-PID or per-command metric NAME, which would
+ *     blow up `METRIC_NAMES`'s closed vocabulary; the real identity (`pid`, `command`) travels in
+ *     `attributes` instead, the same "low-cardinality name, high-cardinality detail in attributes" rule
+ *     `telemetry.mjs`'s own header already establishes for `dispatch.tokens.*`. The `command` attribute is
+ *     passed through `command-redact.mjs#redactCommandLine` before it is built (credential-shaped argv values
+ *     masked, control characters replaced) and only THEN truncated — argv is where secrets live, and this
+ *     file is durable.
+ *   • the `belowFloor` remainder → 2 metrics, `host.process.below_floor_remainder.cpu_pct`/`.mem_bytes` —
+ *     clearly labeled as a remainder (unlike the old `other`, which read as a category), carrying
+ *     `processCount` so a reader can see how many small processes it represents.
+ * @param {ReturnType<typeof buildProcessSnapshot>} snapshot
  * @returns {Array<{name: string, value: number, unit: string, attributes: object}>}
  */
-export function processCategoryMetrics(totals) {
-  const t = totals || {};
+export function processSnapshotMetrics(snapshot) {
+  const s = snapshot || {};
+  const categories = s.categories || {};
   const out = [];
-  for (const cat of PROCESS_CATEGORIES) {
-    const c = t[cat] || { cpuPct: 0, memBytes: 0, count: 0 };
+  for (const cat of FIXED_PROCESS_CATEGORIES) {
+    const c = categories[cat] || { cpuPct: 0, memBytes: 0, count: 0 };
     out.push({ name: `host.process.${cat}.cpu_pct`, value: c.cpuPct, unit: 'percent', attributes: { processCount: c.count } });
     out.push({ name: `host.process.${cat}.mem_bytes`, value: c.memBytes, unit: 'bytes', attributes: { processCount: c.count } });
   }
+  for (const p of Array.isArray(s.processes) ? s.processes : []) {
+    if (!p || typeof p !== 'object') continue;
+    // REDACT FIRST, THEN TRUNCATE — a secret straddling the length cut would otherwise be left half-visible.
+    // The full argv is durable (the NDJSON is retained across days and shared across lane clones), so
+    // credential-shaped values and control characters never reach disk — see `command-redact.mjs`.
+    const command = redactCommandLine(p.command).slice(0, MAX_COMMAND_LENGTH);
+    const attrs = { pid: Number.isFinite(p.pid) ? p.pid : null, command };
+    out.push({ name: 'host.process.entry.cpu_pct', value: Number.isFinite(p.cpuPct) ? p.cpuPct : 0, unit: 'percent', attributes: attrs });
+    out.push({ name: 'host.process.entry.mem_bytes', value: Number.isFinite(p.memBytes) ? p.memBytes : 0, unit: 'bytes', attributes: attrs });
+  }
+  const bf = s.belowFloor || { cpuPct: 0, memBytes: 0, count: 0 };
+  out.push({ name: 'host.process.below_floor_remainder.cpu_pct', value: bf.cpuPct, unit: 'percent', attributes: { processCount: bf.count } });
+  out.push({ name: 'host.process.below_floor_remainder.mem_bytes', value: bf.memBytes, unit: 'bytes', attributes: { processCount: bf.count } });
   return out;
 }
 
@@ -211,7 +287,10 @@ export function processCategoryMetrics(totals) {
  *
  * KEPT CHEAP AND INFREQUENT ON PURPOSE, matching the epic's own instruction: called once per runner tick
  * (`DEFAULT_TICK_INTERVAL_MS`, 120s today) — never on a hot path — because shelling out has a real, if small,
- * cost that a per-dispatch or per-span sampling point cannot absorb the way a 120s cadence can.
+ * cost that a per-dispatch or per-span sampling point cannot absorb the way a 120s cadence can. Enumerating
+ * EVERY process (this machine: ~950 rows, a real capture used to size {@link DEFAULT_PROCESS_CPU_PCT}) is the
+ * cheap part — one `ps` call regardless of row count; the storage floor in {@link buildProcessSnapshot} exists
+ * to bound what gets WRITTEN, not what `ps` itself returns.
  * @param {{exec?: Function}} [io] - injectable for tests; defaults to a real `execFileSync`.
  * @returns {Array<{pid: number, pcpu: number, rssKb: number, command: string}>}
  */

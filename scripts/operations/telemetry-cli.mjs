@@ -22,7 +22,8 @@
 import { pathToFileURL } from 'node:url';
 
 import { createFileTelemetryStore, dayKey } from './telemetry-store.mjs';
-import { goldenSignals, groupByTrace } from './telemetry.mjs';
+import { goldenSignals, groupByTrace, summarizeHostProcesses } from './telemetry.mjs';
+import { redactCommandLine } from './command-redact.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The day keys a rolling window of `hours` can possibly touch — at most two for any window under 24h, and
@@ -156,33 +157,55 @@ export function renderReport(signals, { hours }) {
   }
   L.push('');
 
-  // #3383 follow-on — per-process attribution: who is actually consuming the host, broken into the six closed
-  // `host.process.*` categories (`host-process-sample.mjs`). A dedicated table rather than folded into the
-  // gauge list above: the capacity-planning question this whole feature exists to answer ("what's competing
-  // for headroom") reads as a comparison ACROSS categories, which a table serves far better than six
-  // interleaved single-line gauges would. `other`'s row is never omitted — see `summarizeProcessSample`'s own
-  // docblock for why that catch-all is the honesty check that makes the six numbers auditable against
-  // `host.cpu.load1`/`host.mem.free_bytes` above, rather than a curated subset that could quietly undercount.
+  // #3383 follow-on — per-process attribution, REDESIGNED (telemetry-granularity follow-on): three FIXED
+  // categories (this system's own processes) plus, separately, every individual process that cleared
+  // `host-process-sample.mjs`'s storage floor gets its OWN named row via `summarizeHostProcesses` — no more
+  // `vscode`/`chrome`/`other` flattening hundreds of real processes into one number. `signals.hostProcesses` is
+  // computed by the CALLER (`runTelemetryCli`) over the raw window events, since this function only ever sees
+  // the already-rolled-up `signals` object — see the call site for why.
   L.push('HOST PROCESSES — who is actually consuming it (mean over the window)');
-  const PROCESS_CATEGORY_ORDER = ['conveyor', 'drain', 'dispatched_agents', 'vscode', 'chrome', 'other'];
+  const FIXED_CATEGORY_ORDER = ['conveyor', 'drain', 'dispatched_agents'];
   const g = signals.saturation.gauges;
-  const anyProcessSamples = PROCESS_CATEGORY_ORDER.some((cat) => g[`host.process.${cat}.cpu_pct`]);
+  const hp = signals.hostProcesses || { substantial: [], belowThresholdRemainder: { meanCpuPct: 0, meanMemBytes: 0, samples: 0 }, windowTicks: 0, cpuThresholdPct: 2, memThresholdBytes: 200 * 1024 * 1024 };
+  const anyFixedSamples = FIXED_CATEGORY_ORDER.some((cat) => g[`host.process.${cat}.cpu_pct`]);
+  const anyProcessSamples = anyFixedSamples || hp.substantial.length > 0 || hp.belowThresholdRemainder.samples > 0;
   if (!anyProcessSamples) {
     L.push('    (no per-process samples recorded in this window)');
   } else {
-    L.push(`    ${'category'.padEnd(20)} ${'cpu%'.padStart(10)} ${'mem'.padStart(10)}`);
+    L.push(`    ${'this system'.padEnd(26)} ${'cpu%'.padStart(10)} ${'mem'.padStart(10)}`);
     let cpuTotal = 0;
     let memTotal = 0;
-    for (const cat of PROCESS_CATEGORY_ORDER) {
+    for (const cat of FIXED_CATEGORY_ORDER) {
       const cpuG = g[`host.process.${cat}.cpu_pct`];
       const memG = g[`host.process.${cat}.mem_bytes`];
       const cpuMean = cpuG ? cpuG.mean : 0;
       const memMean = memG ? memG.mean : 0;
       cpuTotal += Number(cpuMean) || 0;
       memTotal += Number(memMean) || 0;
-      L.push(`    ${cat.padEnd(20)} ${Number(cpuMean).toFixed(1).padStart(9)}% ${fmtBytes(memMean).padStart(10)}`);
+      L.push(`    ${cat.padEnd(26)} ${Number(cpuMean).toFixed(1).padStart(9)}% ${fmtBytes(memMean).padStart(10)}`);
     }
-    L.push(`    ${'— total (all 6) —'.padEnd(20)} ${Number(cpuTotal).toFixed(1).padStart(9)}% ${fmtBytes(memTotal).padStart(10)}`);
+    // Substantial, individually-named processes — real identity (pid + full command), never a bucket label.
+    // Threshold is stated in the header so a reader never has to guess what "substantial" meant for this run.
+    L.push(`    — substantial (>${hp.cpuThresholdPct}% cpu or >${fmtBytes(hp.memThresholdBytes)}) —`);
+    if (!hp.substantial.length) {
+      L.push('      (none this window)');
+    } else {
+      for (const p of hp.substantial) {
+        cpuTotal += p.meanCpuPct;
+        memTotal += p.meanMemBytes;
+        const pidTag = p.pids.length === 1 ? `pid ${p.pids[0]}` : `${p.pids.length} pids`;
+        // Redact + strip control characters HERE too (summarizeHostProcesses already does, but a caller can hand
+        // renderReport a hand-built `hostProcesses`, and an escape sequence must never reach the terminal).
+        const safe = redactCommandLine(p.label);
+        const label = safe.length > 60 ? `${safe.slice(0, 59)}…` : safe;
+        L.push(`      ${label.padEnd(60)} ${Number(p.meanCpuPct).toFixed(1).padStart(6)}% ${fmtBytes(p.meanMemBytes).padStart(10)}  (${pidTag}, ${p.samples}/${hp.windowTicks} ticks)`);
+      }
+    }
+    // The remainder — CLEARLY LABELED as such (unlike the old `other`, which read as a category of its own).
+    cpuTotal += hp.belowThresholdRemainder.meanCpuPct;
+    memTotal += hp.belowThresholdRemainder.meanMemBytes;
+    L.push(`    ${'below-threshold remainder'.padEnd(26)} ${Number(hp.belowThresholdRemainder.meanCpuPct).toFixed(1).padStart(9)}% ${fmtBytes(hp.belowThresholdRemainder.meanMemBytes).padStart(10)}`);
+    L.push(`    ${'— total —'.padEnd(26)} ${Number(cpuTotal).toFixed(1).padStart(9)}% ${fmtBytes(memTotal).padStart(10)}`);
   }
   L.push('');
 
@@ -292,7 +315,11 @@ export function runTelemetryCli(argv, { store = null, now = () => new Date(), ou
 
   if (verb !== 'report') { writeLineSync(2, USAGE); return 1; }
 
-  const signals = { ...goldenSignals(events), corrupt };
+  // #3383 telemetry-granularity follow-on — computed over the raw window `events`, not `signals.saturation.
+  // gauges` (which rolls up purely by metric NAME and would mash every `host.process.entry.*` sample, whatever
+  // process it came from, into one gauge — see `summarizeHostProcesses`'s own docblock for why it re-reads the
+  // per-sample `attributes` instead).
+  const signals = { ...goldenSignals(events), hostProcesses: summarizeHostProcesses(events), corrupt };
   out(json ? `${JSON.stringify({ hours, ...signals }, null, 2)}\n` : `${renderReport(signals, { hours })}\n`);
   return 0;
 }
