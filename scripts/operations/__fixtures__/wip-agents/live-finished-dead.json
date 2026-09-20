@@ -1,0 +1,102 @@
+{
+  "now": 1000000,
+  "agents": [
+    {
+      "id": "a1",
+      "sessionId": "active-1",
+      "name": "conveyor-21",
+      "kind": "background",
+      "state": "working",
+      "startedAt": 4,
+      "pid": 601
+    },
+    {
+      "id": "a2",
+      "sessionId": "active-2",
+      "name": "fix-22",
+      "kind": "background",
+      "state": "working",
+      "startedAt": 5,
+      "pid": 602
+    },
+    {
+      "id": "d1",
+      "sessionId": "done-1",
+      "name": "conveyor-11",
+      "kind": "background",
+      "state": "done",
+      "startedAt": 1,
+      "pid": 501
+    },
+    {
+      "id": "x1",
+      "sessionId": "dead-1",
+      "name": "conveyor-31",
+      "kind": "background",
+      "state": "working",
+      "startedAt": 6,
+      "pid": 701
+    },
+    {
+      "id": "x2",
+      "sessionId": "dead-2",
+      "name": "conveyor-32",
+      "kind": "background",
+      "state": "working",
+      "startedAt": 7,
+      "pid": 702
+    },
+    {
+      "id": "x3",
+      "sessionId": "dead-3",
+      "name": "prepare-33",
+      "kind": "background",
+      "state": "blocked",
+      "startedAt": 8,
+      "pid": 703
+    },
+    {
+      "id": "x4",
+      "sessionId": "dead-4",
+      "name": "review-34",
+      "kind": "background",
+      "state": "working",
+      "startedAt": 9
+    },
+    {
+      "id": "x5",
+      "sessionId": "dead-5",
+      "name": "odd-35",
+      "kind": "odd",
+      "startedAt": 10
+    }
+  ],
+  "facts": {
+    "active-1": {
+      "pidAlive": true,
+      "transcriptMtimeMs": 999000
+    },
+    "active-2": {
+      "pidAlive": true,
+      "transcriptMtimeMs": 999000
+    },
+    "done-1": {
+      "pidAlive": true
+    },
+    "dead-1": {
+      "pidAlive": false
+    },
+    "dead-2": {
+      "pidAlive": false
+    },
+    "dead-3": {
+      "pidAlive": false
+    },
+    "dead-4": {
+      "pidAlive": false
+    },
+    "dead-5": {
+      "pidAlive": false
+    }
+  }
+}

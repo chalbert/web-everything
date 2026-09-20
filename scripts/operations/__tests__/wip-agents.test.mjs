@@ -77,18 +77,17 @@ it.each([
 ])('classifies liveness %j with %j as %s', (agent, facts, expected) => {
   expect(classifyLiveness(agent, { now: ACTIVE_WINDOW_MS, ...facts })).toBe(expected);
 });
-it('collapses dead records by state and age, retaining all names in rows', () => {
+it('counts dead records by state in one trailing line, retaining every row in the data', () => {
   const now = 10 * 86400000;
   const agents = Array.from({ length: 30 }, (_, i) => ({ sessionId: `s${i}`, name: `agent-${i}`, state: i < 20 ? 'working' : 'blocked', startedAt: i < 10 ? 0 : now - 1000 }));
   const rows = classifyAgents({ agents, now }), table = renderTable(rows);
   expect(rows).toHaveLength(30);
-  expect(table.match(/dead-record/g)).toHaveLength(3);
-  expect(table).toContain('dead-record (was working) ×10 · age 7d+');
-  expect(table).toContain('dead-record (was working) ×10 · age <1h');
-  expect(table).toContain('dead-record (was blocked) ×10 · age <1h');
-  expect(table).toContain('`agent-5` +4 more (see --json)');
-  for (const line of table.split('\n').filter((l) => l.includes('dead-record'))) expect(line.split('|')[2]).not.toMatch(/\bworking\b|\bblocked\b/);
-  expect(renderTable(classifyAgents({ agents: [{}], now }))).toContain('dead-record ×1 · age unknown');
+  expect(rows.every((r) => r.liveness === 'dead-record')).toBe(true);
+  expect(table.match(/dead-record/g)).toBeNull();
+  expect(table.split('\n').at(-1)).toBe('Dead records (no process): 30 (working x20, blocked x10)');
+  expect(table).toContain('| — | No live agents. | — | — |');
+  expect(table).not.toContain('agent-5');
+  expect(renderTable(classifyAgents({ agents: [{}], now }))).toContain('Dead records (no process): 1 (unknown x1)');
 });
 it('orders live groups by liveness then oldest start and reports a done live process only in the trailing line', () => {
   const agents = ['idle', 'wait', 'active-new', 'active-old', 'done-live', 'done-dead'].map((name, i) => ({ name, sessionId: name, pid: i + 1, startedAt: name === 'active-old' ? 0 : 1, state: name.startsWith('done') ? 'done' : 'working', waitingFor: name === 'wait' ? 'human' : null }));
@@ -134,11 +133,10 @@ it('breaks deferral streaks at missing PRs and alert runs at changed signatures'
   expect(drain.alert.standingSince).toBe(at(2));
 });
 
-it('uses each dead-record age band at its boundary and clamps future transcript ages', () => {
-  const ages = [0, 3600000, 86400000, 7 * 86400000, null], now = 8 * 86400000;
-  const rows = classifyAgents({ agents: ages.map((ms, i) => ({ sessionId: `s${i}`, name: `n${i}`, startedAt: ms == null ? undefined : now - ms })), now, facts: { s0: { transcriptMtimeMs: now + 1 } } });
-  for (const b of ['<1h', '1h-1d', '1d-7d', '7d+', 'unknown']) expect(renderTable(rows)).toContain(`age ${b}`);
-  expect(rows.find((r) => r.sessionId === 's0').transcriptAgeMs).toBe(0);
+it('clamps future transcript ages', () => {
+  const now = 8 * 86400000;
+  const rows = classifyAgents({ agents: [{ sessionId: 's0', name: 'n0', pid: 1, startedAt: now }], now, facts: { s0: { pidAlive: true, transcriptMtimeMs: now + 1 } } });
+  expect(rows[0].transcriptAgeMs).toBe(0);
 });
 
 const fixture = JSON.parse(readFileSync('scripts/operations/__fixtures__/wip-agents/finished-not-reaped.json', 'utf8'));
@@ -166,4 +164,23 @@ it('omits the finished line when no done session has a live process', () => {
   const table = renderTable(classifyAgents(dead));
   expect(table).not.toContain('Finished, not yet reaped');
   expect(table).toMatch(/1 done \(not shown\)$/);
+});
+const mixed = JSON.parse(readFileSync('scripts/operations/__fixtures__/wip-agents/live-finished-dead.json', 'utf8'));
+it('prints only live rows, then Finished, then Dead records, then the not-shown line', () => {
+  const rows = classifyAgents({ ...mixed, agents: [...mixed.agents, { sessionId: 'gone', name: 'gone-done', state: 'done', pid: 9 }], facts: { ...mixed.facts, gone: { pidAlive: false } } });
+  const lines = renderTable(rows).split('\n');
+  expect(rows).toHaveLength(9);
+  expect(lines.filter((l) => l.startsWith('| `'))).toHaveLength(2);
+  expect(lines.slice(2)).toEqual([
+    expect.stringContaining('`conveyor-21`'), expect.stringContaining('`fix-22`'),
+    'Finished, not yet reaped: 1 (`conveyor-11`)',
+    'Dead records (no process): 5 (working x3, blocked x1, unknown x1)',
+    '1 done (not shown)',
+  ]);
+});
+it('omits both trailing lines when there is nothing finished or dead', () => {
+  const live = { ...mixed, agents: mixed.agents.filter((a) => ['active-1', 'active-2'].includes(a.sessionId)) };
+  const lines = renderTable(classifyAgents(live)).split('\n');
+  expect(lines).toHaveLength(4);
+  expect(lines.join('\n')).not.toMatch(/Finished, not yet reaped|Dead records/);
 });

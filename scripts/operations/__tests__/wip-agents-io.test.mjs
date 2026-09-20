@@ -166,7 +166,7 @@ it('reads bounded drain tails, skips partial and malformed lines, supports the d
   writeFileSync(join(home, 'override/history.jsonl'), JSON.stringify(pass));
   expect(read().drain).toEqual({ passes: [pass], alerts: null });
 });
-it('CLI JSON retains all dead records while stdout groups them and appends drain health', async () => {
+it('CLI JSON retains all dead records while stdout counts them in one line and appends drain health', async () => {
   const agents = Array.from({ length: 30 }, (_, i) => ({ name: `dead-${i}`, sessionId: `s${i}`, state: 'working' }));
   const readAgents = () => ({ agents, facts: {}, now: 0, drain: { passes: null, alerts: null } });
   let output = '';
@@ -174,8 +174,8 @@ it('CLI JSON retains all dead records while stdout groups them and appends drain
   expect(JSON.parse(output).rows.map((r) => r.name)).toEqual(agents.map((a) => a.name));
   expect(JSON.parse(output).drain.readable).toBe(false);
   expect(await main({ argv: [], readAgents, stdout: (s) => { output = s; } })).toBe(0);
-  expect(output).toContain('dead-record (was working) ×30');
-  expect(output).toContain('+24 more (see --json)');
+  expect(output).toContain('\nDead records (no process): 30 (working x30)\n');
+  expect(output).not.toContain('dead-0');
   expect(output).toContain('\n\nWork in flight (not agents):\ndrain: unknown (history.jsonl unreadable)');
 });
 
@@ -191,4 +191,19 @@ it('CLI table prints two rows and one finished line for the not-reaped fixture, 
   const json = JSON.parse(output);
   expect(json.rows).toHaveLength(5);
   expect(json.rows.filter((r) => r.liveness === 'done')).toHaveLength(3);
+});
+
+it('CLI table for live + finished + dead prints 2 rows and one line each, while --json keeps every row', async () => {
+  const data = JSON.parse(readFileSync(resolve('scripts/operations/__fixtures__/wip-agents/live-finished-dead.json'), 'utf8'));
+  const readAgents = async () => ({ ...data, drain: { passes: [], alerts: [] } });
+  let output = '';
+  expect(await main({ argv: [], readAgents, stdout: (s) => { output = s; } })).toBe(0);
+  expect(output.split('\n').filter((l) => l.startsWith('| `'))).toHaveLength(2);
+  expect(output.match(/^Finished, not yet reaped: .*$/gm)).toEqual(['Finished, not yet reaped: 1 (`conveyor-11`)']);
+  expect(output.match(/^Dead records \(no process\): .*$/gm)).toEqual(['Dead records (no process): 5 (working x3, blocked x1, unknown x1)']);
+  expect(output).not.toMatch(/dead-record|process still alive/);
+  expect(await main({ argv: ['--json'], readAgents, stdout: (s) => { output = s; } })).toBe(0);
+  const json = JSON.parse(output);
+  expect(json.rows).toHaveLength(8);
+  expect(json.rows.filter((r) => r.liveness === 'dead-record')).toHaveLength(5);
 });

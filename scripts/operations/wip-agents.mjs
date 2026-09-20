@@ -2,9 +2,11 @@
  * @file wip-agents.mjs
  * @description Process-backed session liveness and drain health, with evidence for delegation.
  * This declaration is read-only: both steps compute, with no sinks or ambient IO.
- * Missing evidence remains unknown. JSON retains every session; the table groups
- * dead records and never lists done sessions as rows: those whose process is still alive
- * (the reaper has not stopped them yet) become one trailing "Finished, not yet reaped" line.
+ * Missing evidence remains unknown. JSON retains every session; the table never
+ * lists dead records or done sessions as rows. Done sessions whose process
+ * is still alive (the reaper has not stopped them) become one trailing "Finished, not yet
+ * reaped" line; dead records become one "Dead records (no process)" line counted by state.
+ * Trailing order: Finished, Dead records, then "N done (not shown)".
  * Dispatch facts outrank transcript observations, while absence of delegation is
  * asserted only after a complete scan. The shell owns clocks, files and processes.
  */
@@ -144,7 +146,6 @@ export function classifyAgents({ agents, facts = {}, now }) {
 const age = (ms) => ms == null || !Number.isFinite(ms) ? 'unknown' : ms >= 86400000
   ? `${Math.floor(ms / 86400000)}d ${Math.floor(ms / 3600000) % 24}h` : ms >= 3600000
     ? `${Math.floor(ms / 3600000)}h ${Math.floor(ms / 60000) % 60}m` : `${Math.floor(ms / 60000)}m`;
-const band = (ms) => ms == null ? 'unknown' : ms < 3600000 ? '<1h' : ms < 86400000 ? '1h-1d' : ms < 7 * 86400000 ? '1d-7d' : '7d+';
 export function renderTable(rows) {
   const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
   const lines = ['| Item | Detail | Supervisor | Executor |', '| --- | --- | --- | --- |'];
@@ -159,20 +160,16 @@ export function renderTable(rows) {
     r.executor.providers.length ? r.executor.providers.map((p) => `${p.provider} (${p.model || 'unknown'}${p.cliVersion ? `, cli ${p.cliVersion}` : ''})`).join(' + ')
       : r.executor.source === 'unknown' ? 'unknown' : 'none',
   ]);
-  const groups = new Map();
-  for (const r of rows.filter((r) => r.liveness === 'dead-record')) {
-    const state = r.wasState && r.wasState !== 'unknown' ? r.wasState : null;
-    const key = JSON.stringify([state, band(r.ageMs)]);
-    if (!groups.has(key)) groups.set(key, { state, band: band(r.ageMs), names: [] });
-    groups.get(key).names.push(r.name);
-  }
-  for (const g of groups.values()) add([
-    `dead-record${g.state ? ` (was ${g.state})` : ''} ×${g.names.length} · age ${g.band}`,
-    g.names.slice(0, 6).map((n) => `\`${n}\``).join(', ') + (g.names.length > 6 ? ` +${g.names.length - 6} more (see --json)` : ''), '—', '—',
-  ]);
-  if (!rows.some((r) => r.liveness !== 'done')) add(['—', 'No live agents.', '—', '—']);
+  if (!live.length) add(['—', 'No live agents.', '—', '—']);
   const unreaped = rows.filter((r) => r.liveness === 'done' && r.pidAlive === true);
   if (unreaped.length) lines.push(`Finished, not yet reaped: ${unreaped.length} (${unreaped.slice(0, 6).map((r) => `\`${r.name}\``).join(', ')}${unreaped.length > 6 ? ` +${unreaped.length - 6} more` : ''})`);
+  const dead = new Map();
+  for (const r of rows.filter((r) => r.liveness === 'dead-record')) {
+    const state = r.wasState && r.wasState !== 'unknown' ? r.wasState : 'unknown';
+    dead.set(state, (dead.get(state) ?? 0) + 1);
+  }
+  const deadCount = [...dead.values()].reduce((n, c) => n + c, 0);
+  if (deadCount) lines.push(`Dead records (no process): ${deadCount} (${[...dead].sort((x, y) => y[1] - x[1]).map(([state, count]) => `${state} x${count}`).join(', ')})`);
   const hidden = rows.filter((r) => r.liveness === 'done' && r.pidAlive !== true).length;
   if (hidden) lines.push(`${hidden} done (not shown)`);
   return lines.join('\n');
