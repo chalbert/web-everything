@@ -3,7 +3,7 @@
  * @description The evidence resolver's IO shell, driven with injected fs / completion / gh ports.
  */
 import { describe, it, expect } from 'vitest';
-import { makeEvidenceResolver, prSignalFromGh, slugForRepoKey, MAX_PR_SIGNAL_LOOKUPS_PER_TICK } from '../session-verdicts-io.mjs';
+import { makeEvidenceResolver, prSignalFromGh, slugForRepoKey, ledgerRepoKeyFor, sessionOwnsEntry, MAX_PR_SIGNAL_LOOKUPS_PER_TICK } from '../session-verdicts-io.mjs';
 
 const session = { id: '9eff9f54', sessionId: '9eff9f54-d1d3-44ff-883d-91d4072f17ca', cwd: '/w/wev-conflict-2130', name: 'review-148' };
 const statMap = (m) => (p) => { if (p in m) return { mtimeMs: m[p] }; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); };
@@ -85,5 +85,25 @@ describe('slugForRepoKey', () => {
     expect(slugForRepoKey('plateau-app')).toBe('chalbert/plateau-app');
     expect(slugForRepoKey('nope')).toBeNull();
     expect(slugForRepoKey('__proto__')).toBeNull();
+  });
+});
+
+describe('ledgerRepoKeyFor — the repo a repo-less `review-<PR>` session was dispatched for', () => {
+  const entry = (over = {}) => ({ session: '9eff9f54', kind: 'review', target: 'plateau-app#148', ...over });
+
+  it('returns the repo key from the session\'s own ledger entry (matched on short id or full sessionId)', () => {
+    expect(ledgerRepoKeyFor(session, [entry()], '148')).toBe('plateau-app');
+    expect(ledgerRepoKeyFor(session, [entry({ session: session.sessionId })], 148)).toBe('plateau-app');
+  });
+  it('is null for no ledger, another session, another PR number, a target with no `#`, or an unknown repo key', () => {
+    expect(ledgerRepoKeyFor(session, [], '148')).toBeNull();
+    expect(ledgerRepoKeyFor(session, undefined, '148')).toBeNull();
+    expect(ledgerRepoKeyFor(session, [entry({ session: 'other' })], '148')).toBeNull();
+    expect(ledgerRepoKeyFor(session, [entry()], '149')).toBeNull();
+    expect(ledgerRepoKeyFor(session, [entry({ target: 'plateau-app' })], '148')).toBeNull();
+    expect(ledgerRepoKeyFor(session, [entry({ target: 'nope#148' })], '148')).toBeNull();
+  });
+  it('sessionOwnsEntry never matches an entry with no session', () => {
+    expect(sessionOwnsEntry({ target: 'we#1' }, { id: undefined })).toBe(false);
   });
 });

@@ -148,6 +148,15 @@
  * stops sessions whose work is done); they are reported as `attention` so land-advance can redispatch or escalate.
  * THIS REAPER REMAINS THE ONLY STOPPER — nothing hand-runs `claude stop`.
  *
+ * REPO-LESS PR NAMES AND THE `no handler` GAP (#3383, 2026-09-20). Two live gaps left finished sessions listed.
+ * (1) `review-148` was plateau-app#148 (merged 12:20) but its name carries no repo, so the PR ground truth asked
+ * `gh` about the wrong repo (its cwd's) and the session stayed. {@link makeGroundTruthResolver} now resolves such a
+ * name from `target.repo`, else the session's own follow-up ledger entry, else EVERY constellation repo — done only
+ * when the number is merged in every repo where it exists; ambiguous, unreadable or absent everywhere → kept.
+ * (2) A `stalled` row is reported `attention` with the action `redispatch-once`, but no code executes that rung.
+ * The reaper does not build the executor; it names the gap (`handler: 'none'`, "no handler" in the log) so it is
+ * never mistaken for something already being handled ({@link attentionRows}, {@link REDISPATCH_ACTIONS}).
+ *
  * WHY `id`, NOT `sessionId` — the near-universal `claude stop` FAILURE `we:backlog/3435-*.md`'s "Found live"
  * finding 3 recorded (all five sessions, including `conveyor-3421b`, came back "No job matching" on `claude
  * stop <sessionId>`) was read at the time as a CLI/registry-staleness limitation, the same family as the
@@ -198,7 +207,8 @@ import { createClearStuckSessionReader, createClearStuckSessionSinks } from '../
 // #3383 item 11 — the pure verdict classifier, its evidence resolver and the follow-up ledger reader: REUSED, none
 // re-derived (the resolver lives apart from this file so land-advance-io can share it without an import cycle).
 import { classifySession, DEFAULT_STALL_MINUTES } from './session-verdicts.mjs';
-import { makeEvidenceResolver, prSignalFromGh } from './session-verdicts-io.mjs';
+import { makeEvidenceResolver, prSignalFromGh, slugForRepoKey, ledgerRepoKeyFor } from './session-verdicts-io.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readFollowUps } from '../operations/land-advance-io.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -258,8 +268,11 @@ export function classifySessionReap(session) {
  * though that module's own `itemNumFromSession` does — this function answers "what does the NUMBER in this
  * name identify", and for `fix`/`ci-heal` the number is a PR, not an item; conflating the two would ask the
  * wrong ground-truth question (a PR number happening to also be a valid item number, or vice versa).
+ * A PR-kind name minted BEFORE repo markers existed (`review-148`) names a PR NUMBER only — it carries no `repo`,
+ * and that absence is meaningful, not a default: the resolver ({@link makeGroundTruthResolver}) must not guess
+ * `we`. A target that DOES carry `repo` (a constellation repo key) is checked in that repo alone.
  * @param {string|null|undefined} name
- * @returns {{kind:'item', id:string}|{kind:'pr', id:string}|null}
+ * @returns {{kind:'item', id:string}|{kind:'pr', id:string, repo?:string}|null}
  */
 export function sessionTarget(name) {
   const s = String(name ?? '');
@@ -279,8 +292,11 @@ export function sessionTarget(name) {
  * unchanged. Omitting `groundTruthFor` (or passing a non-function) makes this byte-identical to
  * {@link classifySessionReap} — the new axis is strictly additive.
  *
+ * The resolver is called `(target, session)`: the row rides along so a repo-less PR name can be resolved from the
+ * session's own follow-up ledger entry (see {@link makeGroundTruthResolver}). A one-argument resolver ignores it.
+ *
  * @param {object|null} session
- * @param {((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null} [groundTruthFor]
+ * @param {((target:{kind:'item'|'pr', id:string, repo?:string}, session?:object) => ({resolved:boolean, evidence?:string}|null))|null} [groundTruthFor]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor) {
@@ -288,7 +304,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor) {
   if (base.reap || base.reason !== 'not-terminal' || typeof groundTruthFor !== 'function') return base;
   const target = sessionTarget(session?.name);
   if (!target) return base; // no derivable target — never guess
-  const truth = groundTruthFor(target);
+  const truth = groundTruthFor(target, session);
   if (truth && truth.resolved === true) {
     return { reap: true, reason: `ground-truth-${target.kind}:${truth.evidence || target.id}` };
   }
@@ -313,7 +329,7 @@ export function classifySessionReapWithVerdict(session, { groundTruthFor = null,
   const base = classifySessionReap(session);
   if (base.reap || base.reason !== 'not-terminal') return base;
   const target = typeof groundTruthFor === 'function' ? sessionTarget(session?.name) : null;
-  const truth = target ? groundTruthFor(target) : null;
+  const truth = target ? groundTruthFor(target, session) : null;
   let gathered;
   try { gathered = evidenceFor(session) ?? {}; } catch { gathered = {}; } // unreadable evidence = unknown, never a reap
   const result = classifySession(session, { ...gathered, pidAlive: session.pidAlive, targetMovedOn: truth }, { now, stallMinutes });
@@ -343,6 +359,25 @@ export function sessionReapPlan(sessions, { groundTruthFor = null, evidenceFor =
     (doReap ? reap : keep).push(row);
   }
   return { reap, keep };
+}
+
+/**
+ * The live rows the verdict axis found stuck but does NOT stop (`stalled` / `waiting-permission`), each naming
+ * whether anything executes its `action` (`handler`: `'none'` for {@link REDISPATCH_ACTIONS}, else `'land-advance'`).
+ * @param {Array<{session:object, verdict?:string, action?:string, why?:string}>} keep - {@link sessionReapPlan}'s `keep`.
+ */
+export function attentionRows(keep) {
+  return keep.filter((r) => r.verdict === 'stalled' || r.verdict === 'waiting-permission')
+    .map((r) => ({ id: normalizeHandle(r.session.id) || null, name: r.session.name ?? null, verdict: r.verdict, action: r.action, why: r.why, handler: hasHandler(r.action) ? 'land-advance' : 'none' }));
+}
+
+/** Verdict actions no code executes yet. The reaper only REPORTS these (`attention`); land-advance turns `escalate`
+ *  into an escalation packet, but nothing re-dispatches a stalled session — the first rung is a known gap (#3383). */
+export const REDISPATCH_ACTIONS = new Set(['redispatch-once', 'stop-and-redispatch-once']);
+
+/** Does any code execute this verdict `action`? `false` only for {@link REDISPATCH_ACTIONS} — reported as `no handler`. */
+export function hasHandler(action) {
+  return !REDISPATCH_ACTIONS.has(action);
 }
 
 // ── IO SHELL (runs only as a CLI — owns the one `claude agents --json` read, the ground-truth lookups, and the
@@ -386,18 +421,16 @@ export function groundTruthForItem(id, { backlogDir = DEFAULT_BACKLOG_DIR, readd
 }
 
 /**
- * The PR-kind ground-truth answer for PR `pr` — `resolved: true` iff `gh pr view` reports it merged. Any
- * failure (no `gh`, PR not found, timeout) answers `null` (unknown) rather than throwing — a best-effort
- * check, matching every other `gh`-shelling function in this codebase's own fail-soft convention.
- * @param {string|number} pr
- * @param {{exec?:Function, env?:object}} [io]
- * @returns {{resolved:boolean, evidence?:string}|null}
+ * Read ONE PR's state in ONE repo: `'merged'`, `'not-merged'` (open, or closed unmerged), `'absent'` (the repo has
+ * no PR with that number — `gh`'s "Could not resolve to a PullRequest"), or `null` (unreadable: no `gh`, timeout,
+ * any other failure). `slug` omitted means `gh`'s own cwd repo — only the legacy {@link groundTruthForPr} default.
+ * @returns {'merged'|'not-merged'|'absent'|null}
  */
-export function groundTruthForPr(pr, { exec = execFileSync, env = process.env } = {}) {
+function readPrState(pr, { exec = execFileSync, env = process.env, slug = null } = {}) {
   try {
     // Reuses `dispatch-lane-io.mjs`'s own `prListTimeoutMs` bound rather than inventing a second knob for the
     // same class of cost (one bounded `gh pr view` network call) — see the file header's "COST DISCIPLINE".
-    const out = exec('gh', ['pr', 'view', String(pr), '--json', 'state,mergedAt'], {
+    const out = exec('gh', ['pr', 'view', String(pr), ...(slug ? ['--repo', slug] : []), '--json', 'state,mergedAt'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 1024 * 1024,
@@ -406,19 +439,46 @@ export function groundTruthForPr(pr, { exec = execFileSync, env = process.env } 
     });
     const parsed = JSON.parse(String(out || '{}'));
     const merged = Boolean(parsed?.mergedAt) || String(parsed?.state || '').toUpperCase() === 'MERGED';
-    return merged ? { resolved: true, evidence: `pr#${pr}:merged` } : { resolved: false };
-  } catch {
-    return null; // `gh` unavailable / PR not found / timeout — unknown, never reap on an unreadable signal
+    return merged ? 'merged' : 'not-merged';
+  } catch (e) {
+    return /could not resolve to a pull ?request|no pull requests? found/i.test(`${e?.stderr ?? ''}\n${e?.message ?? ''}`) ? 'absent' : null;
   }
 }
 
 /**
+ * The PR-kind ground-truth answer for PR `pr` — `resolved: true` iff `gh pr view` reports it merged. Any
+ * failure (no `gh`, PR not found, timeout) answers `null` (unknown) rather than throwing — a best-effort
+ * check, matching every other `gh`-shelling function in this codebase's own fail-soft convention. `repo` (a
+ * constellation repo key) pins the lookup with `--repo`; without it `gh` reads its own cwd repo.
+ * @param {string|number} pr
+ * @param {{exec?:Function, env?:object, repo?:string|null}} [io]
+ * @returns {{resolved:boolean, evidence?:string}|null}
+ */
+export function groundTruthForPr(pr, { exec = execFileSync, env = process.env, repo = null } = {}) {
+  const slug = repo ? slugForRepoKey(repo) : null;
+  if (repo && !slug) return null; // an unknown repo key — fail closed, never fall back to the cwd repo
+  const state = readPrState(pr, { exec, env, slug });
+  if (state === 'merged') return { resolved: true, evidence: `pr#${pr}:merged${repo ? `@${repo}` : ''}` };
+  return state === 'not-merged' ? { resolved: false } : null; // absent / unreadable — unknown, never reap
+}
+
+/**
  * Build a `groundTruthFor` resolver for {@link sessionReapPlan}: routes an item-kind target to
- * {@link groundTruthForItem} (unbounded, local) and a PR-kind target to {@link groundTruthForPr} (bounded by
+ * {@link groundTruthForItem} (unbounded, local) and a PR-kind target to `gh` (bounded by
  * {@link MAX_GH_PR_VIEW_CALLS_PER_TICK}, network) — each answer cached per target for the life of the returned
  * resolver, so two sessions naming the same target cost one lookup.
- * @param {{exec?:Function, env?:object, backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function, maxPrViewCalls?:number}} [io]
- * @returns {(target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null)}
+ *
+ * WHICH REPO A PR NUMBER MEANS. A name like `review-148` carries no repo, and `gh pr view 148` from the reaper's
+ * cwd reads WE#148 — wrong for a session reviewing plateau-app#148 (found live 2026-09-20: `review-148`, merged in
+ * plateau-app, kept forever). This resolver NEVER guesses one repo. In order:
+ *   1. `target.repo` (a repo-marked name) → that repo alone.
+ *   2. else the session's own follow-up ledger entry (`followUps`, injected) when its `target` is `<repo>#<this PR>`.
+ *   3. else EVERY constellation repo: done ONLY when the number is merged in every repo where it exists, and
+ *      exists in at least one. Not merged anywhere-it-exists, unreadable in ANY repo, or not found in any → kept.
+ * Every `gh` call, in any repo, counts against `maxPrViewCalls`; a pass that runs out answers `null` (kept).
+ *
+ * @param {{exec?:Function, env?:object, backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function, maxPrViewCalls?:number, followUps?:object[]}} [io]
+ * @returns {(target:{kind:'item'|'pr', id:string, repo?:string}, session?:object) => ({resolved:boolean, evidence?:string}|null)}
  */
 export function makeGroundTruthResolver({
   exec = execFileSync,
@@ -427,22 +487,41 @@ export function makeGroundTruthResolver({
   readdirSyncFn = readdirSync,
   readFileSyncFn = readFileSync,
   maxPrViewCalls = MAX_GH_PR_VIEW_CALLS_PER_TICK,
+  followUps = [],
 } = {}) {
   const cache = new Map();
   let prViewCalls = 0;
-  return function groundTruthFor(target) {
-    const key = `${target.kind}:${target.id}`;
+  /** One bounded `gh pr view` in one repo key; `null` when over the cap, the key is unknown, or `gh` failed. */
+  const stateIn = (id, repoKey) => {
+    const slug = slugForRepoKey(repoKey);
+    if (!slug || prViewCalls >= maxPrViewCalls) return null;
+    prViewCalls++;
+    return readPrState(id, { exec, env, slug });
+  };
+  const resolvePr = (id, repo) => {
+    if (repo) {
+      const state = stateIn(id, repo);
+      if (state === 'merged') return { resolved: true, evidence: `pr#${id}:merged@${repo}` };
+      return state === 'not-merged' ? { resolved: false } : null;
+    }
+    const mergedIn = [];
+    for (const key of Object.keys(CONSTELLATION_REPOS)) {
+      const state = stateIn(id, key);
+      if (state === null) return null; // unreadable (or out of budget) in one repo — the answer is unknown
+      if (state === 'not-merged') return { resolved: false }; // live in some repo — never reap
+      if (state === 'merged') mergedIn.push(key);
+    }
+    return mergedIn.length ? { resolved: true, evidence: `pr#${id}:merged@${mergedIn.join('+')}` } : { resolved: false };
+  };
+  return function groundTruthFor(target, session = null) {
+    const repo = target.kind === 'pr' ? (target.repo ?? (session ? ledgerRepoKeyFor(session, followUps, target.id) : null)) : null;
+    const key = `${target.kind}:${target.id}${target.kind === 'pr' ? `@${repo ?? '*'}` : ''}`;
     if (cache.has(key)) return cache.get(key);
     let result;
     if (target.kind === 'item') {
       result = groundTruthForItem(target.id, { backlogDir, readdirSyncFn, readFileSyncFn });
     } else if (target.kind === 'pr') {
-      if (prViewCalls >= maxPrViewCalls) {
-        result = null; // bounded — left unresolved this tick rather than an unbounded `gh` burst; retried next tick
-      } else {
-        prViewCalls++;
-        result = groundTruthForPr(target.id, { exec, env });
-      }
+      result = resolvePr(target.id, repo);
     } else {
       result = null;
     }
@@ -604,17 +683,23 @@ function parseFlags(argv) {
 async function main(argv) {
   const flags = parseFlags(argv);
   const dryRun = !!flags['dry-run'];
+  // `--no-verdicts` is the rollback for the VERDICT AXIS alone (see the file header): back to the ground-truth and
+  // state/pid axes exactly as they were before #3383 item 11.
+  const useVerdicts = !flags['no-verdicts'];
+  // The follow-up ledger names the repo a repo-less `review-<PR>` session was dispatched for (see
+  // {@link makeGroundTruthResolver}); best-effort, an unreadable ledger is an empty one — never a reap.
+  let followUps = [];
+  if (!flags['no-ground-truth'] || useVerdicts) {
+    try { followUps = readFollowUps(); } catch { /* unreadable ledger = no redispatch history and no repo hint */ }
+  }
   // `--no-ground-truth` is an escape hatch back to the original state-only axis, for a rollback or an
   // A/B live comparison — the default is ON, matching the operator's own instruction that this axis should
   // actually run, not merely exist.
-  const groundTruthFor = flags['no-ground-truth'] ? null : makeGroundTruthResolver({ exec: execFileSync });
+  const groundTruthFor = flags['no-ground-truth'] ? null : makeGroundTruthResolver({ exec: execFileSync, followUps });
   // `--no-clear-stuck` is the SAME kind of rollback/A-B escape hatch, one axis over: the default is ON — a
   // `claude stop` failure attempts the `clear-stuck-session` repair (see the file header's "THE #77683 REPAIR")
   // unless this flag disables it, in which case a failed stop is reported exactly as it always was.
   const clearStuck = !flags['no-clear-stuck'];
-  // `--no-verdicts` is the rollback for the VERDICT AXIS alone (see the file header): back to the ground-truth and
-  // state/pid axes exactly as they were before #3383 item 11.
-  const useVerdicts = !flags['no-verdicts'];
 
   let sessions;
   try {
@@ -650,16 +735,15 @@ async function main(argv) {
   // transcript mtimes / the follow-up ledger. Best-effort: an unreadable ledger is an empty one, never a failure.
   let evidenceFor = null;
   if (useVerdicts) {
-    let followUps = [];
-    try { followUps = readFollowUps(); } catch { /* unreadable ledger = no redispatch history, never a reap */ }
     evidenceFor = makeEvidenceResolver({ followUps, prSignalFor: flags['no-ground-truth'] ? null : (pr, slug) => prSignalFromGh(pr, slug) });
   }
   const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, evidenceFor, now: Date.now() });
   // Live rows the verdict axis found stuck but does NOT stop here (stalled / waiting-permission): reported so
   // land-advance can redispatch or escalate them. This reaper only stops sessions whose work is done.
-  const attention = keep.filter((r) => r.verdict === 'stalled' || r.verdict === 'waiting-permission')
-    .map((r) => ({ id: normalizeHandle(r.session.id) || null, name: r.session.name ?? null, verdict: r.verdict, action: r.action, why: r.why }));
-  for (const a of attention) log(`  attention ${a.id ?? '?'} (${a.verdict} → ${a.action}; ${a.name ?? 'unnamed'}): ${a.why}`);
+  const attention = attentionRows(keep);
+  for (const a of attention) log(`  attention ${a.id ?? '?'} (${a.verdict} → ${a.action}${a.handler === 'none' ? ' — no handler' : ''}; ${a.name ?? 'unnamed'}): ${a.why}`);
+  const noHandler = attention.filter((a) => a.handler === 'none').length;
+  if (noHandler) log(`  ${noHandler} attention row(s) have no handler: nothing executes ${[...REDISPATCH_ACTIONS].join(' / ')} yet — they stay listed until an operator acts`);
 
   let stopped = 0;
   let alreadyGone = 0;

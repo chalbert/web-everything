@@ -17,6 +17,9 @@ import {
   groundTruthForItem,
   groundTruthForPr,
   makeGroundTruthResolver,
+  attentionRows,
+  hasHandler,
+  REDISPATCH_ACTIONS,
   TERMINAL_REAP_STATES,
   ALREADY_STOPPED_STATES,
   stopSessionWithRetry,
@@ -314,6 +317,188 @@ describe('groundTruthForPr — the bounded, network gh pr view IO helper', () =>
     const exec = () => { throw new Error('gh: command not found'); };
     expect(groundTruthForPr('1862', { exec })).toBeNull();
   });
+  it('a repo key pins the lookup with `--repo <owner/repo>` and names the repo in the evidence', () => {
+    const argv = [];
+    const exec = (_cmd, args) => { argv.push(args); return JSON.stringify({ state: 'MERGED' }); };
+    expect(groundTruthForPr('148', { exec, repo: 'plateau-app' })).toEqual({ resolved: true, evidence: 'pr#148:merged@plateau-app' });
+    expect(argv).toEqual([['pr', 'view', '148', '--repo', 'chalbert/plateau-app', '--json', 'state,mergedAt']]);
+  });
+  it('an unknown repo key is unknown (null) and never falls back to the cwd repo — no gh call at all', () => {
+    let calls = 0;
+    expect(groundTruthForPr('148', { exec: () => { calls++; return '{}'; }, repo: 'nope' })).toBeNull();
+    expect(calls).toBe(0);
+  });
+  it('a PR that does not exist in that repo is unknown (null), not "not merged"', () => {
+    const exec = () => { throw Object.assign(new Error('Command failed: gh pr view'), { stderr: 'GraphQL: Could not resolve to a PullRequest with the number of 148.' }); };
+    expect(groundTruthForPr('148', { exec, repo: 'we' })).toBeNull();
+  });
+});
+
+// ── repo-less PR session names (#3383, found live 2026-09-20: `review-148` is plateau-app#148, merged, but the
+//    name carries no repo so `gh pr view 148` from the reaper's cwd read WE#148 — the wrong repo). ────────────
+/** A fake `gh` keyed by `--repo` owner/repo → `'merged' | 'open' | 'absent' | 'error'`; records every call. */
+function fakeGh(byRepo) {
+  const calls = [];
+  const exec = (_cmd, args) => {
+    const slug = args[args.indexOf('--repo') + 1];
+    calls.push(slug);
+    const answer = byRepo[slug];
+    if (answer === 'merged') return JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-20T12:20:00Z' });
+    if (answer === 'open') return JSON.stringify({ state: 'OPEN', mergedAt: null });
+    if (answer === 'closed') return JSON.stringify({ state: 'CLOSED', mergedAt: null });
+    if (answer === 'absent') throw Object.assign(new Error('Command failed: gh pr view'), { stderr: 'GraphQL: Could not resolve to a PullRequest with the number of 148. (repository.pullRequest)' });
+    throw new Error('gh: HTTP 502');
+  };
+  return { exec, calls };
+}
+const WE = 'chalbert/web-everything';
+const FUI = 'chalbert/frontierui';
+const PA = 'chalbert/plateau-app';
+
+describe('makeGroundTruthResolver — a repo-less PR name never guesses one repo', () => {
+  const target = { kind: 'pr', id: '148' };
+
+  it('the review-148 fixture: merged in WE and plateau-app, absent in frontierui → resolved, evidence names the repos', () => {
+    const gh = fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'merged' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: true, evidence: 'pr#148:merged@we+plateau-app' });
+    expect(gh.calls).toEqual([WE, FUI, PA]); // every constellation repo was asked, in table order
+  });
+
+  it('merged in the only repo where it exists → resolved (absent elsewhere is not a blocker)', () => {
+    const gh = fakeGh({ [WE]: 'absent', [FUI]: 'absent', [PA]: 'merged' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: true, evidence: 'pr#148:merged@plateau-app' });
+  });
+
+  it('AMBIGUOUS: merged in one repo but still open in another → kept (resolved:false)', () => {
+    const gh = fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'open' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: false });
+  });
+
+  it('THE LIVE SHAPE (2026-09-20): WE#148 CLOSED unmerged + plateau-app#148 merged → kept. Not merged in every repo where it exists.', () => {
+    // Deliberate, and the one place the operator's rule bites the real `review-148`: a closed-unmerged PR counts as
+    // "not merged". Treating closed as terminal would reap it — an operator decision, pinned here so it is made
+    // consciously (see the reaper-graduate result), not by accident.
+    const gh = fakeGh({ [WE]: 'closed', [FUI]: 'absent', [PA]: 'merged' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: false });
+  });
+
+  it('UNREADABLE in ANY repo → unknown (null), even when every other repo says merged', () => {
+    const gh = fakeGh({ [WE]: 'merged', [FUI]: 'error', [PA]: 'merged' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toBeNull();
+  });
+
+  it('the number exists in NO repo → resolved:false — absence is never done', () => {
+    const gh = fakeGh({ [WE]: 'absent', [FUI]: 'absent', [PA]: 'absent' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: false });
+  });
+
+  it('a repo-marked target (`repo` set) is checked in that repo ALONE — one gh call', () => {
+    const gh = fakeGh({ [WE]: 'open', [FUI]: 'open', [PA]: 'merged' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })({ ...target, repo: 'plateau-app' })).toEqual({ resolved: true, evidence: 'pr#148:merged@plateau-app' });
+    expect(gh.calls).toEqual([PA]);
+  });
+
+  it('a repo-marked target whose PR is absent in that repo is unknown (null) — never widened to the other repos', () => {
+    const gh = fakeGh({ [WE]: 'merged', [PA]: 'absent' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })({ ...target, repo: 'plateau-app' })).toBeNull();
+    expect(gh.calls).toEqual([PA]);
+  });
+
+  it('the session\'s own ledger entry names the repo → that repo alone, before any cross-repo guess', () => {
+    const gh = fakeGh({ [WE]: 'open', [PA]: 'merged' });
+    const followUps = [{ session: 'abc12345', kind: 'review', target: 'plateau-app#148' }];
+    const resolver = makeGroundTruthResolver({ exec: gh.exec, followUps });
+    expect(resolver(target, bg({ name: 'review-148' }))).toEqual({ resolved: true, evidence: 'pr#148:merged@plateau-app' });
+    expect(gh.calls).toEqual([PA]);
+  });
+
+  it('a ledger entry for a DIFFERENT PR number, or another session, or an unknown repo, is ignored (falls back to every repo)', () => {
+    for (const entry of [
+      { session: 'abc12345', kind: 'review', target: 'plateau-app#149' },
+      { session: 'other-session', kind: 'review', target: 'plateau-app#148' },
+      { session: 'abc12345', kind: 'review', target: 'nope#148' },
+    ]) {
+      const gh = fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'merged' });
+      const out = makeGroundTruthResolver({ exec: gh.exec, followUps: [entry] })(target, bg({ name: 'review-148' }));
+      expect(out).toEqual({ resolved: true, evidence: 'pr#148:merged@we+plateau-app' });
+      expect(gh.calls).toEqual([WE, FUI, PA]);
+    }
+  });
+
+  it('every repo call counts against the cap: a pass that runs out midway answers null (kept), never a partial "merged"', () => {
+    const gh = fakeGh({ [WE]: 'merged', [FUI]: 'merged', [PA]: 'merged' });
+    const resolver = makeGroundTruthResolver({ exec: gh.exec, maxPrViewCalls: 2 });
+    expect(resolver(target)).toBeNull();
+    expect(gh.calls).toEqual([WE, FUI]);
+  });
+
+  it('caches per (PR, repo scope): the same repo-less number costs one 3-repo lookup, a marked one is a separate entry', () => {
+    const gh = fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'merged' });
+    const resolver = makeGroundTruthResolver({ exec: gh.exec });
+    resolver(target); resolver(target);
+    expect(gh.calls).toHaveLength(3);
+    resolver({ ...target, repo: 'we' });
+    expect(gh.calls).toHaveLength(4);
+  });
+
+  it('is deterministic: same answers → byte-identical resolutions across independent resolvers', () => {
+    const run = () => makeGroundTruthResolver({ exec: fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'merged' }).exec })(target);
+    expect(JSON.stringify(run())).toBe(JSON.stringify(run()));
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — passes the session row to the resolver', () => {
+  it('reaps repo-less review-148 (blocked, live) only through the unambiguous cross-repo answer', () => {
+    const row = bg({ name: 'review-148', state: 'blocked', id: '9eff9f54' });
+    const merged = makeGroundTruthResolver({ exec: fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'merged' }).exec });
+    expect(classifySessionReapWithGroundTruth(row, merged)).toEqual({ reap: true, reason: 'ground-truth-pr:pr#148:merged@we+plateau-app' });
+    const ambiguous = makeGroundTruthResolver({ exec: fakeGh({ [WE]: 'open', [FUI]: 'absent', [PA]: 'merged' }).exec });
+    expect(classifySessionReapWithGroundTruth(row, ambiguous)).toEqual({ reap: false, reason: 'not-terminal' });
+    const unreadable = makeGroundTruthResolver({ exec: fakeGh({ [WE]: 'merged', [FUI]: 'error', [PA]: 'merged' }).exec });
+    expect(classifySessionReapWithGroundTruth(row, unreadable)).toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('hands the resolver `(target, session)` so a resolver can read the row', () => {
+    const seen = [];
+    const row = bg({ name: 'review-148', state: 'working' });
+    classifySessionReapWithGroundTruth(row, (target, session) => { seen.push([target, session]); return null; });
+    expect(seen).toEqual([[{ kind: 'pr', id: '148' }, row]]);
+  });
+
+  it('sessionReapPlan over a mixed listing is deterministic — same rows and answers, byte-identical plan', () => {
+    const rows = [
+      bg({ id: 'a1', name: 'review-148', state: 'blocked' }),
+      bg({ id: 'a2', name: 'review-149', state: 'blocked' }),
+      bg({ id: 'a3', name: 'conveyor-9', state: 'done' }),
+    ];
+    const plan = () => sessionReapPlan(rows, { groundTruthFor: makeGroundTruthResolver({ exec: fakeGh({ [WE]: 'merged', [FUI]: 'absent', [PA]: 'merged' }).exec }) });
+    expect(JSON.stringify(plan())).toBe(JSON.stringify(plan()));
+    const { reap, keep } = plan();
+    expect(reap.map((r) => r.session.id)).toEqual(['a1', 'a2', 'a3']); // gh fake answers every number the same way
+    expect(keep).toEqual([]);
+  });
+});
+
+describe('attentionRows — the redispatch-once gap is named `no handler`', () => {
+  const kept = (over) => ({ session: bg({ id: 'stall1', name: 'review-7' }), verdict: 'stalled', action: 'redispatch-once', why: 'quiet 45m', ...over });
+
+  it('only stalled / waiting-permission rows are attention rows; everything else is dropped', () => {
+    const rows = attentionRows([kept(), kept({ verdict: 'progressing', action: 'none' }), kept({ verdict: undefined, action: undefined })]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('`redispatch-once` and `stop-and-redispatch-once` report `handler: none`; `escalate` keeps its handler', () => {
+    expect(attentionRows([kept()])[0]).toEqual({ id: 'stall1', name: 'review-7', verdict: 'stalled', action: 'redispatch-once', why: 'quiet 45m', handler: 'none' });
+    expect(attentionRows([kept({ verdict: 'waiting-permission', action: 'stop-and-redispatch-once' })])[0].handler).toBe('none');
+    expect(attentionRows([kept({ action: 'escalate' })])[0].handler).toBe('land-advance');
+  });
+
+  it('the no-handler set is exactly the two redispatch rungs', () => {
+    expect([...REDISPATCH_ACTIONS].sort()).toEqual(['redispatch-once', 'stop-and-redispatch-once']);
+    expect(hasHandler('redispatch-once')).toBe(false);
+    expect(hasHandler('escalate')).toBe(true);
+    expect(hasHandler('reap')).toBe(true);
+  });
 });
 
 describe('makeGroundTruthResolver — routing, caching, and the gh pr view call cap', () => {
@@ -328,8 +513,8 @@ describe('makeGroundTruthResolver — routing, caching, and the gh pr view call 
     });
     expect(resolver({ kind: 'item', id: '3451' })).toEqual({ resolved: true, evidence: 'backlog#3451:resolved' });
     expect(resolver({ kind: 'item', id: '3451' })).toEqual({ resolved: true, evidence: 'backlog#3451:resolved' });
-    expect(resolver({ kind: 'pr', id: '1862' })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
-    expect(resolver({ kind: 'pr', id: '1862' })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
+    expect(resolver({ kind: 'pr', id: '1862', repo: 'we' })).toEqual({ resolved: true, evidence: 'pr#1862:merged@we' });
+    expect(resolver({ kind: 'pr', id: '1862', repo: 'we' })).toEqual({ resolved: true, evidence: 'pr#1862:merged@we' });
     expect(itemReads).toBe(1); // cached — the second identical lookup cost nothing
     expect(prCalls).toBe(1); // cached — same
   });
@@ -340,8 +525,8 @@ describe('makeGroundTruthResolver — routing, caching, and the gh pr view call 
       maxPrViewCalls: 1,
       exec: () => { prCalls++; return JSON.stringify({ state: 'MERGED' }); },
     });
-    expect(resolver({ kind: 'pr', id: '1' })).toEqual({ resolved: true, evidence: 'pr#1:merged' });
-    expect(resolver({ kind: 'pr', id: '2' })).toBeNull(); // past the cap — never called
+    expect(resolver({ kind: 'pr', id: '1', repo: 'we' })).toEqual({ resolved: true, evidence: 'pr#1:merged@we' });
+    expect(resolver({ kind: 'pr', id: '2', repo: 'we' })).toBeNull(); // past the cap — never called
     expect(prCalls).toBe(1);
   });
 

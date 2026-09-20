@@ -36,6 +36,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { writeFollowUp } from '../../operations/land-advance-io.mjs';
+import { createFileRunStore } from '../../operations/run-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REAPER_CLI = resolve(HERE, '..', 'session-reaper.mjs');
@@ -44,11 +46,15 @@ const EXEC_TIMEOUT_MS = 30_000;
 let binDir;
 let argvFile;
 let ghArgvFile;
+let runsDir;
 
 beforeEach(() => {
   binDir = mkdtempSync(join(tmpdir(), 'we-session-reaper-cli-bin-'));
   argvFile = join(binDir, 'argv.txt');
   ghArgvFile = join(binDir, 'gh-argv.txt');
+  // A private, empty run store: the reaper reads the follow-up ledger, and a test must never see the live one.
+  runsDir = join(binDir, 'runs');
+  mkdirSync(runsDir);
   // THE STUB `claude`. `sh` builtins only, on a `PATH` holding nothing else, so the child has no way to reach a
   // real `claude` — no agent is ever stopped and no real listing is ever read. Appends (`>>`, not `>`) because a
   // real pass shells `claude` MORE THAN ONCE (the list, then one `stop` per reaped session) and every call needs
@@ -94,7 +100,21 @@ beforeEach(() => {
       '#!/bin/sh',
       'printf \'%s\\n\' "$*" >> "$STUB_GH_ARGV_FILE"',
       'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then',
-      '  eval "ans=\\$STUB_GH_PR_$3"',
+      // The `--repo <owner/repo>` argument (absent = the legacy cwd-repo call) picks a per-repo answer,
+      // `STUB_GH_PR_<num>_<WE|FUI|PA>`, falling back to `STUB_GH_PR_<num>`. The value `ABSENT` reproduces gh's
+      // "Could not resolve to a PullRequest" (exit 1); `ERROR` is any other gh failure (exit 1).
+      '  slug=""; prev=""',
+      '  for a in "$@"; do if [ "$prev" = "--repo" ]; then slug="$a"; fi; prev="$a"; done',
+      '  case "$slug" in',
+      '    chalbert/web-everything) sfx=WE ;;',
+      '    chalbert/frontierui) sfx=FUI ;;',
+      '    chalbert/plateau-app) sfx=PA ;;',
+      '    *) sfx=NONE ;;',
+      '  esac',
+      '  eval "ans=\\$STUB_GH_PR_$3_$sfx"',
+      '  if [ -z "$ans" ]; then eval "ans=\\$STUB_GH_PR_$3"; fi',
+      '  if [ "$ans" = "ABSENT" ]; then echo "GraphQL: Could not resolve to a PullRequest with the number of $3. (repository.pullRequest)" >&2; exit 1; fi',
+      '  if [ "$ans" = "ERROR" ]; then echo "gh: HTTP 502" >&2; exit 1; fi',
       // A literal `{}` inside a `${var:-word}` default confuses `sh`'s own brace matching (found running this
       // stub for real, not guessed) — an explicit if/else avoids nesting `{}` inside the expansion syntax.
       '  if [ -n "$ans" ]; then printf \'%s\' "$ans"; else printf \'{}\'; fi',
@@ -122,6 +142,7 @@ function runReaperCli(args = [], { agents = '[]', env = {} } = {}) {
       STUB_ARGV_FILE: argvFile,
       STUB_GH_ARGV_FILE: ghArgvFile,
       STUB_STOP_COUNT_DIR: binDir,
+      OPERATION_RUNS_DIR: runsDir,
       ...env,
     },
   });
@@ -259,10 +280,14 @@ describe('the ground-truth axis, end to end through the real CLI wiring — the 
       env: { WE_BACKLOG_DIR: backlogDir, STUB_GH_PR_1862: JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-03T11:57:41Z' }) },
     });
     const report = JSON.parse(out);
-    expect(report.wouldStop).toEqual([{ id: 'review1', sessionId: 'review-1-full-uuid', name: 'review-1862', reason: 'ground-truth-pr:pr#1862:merged' }]);
-    // `gh pr view 1862 --json state,mergedAt` was the ONE real gh call this pass made — the review-1871 shape
-    // (an unrelated open PR) never happens to be in this listing, so there is nothing else to bound here.
-    expect(readFileSync(ghArgvFile, 'utf8').trim()).toBe('pr view 1862 --json state,mergedAt');
+    expect(report.wouldStop).toEqual([{ id: 'review1', sessionId: 'review-1-full-uuid', name: 'review-1862', reason: 'ground-truth-pr:pr#1862:merged@we+frontierui+plateau-app' }]);
+    // A repo-less `review-1862` names no repo, so the PR number is asked of EVERY constellation repo — pinned
+    // with `--repo` each time (a bare `gh pr view` reads whichever repo the reaper's cwd happens to be).
+    expect(readFileSync(ghArgvFile, 'utf8').trim().split('\n')).toEqual([
+      'pr view 1862 --repo chalbert/web-everything --json state,mergedAt',
+      'pr view 1862 --repo chalbert/frontierui --json state,mergedAt',
+      'pr view 1862 --repo chalbert/plateau-app --json state,mergedAt',
+    ]);
   }, EXEC_TIMEOUT_MS);
 
   it('a `working` review-<PR> session whose PR is still open (the review-1871 shape) is kept, not reaped', () => {
@@ -328,10 +353,14 @@ describe('the ground-truth axis, end to end through the real CLI wiring — the 
       env: { WE_BACKLOG_DIR: backlogDir, STUB_GH_PR_1862: JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-03T11:57:41Z' }) },
     });
     const report = JSON.parse(out);
-    expect(report.wouldStop).toEqual([{ id: 'review1', sessionId: 'review-1-full-uuid', name: 'review-1862', reason: 'ground-truth-pr:pr#1862:merged' }]);
-    // `gh pr view 1862 --json state,mergedAt` was the ONE real gh call this pass made — the review-1871 shape
-    // (an unrelated open PR) never happens to be in this listing, so there is nothing else to bound here.
-    expect(readFileSync(ghArgvFile, 'utf8').trim()).toBe('pr view 1862 --json state,mergedAt');
+    expect(report.wouldStop).toEqual([{ id: 'review1', sessionId: 'review-1-full-uuid', name: 'review-1862', reason: 'ground-truth-pr:pr#1862:merged@we+frontierui+plateau-app' }]);
+    // A repo-less `review-1862` names no repo, so the PR number is asked of EVERY constellation repo — pinned
+    // with `--repo` each time (a bare `gh pr view` reads whichever repo the reaper's cwd happens to be).
+    expect(readFileSync(ghArgvFile, 'utf8').trim().split('\n')).toEqual([
+      'pr view 1862 --repo chalbert/web-everything --json state,mergedAt',
+      'pr view 1862 --repo chalbert/frontierui --json state,mergedAt',
+      'pr view 1862 --repo chalbert/plateau-app --json state,mergedAt',
+    ]);
   }, EXEC_TIMEOUT_MS);
 
   it('a `working` review-<PR> session whose PR is still open (the review-1871 shape) is kept, not reaped', () => {
@@ -364,6 +393,80 @@ describe('the ground-truth axis, end to end through the real CLI wiring — the 
   }, EXEC_TIMEOUT_MS);
 });
 
+
+describe('repo-less PR session names — review-148 is plateau-app#148 (merged), not WE#148 (#3383, found live 2026-09-20)', () => {
+  const review148 = { id: '9eff9f54', sessionId: '9eff9f54-d1d3-44ff-883d-91d4072f17ca', kind: 'background', state: 'blocked', status: 'idle', name: 'review-148' };
+  const run = (gh, { agents = [review148], args = ['--dry-run', '--json'], env = {} } = {}) => {
+    const backlogDir = makeBacklogDir({});
+    try {
+      return runReaperCli(args, { agents: JSON.stringify(agents), env: { WE_BACKLOG_DIR: backlogDir, ...gh, ...env } });
+    } finally {
+      rmSync(backlogDir, { recursive: true, force: true });
+    }
+  };
+  const MERGED = JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-20T12:20:00Z' });
+  const OPEN = JSON.stringify({ state: 'OPEN', mergedAt: null });
+
+  it('UNAMBIGUOUS: merged in WE and plateau-app, absent in frontierui → planned for reap, evidence names both repos', () => {
+    const report = JSON.parse(run({ STUB_GH_PR_148_WE: MERGED, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }));
+    expect(report.wouldStop).toEqual([{ id: '9eff9f54', sessionId: review148.sessionId, name: 'review-148', reason: 'ground-truth-pr:pr#148:merged@we+plateau-app' }]);
+    expect(readFileSync(ghArgvFile, 'utf8').trim().split('\n')).toEqual([
+      'pr view 148 --repo chalbert/web-everything --json state,mergedAt',
+      'pr view 148 --repo chalbert/frontierui --json state,mergedAt',
+      'pr view 148 --repo chalbert/plateau-app --json state,mergedAt',
+    ]);
+  }, EXEC_TIMEOUT_MS);
+
+  it('AMBIGUOUS: merged in plateau-app but the same number is still OPEN in WE → kept', () => {
+    const report = JSON.parse(run({ STUB_GH_PR_148_WE: OPEN, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }));
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('UNREADABLE: one repo\'s lookup fails → kept, even though the others say merged', () => {
+    const report = JSON.parse(run({ STUB_GH_PR_148_WE: MERGED, STUB_GH_PR_148_FUI: 'ERROR', STUB_GH_PR_148_PA: MERGED }));
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('the number exists in no repo → kept', () => {
+    const report = JSON.parse(run({ STUB_GH_PR_148: 'ABSENT' }));
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('the follow-up ledger names the repo → that repo alone (one gh call, in plateau-app), even with WE#148 open', () => {
+    writeFollowUp(
+      { session: review148.id, kind: 'review', target: 'plateau-app#148', launchedAt: '2026-09-20T12:00:00.000Z', deadline: '2026-09-20T13:00:00.000Z' },
+      { store: createFileRunStore(runsDir) },
+    );
+    const report = JSON.parse(run({ STUB_GH_PR_148_WE: OPEN, STUB_GH_PR_148_PA: MERGED }));
+    expect(report.wouldStop.map((w) => w.reason)).toEqual(['ground-truth-pr:pr#148:merged@plateau-app']);
+    // (The verdict axis's own `gh api` PR-signal reads for the ledger entry are a separate lookup, not counted.)
+    const prViews = readFileSync(ghArgvFile, 'utf8').trim().split('\n').filter((l) => l.startsWith('pr view'));
+    expect(prViews).toEqual(['pr view 148 --repo chalbert/plateau-app --json state,mergedAt']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('`--dry-run --json` keeps its shape: the same top-level keys and `wouldStop` entry keys as before this change', () => {
+    const report = JSON.parse(run({ STUB_GH_PR_148: MERGED }));
+    expect(Object.keys(report)).toEqual(['scanned', 'stopped', 'alreadyGone', 'cleared', 'failures', 'anomalies', 'wouldStop', 'kept', 'attention']);
+    expect(Object.keys(report.wouldStop[0])).toEqual(['id', 'sessionId', 'name', 'reason']);
+    expect(report).toMatchObject({ scanned: 1, stopped: 0, failures: 0, anomalies: 0, kept: 0, attention: [] });
+  }, EXEC_TIMEOUT_MS);
+
+  it('is deterministic: two identical passes print byte-identical reports', () => {
+    const gh = { STUB_GH_PR_148_WE: MERGED, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED };
+    expect(run(gh)).toBe(run(gh));
+  }, EXEC_TIMEOUT_MS);
+
+  it('a real (non-dry-run) pass stops the unambiguous one with the SHORT id, and never touches an ambiguous one', () => {
+    run({ STUB_GH_PR_148_WE: MERGED, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }, { args: [] });
+    expect(readFileSync(argvFile, 'utf8').trim().split('\n')).toEqual(['agents --json --all', 'stop 9eff9f54']);
+    rmSync(argvFile);
+    run({ STUB_GH_PR_148_WE: OPEN, STUB_GH_PR_148_FUI: 'ABSENT', STUB_GH_PR_148_PA: MERGED }, { args: [] });
+    expect(readFileSync(argvFile, 'utf8').trim().split('\n')).toEqual(['agents --json --all']);
+  }, EXEC_TIMEOUT_MS);
+});
 
 describe('the #77683 repair — clear-stuck-session driven BY THE TICK ITSELF, no human in the loop', () => {
   // A stub `ps`, ON TOP OF the outer `beforeEach`'s `claude`/`gh` — `clear-stuck-session-io.mjs`'s reader falls

@@ -35,6 +35,23 @@ export function slugForRepoKey(key) {
   return meta.slug.includes('/') ? meta.slug : `chalbert/${meta.slug}`;
 }
 
+/** Does follow-up ledger entry `e` belong to session row `s`? (Matched on the short `id` or the full `sessionId`.) */
+export function sessionOwnsEntry(e, s) {
+  return Boolean(e?.session) && [s?.id, s?.sessionId].includes(e.session);
+}
+
+/**
+ * The constellation repo KEY the session's own ledger entry names for PR `pr` (`target: "plateau-app#148"` →
+ * `plateau-app`), or `null`: no owned entry, an entry for a different PR number, or an unknown repo key. A repo-less
+ * session name (`review-148`) is resolved from this before any cross-repo guess — the ledger is what dispatched it.
+ */
+export function ledgerRepoKeyFor(session, followUps, pr) {
+  const entry = (Array.isArray(followUps) ? followUps : []).find((e) => sessionOwnsEntry(e, session));
+  if (!entry?.target) return null;
+  const [key, ledgerPr] = String(entry.target).split('#');
+  return ledgerPr === String(pr) && slugForRepoKey(key) ? key : null;
+}
+
 /**
  * The newest `review:*` label event or verdict comment (the `<!-- reviewed-sha: … -->` marker) on `pr` in `slug`, as
  * `{reviewSignalAtMs, what}`; `{reviewSignalAtMs: null}` when there is none; `null` when `gh` fails (unknown).
@@ -79,11 +96,10 @@ export function makeEvidenceResolver({
   readCompletionFn = (slug) => tryReadCompletion(slug), prSignalFor = null, maxPrSignalLookups = MAX_PR_SIGNAL_LOOKUPS_PER_TICK,
 } = {}) {
   const mtime = (path) => { try { return statFn(path).mtimeMs; } catch { return null; } };
-  const owns = (e, s) => Boolean(e?.session) && [s.id, s.sessionId].includes(e.session);
   let lookups = 0;
   return function evidenceFor(session) {
     const name = session?.name;
-    const entry = followUps.find((e) => owns(e, session)) ?? null;
+    const entry = followUps.find((e) => sessionOwnsEntry(e, session)) ?? null;
     const evidence = {};
 
     const paths = [];
