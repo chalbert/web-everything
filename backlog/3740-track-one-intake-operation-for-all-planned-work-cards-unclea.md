@@ -1,7 +1,6 @@
 ---
 bornAs: xqbksmb
 kind: epic
-size: 13
 parent: "3383"
 status: open
 scope: ["we:scripts/operations/file-item.mjs", "we:scripts/prototype-tracker.mjs", "we:scripts/capability-search.mjs"]
