@@ -421,10 +421,11 @@ export function groundTruthForItem(id, { backlogDir = DEFAULT_BACKLOG_DIR, readd
 }
 
 /**
- * Read ONE PR's state in ONE repo: `'merged'`, `'not-merged'` (open, or closed unmerged), `'absent'` (the repo has
- * no PR with that number — `gh`'s "Could not resolve to a PullRequest"), or `null` (unreadable: no `gh`, timeout,
- * any other failure). `slug` omitted means `gh`'s own cwd repo — only the legacy {@link groundTruthForPr} default.
- * @returns {'merged'|'not-merged'|'absent'|null}
+ * Read ONE PR's state in ONE repo: `'merged'`, `'closed'` (closed WITHOUT merging — its review/fix target is gone),
+ * `'not-merged'` (still open), `'absent'` (the repo has no PR with that number — `gh`'s "Could not resolve to a
+ * PullRequest"), or `null` (unreadable: no `gh`, timeout, any other failure). `slug` omitted means `gh`'s own cwd
+ * repo — only the legacy {@link groundTruthForPr} default.
+ * @returns {'merged'|'closed'|'not-merged'|'absent'|null}
  */
 function readPrState(pr, { exec = execFileSync, env = process.env, slug = null } = {}) {
   try {
@@ -439,7 +440,8 @@ function readPrState(pr, { exec = execFileSync, env = process.env, slug = null }
     });
     const parsed = JSON.parse(String(out || '{}'));
     const merged = Boolean(parsed?.mergedAt) || String(parsed?.state || '').toUpperCase() === 'MERGED';
-    return merged ? 'merged' : 'not-merged';
+    if (merged) return 'merged';
+    return String(parsed?.state || '').toUpperCase() === 'CLOSED' ? 'closed' : 'not-merged';
   } catch (e) {
     return /could not resolve to a pull ?request|no pull requests? found/i.test(`${e?.stderr ?? ''}\n${e?.message ?? ''}`) ? 'absent' : null;
   }
@@ -459,7 +461,7 @@ export function groundTruthForPr(pr, { exec = execFileSync, env = process.env, r
   if (repo && !slug) return null; // an unknown repo key — fail closed, never fall back to the cwd repo
   const state = readPrState(pr, { exec, env, slug });
   if (state === 'merged') return { resolved: true, evidence: `pr#${pr}:merged${repo ? `@${repo}` : ''}` };
-  return state === 'not-merged' ? { resolved: false } : null; // absent / unreadable — unknown, never reap
+  return state === 'not-merged' || state === 'closed' ? { resolved: false } : null; // absent / unreadable — unknown, never reap
 }
 
 /**
@@ -473,8 +475,10 @@ export function groundTruthForPr(pr, { exec = execFileSync, env = process.env, r
  * plateau-app, kept forever). This resolver NEVER guesses one repo. In order:
  *   1. `target.repo` (a repo-marked name) → that repo alone.
  *   2. else the session's own follow-up ledger entry (`followUps`, injected) when its `target` is `<repo>#<this PR>`.
- *   3. else EVERY constellation repo: done ONLY when the number is merged in every repo where it exists, and
- *      exists in at least one. Not merged anywhere-it-exists, unreadable in ANY repo, or not found in any → kept.
+ *   3. else EVERY constellation repo: done ONLY when NO repo has it open (each repo where it exists holds it merged
+ *      or closed-unmerged, the operator rule of 2026-09-20: only an OPEN PR blocks) and it exists in at least one.
+ *      Open in ANY repo, unreadable in ANY repo, or not found in any → kept. A repo-marked or ledger-named target is
+ *      unchanged: a closed-unmerged PR there stays `resolved:false`.
  * Every `gh` call, in any repo, counts against `maxPrViewCalls`; a pass that runs out answers `null` (kept).
  *
  * @param {{exec?:Function, env?:object, backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function, maxPrViewCalls?:number, followUps?:object[]}} [io]
@@ -502,16 +506,22 @@ export function makeGroundTruthResolver({
     if (repo) {
       const state = stateIn(id, repo);
       if (state === 'merged') return { resolved: true, evidence: `pr#${id}:merged@${repo}` };
-      return state === 'not-merged' ? { resolved: false } : null;
+      return state === 'not-merged' || state === 'closed' ? { resolved: false } : null;
     }
+    // Operator rule (2026-09-20, "closed unmerged is terminal"): in the repo-less cross-repo check ONLY an OPEN PR
+    // blocks. A PR closed without merging has no review/fix target left, so it counts as terminal like a merged one.
     const mergedIn = [];
+    const closedIn = [];
     for (const key of Object.keys(CONSTELLATION_REPOS)) {
       const state = stateIn(id, key);
       if (state === null) return null; // unreadable (or out of budget) in one repo — the answer is unknown
-      if (state === 'not-merged') return { resolved: false }; // live in some repo — never reap
+      if (state === 'not-merged') return { resolved: false }; // still open in some repo — never reap
       if (state === 'merged') mergedIn.push(key);
+      if (state === 'closed') closedIn.push(key);
     }
-    return mergedIn.length ? { resolved: true, evidence: `pr#${id}:merged@${mergedIn.join('+')}` } : { resolved: false };
+    if (!mergedIn.length && !closedIn.length) return { resolved: false }; // exists nowhere — absence is never done
+    const evidence = [mergedIn.length ? `merged@${mergedIn.join('+')}` : '', closedIn.length ? `closed@${closedIn.join('+')}` : ''].filter(Boolean).join(',');
+    return { resolved: true, evidence: `pr#${id}:${evidence}` };
   };
   return function groundTruthFor(target, session = null) {
     const repo = target.kind === 'pr' ? (target.repo ?? (session ? ledgerRepoKeyFor(session, followUps, target.id) : null)) : null;

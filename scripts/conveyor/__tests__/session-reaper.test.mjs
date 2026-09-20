@@ -374,12 +374,27 @@ describe('makeGroundTruthResolver — a repo-less PR name never guesses one repo
     expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: false });
   });
 
-  it('THE LIVE SHAPE (2026-09-20): WE#148 CLOSED unmerged + plateau-app#148 merged → kept. Not merged in every repo where it exists.', () => {
-    // Deliberate, and the one place the operator's rule bites the real `review-148`: a closed-unmerged PR counts as
-    // "not merged". Treating closed as terminal would reap it — an operator decision, pinned here so it is made
-    // consciously (see the reaper-graduate result), not by accident.
+  it('THE LIVE SHAPE (2026-09-20): WE#148 CLOSED unmerged + plateau-app#148 merged → resolved (operator rule: only an OPEN PR blocks)', () => {
+    // The operator ruled "closed unmerged is terminal" on 2026-09-20 (this test pinned the opposite until then, so
+    // the flip was deliberate). It is what reaps the real `review-148`.
     const gh = fakeGh({ [WE]: 'closed', [FUI]: 'absent', [PA]: 'merged' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: true, evidence: 'pr#148:merged@plateau-app,closed@we' });
+  });
+
+  it('closed unmerged in every repo where it exists (none merged, none open) → resolved: the review target is gone', () => {
+    const gh = fakeGh({ [WE]: 'closed', [FUI]: 'absent', [PA]: 'absent' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: true, evidence: 'pr#148:closed@we' });
+  });
+
+  it('closed in one repo but still OPEN in another → kept (only an open PR blocks, and one is open)', () => {
+    const gh = fakeGh({ [WE]: 'closed', [FUI]: 'absent', [PA]: 'open' });
     expect(makeGroundTruthResolver({ exec: gh.exec })(target)).toEqual({ resolved: false });
+  });
+
+  it('a repo-marked target whose PR is closed unmerged stays resolved:false (the rule covers the repo-less cross-repo check only)', () => {
+    const gh = fakeGh({ [PA]: 'closed' });
+    expect(makeGroundTruthResolver({ exec: gh.exec })({ ...target, repo: 'plateau-app' })).toEqual({ resolved: false });
+    expect(gh.calls).toEqual([PA]);
   });
 
   it('UNREADABLE in ANY repo → unknown (null), even when every other repo says merged', () => {
