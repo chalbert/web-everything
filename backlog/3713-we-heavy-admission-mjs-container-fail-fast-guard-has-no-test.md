@@ -1,4 +1,5 @@
 ---
+bornAs: xj9554r
 kind: story
 size: 2
 parent: "3621"

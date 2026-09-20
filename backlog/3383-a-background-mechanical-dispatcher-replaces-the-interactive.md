@@ -3139,7 +3139,7 @@ independent jury review with `review:accepted` / `ready-to-merge` and has since 
 (`we:.operations/review/review-pr-744615b3-.../chalbert-web-everything-2206-verdict.md`) marked 6 non-blocking
 findings `OWED — file it`, all `_[CONFIRMED]_`:
 
-- **Filed as `we:backlog/xt20eug-...md`** (now size 1) — three correctness findings in
+- **Filed as `we:backlog/3714-...md`** (now size 1) — three correctness findings in
   `we:scripts/lib/container-exec.mjs` were reported; re-checked against current `main`, only ONE is still
   live. `execContainerized` still spreads the whole caller `opts` bag (including `opts.env`) into the real
   `execFileSync` call for the container-launching host process, contradicting its own comment that `env` is
@@ -3147,10 +3147,10 @@ findings `OWED — file it`, all `_[CONFIRMED]_`:
   tests: the relative `opts.cwd` now resolves to an absolute path before the `--volume` mount argv is built,
   and `containerImageAvailable` now matches the NAME and TAG columns of the image listing exactly instead of
   prefix/substring matching (that last one was caught by two jurors at the same call site, one bug not two).
-- **Filed as `we:backlog/xu0gnzj-...md`** (size 2) — `we:scripts/lib/container-exec/Containerfile` pulls its
+- **Filed as `we:backlog/3715-...md`** (size 2) — `we:scripts/lib/container-exec/Containerfile` pulls its
   base image by mutable tag (`node:22-alpine`), no `@sha256` digest pin, so a later rebuild can silently get a
   different image than the one this POC's own fidelity evidence was measured against.
-- **Filed as `we:backlog/xj9554r-...md`** (size 2) — `we:scripts/readiness/heavy-admission.mjs`'s
+- **Filed as `we:backlog/3713-...md`** (size 2) — `we:scripts/readiness/heavy-admission.mjs`'s
   `--container` fail-fast guard (~line 425) has no test coverage at all; breaking it would redden nothing.
 
 All three parented under `#3621` (this PR's own decision item), following this session's own two-small-bugs
