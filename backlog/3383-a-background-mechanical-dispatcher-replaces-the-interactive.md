@@ -3865,3 +3865,13 @@ Independent host-load sampler built (`scripts/operations/host-sampler*.mjs`, `lo
 - Unchanged: `buildReport`, `--json`, `--sessions`, `--stamp`, section headings and order, and the verbatim `## Needs you` lines (never wrapped). The `## Done since ...` heading can pass 42 columns; a viewer wraps a heading by itself.
 - Authored by Claude Sonnet 5 directly (no Codex/Gemini). Tests: table assertions updated; new tests for no table rows, every fact present, no line over 60 columns (headings and Needs-you exempt), determinism, and child-session nesting. `scripts/operations/__tests__`, `scripts/conveyor/__tests__`, gate-config and gate-invariants: 168 files, 5061 tests pass.
 - **Owed:** the `/wip` command file (the operator's) was not touched; if its prompt describes the tables, the operator edits it. Not checked on a real phone: 42 columns is a design target, not a measurement.
+
+## Session update (2026-09-20) — session-reaper: repo-less PR names resolved across the constellation, redispatch-once named 'no handler', reaper graduation slice prepared
+
+Session-reaper: two live gaps that left finished sessions listed on 2026-09-20.
+
+- **Repo-less PR names.** `review-148` (plateau-app#148, merged) carries no repo marker, so the reaper's `gh pr view 148` read the wrong repo. The ground-truth resolver now takes the repo from the target, else the session's follow-up ledger entry, else asks EVERY constellation repo (`--repo` pinned): done only when merged in every repo where the number exists; ambiguous, unreadable, absent everywhere or out of `gh` budget keeps the session.
+- **`redispatch-once` has no executor.** Not built. Attention rows now carry `handler: 'none'` and the log says `no handler` (plus a one-line count).
+- **Live result, honest:** a read-only `--dry-run` still KEEPS `review-148`: WE#148 is CLOSED unmerged, so "merged in every repo where it exists" is false. It is also `stalled` (idle 54 min), i.e. a `no handler` row. Reaping it needs the operator's call (treat closed as terminal), pinned by a test.
+- **Graduation:** the slice is prepared as an entry in #3443 (no PR, main untouched). Blockers: `driver-watchdog` chain not on main, `readFollowUps` lives in `land-advance-io`, and main's `sessionTarget` now uses `parseSessionSlug`, so it is a hand-port. Three forks recorded there.
+- Tests: `scripts/conveyor/__tests__` + `skills-src/conveyor/__tests__` + gate-config/invariants 62 files / 1828 pass; `scripts/operations/__tests__` 110 files / 3439 pass. Author: Claude Sonnet 5 directly (no Codex/Gemini).
