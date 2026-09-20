@@ -74,6 +74,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
+import { markWorkerEnv } from '../operations/session-role.mjs';
 
 /**
  * Are these two paths the SAME DIRECTORY? By inode + device, never by comparing the strings.
@@ -778,7 +779,7 @@ export async function judgeSpawn({
   const { stdout, stderr, code, timedOut } = await new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(cli, argv, { cwd: spawnCwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnFn(cli, argv, { cwd: spawnCwd, env: markWorkerEnv(env), stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) {
       reject(new Error(`judge-spawn: could not start \`${cli}\`: ${e.message}`));
       return;

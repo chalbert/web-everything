@@ -39,6 +39,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdirSync, openSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { markWorkerEnv } from './session-role.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — the same reason `dispatch-lane-io.mjs` and
@@ -105,7 +106,7 @@ export function defaultSpawnDetached(argv, { cwd, logPath } = {}, {
 } = {}) {
   ensureDir(dirname(logPath));
   const fd = openLog(logPath);
-  const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd] });
+  const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd], env: markWorkerEnv(process.env) });
   if (typeof child.unref === 'function') child.unref();
   return child;
 }

@@ -7,6 +7,6 @@ export function resolveCoordinationRoot({ env = process.env, home = homedir() } 
 }
 export function coordinationPaths(root = resolveCoordinationRoot()) {
   return { root, runs: join(root, 'runs'), actions: join(root, 'actions'),
-    tickMutex: join(root, 'tick-mutex'), bookkeeping: join(root, 'tick-bookkeeping.json'),
+    tickMutex: join(root, 'tick-mutex'), tickThrottle: join(root, 'tick-throttle.json'), bookkeeping: join(root, 'tick-bookkeeping.json'),
     status: join(root, 'status'), trace: join(root, 'trace') };
 }

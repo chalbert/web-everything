@@ -40,6 +40,7 @@
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import { openSync, closeSync, statSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { markWorkerEnv } from '../operations/session-role.mjs';
 
 export const REPO = process.env.WE_REPO || '/Users/nicolasgilbert/workspace/webeverything';
 export const LANES = process.env.WE_LANES || '/Users/nicolasgilbert/workspace/.lanes/web-everything';
@@ -409,7 +410,7 @@ export async function runAgent({
   let child;
   try {
     child = spawnFn('claude', ['-p', '--permission-mode', 'bypassPermissions', prompt], {
-      cwd: lanePath, stdio: ['ignore', logFd, logFd], detached: true,
+      cwd: lanePath, stdio: ['ignore', logFd, logFd], detached: true, env: markWorkerEnv(process.env),
     });
     writeFileSync(claimPath, JSON.stringify({
       pr: prId, role: tag.includes('-rev-') ? 'rev' : 'fix', pid: child.pid, lane, tag,

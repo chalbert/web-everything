@@ -688,7 +688,7 @@ describe('NO NEW ROUTE FROM CALLER INPUT TO A CHILD\'S ARGV (#3056 is captured, 
     for (const c of spy.calls) {
       expect(c.cli).toBe('claude');
       expect(c.opts.cwd).toBe('/tmp/juror');
-      expect(c.opts.env).toEqual({ A: '1' });
+      expect(c.opts.env).toEqual({ A: '1', WE_CONVEYOR_WORKER: '1' }); // #3383: a juror is a worker
       expect(c.argv).not.toContain('/tmp/juror');
     }
   });

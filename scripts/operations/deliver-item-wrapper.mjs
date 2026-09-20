@@ -103,6 +103,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // never-throwing by construction — see `telemetry-store.mjs`'s purity discipline.
 import { recorderFor, setActiveRecorder, spanAround, resolveTurnCpuAttributes, recordChildResourceUsage } from './telemetry-store.mjs';
 import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+import { markWorkerEnv } from './session-role.mjs';
 import { extractSubmitResult } from './open-pr.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
@@ -1371,7 +1372,7 @@ export function runConvergeEdit(
   // note refused to write one for exactly that reason). The fix wrapper passes `repair`, a WRAPPER-AGENT kind
   // (`dispatch-lane.mjs#WRAPPER_AGENT_KINDS`) — the same half of the value space this default's own
   // `'delivery'` has always been in. The gap that note called an open follow-up is closed.
-  const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: dispatchKind } });
+  const out = runFn('claude', argv, { cwd: lane, env: markWorkerEnv({ ...process.env, WE_DISPATCH_KIND: dispatchKind }) });
   // Additive fields only — see this function's own docblock ("VISIBILITY fix") for why these two are always
   // `requestedProvider !== editorProvider` on a Codex-selected delivery, on purpose, not a bug.
   return { ...parseConvergeEditResult(out), requestedProvider: provider.name, editorProvider: CLAUDE_RESTRICTED_PROVIDER.name };

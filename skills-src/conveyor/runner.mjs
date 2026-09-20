@@ -313,7 +313,7 @@ export async function runLoop({
 /** Build the real `tickOnce` effect: shell `tick-core.mjs`, pipe the bookkeeping payload in on STDIN, parse
  *  `{ decisions, nextState }` off STDOUT. This is the SAME core the main-session SKILL loop shells (§2b) — the
  *  runner and the SKILL can never disagree on a guard, because there is exactly ONE core. */
-function makeCliTickOnce({ tickCorePath, repo = null }) {
+export function makeCliTickOnce({ tickCorePath, repo = null }) {
   return async (payload) => {
     const { execFileSync } = await import('node:child_process');
     const args = [tickCorePath];
@@ -1144,12 +1144,13 @@ export function appendDecisionTrace(traceDir, ctx, entries) {
  *  judgment layer executes (the runner spends no model context, so it surfaces them — #2701 clause 3). Also
  *  writes the durable external status file every tick (see {@link writeDriverStatus}) and appends the tick's
  *  decision trace (see {@link appendDecisionTrace}), both regardless of `json`. */
-function makeCliEmit({ json = false, recorder = null, statusPath = null, traceDir = null } = {}) {
+function makeCliEmit({ json = false, recorder = null, statusPath = null, traceDir = null, quiet = false } = {}) {
   const tel = recorder || createTelemetryRecorder({ kind: 'runner', traceId: `runner-${process.pid}` });
   return (surface, ctx) => {
     emitTickMetrics(tel, surface, ctx);
     if (statusPath) writeDriverStatus(statusPath, ctx, surface);
     if (traceDir) appendDecisionTrace(traceDir, ctx, surface.decisionTrace);
+    if (quiet) return; // #3383 tick-once: status + trace files only, nothing on stdout
     if (json) { process.stdout.write(JSON.stringify({ tick: ctx.tick, ...surface }) + '\n'); return; }
     const { dispatch } = surface;
     const counts = `${dispatch.builds.length} build · ${dispatch.prepareScope.length + dispatch.prepareDecision.length} prepare · ${dispatch.fixes.length} fix · ${dispatch.ciHeals.length} heal · ${surface.armWatchers.length} watch`;
@@ -1158,6 +1159,24 @@ function makeCliEmit({ json = false, recorder = null, statusPath = null, traceDi
       process.stdout.write(`  ↳ surface for judgment layer: ${counts}\n`);
     }
     for (const n of surface.notes) process.stdout.write(`  ${n.text || JSON.stringify(n)}\n`);
+  };
+}
+
+/** #3383 — The REAL per-tick effects (tick core, emit, dispatch pass, mechanical passes, coordination report),
+ *  shared by the resident runner's `main` and the one-shot `scripts/conveyor/tick-once.mjs` so neither builds a
+ *  second path. `quiet` keeps the status file and decision trace but prints nothing on stdout. The loop-only
+ *  knobs (sleep, interval, maxTicks, coordination) stay with the caller. */
+export function buildCliTickEffects({ scriptsDir, tickCorePath, repo = null, json = false, statusPath = null, traceDir = null, hiccupSession, quiet = false } = {}) {
+  return {
+    reportCoordination: (rows) => {
+      for (const row of rows.filter((r) => r.reason && r.reason !== 'held')) {
+        process.stderr.write(`conveyor coordination: ${row.reason} ${row.record?.resource ?? ''}${row.error ? ` — ${row.error}` : ''}\n`);
+      }
+    },
+    tickOnce: makeCliTickOnce({ tickCorePath, repo }),
+    emit: makeCliEmit({ json, statusPath, traceDir, quiet }),
+    dispatchPass: makeCliDispatchPass({ scriptsDir, repo }),
+    mechanicalPasses: makeCliMechanicalPasses({ scriptsDir, repo, hiccupSession }),
   };
 }
 
@@ -1389,16 +1408,8 @@ async function main(argv) {
 
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = () => ({
+    ...buildCliTickEffects({ scriptsDir: SCRIPTS_DIR, tickCorePath: TICK_CORE, repo, json, statusPath: STATUS_PATH, traceDir: TRACE_DIR, hiccupSession }),
     coordination: createTickCoordination(),
-    reportCoordination: (rows) => {
-      for (const row of rows.filter((r) => r.reason && r.reason !== 'held')) {
-        process.stderr.write(`conveyor coordination: ${row.reason} ${row.record?.resource ?? ''}${row.error ? ` — ${row.error}` : ''}\n`);
-      }
-    },
-    tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
-    emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
-    dispatchPass: makeCliDispatchPass({ scriptsDir: SCRIPTS_DIR, repo }),
-    mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     intervalMs,
     maxTicks,

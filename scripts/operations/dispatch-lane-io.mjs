@@ -57,6 +57,7 @@ import { guardedDispatch } from './action-dispatch.mjs';
 import { createActionStore } from './action-store.mjs';
 import { actionResource } from './action-record.mjs';
 import { DRIVER_ID } from './tick-mutex.mjs';
+import { markWorkerEnv } from './session-role.mjs';
 import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -1284,6 +1285,8 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
 export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {}) {
   return exec('claude', argv, {
     encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
+    // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
+    env: markWorkerEnv(opts.env ?? process.env),
   });
 }
 
@@ -1314,6 +1317,7 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
 export function spawnAgentToCompletion(argv, opts = {}, io = {}) {
   return spawnToCompletion('claude', argv, {
     encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
+    env: markWorkerEnv(opts.env ?? process.env),
   }, io);
 }
 

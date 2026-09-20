@@ -281,6 +281,27 @@ export const DEFAULT_FIX_TTL_TICKS = 5;
 export const DEFAULT_FIX_RETRY_CAP = 3;
 /** Default TTL (in ticks) for the CI-HEAL guard's died-before-repush backstop (SKILL §3c-ci, #2666). */
 export const DEFAULT_CI_HEAL_TTL_TICKS = 5;
+/**
+ * #3383 — What ONE TTL "tick" is worth in wall-clock time: the resident runner's default interval
+ * (`DEFAULT_TICK_INTERVAL_MS` in `skills-src/conveyor/runner.mjs`, 120 s), which is what the tick-count TTLs
+ * above were calibrated against. Hook-driven `tick-once` ticks arrive at a VARIABLE rate (throttled to >= 60 s,
+ * but seconds apart in a burst of prompts and hours apart when idle), so a bare tick count is no longer a
+ * stable clock: in a burst a guard could expire in half the intended time, and after the last prompt of the day
+ * it would never expire at all.
+ */
+export const TTL_MS_PER_TICK = 120_000;
+/** A guard's spawn is stamped with both the tick counter (legacy) and the wall clock (when the caller has one). */
+const spawnStamp = (tick, now) => (Number.isFinite(now) ? { spawnedTick: tick, spawnedAt: now } : { spawnedTick: tick });
+/**
+ * Has a guard's TTL run out? WALL-CLOCK when the guard carries `spawnedAt` and the caller supplied `now` (and the
+ * clock has not gone backwards past the stamp): `ttlTicks * TTL_MS_PER_TICK` ms. Otherwise the original tick
+ * count — a guard persisted before this change, or a caller with no clock, behaves exactly as it always did.
+ * With the resident runner at its 120 s interval the two are the same TTL.
+ */
+export function guardTtlElapsed(g, { tick = 0, now = null, ttlTicks }) {
+  if (Number.isFinite(g?.spawnedAt) && Number.isFinite(now) && now >= g.spawnedAt) return now - g.spawnedAt >= ttlTicks * TTL_MS_PER_TICK;
+  return tick - (g?.spawnedTick ?? tick) >= ttlTicks;
+}
 /** Default per-PR CI-heal attempt cap before a red/BEHIND PR is surfaced for `/review` (SKILL §3c-ci, #2666). */
 export const DEFAULT_CI_HEAL_RETRY_CAP = 3;
 /** Default idle-stop window: queue-empty + no operator feedback for this long → stop (SKILL §6). */
@@ -456,7 +477,7 @@ export function durableBuildNums(sessions) {
  * @param {{ lanes?:object[], queue?:object[], tick:number, ttlTicks?:number, returnedBuildNums?:Array<*> }} ctx
  * @returns {{ live:Array<object>, retired:Array<{num:*, lane:*, reason:string, note?:boolean}> }}
  */
-export function retireBuildGuards(buildGuards, { lanes = [], queue = [], tick = 0, ttlTicks = DEFAULT_BUILD_TTL_TICKS, returnedBuildNums = [] } = {}) {
+export function retireBuildGuards(buildGuards, { lanes = [], queue = [], tick = 0, now = null, ttlTicks = DEFAULT_BUILD_TTL_TICKS, returnedBuildNums = [] } = {}) {
   const leasedLanes = new Set((Array.isArray(lanes) ? lanes : []).map((l) => String(l?.lane)));
   const clearedNums = clearedQueueNums(queue);
   const returned = new Set((Array.isArray(returnedBuildNums) ? returnedBuildNums : []).map(normNum));
@@ -468,7 +489,7 @@ export function retireBuildGuards(buildGuards, { lanes = [], queue = [], tick = 
     const claimed = leasedLanes.has(String(g.lane)) || !clearedNums.has(key);
     if (claimed) { retired.push({ num: g.num, lane: g.lane, reason: 'claimed' }); continue; }
     if (returned.has(key)) { retired.push({ num: g.num, lane: g.lane, reason: 'returned' }); continue; }
-    if (tick - (g.spawnedTick ?? tick) >= ttlTicks) {
+    if (guardTtlElapsed(g, { tick, now, ttlTicks })) {
       retired.push({ num: g.num, lane: g.lane, reason: 'ttl', note: true });
       continue;
     }
@@ -520,7 +541,7 @@ export function filterLaunches(launches, liveBuildGuards) {
  * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], prs?:object[], tick:number, ttlTicks?:number }} ctx
  * @returns {{ live:Array<object>, retired:Array<{num:*, kind:string, reason:string, note?:boolean}> }}
  */
-export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = [], investigations = [], prs = [], tick = 0, ttlTicks = DEFAULT_PREPARE_TTL_TICKS } = {}) {
+export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = [], investigations = [], prs = [], tick = 0, now = null, ttlTicks = DEFAULT_PREPARE_TTL_TICKS } = {}) {
   const unshapedNums = new Set((Array.isArray(unshaped) ? unshaped : []).map((u) => normNum(u.num)));
   const unpreparedNums = new Set(
     (Array.isArray(decisions) ? decisions : []).filter((d) => d?.prepared !== true).map((d) => normNum(d.num)),
@@ -540,7 +561,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
     const sawPr = g.sawPr === true || openPr;
     if (!pendingNums.has(key)) { retired.push({ num: g.num, kind, reason: 'scope-committed' }); continue; }
     if (sawPr && !openPr) { retired.push({ num: g.num, kind, reason: 'pr-terminal' }); continue; }
-    if (!sawPr && tick - (g.spawnedTick ?? tick) >= ttlTicks) {
+    if (!sawPr && guardTtlElapsed(g, { tick, now, ttlTicks })) {
       retired.push({ num: g.num, kind, reason: 'ttl', note: true });
       continue;
     }
@@ -561,7 +582,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, investigationSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0 } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, now = null } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -580,7 +601,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
     consumedLanes.push(lane);
     guardNums.add(key); // a decision and a scope item never share a num, but stay safe against a duplicate row
     sink.push({ num, lane });
-    newGuards.push({ num, kind, lane, spawnedTick: tick, sawPr: false });
+    newGuards.push({ num, kind, lane, ...spawnStamp(tick, now), sawPr: false });
   };
 
   for (const u of Array.isArray(unshaped) ? unshaped : []) if (u?.num != null) plan(u.num, 'prepare', scopeSpawns);
@@ -626,7 +647,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
  * @param {{ prs?:object[], launchedNums?:Array<*>, liveFixGuards?:object[], fixAttempts?:object, prRearmCounts?:object, retryCap?:number, availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ spawns:Array<{pr:number, num:*, lane:*}>, newGuards:Array<object>, fixAttempts:object, consumedLanes:Array<*>, notes:Array<object> }}
  */
-export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [], fixAttempts = {}, prRearmCounts = {}, retryCap = DEFAULT_FIX_RETRY_CAP, availableLanes = [], tick = 0 } = {}) {
+export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [], fixAttempts = {}, prRearmCounts = {}, retryCap = DEFAULT_FIX_RETRY_CAP, availableLanes = [], tick = 0, now = null } = {}) {
   const launched = new Set((Array.isArray(launchedNums) ? launchedNums : []).map(normNum));
   const guardedPrs = new Set((Array.isArray(liveFixGuards) ? liveFixGuards : []).map((g) => Number(g.pr)));
   const nextAttempts = { ...(fixAttempts && typeof fixAttempts === 'object' ? fixAttempts : {}) };
@@ -659,7 +680,7 @@ export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [],
     // decided downstream by dispatch-lane.mjs, and confirmed back into fixAttempts via retireFixGuards' claim
     // detection next tick. Bumping here counted phantom, guard-refused dispatches as real bounces.
     spawns.push({ pr, num: p.num, lane });
-    newGuards.push({ pr, num: p.num, lane, spawnedTick: tick, claimed: false });
+    newGuards.push({ pr, num: p.num, lane, ...spawnStamp(tick, now), claimed: false });
   }
   return { spawns, newGuards, fixAttempts: nextAttempts, consumedLanes, notes };
 }
@@ -688,7 +709,7 @@ export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [],
  * @param {{ prs?:object[], lanes?:object[], tick:number, ttlTicks?:number }} ctx
  * @returns {{ live:Array<object>, retired:Array<{pr:number, num:*, reason:string, claimed:boolean, note?:boolean}>, newlyClaimed:Array<{pr:number, num:*}> }}
  */
-export function retireFixGuards(fixGuards, { prs = [], lanes = [], tick = 0, ttlTicks = DEFAULT_FIX_TTL_TICKS } = {}) {
+export function retireFixGuards(fixGuards, { prs = [], lanes = [], tick = 0, now = null, ttlTicks = DEFAULT_FIX_TTL_TICKS } = {}) {
   const byPr = new Map();
   for (const p of Array.isArray(prs) ? prs : []) if (p?.prNumber != null) byPr.set(Number(p.prNumber), p);
   const leasedLanes = new Set((Array.isArray(lanes) ? lanes : []).map((l) => String(l?.lane)));
@@ -703,7 +724,7 @@ export function retireFixGuards(fixGuards, { prs = [], lanes = [], tick = 0, ttl
     const prRow = byPr.get(Number(g.pr));
     const stillChanges = prRow && isOpenPr(prRow) && hasReviewChanges(prRow);
     if (!stillChanges) { retired.push({ pr: Number(g.pr), num: g.num, reason: 'resolved', claimed }); continue; }
-    if (tick - (g.spawnedTick ?? tick) >= ttlTicks) {
+    if (guardTtlElapsed(g, { tick, now, ttlTicks })) {
       retired.push({ pr: Number(g.pr), num: g.num, reason: claimed ? 'ttl' : 'ttl-unclaimed', note: true, claimed });
       continue;
     }
@@ -747,7 +768,7 @@ export function clearTerminalFixAttempts(fixAttempts, prs) {
  * @param {{ prs?:object[], launchedNums?:Array<*>, liveCiHealGuards?:object[], ciHealAttempts?:object, prCiHealCounts?:object, retryCap?:number, availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ spawns:Array<{pr:number, num:*, lane:*, reason:string}>, newGuards:Array<object>, ciHealAttempts:object, consumedLanes:Array<*>, notes:Array<object> }}
  */
-export function planCiHealSpawns({ prs = [], launchedNums = [], liveCiHealGuards = [], ciHealAttempts = {}, prCiHealCounts = {}, retryCap = DEFAULT_CI_HEAL_RETRY_CAP, availableLanes = [], tick = 0 } = {}) {
+export function planCiHealSpawns({ prs = [], launchedNums = [], liveCiHealGuards = [], ciHealAttempts = {}, prCiHealCounts = {}, retryCap = DEFAULT_CI_HEAL_RETRY_CAP, availableLanes = [], tick = 0, now = null } = {}) {
   const launched = new Set((Array.isArray(launchedNums) ? launchedNums : []).map(normNum));
   const guardedPrs = new Set((Array.isArray(liveCiHealGuards) ? liveCiHealGuards : []).map((g) => Number(g.pr)));
   const nextAttempts = { ...(ciHealAttempts && typeof ciHealAttempts === 'object' ? ciHealAttempts : {}) };
@@ -778,7 +799,7 @@ export function planCiHealSpawns({ prs = [], launchedNums = [], liveCiHealGuards
     nextAttempts[pr] = attempts + 1;
     const reason = isRedCi(p) ? 'red-ci' : 'behind';
     spawns.push({ pr, num: p.num, lane, reason });
-    newGuards.push({ pr, num: p.num, lane, spawnedTick: tick });
+    newGuards.push({ pr, num: p.num, lane, ...spawnStamp(tick, now) });
   }
   return { spawns, newGuards, ciHealAttempts: nextAttempts, consumedLanes, notes };
 }
@@ -794,7 +815,7 @@ export function planCiHealSpawns({ prs = [], launchedNums = [], liveCiHealGuards
  * @param {{ prs?:object[], tick:number, ttlTicks?:number }} ctx
  * @returns {{ live:Array<object>, retired:Array<{pr:number, num:*, reason:string, note?:boolean}> }}
  */
-export function retireCiHealGuards(ciHealGuards, { prs = [], tick = 0, ttlTicks = DEFAULT_CI_HEAL_TTL_TICKS } = {}) {
+export function retireCiHealGuards(ciHealGuards, { prs = [], tick = 0, now = null, ttlTicks = DEFAULT_CI_HEAL_TTL_TICKS } = {}) {
   const byPr = new Map();
   for (const p of Array.isArray(prs) ? prs : []) if (p?.prNumber != null) byPr.set(Number(p.prNumber), p);
   const live = [];
@@ -804,7 +825,7 @@ export function retireCiHealGuards(ciHealGuards, { prs = [], tick = 0, ttlTicks 
     const prRow = byPr.get(Number(g.pr));
     const stillTarget = prRow && isCiHealTarget(prRow);
     if (!stillTarget) { retired.push({ pr: Number(g.pr), num: g.num, reason: 'resolved' }); continue; }
-    if (tick - (g.spawnedTick ?? tick) >= ttlTicks) {
+    if (guardTtlElapsed(g, { tick, now, ttlTicks })) {
       retired.push({ pr: Number(g.pr), num: g.num, reason: 'ttl', note: true });
       continue;
     }
@@ -1097,12 +1118,12 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
 
   // 1. RETIRE stale guards FIRST — a launch is then filtered against only still-live guards.
   const build = retireBuildGuards(bookkeeping.buildGuards, {
-    lanes, queue, tick, ttlTicks: cfg.buildTtlTicks, returnedBuildNums: signals.returnedBuildNums,
+    lanes, queue, tick, now, ttlTicks: cfg.buildTtlTicks, returnedBuildNums: signals.returnedBuildNums,
   });
   const prepare = retirePrepareGuards(bookkeeping.prepareGuards, {
-    unshaped, decisions, investigations: investigationsGuardPending, prs, tick, ttlTicks: cfg.prepareTtlTicks,
+    unshaped, decisions, investigations: investigationsGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
   });
-  const fix = retireFixGuards(bookkeeping.fixGuards, { prs, lanes, tick, ttlTicks: cfg.fixTtlTicks });
+  const fix = retireFixGuards(bookkeeping.fixGuards, { prs, lanes, tick, now, ttlTicks: cfg.fixTtlTicks });
   // #3454 — bump fixAttempts HERE, once per guard, exactly when retireFixGuards confirms a REAL attempt (its
   // assigned lane was observed leased) — never speculatively at plan time (that was the phantom-attempt bug).
   // Re-primes off the durable re-arm-comment floor on the first post-restart claim, same as the old plan-time
@@ -1114,7 +1135,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     const current = Number(fixAttempts[pr]) || 0;
     fixAttempts = { ...fixAttempts, [pr]: Math.max(current, durableFloor) + 1 };
   }
-  const ciHeal = retireCiHealGuards(bookkeeping.ciHealGuards, { prs, tick, ttlTicks: cfg.ciHealTtlTicks });
+  const ciHeal = retireCiHealGuards(bookkeeping.ciHealGuards, { prs, tick, now, ttlTicks: cfg.ciHealTtlTicks });
   const ciHealAttempts = clearTerminalCiHealAttempts(bookkeeping.ciHealAttempts, prs);
 
   // 1b. #3403 — the DURABLE build-guard floor. `build.live` alone is only the in-session bookkeeping, wiped by
@@ -1137,14 +1158,17 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const priorDurableSpawnedTick = new Map(
     (Array.isArray(bookkeeping.buildGuards) ? bookkeeping.buildGuards : [])
       .filter((g) => g && g.lane == null && g.num != null)
-      .map((g) => [normNum(g.num), g.spawnedTick]),
+      .map((g) => [normNum(g.num), { spawnedTick: g.spawnedTick, spawnedAt: g.spawnedAt }]),
   );
   const durableOnly = durableBuildNums(liveAgentSessions)
     .filter((num) => !build.live.some((g) => normNum(g.num) === num));
   const durableBuildGuards = durableOnly.map((num) => ({
     num,
     lane: null,
-    spawnedTick: priorDurableSpawnedTick.has(num) ? priorDurableSpawnedTick.get(num) : tick,
+    // Sticky: keep BOTH the prior tick stamp and (#3383) the prior wall-clock stamp; never re-stamp on re-synthesis.
+    ...(priorDurableSpawnedTick.has(num)
+      ? { spawnedTick: priorDurableSpawnedTick.get(num).spawnedTick, ...(Number.isFinite(priorDurableSpawnedTick.get(num).spawnedAt) ? { spawnedAt: priorDurableSpawnedTick.get(num).spawnedAt } : {}) }
+      : spawnStamp(tick, now)),
   }));
   const buildLive = [...build.live, ...durableBuildGuards];
 
@@ -1162,7 +1186,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     spawn: buildBudget.admitted,
     suppressed: [...guardFiltered.suppressed, ...buildBudget.overflow.map((l) => ({ num: l.num, lane: l.lane, by: 'capacity-cap' }))],
   };
-  const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, spawnedTick: tick }));
+  const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, ...spawnStamp(tick, now) }));
   const liveBuildGuards = [...buildLive, ...newBuildGuards];
 
   // #3403 FOLLOW-UP — the STATUS LINE's "building" tally must not count a durable-floor entry (`lane: null`)
@@ -1176,7 +1200,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // that never gets claimed" shape #3454 already established for the fix guard, applied here to the ONE guard
   // kind (the durable floor) whose synthesis previously had no TTL of its own to inherit.
   const countableBuildGuards = liveBuildGuards.filter(
-    (g) => g.lane != null || tick - (Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick) < cfg.buildTtlTicks,
+    (g) => g.lane != null || !guardTtlElapsed({ ...g, spawnedTick: Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick }, { tick, now, ttlTicks: cfg.buildTtlTicks }),
   );
 
   // 3. The free lanes a prepare/fix may take = free lanes MINUS this tick's build launches MINUS every live
@@ -1225,6 +1249,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     livePrepareGuards: prepare.live,
     availableLanes,
     tick,
+    now,
   });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
@@ -1244,7 +1269,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    attempt is spawned to count) rather than being recomputed by `planFixSpawns`.
   const fixPlan = kindPaused('fix')
     ? { spawns: [], newGuards: [], fixAttempts, consumedLanes: [], notes: [] }
-    : planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
+    : planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick, now });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
   const fixConsumed = new Set(fixPlan.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !fixConsumed.has(String(l)));
@@ -1255,7 +1280,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    #3609 — held by the same manual dispatch-pause as steps 4/6; `ciHealAttempts` passes through UNCHANGED.
   const ciHealPlan = kindPaused('ci-heal')
     ? { spawns: [], newGuards: [], ciHealAttempts, consumedLanes: [], notes: [] }
-    : planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
+    : planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick, now });
   const liveCiHealGuards = [...ciHeal.live, ...ciHealPlan.newGuards];
 
   // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs. Each armed entry
