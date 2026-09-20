@@ -146,6 +146,14 @@ describe('deriveUnshaped — armed rows with no predicted scope (the auto-prepar
     expect(deriveDecisions(buildQueue, ['10', '20'])).toEqual([{ num: '10', prepared: false, preparedDate: null }]); // the decision only
   });
 
+  it('EXCLUDES a scope-less investigation — it is needs-investigation, NOT unshaped (mirrors the investigation-before-scope precedence, #3567)', () => {
+    // An investigation carries no scope; without the guard it would satisfy the empty-scope test and surface as
+    // unshaped, so planPrepareSpawns' shared guard set would spawn a wrong-kind prepare-SCOPE agent for it first and
+    // silently skip the real investigate spawn.
+    const buildQueue = { queue: [{ num: '10', kind: 'investigation' }, { num: '20', kind: 'story' }] };
+    expect(deriveUnshaped(buildQueue, ['10', '20'])).toEqual([{ num: '20', scope: null }]); // the story only
+  });
+
   it('EXCLUDES a scope-less feature — it is needs-slice, NOT unshaped, exactly like an epic (#1312 review regression, #2998)', () => {
     // Regression coverage: a scope-less `kind:feature` previously satisfied the empty-scope test and would have
     // false-surfaced here (aiming a prepare-SCOPE agent at a container) because only `kind === 'epic'` was excluded.

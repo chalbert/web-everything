@@ -39,6 +39,11 @@ After the xoywo06 incident repaired through #2335, nine more cards stranded on m
 | xu0gnzj | #3715 | #2210 | 18:11 | Drain |
 | xyp1wsl | #3716 | #2032 | 17:24 | Drain |
 
+**Later update (2026-09-19, VERIFIED):** the same nine were subsequently numbered on main by a drain
+commit (`11bc4e922`, "drain: JIT-number x93vxdr→#3708 … xyp1wsl→#3716 at land (#2288)") — to exactly the
+numbers above — when PR #2058 landed. The hashes sat on main until an unrelated later land's tail happened to
+sweep them: a late, accidental repair, which confirms the tail is not a guarantee.
+
 All four PRs have “📌 Merge trace … merged by drain (session unknown)” and labels `ready-to-merge` +
 `review:accepted`; none received a following `drain: JIT-number …` commit. The earlier UI/bare-merge
 explanation is refuted. **UNVERIFIED:** the exact failing step; drain stderr was not recorded.

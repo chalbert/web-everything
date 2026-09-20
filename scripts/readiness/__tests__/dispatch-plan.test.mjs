@@ -453,6 +453,56 @@ describe('dispatchPlan — a cleared kind:decision is HELD "needs-decision", nev
   });
 });
 
+describe('dispatchPlan — a cleared kind:investigation is HELD "needs-investigation", never built (#3567)', () => {
+  // An investigation is NOT build work either — it is a single dispatched investigator (investigate ->
+  // synthesize -> report), never a two-phase prepare/present lifecycle the way a decision is. Like a decision,
+  // it must not fall through to the scope gate (it carries no build touch-set) and must never land in launch.
+  it('holds a scope-less investigation "needs-investigation" even in a fully-idle pool with free lanes', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'investigation' }],
+      leases: [],
+      freeLanes: [2, 3],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-investigation' }]);
+  });
+
+  it('holds an investigation "needs-investigation" even when it somehow carries a scope', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'investigation', scope: ['src/a/'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-investigation' }]);
+  });
+
+  it('blocked takes precedence over needs-investigation', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'investigation', openBlockers: ['9'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'blocked' }]);
+  });
+
+  it('needs-investigation holds the investigation while a disjoint story on the same tick still launches — never into spawnBuilds\' backing list', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'investigation' },
+        { num: 2, kind: 'story', scope: ['src/b/'] },
+      ],
+      leases: [],
+      freeLanes: [7],
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 7 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-investigation' }]);
+    // #1 never appears anywhere in `launch` — the list `decisions.spawnBuilds` is built from — regardless of
+    // how many free lanes were available.
+    expect(plan.launch.some((l) => l.num === 1)).toBe(false);
+  });
+});
+
 describe('dispatchPlan — the UNSCOPED AUTO-PREPARE hold (#2613, ruled 2026-07-22)', () => {
   // An unscoped item is "assume-overlaps-everything" and is NEVER launched to build — not even alone into an idle
   // pool. It is ALWAYS held `unshaped-no-scope` so the /conveyor skill auto-prepares its scope upstream; once that
