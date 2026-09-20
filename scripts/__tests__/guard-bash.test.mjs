@@ -819,6 +819,99 @@ describe('guard-bash — sed/tee/perl write-shape tables + ReDoS bound (#2108 re
   });
 });
 
+describe('guard-bash — differential write-shape table (#2108 review r5)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+  const inPlaceCases = [];
+  for (const prog of ['sed', 'gsed', 'perl']) {
+    for (const inplace of ['-i', '-i.bak', '-i~', ...(prog === 'perl' ? ['-pi'] : [])]) {
+      for (const script of ['-e s/x/y/', '-es/x/y/', '-nes/x/y/', "-e's/x/y/'",
+        ...(prog === 'perl' ? [] : ['--expression=s/x/y/'])]) {
+        inPlaceCases.push(`${prog} ${inplace} ${script} backlog/a.md`);
+      }
+      if (prog !== 'perl') {
+        for (const script of ['-fx.sed', '-ne s/x/y/', '-nf x.sed', '--file=x.sed', '-es/a/b/ -es/c/d/']) {
+          inPlaceCases.push(`${prog} ${inplace} ${script} backlog/a.md`);
+        }
+      }
+    }
+  }
+  it.each(inPlaceCases)('denies parsed in-place target: %s', denied);
+  it.each([
+    'perl -pi -es/x/z/ backlog/a.md',
+    `perl -pe 'BEGIN{$^I=".bak"}' backlog/a.md`,
+    `perl -e 'open(F,">",shift); print F 1' backlog/a.md`,
+    `perl -e 'open(F,">",$ARGV[0])' backlog/a.md`,
+    `perl -e 'unlink shift' backlog/a.md`,
+    `perl -e 'open(F,shift)' '>backlog/a.md'`,
+    `perl -e '$INPLACE_EDIT=""' backlog/a.md`,
+    `perl -e '$^I=""; @ARGV=("backlog/a.md"); while(<>){s/x/y/; print}'`,
+    `perl -e 'unlink "backlog/a.md"'`,
+    `perl -e 'chmod 0644, "backlog/a.md"'`,
+    `perl -e 'truncate("backlog/a.md",0)'`,
+    `perl -e 'sysopen(F,"backlog/a.md",1)'`,
+    `perl -e 'open(F,"|tee backlog/a.md")'`,
+    `perl -e 'open(F,"<",shift); open(G,">",shift)' backlog/a.md`,
+    `perl -e 'open(F,"<","|tee backlog/a.md")'`,
+    'perl fix.pl backlog/a.md',
+    'perl -I lib fix.PM reports/a.md',
+    'perl fix.t backlog/a.md',
+    `sed '1e cp /tmp/x backlog/a.md' f`,
+    `sed -n '1e tee backlog/a.md' f`,
+    `sed 's/x/y/e' backlog/a.md`,
+    `sed 's/x/y/eg' backlog/a.md`,
+    `sed 's|x|y|ge; # backlog/a.md' f`,
+    `sed -n -f - f <<< 'w backlog/a.md'`,
+    `sed -n -f /dev/stdin f <<< 'w backlog/a.md'`,
+    `sed -n --file=- f <<< 'w backlog/a.md'`,
+    `sed -n -f - f <<< '1e tee backlog/a.md'`,
+    `sed -i -e s/x/y/ -- backlog/a.md`,
+    `perl -fi s/x/y/ backlog/a.md`, // perl -f is not a script option
+  ])('denies differential write shape: %s', denied);
+  it.each([
+    'sed -n -es/x/y/p backlog/a.md',
+    'sed -es/x/y/ backlog/a.md',
+    'perl -es/x/z/ backlog/a.md',
+    `perl -ne 'print' backlog/a.md`,
+    `perl -pe 's/x/y/' backlog/1.md`,
+    `perl -ne 'print if /x/' reports/123-foo.md`,
+    `perl -0p -e 's/x/y/' reports/a.md`,
+    `perl -ne 'print if /rename|unlink|link/' backlog/a.md`, // builtin NAMES inside a regex are not calls
+    `perl -ne 'print "rename\\n" if /mkdir/' reports/a.md`,
+    `perl -Ilib -e 'print 1' backlog/a.md`,
+    `perl -I lib -e 'print 1' backlog/a.md`,
+    `perl -e 'open(F,"<",shift); print <F>' backlog/a.md`,
+    `perl -e 'open(F,"<:utf8",shift); open(G,"<",shift)' backlog/a.md`,
+    'perl backlog/1.md',
+    'perl fix.other backlog/a.md', // accepted script-extension limit
+    'sed -f script.sed backlog/a.md',
+    'sed -i -es/x/y/ /tmp/x.md',
+    'perl -pi -es/x/z/ /tmp/x.md',
+    `sed -n -f - backlog/a.md <<< 'p'`,
+    `sed -- -i backlog/a.md`,
+    `sed -n '1,120p' backlog/3390-guard-bash-sed-tee-perl-corpus-fp.md`,
+    `sed -n '/^## /p' ~/workspace/web-everything/backlog/3390-x.md`,
+    `cd ~/workspace/x && sed -n '1,40p' backlog/2108-y.md | head`,
+  ])('allows read-only / scratch twin and reviewer-shell regression: %s', allowed);
+
+  // Exercise each new regex through the public scanner, including escaped near misses.
+  it.each([
+    ['SED_SUB_E', `sed 's/${'\\'.repeat(2000)}' backlog/a.md`],
+    ['SED_EXEC', `sed '/${'\\/'.repeat(1000)}' backlog/a.md`],
+    ['SED_EXEC whitespace', `sed '${' '.repeat(100)}# backlog/a.md' f`],
+    ['PERL_MUTATING', `perl -e '${'\\'.repeat(2000)} $INPLACE_EDI' backlog/a.md`],
+    ['PERL_WRITE_PRIMITIVE', `perl -e '${'\\'.repeat(2000)} system "read backlog/a.md"'`],
+    ['PERL_OPEN_WORD', `perl -e '${'openly '.repeat(400)}' backlog/a.md`],
+    ['PERL_READ_OPEN', `perl -e 'open(${ ' '.repeat(2000)}F,"<",shift)' backlog/a.md`],
+    ['PERL_OPEN_STRING', `perl -e 'open(F,"<","${'\\'.repeat(2000)}")' backlog/a.md`],
+    ['script extension', `perl ${'a'.repeat(2000)}.other backlog/a.md`],
+  ])('bounds %s scanning', (_name, cmd) => {
+    const start = performance.now();
+    reason(cmd);
+    expect(performance.now() - start).toBeLessThan(250);
+  });
+});
+
 describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
   const blockedMerge = (c) => expect(decide(c), c).toMatch(/assertMayMerge/);
   const allowed = (c) => expect(decide(c), c).toBeNull();
