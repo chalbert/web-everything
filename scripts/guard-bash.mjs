@@ -1360,14 +1360,22 @@ function fileOperands(args, optsWithArg = new Set()) {
 // #2108 review r4 — the two lazy groups MUST be disjoint: `(?:\\.|(?!\1).)` let a backslash match BOTH branches, so
 // a run of N escapes backtracked ~Fibonacci(N) ways (n=40 took seconds, n=48 half a minute) in a hook that runs
 // on every sed segment. `[^\\]` in the second branch makes each backslash consumable exactly one way.
-const SED_SUB_W = /s(.)(?:\\.|(?!\1)[^\\])*?\1(?:\\.|(?!\1)[^\\])*?\1[a-zA-Z0-9]*w[ \t]+(\S.*)$/;
-const SED_SUB_E = /s(.)(?:\\.|(?!\1)[^\\])*?\1(?:\\.|(?!\1)[^\\])*?\1[a-zA-Z0-9]*e/;
+// #2108 review r6 — an `s` COMMAND never follows a letter (`;s`, `{s`, ` s`, `1s`, `/x/s`, `!s`), so a start
+// inside a run of letters (`sssss…`, `sasasa…`) is not one: without this lookbehind every `s` of such a run was a
+// start that rescanned the rest of the run for flags (quadratic). The one letter that may precede it is an
+// address flag (`/x/Is/a/b/w f`, `/x/Ms/…`), allowed explicitly.
+// The flag run is only sed's real `s` flags (g p i I m M N): a wider `[a-zA-Z0-9]*` let a digit-delimited run
+// (`s1s1s1…`) rescan the rest of the run from every start; `s` is not a flag, so a flag scan now ends at the next one.
+const SED_SUB_START = String.raw`(?:(?<![A-Za-z])|(?<=\/[IM]{1,2}))s`;
+const SED_SUB_W = new RegExp(String.raw`${SED_SUB_START}(.)(?:\\.|(?!\1)[^\\])*?\1(?:\\.|(?!\1)[^\\])*?\1[gpiImM0-9]*w[ \t]+(\S.*)$`);
+const SED_SUB_E = new RegExp(String.raw`${SED_SUB_START}(.)(?:\\.|(?!\1)[^\\])*?\1(?:\\.|(?!\1)[^\\])*?\1[gpiImM0-9]*e`);
 // #2108 review r3 — the address form also writes via a NEGATED address (`/pat/!w file`, `3,5!w file`),
 // via GNU's `first~step` extension (`0~3w file`), and via the uppercase `W` command (writes only the
 // pattern space's FIRST line, GNU sed) — none of which the original lowercase-only, negation-blind regex
 // recognized, so a real write through any of those three shapes silently bypassed the guard.
 const SED_ADDRESS = String.raw`(?:\$|\d+(?:~\d+)?|\/(?:\\.|[^\/\\])*\/[IM]*)`;
-const SED_ADDR_W = new RegExp(String.raw`(?:^|[;{])[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?)?[ \t]*!?[ \t]*[wW][ \t]+(\S.*)$`);
+// #2108 review r6 — optional addresses/negation own their trailing spaces, avoiding cubic whitespace splits.
+const SED_ADDR_W = new RegExp(String.raw`(?:^|[;{])[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*)?(?:![ \t]*)?[wW][ \t]+(\S.*)$`);
 
 const SED_EXEC = new RegExp(String.raw`(?:^|[;{}\s])(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?)?!?e[ \t]+\S`);
 
@@ -1427,6 +1435,18 @@ const PERL_OPEN_WORD = /\bopen\b/g;
 // open and bound it by the next open/semicolon, avoiding repeated scans of overlapping suffixes.
 const PERL_READ_OPEN = /^\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*<(?::[^"'|\s]+)?\s*\1\s*[,)]/;
 const PERL_OPEN_STRING = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g;
+// #2108 review r6 — corpus mentions need a read-only vocabulary; a write deny-list cannot cover arbitrary calls.
+const PERL_READ_ONLY = new Set(`print say printf open close eof while until if unless else elsif for foreach
+  my our local chomp chop lc uc lcfirst ucfirst length index substr split join map grep sort reverse keys values
+  scalar defined exists last next return sprintf and or not eq ne lt gt le ge cmp x`.split(/\s+/));
+function perlHasUnknownCode(script) {
+  const code = script.replace(PERL_OPEN_STRING, (literal) =>
+    literal.startsWith('"') && ['@{', '${\\', '$('].some((marker) => literal.includes(marker)) ? literal : ' ');
+  for (const [identifier] of code.matchAll(/(?<![$@%\w])[A-Za-z_]\w*(?:::\w+)*/g)) {
+    if (!PERL_READ_ONLY.has(identifier) && !/^[A-Z][A-Z0-9_]*$/.test(identifier)) return true;
+  }
+  return false;
+}
 function perlMutates(script, pipeOnly = false) {
   if (!pipeOnly && PERL_MUTATING.test(script)) return true;
   const opens = [...script.matchAll(PERL_OPEN_WORD)];
@@ -1443,15 +1463,15 @@ function corpusTarget(s) {
 }
 
 /** Corpus paths a perl script writes by a route `perlWriteTargets` cannot parse. Fail closed: the script
- *  text itself must MENTION a corpus path AND either redirect into it, call a write primitive, or open some
- *  file for write (so a computed/variable-held path — `$f="backlog/a.md"; open(F,">",$f)` — is still caught).
- *  A read-only `open(F,"<","backlog/x.md")` or a bare `print "backlog/x.md"` matches none of those. Pure. */
+ *  text itself must MENTION a corpus path and pass every write check plus the read-only vocabulary.
+ *  Computed/variable-held writes are caught; a read-only `open(F,"<","backlog/x.md")` or a bare
+ *  `print "backlog/x.md"` remains allowed. Pure. */
 function perlFailClosedTargets(scriptText) {
   const s = String(scriptText);
   if (!CORPUS_MENTION.test(s)) return [];
   const redirects = [...s.matchAll(SHELL_REDIRECT_CORPUS)].map((m) => m[1]);
   if (redirects.length) return redirects;
-  if (PERL_WRITE_PRIMITIVE.test(s) || PERL_WRITE_OPEN.test(s) || perlMutates(s, true)) {
+  if (PERL_WRITE_PRIMITIVE.test(s) || PERL_WRITE_OPEN.test(s) || perlMutates(s, true) || perlHasUnknownCode(s)) {
     const named = s.match(new RegExp(CORPUS_PATH));
     // A computed path (`"backlog/"."x.md"`) has no literal `.md` name to return; report the corpus dir it
     // mentions with a placeholder leaf so the deny arm's CORPUS_MD test still sees a corpus write.
@@ -1464,7 +1484,8 @@ function perlFailClosedTargets(scriptText) {
  *  with `>`, `>>`, `+>`, `+>>`, or `+<` (optionally with an encoding layer like `>:utf8`), PATH a quoted literal. */
 const PERL_OPEN_3ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)(?::\S+)?\s*\1\s*,\s*(["'])([^$]*?)\3/g;
 /** 2-arg perl open: open(FH, ">path") / open(FH, ">>path") / open FH, ">> path". Strip leading spaces after mode. */
-const PERL_OPEN_2ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)\s*([^$]*?)\1/g;
+// #2108 review r6 — consume leading path whitespace once, rather than retrying it inside an unterminated path.
+const PERL_OPEN_2ARG = /\bopen\s*(?:\(\s*)?(?:my\s+)?\$?[A-Za-z0-9_]+\s*,\s*(["'])\s*(\+>>|\+>|\+<|>>|>)\s*(?!\s)([^$]*?)\1/g;
 
 /** The string-literal file path(s) a Perl script writes via `open(...)`. Pure.
  *  Handles 3-arg open(FH, MODE, PATH) and 2-arg open(FH, ">path").
@@ -1490,12 +1511,15 @@ function perlWriteTargets(scriptText) {
 /** Parse editor options once: argument-taking letters own the rest of a cluster, and `i`
  * owns its backup suffix. Quoted words and words after `--` are operands; empty BSD suffixes
  * are skipped. Script files are recorded but never read by the guard. */
+// #2108 review r6 — GNU long options accept only unambiguous prefixes, including argument-taking options.
+const SED_LONG_OPTIONS = `binary debug expression file follow-symlinks help in-place line-length null-data
+  zero-terminated posix quiet regexp-extended sandbox separate silent unbuffered version`.split(/\s+/);
 function editorOperands(args, prog) {
   const files = [], texts = [];
   const perl = prog === 'perl';
   const scriptLetters = perl ? 'eE' : 'ef';
   const argTaking = perl ? 'eEIMmFxCVdD' : 'efl';
-  let scriptFromFlag = false, stdinScript = false, inPlace = false, endFlags = false;
+  let scriptFromFlag = false, stdinScript = false, inPlace = false, endFlags = false, varFlags = false;
   const scriptArg = (letter, value) => {
     scriptFromFlag = true;
     if (!perl && letter === 'f') stdinScript ||= value === '-' || value === '/dev/stdin';
@@ -1507,7 +1531,10 @@ function editorOperands(args, prog) {
     if (!endFlags && !a.quoted && word.startsWith('-') && word.length > 1) {
       if (word.startsWith('--')) {
         const eq = word.indexOf('=');
-        const name = eq < 0 ? word : word.slice(0, eq);
+        const flag = eq < 0 ? word : word.slice(0, eq);
+        varFlags ||= /[$`]/.test(flag);
+        const matches = perl ? [] : SED_LONG_OPTIONS.filter((option) => option.startsWith(flag.slice(2)));
+        const name = matches.length === 1 ? `--${matches[0]}` : flag;
         if (!perl && (name === '--expression' || name === '--file')) {
           scriptArg(name === '--file' ? 'f' : 'e', eq < 0 ? args[++i]?.text : word.slice(eq + 1));
         } else if (!perl && name === '--line-length' && eq < 0) i += 1;
@@ -1516,6 +1543,7 @@ function editorOperands(args, prog) {
       }
       for (let j = 1; j < word.length; j++) {
         const ch = word[j];
+        varFlags ||= ch === '$' || ch === '`';
         if (ch === 'i') { inPlace = true; break; }
         if (!argTaking.includes(ch)) continue;
         let value = word.slice(j + 1);
@@ -1525,9 +1553,13 @@ function editorOperands(args, prog) {
       }
       continue;
     }
-    if (word !== '') files.push(word);
+    if (word !== '') {
+      // #2108 review r6 — unresolved operand expansions may supply flags; literal quoted scripts remain readable.
+      varFlags ||= /[$`]/.test(word) && (!a.quoted || /^(?:\$\{[^}]+\}|\$[A-Za-z_]\w+|\$\(.*\))$/.test(word));
+      files.push(word);
+    }
   }
-  return { files, texts, scriptFromFlag, stdinScript, inPlace };
+  return { files, texts, scriptFromFlag, stdinScript, inPlace, varFlags };
 }
 
 function perlScriptTexts(editor) { return editor.texts; }
@@ -1585,6 +1617,7 @@ function rawFileWriteTargets(segment, resolvedOptions = false) {
     args.push(resolvedOptions && arg.text.startsWith('-') ? { ...arg, quoted: false } : arg);
   }
   const editor = ['sed', 'gsed', 'perl'].includes(prog) ? editorOperands(args, prog) : null;
+  if (editor?.varFlags) out.push(...editor.files.filter((f) => CORPUS_MENTION.test(f)).map(corpusTarget));
   if (editor?.inPlace) {
     out.push(...(editor.scriptFromFlag ? editor.files : editor.files.slice(1)));
   }
@@ -1616,7 +1649,8 @@ function rawFileWriteTargets(segment, resolvedOptions = false) {
     const scripts = perlScriptTexts(editor);
     for (const script of scripts) out.push(...perlWriteTargets(script), ...perlFailClosedTargets(script));
     if (scripts.some((script) => perlMutates(script))) out.push(...editor.files.filter((file) => CORPUS_MENTION.test(file)).map(corpusTarget));
-    if (!scripts.length && !CORPUS_MENTION.test(editor.files[0] || '') && /\.(?:pl|pm|t)$/i.test(editor.files[0] || '')) {
+    // #2108 review r6 — stdin scripts are as opaque as script files (heredoc bodies are not scanned).
+    if (!scripts.length && !CORPUS_MENTION.test(editor.files[0] || '') && (editor.files[0] === '-' || /\.(?:pl|pm|t)$/i.test(editor.files[0] || ''))) {
       out.push(...editor.files.slice(1).filter((file) => CORPUS_MENTION.test(file)).map(corpusTarget));
     }
   }

@@ -2600,3 +2600,135 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
     expect(decide('node scripts/lane-pool.mjs acquire --lane=3')).toBeNull();
   });
 });
+
+describe('guard-bash — every script-scanning regex is linear on hostile runs (#2108 review r6)', () => {
+  const runs = [' ', '\t', '\\', ';', '{', '/', '\\/', '; ', '{ ', ';/', 's', 'w ', 'e '];
+  const wrappers = [
+    (p) => `sed -n '${p}x' backlog/a.md`,
+    (p) => `sed -n ';${p}' backlog/a.md`,
+    (p) => `sed -n '{${p}' backlog/a.md`,
+    (p) => `sed -n -e '${p}' backlog/a.md`,
+    (p) => `sed 's/a/b/${p}' backlog/a.md`,
+    (p) => `perl -ne '${p}' backlog/a.md`,
+    (p) => `perl -e 'open(${p}' backlog/a.md`,
+    (p) => `perl -e 'print "${p}' backlog/a.md`,
+    (p) => `perl -e 'open(F,">${p}' backlog/a.md`,
+    (p) => `perl -e 'open(F,">", "${p}' backlog/a.md`,
+    // Corpus text reaches the allow-list, including literal blanking and interpolated code.
+    (p) => `perl -e 'print "backlog/a.md"; ${p}'`,
+    (p) => `perl -e 'print "backlog/a.md @{${p}}"'`,
+  ];
+  it.each(wrappers.flatMap((wrap, w) => runs.map((run) => [w, JSON.stringify(run), wrap(run.repeat(3000))])))
+    ('bounds wrapper %s with run %s', (_wrapper, _run, cmd) => {
+      const start = performance.now();
+      fileWriteTargets(cmd);
+      expect(performance.now() - start).toBeLessThan(250);
+    });
+  it.each([
+    "sed -n '1s/a/b/w backlog/x.md' f",
+    "sed -n '/x/Is/a/b/w backlog/x.md' f",
+    "sed -n '/x/IMs/a/b/w backlog/x.md' f",
+    "sed -n '$!s/a/b/w backlog/x.md' f",
+    "sed 's/a/b/e' backlog/x.md",
+    "sed '/x/Is/a/b/e' backlog/x.md",
+  ])('the s-command start bound still finds a real write/exec: %s', (cmd) => {
+    expect(reason(cmd), cmd).toMatch(/locus-prefix/);
+  });
+  it('bounds the exact reviewer whitespace repro', () => {
+    const cmd = `sed -n '${' '.repeat(3000)}x' f`;
+    const start = performance.now();
+    fileWriteTargets(cmd);
+    expect(performance.now() - start).toBeLessThan(250);
+  });
+});
+
+describe('guard-bash — GNU-abbreviated long options and variable-held flags fail closed (#2108 review r6)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+  it.each([
+    ...['--in', '--i', '--in-pl', '--in-pla', '--in-place', '--in-place=.bak'].map((flag) => `sed ${flag} s/x/y/ backlog/a.md`),
+    'gsed --in-pl s/x/y/ backlog/a.md',
+    'sed --i --expr=s/x/y/ backlog/a.md',
+    'sed --in --expression s/x/y/ backlog/a.md',
+    'sed --in --fil=x.sed backlog/a.md',
+    'sed --in --file x.sed backlog/a.md',
+    'sed --expr=s/x/y/w\\ backlog/a.md f',
+    "sed --expr='w backlog/x.md' f",
+    'sed --l 80 --in s/x/y/ backlog/a.md',
+    'sed --line-length=80 --i s/x/y/ backlog/a.md',
+    "sed --e 'w backlog/a.md' f",
+    'sed --in --fi x.sed backlog/a.md',
+    'sed $OPTS s/x/y/ backlog/a.md',
+    'sed ${I} s/x/y/ backlog/a.md',
+    'sed "$OPTS" s/x/y/ backlog/a.md',
+    'sed -$X s/x/y/ backlog/a.md',
+    "perl $OPTS -e 's/x/y/' backlog/a.md",
+    'sed --$L s/x/y/ backlog/a.md',
+    'sed --in-$Y s/x/y/ backlog/a.md',
+    'sed -n$X s/x/y/ backlog/a.md',
+    'sed "${I}" s/x/y/ backlog/a.md',
+    'sed "$(flags)" s/x/y/ backlog/a.md',
+    'sed `flags` s/x/y/ backlog/a.md',
+    "perl -n$X -e 's/x/y/' reports/a.md",
+  ])('denies hidden editor flags or abbreviated writes: %s', denied);
+  it.each([
+    'sed --follow-symlinks -n p backlog/a.md',
+    'sed --fo -n p backlog/a.md',
+    'sed --quiet --expr=p backlog/a.md',
+    'sed --in s/x/y/ /tmp/x.md',
+    'sed $OPTS s/x/y/ /tmp/x.md',
+    "sed -n '$p' backlog/a.md",
+    "sed -n 's/x$/y/' backlog/a.md",
+    "sed -n -e '$p' backlog/a.md",
+    "perl -ne 'print $x' backlog/a.md",
+    "perl -e'print $x' backlog/a.md",
+    "sed -n '${START}p' backlog/a.md",
+    'sed --f -n p backlog/a.md',
+    'sed --unknown -n p backlog/a.md',
+    'sed --in --f s/x/y/ /tmp/x.md',
+    "sed -ne'$p' backlog/a.md",
+    "sed --expr='$p' backlog/a.md",
+    'sed -f $SCRIPT backlog/a.md',
+    "perl -I $LIB -e 'print' backlog/a.md",
+    "perl -Mfeature=say -e 'say' backlog/a.md",
+  ])('allows read-only and scratch twins: %s', allowed);
+});
+
+describe('guard-bash — a perl script naming a corpus path must be provably read-only (#2108 review r6)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+  it.each([
+    ...[
+      'sed -i s/x/y/ backlog/a.md', 'perl -pi -e s/x/y/ backlog/a.md',
+      'git checkout -- backlog/a.md', 'patch backlog/a.md < x.diff', 'rm backlog/a.md',
+    ].map((cmd) => `perl -e 'system("${cmd}")'`),
+    `perl -e 'system("printf","x",">","backlog/a.md")'`,
+    ...['append', 'edit', 'edit_lines', 'touch', 'remove', 'spew_utf8'].map((method) =>
+      `perl -e 'path("backlog/a.md")->${method}("x")'`),
+    `perl -e 'File::Slurper::write_text("backlog/a.md","x")'`,
+    `perl -e 'IO::File->new("backlog/a.md","w")'`,
+    `perl -e 'File::Path::remove_tree("backlog/a.md")'`,
+    `perl -MFile::Slurper=write_text -e 'write_text("backlog/a.md","x")'`,
+    `perl -e 'eval "unlink q(backlog/a.md)"'`,
+    `perl -e '&system("rm backlog/a.md")'`,
+    ...['exec', 'qx', 'require', 'use', 'do', 'unlink'].map((name) => `perl -e '${name} "backlog/a.md"'`),
+    ...['s', 'm', 'y', 'tr', 'q', 'qq', 'qw', 'qr'].map((op) => `perl -e '${op}/backlog\/a.md/'`),
+    `perl -e 'print "@{[system(q(rm backlog/a.md))]}"'`,
+    'perl -e \'print "${\\system(q(rm backlog/a.md))}"\'',
+    `perl -e 'print "$(system(q(rm backlog/a.md)))"'`,
+    "perl - backlog/a.md <<'X'\nopen(F,\">\",shift)\nX",
+  ])('denies corpus code outside the read-only vocabulary: %s', denied);
+  it.each([
+    `perl -e 'open(F,"<","backlog/x.md"); while(<F>){print}'`,
+    `perl -e 'print "see backlog/x.md\\n"'`,
+    `perl -e 'open(IN, "<", "reports/a.md"); my @l = <IN>; print scalar(@l)'`,
+    `perl -e 'open(F,"<","backlog/x.md"); print <F>'`,
+    `perl -e 'print "see backlog/x.md"'`,
+    `perl -e 'open(F,">","/tmp/x.txt")'`,
+    `perl -e 'my $system = "backlog/a.md"; print $system'`,
+    `perl -e 'print "system backlog/a.md"'`,
+    `perl -e 'print "backlog/a.md", "escaped \\"quote\\""'`,
+    'perl - /tmp/x.md',
+    "perl - /tmp/x.md <<'X'\nopen(F,\">\",shift)\nX",
+  ])('allows provably read-only corpus code and scratch stdin: %s', allowed);
+});
