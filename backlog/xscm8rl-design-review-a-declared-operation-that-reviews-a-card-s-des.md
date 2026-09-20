@@ -9,7 +9,7 @@ tags: []
 
 # design-review: a declared operation that reviews a card's design through the jury panel, records it on the card, and gates clearing
 
-A card's design is reviewed by hand today: the orchestrator pastes the card into a jury workflow launch, picks a care level by feel, and copies the findings back. This epic declares that as one operation, `design-review`. It reads a card, sets the care level from the card's own fields, runs the jury panel directly (no launcher subagent relaying a result), writes the verdict and findings onto the card together with the hash of the design it judged, and feeds a gate, so a design-first card cannot be cleared for the conveyor until a review has accepted its current design. Design-first, filed uncleared: this card is itself design-reviewed before any slice is built.
+Card designs are reviewed by hand today: the orchestrator pastes the card into a jury workflow launch, picks a care level by feel, and copies the findings back. This epic declares that as one operation, `design-review`. It sets the care level from the card's fields, runs the jury panel directly, writes the verdict, findings and the hash of the design it judged onto the card, and feeds a gate: a design-first card cannot be cleared for the conveyor until a review accepted its current design. Filed uncleared; this card is itself design-reviewed before any slice is built.
 
 Epic under #3383. Sized as an epic, not a story: it spans a pure core, an operation, a card writer, three clearing paths, a skill and a notice, so no single story of size 8 or less holds it. The proposed slices are at the end.
 
