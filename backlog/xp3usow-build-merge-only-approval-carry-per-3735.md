@@ -39,11 +39,15 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
 ## DESIGN TO SETTLE
 
 1. **Where the probe lives and what it costs.** The probe (resolve `reviewed-sha`, walk to it, one hermetic
-   `git merge-tree --write-tree` per merge, one `git diff --name-only` per merge) sits beside
+   `git merge-tree --write-tree` per merge, one `git diff --name-only --no-renames` per merge) sits beside
    `computeNetDiffText` in we:scripts/merge-ai-prs.mjs. Decide the walk's cap (how many merges before it gives
    up as `unproven`) and whether it runs only when the SHA route already said "stale".
 2. **The reviewed file set.** Which net-diff read supplies `reviewedPaths` (the PR's own files at the reviewed
-   SHA), and how it behaves when that read fails (rule 7: no carry).
+   SHA), and how it behaves when that read fails (rule 7: no carry). **Settled for renames:** both file sets
+   (`reviewedPaths` and main's side per merge) are read with `--no-renames`, so a rename contributes both its
+   old and its new path (rule 4). The replay itself pins `-c merge.renames=true` (git's default) with the other
+   hermetic pins of rule 3; rename-following in the replay cannot hide an overlap, because the overlap test
+   never rename-collapses.
 3. **The carry comment.** Its heading, and the exact markers: source `reviewed-sha`, destination head,
    `carried-human-from` for a human clearance, never `cleared-human`.
 4. **The re-park comment add-on** showing the conflicted files and the changed `+/-` lines on a conflicted
@@ -65,6 +69,19 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
    - A merge commit with a hand edit (tree ≠ git's merge): re-parks.
    - A disconnected chain (each entry a clean merge of main, the last entry's PR parent equal to
      `reviewed-sha`, but some `chain[i].prParent !== chain[i+1].sha`): `mergeOnlyCarry` returns no carry.
+   - Merge of a non-main branch: no carry. The merge's other parent is an unreviewed side branch (another PR's
+     tip, or a scratch branch) that is not an ancestor of `origin/main` and only adds new files sharing no path
+     with the reviewed PR, so the merge is clean, tree-equal and has no file overlap: the carry is refused
+     (rule 1, "the other is an ancestor of `origin/main`").
+   - An octopus merge (three or more parents) of main and the PR: no carry (rule 1, "exactly two parents").
+   - A live head whose walk never reaches `reviewed-sha` (the reviewed commit is not an ancestor of the head,
+     e.g. history rewritten, every commit on the walked path a clean merge of main): no carry (rule 1, "the
+     path must end at `reviewed-sha`").
+   - A merge that `git merge-tree` reports as conflicted (non-zero exit), even when the author committed git's
+     conflicted result verbatim so the trees are equal: no carry (rule 1, "must exit 0").
+   - Rename overlap: the PR modified a file A; main renamed A to a new path B; the author's merge is clean and
+     tree-equal. Main's side, read with `--no-renames`, lists A, so the PR re-parks (rule 4). Fails if either
+     file set is read with rename detection.
    - The head moves between probe and stamp (the replay proves H1; H2 is pushed before the restamp child runs):
      `--to=restamp --expect-head=H1` refuses, nothing is stamped, and the next pass judges H2 from scratch. A
      restamp with no `--expect-head` also refuses.
