@@ -149,6 +149,87 @@ describe('one case per verdict', () => {
   });
 });
 
+describe('#3721 finished-but-alive: a result file or completion record reaps only a session at its prompt, quiet past the grace period', () => {
+  const doneRecord = (agent) => ({ status: 'done', startedAt: new Date(agent.startedAt).toISOString(), updatedAt: new Date(agent.startedAt + 5 * MIN).toISOString() });
+  const finished = (quietMin, over = {}) => live({ transcriptMtimeMs: NOW - quietMin * MIN, resultFiles: [resultAfter(unstick, 142000, 'jobs/unstick-2072.result.md')], ...over });
+
+  it('a finished session quiet for the grace period is reaped, and `why` names the proof and the quiet time', () => {
+    const r = classify(unstick, finished(DEFAULT_STALL_MINUTES));
+    expect(r).toMatchObject({ verdict: 'finished-unreaped', action: 'reap' });
+    expect(r.why).toContain('result file');
+    expect(r.why).toContain(`quiet ${DEFAULT_STALL_MINUTES} min`);
+  });
+  it('the same session one minute INSIDE the grace period is kept (a fresh finish may still be talking)', () => {
+    const r = classify(unstick, finished(DEFAULT_STALL_MINUTES - 1));
+    expect(r).toMatchObject({ verdict: 'progressing', action: 'none' });
+    expect(r.why).toContain('grace');
+  });
+  it('a completion record proves the same way, and is held to the same grace', () => {
+    const completion = doneRecord(review148);
+    expect(classify(review148, live({ transcriptMtimeMs: NOW - 2 * MIN, completion })).action).toBe('none');
+    expect(classify(review148, live({ transcriptMtimeMs: NOW - 40 * MIN, completion }))).toMatchObject({ verdict: 'finished-unreaped', action: 'reap' });
+  });
+  it('MID-TURN is never reaped: `status: busy` keeps a session with a result file, however old its transcript (the live `priority-order` shape)', () => {
+    for (const state of ['blocked', 'working']) {
+      const r = classify({ ...unstick, state, status: 'busy' }, finished(600));
+      expect(r).toMatchObject({ verdict: 'progressing', action: 'none' });
+      if (state === 'blocked') expect(r.why).toContain('busy'); // `working` + busy never reaches the quiet branch at all
+    }
+  });
+  it('an unknown status (no `status` field) keeps a session with a result file: unknown means keep', () => {
+    const { status, ...noStatus } = unstick;
+    expect(classify(noStatus, finished(600))).toMatchObject({ verdict: 'progressing', action: 'none' });
+  });
+  it('an unknown idle time (no transcript mtime) keeps a session with a result file', () => {
+    const r = classify(unstick, live({ resultFiles: [resultAfter(unstick, 142000, 'jobs/unstick-2072.result.md')] }));
+    expect(r).toMatchObject({ verdict: 'progressing', action: 'none' });
+    expect(r.why).toContain('idle time unknown');
+  });
+  it('a `started` completion record and a result file older than the session prove nothing: still kept inside the stall window', () => {
+    const started = { status: 'started', startedAt: new Date(unstick.startedAt).toISOString(), updatedAt: new Date(unstick.startedAt).toISOString() };
+    expect(classify(unstick, live({ transcriptMtimeMs: NOW - 5 * MIN, completion: started }))).toMatchObject({ verdict: 'progressing', action: 'none' });
+    expect(classify(unstick, live({ transcriptMtimeMs: NOW - 5 * MIN, resultFiles: [{ path: 'old', mtimeMs: unstick.startedAt - MIN }] }))).toMatchObject({ verdict: 'progressing', action: 'none' });
+  });
+  it('a session waiting on the operator (`waitingFor`) is never reaped, whatever its result file says', () => {
+    expect(classify({ ...unstick, status: 'waiting', waitingFor: 'user input' }, finished(600))).toMatchObject({ verdict: 'progressing', action: 'none' });
+    expect(classify({ ...unstick, status: 'waiting', waitingFor: 'permission prompt' }, finished(600)).verdict).toBe('waiting-permission');
+  });
+  it('an interactive session is never reaped, whatever its record says', () => {
+    const operator = { pid: 1, kind: 'interactive', name: 'unstick-2072', status: 'idle', startedAt: unstick.startedAt };
+    expect(classify(operator, finished(600))).toMatchObject({ verdict: 'progressing', action: 'none' });
+  });
+  it('a live registry `done` session is unchanged: reaped with no result file and no idle time', () => {
+    expect(classify({ ...unstick, state: 'done', status: 'busy' }, live())).toMatchObject({ verdict: 'finished-unreaped', action: 'reap' });
+  });
+  it('`graceMinutes` is its own knob: a longer one keeps what the default would reap, a shorter one reaps sooner, and it defaults to `stallMinutes`', () => {
+    const ev = finished(20);
+    expect(classifySession(unstick, ev, { now: NOW }).action).toBe('none');
+    expect(classifySession(unstick, ev, { now: NOW, graceMinutes: 10 }).action).toBe('reap');
+    expect(classifySession(unstick, ev, { now: NOW, stallMinutes: 15 }).action).toBe('reap');
+    expect(classifySession(unstick, finished(40), { now: NOW, graceMinutes: 60 }).action).toBe('none');
+  });
+  it('one quiet threshold, two outcomes: quiet past it is `finished-unreaped` with a proof and `stalled` without one', () => {
+    expect(classify(unstick, live({ transcriptMtimeMs: NOW - 40 * MIN })).verdict).toBe('stalled');
+    expect(classify(unstick, finished(40)).verdict).toBe('finished-unreaped');
+  });
+
+  it('through the reaper plan: of five live-shaped rows only the two finished, idle, quiet ones are reaped, and the kept ones say why', () => {
+    const evidenceByName = {
+      done_quiet: finished(45),
+      done_fresh: finished(3),
+      done_busy: finished(45),
+      done_noidle: live({ resultFiles: [resultAfter(unstick, 142000, 'jobs/x.result.md')] }),
+      done_completion: live({ transcriptMtimeMs: NOW - 90 * MIN, completion: doneRecord(unstick) }),
+    };
+    const rows = Object.keys(evidenceByName).map((name, i) => ({ ...unstick, pidAlive: true, id: `id${i}`, name, ...(name === 'done_busy' ? { status: 'busy' } : {}) }));
+    const plan = sessionReapPlan(rows, { evidenceFor: (row) => evidenceByName[row.name], now: NOW });
+    expect(plan.reap.map((r) => r.session.name)).toEqual(['done_quiet', 'done_completion']);
+    expect(plan.keep.map((r) => r.session.name)).toEqual(['done_fresh', 'done_busy', 'done_noidle']);
+    expect(plan.keep.map((r) => r.verdict)).toEqual(['progressing', 'progressing', 'progressing']);
+    expect(sessionReapPlan(rows, { evidenceFor: (row) => evidenceByName[row.name], now: NOW, graceMinutes: 1 }).reap.map((r) => r.session.name)).toEqual(['done_quiet', 'done_fresh', 'done_completion']);
+  });
+});
+
 describe('closed enums', () => {
   const matrix = [];
   for (const agent of [unstick, review148, newFix, { ...review148, status: 'waiting', waitingFor: 'permission prompt' }, { ...review148, name: 'proto-note' }, { kind: 'interactive' }]) {

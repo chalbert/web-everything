@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   stopSessionWithRetry, STOP_RETRY_ATTEMPTS, STOP_RETRY_BACKOFF_MS,
-  STOP_CONFIRM_WAIT_MS, STOP_MAX_RETRIES, TERMINAL_ROW_STATES, isTerminalRow, partitionAlreadyTerminal, parseConfirmWaitMs, runStopPass,
+  STOP_CONFIRM_WAIT_MS, STOP_MAX_RETRIES, TERMINAL_ROW_STATES, isTerminalRow, isTerminalAndGone, partitionAlreadyTerminal, parseConfirmWaitMs, runStopPass,
 } from '../session-reap-stop.mjs';
 
 // ── stopSessionWithRetry — WE #3479, found live 2026-09-04: the ONE session-reaper.mjs mechanical-pass failure
@@ -203,6 +203,45 @@ describe('runStopPass — confirm against the re-read registry', () => {
     expect(h.reads).toBe(0);
     expect(h.sleeps).toEqual([]);
     expect(out).toMatchObject({ stopped: [], failed: [], confirmed: [], unconfirmed: [], retried: 0, readError: null });
+  });
+});
+
+describe('#3721 a terminal row whose process is still alive is stopped, and only confirmed once the process is gone', () => {
+  const aliveDone = (id) => ({ session: { ...cand(id, 'done').session, pidAlive: true }, reason: 'done' });
+  const deadDone = (id) => ({ session: { ...cand(id, 'done').session, pidAlive: false }, reason: 'done' });
+
+  it('isTerminalAndGone: a terminal row is "gone" unless `pidAlive` is exactly true (unknown keeps the #3744 skip)', () => {
+    expect([true, false, null, undefined].map((pidAlive) => isTerminalAndGone({ state: 'done', pidAlive }))).toEqual([false, true, true, true]);
+    expect(isTerminalAndGone({ state: 'working', pidAlive: false })).toBe(false);
+    expect(isTerminalAndGone(null)).toBe(false);
+  });
+
+  it('partition: done+alive is `live` (stopped), done+dead and done+unknown stay `alreadyTerminal` (never re-stopped)', () => {
+    const reap = [aliveDone('a1'), deadDone('d1'), cand('u1', 'done'), cand('f1', 'failed'), { session: { ...cand('s1', 'failed').session, pidAlive: true }, reason: 'failed' }];
+    const { live, alreadyTerminal } = partitionAlreadyTerminal(reap);
+    expect(live.map((r) => r.session.id)).toEqual(['a1', 's1']);
+    expect(alreadyTerminal.map((r) => r.session.id)).toEqual(['d1', 'u1', 'f1']);
+  });
+
+  it('a `done` row whose process survived the stop is UNCONFIRMED (state alone no longer confirms it), then retried', () => {
+    const h = harness([[{ ...row('a1', 'done'), pid: 4242 }]]);
+    const out = runStopPass({ candidates: [aliveDone('a1')], ...h.opts, isAlive: (r) => r.pid === 4242, confirmWaitMs: 0 });
+    expect(out.confirmed).toEqual([]);
+    expect(out.unconfirmed.map((c) => c.session.id)).toEqual(['a1']);
+    expect(h.stops).toEqual(['a1', 'a1', 'a1']); // first stop + STOP_MAX_RETRIES retries
+  });
+
+  it('a `done` row whose process is gone after the stop is confirmed; so is one that left the listing', () => {
+    const h = harness([[{ ...row('a1', 'done'), pid: 4242 }]]);
+    const out = runStopPass({ candidates: [aliveDone('a1'), aliveDone('a2')], ...h.opts, isAlive: () => false, confirmWaitMs: 0 });
+    expect(out.confirmed.map((c) => c.session.id)).toEqual(['a1', 'a2']);
+    expect(out.unconfirmed).toEqual([]);
+  });
+
+  it('without an `isAlive` probe the pass confirms on state alone, exactly as #3744 did', () => {
+    const h = harness([[{ ...row('a1', 'done'), pid: 4242 }]]);
+    const out = runStopPass({ candidates: [aliveDone('a1')], ...h.opts, confirmWaitMs: 0 });
+    expect(out.confirmed).toHaveLength(1);
   });
 });
 

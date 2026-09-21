@@ -137,7 +137,7 @@ describe('through buildReport on the real fixture (2026-09-20)', () => {
   it('with a live runner: the auto findings are queued, the no-handler ones are the plan, and `attention` still holds them all', () => {
     const r = make({ state: 'alive-and-idle' });
     expect(r.queue.plan.map((p) => p.key)).toEqual(['ci-failed-no-fixer:we#2349', 'session-stalled:review-148', 'session-stalled:fix-2347', 'pre-today-pr-open']);
-    expect(r.queue.handledRows.map((h) => h.ref)).toEqual(['we#2344', 'we#2170', 'pa#148', 'x10']);
+    expect(r.queue.handledRows.map((h) => h.ref)).toEqual(['we#2344', 'we#2170', 'pa#148', 'x8']);
     expect(r.queue.shown).toEqual([]);
     expect(r.attention).toHaveLength(r.queue.handled.length + r.queue.plan.length + r.queue.shown.length); // nothing is dropped from the data
     expect(r.queue.overdue.length).toBeGreaterThan(0);
