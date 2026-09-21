@@ -4428,3 +4428,41 @@ Built on the prototype branch (no PR): code straight to `lane/mechanical-dispatc
 **The unwritten-why list:** none yet, because nothing was added on the real run.
 
 Tests: `scripts/operations/__tests__` plus `scripts/__tests__` plus `scripts/lib/__tests__` were 318 files and 11,180 passing (12 skipped) before, 320 files and 11,249 passing after (69 new: 65 table tests and 4 real-repository tests). The one existing test edited is the module map in `we:scripts/operations/__tests__/http-adapter.test.mjs`, which requires a deliberate one-line entry for every new operation. `check:standards` 0 errors, 1,816 warnings (unchanged from baseline).
+
+## Session update (2026-09-21) — #3736 /wip report built on the prototype branch: compact phone-first tables by default, stacked bullets behind --bullets, Attention findings classified as queued / gap / overdue and a --queue-plan (code commit c952d29fe)
+
+Card #3736 (`/wip` compact phone-first tables, and Attention findings as queued items) is built on this branch (code commit c952d29fe; no PR, per the prototype rule). The operator's ruling of 2026-09-21: "Table but for vertical use, too much space between bullet", so compact tables are the new default, made for a narrow vertical screen, and the old stacked bullets stay as a fallback.
+
+**What exists:**
+
+- `we:scripts/operations/wip-report.mjs`: `renderReport(report, { style })` is now a switch. `renderCompact` (the default) and `renderBullets` (the old renderer, renamed and unchanged). Helpers `tableRow`, `mdTable`, `shortState`; constants `ROW_MAX` = 35 and `TITLE_MAX` = 18.
+- `we:scripts/operations/wip-report-queue.mjs` (new, pure, imports nothing): `classifyFinding`, `buildQueue`, `dedupKey`, `gapsLine`, `overdueLine`, `renderQueuePlan`, `OVERDUE_MS` (2 hours, a named constant). `buildReport` now returns `queue` next to `attention`.
+- `we:scripts/operations/wip-report-cli.mjs`: `--bullets` (and env `WIP_REPORT_STYLE=bullets`) selects the old output; `--queue-plan` prints the queue plan (JSON with `--json`); `--stamp` is untouched and still the only write.
+
+**Compact layout:** Work items `item | title | state` (title cut to 18, state at most 8 characters, a live session nests as a `↳` row); Done since `time | item | title`; Attention `finding | since | remedy`. Rows are unpadded and at most 35 characters, at most 3 columns. No blank line inside a table or between a table and its heading; one blank line between sections. A `- ` note goes under a table only when a row needs detail (a blocked reason, a delegated executor, the words of a session, unreaped or over-capacity finding). The header is five plain lines, Needs you is unchanged and verbatim, Next stays bullets. PRs read `we#2349` and `pa#148` (short repo ids). A live report of 2026-09-21 is 42 lines compact against 54 as bullets; the 2026-09-20 fixture is 91 lines against 171.
+
+**Queue classification (pure, display only):** a finding whose remedy is `auto` (a live handler and a live runner) leaves Attention and shows as a `queued` Work-items row. A finding whose remedy is `no-handler` gets the stable key `<rule>:<target>` (`ci-failed-no-fixer:we#2349`; just the rule for an aggregate finding such as the unreaped-sessions count), goes in the queue plan, and shows as ONE `N gaps queued (<keys>)` line. A handled or gap finding unresolved past `OVERDUE_MS` shows one `overdue <age>: <key>` line.
+
+**Forks, ruled here, open to review:**
+
+- The report never writes or files anything. Filing goes through the `file-item` operation later, run by the orchestrator or a worker over `--queue-plan --json`. Until something consumes the plan, "N gaps queued" means "in the queue plan", not "a backlog item exists".
+- A third class, SHOWN: a finding with a handler but no live runner (`auto (runner down)`, `auto (runner unknown)`, `run: session-reaper`, `start: /conveyor`) stays in Attention with its remedy. It is neither queued nor a gap, because nothing would act on it and a card would be premature.
+- Only the compact style applies the classification. `--bullets` and `--json`'s `attention` still list every finding, so the fallback is unchanged in content.
+- Overdue covers handled and gap findings only, and a finding with no known start is never overdue (never a guess). `pre-today-pr-open` starts at the oldest open PR's creation, so it reads overdue for as long as an old PR is open.
+- A queued row is its own row: a PR that is also in Work items appears twice (its state, then `queued`), one queued row per target with the handlers joined.
+- Dropped from the compact view, still in `--bullets` and `--json`: per-row "since" in Work items, the `next:` line (Next repeats deferrals), the runner-down reason text (the header says the runner is not live and the row says `/conveyor`).
+- Notes are `- ` bullets, not plain lines, because a plain line right under a table row is read as one more row.
+
+**Done when (executable)** (the `we:` is the repo prefix, drop it to run a command):
+
+1. `npx vitest run` on the four files `we:scripts/operations/__tests__/wip-report-compact.test.mjs`, `we:scripts/operations/__tests__/wip-report-queue.test.mjs`, `we:scripts/operations/__tests__/wip-report.test.mjs` and `we:scripts/operations/__tests__/wip-report-io.test.mjs` passes (before: the first two files do not exist).
+2. `node we:scripts/operations/wip-report-cli.mjs --queue-plan; echo $?` prints a `Queue plan:` line and 0 (before: `Unknown argument: --queue-plan`, exit 1).
+3. `node we:scripts/operations/wip-report-cli.mjs | node -e "console.log(require('fs').readFileSync(0,'utf8').split('\\n').filter((l) => l.startsWith('|') && l.length > 35).length)"` prints 0 (JavaScript counts characters; awk on macOS counts bytes, and a 35-character row holding `…` is 37 bytes), and `node we:scripts/operations/wip-report-cli.mjs | grep -Ec '^\|(finding|item)\|'` prints at least 1 whenever there is a finding or a work item (before: 0 rows, all bullets).
+4. The fallback: the compact test `reproduces today's bullets output for the fixed fixture, byte for byte` and the CLI tests for `--bullets` and `WIP_REPORT_STYLE=bullets` compare against `we:scripts/operations/__fixtures__/wip-report/bullets-2026-09-20.txt`, captured from the code before this change.
+5. The vertical-space assertions (per fixture): every table row at most 35 characters and 3 columns, no blank line inside a table, a table starts on the line after its heading, at most one blank line between sections, and fewer lines than the bullets output.
+
+**Existing tests:** the ones that pinned the old default now ask for the bullets style explicitly (the `run` helper and five direct calls in `we:scripts/operations/__tests__/wip-report.test.mjs` pass `{ style: 'bullets' }`, and the layout block is renamed "the stacked-bullets fallback"). Their assertions are unchanged. `--json` gained `queue`, and rows gained `target`/`ref` (findings), `short` (PR rows), `ref`/`detail` (done rows); nothing was removed.
+
+**Not verified here:** how the operator's phone viewer draws an unpadded table with a `|-|-|-|` separator and `- ` notes (GitHub-flavoured markdown says it is a table, but the viewer was not seen); a live runner (the queued and overdue paths ran only on the 2026-09-20 fixture and on hand-made findings, because the runner is not live here, so the live `--queue-plan` prints "nothing to file"); that the orchestrator's `file-item` step consumes the plan (not built).
+
+Checks: 77 new tests (27 in `we:scripts/operations/__tests__/wip-report-queue.test.mjs`, 50 in `we:scripts/operations/__tests__/wip-report-compact.test.mjs`); `scripts/operations/__tests__` plus `scripts/conveyor/__tests__` 180 files and 5232 tests before, 182 files and 5309 after (on tip 659744301; rebased onto the priority-sync commits, 184 files and 5378 tests, all passing); `check:standards` 0 errors (no new warning from these files); `check-priority --ref=origin/main --strict` OK.
