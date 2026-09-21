@@ -12,6 +12,7 @@ import {
 import { scrubPublish } from './secret-scrub.mjs';
 import { thresholdsForRisk, neverSpotCheck, spotCheckSample } from './dispatch-thresholds.mjs';
 import { CODEX_MODEL } from './codex-model-routing.mjs';
+import { taskTypeFor } from './dispatch-task-type.mjs';
 
 /** Closed task vocabulary, sourced from the router's proven envelopes. */
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
@@ -653,4 +654,255 @@ export function supervisorTrialFromVerdict(r, v, options = {}) { return makeTria
 export function shadowTrialFromVerdict(r, shadow, acting, options = {}) {
   if (!shadow) return { ok: false, reason: 'shadow verdict is required' };
   return makeTrial(r, acting, options, 'supervise', shadow);
+}
+
+// ── #3717 — THE DISPATCH PATH'S ONE ROUTING ENTRY POINT ───────────────────────────────────────────────────
+//
+// `routeDispatch` above (slice G1) already composes BOTH halves of the router
+// (`provider-routing.mjs#selectProvider` and `#selectSupervisionLevel`) and returns the provider, the model,
+// the supervision level and an audit trail. #3717's wiring therefore adds NO second router: it adds the one
+// thing `routeDispatch` was missing to be callable from a real dispatch — the `taskType`, DERIVED from the
+// dispatch itself (`./dispatch-task-type.mjs`) rather than read off a card, a brief or a model's guess.
+//
+// `decideDispatchRoute` is that composition and nothing more. It is PURE: the scorecards arrive as data, read
+// at the io edge by `we:scripts/operations/dispatch-lane-io.mjs`.
+
+/** The env var that turns supervision ENFORCEMENT on. Off by default — see {@link supervisionEnforcementFrom}. */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const SUPERVISION_ENFORCEMENT_ENV = 'WE_DISPATCH_SUPERVISION_ENFORCE';
+
+/**
+ * WHETHER SUPERVISION IS ENFORCED AS A GATE, or only RECORDED. **Off by default, deliberately.**
+ *
+ * The supervision level `selectSupervisionLevel` computes implements #3690's progressive-backdown graduation
+ * model, and **#3690 is an OPEN, unratified decision** (worker `prepare-3690` is preparing it). Turning a
+ * computed level into a dispatch gate would put that model into force ahead of the ruling, which #3717's own
+ * card flags for the operator. So the level is computed and written into the run record on every dispatch —
+ * the data the eventual ruling needs — and the gate stays behind this switch until #3690 is ratified.
+ *
+ * An unrecognised value THROWS rather than picking a side, for the same reason
+ * `dispatch-provider-registry.mjs#dispatchModeFor` does: a typo'd `WE_DISPATCH_SUPERVISION_ENFORCE=ture`
+ * silently disabling a gate is the failure this shape exists to remove.
+ *
+ * @param {Record<string, string|undefined>} [env] - data; this module never reads the ambient environment.
+ * @returns {boolean}
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function supervisionEnforcementFrom(env = {}) {
+  const raw = String(env?.[SUPERVISION_ENFORCEMENT_ENV] ?? '').trim().toLowerCase();
+  if (!raw) return false;
+  if (['1', 'true', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'off'].includes(raw)) return false;
+  throw new TypeError(
+    `dispatch-contracts: ${SUPERVISION_ENFORCEMENT_ENV} must be 1/true/on or 0/false/off (the default — `
+    + `#3690 is not ratified, so supervision is RECORDED, not enforced), got ${JSON.stringify(raw)}`,
+  );
+}
+
+/**
+ * THE SUPERVISION GATE, once #3690 ratifies. `null` means "nothing holds this dispatch".
+ *
+ * With `enforce` off (the default) it ALWAYS returns `null`: byte-identical dispatch behaviour, the level
+ * recorded either way. With it on, a dispatch whose computed level is `full` and which names no supervisor is
+ * held — a `full`-supervision route with nobody supervising it is the exact case the level exists to name.
+ *
+ * @param {{supervision?: string, supervisor?: unknown}} routing
+ * @param {{enforce?: boolean}} [o]
+ * @returns {string|null} the hold reason, or `null`.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function supervisionHold(routing, { enforce = false } = {}) {
+  if (!enforce) return null;
+  if (routing?.supervision !== SUPERVISION_LEVELS.FULL) return null;
+  if (routing?.supervisor) return null;
+  return `computed supervision level is \`${SUPERVISION_LEVELS.FULL}\` and this dispatch names no supervisor — `
+    + `held because ${SUPERVISION_ENFORCEMENT_ENV} is on. Unset it to record the level without gating on it `
+    + '(#3690 is not ratified).';
+}
+
+/**
+ * THE `size:` → estimated-LOC read, with the ONE safe answer for a card that declares no size.
+ *
+ * 1,148 of the backlog's cards carry no `size:` (see {@link SIZE_TO_ESTIMATED_LOC}'s own table), so refusing
+ * an unsized dispatch would stop a third of the conveyor. Understating the size would be the dangerous
+ * direction — it is what puts a task INSIDE a proven envelope and hands it to a non-Claude provider. So an
+ * unknown size reads as the LARGEST band (`13` → 900 LOC), which sits outside every entry of
+ * `provider-routing.mjs#PROVEN_TASK_ENVELOPES` and therefore forces the Claude/both side of the cascade.
+ * Overstating is recorded, not hidden: the returned `sized` flag says whether the number came from the card.
+ *
+ * @param {unknown} size
+ * @returns {{estimatedLoc: number, sized: boolean}}
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function estimatedLocForSize(size) {
+  const n = typeof size === 'string' && /^\d+$/.test(size) ? Number(size) : size;
+  if (typeof n === 'number' && owns(SIZE_TO_ESTIMATED_LOC, n)) return { estimatedLoc: SIZE_TO_ESTIMATED_LOC[n], sized: true };
+  const bands = Object.keys(SIZE_TO_ESTIMATED_LOC).map(Number);
+  return { estimatedLoc: SIZE_TO_ESTIMATED_LOC[Math.max(...bands)], sized: false };
+}
+
+/** The providers an explicit `--provider-override` may name. `both` is a routing recommendation, not a provider. */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const OVERRIDABLE_PROVIDERS = Object.freeze([...PROVIDERS]);
+
+/**
+ * THE PROVIDER ACTUALLY AVAILABLE TO EXECUTE A DISPATCH TODAY.
+ *
+ * `we:scripts/operations/dispatch-lane-io.mjs`'s `provider` port (#3579) has exactly one implementation that
+ * starts a worker — `defaultClaudeProvider` — and every mechanical per-kind provider in
+ * `dispatch-provider-registry.mjs` wraps that same spawn. No Codex or Gemini provider port exists (#3443,
+ * #3658 are unlanded). So a non-Claude ROUTE is recorded as `routed: <p>, executed: claude` rather than
+ * quietly becoming a Claude decision — which is what makes the delegation gap MEASURABLE instead of invisible
+ * (#3717 step 6).
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const EXECUTABLE_PROVIDER = 'claude';
+
+/**
+ * DECIDE A DISPATCH'S ROUTE — the one call a dispatch path makes before a spawn.
+ *
+ * Composes, in order: the `taskType` derivation → the profile → `routeDispatch` (which is itself
+ * `selectProvider` + `selectSupervisionLevel`). Returns a RECORD, never a side effect, and never consults a
+ * brief, a prompt or a model.
+ *
+ * FAILS CLOSED three ways, each with a named reason on `refusal`:
+ *   - the dispatch has no derivable `taskType` (#3717's own rule: never guessed, never defaulted to `bugfix`);
+ *   - the profile does not validate (an un-normalised scope path, a non-boolean `acceptanceTestable`, …);
+ *   - `routeDispatch` itself refuses (`role: 'refused'`), e.g. no candidate model reproduces its own
+ *     recommendation.
+ *
+ * THE ROLE PATH takes none of that: a `prepare`/`prepare-decision`/`investigate`/`review` dispatch has no
+ * router `taskType` by nature, so the provider cascade is NEVER consulted for it and the record says `role`
+ * with `routed: null`. That is the honest answer, and it is still mechanical — the kind decided it.
+ *
+ * @param {object} dispatch
+ *   - `kind`, `cause`, `scopePaths` — handed to {@link ./dispatch-task-type.mjs#taskTypeFor}.
+ *   - `size` the card's `size:` frontmatter (see {@link estimatedLocForSize}); `estimatedLoc` overrides it.
+ *   - `acceptanceTestable` (default `true`), `dependsOn` (default `[]`), `risk` (optional raise-only floor).
+ *   - `taskKey` `{storyRef, round, taskId}` — spot-check sampling only; omitted means no sample.
+ *   - `providerOverride` / `overrideReason` — an EXPLICIT, RECORDED operator input (#3717 step 4 of the card's
+ *     proposed shape). An override with no reason, or naming an unknown provider, is REFUSED: an unexplained
+ *     override is indistinguishable from the brief-sentence delegation this card exists to abolish.
+ * @param {{scorecards?: unknown, enforceSupervision?: boolean}} [deps]
+ * @returns {object} the routing record — see the file's own test for the exact shape.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSupervision = false } = {}) {
+  try {
+    const kind = String(dispatch?.kind ?? '').trim();
+    const scopePaths = Array.isArray(dispatch?.scopePaths) ? dispatch.scopePaths.map(String) : [];
+    const derivation = taskTypeFor({ kind, cause: dispatch?.cause ?? null, scopePaths });
+
+    const override = normalizeOverride(dispatch);
+    if (override.refusal) return routeRefused(kind, derivation, override.refusal);
+
+    if (derivation.outcome === 'refused') return routeRefused(kind, derivation, derivation.reason);
+
+    if (derivation.outcome === 'role') {
+      const record = {
+        kind,
+        outcome: 'role',
+        role: derivation.role,
+        taskType: null,
+        routed: null,
+        executed: null,
+        model: null,
+        tier: null,
+        supervision: SUPERVISION_LEVELS.FULL,
+        spotCheck: null,
+        sized: null,
+        override: override.value,
+        refusal: null,
+        supervisionEnforced: enforceSupervision,
+        supervisionHold: null,
+        auditTrail: [audit('role-path', derivation.role, `kind=${kind}`, derivation.reason)],
+      };
+      // An override on a role dispatch is recorded and does NOT invent a route: the role path has no provider
+      // decision to override, and silently minting one would be the guess this whole card removes.
+      return record;
+    }
+
+    const { estimatedLoc, sized } = dispatch?.estimatedLoc != null
+      ? { estimatedLoc: dispatch.estimatedLoc, sized: true }
+      : estimatedLocForSize(dispatch?.size);
+    const filesTouched = [...new Set(scopePaths.map((p) => p.replace(/^we:/, '').replace(/^([A-Za-z0-9._-]+):/, '$1/').replace(/^\.\//, '')).filter(Boolean))];
+    const input = {
+      taskType: derivation.taskType,
+      estimatedLoc,
+      filesTouched,
+      acceptanceTestable: dispatch?.acceptanceTestable !== false,
+      dependsOn: Array.isArray(dispatch?.dependsOn) ? [...new Set(dispatch.dependsOn.map(String))] : [],
+    };
+    if (owns(dispatch ?? {}, 'risk') && dispatch.risk != null) input.risk = dispatch.risk;
+    const built = buildDispatchProfile(input);
+    if (!built.ok) {
+      return routeRefused(kind, derivation, `the dispatch profile does not validate: ${built.errors.join('; ')}`);
+    }
+
+    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey });
+    if (out.role === 'refused') {
+      return routeRefused(kind, derivation, `the router refused this dispatch: ${out.auditTrail.map((a) => a.reasoning).join('; ')}`);
+    }
+
+    const routed = override.value ? override.value.provider : out.provider;
+    const record = {
+      kind,
+      outcome: 'routed',
+      role: out.role,
+      taskType: derivation.taskType,
+      routed,
+      // WHAT ACTUALLY RUNS IT. One provider port exists; see {@link EXECUTABLE_PROVIDER}. `routed !== executed`
+      // is the delegation gap, recorded rather than silently collapsed.
+      executed: EXECUTABLE_PROVIDER,
+      model: override.value ? null : out.model,
+      tier: override.value ? null : out.tier,
+      supervision: out.supervision,
+      spotCheck: out.spotCheck,
+      risk: built.profile.risk,
+      complexity: built.profile.complexity,
+      estimatedLoc,
+      sized,
+      override: override.value,
+      refusal: null,
+      supervisionEnforced: enforceSupervision,
+      supervisionHold: null,
+      auditTrail: [
+        audit('task-type-derivation', derivation.taskType, `kind=${kind}, cause=${dispatch?.cause ?? 'none'}, scope=${scopePaths.length} path(s)`, derivation.reason),
+        audit('estimated-loc', String(estimatedLoc), `size=${JSON.stringify(dispatch?.size ?? null)}`, sized ? 'from the card\'s own `size:`' : 'the card declares no `size:` — read as the largest band, which sits outside every proven envelope'),
+        ...(override.value ? [audit('provider-override', override.value.provider, `router said ${out.provider}`, override.value.reason)] : []),
+        ...out.auditTrail,
+      ],
+    };
+    record.supervisionHold = supervisionHold(record, { enforce: enforceSupervision });
+    return record;
+  } catch (e) {
+    return routeRefused('', { reason: String((e && e.message) || e) }, `unreadable dispatch input: ${String((e && e.message) || e)}`);
+  }
+}
+
+function routeRefused(kind, derivation, reason) {
+  return {
+    kind, outcome: 'refused', role: null, taskType: null, routed: null, executed: null, model: null, tier: null,
+    supervision: SUPERVISION_LEVELS.FULL, spotCheck: null, sized: null, override: null,
+    refusal: reason, supervisionEnforced: false, supervisionHold: null,
+    auditTrail: [audit('dispatch-task-type', 'refused', `kind=${kind}`, derivation?.reason ?? reason)],
+  };
+}
+
+function normalizeOverride(dispatch) {
+  const provider = dispatch?.providerOverride == null ? '' : String(dispatch.providerOverride).trim();
+  const reason = dispatch?.overrideReason == null ? '' : String(dispatch.overrideReason).trim();
+  if (!provider) {
+    if (reason) {
+      return { value: null, refusal: 'an `--override-reason` was given with no `--provider-override` — a reason for nothing is a sentence in a brief, which is what #3717 abolishes' };
+    }
+    return { value: null, refusal: null };
+  }
+  if (!OVERRIDABLE_PROVIDERS.includes(provider)) {
+    return { value: null, refusal: `--provider-override=${JSON.stringify(provider)} is not one of ${OVERRIDABLE_PROVIDERS.join(', ')}` };
+  }
+  if (!reason) {
+    return { value: null, refusal: `--provider-override=${provider} was given with no \`--override-reason\` — an unexplained override is indistinguishable from the brief-sentence delegation this card removes, so it is refused` };
+  }
+  return { value: { provider, reason }, refusal: null };
 }

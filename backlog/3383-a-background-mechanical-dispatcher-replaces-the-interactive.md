@@ -21,7 +21,7 @@ tags: []
 
 ## Priority order
 
-Updated: 2026-09-21 by delivery worker `apply-delegation-priority` (Claude) — moved delegation to Codex and Antigravity to the top, right after the health chain, on the operator's instruction: nine cards in a new section (rule 0a), #3717, #3675 and #3658 moved out of bands A and C, later lines renumbered. Derived by the rules below from the ranker and this card's own goal; the orchestrator dispatches from the top of band A and never chooses order. Whoever files, resolves, re-scopes or blocks a #3383 card updates this section in the same push; the `check-priority` command of we:scripts/prototype-tracker.mjs, run with `--ref=origin/main --strict`, fails on drift.
+Updated: 2026-09-21 by delivery worker `tracker-chores` (Claude) — added #3783 (claimed, so listed not ordered; it belongs to the delegation stack of rule 0a) and #3782 (outside #3383, off-path list); no ordered line moved. Earlier the same day, by `apply-delegation-priority`: moved delegation to Codex and Antigravity to the top, right after the health chain, on the operator's instruction: nine cards in a new section (rule 0a), #3717, #3675 and #3658 moved out of bands A and C, later lines renumbered. Derived by the rules below from the ranker and this card's own goal; the orchestrator dispatches from the top of band A and never chooses order. Whoever files, resolves, re-scopes or blocks a #3383 card updates this section in the same push; the `check-priority` command of we:scripts/prototype-tracker.mjs, run with `--ref=origin/main --strict`, fails on drift.
 
 **Scope.** Every open card under #3383, plus the open slices of open epic children (the walk stops at a resolved card). A card resolved on `main` or on this branch counts as resolved. A card with `status: active` is claimed: listed at the end, never ordered. Ranker signals: the `suggest-next` operation (through we:scripts/operations/run.mjs, with `--json --parent=3383`) on `main` (it ranks Tier A only and prints at most 50 rows, so leverage for the rest was read from the loader `we:src/_data/backlog.js` on `main`). Leverage is 0 for almost every card, so most ties fall to size, then number.
 
@@ -195,6 +195,7 @@ Updated: 2026-09-21 by delivery worker `apply-delegation-priority` (Claude) — 
 - #3441 · task · claimed · A build-dispatch agent whose PR merges must resolve its own backlog item, not leave it active forever
 - #3443 · epic · claimed · Graduate origin/lane/mechanical-dispatcher to main in small, independently reviewable pieces
 - #3447 · 2 · claimed · Require check:health in the test-plan checklist for any PR stamping preparedDate on a decision with Fork secti
+- #3783 · 5 · claimed · Build the concurrent-baseline comparison harness for delegation trials (child of #3718; filed by the #3690 preparation PR #2363). Part of the delegation stack: rule 0a would place it in the delegation section, after #3717 (the router caller its trial pairs feed) and before band A; not ordered while claimed.
 
 **Owed, no card yet — not ordered** (from this card's own notes; each needs a card once its scope is re-read).
 
@@ -206,6 +207,7 @@ Updated: 2026-09-21 by delivery worker `apply-delegation-priority` (Claude) — 
 **Off-path, not ordered — not #3383 cards.** Listed so nothing is silently dropped.
 
 - off-path #3735 · decision · parent #3054: whether a `review:human` approval carries across a push that only merges `main` into the branch.
+- off-path #3782 · 3 · claimed, no parent: codex-direct-task's scratch clone points origin at the real remote, so the draft-only rule is prompt text over a push-capable checkout; filed by the #3690 preparation PR #2363, outside #3383, so not ordered.
 - off-path: the operator clearing list (the `list` action of we:scripts/conveyor/queue.mjs) is session-local and empty; it is not a priority list.
 
 
@@ -4379,3 +4381,61 @@ place with PR #2206 as a fresh confirming instance, with no seat-count change, r
 `elevated`-care PR can still get fewer lenses than its own dial says it earned, silently, because the record
 only states what ran, not what the touch-set was owed.** `#3393` remains open and unresolved; this entry adds
 evidence, not a fix.
+## Session update (2026-09-20) — #3717 wired mechanically: taskType derived from the dispatch, routeDispatch called before the spawn, routed/executed recorded
+
+Built on the prototype branch under the operator's 2026-09-21 ruling ("G2 is FOLDED INTO #3717: one router
+path and one wiring card, built WHERE THE PROVIDER PORTS ARE"), so no PR: code straight to
+`lane/mechanical-dispatcher`, card stays on `main`.
+
+**The reconcile gate the ruling set passed.** `we:scripts/lib/dispatch-contracts.mjs#routeDispatch` (G1) already composes
+BOTH `we:scripts/lib/provider-routing.mjs#selectProvider` and `#selectSupervisionLevel`, so this wiring adds NO second entry
+point — it adds the one input `routeDispatch` was missing to be callable from a real dispatch.
+
+**What landed.**
+
+- `we:scripts/lib/dispatch-task-type.mjs` — the pure `taskType` derivation from the dispatch itself (kind,
+  cause, declared scope), with three outcomes: a derived `taskType`, the ROLE path (no `taskType`, provider
+  cascade never consulted), or a named REFUSAL. `self-fix` and `other` are unreachable; `conflict-resolution`
+  comes only from the `conflict` CAUSE, which only `we:scripts/conveyor/reconcile-fix-dispatch.mjs` knows.
+- `we:scripts/lib/dispatch-contracts.mjs#decideDispatchRoute` — the composition: derivation → profile → `routeDispatch`.
+  Pure; the scorecards arrive as data. Records `routed` AND `executed`, the supervision level, the audit
+  trail, and an explicit `--provider-override` with its mandatory reason (an unexplained override is refused).
+- `we:scripts/operations/dispatch-lane.mjs`: the io shell computes the route (the contract's import graph reaches `node:fs`, and the
+  declaration is asserted to reach nothing that can act, so the CALL is on the io side and the CONSEQUENCE —
+  the refusal — is in the pure half). The decision rides the verdict and the effect payload into the run
+  record; the sink writes `routedProvider`/`executedProvider`/`routedTaskType`/`supervisionLevel`.
+- `we:scripts/operations/review-dispatch.mjs` records the role path; `we:scripts/conveyor/reconcile-fix-dispatch.mjs` feeds the conflict cause to the router.
+- `we:scripts/gen-dispatch-routing-table.mjs` + `npm run gen:dispatch-routing-table` publish the table into
+  `we:docs/agent/dispatcher-runbook.md`, with a drift test.
+
+**Supervision is RECORDED, not enforced.** #3690 is unratified, so the gate sits behind
+`WE_DISPATCH_SUPERVISION_ENFORCE`, off by default; the default path is byte-identical to before.
+
+**The finding the operator wants.** Under today's `we:scripts/conveyor/run-scorecards.json` every route resolves to `claude`, and
+not because the cascade preferred it: the 18 records carry NO `taskType` and NO `outcome`, so the router's
+`{provider, model, taskType}` trust unit can never accumulate a clean trial. Delegation to Codex/Antigravity
+is structurally unreachable until trials are scored WITH a taskType — that is the next blocker, not the
+wiring. With six synthetic clean codex `bugfix` trials the same call returns `both`, so the mechanism works.
+
+Tests: 455 files / 14,426 passing (was 14,426 before with 4 new suites' 59 tests added); `check:standards`
+0 errors, 1816 warnings (unchanged from baseline).
+
+## Session update (2026-09-21) — what landed on main (PRs #2360, #2362, #2363; cards #3782, #3783) and the operator's rulings of 2026-09-21: operations only for dispatch, auto-mode workers, delegation first, mechanical catch-up, handoff on an ops branch
+
+What landed on `main` since the last note, and the operator's rulings of 2026-09-21. The prototype branch itself is still behind `main`; the catch-up merge has not landed here, and this note does not claim it.
+
+**Landed on `main` (all merged):**
+
+- PR #2360, card #3767: the `/wip`, `continue` and `handoff` commands are tracked in source (`we:.claude/commands/wip.md`, `we:.claude/commands/continue.md`, `we:.claude/commands/handoff.md`, with a test in `we:scripts/__tests__/sync-commands-deploy.test.mjs`). The card itself still read `status: open` on `main` when this note was written, so its line in the priority order stays until it is resolved.
+- PR #2362: the container-exec test skip fix. The second real-container block in `we:scripts/lib/__tests__/container-exec.test.mjs` guarded on the CLI and the volume but also ran the image, so it failed with a 401 when the local image was absent; the guard now covers the image too.
+- PR #2363: decision #3690 prepared, tagged `✓ ready to ratify`, with five forks and a bold default on each, and the research topic `/research/delegation-graduation-and-supervision-tiers/`. It filed two follow-up cards: #3782 (outside #3383) and #3783 (child of #3718, claimed). Both are now on the priority list of this card, in the claimed and off-path lists, and `check-priority --strict` passes again.
+
+**Rulings by the operator, 2026-09-21:**
+
+- Operations only for dispatch: a worker is launched through a declared operation, never a hand-written spawn. `dispatch-task` is built for this (#3730, see the update above).
+- Workers run in auto mode. `acceptEdits` hangs a background session on a prompt nobody answers.
+- Delegation to Codex and Antigravity comes first in the priority order (already applied, see the update above).
+- The prototype must be kept up to date mechanically: a merge commit (not a rebase), landed through a staging ref, then the mechanical loop re-run after each catch-up. The catch-up job pushes only to `lane/mechanical-dispatcher-catchup`.
+- The handoff should be tracked on an `ops/*` branch rather than left as an untracked file.
+
+Owed work is on cards, not listed here: see the priority order above.

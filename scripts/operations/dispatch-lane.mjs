@@ -64,6 +64,8 @@
 
 import { mintSessionSlug, PR_KINDS } from '../conveyor/session-slug.mjs';
 import { op } from './registry.mjs';
+// #3717 — the `taskType` derivation. PURE and import-free, which is why the DECLARATION may hold it.
+import { taskTypeFor } from '../lib/dispatch-task-type.mjs';
 // #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
 // consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
 import { DECLARED_HOMES } from './declared-homes.mjs';
@@ -1052,9 +1054,67 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // belongs on the pure side — and freezing it into the effect payload means the run record says exactly what
   // was dispatched, which is what a restart needs and a sink-side fill would not give.
   const brief = fillBrief(String(raw.briefTemplate ?? ''), values, BRIEF_REQUIRED_BY_KIND[launchKind]);
+
+  // #3717 — THE ROUTE THIS DISPATCH TAKES, in two halves that sit on opposite sides of this file's purity
+  // line, on purpose.
+  //
+  //   THE DERIVATION is HERE, because it is the acceptance-critical half and it is genuinely pure:
+  //   `we:scripts/lib/dispatch-task-type.mjs#taskTypeFor` imports nothing at all, so the declaration keeps
+  //   its "reaches nothing that can act" property. A dispatch whose `taskType` cannot be DERIVED from the
+  //   dispatch itself is REFUSED with the derivation's own named reason — never routed on
+  //   `provider-routing.mjs#selectProvider`'s silent `bugfix` default, which is the exact hole #3717 exists
+  //   to close ("no model judgment anywhere between the dispatch kind and the chosen provider").
+  //
+  //   THE PROVIDER CHOICE is computed by the io shell (`dispatch-lane-io.mjs#readTick`) and arrives as DATA
+  //   on `raw.routing`, because `decideDispatchRoute` — though itself pure — reaches `node:fs` transitively
+  //   through `provider-routing.mjs` → `model-capability-ratings.mjs`, which this module may not import.
+  //   A read that carries no routing record (every hand-built fixture) dispatches with `routing: null`: the
+  //   provider decision is absent, and the record says so rather than inventing one.
+  const derivedTaskType = taskTypeFor({ kind: launchKind, cause: null, scopePaths: scope });
+  if (derivedTaskType.outcome === 'refused') {
+    return {
+      ...base,
+      inFlightRuns: [], agedOutRuns, dispatching: false, lane: null, sessionSlug: null, prompt: null,
+      briefUnknownTokens: [], itemSpecPath: null, scope: [], dispatchedGuard: null, routing: null,
+      holdReason:
+        `#${resolvedNum} has no mechanically derivable dispatch \`taskType\` — ${derivedTaskType.reason}. `
+        + 'Refusing to spawn: #3717 requires the provider to be computed from declared criteria before launch, '
+        + 'and a dispatch with no derivable `taskType` is refused rather than routed on a default.',
+    };
+  }
+  const routing = raw.routing && typeof raw.routing === 'object' ? raw.routing : null;
+  if (routing && routing.outcome === 'refused') {
+    return {
+      ...base,
+      inFlightRuns: [], agedOutRuns, dispatching: false, lane: null, sessionSlug: null, prompt: null,
+      briefUnknownTokens: [], itemSpecPath: null, scope: [], dispatchedGuard: null, routing,
+      holdReason:
+        `#${resolvedNum} has no mechanically computed dispatch route — ${routing.refusal}. Refusing to spawn: `
+        + 'the provider is computed from declared criteria before launch, never chosen after it.',
+    };
+  }
+  // #3717 step 3 — the SUPERVISION GATE, OFF unless `WE_DISPATCH_SUPERVISION_ENFORCE` says otherwise, because
+  // the graduation model it implements (#3690) is not ratified. With the switch off this is always `null` and
+  // the dispatch is byte-identical to before; the level is RECORDED either way.
+  if (routing?.supervisionHold) {
+    return {
+      ...base,
+      inFlightRuns: [], agedOutRuns, dispatching: false, lane: null, sessionSlug: null, prompt: null,
+      briefUnknownTokens: [], itemSpecPath: null, scope: [], dispatchedGuard: null, routing,
+      holdReason: `#${resolvedNum} is held by the supervision gate — ${routing.supervisionHold}`,
+    };
+  }
   return {
     ...base,
     dispatching: true,
+    // THE COMPUTED ROUTE, frozen onto the read exactly as the filled brief is: the run record must say which
+    // provider was CHOSEN and which one actually RAN, so a silent fallback is visible in the trial data
+    // instead of corrupting it (#3717 step 4). `taskType` is carried separately because the DERIVATION runs
+    // here even when no provider decision arrived.
+    routing,
+    taskType: derivedTaskType.taskType,
+    taskTypeOutcome: derivedTaskType.outcome,
+    taskTypeReason: derivedTaskType.reason,
     lane: launch.lane,
     sessionSlug,
     itemSpecPath: specPath,
@@ -1157,6 +1217,12 @@ export function dispatchLaneOperation({ readTick } = {}) {
           guardsFrom: read.bookkeepingSource,
           droppedBookkeeping: read.droppedBookkeeping,
           statusLine: read.statusLine,
+          // #3717 — THE ROUTE ON THE VERDICT, where the decision is read. `routed` is what the declared
+          // criteria chose; `executed` is the provider port that can actually run it today. They differ
+          // whenever the router picks a non-Claude provider, and that difference is the delegation gap this
+          // card exists to make measurable.
+          routing: read.routing ?? null,
+          taskType: read.taskType ?? null,
         };
       },
     }),
@@ -1203,6 +1269,10 @@ export function dispatchLaneOperation({ readTick } = {}) {
             // the tick. `null` for build/prepare/prepare-decision, same as on `read`.
             pr: read.pr,
             reason: read.reason,
+            // #3717 — the computed route rides the payload so the RUN RECORD (not a log line) is where the
+            // routing decision, its audit trail and the routed/executed pair are read back from.
+            routing: read.routing ?? null,
+            taskType: read.taskType ?? null,
           },
         }];
       },

@@ -67,8 +67,12 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
   defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
-  resumeSucceeded, REPO_ROOT,
+  resumeSucceeded, REPO_ROOT, defaultReadScorecards,
 } from '../operations/dispatch-lane-io.mjs';
+// #3717 — THE ONE DISPATCH PATH THAT KNOWS A BOUNCE WAS CONFLICT-CAUSED. `planFixesFromReconcile` already
+// reads the `merge-status:conflicting` label into `isConflict`, and #3717's table says `conflict-resolution`
+// is produced by that CAUSE and by no kind at all. So this file is where the cause reaches the router.
+import { decideDispatchRoute } from '../lib/dispatch-contracts.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
 import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
@@ -510,6 +514,9 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   resumeAttempt = null,
+  // #3717 — the router's trial history, injected for the same reason every other io seam here is: the real
+  // read is a file, and a test must be able to hand in the trials it is asserting about.
+  readScorecards = () => defaultReadScorecards({ root }),
 } = {}) {
   if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
   assertNotALaneCheckout(root);
@@ -537,6 +544,16 @@ export function dispatchFix(planned, {
   // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
   // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
   // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
+  // #3717 — THE ROUTE, computed from declared criteria BEFORE the spawn: the dispatch kind (`fix`), its CAUSE
+  // (`conflict` when this bounce carried `merge-status:conflicting`, else none) and the declared scope. A
+  // refusal is recorded, not fatal, and never widens into a guess: this path's provider is the Claude spawn
+  // below either way, and `routed !== executed` is exactly the gap #3717 exists to measure.
+  const routing = decideDispatchRoute({
+    kind: 'fix',
+    cause: planned.isConflict ? 'conflict' : null,
+    scopePaths: Array.isArray(planned.scope) ? planned.scope : [],
+    taskKey: { storyRef: String(planned.itemNum ?? planned.pr), round: 1, taskId: 'fix' },
+  }, { scorecards: readScorecards() });
   const guarded = guardedDispatch({ resource: actionResource(repo, { type: 'pr', id: planned.pr }),
     kind: 'fix', owner, actions, now, evidence: { sessionSlug, num: planned.itemNum },
     effect: () => ({ handle: parseBackgroundedId(String(spawnAgent(argv, { cwd: root }) ?? '')) }) });
@@ -544,7 +561,7 @@ export function dispatchFix(planned, {
   return {
     sessionId, agentId: guarded.result.handle,
     sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
-    resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
+    resumed: false, routing, ...(resumeAttempt ? { resumeAttempt } : {}),
   };
 }
 

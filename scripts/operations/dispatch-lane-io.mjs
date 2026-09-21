@@ -81,6 +81,11 @@ import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRAC
 // them, neither of them imports this file. See the `THE MECHANICAL DISPATCH SEAM` banner below for why the
 // per-kind bodies live there and why that is not a split of this file's `@cohesive:` triple.
 import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, detachedHandlePid } from './detached-dispatch.mjs';
+// #3717 — the supervision-enforcement switch, read HERE (io) and handed to the pure side as data. The routing
+// decision itself is `dispatch-contracts.mjs#decideDispatchRoute`, called from `dispatch-lane.mjs`'s pure
+// `shapeDispatchRead`; this file only supplies the two things that need a filesystem and an environment: the
+// scorecards and this flag.
+import { EXECUTABLE_PROVIDER, decideDispatchRoute, supervisionEnforcementFrom } from '../lib/dispatch-contracts.mjs';
 import {
   DISPATCH_PROVIDER_REGISTRY,
   dispatchModeFor,
@@ -208,6 +213,21 @@ export function readTick({
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
+  // #3717 — THE ROUTER'S EVIDENCE. `selectProvider`/`selectSupervisionLevel` are pure and read their trial
+  // history from their caller, so the scorecards are loaded at this io edge and handed across as data. A
+  // missing or unreadable file reads as NO trials, which is the fail-closed direction: with no clean trials
+  // the cascade can never find a non-Claude provider fit and resolves to Claude.
+  readScorecards = () => defaultReadScorecards({ root, readText }),
+  // #3717 step 3 — supervision is RECORDED, not enforced, until #3690 is ratified. Off by default.
+  enforceSupervision = supervisionEnforcementFrom(process.env),
+  // #3717 — THE EXPLICIT, RECORDED PROVIDER OVERRIDE. Read from the ENVIRONMENT for exactly the reason
+  // `WE_BUILD_DISPATCH_MODE` is (see `dispatch-provider-registry.mjs#dispatchModeFor`): "a knob only a test
+  // can reach is not a knob, and the `dispatch-lane` operation's declared input has no field for this". The
+  // card asks for `--provider-override=<p> --override-reason=<text>`; the operation's input is the TICK's,
+  // not the operator's, and adding a field to it is what `dispatch-lane.test.mjs` pins against. Either half
+  // without the other is REFUSED by `decideDispatchRoute` — an unexplained override is a brief sentence.
+  providerOverride = process.env.WE_DISPATCH_PROVIDER_OVERRIDE ?? '',
+  overrideReason = process.env.WE_DISPATCH_OVERRIDE_REASON ?? '',
   now = () => new Date(),
   all = false,
   verbose,
@@ -358,6 +378,9 @@ export function readTick({
   // check, not build/fix/ci-heal only.
   const alreadyDone = launch ? checkAlreadyDone(key) : { done: false, pr: null, checked: false };
 
+  // #3717 — read ONCE per tick read: the routing record below and the `scorecards` the pure half reports are
+  // the same evidence, and two reads could disagree if the file changed between them.
+  const scorecards = readScorecards();
   return {
     resolvedNum: key,
     admission: tick.decisions?.admission ? {
@@ -384,6 +407,29 @@ export function readTick({
     laneRef,
     // #3457/#3460 — the ground-truth verdict, or the not-checked default when nothing was cleared for launch.
     alreadyDone,
+    // #3717 — the router's trial history and the supervision-enforcement switch, both read here so the pure
+    // half can compute the routing decision without touching a file or an environment.
+    scorecards,
+    enforceSupervision: enforceSupervision === true,
+    // #3717 — THE ROUTING DECISION ITSELF, computed HERE rather than in the pure declaration. Not a change of
+    // heart about where decisions belong: `decideDispatchRoute` IS pure, but its import graph reaches
+    // `provider-routing.mjs` → `model-capability-ratings.mjs` → `node:fs`, and
+    // `dispatch-lane.test.mjs`'s "the DECLARATION module reaches nothing that can act" asserts
+    // `dispatch-lane.mjs` has NO external specifier anywhere in its graph. So the pure function is called
+    // from this side and its verdict crosses as DATA, exactly like the scorecards it reads. The pure half
+    // still owns the consequence: `shapeDispatchRead` REFUSES a dispatch whose route was refused.
+    routing: launch
+      ? decideDispatchRoute({
+        kind: launchKind,
+        // The tick has no CAUSE axis — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` is the one dispatch
+        // path that knows a bounce was conflict-caused, and it carries its own cause (#3717's table).
+        cause: null,
+        scopePaths: Array.isArray(item?.scope) ? item.scope : [],
+        size: item?.size ?? null,
+        taskKey: { storyRef: key, round: 1, taskId: launchKind },
+        providerOverride, overrideReason,
+      }, { scorecards, enforceSupervision: enforceSupervision === true })
+      : null,
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
@@ -394,6 +440,29 @@ export function readTick({
     // ages out and every in-flight record holds, which is the fail-closed direction.
     observedAt: now().toISOString(),
   };
+}
+
+/**
+ * #3717 — THE SCORECARDS READ, as its own named export for the same reason {@link defaultRunNode} is: the
+ * PATH it reads and the fail-closed shape of a bad read are the whole point, and a default nobody can reach
+ * is a default that rots.
+ *
+ * `we:scripts/conveyor/run-scorecards.json` is the trial history `provider-routing.mjs` measures the
+ * `{provider, model, taskType}` trust unit over. An unreadable or malformed file yields `[]` — NO trials —
+ * which is fail-closed here: with no clean verified trials the provider cascade can never find a non-Claude
+ * provider fit, so a broken read routes to Claude rather than to whoever happens to be first in the cascade.
+ *
+ * @param {{root?: string, readText?: (p: string) => string}} [io]
+ * @returns {Array<object>} the records, or `[]`.
+ */
+export function defaultReadScorecards({ root = REPO_ROOT, readText = (p) => readFileSync(p, 'utf8') } = {}) {
+  try {
+    const parsed = JSON.parse(String(readText(join(root, 'scripts', 'conveyor', 'run-scorecards.json'))));
+    const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.records) ? parsed.records : [];
+    return records.filter((r) => r && typeof r === 'object');
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -760,6 +829,15 @@ export function findItem(key, loadItems, pocRegistry = null) {
     scope: Array.isArray(it.scope) ? it.scope.map(String) : [],
     // The still-open `blockedBy` targets (#3462), or `[]` when every edge resolved or the item names none.
     openBlockers: Array.isArray(it.openBlockers) ? it.openBlockers.map(String) : [],
+    // #3717 — the card's own `size:` frontmatter, narrowed through for the SAME reason `openBlockers` is: the
+    // routing decision (`dispatch-contracts.mjs#decideDispatchRoute`) turns it into the estimated LOC the
+    // router's proven envelopes are measured in, and a field this function drops is a field the dispatch path
+    // cannot route on. Absent ⇒ the largest band (see `estimatedLocForSize`), which forces the Claude side.
+    //
+    // SPREAD, not a `null` key, and deliberately: "this card declares no `size:`" is the ABSENCE of the
+    // field, exactly as `deliveryTarget` treats its own absence, and 1,148 of the backlog's cards are in
+    // that state. It also keeps the resolved-item shape byte-identical for every unsized card.
+    ...(it.size == null || it.size === '' ? {} : { size: it.size }),
     // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
     // loader spreads unknown frontmatter through (`...data`), so this arrives with no loader change; it is
     // narrowed here for the same reason `openBlockers` is — a field that is computed but never carried through
@@ -1284,6 +1362,21 @@ export function createDispatchSinks({
         dispatch: {
           supervisorModel, launchKind: payload?.launchKind ?? 'build',
           route: String(handle ?? '').startsWith(DETACHED_HANDLE_PREFIX) ? 'detached' : 'claude-bg',
+          // #3717 — WHAT THE CRITERIA CHOSE vs WHAT ACTUALLY RAN IT, both on the durable record.
+          //
+          // `routed` is `decideDispatchRoute`'s answer, computed before this spawn from the derived
+          // `taskType` and the scorecards. `executed` is the provider that ran: every implementation behind
+          // the `provider` port (#3579) — `defaultClaudeProvider` and each mechanical wrapper in
+          // `dispatch-provider-registry.mjs` — starts a Claude session, and no Codex or Gemini port exists
+          // yet (#3443, #3658). So a non-Claude ROUTE lands here as `routed: codex, executed: claude`: the
+          // gap is a recorded fact a trial can be measured against, not a silent collapse into "claude was
+          // chosen". The moment a real non-Claude port lands, this is the one line that changes.
+          routedProvider: payload?.routing?.routed ?? null,
+          executedProvider: payload?.routing ? EXECUTABLE_PROVIDER : null,
+          routedTaskType: payload?.routing?.taskType ?? null,
+          supervisionLevel: payload?.routing?.supervision ?? null,
+          supervisionEnforced: payload?.routing?.supervisionEnforced === true,
+          providerOverride: payload?.routing?.override ?? null,
           // The provider resolves delivery-agent internally and returns only a handle.
           // Re-reading its marker here would duplicate routing and race that resolution.
           executor: null,
