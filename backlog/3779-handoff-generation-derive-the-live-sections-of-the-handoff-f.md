@@ -3,9 +3,10 @@ bornAs: xde32mt
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:.claude/commands/handoff.md", "we:.claude/commands/continue.md", "we:scripts/operations/run.mjs", "we:scripts/operations/handoff-home.mjs", "we:scripts/lib/git-transport-branch.mjs"]
 dateOpened: "2026-09-20"
+dateResolved: "2026-09-21"
 tags: []
 ---
 
