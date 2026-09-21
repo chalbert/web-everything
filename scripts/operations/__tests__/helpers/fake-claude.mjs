@@ -91,6 +91,12 @@ for (let i = 0; i < argv.length; i += 1) {
   // #xqyyoje — the dispatched-agent standing-identity flag. Recorded, not read: this shim proves ARGV
   // acceptance (the real CLI's own --help lists this flag), not file contents.
   if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; extraFlagCount += 1; continue; }
+  // #3730 — the two flags dispatch-task adds. Both are real claude --help options. --permission-mode takes
+  // a separate value; --allowedTools is VARIADIC in the real CLI, so the dispatcher passes it as ONE
+  // --allowedTools=<list> token (a separate list would swallow the prompt), and only that spelling is accepted
+  // here. Recorded through the call log's argv, not interpreted.
+  if (a === '--permission-mode') { i += 1; extraFlagCount += 1; continue; }
+  if (a.startsWith('--allowedTools=') || a.startsWith('--allowed-tools=')) { extraFlagCount += 1; continue; }
   // NO \`--\` END-OF-OPTIONS BRANCH, deliberately. \`buildAgentArgv\` never emits one, so a branch here would
   // model the very escape hatch dispatch-lane-io.mjs says it DECLINED to bet on — a fidelity claim with
   // nothing checking it. The guard it chose instead (refuse a leading-dash brief) is what gets exercised.

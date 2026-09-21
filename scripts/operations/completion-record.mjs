@@ -38,8 +38,12 @@ export const COMPLETION_STATUSES = Object.freeze(['started', 'done']);
  * `we:scripts/operations/dispatch-lane.mjs#sessionSlugFor(num, 'ci-heal', pr)` mints. Distinct from `fix`
  * deliberately: both repair kinds can target the SAME PR number, so folding them onto one kind would make the
  * two dispatches' records collide on one file.
+ *
+ * `task` (#3730) is a brief-file worker started by `dispatch-task`. It has no PR: the session slug is the
+ * dispatcher's own (`--session=<slug>`), so a `task` report always names its session explicitly, and the job
+ * view (`dispatch-task.mjs#projectJobs`) reads `state` and `result` from this record.
  */
-export const COMPLETION_KINDS = Object.freeze(['review', 'fix', 'ci-heal']);
+export const COMPLETION_KINDS = Object.freeze(['review', 'fix', 'ci-heal', 'task']);
 
 /** Session slugs are used as filenames, so the character set is closed — no separators, no traversal. */
 const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

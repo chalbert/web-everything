@@ -88,6 +88,8 @@ import { restartRunnerOperation, RESTART_RUNNER_OP, classifyLease } from './rest
 import { createRestartReader, createRestartRunnerSinks } from './restart-runner-io.mjs';
 import { clearStuckSessionOperation, CLEAR_STUCK_SESSION_OP } from './clear-stuck-session.mjs';
 import { createClearStuckSessionReader, createClearStuckSessionSinks } from './clear-stuck-session-io.mjs';
+import { dispatchTaskOperation, DISPATCH_TASK_OP, finishTaskOutcome } from './dispatch-task.mjs';
+import { createTaskReader, createDispatchTaskSinks } from './dispatch-task-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -283,6 +285,16 @@ export const OPERATIONS = Object.freeze({
     declaration: openPrOperation({ parkLabels: PARK_LABELS }),
     sinks: createOpenPrSinks(),
   }),
+  // #3730 — a worker started from a BRIEF FILE, through the same run store and the same spawn as `dispatch-lane`.
+  // `finish` is the one thing no other entry has: it appends the `subscribe: <name> session=<id>` last line (and
+  // the `subscribe` JSON field) the orchestrator needs to make its idle-notice subscription, and makes a refused
+  // dispatch visible with exit 1 — see `dispatch-task.mjs#finishTaskOutcome`. It reads `WE_DISPATCH_AGENT_ARGS`
+  // like `dispatch-lane` does, so a worker model is set there and nowhere else.
+  [DISPATCH_TASK_OP]: () => ({
+    declaration: dispatchTaskOperation({ readTask: createTaskReader() }),
+    sinks: createDispatchTaskSinks({ extraArgs: agentArgsFromEnv() }),
+    finish: finishTaskOutcome,
+  }),
   [EXPLORE_OP]: () => ({
     declaration: exploreOperation(),
     // The SAME `WE_DISPATCH_AGENT_ARGS` a dispatched delivery agent runs under, and deliberately not a second
@@ -362,10 +374,10 @@ export function resolveOperation(name, opts = {}) {
       `operations: no operation named ${JSON.stringify(name)} (known: ${Object.keys(OPERATIONS).sort().join(', ')})`,
     );
   }
-  const { declaration, sinks } = build(opts);
+  const { declaration, sinks, finish } = build(opts);
   const registry = createRegistry();
   registry.register(declaration);
-  return { declaration, registry, sinks };
+  return { declaration, registry, sinks, finish };
 }
 
 /** The usage text when no operation is named. */
@@ -399,7 +411,7 @@ if (IS_CLI) {
     writeAllSync(1, `error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
     process.exit(2);
   }
-  const { declaration, registry, sinks } = resolved;
+  const { declaration, registry, sinks, finish } = resolved;
   if (rest.includes('--help')) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
@@ -436,7 +448,10 @@ if (IS_CLI) {
     makeJudge: createCliJudgeFactory(),
     newRunId: () => newRunId(declaration.name),
   })
-    .then(({ code, lines }) => {
+    .then((outcome) => {
+      const { code, lines } = typeof finish === 'function'
+        ? finish({ run: outcome.run, code: outcome.code, lines: outcome.lines, json: hasJsonFlag(rest) })
+        : outcome;
       writeAllSync(1, `${lines.join('\n')}\n`);
       process.exit(code);
     })

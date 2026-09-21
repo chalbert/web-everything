@@ -51,6 +51,7 @@ import { FILE_ITEM_OP } from '../file-item.mjs';
 import { RESTART_RUNNER_OP } from '../restart-runner.mjs';
 import { CLEAR_STUCK_SESSION_OP } from '../clear-stuck-session.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
+import { DISPATCH_TASK_OP } from '../dispatch-task.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
@@ -375,6 +376,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // act — `fs`, `claude agents`, `ps` and the run-store all live in `clear-stuck-session-io.mjs`, behind the
     // `readStuckFacts` reader and the sink `../run.mjs` wires through.
     [CLEAR_STUCK_SESSION_OP]: 'clear-stuck-session.mjs',
+    // #3730 — `dispatch-task`'s `dispatch` step is an effect, so it is NOT read-only; listed for map coverage.
+    // The declaring module reaches nothing that can act: the spawn, the run store and the brief read all live in
+    // `dispatch-task-io.mjs`, behind the `readTask` reader and the sink `../run.mjs` wires through.
+    [DISPATCH_TASK_OP]: 'dispatch-task.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
