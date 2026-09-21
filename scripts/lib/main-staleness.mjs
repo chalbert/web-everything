@@ -29,16 +29,23 @@ export function gitRun(args, opts = {}) {
  *   { fresh:true }                 — up to date (behind 0).
  *   { action:'auto-ff' }           — behind, NOT diverged (dirty or clean) → safe to autostash fast-forward.
  *   { action:'warn', warning }     — behind AND diverged (local ahead), or autoFf off → read may be stale; warn, don't touch.
- * @param {{behind:number, ahead:number, dirty:boolean, autoFf:boolean, base?:string}} o
+ *
+ * `cleanOnly` (#3474) is the stricter gate for a DISPATCH chokepoint that must never touch a tree it does not
+ * own: auto-ff ONLY when the tree is clean (nothing for `--autostash` to carry) AND `HEAD` is on `base`
+ * (`onBase`, default true so a caller that has not measured it is unchanged). Every other behind case warns,
+ * with a machine-readable `reason`: `diverged` | `dirty` | `not-on-base` | `not-auto-syncing`.
+ * @param {{behind:number, ahead:number, dirty:boolean, autoFf:boolean, base?:string, cleanOnly?:boolean, onBase?:boolean}} o
  */
-export function classifyStaleness({ behind, ahead, dirty, autoFf, base = 'main' }) {
+export function classifyStaleness({ behind, ahead, dirty, autoFf, base = 'main', cleanOnly = false, onBase = true }) {
   if (!behind || behind <= 0) return { fresh: true, behind: 0, ahead };
   // Auto-ff any non-diverged tree, dirty included: the pull is `--ff-only --autostash`, which stashes a dirty
   // tree, fast-forwards, and pops it back. Only a diverged tree (local commits ahead) can't ff — warn there.
-  if (autoFf && (!ahead || ahead === 0)) return { action: 'auto-ff', behind, ahead: 0, dirty };
-  const why = ahead ? `diverged (${ahead} local commit(s))` : 'not auto-syncing';
+  const diverged = !!ahead && ahead > 0;
+  if (autoFf && !diverged && (!cleanOnly || (!dirty && onBase))) return { action: 'auto-ff', behind, ahead: 0, dirty };
+  const why = diverged ? `diverged (${ahead} local commit(s))` : 'not auto-syncing';
+  const reason = diverged ? 'diverged' : !autoFf ? 'not-auto-syncing' : dirty ? 'dirty' : 'not-on-base';
   return {
-    action: 'warn', behind, ahead, dirty,
+    action: 'warn', reason, behind, ahead, dirty,
     warning: `local ${base} is ${behind} commit(s) behind origin/${base} (${why}) — ranking/selection may be STALE. `
       + `Sync (git pull --ff-only --autostash) or work in a fresh clone off origin/${base}.`,
   };
@@ -46,10 +53,15 @@ export function classifyStaleness({ behind, ahead, dirty, autoFf, base = 'main' 
 
 /**
  * Fetch origin/<base>, compare to local <base>, and either fast-forward (clean) or return a warning. Fail-soft.
- * @param {{base?:string, autoFf?:boolean, run?:typeof gitRun}} o
- * @returns {{offline?:true}|{fresh:true,behind:0}|{synced:true,behind:number}|{action:'warn',behind,ahead,dirty,warning:string}}
+ *
+ * `cleanOnly` (#3474) switches the sync to the dispatch-safe form: fast-forward ONLY a clean tree whose `HEAD` is
+ * on `base`, via a plain `git merge --ff-only origin/<base>` (the fetch already ran) — never `pull --autostash`,
+ * which would stash and pop a dirty tree the caller does not expect mutated. Diverged, dirty-and-behind, or
+ * off-`base` all return the warn with a `reason`; the sync is not attempted.
+ * @param {{base?:string, autoFf?:boolean, cleanOnly?:boolean, run?:typeof gitRun}} o
+ * @returns {{offline?:true}|{fresh:true,behind:0}|{synced:true,behind:number}|{action:'warn',reason?:string,behind,ahead,dirty,warning:string}}
  */
-export function checkMainStaleness({ base = 'main', autoFf = true, run = gitRun } = {}) {
+export function checkMainStaleness({ base = 'main', autoFf = true, cleanOnly = false, run = gitRun } = {}) {
   const fetched = run(['fetch', 'origin', base, '--quiet']);
   if (fetched.status !== 0) return { offline: true };
   const rev = (a) => { const r = run(['rev-parse', a]); return r.status === 0 ? r.stdout.trim() : null; };
@@ -62,11 +74,20 @@ export function checkMainStaleness({ base = 'main', autoFf = true, run = gitRun 
   const ahead = count(`origin/${base}..${base}`);
   const st = run(['status', '--porcelain']);
   const dirty = !!(st.stdout && st.stdout.trim());
-  const cls = classifyStaleness({ behind, ahead, dirty, autoFf, base });
+  let onBase = true;
+  if (cleanOnly) {
+    const head = run(['symbolic-ref', '--short', 'HEAD']);
+    onBase = head.status === 0 && head.stdout.trim() === base;
+  }
+  const cls = classifyStaleness({ behind, ahead, dirty, autoFf, base, cleanOnly, onBase });
   if (cls.action === 'auto-ff') {
-    const pulled = run(['pull', '--ff-only', '--autostash']);
-    if (pulled.status === 0) return { synced: true, behind };
-    return { action: 'warn', behind, ahead, dirty, warning: `local ${base} is ${behind} behind origin/${base} and the auto fast-forward failed — sync by hand.` };
+    const synced = cleanOnly ? run(['merge', '--ff-only', `origin/${base}`]) : run(['pull', '--ff-only', '--autostash']);
+    if (synced.status === 0) return { synced: true, behind };
+    return {
+      action: 'warn', reason: 'ff-failed', behind, ahead, dirty,
+      warning: `local ${base} is ${behind} behind origin/${base} and the auto fast-forward failed — sync by hand.`,
+      ...(cleanOnly && synced.stderr.trim() ? { detail: synced.stderr.trim() } : {}),
+    };
   }
   return cls;
 }

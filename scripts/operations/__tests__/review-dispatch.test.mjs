@@ -7,8 +7,14 @@
  * covers for the shared `buildAgentArgv`/`defaultSpawnAgent` machinery this file reuses verbatim).
  */
 
-import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import { afterEach, describe, it, expect, vi } from 'vitest';
+
+import { runReconcileFixDispatch } from '../../conveyor/reconcile-fix-dispatch.mjs';
 import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
@@ -366,6 +372,119 @@ describe('assertMainNotStale', () => {
     expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 1, ahead: 0, dirty: false, warning: 'stub' })))
       .toThrow(/behind origin\/main/);
     expect(assertMainNotStale('/repo', FRESH)).toEqual({ fresh: true, behind: 0 });
+  });
+
+  // ── #3474 — the REAL mechanism: a temp git repo with a bare origin, no mocked git. ────────────────────────────
+  // A dispatching checkout that is merely behind, with a clean tree, is fast-forwarded (zero judgment); anything
+  // that is not a mechanical fast-forward still refuses, and the refusal must not have touched the checkout.
+  describe('#3474 — auto-sync a clean fast-forward, on a real repo with a bare origin', () => {
+    const dirs = [];
+    // each test builds 1–2 real repos (a dozen git spawns) — well inside the default 5s alone, but a loaded host is not.
+    vi.setConfig({ testTimeout: 30_000 });
+    afterEach(() => { vi.restoreAllMocks(); for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+    const git = (cwd, ...args) => execFileSync('git', [
+      '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args,
+    ], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const commit = (cwd, file, text) => { writeFileSync(join(cwd, file), text); git(cwd, 'add', file); git(cwd, 'commit', '-m', `edit ${file}`); };
+
+    /** origin (bare) ← pusher; `checkout` is a clone of origin taken at C1, then the pusher lands 2 more commits
+     *  so the checkout is exactly 2 behind origin/main by the time the guard fetches. */
+    function behindFixture() {
+      const dir = mkdtempSync(join(tmpdir(), 'rd-stale-'));
+      dirs.push(dir);
+      const origin = join(dir, 'origin.git');
+      const pusher = join(dir, 'pusher');
+      const checkout = join(dir, 'checkout');
+      git(dir, 'init', '--bare', '-b', 'main', origin);
+      git(dir, 'init', '-b', 'main', pusher);
+      git(pusher, 'remote', 'add', 'origin', origin);
+      commit(pusher, 'tracked.txt', 'one\n');
+      git(pusher, 'push', 'origin', 'main');
+      git(dir, 'clone', origin, checkout);
+      commit(pusher, 'landed-a.txt', 'a\n');
+      commit(pusher, 'landed-b.txt', 'b\n');
+      git(pusher, 'push', 'origin', 'main');
+      return { dir, origin, pusher, checkout, originHead: git(pusher, 'rev-parse', 'HEAD') };
+    }
+
+    it('(a) behind + clean → no throw, fast-forwards, HEAD equals origin/main, dispatch proceeds', () => {
+      const { checkout, originHead } = behindFixture();
+      const note = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect(git(checkout, 'rev-parse', 'HEAD')).not.toBe(originHead);
+
+      const st = assertMainNotStale(checkout);
+
+      expect(st).toEqual({ synced: true, behind: 2 });
+      expect(git(checkout, 'rev-parse', 'HEAD')).toBe(originHead);
+      expect(git(checkout, 'status', '--porcelain')).toBe('');
+      expect(note).toHaveBeenCalledWith(expect.stringMatching(/fast-forwarded .* 2 commit\(s\) to origin\/main/));
+      // ...and a second call is now simply fresh — the sync was real, not remembered.
+      expect(assertMainNotStale(checkout)).toEqual({ fresh: true, behind: 0 });
+    });
+
+    it('(b) behind + DIVERGED (local commit ahead) → still throws, HEAD untouched, message names the divergence', () => {
+      const { checkout, originHead } = behindFixture();
+      commit(checkout, 'local-only.txt', 'mine\n');
+      const headBefore = git(checkout, 'rev-parse', 'HEAD');
+
+      let err;
+      try { assertMainNotStale(checkout); } catch (e) { err = e; }
+
+      expect(err?.message).toMatch(/2 commit\(s\) behind origin\/main/);
+      expect(err.message).toMatch(/DIVERGED \(1 local commit\(s\) ahead of origin\/main\)/);
+      expect(err.message).toMatch(/#3439/);
+      expect(git(checkout, 'rev-parse', 'HEAD')).toBe(headBefore);
+      expect(headBefore).not.toBe(originHead);
+    });
+
+    it('(c) behind + DIRTY tree → still throws, auto-sync NOT attempted: HEAD, the dirty file and the stash are untouched', () => {
+      const { checkout, originHead } = behindFixture();
+      writeFileSync(join(checkout, 'tracked.txt'), 'one\nuncommitted edit\n');
+      const headBefore = git(checkout, 'rev-parse', 'HEAD');
+
+      let err;
+      try { assertMainNotStale(checkout); } catch (e) { err = e; }
+
+      expect(err?.message).toMatch(/2 commit\(s\) behind origin\/main/);
+      expect(err.message).toMatch(/uncommitted changes, so the automatic fast-forward was NOT attempted/);
+      expect(git(checkout, 'rev-parse', 'HEAD')).toBe(headBefore);
+      expect(headBefore).not.toBe(originHead);
+      expect(readFileSync(join(checkout, 'tracked.txt'), 'utf8')).toBe('one\nuncommitted edit\n');
+      expect(git(checkout, 'status', '--porcelain')).toBe('M tracked.txt');
+      expect(git(checkout, 'stash', 'list')).toBe(''); // no --autostash round-trip either
+    });
+
+    it('an UNTRACKED file also counts as a dirty tree (nothing is fast-forwarded over it)', () => {
+      const { checkout } = behindFixture();
+      writeFileSync(join(checkout, 'scratch.txt'), 'x\n');
+      const headBefore = git(checkout, 'rev-parse', 'HEAD');
+      expect(() => assertMainNotStale(checkout)).toThrow(/uncommitted changes/);
+      expect(git(checkout, 'rev-parse', 'HEAD')).toBe(headBefore);
+    });
+
+    it('a fetch failure / offline stays fail-soft — no throw, nothing touched', () => {
+      const { dir, checkout } = behindFixture();
+      git(checkout, 'remote', 'set-url', 'origin', join(dir, 'no-such-origin.git'));
+      const headBefore = git(checkout, 'rev-parse', 'HEAD');
+      expect(assertMainNotStale(checkout)).toEqual({ offline: true });
+      expect(git(checkout, 'rev-parse', 'HEAD')).toBe(headBefore);
+    });
+
+    it('reconcile-fix-dispatch gets the same behaviour through the same function (no per-caller copy)', () => {
+      const stubs = { reconcile: () => ({ dispatch: [], refusals: [], notes: [] }), pickFreeLanes: () => [], loadItems: () => [] };
+
+      const clean = behindFixture();
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect(() => runReconcileFixDispatch({ root: clean.checkout, ...stubs })).not.toThrow();
+      expect(git(clean.checkout, 'rev-parse', 'HEAD')).toBe(clean.originHead);
+
+      const dirty = behindFixture();
+      writeFileSync(join(dirty.checkout, 'tracked.txt'), 'edited\n');
+      const headBefore = git(dirty.checkout, 'rev-parse', 'HEAD');
+      expect(() => runReconcileFixDispatch({ root: dirty.checkout, ...stubs })).toThrow(/uncommitted changes/);
+      expect(git(dirty.checkout, 'rev-parse', 'HEAD')).toBe(headBefore);
+    });
   });
 });
 

@@ -2,8 +2,9 @@
 bornAs: xpezx0h
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-03"
+dateResolved: "2026-09-21"
 tags: []
 scope:
   - we:scripts/operations/review-dispatch.mjs
@@ -48,3 +49,13 @@ This is a forced-invariant fix, not a design fork worth scaffolding as a `decisi
 1. **Executable** — a test (e.g. added to `we:scripts/operations/__tests__/review-dispatch.test.mjs`'s existing `assertMainNotStale` `describe` block) exercises three shapes and asserts: (a) behind + not diverged + clean → no throw, sync performed, dispatch proceeds; (b) behind + diverged (local ahead) → still throws, same refusal class as today; (c) behind + not diverged + dirty working tree → still throws / refuses, auto-sync NOT attempted over the dirty tree.
 2. Both existing call sites — `we:scripts/operations/review-dispatch.mjs#dispatchReview` and `we:scripts/conveyor/reconcile-fix-dispatch.mjs#runReconcileFixDispatch` — pick up the fixed behavior through the single shared `assertMainNotStale`, with no per-caller duplication.
 3. The refusal message for the still-refusing cases (diverged, or dirty-and-behind) stays as informative as today's — a future hit of either case should not read as a regression in clarity, only in frequency.
+
+## Resolution (2026-09-21)
+
+Built once, in the shared guard. `checkMainStaleness` (`we:scripts/lib/main-staleness.mjs`) gained a `cleanOnly` mode: fast-forward only a clean tree whose `HEAD` is on `base`, with a plain `git merge --ff-only origin/<base>` (never `pull --autostash`); every other behind case returns a warn carrying a `reason`. `assertMainNotStale` (`we:scripts/operations/review-dispatch.mjs`) now calls it with `autoFf: true, cleanOnly: true` and builds a reason-specific refusal (diverged / dirty / not-on-base / ff-failed). Fetch failure stays fail-soft. Both callers pick it up through that one function.
+
+1. Done-when 1 — real temp repo + bare origin, in `we:scripts/operations/__tests__/review-dispatch.test.mjs` › `assertMainNotStale` › `#3474 — auto-sync a clean fast-forward…`: "(a) behind + clean → no throw, fast-forwards, HEAD equals origin/main", "(b) behind + DIVERGED … still throws, HEAD untouched", "(c) behind + DIRTY tree … auto-sync NOT attempted: HEAD, the dirty file and the stash are untouched"; plus an untracked-file case and an offline (fail-soft) case.
+2. Done-when 2 — "reconcile-fix-dispatch gets the same behaviour through the same function" runs `runReconcileFixDispatch` with no injected checker against real repos (clean → syncs, dirty → refuses); no per-caller code changed.
+3. Done-when 3 — the refusal keeps today's `N commit(s) behind origin/<base> … (#3439)` prefix and adds the reason (`DIVERGED (N local commit(s) ahead …)`, `uncommitted changes, so the automatic fast-forward was NOT attempted`); asserted in (b) and (c).
+
+Helper-level unit tests: `we:scripts/lib/__tests__/main-staleness.test.mjs` › `classifyStaleness — cleanOnly (#3474)` and `checkMainStaleness — cleanOnly (#3474)`. Delivered in the PR that resolves this card.
