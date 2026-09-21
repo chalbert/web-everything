@@ -30,7 +30,8 @@
 ## Your job (one sentence)
 
 Build backlog item **#{{ITEM_NUM}}** to spec in an isolated lane clone, get its gate green, **review your own
-diff to convergence with an adversarial subagent**, open a PR (`ready-to-merge`, or parked `review:human`
+diff to convergence with an adversarial subagent**, resolve the card in the lane and commit it with the work (the
+claim and the resolve ride the PR — step 8), open a PR (`ready-to-merge`, or parked `review:human`
 **only for good reason**), drop a learnings entry — then **EXIT WITHOUT MERGING**. The resident drain daemon
 (`plateau:tools/drain-daemon/`) is the single landing serializer; it lands green couples and parks escalations
 `review:human` for the main session. You never run `gh pr merge`.
@@ -156,7 +157,8 @@ leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rath
 
 A WE item's gate is `npm run check:standards`. For a cross-locus item, run **that** locus's gate
 (look up `LOCI[item.locus]` in `check-standards-rules.mjs`). **The gate must be green before you push** — a red
-gate is a hard stop (see *Escalations*). Then resolve:
+gate is a hard stop (see *Escalations*). **Do NOT `resolve` the card here** — the card is resolved in step 8, once
+the diff has converged (steps 6–7) and just before the one commit, so the flip rides the PR (see step 8):
 
 **You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
 well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
@@ -173,19 +175,7 @@ node scripts/verify-lane.mjs check --json          # fast marker read; repeat ac
 ```
 
 `check`'s `status` is `running` while your request is still pending or in flight (poll again next turn),
-`green`/`red` once the runner has actually run it. Only once you see `green` do you resolve:
-
-```bash
-node scripts/operations/run.mjs resolve --ref={{ITEM_NUM}} --json   # --ref= is a FLAG, not a positional
-```
-
-**`resolve` is declared too, and its shape differs from the raw CLI's.** `we:scripts/backlog.mjs resolve`
-takes the item as a positional and spells its options kebab-case (`--graduated-to`, `--codified-to`); the
-operation takes `--ref=<NNN>` and camelCase (`--graduatedTo`, `--codifiedTo`), and refuses an unknown flag
-rather than dropping it. Both run the same four refusals — `open-children` (#658), `uncodified-decision`
-(#911), `scope-drift` (#2803), `not-in-flight` — but the operation *names* the one that fired in
-`verdict`, so a delivery agent branches on a value instead of parsing stderr, and a `--force=true` that
-steps over one is recorded rather than warned about.
+`green`/`red` once the runner has actually run it. Only `green` lets you go on to step 6.
 
 **Read `check`'s `status`/`ok`, never just its exit code.** `{sha, status, reason, ok, detail}` — `status` is
 `green` (ok) / `red` (ok:false, a real gate failure) / `running` (not yet settled — poll again, this is NOT a
@@ -257,9 +247,35 @@ exported from the design artifact). A brand-new surface with no target must **no
 nobody has drawn its baseline yet — you STILL Read the screenshot and do the by-eye pass (2), and note the
 documented skip on the automated diff. The automated layer only bites once a baseline is committed.
 
-### 8. Commit on the lane's current branch + publish HEAD to the `lane/...` ref + open the PR (label green ONLY after `test` passes)
+### 8. Resolve the card in the lane, commit, publish HEAD to the `lane/...` ref + open the PR (label green ONLY after `test` passes)
 
-Commit only this item's files (explicit paths, never `git add -A`; one commit) on the lane's **current branch**
+**Resolve the card FIRST — here, in the lane clone, just before the commit, and never earlier.** Resolving is the
+CLOSE of the claim/resolve lifecycle (`we:scripts/operations/resolve.mjs`). The claim rode this PR (step 2) and the
+resolve rides the SAME PR — `claim`/`release`/`resolve` all run in the lane clone and land in the item's own PR
+(`we:docs/agent/backlog-workflow.md`, *Working an item*), so the card reads `resolved` on `main` only when the
+daemon merges the PR, and an item that fails in-lane is never left `resolved` (or `active`) on `main`. It comes
+AFTER the gate (step 5), the `/converge` run (step 6) and the visual self-review (step 7), because those can still
+change the diff and whether the card is really done, and BEFORE the commit so the flip is part of it (and of the
+final-HEAD verification below). Resolve **only if every `## Done when` item of `{{ITEM_SPEC_PATH}}` holds**; if one
+does not, the card is not done — leave it `active`, do not resolve over it, and say so in your one-line return
+(step 10). Never resolve to make a stop look finished, and never on a step-0 not-ready / gate-red stop.
+
+```bash
+node scripts/operations/run.mjs resolve --ref={{ITEM_NUM}} --json   # --ref= is a FLAG, not a positional
+```
+
+**`resolve` is declared too, and its shape differs from the raw CLI's.** `we:scripts/backlog.mjs resolve`
+takes the item as a positional and spells its options kebab-case (`--graduated-to`, `--codified-to`); the
+operation takes `--ref=<NNN>` and camelCase (`--graduatedTo`, `--codifiedTo`), and refuses an unknown flag
+rather than dropping it. Both run the same four refusals — `open-children` (#658), `uncodified-decision`
+(#911), `scope-drift` (#2803), `not-in-flight` — but the operation *names* the one that fired in
+`verdict`, so a delivery agent branches on a value instead of parsing stderr, and a `--force=true` that
+steps over one is recorded rather than warned about. The drain's own post-land flip
+(`resolveLandedItem`) is only the fallback for a producer that did not pre-author it; you are the producer,
+so you author it.
+
+Then commit only this item's files — **including the item's own `backlog/` card, which now carries the claim and
+the resolve** (explicit paths, never `git add -A`; one commit) on the lane's **current branch**
 (its local `main`) — do **NOT** `git checkout -b lane/...`; the single-branch hook blocks branch creation even
 inside a lane clone. You never create the `lane/...` branch locally: `pr-land` **publishes HEAD** to that ref
 for you via `--ref=... --sha=HEAD`. Then open the PR through the canonical producer — **never a hand-rolled
@@ -389,7 +405,8 @@ daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-n
 **conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 8; its process exit
 (merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
 signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |
-escalated <label> | gate-red | blocked-on-infra)`. **A red gate / red CI is NOT watcher-visible** (it reads
+escalated <label> | gate-red | blocked-on-infra)` — and add `, card left active: <which Done-when item does not
+hold>` when step 8 did not resolve it. **A red gate / red CI is NOT watcher-visible** (it reads
 only state/labels), and **`blocked-on-infra` has no PR to watch at all** — your one-line RETURN is the only
 signal that surfaces either, so always report it explicitly.
 
@@ -545,6 +562,9 @@ never self-clear a review, and never build a card that failed the readiness gate
 - **One item, one lane, one PR** — do not fold unrelated work in; capture leftovers as new backlog items. (The
   **cross-locus couple** is the sole exception: one item, two lanes, two PRs — impl-first / WE-last, manifest
   on the WE PR; see *Cross-locus items — the two-PR couple*.)
-- **Work only through the normal verbs** (claim → lane clone → `lane/{{ITEM_NUM}}` branch → PR → daemon merge →
-  resolve) — those are exactly the channels the lane board reads, so state is reflected **for free**. No parallel
+- **Never resolve before the work is built, converged and about to be committed** — `resolve` runs once, in step 8,
+  in the lane clone, and rides the same PR as the claim; it is never run at the gate (step 5) and never after the
+  merge (you never merge).
+- **Work only through the normal verbs** (claim → lane clone → build → resolve in the lane → one commit → PR →
+  daemon merge; the claim and the resolve ride that PR) — those are exactly the channels the lane board reads, so state is reflected **for free**. No parallel
   state store, ever (#2612 ruling).

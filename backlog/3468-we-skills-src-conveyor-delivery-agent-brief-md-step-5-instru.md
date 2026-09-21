@@ -13,4 +13,8 @@ we:skills-src/conveyor/delivery-agent-brief.md's step 5 (Run the gate GREEN) cur
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run skills-src/conveyor/__tests__/` passes. The test is the "resolve rides the PR, never runs before the work is built (#3468)" block in `we:skills-src/conveyor/__tests__/scratch-dir-rule.test.mjs`. It reads `we:skills-src/conveyor/delivery-agent-brief.md` and fails on the old text (step 5 ran the `resolve` operation; five of its assertions fail) and passes on the new text: step 5 carries no resolve call, the brief runs `resolve --ref={{ITEM_NUM}}` exactly once, in step 8 and before that step's `git commit -F`, states that the resolve rides the same PR as the claim and only when every `## Done when` item holds, and the guardrails no longer put resolve after the daemon merge.
+
+## Resolution (design followed)
+
+The brief follows `we:docs/agent/backlog-workflow.md` (*Working an item*: `claim`/`release`/`resolve` "run in the lane clone and land in the item's own PR") and `we:skills-src/batch-backlog-items/SKILL.md` ("the claim + resolve ride the PR"): resolve is authored by the producer in the lane, once, at step 8 just before the commit, after the gate, `/converge` and the visual review. The drain's `resolveLandedItem` flip (`we:scripts/lane-drain.mjs`) is only the fallback "when the producer didn't pre-author it". This card's own premise, that the daemon resolves the item after landing, describes that fallback, not the primary path.
