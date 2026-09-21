@@ -1,4 +1,5 @@
 ---
+bornAs: xggecwt
 kind: decision
 parent: "3383"
 status: open
@@ -12,7 +13,7 @@ tags: []
 
 # Decision: how the drain stops resolving a multi-slice card when one slice lands (#3816)
 
-Rule how the drain avoids setting `status: resolved` on a whole card when a PR for only one of its slices lands. Story #3816 (filed as `xuh255e`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3816 stays the build card and is blocked by this one. **The options, the evidence and the proposed default are copied from #3816; nothing was re-researched and the default was not changed.**
+Rule how the drain avoids setting `status: resolved` on a whole card when a PR for only one of its slices lands. Story #3816 (filed as `3816`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3816 stays the build card and is blocked by this one. **The options, the evidence and the proposed default are copied from #3816; nothing was re-researched and the default was not changed.**
 
 ## FOUND (from #3816, re-checked there against main `a4ff83ea6`)
 

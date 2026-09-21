@@ -1,4 +1,5 @@
 ---
+bornAs: xq4aezx
 kind: decision
 parent: "3383"
 status: open
@@ -12,7 +13,7 @@ tags: []
 
 # Decision: adopt the review-lens rules from the PR #2392 and PR #2400 reviews (#3813)
 
-Rule whether to add three review rules, and in what form. Story #3813 (filed as `x8fprww`) proposes them and says it needs the operator's OK before any build. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3813 stays the build card and is blocked by this one. **The options and the proposed default are copied from #3813; nothing was re-researched and the default was not changed.** One option, Fork 1 (b), was not in #3813's list; it was added when this card was filed and is marked as such.
+Rule whether to add three review rules, and in what form. Story #3813 (filed as `3813`) proposes them and says it needs the operator's OK before any build. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3813 stays the build card and is blocked by this one. **The options and the proposed default are copied from #3813; nothing was re-researched and the default was not changed.** One option, Fork 1 (b), was not in #3813's list; it was added when this card was filed and is marked as such.
 
 **The three rules.**
 

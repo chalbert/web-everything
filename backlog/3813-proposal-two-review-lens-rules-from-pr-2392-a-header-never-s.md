@@ -6,7 +6,7 @@ parent: "3383"
 status: open
 scope: ["we:scripts/lib/review-core.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/jury-ledger.mjs", "we:scripts/lib/__tests__/review-core.test.mjs"]
 dateOpened: "2026-09-21"
-blockedBy: ["xq4aezx"]
+blockedBy: ["3821"]
 tags: []
 ---
 
@@ -43,8 +43,8 @@ FOUND 2026-09-21. The review of PR #2392 found two untested guards by mutation p
 
 The review of PR #2400 (recorded 2026-09-21, reviewed sha `31a400872ffe0b4e57346c57a4fadf43d7676662`, verdict "prevention outstanding") produced exactly the same class of finding on two cards, this time in backlog cards rather than in a source-file header: a "must use X rather than Y" or "never" sentence in a card's fix section, with no Done-when case that fails under the wrong choice.
 
-- #3814 (filed as `x9vriie`; `acquire --lane=N --branch=<pr-branch>` refuses a clean lane as "ahead"): the fix section says the check must use the live `ls-remote` snapshot rather than stale local remote-tracking refs, but none of the three Done-when cases would fail if the fix used stale local refs. An implementation on stale refs would pass all three and silently discard a commit pushed to a since-deleted branch. Judged by the security lens, `PLAUSIBLE`, spec-only.
-- #3815 (filed as `xer3jlp`; lane leases outlive their work): the proposed janitor recycles lanes "dirty only by a one-line claim flip", which is also how a live worker's lane looks early in its work. The only guard, "never removes a lane whose lease is live and not stale", was prose in Done-when item 2 with no test. An implementation that ignores lease liveness would pass every listed test. Judged by the security lens, `CONFIRMED`, spec-only.
+- #3814 (filed as `3814`; `acquire --lane=N --branch=<pr-branch>` refuses a clean lane as "ahead"): the fix section says the check must use the live `ls-remote` snapshot rather than stale local remote-tracking refs, but none of the three Done-when cases would fail if the fix used stale local refs. An implementation on stale refs would pass all three and silently discard a commit pushed to a since-deleted branch. Judged by the security lens, `PLAUSIBLE`, spec-only.
+- #3815 (filed as `3815`; lane leases outlive their work): the proposed janitor recycles lanes "dirty only by a one-line claim flip", which is also how a live worker's lane looks early in its work. The only guard, "never removes a lane whose lease is live and not stale", was prose in Done-when item 2 with no test. An implementation that ignores lease liveness would pass every listed test. Judged by the security lens, `CONFIRMED`, spec-only.
 - Both findings were spec-only: the cards' tests are unbuilt, so the reviewer could not run a mutation probe; the gap was found by reading the card. The two cards were amended afterwards with a named case each (a stale-tracking-ref fixture on #3814, a live-lease fixture on #3815).
 
 **The rule this suggests, worded for cards:** every "must not", "must use X rather than Y" and "never" sentence in a card's fix section or Done-when needs a Done-when case, named and with its exact fixture, that fails under Y (the wrong choice the sentence rules out). The card should also say that the case fails under Y, so a reviewer can check the claim by reading. This is the card-side twin of this proposal's first rule (a "never" or "still refused" claim in a file header needs a named test for that exact line), and it belongs in the same review-lens brief, since one juror applies both.

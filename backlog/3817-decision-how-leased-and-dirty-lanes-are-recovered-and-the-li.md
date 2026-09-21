@@ -1,4 +1,5 @@
 ---
+bornAs: x0hik3k
 kind: decision
 parent: "3383"
 status: open
@@ -12,7 +13,7 @@ tags: []
 
 # Decision: how leased and dirty lanes are recovered, and the live-lease invariant (#3815)
 
-Rule how the lane pool recovers from leases that outlive their work and from lanes left dirty by abandoned work. Story #3815 (filed as `xer3jlp`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3815 stays the build card and is blocked by this one. **The options and the proposed default are copied from #3815; nothing was re-researched and the default was not changed.** #3815 also asks three open questions with no default; each is a fork below, with the least invasive option marked and the reason given.
+Rule how the lane pool recovers from leases that outlive their work and from lanes left dirty by abandoned work. Story #3815 (filed as `3815`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3815 stays the build card and is blocked by this one. **The options and the proposed default are copied from #3815; nothing was re-researched and the default was not changed.** #3815 also asks three open questions with no default; each is a fork below, with the least invasive option marked and the reason given.
 
 ## FOUND (from #3815, re-checked there against main `a4ff83ea6`)
 
