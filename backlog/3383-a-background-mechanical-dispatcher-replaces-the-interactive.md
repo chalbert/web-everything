@@ -21,7 +21,7 @@ tags: []
 
 ## Priority order
 
-Updated: 2026-09-20 by delivery worker `priority-order` (Claude) — first pass. Derived by the rules below from the ranker and this card's own goal; the orchestrator dispatches from the top of band A and never chooses order. Whoever files, resolves, re-scopes or blocks a #3383 card updates this section in the same push; the `check-priority` command of we:scripts/prototype-tracker.mjs, run with `--ref=origin/main --strict`, fails on drift.
+Updated: 2026-09-20 by delivery worker `post-land-2361` (Claude) — placed #3776 to #3781 after #2361 merged (they were the unnumbered "Awaiting a card number" lines) and renumbered the lines after them. Derived by the rules below from the ranker and this card's own goal; the orchestrator dispatches from the top of band A and never chooses order. Whoever files, resolves, re-scopes or blocks a #3383 card updates this section in the same push; the `check-priority` command of we:scripts/prototype-tracker.mjs, run with `--ref=origin/main --strict`, fails on drift.
 
 **Scope.** Every open card under #3383, plus the open slices of open epic children (the walk stops at a resolved card). A card resolved on `main` or on this branch counts as resolved. A card with `status: active` is claimed: listed at the end, never ordered. Ranker signals: the `suggest-next` operation (through we:scripts/operations/run.mjs, with `--json --parent=3383`) on `main` (it ranks Tier A only and prints at most 50 rows, so leverage for the rest was read from the loader `we:src/_data/backlog.js` on `main`). Leverage is 0 for almost every card, so most ties fall to size, then number.
 
@@ -108,69 +108,75 @@ Updated: 2026-09-20 by delivery worker `priority-order` (Claude) — first pass.
 63. #3773 · 2 · B · Clears: review briefs carry an unresolved double-brace token, so reviewers get a broken header.
 64. #3742 · 3 · B · Clears: open-pr reports complete though no pull request exists, so a landing looks done when it is not.
 65. #3752 · 3 · B · Clears: a hand dispatch can end without doing the brief or subscribing to an idle notice, so the orchestrator waits blind.
-66. #3743 · 5 · B · Clears: the tick has no start gate, so it can dispatch while an earlier day's PRs are still open.
-67. #3745 · 5 · B · Removes: hand-wiring the tick hook; emits the settings fragment as data, never applied by the build.
-68. #3751 · 5 · B · Clears: one red verify record blocks any second verify, and environment-only failures turn docs-only work red.
-69. #3765 · 2 · B · Clears: the reaper planner crashes on a null session row.
-70. #3744 · 5 · B · Clears: the reaper cannot tell a stop worked and re-stops about 570 finished sessions per run (built on the branch, graduation owed).
-71. #3771 · 5 · B · Clears: background workflow runs die silently, so the orchestrator waits on work that is gone.
-72. #3775 · 5 · B · Removes: the orchestrator running about eight commands by hand to see what is building, stuck and next.
-73. #3625 · epic · B · Container (unsliced): per-lane health rollup and orphan detection, the watch step of the epic.
-74. #3741 · 3 · B · Clears: the jury launcher returns a whole result into the caller's context; a path and summary is enough.
-75. #3774 · 3 · B · Speeds verify by giving docs-only changes a narrower run; removes no step.
-76. #3737 · 5 · B · Sets concurrency limits from measured host data on a dated review; today's numbers are a guess.
-77. #3770 · epic · B · Adds a design-review gate before clearing, which is what unlocks the design-first band; sequence with #3746, both change planQueueing.
-78. #3740 · epic · B · Container (off path): one intake operation for planned work; its slices are ordered on their own lines.
-79. #3746 · 3 · B · Off path: track intake, additive key and provenance inputs on file-item.
-80. #3753 · 5 · B · Off path: track intake, the strict one-line contract.
-81. #3757 · 5 · B · Off path: track intake, read-only reconciler of owed lines.
-82. #3758 · 5 · B · Off path: track intake, the ingest engine.
-83. #3760 · 5 · B · Off path: track intake, worker result adapter.
-84. #3576 · 3 · B · Off path: auto-prepare for build items, open fork unresolved; ranker leverage 1001 does not lift it above on-path cards (rule 0).
-85. #3759 · 5 · B · Off path: track intake, orchestrator handoff adapter.
-86. #3761 · 5 · B · Off path: track intake, pending-intake ledger at land.
-87. #3749 · 2 · B · Off path: rebuild of the decision docket page for the operator; no dispatch step reads it.
-88. #3766 · 2 · B · Off path: tidy-up of a helper copied in three places.
-89. #3671 · 3 · B · Off path: telemetry tool-use counts; a design decision is still open.
-90. #3747 · 3 · B · Off path: track intake, lint so a tracker note cannot carry a free-text owed list.
-91. #3597 · 5 · B · Off path: standing pass that re-verifies queued scope; open fork unresolved.
-92. #3763 · 5 · B · Off path: track intake, one-time backfill sweep.
-93. #3764 · 5 · B · Off path: track intake, learnings and escalation adapter.
-94. #3738 · 8 · B · Off path: usage-by-role aggregation over telemetry.
+66. #3777 · 3 · B · Removes: the orchestrator choosing dispatch order by hand, and the 50-row cap that hides 13 scoped cards; this section is the manual first pass for it.
+67. #3743 · 5 · B · Clears: the tick has no start gate, so it can dispatch while an earlier day's PRs are still open.
+68. #3745 · 5 · B · Removes: hand-wiring the tick hook; emits the settings fragment as data, never applied by the build.
+69. #3751 · 5 · B · Clears: one red verify record blocks any second verify, and environment-only failures turn docs-only work red.
+70. #3765 · 2 · B · Clears: the reaper planner crashes on a null session row.
+71. #3776 · 3 · B · Clears: finished session rows stay in the agents list for good, so live workers are miscounted; settles how rows leave and who may delete.
+72. #3781 · 3 · B · Removes: a person syncing a stale checkout by hand before the orchestrator's reads; settle with #3752 and #3474 whether reads and dispatch share one clone.
+73. #3744 · 5 · B · Clears: the reaper cannot tell a stop worked and re-stops about 570 finished sessions per run (built on the branch, graduation owed).
+74. #3771 · 5 · B · Clears: background workflow runs die silently, so the orchestrator waits on work that is gone.
+75. #3775 · 5 · B · Removes: the orchestrator running about eight commands by hand to see what is building, stuck and next.
+76. #3778 · 5 · B · Removes: the orchestrator running about eight commands by hand at session start; leans toward extending #3775, so it follows #3775.
+77. #3779 · 5 · B · Removes: hand-composing the live sections of the handoff each session; needs the dead-row rule (#3776) and the liveness rule (#3775); overlaps #3759.
+78. #3625 · epic · B · Container (unsliced): per-lane health rollup and orphan detection, the watch step of the epic.
+79. #3741 · 3 · B · Clears: the jury launcher returns a whole result into the caller's context; a path and summary is enough.
+80. #3774 · 3 · B · Speeds verify by giving docs-only changes a narrower run; removes no step.
+81. #3780 · 3 · B · Removes: hand-composing the reply's closing tail; the design may end at "keep as instructions", which builds nothing; follows #3778.
+82. #3737 · 5 · B · Sets concurrency limits from measured host data on a dated review; today's numbers are a guess.
+83. #3770 · epic · B · Adds a design-review gate before clearing, which is what unlocks the design-first band; sequence with #3746, both change planQueueing.
+84. #3740 · epic · B · Container (off path): one intake operation for planned work; its slices are ordered on their own lines.
+85. #3746 · 3 · B · Off path: track intake, additive key and provenance inputs on file-item.
+86. #3753 · 5 · B · Off path: track intake, the strict one-line contract.
+87. #3757 · 5 · B · Off path: track intake, read-only reconciler of owed lines.
+88. #3758 · 5 · B · Off path: track intake, the ingest engine.
+89. #3760 · 5 · B · Off path: track intake, worker result adapter.
+90. #3576 · 3 · B · Off path: auto-prepare for build items, open fork unresolved; ranker leverage 1001 does not lift it above on-path cards (rule 0).
+91. #3759 · 5 · B · Off path: track intake, orchestrator handoff adapter.
+92. #3761 · 5 · B · Off path: track intake, pending-intake ledger at land.
+93. #3749 · 2 · B · Off path: rebuild of the decision docket page for the operator; no dispatch step reads it.
+94. #3766 · 2 · B · Off path: tidy-up of a helper copied in three places.
+95. #3671 · 3 · B · Off path: telemetry tool-use counts; a design decision is still open.
+96. #3747 · 3 · B · Off path: track intake, lint so a tracker note cannot carry a free-text owed list.
+97. #3597 · 5 · B · Off path: standing pass that re-verifies queued scope; open fork unresolved.
+98. #3763 · 5 · B · Off path: track intake, one-time backfill sweep.
+99. #3764 · 5 · B · Off path: track intake, learnings and escalation adapter.
+100. #3738 · 8 · B · Off path: usage-by-role aggregation over telemetry.
 
 **Band C — needs an operator ruling**
 
-95. #3748 · 3 · C · Clears: background workers run in untrusted checkouts, so committed permissions are ignored and they stall on prompts; touches the operator's Claude trust settings.
-96. #3605 · decision · C · Ready to ratify. Clears: a cleared item silently drops out of dispatch when its hash id is renumbered.
-97. #3463 · decision · C · Clears: an unresolvable sync conflict never reaches the dispatch that owns the touched files.
-98. #3627 · decision · C · Rules what context a dispatched agent gets; #3628 and #3629 follow from it.
-99. #3628 · decision · C · Downstream of #3627: mechanical lane acquisition for every dispatched agent type.
-100. #3629 · decision · C · Downstream of #3627: the minimal-context wrapper for review and fix dispatch.
-101. #3682 · decision · C · Clears: tick cadence is tied to gate duration, so mechanical passes starve behind slow checks.
-102. #3767 · 2 · C · Clears: the deployed wip command is hand-edited and drifts from source; touches the operator's deployed command.
-103. #3756 · 5 · C · Clears: nothing runs the reaper or alerts when the runner is down; schedules on the operator's machine.
-104. #3769 · 5 · C · Clears: nothing stops the main session editing and committing itself; a hook policy the operator must approve.
-105. #3655 · decision · C · Clears: idle peer sessions and orphaned watchers linger after their target resolves.
-106. #3681 · decision · C · Clears: long-running daemons have no health check, staleness detection or live reload.
-107. #3686 · decision · C · Names the liveness guarantee that the reaper, workflow and watcher cards all lean on.
-108. #3722 · decision · C · Rules whether the session and the runner are one system or two; fixes the orchestrator's role.
-109. #3639 · decision · C · Two runners on disjoint parts of the queue; not needed while one runner serves the queue.
-110. #3648 · decision · C · How the POC branch keeps its own running record; documentation, not a cycle step.
-111. #3598 · epic · C · Container (off path): approval-granularity policy for auto-queue; the operator's policy, not a cycle step.
-112. #3599 · 3 · C · Off path: per-epic approval policy for auto-queue; the operator's policy.
-113. #3739 · 3 · C · Off path: repoint the telemetry collector's launchd job; touches the operator's deployed job.
-114. #3675 · decision · C · Off path: container-scoped write access for Codex's review seat; ready to ratify but an alternative provider, not a cycle step.
-115. #3672 · decision · C · Off path: a contained playground mode for open-ended experiments.
-116. #3563 · decision · C · Off path: whether the backlog guard should refuse any hand-written card; a policy call.
-117. #3558 · task · C · Off path: widens that guard; build only after #3563 is ruled.
-118. #3575 · decision · C · Off path: parallelising a build below the item level.
-119. #3601 · decision · C · Off path: which approval levels ship and their default; the operator's policy.
-120. #3621 · decision · C · Off path: OS-level isolation per lane; the operator deferred active work on it.
-121. #3658 · decision · C · Off path: self-registering provider descriptors instead of a shared table.
-122. #3676 · decision · C · Off path: act on heavy commands that overrun a container budget; container work is deferred.
-123. #3707 · decision · C · Off path: dispatch-origin attribution for velocity metrics.
-124. #3734 · decision · C · Off path: whether benchmark data may act as a capped prior for supervision graduation.
-125. #3762 · decision · C · Off path: track intake, when the worker Owed block stops being soft.
+101. #3748 · 3 · C · Clears: background workers run in untrusted checkouts, so committed permissions are ignored and they stall on prompts; touches the operator's Claude trust settings.
+102. #3605 · decision · C · Ready to ratify. Clears: a cleared item silently drops out of dispatch when its hash id is renumbered.
+103. #3463 · decision · C · Clears: an unresolvable sync conflict never reaches the dispatch that owns the touched files.
+104. #3627 · decision · C · Rules what context a dispatched agent gets; #3628 and #3629 follow from it.
+105. #3628 · decision · C · Downstream of #3627: mechanical lane acquisition for every dispatched agent type.
+106. #3629 · decision · C · Downstream of #3627: the minimal-context wrapper for review and fix dispatch.
+107. #3682 · decision · C · Clears: tick cadence is tied to gate duration, so mechanical passes starve behind slow checks.
+108. #3767 · 2 · C · Clears: the deployed wip command is hand-edited and drifts from source; touches the operator's deployed command.
+109. #3756 · 5 · C · Clears: nothing runs the reaper or alerts when the runner is down; schedules on the operator's machine.
+110. #3769 · 5 · C · Clears: nothing stops the main session editing and committing itself; a hook policy the operator must approve.
+111. #3655 · decision · C · Clears: idle peer sessions and orphaned watchers linger after their target resolves.
+112. #3681 · decision · C · Clears: long-running daemons have no health check, staleness detection or live reload.
+113. #3686 · decision · C · Names the liveness guarantee that the reaper, workflow and watcher cards all lean on.
+114. #3722 · decision · C · Rules whether the session and the runner are one system or two; fixes the orchestrator's role.
+115. #3639 · decision · C · Two runners on disjoint parts of the queue; not needed while one runner serves the queue.
+116. #3648 · decision · C · How the POC branch keeps its own running record; documentation, not a cycle step.
+117. #3598 · epic · C · Container (off path): approval-granularity policy for auto-queue; the operator's policy, not a cycle step.
+118. #3599 · 3 · C · Off path: per-epic approval policy for auto-queue; the operator's policy.
+119. #3739 · 3 · C · Off path: repoint the telemetry collector's launchd job; touches the operator's deployed job.
+120. #3675 · decision · C · Off path: container-scoped write access for Codex's review seat; ready to ratify but an alternative provider, not a cycle step.
+121. #3672 · decision · C · Off path: a contained playground mode for open-ended experiments.
+122. #3563 · decision · C · Off path: whether the backlog guard should refuse any hand-written card; a policy call.
+123. #3558 · task · C · Off path: widens that guard; build only after #3563 is ruled.
+124. #3575 · decision · C · Off path: parallelising a build below the item level.
+125. #3601 · decision · C · Off path: which approval levels ship and their default; the operator's policy.
+126. #3621 · decision · C · Off path: OS-level isolation per lane; the operator deferred active work on it.
+127. #3658 · decision · C · Off path: self-registering provider descriptors instead of a shared table.
+128. #3676 · decision · C · Off path: act on heavy commands that overrun a container budget; container work is deferred.
+129. #3707 · decision · C · Off path: dispatch-origin attribution for velocity metrics.
+130. #3734 · decision · C · Off path: whether benchmark data may act as a capped prior for supervision graduation.
+131. #3762 · decision · C · Off path: track intake, when the worker Owed block stops being soft.
 
 **Claimed (`status: active`) — listed, not ordered**
 
@@ -180,16 +186,6 @@ Updated: 2026-09-20 by delivery worker `priority-order` (Claude) — first pass.
 - #3441 · task · claimed · A build-dispatch agent whose PR merges must resolve its own backlog item, not leave it active forever
 - #3443 · epic · claimed · Graduate origin/lane/mechanical-dispatcher to main in small, independently reviewable pieces
 - #3447 · 2 · claimed · Require check:health in the test-plan checklist for any PR stamping preparedDate on a decision with Fork secti
-
-**Awaiting a card number — not ordered.** Worker `file-batch4` was filing these under #3383 when this list was written; none was on `main` yet. When one lands, insert it by rules 0 to 3 and delete its line here.
-
-- (no number yet) · Start-of-session state pass: one read-only report replacing about eight hand-run commands (may overlap #3775).
-- (no number yet) · Stale-clone handling: a designated operations clone that syncs itself, or operations that read `origin/main` directly.
-- (no number yet) · Epic-scoped ordered list: the mechanism this section is the manual first pass for; name its number here once filed, and let it read or replace this section rather than duplicate it.
-- (no number yet) · Handoff generation: derive the live sections of the orchestrator handoff from state.
-- (no number yet) · Deployed session-command drift: `/continue` and `/handoff` are deployed but untracked in source (sibling of #3767).
-- (no number yet) · Session reply and report format: which parts of the closing tail a script can decide.
-- (no number yet) · Dead session rows are never cleaned: how the rows leave the agent list, and who may delete a session.
 
 **Owed, no card yet — not ordered** (from this card's own notes; each needs a card once its scope is re-read).
 
