@@ -2430,6 +2430,10 @@ export function duplicateBornAs(items = []) {
  *   that don't pass it keep the old always-error behaviour).
  * @param {() => number} [opts.now]  epoch seconds "now" — injectable for deterministic tests.
  * @param {number} [opts.graceWindowSeconds]  in-flight window, default `STRANDED_HASH_GRACE_SECONDS`.
+ * @param {boolean} [opts.inLane]  true when the checkout running the check is a LANE clone. A genuine strand is
+ *   then a WARNING, not an error: the lane neither caused it nor can repair it (`number-stranded` refuses to run
+ *   in a lane), and an error wedged every lane's `verify-lane` until someone numbered it in a primary. Default
+ *   false — a primary checkout keeps the hard error.
  * @returns {{errors: string[], warnings: string[]}} one message per stranded hash, routed by recency.
  */
 export const STRANDED_HASH_GRACE_SECONDS = 180; // ~2.5x the measured 7-73s drain numbering-commit lag
@@ -2438,6 +2442,7 @@ export function strandedHashesOnMain(mainBacklogPaths = [], {
   commitTimeFor = () => null,
   now = () => Date.now() / 1000,
   graceWindowSeconds = STRANDED_HASH_GRACE_SECONDS,
+  inLane = false,
 } = {}) {
   const errors = [];
   const warnings = [];
@@ -2451,6 +2456,12 @@ export function strandedHashesOnMain(mainBacklogPaths = [], {
     const inFlight = ageSeconds !== null && ageSeconds >= 0 && ageSeconds < graceWindowSeconds;
     if (inFlight) {
       warnings.push(`Backlog file "${p}" is on main with a NON-NUMERIC leading id "${lead}", committed ${Math.round(ageSeconds)}s ago — within the drain's own JIT-numbering window (#2288/#2956, <${graceWindowSeconds}s grace). This looks like the drain's separate numbering commit hasn't landed yet, not a strand. No action needed here — re-run \`check:standards\` after a fresh fetch to confirm it cleared.`);
+    } else if (inLane) {
+      // A lane clone can neither cause this (the strand is already on main) nor repair it: `number-stranded`
+      // refuses to run in a lane, because the NNN it mints is only valid against serialized main. Erroring here
+      // wedged `verify-lane` for EVERY lane while CI (which has no origin/main to read) stayed green, so it is
+      // a warning in a lane; the primary checkout and the drain's own assert still hard-error.
+      warnings.push(`Backlog file "${p}" is on main with a NON-NUMERIC leading id "${lead}" — a land route bypassed JIT numbering (#2288) and stranded a hash (#2319). Not caused by this lane and not fixable from it (\`number-stranded\` refuses to run in a lane): run \`node scripts/backlog.mjs number-stranded\` in a PRIMARY checkout, or let the drain number it at its next land.`);
     } else {
       errors.push(`Backlog file "${p}" is on main with a NON-NUMERIC leading id "${lead}" — a land route bypassed JIT numbering (#2288) and stranded a hash (#2319). Number it: \`node scripts/backlog.mjs number-stranded\` (distinct from a duplicate NNN — a lone hash isn't a collision).`);
     }
