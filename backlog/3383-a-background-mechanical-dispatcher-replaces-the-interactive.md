@@ -4304,3 +4304,19 @@ PR #2361 (merged 2026-09-21T00:22Z) filed six uncleared design-first stories und
 - `open-pr` and `we:scripts/pr-land.mjs` with `--no-require-verified` were needed because local verification is red only on the known `container-exec` test (`we:scripts/lib/__tests__/container-exec.test.mjs`). It needs the image `we-heavy-admission:poc`, a local proof-of-concept image that is in no registry, and the test does not skip itself when the image is absent.
 
 **Not verified here:** that `claude rm` removes the row or the transcript (help text only, not run); that the 13 scoped rows hidden by the 50-row cap of the ranker include #3768 to #3771, #3775 and #3756.
+
+## Session update (2026-09-21) — delegation to Codex and Antigravity moved to the top of the priority order on the operator's instruction: nine cards, #3717 first on the critical path (prototype commit 903041902)
+
+On the operator's instruction of 2026-09-21 ("I want to prioritise the delegation to other subagent from agy and codex, got the impression we are not doing much for that at the moment"), delegation to Codex and Antigravity now sits at the top of the `## Priority order`, right after the health chain and before band A (prototype commit 903041902). The operator confirmed the approach ("Yes for 3717") and named the routing work the top priority. The section only orders existing cards; no card was filed or changed.
+
+**The nine cards, in order (lines 5 to 13):** #3696, #3717, #3369, #3704, #3580, #3630, #3675, #3658, #3690. Six of them (#3696, #3369, #3704, #3580, #3630, #3690) are not under #3383, so their lines carry an `operator-added` marker, and rule 0 now says cards outside #3383 are ordered only when so marked (new rule 0a records the operator's position for the section). #3717, #3675 and #3658 moved out of bands A and C so no card appears twice; later lines were renumbered. `check-priority --ref=origin/main --strict` passes (137 open cards under #3383, 143 lines) and `check:standards` is at 0 errors; no change to `we:scripts/lib/priority-order.mjs` was needed.
+
+**Two findings that change the picture:**
+- A write-capable Codex delivery provider for build, fix and ci-heal exists, but only on this prototype branch (`we:scripts/operations/codex-delivery-provider.mjs`, #3580, #3640, #3642). It is opt-in (`--provider=codex`), Claude stays the default, and it has one accepted run (PR #2169, #3564, `review:accepted` with no findings). There is no Antigravity delivery provider.
+- Two "open" cards are largely finished. #3696 landed in code on 2026-09-15 (`049d64039`, on main). The #3704 seat (tool-free Codex review, opt-in through `REVIEW_PR_CODEX_ADVISORY`) is on main. Their lines ask for a confirm-then-close, not a close; #3630 is in the same state.
+
+**Open overlap, needs an operator decision:** the branch's `routeDispatch` in `we:scripts/lib/dispatch-contracts.mjs` (slice G1, commit 6761be552, no runtime caller) and #3717 on main (one `chooseProvider` before every spawn, records `routed` and `executed`) both build a dispatch router, and the G2 wiring named in the G1 note has no card. Either fold G2 into #3717, or fold #3717 into G2; leaving both risks two routers.
+
+**Not verified here:** #3704 and #3630 "mostly landed" is from reading code and cards, not from running their flows; the section's order was not compared with a fresh `suggest-next` run.
+
+Owed: the operator picks the G2 versus #3717 fold; no card exists yet for an Antigravity delivery provider, for graduating the Codex delivery provider to main, or for validating Codex delivery on real work.
