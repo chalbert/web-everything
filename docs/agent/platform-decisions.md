@@ -3015,7 +3015,7 @@ freezes the sync merge and alerts. Four points, ruled here:
    must adopt. This overrides rule 1 of epic #3383's Priority order ("nothing may graduate before the health
    chain") for slices; each slice's PR runs `check:standards`, `test` and `smoke` on `main`'s tree instead.
 
-**Lineage:** #3804 (ratified 2026-09-21, operator, in conversation; `bornAs: xki1xap`), the four points left
+**Lineage:** #3804 (ratified 2026-09-21, operator, in conversation; `bornAs: 3804`), the four points left
 open by #3772. Amends #3556's brief and clause 4(d) above.
 
 ---
