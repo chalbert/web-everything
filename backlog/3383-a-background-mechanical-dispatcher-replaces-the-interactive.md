@@ -4466,3 +4466,38 @@ Card #3736 (`/wip` compact phone-first tables, and Attention findings as queued 
 **Not verified here:** how the operator's phone viewer draws an unpadded table with a `|-|-|-|` separator and `- ` notes (GitHub-flavoured markdown says it is a table, but the viewer was not seen); a live runner (the queued and overdue paths ran only on the 2026-09-20 fixture and on hand-made findings, because the runner is not live here, so the live `--queue-plan` prints "nothing to file"); that the orchestrator's `file-item` step consumes the plan (not built).
 
 Checks: 77 new tests (27 in `we:scripts/operations/__tests__/wip-report-queue.test.mjs`, 50 in `we:scripts/operations/__tests__/wip-report-compact.test.mjs`); `scripts/operations/__tests__` plus `scripts/conveyor/__tests__` 180 files and 5232 tests before, 182 files and 5309 after (on tip 659744301; rebased onto the priority-sync commits, 184 files and 5378 tests, all passing); `check:standards` 0 errors (no new warning from these files); `check-priority --ref=origin/main --strict` OK.
+
+## Session update (2026-09-21) — host sampler schema 2: true host CPU, command classes, lane and holder attribution, heavy-run episodes, hardware profile, lane-load model, smoothed pressure brake and an opt-in calibrate hook, all additive (code commit a0c27874c)
+
+The host sampler now answers "how much to reserve for the system and VS Code, for heavy commands and for lanes" (code commit a0c27874c on this branch, no PR, per the prototype rule). The operator asked for real data on lane, system and heavy need, smoothed rather than point-in-time, and (added mid-build) for "the load each lane adds to a heavy command, so we can determine an algorithm for how many lanes can run on a particular hardware". Everything is additive: every schema-1 record and field is unchanged, the file stays JSONL, each record now carries `attributes.schema = 2` and `attributes.quality`, the daily rollup keeps `v: 1` and gains `schema: 2` and a `capacity` section. The running sampler (pid 50822) was not touched; it must be reloaded to pick this up.
+
+**What exists** (all under `we:scripts/operations/`):
+
+- `we:scripts/operations/host-sampler-selfcheck.mjs`: true host user/system/idle CPU from `os.cpus()` kernel tick deltas over the whole inter-sample window (no subprocess; `top -l 1` was rejected because its first sample is not a delta), `hw.ncpu`, busiest core, the sampler's own duration and CPU cost, a heartbeat gap counter, a `partial` quality flag naming the failed probe, and `PROBE_COMMANDS` (a test pins that none is a heavy command).
+- `we:scripts/operations/host-sampler-classes.mjs`: `classifyCommandClass`, the closed table of 16 classes (the operator's fifteen plus `claude-infra`). Live: `other` holds 1.4 to 3.2 percent of CPU, the old table left 64 to 73 percent in `other` plus `node-other`.
+- `we:scripts/operations/host-sampler-attribution.mjs`: every process joined to its lane (cwd, argv, ancestor, session cwd) and to the heavy-admission holder; unadmitted heavy work; holder hold times; waiting and STALE markers (four found: lane-1 frontierui and lane-27 from 09-04, lane-30 and lane-57 from 09-14), flagged not deleted; live workers by kind and edge-triggered start and finish events.
+- `we:scripts/operations/host-sampler-episodes.mjs`: one episode record per heavy run when it ends (`heavy.run.episode`), and the hardware profile (`host.hardware.profile`, once per sampler start and daily).
+- `we:scripts/operations/host-sampler-rollup.mjs`: hourly per-class p50/p90/p99/max of CPU and RSS, host idle p50/p10/min, burst episodes, `reservation-inputs` (system + VS Code baseline from quiet samples, per-worker marginal cost with r and n, the heavy pool's demand, lane count and per-lane need) with `lane-load-model` inside, and `smoothedPressure` / `replayPressure`.
+- `we:scripts/operations/host-sampler-calibrate.mjs`: the calibration hook.
+- CLI (`we:scripts/operations/host-sampler.mjs`): `pressure [--window=10m] [--at=ISO] [--json]`, `lane-load [--days=7] [--json]`, `calibrate --family= --concurrency= [--reps=] [--dry-run] [--yes]`.
+- Also fixed: `lsof -p a,b,c` exits 1 when any pid has vanished but still prints the others; the old reader threw that output away, which is why the live cwd cache was empty and lane attribution read `unattributed`.
+
+**Forks, ruled here, open to review:**
+
+- The class table is beside the old family table, not a replacement, so every old reader keeps its meaning. `container` is not a heavy class: Apple `container` services stay resident and idle; a container counts as heavy work only while its class CPU is at least 5 percent.
+- Bg-spare processes are `claude-background-worker` unless the roster matches their pid to a review or interactive session; an idle spare cannot be told from a claimed worker by its command line.
+- Episode end is the midpoint between the last sighting and the first miss (`end_uncertainty_s`), CPU-seconds is the larger of the survivors' cumulative `ps time` and the `%cpu` integral (both under-count children that exit between samples), and runs seen once are left out of the CPU tables.
+- A run is admitted when a holder pid is above its root or anywhere inside its tree (`we:scripts/verify-lane.mjs` holds its own slot under a shell root).
+- `calibrate` is plan-only unless `--yes` is given and `--dry-run` is not. It loads the machine and was NOT run for real, only with a fake runner.
+- The brake fails open: fewer than 5 samples or a newest sample older than 5 minutes admits, so a dead sampler cannot wedge the queue in hold. All thresholds are named, provisional constants.
+
+**Done when (executable)** (drop the `we:` prefix to run):
+
+1. `npx vitest run we:scripts/operations/__tests__ we:scripts/__tests__ we:scripts/lib/__tests__` passes (327 files, 11496 tests, 12 skipped).
+2. `node we:scripts/operations/host-sampler.mjs pressure --dir=<telemetry dir> --json` prints a verdict with `decision`, `p90CpuBusy` and `p90Load1PerCore`, and `node we:scripts/operations/host-sampler.mjs calibrate --family=vitest --concurrency=1,2,3,4` prints a plan and starts nothing.
+3. After the live sampler is reloaded, the day file holds `host.cpu.busy_pct`, `host.class.cpu_pct`, `lane.attribution.cpu_pct`, `heavy.admission.holder`, `host.workers.live`, `host.sampler.self` and `host.hardware.profile` records.
+4. After 5 to 7 days: `node we:scripts/operations/host-sampler.mjs lane-load --days=7` fills the per-family, per-lane and active-lanes-by-heavy-runs tables with a data-sufficiency line each.
+
+**Not verified here:** the live sampler was not reloaded; the reload command is in the result file of the refine-host-sampler job (the operator's jobs directory, outside the repo). Overhead was measured over 3-minute runs into a temp directory, not over a day. `calibrate` never ran for real. `ps -M` thread counts and `ps time` were checked on this host only. The `container` class saw no real container work in the runs.
+
+Checks: 5 new test files, 170 new tests, existing sampler tests unchanged and passing; `check:standards` 0 errors; `check-priority --strict` reports 3 findings (card #3784 missing, #3690 and #3495 listed but resolved) that come from main having moved, not from this change.
