@@ -26,5 +26,5 @@ Carved from the ratified decision #3804 (Fork 3 and its record sub-fork; statute
 
 ## Done when
 
-1. **Executable** — the new test `we:scripts/operations/__tests__/prototype-sync-alert.test.mjs` passes under `npx vitest run`: it asserts the three exact lines for their states, that no line is produced when nothing is wrong, and that an unreadable record yields the `unknown` line.
+1. **Executable** — the new test `we:scripts/operations/__tests__/prototype-sync-alert.test.mjs` passes under `npx vitest run`: it asserts the three exact lines for their states, that no line is produced when nothing is wrong, and that an unreadable record yields the `unknown` line. It also asserts (rows added 2026-09-21 from the #3804 wording spec, after the advisory review of PR #2415): no line while a reconcile attempt is in flight; the record is written on a state change only, never on a tick with no change; when the state clears the record gets a `cleared` commit and no line is shown after it; and a failed push of the record keeps a local copy and yields the `unknown` line with the reason "the alert record could not be saved".
 2. A stuck-sync state written by the sync pass shows up as a row in the digest and in the wip report on a real run (screenshot or pasted output in the progress log).

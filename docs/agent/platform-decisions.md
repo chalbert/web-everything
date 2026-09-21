@@ -2983,7 +2983,8 @@ deterministic gate that survives; judgment is deferred, not skipped).
 [#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode) and amends its clause 4(d). The
 operator's merge-shape ruling (#3772) stands: `main` is merged into the POC branch by a MERGE COMMIT, never a
 rebase and never a force-push of the shared branch; a clean merge is pushed fast-forward-only; a conflict
-freezes the sync merge and alerts. Four points, ruled here:
+freezes the sync merge. Who resolves the conflict and when the operator is alerted are points 2 and 3. Four
+points, ruled here:
 
 1. **Lag.** Whenever `main` has commits the branch lacks, the next sync pass merges them. The 40-commit
    ceiling (`DEFAULT_MAX_BEHIND`) stays only as a backstop for the `branch-drift-blocked` hold; it is never
@@ -2995,13 +2996,24 @@ freezes the sync merge and alerts. Four points, ruled here:
    branch. The sync pass, not a person, then promotes it by a plain fast-forward push, only when the push is
    a true fast-forward AND the branch's own tests are green at that exact commit as the pass itself sees
    them (never the agent's report), under the same per-branch lock and `autoSync` gate as the clean-merge
-   push. At most one attempt is in flight, and the cap is one attempt per set of conflicting files. A
-   condition not met pushes nothing and alerts. Only the sync merge freezes; direct pushes to the branch
+   push. At most one attempt is in flight, and the cap is one attempt per set of conflicting files
+   (`git merge-tree --name-only`), each attempt pinned to one (branch tip, main tip) pair. When a condition
+   is not met, nothing is pushed, and in the #3804 ruling's words: "If the shared branch moved meanwhile, the
+   newer commits are merged into the staging ref and the tests run again; a conflict there is a new conflict.
+   A red result, or an agent that gave up, raises the alert (Fork 3) and nothing is pushed. The one-attempt
+   cap per conflicting file set means a red result is not retried on its own; the alert goes to the
+   operator, who decides the next step. If `main` moved while the agent worked, the promotion still goes
+   ahead and the next pass takes the new `main` commits as an ordinary merge. A held lock or a switched-off
+   `autoSync` makes the pass skip and try again on the next tick." Only those two states alert (point 3); a
+   held lock, `autoSync` off, or a moved branch does not. Only the sync merge freezes; direct pushes to the branch
    continue and the existing `branch-drift-blocked` hold on overlapping queued cards is unchanged. A
    resolution the agent cannot make on merit, including one that changes a test's assertions, comes back as a
-   decision card. This amends #3556 (merge only; staging ref only; promotion by the pass).
+   decision card. This amends #3556 (merge only; staging ref only; promotion by the pass). Two open
+   decisions may add to this point, and do not change it until ruled: what the pass checks about test and
+   gate files before it promotes (`x86eyvl`), and how the agent is kept from pushing to the shared branch
+   (`xm96s8j`).
 3. **Alert.** The operator is alerted only when they must act (the agent's one attempt failed, or the tests
-   on the resolved staging ref are red). It is a line in the every-turn turn digest plus a row in the wip
+   on the resolved staging ref are red). Nothing is raised while the agent works. It is a line in the every-turn turn digest plus a row in the wip
    report, and it fails visible: an unreadable record is "status unknown", never "all clear". The record is
    one small file per branch on an `ops/` branch on origin, committed on a state change only. The exact
    wording is the spec under #3804 Fork 3. The build is `blockedBy` #3726; the desktop notice stays until
