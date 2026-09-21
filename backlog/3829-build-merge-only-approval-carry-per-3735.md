@@ -42,9 +42,13 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
 1. **Where the probe lives and what it costs.** The probe (resolve `reviewed-sha`, walk to it, one hermetic
    `git merge-tree --write-tree` per merge, one `git diff --name-only --no-renames` per merge) sits beside
    `computeNetDiffText` in we:scripts/merge-ai-prs.mjs. Decide the walk's cap (how many merges before it gives
-   up as `unproven`) and whether it runs only when the SHA route already said "stale".
+   up as `unproven`) and whether it runs only when the SHA route already said "stale". #3735 ratified no
+   value for the cap, so it is a named exported constant (for example `MERGE_ONLY_WALK_CAP`) that the tests
+   read; its value is set here, at build time.
 2. **The reviewed file set.** Which net-diff read supplies `reviewedPaths` (the PR's own files at the reviewed
-   SHA), and how it behaves when that read fails (rule 7: no carry). **Settled for renames:** both file sets
+   SHA), and how it behaves when that read fails (rule 7: no carry). **Settled for empty sets:** an empty
+   file set is never read as "shares nothing". A set read that fails, or returns empty while the two trees it
+   compares differ, is a failed read (rule 7: no carry). **Settled for renames:** both file sets
    (`reviewedPaths` and main's side per merge) are read with `--no-renames`, so a rename contributes both its
    old and its new path (rule 4). The replay itself pins `-c merge.renames=true` (git's default) with the other
    hermetic pins of rule 3; rename-following in the replay cannot hide an overlap, because the overlap test
@@ -107,13 +111,22 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
      the positive side of "only when").
    - The same merge-only push on a PR cleared by `--to=clear-human` and on one accepted by `--to=accepted`:
      both carry (rule 6, "follow the same rule").
-   - A `reviewed-sha` that cannot be resolved in the drain's clone (unknown object): no carry, and the gate's
+   - A `reviewed-sha` that cannot be resolved in the drain's clone (unknown object, or a prefix matching
+     more than one object): no carry, and the gate's
      decision equals its decision with the carry route removed (rule 7).
-   - Hermetic replay: the replay's git argv carries `-c rerere.enabled=false`, `-c merge.renames=true` and
-     `-c attr.tree=<empty tree>`, and no `-X` or `-s` option (rule 3).
-   - Hermetic replay: the drain's clone has a custom merge driver configured (`merge.<name>.driver` in its git
-     config, selected by its `info/attributes`) that would make a conflicting same-file edit merge cleanly: the
-     replay still conflicts, so the PR re-parks (rule 3, "no configured merge drivers").
+   - Hermetic replay: the replay's git argv carries `-c rerere.enabled=false`, `-c merge.renames=true`,
+     `-c attr.tree=<empty tree>` and `-c core.attributesFile=/dev/null`, and no `-X` or `-s` option; its env
+     sets `GIT_ATTR_NOSYSTEM=1`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL=/dev/null` and has no
+     `GIT_CONFIG_COUNT` or `GIT_CONFIG_PARAMETERS`, even when the drain's own env sets them; its `--git-dir` is
+     not the drain clone's (rule 3).
+   - Hermetic replay, one planted-driver case per route, each on a same-line conflict that the planted driver
+     (a custom `merge.<name>.driver = cp %B %A`, and separately the built-in `union`) would merge cleanly: the
+     replay still conflicts and the PR re-parks (rule 3, "no configured merge drivers"). Routes: the drain
+     clone's `$GIT_DIR/info/attributes` with the driver in its local config; `core.attributesFile` set in the
+     clone's local config; `$XDG_CONFIG_HOME/git/attributes` (the default `core.attributesFile`); a global
+     config (`$HOME/.gitconfig`) setting `core.attributesFile` and the driver; a system config (via
+     `GIT_CONFIG_SYSTEM`) doing the same; the drain's env (`GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS`) doing the
+     same. Each case fails against a replay that carries only the three original pins.
    - Hermetic replay: the drain's clone sets `merge.renames=false`; the replay's result equals the result with
      git's default (rule 3, rename detection pinned).
    - Hermetic replay: a PR adding `.gitattributes` with `merge=union` on a file, plus a same-file main edit
@@ -125,6 +138,18 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
      carry comment contains `cleared-human`. A comment with `carried-human-from` alone never suppresses the
      anti-test-tampering re-park.
    - A read failure: no carry, no revocation, retried next pass.
+   - Failed or empty file-set reads, each on the otherwise carrying #2365 replay, each asserting no carry
+     (rules 4 and 7; an empty set "shares nothing" and would carry): the `reviewedPaths` read throws; it
+     returns `[]` while the reviewed PR's diff is non-empty; main's per-merge
+     `git diff --name-only --no-renames` read throws; it returns `[]` while that merge's main side changed files.
+   - Failed or empty tree reads: the replay's printed tree and the merge commit's own tree both read as empty
+     (or either read throws) on a merge whose real trees differ: no carry (rule 1, trees "equal").
+   - An ancestry read (`git merge-base --is-ancestor`) that errors, rather than answering yes or no, while the
+     walk classifies a parent: no carry (rule 1, "found by ancestry"; rule 7).
+   - Walk cap, read from the exported constant: a chain of exactly cap clean, non-overlapping merges of main
+     carries; a chain of cap+1 is `unproven`, no carry, and runs at most cap `merge-tree` calls.
+   - The lane-tip coverage read behind a `rebaseDropManifest` re-stamp throws, or returns empty digests on both
+     sides: re-parks, never re-stamps (rule 5, "only when"; rule 7).
    - Missing acceptance, a review hold, or `review:changes`: the carry refuses. One case per condition: no
      `review:accepted`; `review:human` present; `review:changes` present (rule 9, "a carry never creates an
      acceptance").
