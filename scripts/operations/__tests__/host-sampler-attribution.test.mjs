@@ -103,6 +103,15 @@ describe('attributeProcesses — lane and heavy-admission holder attribution ove
     expect(t.has(999)).toBe(false);
   });
 
+  it('a `run` wrapper NESTED under a slot holder (verify-lane re-entering the wrapper) is part of that admitted run, not a second unslotted holder', () => {
+    const rows = [row(300, 1, 0, 1000, 'node scripts/verify-lane.mjs check', 90), row(301, 300, 1, 30_000, 'node scripts/readiness/heavy-admission.mjs run -- npm run test:unit'), row(302, 301, 0.5, 10_000, 'npm run test:unit'), row(303, 302, 250, 600_000, 'node (vitest)')];
+    const adm = { cap: 2, held: [{ slot: 0, owner: '/w/.lanes/web-everything/lane-3', pid: 300, heartbeatAt: new Date(NOW - 80_000).toISOString() }], waiting: [], staleWaiting: [] };
+    expect([...holderTable({ admission: adm, rows, nowMs: NOW }).values()].map((h) => h.id)).toEqual(['slot-0:lane-3']);
+    const r = attributeProcesses({ rows, lanes: LANES, admission: adm, nowMs: NOW });
+    expect(r.holders).toHaveLength(1);
+    expect(r.holders[0]).toMatchObject({ id: 'slot-0:lane-3', count: 4, cpuPct: 251.5 }); // the vitest CPU is charged to the slot that admitted it
+  });
+
   it('a held slot whose owner process is gone still yields a record (alive:false)', () => {
     const r = attributeProcesses({ rows: ROWS.filter((x) => x.pid !== 100), lanes: LANES, cwds: CWDS, admission: ADMISSION, nowMs: NOW });
     expect(r.holders.find((h) => h.id === 'slot-0:lane-3')).toMatchObject({ alive: false, count: 0 });

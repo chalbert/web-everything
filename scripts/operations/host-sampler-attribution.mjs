@@ -52,8 +52,15 @@ export function holderTable({ admission, rows, nowMs }) {
       heldForS: Number.isFinite(hb) ? Math.max(0, Math.round((nowMs - hb) / 1000)) : null, alive: row != null, elapsedS: row?.etimeS ?? null, unslotted: false,
     });
   }
+  // A `run` wrapper NESTED under a process that already holds a slot (`verify-lane.mjs` holds its own slot, then runs its gate
+  // through the wrapper, which re-enters) is part of that admitted run, not a second, unslotted holder.
+  const insideSlot = (r) => {
+    const seen = new Set([r.pid]);
+    for (let cur = byPid.get(r.ppid), hop = 0; cur && !seen.has(cur.pid) && hop < MAX_HOPS; hop++) { if (holders.has(cur.pid)) return true; seen.add(cur.pid); cur = byPid.get(cur.ppid); }
+    return false;
+  };
   for (const r of rows) {
-    if (holders.has(r.pid) || waitingPids.has(r.pid)) continue;
+    if (holders.has(r.pid) || waitingPids.has(r.pid) || insideSlot(r)) continue;
     if (/heavy-admission\.mjs\s+run\b/.test(r.command) && /^(node|nodejs)\b/.test(baseName(String(r.command).split(' ')[0]))) {
       holders.set(r.pid, { id: `unslotted:${r.pid}`, slot: null, owner: null, pid: r.pid, heldForS: null, alive: true, elapsedS: r.etimeS ?? null, unslotted: true });
     }
