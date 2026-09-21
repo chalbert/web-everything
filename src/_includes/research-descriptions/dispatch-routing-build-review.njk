@@ -1,0 +1,75 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>The #3717 build wired the provider router into the prototype branch's dispatch path and stopped at five
+choices the card had left open. <a href="/backlog/3801-decision-review-the-five-choices-the-3717-dispatch-routing-b/">#3801</a>
+asks the operator to review them: which routing stage a code-change launch is, the three task types no dispatch
+kind produces, whether role dispatches call the router, how an unsized card is read, and where the provider
+override lives. The router's graduation model is ratified (<code>#delegation-trial-record-graduation</code>, from
+#3690), and so is the vendor registry (<code>#agent-vendor-registry</code>, from #3658). The full working is in
+<a href="/reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md">the session report</a>.</p>
+
+<h2>Measured on 2026-09-21, branch tip 5ab89f87b</h2>
+
+<ul>
+  <li>The branch's trial file has 18 records, none with a task type. The 26 delegation trials the router was
+    designed around exist only on <code>main</code>.</li>
+  <li>Fed <code>main</code>'s trials, the branch's own routing function sends a small <code>fix</code> to Codex and
+    a conflict <code>fix</code> to Antigravity, both at an automatically promoted <code>spot-check</code>. The
+    ratified rule says promotion takes an explicit act by the operator.</li>
+  <li>An override to one provider records the supervision level another provider's trials earned.</li>
+  <li>The record's <code>executed</code> field is the constant <code>claude</code>, even when the per-item
+    <code>deliveryAgent:</code> marker makes Codex deliver.</li>
+  <li>Tasks are unsized by the backlog's own rule: all 192 open tasks are unsized, and all 381 open stories are sized.</li>
+  <li>The <code>spot-check</code> values come from the dispatch path's placeholder risk thresholds (low risk: a streak
+    of 2 and no positive control). With the router's defaults, both triples stay at <code>full</code>.</li>
+  <li>With supervision enforcement switched on, every code-change dispatch would be held, because no route names
+    a supervisor.</li>
+</ul>
+
+<h2>Prior art</h2>
+
+<ul>
+  <li><strong>A default applies only when nothing is declared.</strong> Kubernetes' LimitRange: "the LimitRange
+    admission controller applies default request and limit values for all Pods (and their containers) that do
+    not set compute resource requirements" (kubernetes.io, Limit Ranges). The default is a policy value the
+    cluster owner sets, not something inferred per request. That is the shape the prep lands on for an unsized
+    task: a table row set from measured data, not a guess made at dispatch time.</li>
+  <li><strong>The environment holds per-deploy configuration, not per-item choices.</strong> "The twelve-factor
+    app stores config in environment variables" (12factor.net, Config). Config there is what varies between
+    deploys. A routing override for one item is not that, which is why a process-wide variable is the wrong home
+    for it.</li>
+  <li><strong>A per-run override is declared and bound to the run.</strong> GitHub Actions'
+    <code>workflow_dispatch</code> lets a workflow declare "custom-defined input properties, default input values,
+    and required inputs", and the run receives them in its event payload (docs.github.com). The repo's
+    per-item analogue already exists and is ratified: the <code>deliveryAgent:</code> marker in the item's own
+    file, which lacks only the declared reason.</li>
+</ul>
+
+<h2>How the research reshaped the forks</h2>
+
+<ul>
+  <li><strong>Fork 1 (routing stage):</strong> keep <code>task</code>. The story stage forces Claude on every
+    dispatch, so no route could leave Claude.</li>
+  <li><strong>Fork 2 (unproduced task types):</strong> keep "none is produced". Re-using the <code>other</code>
+    trial history is trial-data work, not a routing default.</li>
+  <li><strong>Fork 3 (role dispatches):</strong> keep them outside the router. The reviewer seat is already
+    governed by <code>#reviewer-tool-surface-and-containment</code>.</li>
+  <li><strong>Fork 4 (unsized cards):</strong> keep 900 lines. A task's estimate becomes a table row set later by
+    a batched finding from measured task diffs. The skeptic refuted the first draft's 80-line read.</li>
+  <li><strong>Fork 5 (the override):</strong> change it. The ratified <code>deliveryAgent:</code> marker, with a
+    required reason, is the one override; both process-wide variables are retired.</li>
+  <li><strong>Settled by statute:</strong> supervision is computed for the triple that runs, <code>executed</code>
+    records the vendor spawned, and <code>routed</code> is never overwritten by an override.</li>
+</ul>
+
+<h2>Sources</h2>
+
+<ul>
+  <li>kubernetes.io/docs/concepts/policy/limit-range/ (fetched 2026-09-21)</li>
+  <li>12factor.net/config (fetched 2026-09-21)</li>
+  <li>docs.github.com, <code>workflow_dispatch</code> inputs (fetched 2026-09-21)</li>
+  <li>LaunchDarkly individual targeting: fetched, but no citable line on precedence was found, so it is not
+    relied on.</li>
+</ul>
+{% endraw %}

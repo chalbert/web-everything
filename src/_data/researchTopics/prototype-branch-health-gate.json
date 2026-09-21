@@ -1,0 +1,19 @@
+{
+  "id": "prototype-branch-health-gate",
+  "title": "Keeping the prototype branch's health check at zero errors: where errors are fixed, who owns them, the recurrence guard, and the order with the catch-up merge, grounded against lane/mechanical-dispatcher",
+  "status": "open",
+  "summary": "Grounds card #3768, the prototype branch health gate that is line 1 of epic #3383's Priority order. Reproduced 2026-09-21 on a clean lane clone of the branch tip 5ab89f87b: check:standards reports 1 error, not the 15 filed on 2026-09-20. The 15 were fixed on the branch on 2026-09-20 on the operator's approval; 11 of them came from drift (both drains numbering cards independently) and 4 were branch-only. The one new error is a branch-only tracker note whose Artifact URL id trips the secret detector. THE LOAD-BEARING FINDING: poc-land requires verify-lane, and on a branch lane verify-lane's check:standards falls back to the whole tree because the diff always contains backlog files, so a single error anywhere on the tip fails the branch's only landing gate, and work then reaches the branch by direct push with no gate at all. A local trial merge of main that takes the branch's side of every conflict leaves two modules broken, so the error count after a catch-up cannot be predicted. PRIOR ART: the Not Rocket Science rule (keep a repository that always passes its tests, enforced mechanically), Chromium's tree sheriffs (a named owner keeps the tree green and open), git's pre-push hook (a non-zero exit aborts the push), and ratchet tools such as Betterer (only new violations fail). RESHAPES (after a skeptic pass): fix on the branch and keep the tip at 0; ownership split by cause, because check:standards reads origin/main and main moving creates errors with no push: a push owns errors in its own files, drift reconciliation owns the rest; a pre-push guard refuses what a push adds and a runner-tick probe finds the rest; today's error is fixed by rewording the note, not by exempting Artifact URLs from the secret detector; ordering with the catch-up is a requirement, not a fork.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "conveyor",
+    "prototype-branch",
+    "graduation",
+    "health-gate",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
