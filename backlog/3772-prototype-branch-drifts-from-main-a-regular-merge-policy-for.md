@@ -23,6 +23,10 @@ ADDED 2026-09-21 (operator ruling). The words below were typed by the operator i
 
 The operator ruled that the prototype is kept up to date mechanically, by a merge commit (never a rebase or force-push), with conflicts resolved on a staging ref and the operator fast-forwarding the shared branch afterwards; this settles the merge shape in design point (2) (a merge commit, a staging ref, no rebase, no force-push). The points still open (cadence: after each landing on main versus hourly; who resolves a conflict; the alert path; when a slice may graduate) are filed as decision card 3804, `relatedTo` this card, uncleared and not yet prepared. Also re-measured today: `git rev-list --left-right --count origin/main...origin/lane/mechanical-dispatcher` reads 465 only on main and 253 only on the branch, and the staging ref `origin/lane/mechanical-dispatcher-catchup` (dd9d51bfb) is no longer a fast-forward of the branch (12 commits landed on the branch after it was cut). Design point (3), duplicate ids, is NOT in that decision card and stays here.
 
+## Correction and ruling (2026-09-21): decision #3804 is ratified
+
+The summary line above that says conflicts are resolved on a staging ref "and the operator fast-forwarding the shared branch afterwards" over-generalized the operator's quoted ruling: the staging ref and the operator's own fast-forward were for the FIRST catch-up only. For later conflicts the ratified rule (`we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync`) is a reconcile agent on a staging ref and a promotion by the sync pass once the tests are green. Cadence, conflict owner, alert path and graduation order are ruled there; duplicate ids (design point 3) stay open here.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.

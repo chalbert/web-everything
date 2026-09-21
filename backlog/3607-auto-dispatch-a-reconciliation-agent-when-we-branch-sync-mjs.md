@@ -54,6 +54,10 @@ Ratified by we:backlog/3556-auto-dispatch-a-reconciliation-agent-when-we-branch-
    direct proof the cap is a configurable setting, not a hardcoded `1`.
 7. **Executable** — `npm run check:standards` stays green.
 
+8. **Executable** — amended 2026-09-21 by the ratified decision #3804 (`we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync`, point 2): a test shows the pass pushes a resolved staging ref to the shared branch only when the push is a true fast-forward AND the branch's tests are green at that exact commit as the pass itself runs them (never the agent's report); a red result, a moved shared branch that conflicts, or an agent that gave up pushes nothing and raises the alert; and at most one attempt is in flight.
+
+**Brief change required by #3804 (before this is built).** The agent merges only (never rebases) and pushes to the staging ref only, never the shared branch; the cap is one attempt per set of conflicting files, pinned to one (branch tip, main tip) pair; the branch's newer commits are merged into the staging ref once, just before promotion; and any resolution that changes a test's assertions comes back as a decision card.
+
 **Not pinned down by this Done-when** (left to the build's own judgment, per `we:backlog/3556-*.md`'s own
 "What this ruling does not settle"): the exact JSON shape of the state extension, and whether a successful
 auto-dispatched reconciliation posts any durable record beyond ordinary git history.

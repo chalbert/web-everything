@@ -2988,7 +2988,7 @@ freezes the sync merge and alerts. Four points, ruled here:
 1. **Lag.** Whenever `main` has commits the branch lacks, the next sync pass merges them. The 40-commit
    ceiling (`DEFAULT_MAX_BEHIND`) stays only as a backstop for the `branch-drift-blocked` hold; it is never
    the trigger. A clean sync merge is pushed with no test gate, by design; the cover is a `check:standards`
-   run on each push to the branch (#3768 design point 6). What triggers a pass (today the runner tick) is a
+   run on each push to the branch (#3768 design point 6). What triggers a pass (the runner tick, for example) is a
    build choice.
 2. **Conflicts.** A dispatched reconcile agent resolves on a throw-away **staging ref**
    (`lane/mechanical-dispatcher-catchup` for the prototype) by merge commits only, never touching the shared

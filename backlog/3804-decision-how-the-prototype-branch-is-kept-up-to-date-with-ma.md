@@ -2,11 +2,13 @@
 bornAs: xki1xap
 kind: decision
 parent: "3383"
-status: active
+status: resolved
 relatedTo: ["3772", "3443", "3556", "3607", "3464", "3797", "3803", "3805"]
 scope: ["we:scripts/conveyor/branch-sync.mjs", "we:scripts/conveyor/branch-drift.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/lib/poc-branches.mjs"]
 dateOpened: "2026-09-21"
 dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: "docs/agent/platform-decisions.md#poc-branch-mechanical-sync"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "4cd769f889f977d7f7ac67288e585c46c46e4b5b"
 relatedReport: reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md
@@ -158,15 +160,16 @@ done
 **Skeptic:** REFUTED as first written → rewritten. Statute collision: clause 4(d) of `#poc-branch-declared-delivery-mode` says a drifted branch holds its own items, and `we:scripts/readiness/dispatch-plan.mjs:430` does hold graduation slices, so "any time" was false in the dispatcher today. Merit: a slice file in the open conflict set would be resolved twice, possibly two ways. Fixed: the default now exempts graduation slices from the hold and names the clause 4(d) amendment the codification must make, and conflict-set files take or set the staging resolution. Statute overlap reconciled: this is the only anchor collision found; `#repo-drain-check-contract` is untouched.
 **Screen:** clear. Real policy; it overrides the Priority order's rule 1 for slices. The freshness script is an illustration; only "never copy a file main has moved" is ruled.
 
-## Ratified so far (forks 1, 2 and 3, each with its sub-fork; this card resolves only when all four forks are ruled)
+## Ruling
 
-*Ratified by the operator on 2026-09-21, in the review session, each against the card's text as it stood when they said so. Forks 3 and 4 are still open. This is not the card's `## Ruling` section: that is written when the last fork is ruled.*
+*All four forks were ratified by the operator on 2026-09-21, in the review session, each against the card's text as it stood when they said so. Codified in `we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync`, which also amends clause 4(d) of `#poc-branch-declared-delivery-mode`.*
 
 - **Fork 1: (a) promptly.** Whenever main has commits the branch lacks, the next sync pass merges them. The 40-commit ceiling stays only as a backstop. The trigger mechanism is #3797's build choice. Accepted cost as named in the fork: a clean sync merge is pushed with no test gate; the cover is #3768 design point 6.
 - **Fork 2: (a) a dispatched reconcile agent on the staging ref, then the sync pass promotes it once the tests are green.** No person fast-forwards by hand. The promotion, its conditions (a true fast-forward, tests green at that exact commit as the pass sees it, the same lock and `autoSync` gate), what happens when a condition is not met, and the one-attempt-in-flight rule are as written in the fork.
 - **Fork 2 sub-fork (what freezes while a conflict is open): (a) only the sync merge freezes; no new freeze.** Ratified separately, after it was laid out on its own, on 2026-09-21. Direct pushes to the prototype continue; the existing `branch-drift-blocked` hold on overlapping queued cards is unchanged; each agent attempt is pinned to one (branch tip, main tip) pair; the one-attempt cap is keyed on the conflicting file set.
 - **Fork 3: (b) a line in the every-turn digest plus a row in the wip report, raised only when the operator must act, failing visible; sub-fork (b) the record is a small file on an `ops/` branch on origin.** Ratified on 2026-09-21 after the options and the exact wording were laid out. The wording under Fork 3 ("a spec that goes with the ruling") is the text the build uses. The build of the surface is `blockedBy` #3726, and the desktop notice stays on until then.
-- **Follow-ups this ruling creates:** #3607's brief must change before it is built (it amends #3556: merge only, staging ref only, promotion by the pass); the agent's brief must send any resolution that changes a test's assertions back as a decision card; the correction to #3772's summary line (the staging ref and a person's fast-forward were ruled for the first catch-up only) is recorded at the top of this card.
+- **Fork 4: (a) any time, with a per-file freshness rule.** A slice graduates whatever the sync state; graduation slices are exempt from the `branch-drift-blocked` hold (the clause 4(d) amendment); a file `main` has moved is ported as a diff onto `main`'s current file, never copied; a ported file in the open conflict set takes the staging ref's resolution or is recorded for the reconcile agent to adopt. **Consequence, accepted by the operator:** rule 1 of the Priority order in #3383 ("nothing may graduate before the health chain") no longer holds for slices; each slice's PR runs `check:standards`, `test` and `smoke` on `main`'s tree.
+- **Where the build went (Done-when 2).** Folded into existing cards: #3797 (the loop: cadence, conflict dispatch, promotion), #3607 (the reconcile agent's brief change and a promotion test, amending #3556), and #3772 (a correction: the staging ref and a person's fast-forward were ruled for the first catch-up only). Carved into new items under #3383: `x2c682x` (the ops-branch record, digest line and wip row; `blockedBy` #3726) and `xa4qb9f` (the drift-hold exemption, the freshness rule in #3443's slice procedure, and the amended Priority order rule 1).
 - **Not done before ratifying:** an independent `judgePanel` skeptic on Forks 2 and 3. The operator ratified on this session's inline red-team, recorded in Fork 2's update note.
 
 ## Not in this decision
