@@ -2,9 +2,12 @@
 bornAs: xyttg9l
 kind: decision
 parent: "3054"
-status: open
+status: resolved
 scope: ["we:scripts/review-set-label.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-20"
+dateResolved: "2026-09-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#merge-only-push-approval-carry"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "565e49cab664b0057ec7b69e8e367d095868f8ea"
 tags: [review, drain, review-escalation, acceptance, merge-commit, decision-prep]
@@ -21,6 +24,10 @@ carries across a push only when the drain can **replay the merge itself** and ge
 byte-for-byte, with no conflict and without main touching the PR's own files. Anything else re-parks, as
 today. Grounding: [report](/reports/2026-09-21-merge-only-approval-carry-grounding.md) · research topic
 [/research/merge-only-approval-carry/](/research/merge-only-approval-carry/).
+
+**Ratified 2026-09-21 by the operator, as prepared** — every fork's bold default, with the guardrails as written.
+See `## Ratified (all four forks, as prepared) — 2026-09-21` below; the rule is codified at
+[#merge-only-push-approval-carry](../docs/agent/platform-decisions.md#merge-only-push-approval-carry).
 
 ## Two incidents, two answers
 
@@ -456,7 +463,53 @@ These are build criteria for the eventual ruling; they do not assert that a ruli
 - A read failure: no carry, no revocation, retried next pass.
 - Missing acceptance, a review hold, or `review:changes`: the carry refuses.
 
+## Ratified (all four forks, as prepared) — 2026-09-21
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), as prepared.** The operator's words, typed in the
+orchestrating session: "I ratify 3735". That takes the bold default of every fork, with the guardrails as
+written in *Supported by default* and in Fork 4's build note, and no amendment. Codified at
+[#merge-only-push-approval-carry](../docs/agent/platform-decisions.md#merge-only-push-approval-carry).
+
+- **Fork 1 — (a) replay the merges.** Binds: "Every commit on the way must be a merge with exactly two parents
+  where one parent is (or descends from) the reviewed SHA — the PR side, found by ancestry, not by position",
+  and "`git merge-tree --write-tree <parent 1> <parent 2>` must exit 0 and print a tree **equal** to the
+  merge's own tree"; "a non-merge commit anywhere on the path … → no carry"; the replay is hermetic
+  (Condition 1) and `mergeOnlyCarry` re-checks chain linkage ("chain is disconnected").
+- **Fork 2 — (a) does not carry; re-park.** Binds: "Carry only when the files main's side brought in
+  (`git diff --name-only <PR-side parent> <merge>` …) share nothing with the files the reviewed PR changed.
+  Otherwise re-park as today."
+- **Fork 3 — (a) the drain's content-resolving merges obey Fork 2.** Binds: "A `rebaseDropContent` merge on an
+  accepted PR re-parks instead of re-stamping. `rebaseDropManifest` merges … still re-stamp, under the re-stamp
+  gap fix above."
+- **Fork 4 — (a) same rule for both.** Binds: "the carry must not copy the `cleared-human` marker"; the carry
+  reaches the anti-test-tampering gate "through the ledger, not a comment" — "gated on #3179", and "Until #3179
+  lands, a carried human clearance **does not** suppress the anti-test-tampering re-park"; `carried-human-from`
+  may name the origin "for the human reader, but no gate parses it". The comment-marker-plus-pinned-residual
+  alternative stays rejected.
+- **Guardrails taken with it (Supported by default).** Fail closed when the proof cannot run; close the re-stamp
+  gap (re-stamp only when the merged lane tip is covered by the acceptance); bind the stamp to the proven head
+  (`--expect-head=<full sha>`, **required** on `--to=restamp`, refusing on a missing flag or a moved head, the
+  carry comment recording source `reviewed-sha` and destination head); the drain verifies inside
+  `decideReviewGate` and records through `--to=restamp`; the carry never creates an acceptance.
+
+**What this ratification does NOT do.**
+
+- It builds nothing: no `mergeOnlyCarry`, no probe, no carry comment, no `--expect-head` flag. It changes no
+  gate; until the build lands, every head move is judged exactly as before.
+- The build is filed as design-first, uncleared follow-ons under `#3054`:
+  [xp3usow](/backlog/xp3usow-build-merge-only-approval-carry-per-3735/) (build the carry, with this card's
+  Definition of done as its acceptance),
+  [xm88lki](/backlog/xm88lki-bind-restamp-to-the-proven-head-expect-head/) (the `--expect-head` binding on
+  `we:scripts/review-set-label.mjs --to=restamp` and in `restampAcceptance` of `we:scripts/merge-ai-prs.mjs`,
+  its own card because the re-stamp race is a bug under any ruling), and
+  [xw8cc2j](/backlog/xw8cc2j-standards-check-restamp-call-site-passes-expected-head/) (the stated follow-up
+  standards check that every restamp or carry call site passes an expected head).
+
 ## Done when
 
 1. **Executable** — a vitest run of the proposed test file `we:scripts/__tests__/review-human-carry-over.test.mjs` (proposed, does not exist yet) fails before the ruling's build lands and passes after. It holds the cases in the definition of done above.
 2. The ruling is recorded on this card, and codified as a platform-decisions anchor (none today covers review binding to a commit). The review-ceremony guidance in `we:docs/agent/delivery-loop.md` is updated only if the ruling changes behaviour.
+3. **Ratified (2026-09-21).** The operator ratified every fork as prepared; the ruling is recorded above,
+   codified at `we:docs/agent/platform-decisions.md#merge-only-push-approval-carry` (`codifiedIn`), and the card
+   is resolved through the `resolve` operation. Item 1 moves to the build story xp3usow; the ruling changes no
+   behaviour yet, so `we:docs/agent/delivery-loop.md` is unchanged.
