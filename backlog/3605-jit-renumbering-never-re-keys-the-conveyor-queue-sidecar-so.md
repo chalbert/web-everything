@@ -2,10 +2,14 @@
 bornAs: xn7yaiz
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lane-drain.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/queue-store.mjs", "we:scripts/conveyor/queue.mjs"]
 relatedTo: ["3570", "3567", "3478"]
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates"
 preparedDate: "2026-09-15"
 tags: []
 ---
@@ -18,6 +22,28 @@ The original capture leaned toward Fork B. This pass confirmed that lean with ev
 the capture (one about which file holds the code, one about how hard write-time re-keying would be), found a
 second sidecar reader the capture missed, and split out a second real fork: whether anything should write the
 corrected id back into the sidecar.
+
+## Ruling — RATIFIED 2026-09-21 (operator, in conversation)
+
+- **Fork 1: (b)** — resolve through `bornAs` at the consumers, through one pure `canonicalizeQueue` step in
+  `we:scripts/conveyor/queue-store.mjs` applied once per IO shell. (a) and (c) are not taken: the drain never
+  writes the conveyor sidecar.
+- **Fork 2: (a)** — readers translate in memory only; the two operator CLIs translate before `add`/`remove` and
+  write the corrected file. (b) read-repair is rejected. (c) an explicit sweep verb is not built.
+- **Two build-shape points ratified with it** (both already in this card's own text, stated firmly at the
+  decision): `list` prints `#NNN (cleared as <hash>)` — required, not optional; and the build's touch set widens
+  to add `we:scripts/readiness/conveyor-state.mjs` and `we:scripts/conveyor/queue-work.mjs`.
+- **Ratify-time attack** (classification, merit-basis, statute-overlap, citation-scope; the prep's per-fork
+  `Skeptic:` verdicts were re-read as the confirmation): the attack fails and the defaults stand. One citation
+  note: Fork 1 (a)'s Against cites #2501 (`#drain-daemon-self-hosting-boundary`) for "the drain must not write
+  outside its own clone". That anchor governs the daemon's own source, reload and review, not which files it may
+  write, so it is **supporting context, not authority**. (a)'s rejection stands on its other Against points
+  (coverage gaps, second unsynchronized writer). No overlap with an existing statute; the rule composes with
+  `#state-lives-where-its-nature-dictates`.
+- **Codified** as a rider on
+  [state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates).
+  **Build:** [x238swe](/backlog/x238swe-translate-birth-hash-ids-to-current-numbers-when-the-conveyo/) (size 5,
+  `parent: 3383`).
 
 ## What happened
 
