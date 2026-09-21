@@ -6,6 +6,7 @@ parent: "3383"
 status: open
 scope: ["we:scripts/lib/review-core.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/jury-ledger.mjs", "we:scripts/lib/__tests__/review-core.test.mjs"]
 dateOpened: "2026-09-21"
+blockedBy: ["xq4aezx"]
 tags: []
 ---
 

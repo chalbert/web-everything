@@ -6,6 +6,7 @@ parent: "3383"
 status: open
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/lib/lane-lease.mjs"]
 dateOpened: "2026-09-21"
+blockedBy: ["x0hik3k"]
 tags: []
 ---
 
