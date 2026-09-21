@@ -4264,7 +4264,7 @@ spellings (`npx vitest run|related`, `npm run verify`, `node scripts/check-stand
 test`) to dispatched agents and blocks backgrounding them for everyone; the deliberate exception stays
 `lane-pool.mjs acquire`'s `npm ci` (clause 2). A `waiting` marker whose owner is gone and that is older than
 30 minutes is reaped by the next admission attempt (`heavy-admission.mjs reap [--apply]` previews/applies it).
-Card: #xaipsbs.
+Card: #3785.
 
 **Core budget (PROVISIONAL — to be re-evaluated from telemetry, not a ratified constant).** On the 12-core
 workstation: about **2 cores reserved** for the system and VS Code; the **heavy pool** is cap 2 × 4 vitest

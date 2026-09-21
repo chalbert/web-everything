@@ -1,4 +1,5 @@
 ---
+bornAs: xaipsbs
 kind: story
 size: 5
 parent: "3383"
@@ -18,7 +19,7 @@ Operator 2026-09-21: 'Yes to routing heavy cmd, I thought this was already done 
 
 ## Done when
 
-1. **Executable** — `we:scripts/readiness/__tests__/heavy-admission.test.mjs` (xaipsbs blocks): a NESTED wrapper
+1. **Executable** — `we:scripts/readiness/__tests__/heavy-admission.test.mjs` (3785 blocks): a NESTED wrapper
    under cap 1 finishes and holds exactly one slot (no deadlock, no second slot); two wrappers from the same
    checkout under cap 1 never overlap (real processes; this failed before the `we:scripts/readiness/file-locks.mjs` mkdir/write-gap
    fix); `CI=true` is a pass-through that creates nothing; the stale-waiter reap previews, applies and is
