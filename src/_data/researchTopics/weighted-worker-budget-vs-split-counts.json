@@ -1,0 +1,20 @@
+{
+  "id": "weighted-worker-budget-vs-split-counts",
+  "title": "Worker admission — one weighted budget plus a structural heavy pool, or separate heavy and light counts",
+  "status": "open",
+  "summary": "Prior-art survey for backlog #3806: should dispatch of worker agents (review, light task, prepare, build/fix, calibration) be limited by ONE weighted budget with a weight per dispatch kind on top of the structural heavy-command pool, or by two separate counts (heavy workers, light workers)? Fork 1: Ninja (a global -j ceiling plus named pools with a depth), Gradle (--max-workers plus a shared-service maxParallelUsages), Bazel (declared per-action CPU/RAM against one scheduler), Airflow (pool_slots weights inside one shared pool) and Jenkins (Heavy Job executor weights) all use one shared budget plus a hard cap on the scarce resource; Hadoop MRv1's fixed map and reduce slots is the one documented static two-class split, and it idled one class while the other was saturated before MRv2/YARN replaced it with fungible containers. Declared weights can be wrong (Bazel's maintainers say resource modeling is inaccurate; Kubernetes ResourceQuota charges declared requests), which is why the structural pool stays. Per-kind ceilings inside the same budget (Jenkins Throttle categories, Slurm GrpTRES/MaxJobs beside TRESBillingWeights) are a real, additive extension, not a competing branch. Fork 2 (surfaced by the survey, absent from the original item): what happens at the head of the queue when the next item does not fit the remaining budget — the Go weighted semaphore documents strict FIFO to avoid starving large requests, Airflow issue #29474 is the mirror complaint, and only the exclusive (calibration) weight is unreachable under pure skip-ahead admission. Also records that the repo's heavy pool fails open after 20 minutes and is bypassable, so it is a bounded-wait guarantee, not a hard cap.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "conveyor",
+    "concurrency",
+    "admission-control",
+    "capacity",
+    "dispatch-budget",
+    "weighted-semaphore",
+    "dev-workflow"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
