@@ -67,7 +67,7 @@ A scan of scripts/, skills-src/ and docs/ on `origin/lane/mechanical-dispatcher`
 - we:scripts/lib/dispatch-contracts.mjs, the hold message: "(#3690 is not ratified)".
 - we:scripts/operations/dispatch-lane.mjs, the comment above the supervision gate: "the graduation model it implements (#3690) is not ratified".
 
-The two message strings are user-visible, so a test may assert them; reword them together with any test that does. The separate header claim in we:scripts/lib/provider-routing.mjs (it says the router serves interactive sessions, against the ratified Reach rule) is a different correction and is tracked on card xhbc67b, not here.
+The two message strings are user-visible, so a test may assert them; reword them together with any test that does. The separate header claim in we:scripts/lib/provider-routing.mjs (it says the router serves interactive sessions, against the ratified Reach rule) is a different correction and is tracked on card 3798, not here.
 
 ## Done when
 

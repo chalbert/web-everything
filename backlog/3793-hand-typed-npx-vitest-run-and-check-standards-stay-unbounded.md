@@ -1,4 +1,5 @@
 ---
+bornAs: x1yh4um
 kind: story
 size: 2
 parent: "3383"
@@ -11,7 +12,7 @@ tags: []
 
 # Hand-typed npx vitest run and check-standards stay unbounded in an interactive session: add a wrapper hint
 
-Hand-typed `npx vitest run` and `node we:scripts/check-standards.mjs` stay unbounded in an interactive session: the heavy-admission wrapper covers the npm scripts and the repo's own callers, but a raw command typed by hand is denied only to a dispatched agent. Give the interactive session a hint at the moment it types one. Design-first and deliberately not cleared for the conveyor. Relates #3785 (`xaipsbs`, resolved: routed every heavy command through the pool), #3417, #3650 and #3471.
+Hand-typed `npx vitest run` and `node we:scripts/check-standards.mjs` stay unbounded in an interactive session: the heavy-admission wrapper covers the npm scripts and the repo's own callers, but a raw command typed by hand is denied only to a dispatched agent. Give the interactive session a hint at the moment it types one. Design-first and deliberately not cleared for the conveyor. Relates #3785 (`3785`, resolved: routed every heavy command through the pool), #3417, #3650 and #3471.
 
 ## FOUND (2026-09-21)
 

@@ -20,7 +20,7 @@ Operator, 2026-09-21: "We need a different cap value per type of lane. A review 
 
 - **Where it belongs.** The resolver in we:scripts/lib/lane-concurrency.mjs returns a budget rather than a count, shared by we:scripts/readiness/dispatch-plan.mjs and we:scripts/conveyor/tick-core.mjs, and by we:scripts/operations/dispatch-lane.mjs, so every dispatch path weighs a candidate by its kind.
 - **Where the numbers come from.** The weights are provisional and should be set from the sampler's per-kind rollup (`host.workers.live` per kind and the `perWorker` figures in `reservation-inputs`). The first samples were thin (for example review 8.3% CPU and 1669 MB over 5 workers, build 0.5% and 1065 MB over 3, task 28.3% and 3706 MB over 8).
-- **Tracking.** Re-evaluating the numbers is card xukmbh0; this finding is the design input to the resolver.
+- **Tracking.** Re-evaluating the numbers is card 3800; this finding is the design input to the resolver.
 
 ## Done when
 

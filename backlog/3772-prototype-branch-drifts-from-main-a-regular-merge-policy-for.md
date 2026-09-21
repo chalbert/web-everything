@@ -15,7 +15,7 @@ FOUND 2026-09-20. The prototype branch lane/mechanical-dispatcher has drifted fa
 
 ## Finding (2026-09-21): the loop that carries out this policy is filed separately
 
-Card xfgv680 is the mechanical loop (a dedicated clone, a merge commit, a fast-forward-only push after a clean merge, the per-branch lock, the `autoSync` gate, a freeze plus alert on conflict, then a reconcile agent). It depends on this card's policy points (who and when, the conflict rules, duplicate ids, graduation order). New evidence recorded there: the live sync process is stuck at attempt 5 since 2026-09-12 and cannot push; a hand merge showed 54 conflicts and was staged once on `origin/lane/mechanical-dispatcher-catchup` without reaching the shared branch; as of 2026-09-21 `origin/main` has 446 commits the branch lacks and the branch has 253 that main lacks.
+Card 3797 is the mechanical loop (a dedicated clone, a merge commit, a fast-forward-only push after a clean merge, the per-branch lock, the `autoSync` gate, a freeze plus alert on conflict, then a reconcile agent). It depends on this card's policy points (who and when, the conflict rules, duplicate ids, graduation order). New evidence recorded there: the live sync process is stuck at attempt 5 since 2026-09-12 and cannot push; a hand merge showed 54 conflicts and was staged once on `origin/lane/mechanical-dispatcher-catchup` without reaching the shared branch; as of 2026-09-21 `origin/main` has 446 commits the branch lacks and the branch has 253 that main lacks.
 
 ## Done when
 
