@@ -4616,6 +4616,76 @@ never the tooling-asymmetry finding alone.
 and grounded in `we:reports/2026-09-14-calibration-veto-clearing-grounding.md`. Full reasoning:
 [#3673](/backlog/3673-define-what-clears-a-triggered-calibration-veto-so-a-role-ca/).
 
+### A delegated agent's trial record governs every read of it; the bar is a shape, demotion is computed, promotion is ratified, and the independent look gets shallower but never goes away {#delegation-trial-record-graduation}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), all five forks approved as prepared, no
+amendments (`#3690`).** Applies [#model-probation-graduation-criteria](#model-probation-graduation-criteria)
+and [#calibration-veto-clearing](#calibration-veto-clearing) to the delegation-trial record — the
+`dispatchKind: "session-delegation"` rows in `we:scripts/conveyor/run-scorecards.json`, written through
+`we:scripts/conveyor/log-delegation-trial.mjs` and read by `we:scripts/lib/provider-routing.mjs`. The unit
+of trust is the triple `{provider, model, taskType}`, and trust never carries across triples. **No numeric
+threshold is fixed by any clause below.** Seven rules:
+
+1. **What the record governs — every read of it.** One record has two consumers: choosing *which provider
+   gets the work* (`selectProvider` and its fitness test) and choosing *how much checking the result gets*
+   (`selectSupervisionLevel`). Both read the same predicates, so this ruling binds both. Changing what counts
+   as a clean or an informative trial is a governed change wherever the record is read, never a local edit
+   to one consumer.
+2. **Authority is not earned by a streak.** What a delegated agent may DO — commit, push, open a PR, land —
+   comes only from the typed-operation catalog, per
+   [#agent-mutations-through-typed-operations](#agent-mutations-through-typed-operations). Neither a trial
+   streak nor a transport's prompt text or sandbox grants it. A streak moves supervision depth and provider
+   fitness, nothing else.
+3. **The evidence bar is a shape: a trailing clean streak, plus a positive control, plus a clean most recent
+   verified trial, with a confirmed miss as a hard veto — per triple.** The streak length N is a
+   `backdownThresholds` config default (`DEFAULT_BACKDOWN_THRESHOLDS` in
+   `we:scripts/lib/provider-routing.mjs`), proposed and changed by an ordinary batched finding against real
+   data, never by a decision ceremony. A confirmed miss resets the triple at once; it is never averaged into
+   a score. A concurrent-baseline comparison (the same task run through Claude and through the delegated
+   provider, judged on the difference) is the preferred evidence shape over raising N.
+4. **What makes a trial informative — its own recorded field.** A trial is the positive control only when a
+   separate `informative` field on the row says so, meaning *independent review found a real problem on this
+   trial that was then fixed*. It is never inferred from `outcome` (which means only "did this trial land")
+   or from the free-text `findings`.
+5. **Re-graduation after a miss — a root-cause note first, then a higher bar.** After a miss, post-miss
+   trials count toward restoration only once a root-cause note is on record in its own field, not in a later
+   row's `findings`. The post-miss bar is strictly higher than the cold-start bar (`minCleanStreak + k`,
+   with `k` set by the same batched finding that sets N). This is the same principle as
+   [#calibration-veto-clearing](#calibration-veto-clearing), applied to a delivery trial rather than a
+   reviewer's disposition.
+6. **Who moves a level — the data demotes, the operator promotes.** Demotion is computed from the record and
+   takes effect immediately. Promotion to a lighter level takes an explicit ratified act naming the triples
+   promoted, done in batches against accumulated data, never per dispatch and never per trial. With no such
+   act, a triple stays at `full`. This triple axis composes with the repo axis of
+   [#agent-convergence-independent-validation](#agent-convergence-independent-validation): the repo axis
+   says whether a repo permits staged autonomy at all, the triple axis says how much checking a delegated
+   draft gets inside a repo that permits it, and a repo-level `none` is never overridden by any triple's
+   level.
+7. **The verification floor — shallower, never absent.** At every level the orchestrator reads the real diff
+   and rules on it, and runs the close-out gate itself and reads its output
+   ([#model-routing](backlog-workflow.md#model-routing) Inline (2) and (5)); a delegated run's exit code is
+   never the verdict. The separate independent pass keeps full coverage and moves only in depth: a full
+   independent review at `full`; at `spot-check`, the
+   [#every-pr-gets-a-look-advisory-floor](#every-pr-gets-a-look-advisory-floor) shape (one tool-free juror,
+   one round, the diff and the item card, capped findings, non-blocking). A finding from that pass files a
+   follow-up item, and the floor's cost and yield are measured and reported. Any provider may fill the
+   reviewer seat; a different provider from the builder is preferred, never required.
+
+**Reach.** Mechanical provider routing binds the mechanical dispatch path only. An interactive orchestrating
+loop keeps its own inline routing verdict under [#model-routing](backlog-workflow.md#model-routing) Inline (3)
+and [#effort-routing](backlog-workflow.md#effort-routing); the router may inform that verdict, never replace
+it.
+
+**What this ruling does not do.** It sets no threshold value and does not itself switch on any dispatch gate
+that reads the supervision level; turning such a gate on is separately-scoped work tracked on the backlog.
+
+**Lineage:** ratified via `#3690` (2026-09-21), filed under the background mechanical dispatcher epic
+`#3383`, grounded in `/research/delegation-graduation-and-supervision-tiers/` and
+`we:reports/2026-09-20-delegation-graduation-model-grounding.md`, extending
+[#model-probation-graduation-criteria](#model-probation-graduation-criteria) (`#3654`) and composing with
+[#calibration-veto-clearing](#calibration-veto-clearing) (`#3673`). Full reasoning:
+[#3690](/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
