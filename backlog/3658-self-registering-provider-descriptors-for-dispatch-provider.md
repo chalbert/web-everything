@@ -2,9 +2,13 @@
 bornAs: x1o71ec
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-provider-registry.mjs", "we:scripts/operations/dispatch-providers/build.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs", "we:scripts/operations/dispatch-providers/prepare.mjs", "we:scripts/operations/dispatch-providers/prepare-decision.mjs"]
 dateOpened: "2026-09-13"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#agent-vendor-registry"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "18798aec3835377c24a82133b5d87711dcfdb3e2"
 tags: [dispatch, provider, registry, codex, antigravity, decision-prep]
@@ -20,6 +24,33 @@ while a new agent *vendor* (Codex, Antigravity) lands in three other tables insi
 follow, each with a bold default. The original filing is kept below under `## The idea (as filed)`.
 Grounding: [report](/reports/2026-09-21-provider-registration-grounding.md) · research topic
 [/research/dispatch-provider-registration/](/research/dispatch-provider-registration/).
+
+## Ruling — RATIFIED 2026-09-21 (operator, in conversation)
+
+The operator ratified the card as prepared: all four bold defaults, no amendments.
+
+- **Fork 1: (a)** — the ruling governs the vendor axis. The kind table stays a closed, hand-edited, load-checked
+  table. (b) both tables and (c) the kind table only are not taken.
+- **Fork 2: (a)** — one descriptor module per vendor, listed in one explicit static index. (b) runtime
+  directory discovery and (c) three per-wrapper tables are rejected on merit, as stated in the fork.
+- **Fork 3: (a)** — a descriptor declares mechanics only. (b) fitness and (c) cascade rank are excluded
+  (self-certification; routing order depending on which files merged).
+- **Fork 4: (a)** — refuse for `build`, fall back to `claude-restricted` for `fix`/`ci-heal`, recorded as
+  `requestedVendor`/`executedVendor`/`reason`, apart from the router's fields. (b) and (c) are not taken.
+- **Ratify-time check** (the prep's per-fork `Skeptic:`/`Screen:` verdicts were re-read as the confirmation):
+  every statute anchor the card cites resolves in `we:docs/agent/platform-decisions.md`; the files the card
+  marks as on main (`we:scripts/lib/provider-routing.mjs` cascade order and route set,
+  `DELIVERY_AGENT_PROVIDERS` in `we:scripts/operations/deliver-item-wrapper.mjs`, `defaultClaudeProvider` in
+  `we:scripts/operations/dispatch-lane-io.mjs`) match what it says; no existing statute governs registries of
+  executable providers, so there is no overlap. The prototype-branch line numbers were not re-read at ratify
+  (they were read in the prep, at `13affbab1`); the builds re-verify them on the branch.
+- **Codified** as [agent-vendor-registry](../../docs/agent/platform-decisions.md#agent-vendor-registry).
+  **Builds** (both `parent: 3383`, both land on `lane/mechanical-dispatcher` and reach main through #3443):
+  [xceuk6m](/backlog/xceuk6m-build-the-agent-vendor-registry-one-descriptor-module-per-ve/) (size 8, the registry and
+  descriptors) and
+  [xirxlz4](/backlog/xirxlz4-refuse-or-repair-around-a-marked-vendor-that-cannot-run-the/) (size 5, the Fork 4
+  refuse/fallback and the run-record fields; `blockedBy` xceuk6m). Neither is cleared for the conveyor: their
+  files exist only on the prototype branch.
 
 ## Why this is on the critical path
 
@@ -439,8 +470,9 @@ it is not evidence about `DISPATCH_PROVIDER_REGISTRY` in particular.
 
 1. **Executable** — `grep -c '^## Fork ' we:backlog/3658-self-registering-provider-descriptors-for-dispatch-provider.md`
    prints `4` and the card carries `preparedDate` (failed before: zero forks, no `preparedDate`).
-2. **Prepared, not ruled (2026-09-21).** Four forks are authored with bold defaults, a `Skeptic:` and a
-   `Screen:` line each, and the research topic is published. The call stays the operator's; `status` stays
-   `open`.
-3. **At ratification:** the ruling is codified as a `we:docs/agent/platform-decisions.md` anchor and
-   `codifiedIn` is set; the build is carved into children scoped per the touch-set above.
+2. **Prepared (2026-09-21), then ratified the same day.** Four forks were authored with bold defaults, a
+   `Skeptic:` and a `Screen:` line each, and the research topic is published. The operator ratified all four
+   defaults as prepared.
+3. **Ratified:** the ruling is codified as `we:docs/agent/platform-decisions.md#agent-vendor-registry` and
+   `codifiedIn` is set; the build is carved into two children (see the ruling block above), scoped per the
+   touch-set.
