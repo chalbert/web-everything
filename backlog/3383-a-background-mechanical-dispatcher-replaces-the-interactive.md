@@ -21,7 +21,7 @@ tags: []
 
 ## Priority order
 
-Updated: 2026-09-21 by delivery worker `apply-delegation-priority` (Claude) — moved delegation to Codex and Antigravity to the top, right after the health chain, on the operator's instruction: nine cards in a new section (rule 0a), #3717, #3675 and #3658 moved out of bands A and C, later lines renumbered. Derived by the rules below from the ranker and this card's own goal; the orchestrator dispatches from the top of band A and never chooses order. Whoever files, resolves, re-scopes or blocks a #3383 card updates this section in the same push; the `check-priority` command of we:scripts/prototype-tracker.mjs, run with `--ref=origin/main --strict`, fails on drift.
+Updated: 2026-09-21 by delivery worker `tracker-chores` (Claude) — added #3783 (claimed, so listed not ordered; it belongs to the delegation stack of rule 0a) and #3782 (outside #3383, off-path list); no ordered line moved. Earlier the same day, by `apply-delegation-priority`: moved delegation to Codex and Antigravity to the top, right after the health chain, on the operator's instruction: nine cards in a new section (rule 0a), #3717, #3675 and #3658 moved out of bands A and C, later lines renumbered. Derived by the rules below from the ranker and this card's own goal; the orchestrator dispatches from the top of band A and never chooses order. Whoever files, resolves, re-scopes or blocks a #3383 card updates this section in the same push; the `check-priority` command of we:scripts/prototype-tracker.mjs, run with `--ref=origin/main --strict`, fails on drift.
 
 **Scope.** Every open card under #3383, plus the open slices of open epic children (the walk stops at a resolved card). A card resolved on `main` or on this branch counts as resolved. A card with `status: active` is claimed: listed at the end, never ordered. Ranker signals: the `suggest-next` operation (through we:scripts/operations/run.mjs, with `--json --parent=3383`) on `main` (it ranks Tier A only and prints at most 50 rows, so leverage for the rest was read from the loader `we:src/_data/backlog.js` on `main`). Leverage is 0 for almost every card, so most ties fall to size, then number.
 
@@ -195,6 +195,7 @@ Updated: 2026-09-21 by delivery worker `apply-delegation-priority` (Claude) — 
 - #3441 · task · claimed · A build-dispatch agent whose PR merges must resolve its own backlog item, not leave it active forever
 - #3443 · epic · claimed · Graduate origin/lane/mechanical-dispatcher to main in small, independently reviewable pieces
 - #3447 · 2 · claimed · Require check:health in the test-plan checklist for any PR stamping preparedDate on a decision with Fork secti
+- #3783 · 5 · claimed · Build the concurrent-baseline comparison harness for delegation trials (child of #3718; filed by the #3690 preparation PR #2363). Part of the delegation stack: rule 0a would place it in the delegation section, after #3717 (the router caller its trial pairs feed) and before band A; not ordered while claimed.
 
 **Owed, no card yet — not ordered** (from this card's own notes; each needs a card once its scope is re-read).
 
@@ -206,6 +207,7 @@ Updated: 2026-09-21 by delivery worker `apply-delegation-priority` (Claude) — 
 **Off-path, not ordered — not #3383 cards.** Listed so nothing is silently dropped.
 
 - off-path #3735 · decision · parent #3054: whether a `review:human` approval carries across a push that only merges `main` into the branch.
+- off-path #3782 · 3 · claimed, no parent: codex-direct-task's scratch clone points origin at the real remote, so the draft-only rule is prompt text over a push-capable checkout; filed by the #3690 preparation PR #2363, outside #3383, so not ordered.
 - off-path: the operator clearing list (the `list` action of we:scripts/conveyor/queue.mjs) is session-local and empty; it is not a priority list.
 
 
