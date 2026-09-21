@@ -58,6 +58,17 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
    is carved into its own child story under #3383 with a `blockedBy` edge from this one, or folded in here.
 4. **Which branch lands it.** `main` (after #3443) or `lane/mechanical-dispatcher` first.
 
+## Finding (2026-09-21): the exact lines that still say "not ratified"
+
+A scan of scripts/, skills-src/ and docs/ on `origin/lane/mechanical-dispatcher` for `#3690` next to "not ratified" or "unratified" finds four places, all prose or error text, none on main:
+
+- we:scripts/lib/dispatch-contracts.mjs, the docblock: "#3690 is an OPEN, unratified decision (worker `prepare-3690` is preparing it)".
+- we:scripts/lib/dispatch-contracts.mjs, the error text for a bad enforcement value: "#3690 is not ratified, so supervision is RECORDED, not enforced".
+- we:scripts/lib/dispatch-contracts.mjs, the hold message: "(#3690 is not ratified)".
+- we:scripts/operations/dispatch-lane.mjs, the comment above the supervision gate: "the graduation model it implements (#3690) is not ratified".
+
+The two message strings are user-visible, so a test may assert them; reword them together with any test that does. The separate header claim in we:scripts/lib/provider-routing.mjs (it says the router serves interactive sessions, against the ratified Reach rule) is a different correction and is tracked on card xhbc67b, not here.
+
 ## Done when
 
 1. **Executable** — a test in the dispatch-contracts suite asserts that `supervisionEnforcementFrom({})`
