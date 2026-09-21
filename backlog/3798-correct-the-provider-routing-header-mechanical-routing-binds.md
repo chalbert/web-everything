@@ -3,10 +3,11 @@ bornAs: xhbc67b
 kind: story
 size: 1
 parent: "3383"
-status: open
+status: resolved
 relatedTo: ["3690", "3784", "3717"]
 scope: ["we:scripts/lib/provider-routing.mjs"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-21"
 tags: []
 ---
 

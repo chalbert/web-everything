@@ -1,10 +1,14 @@
 /**
  * provider-routing.mjs — deterministic LLM dispatch-provider and supervision-level router (#3690).
  *
- * This module provides the shared routing intelligence for picking the optimal dispatch provider
- * ('gemini' | 'codex' | 'both' | 'claude') and model supervision level ('full' | 'spot-check')
- * across both interactive Claude Code sessions (as a pre-dispatch check before picking a subagent)
- * and autonomous conveyor/runner dispatch machinery — shared logic, not duplicated.
+ * This module provides the routing intelligence for picking the optimal dispatch provider
+ * ('gemini' | 'codex' | 'both' | 'claude') and model supervision level ('full' | 'spot-check').
+ *
+ * REACH: the mechanical dispatch path only. Mechanical provider routing binds the mechanical dispatch
+ * path only (the autonomous conveyor/runner dispatch machinery). An interactive orchestrating loop
+ * keeps its own inline routing verdict under [docs/agent/backlog-workflow.md#model-routing] Inline (3)
+ * and [docs/agent/backlog-workflow.md#effort-routing]; the router may inform that verdict, never
+ * replace it (per [docs/agent/platform-decisions.md#delegation-trial-record-graduation] "Reach", #3690).
  *
  * PURE MODULE ARCHITECTURE (per [docs/agent/platform-decisions.md#deterministic-core-thin-judgment]):
  *   • Zero filesystem (fs) or process environment reads at import or execution time.
