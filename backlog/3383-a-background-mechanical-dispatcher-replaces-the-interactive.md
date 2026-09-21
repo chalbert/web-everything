@@ -4564,3 +4564,29 @@ node we:scripts/operations/tracker-refresh-state.mjs record --html=~/workspace/.
 **Not verified here:** the publish worker itself (a dispatched worker reading the brief and calling the Artifact tool) has not run; I published by hand and recorded the state with the same `record` command the brief names, so the state file and the `publish: current` line are real but the worker path is not. The orchestrator's queue check does not call `tracker-refresh` yet (no code for it here). The page was seen at 390 px in Chromium (no horizontal overflow) but not on the operator's phone. This page shows the notes up to the one before this note: this note is newer than the page, so the next refresh reads `publish: needed`.
 
 Checks: 76 new tests (27 pure compact, 7 real `render` over a real git repo, 36 pure `tracker-refresh` including the state command, 6 real `tracker-refresh` over a real repo and a temp `.operations` directory); `we:scripts/operations/__tests__`, `we:scripts/__tests__` and `we:scripts/lib/__tests__` 326 files, 11,402 passed and 12 skipped (before the rebase; the 11 touched suites re-run after it: 257 passed); `check:standards` 0 errors; `check-priority --ref=origin/main --strict` OK (137 open cards, 142 lines).
+
+## Session update (2026-09-21) — host sampler: `pressure` and `lane-load` read a full day's telemetry file: a tail reader replaces the whole-file spread that overflowed the stack (code commit d8e26fd37)
+
+The `pressure` command, the smoothed brake the admission routing work depends on, crashed on a full day's telemetry file, and `lane-load` returned an empty model on the same file without saying so (code commit d8e26fd37 on this branch, no PR, per the prototype rule). The orchestrator reproduced it after reloading the sampler: `we:scripts/operations/host-sampler.mjs pressure` failed with `RangeError: Maximum call stack size exceeded` on the 2026-09-21 day file (87 MB, about 150,000 records).
+
+**Root cause:** `readPressureSamples` in `we:scripts/operations/host-sampler-rollup.mjs` did `events.push(...parseTelemetryLines(<whole file text>).events)`. Spreading 150k records into one call overflows the stack. `readLaneLoadModel` had the same spread inside a `try`/`catch` that skipped "an unreadable day", so `lane-load` swallowed the RangeError and reported 0 heavy runs.
+
+**What changed:**
+
+- `we:scripts/operations/host-sampler-tail.mjs` (new): reads a day file (raw or gzipped) backward from the end in 1 MiB chunks and stops after 64 consecutive lines older than the wanted span (2 minutes of slack, one stray out-of-order line cannot end it), or forward in chunks. The line's time is read with a string search, so only lines inside the span are JSON-parsed. `maxOf` / `minOf` are plain loops.
+- `readPressureSamples` now reads the last window plus the 6-window hysteresis lead-in (70 minutes by default) from the tail of each UTC day that span touches, and skips records after `--at`. Its cost follows the span, not the file. The `--at` scan grows with how far back the instant is.
+- `readLaneLoadModel` reads one day at a time, groups it into samples, and drops the records before the next day. Unreadable days are still skipped, but a RangeError can no longer be the reason.
+- `replayPressure` is linear (each step scores a slice of the sorted samples) instead of re-filtering every sample for every sample; a test pins it equal to the old quadratic version.
+- `Math.max(...list)` / `Math.min(...list)` over whole sample lists are loops in `we:scripts/operations/host-sampler-rollup.mjs`, `we:scripts/operations/host-sampler-retention.mjs` and `we:scripts/operations/load-analysis.mjs`; the daily rollover parses its buffer line by line instead of one 90 MB string.
+- The pressure text says "transitions in the replayed span" (it was "in the file"), since the replay now covers the lead-in, not the whole day. Verdicts and `--json` fields are unchanged.
+
+**Fork, ruled here, open to review:** `pressure` no longer replays the hysteresis from midnight. It replays from 70 minutes back, which is the lead-in the code already asked for (`leadMs = 6 * window`). The state a brake "running all day" would be in can differ only when the last hold or release started more than 70 minutes ago.
+
+**Done when (executable)** (drop the `we:` prefix to run):
+
+1. `npx vitest run we:scripts/operations/__tests__/host-sampler` passes, including the new `we:scripts/operations/__tests__/host-sampler-large-file.test.mjs` (14 tests over a generated 200,000-record file).
+2. `node we:scripts/operations/host-sampler.mjs pressure --dir=<dir with a 90 MB day file>` prints a verdict in well under a second.
+
+**Not verified here:** the live sampler was not reloaded (the operator does that); the fix was run against a copy of the live day file, never the live file. The fixture test cannot reproduce the RangeError itself, because vitest's stack is larger than the CLI's; the old code shows up there as 13 s against under 2 s.
+
+Checks: `we:scripts/operations/__tests__`, `we:scripts/__tests__` and `we:scripts/lib/__tests__` 332 files and 11587 tests pass (12 skipped); `check:standards` reports 2 errors, both already on the branch tip and neither from this change (a stranded `xaipsbs-` backlog file, and an opaque-token finding in this tracker file from the earlier tracker-page note; left alone); `check-priority --strict` OK (137 open cards, 142 lines) after rebasing onto the branch tip, and before the rebase it showed 4 findings from cards that landed on main (#3784 missing, #3675, #3690 and #3495 resolved but listed).
