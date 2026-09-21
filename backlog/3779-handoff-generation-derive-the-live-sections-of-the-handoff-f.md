@@ -1,12 +1,10 @@
 ---
 bornAs: xde32mt
-kind: story
-size: 5
+kind: epic
 parent: "3383"
-status: resolved
+status: open
 scope: ["we:.claude/commands/handoff.md", "we:.claude/commands/continue.md", "we:scripts/operations/run.mjs", "we:scripts/operations/handoff-home.mjs", "we:scripts/lib/git-transport-branch.mjs"]
 dateOpened: "2026-09-20"
-dateResolved: "2026-09-21"
 tags: []
 ---
 
@@ -38,7 +36,7 @@ ADDED 2026-09-21 (operator ruling). The words below were typed by the operator i
 
 ## Slice A: location
 
-Builds design point 4 only, as ruled on 2026-09-21. Design points 1, 2, 3 and 5 (the generator, the generated and hand-kept split, the in-flight source, the word cap) stay unbuilt until #3775 and #3776 settle; the Done-when list above is theirs.
+Landed in PR #2392 on 2026-09-21. The drain then resolved this whole card on land (`drain: resolve #3779 on land (#2748)`), which was premature: only this slice shipped. The operator asked for it to be reopened, and it is an epic now (a sized story cannot also have children; the review follow-ups are the child card filed under it). Builds design point 4 only, as ruled on 2026-09-21. Design points 1, 2, 3 and 5 (the generator, the generated and hand-kept split, the in-flight source, the word cap) stay unbuilt until #3775 and #3776 settle; the Done-when list above is theirs.
 
 What ships: `we:scripts/operations/handoff-home.mjs` with three verbs. `path` prints the working copy (`~/workspace/.operations/handoff/`, outside `~/.claude/`). `pull` fast-forwards it from `origin/ops/handoff`. `push` commits both files (the snapshot and the operator's rules file) onto `ops/handoff` through `we:scripts/lib/git-transport-branch.mjs`, the same transport as `ops/review-requests` and `ops/pr-views`. The transport gained one opt-in, `createIfAbsent`, so the first push can start the branch as an orphan. `push` never forces, refuses when the remote moved since the last pull, and runs a publish gate first: `scrubPublish` on both files, and on a PUBLIC repository also any personal home-directory path. The repository is PUBLIC, so the first real push is the operator's call, not an agent's.
 
