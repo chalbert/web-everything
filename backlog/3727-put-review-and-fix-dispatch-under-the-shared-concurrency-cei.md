@@ -30,9 +30,9 @@ The reconcile path dispatches one review per owed PR with no admission check. Re
 
 When review and fix dispatch join the shared ceiling, they should not count as one lane each. The operator's ruling (2026-09-21) is a different cap per type of lane: a review that launches no heavy commands takes very little capacity compared with a build lane that runs tests repeatedly. The provisional weights are review 0.25, light task 0.5, prepare 1.0, build 1.5 (fix runs tests repeatedly, so it weighs as a build), calibration exclusive, against a budget of 6 units; they are to be set from the sampler's per-kind rollup (see the finding on #3612). Counted as whole lanes, a burst of re-armed reviews would be throttled as hard as a burst of builds, which is the opposite of the intent. `review-dispatch` and `reconcile-fix-dispatch` should therefore read the remaining budget in units and pass their kind's weight, not a count. Tracked for re-evaluation on card 3800.
 
-## Finding (2026-09-21): read the budget from the tracked config, card x5fkzgl
+## Finding (2026-09-21): read the budget from the tracked config, card 3807
 
-The units budget and the kind weights this card's finding asks `review-dispatch` and `reconcile-fix-dispatch` to read will live in the tracked `dispatch-budget` config of card x5fkzgl, through the one resolver in `we:scripts/lib/lane-concurrency.mjs`. Build against that resolver rather than a local constant, so the number stays in one place. Whether the count should be one weighted budget or separate heavy and light counts is the open decision x3pvhaf (default: one weighted budget plus the heavy pool).
+The units budget and the kind weights this card's finding asks `review-dispatch` and `reconcile-fix-dispatch` to read will live in the tracked `dispatch-budget` config of card 3807, through the one resolver in `we:scripts/lib/lane-concurrency.mjs`. Build against that resolver rather than a local constant, so the number stays in one place. Whether the count should be one weighted budget or separate heavy and light counts is the open decision 3806 (default: one weighted budget plus the heavy pool).
 
 ## Done when
 

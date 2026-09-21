@@ -69,7 +69,7 @@ The runner is stopped, not machine-readably paused: `we:.conveyor/dispatch-pause
 
 ## Finding (2026-09-21): the load gate here is superseded by the emergency floor in the tracked config
 
-Capacity step 1 above adds a load gate (`os.loadavg()[0]` over the core count means budget 0). The operator's rule v4 (2026-09-21) replaces reactive load pacing with a declared-cost weighted budget plus an EMERGENCY FLOOR only (instantaneous CPU busy above 95 for two readings in a row, or available RAM under 8 GB). The statute in `we:docs/agent/platform-decisions.md` also says "No load-average gate". Before building this card's gate, read the budget, the weights and the floor from the tracked `dispatch-budget` config of card x5fkzgl instead of computing a second capacity number here; card x9ls7aa only REPORTS a floor breach, so enforcing the floor at dispatch time is this operation's job.
+Capacity step 1 above adds a load gate (`os.loadavg()[0]` over the core count means budget 0). The operator's rule v4 (2026-09-21) replaces reactive load pacing with a declared-cost weighted budget plus an EMERGENCY FLOOR only (instantaneous CPU busy above 95 for two readings in a row, or available RAM under 8 GB). The statute in `we:docs/agent/platform-decisions.md` also says "No load-average gate". Before building this card's gate, read the budget, the weights and the floor from the tracked `dispatch-budget` config of card 3807 instead of computing a second capacity number here; card 3808 only REPORTS a floor breach, so enforcing the floor at dispatch time is this operation's job.
 
 ## Done when
 

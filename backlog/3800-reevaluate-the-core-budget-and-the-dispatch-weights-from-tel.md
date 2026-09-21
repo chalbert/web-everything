@@ -31,7 +31,7 @@ Reevaluate the core budget and the dispatch weights from telemetry, and ratify a
 
 ## Finding (2026-09-21): three cards now cover the process this one names
 
-Operator, 2026-09-21: "keep adjusting as we learn. Suggest adjustment regularly, create a process that survives handoff" and "Do we need heavy worker and light worker count?". This card stays the first reevaluation and the per-hardware formula. Design point 5 (one home for the numbers) is built by card x5fkzgl (the tracked `dispatch-budget` config, each change a reviewed commit with a dated reason). The regular suggestion is card x9ls7aa (a read-only `capacity-review` operation returning raise, hold or lower on the runner tick, shown in `/wip`). The heavy-versus-light count question is the open decision x3pvhaf (default: one weighted budget plus the heavy pool). The "which clean window counts" point (design point 1) needs the annotation reader that card x9ls7aa lists as missing.
+Operator, 2026-09-21: "keep adjusting as we learn. Suggest adjustment regularly, create a process that survives handoff" and "Do we need heavy worker and light worker count?". This card stays the first reevaluation and the per-hardware formula. Design point 5 (one home for the numbers) is built by card 3807 (the tracked `dispatch-budget` config, each change a reviewed commit with a dated reason). The regular suggestion is card 3808 (a read-only `capacity-review` operation returning raise, hold or lower on the runner tick, shown in `/wip`). The heavy-versus-light count question is the open decision 3806 (default: one weighted budget plus the heavy pool). The "which clean window counts" point (design point 1) needs the annotation reader that card 3808 lists as missing.
 
 ## Done when
 

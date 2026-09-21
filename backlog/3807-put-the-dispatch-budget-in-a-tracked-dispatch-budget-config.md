@@ -1,9 +1,10 @@
 ---
+bornAs: x5fkzgl
 kind: story
 size: 5
 parent: "3383"
 status: open
-relatedTo: ["3612","3727","3800","3737","3720","x9ls7aa","x3pvhaf"]
+relatedTo: ["3612","3727","3800","3737","3720","3808","3806"]
 scope: ["we:scripts/lib/lane-concurrency.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-task.mjs"]
 dateOpened: "2026-09-21"
 tags: []
@@ -28,13 +29,13 @@ Today the number that limits how much work runs at once is not in the repo. The 
 ## DESIGN TO SETTLE (recommendations first)
 
 1. **Format and place.** Recommend ONE JSON file under `we:config/` read by ONE resolver in `we:scripts/lib/lane-concurrency.mjs` (extend it, do not add a second module). JSON so the runner, a test and a checker can all parse it without importing code. Alternative: a `.mjs` module; rejected because a reviewer cannot tell a data change from a logic change in the diff.
-2. **Fields.** `budget` (units), `ramp` (the allowed ladder, for example [8, 10, 12]; `budget` must be one of its values), `weights` (per dispatch kind: review, advisory, light, prepare, build, fix, calibration with `exclusive`), `knee` (thresholds `capacity-review` in card x9ls7aa compares against), `emergencyFloor` (CPU busy percent, consecutive readings, minimum available RAM), and `changes` (newest first: date, from, to, reason, evidence pointer). The git history is the durable ledger; the `changes` list is what a reader sees without running git.
+2. **Fields.** `budget` (units), `ramp` (the allowed ladder, for example [8, 10, 12]; `budget` must be one of its values), `weights` (per dispatch kind: review, advisory, light, prepare, build, fix, calibration with `exclusive`), `knee` (thresholds `capacity-review` in card 3808 compares against), `emergencyFloor` (CPU busy percent, consecutive readings, minimum available RAM), and `changes` (newest first: date, from, to, reason, evidence pointer). The git history is the durable ledger; the `changes` list is what a reader sees without running git.
 3. **Units versus lanes.** Recommend the unit budget becomes the admission rule and the old lane count stays as a separate hard upper bound (`maxLanes`) until #3612 settles. Do not delete the count in this card.
 4. **What "live" means.** A dispatch is admitted while the sum of live weights plus the new weight is at most the budget. Recommend the live sum comes from the roster of live dispatched sessions and their dispatch kind (the `WE_DISPATCH_KIND` each dispatch already carries), not from the sampler, which is telemetry and can lag. Open: confirm every dispatch path stamps the kind.
 5. **Bad config.** Recommend a missing or invalid file falls back to a small built-in floor and says `config-invalid` loudly in the dispatch result. Rejected: a silent default (a hidden number is the bug this card removes) and refusing all dispatch (one typo would stop the factory).
 6. **Environment override.** Keep an env override for an emergency on one machine, but report it in the dispatch result so the effective number is never hidden.
 7. **Hardware.** This card stores the numbers for THIS host. The formula that derives them from a hardware profile is card #3800; this card must not block it, and the file may later gain per-profile sections.
-8. **Who enforces the floor.** This card stores the emergency floor; card x9ls7aa only reports a breach. Enforcing it at dispatch time is the load gate of #3720 (see the finding there), reading the floor from this config.
+8. **Who enforces the floor.** This card stores the emergency floor; card 3808 only reports a breach. Enforcing it at dispatch time is the load gate of #3720 (see the finding there), reading the floor from this config.
 9. **The statute.** Point `we:docs/agent/platform-decisions.md` at the config, replace its "worker dispatch cap is 3", and state whether the emergency floor is compatible with "No load-average gate" (recommend: yes, it is a floor on CPU busy and RAM, not a load-average gate; say so in the statute).
 
 ## Done when
@@ -44,4 +45,4 @@ Today the number that limits how much work runs at once is not in the repo. The 
 3. **Assertable** — a check in `npm run check:standards` fails when the `budget` or any weight changes without a new `changes` entry that carries a date and a reason.
 4. **Handoff** — from a fresh checkout with no orchestrator notes and no env, one command prints the effective budget, weights and the last change; the statute names that command.
 
-Seeded from rule v4 as of 2026-09-21. Not verified: that every dispatch path stamps `WE_DISPATCH_KIND` (design point 4), and the numeric knee thresholds, which rule v4 does not state (see card x9ls7aa).
+Seeded from rule v4 as of 2026-09-21. Not verified: that every dispatch path stamps `WE_DISPATCH_KIND` (design point 4), and the numeric knee thresholds, which rule v4 does not state (see card 3808).
