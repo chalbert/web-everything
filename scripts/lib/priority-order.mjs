@@ -29,6 +29,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import matter from 'gray-matter';
+import { UNWRITTEN_WHY } from './priority-markers.mjs';
 
 export const ROOT_EPIC = '3383';
 export const SECTION_HEADING = '## Priority order';
@@ -40,7 +41,7 @@ const CLAIMED_RE = /^-\s+#([0-9a-z]+)\s+·\s/;
 /**
  * Parse the `## Priority order` section out of the tracker card's text. PURE.
  * @param {string} text the whole tracker card
- * @returns {{found: boolean, entries: Array<{id: string, kind: 'ordered'|'claimed', n: number|null, line: number}>}}
+ * @returns {{found: boolean, entries: Array<{id: string, kind: 'ordered'|'claimed', n: number|null, line: number, unwritten: boolean}>}}
  */
 export function parsePriorityOrder(text) {
   const lines = String(text ?? '').split('\n');
@@ -49,10 +50,11 @@ export function parsePriorityOrder(text) {
   const entries = [];
   for (let i = start + 1; i < lines.length; i++) {
     if (/^## /.test(lines[i])) break;
+    const unwritten = lines[i].includes(UNWRITTEN_WHY);
     const o = ORDERED_RE.exec(lines[i]);
-    if (o) { entries.push({ id: o[2], kind: 'ordered', n: Number(o[1]), line: i + 1 }); continue; }
+    if (o) { entries.push({ id: o[2], kind: 'ordered', n: Number(o[1]), line: i + 1, unwritten }); continue; }
     const c = CLAIMED_RE.exec(lines[i]);
-    if (c) entries.push({ id: c[1], kind: 'claimed', n: null, line: i + 1 });
+    if (c) entries.push({ id: c[1], kind: 'claimed', n: null, line: i + 1, unwritten });
   }
   return { found: true, entries };
 }
@@ -87,7 +89,9 @@ export function liveTree(cards, root = ROOT_EPIC) {
  * Check the section against the cards. PURE.
  * @param {string} trackerText
  * @param {Map<string, {id: string, parent: string|null, status: string, blockedBy: string[]}>} cards
- * @returns {{ok: boolean, findings: Array<{kind: string, id: string|null, message: string}>, stats: {live: number, entries: number}}}
+ * @returns {{ok: boolean, findings: Array<{kind: string, id: string|null, message: string}>, warnings: Array<{kind: string, id: string|null, message: string}>, stats: {live: number, entries: number}}}
+ *   `warnings` are not drift: a line that still carries `why: (unwritten)` (a line `priority-sync` added, waiting for
+ *   a worker to write its reason). They never change `ok`; `--strict-why` on the command line makes them fail.
  */
 export function checkPriorityOrder(trackerText, cards) {
   const findings = [];
@@ -96,7 +100,7 @@ export function checkPriorityOrder(trackerText, cards) {
   const live = liveTree(cards);
   if (!found) {
     add('no-section', null, `the tracker card has no "${SECTION_HEADING}" section`);
-    return { ok: false, findings, stats: { live: live.size, entries: 0 } };
+    return { ok: false, findings, warnings: [], stats: { live: live.size, entries: 0 } };
   }
 
   const seen = new Map();
@@ -124,7 +128,8 @@ export function checkPriorityOrder(trackerText, cards) {
       }
     }
   }
-  return { ok: findings.length === 0, findings, stats: { live: live.size, entries: entries.length } };
+  const warnings = entries.filter((e) => e.unwritten).map((e) => ({ kind: 'why-unwritten', id: e.id, message: `line ${e.line}: #${e.id} still carries "${UNWRITTEN_WHY}": a worker owes its one-sentence reason` }));
+  return { ok: findings.length === 0, findings, warnings, stats: { live: live.size, entries: entries.length } };
 }
 
 /** Frontmatter of one card -> the few fields the check reads. PURE. */

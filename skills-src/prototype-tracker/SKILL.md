@@ -67,6 +67,13 @@ its own rules say how a card is placed, so nobody re-prioritises from memory.
   insert a new card by the section's rules, delete a resolved card's line, move a re-scoped or newly
   blocked card by its new band and `blockedBy`. Replace the section in place, never append a dated
   copy, and refresh its `Updated:` line.
+- **Let the operation do the mechanical part:** `node scripts/operations/run.mjs priority-sync` is a dry
+  run that prints the planned change (lines to drop, cards to add, lines to renumber, cards that a merged
+  PR or commit on `origin/main` names but that are still open); add `--apply` to write the section in
+  place. It never commits or pushes, and it never resolves a card. A line it adds carries
+  `why: (unwritten)`: write that one sentence yourself, and place the line by the section's rules (the
+  operation puts a new line at the end of its band). `check-priority` warns while any remains
+  (`--strict-why` makes it fail). Fetch `origin/main` first; the operation does not.
 - **Check before you push:** `node scripts/prototype-tracker.mjs check-priority --ref=origin/main --strict`
   must pass (a plain run only prints the drift and exits 0).
 - **The orchestrator dispatches from the top of band A and never chooses order.** If the list looks

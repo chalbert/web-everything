@@ -90,6 +90,8 @@ import { clearStuckSessionOperation, CLEAR_STUCK_SESSION_OP } from './clear-stuc
 import { createClearStuckSessionReader, createClearStuckSessionSinks } from './clear-stuck-session-io.mjs';
 import { dispatchTaskOperation, DISPATCH_TASK_OP, finishTaskOutcome } from './dispatch-task.mjs';
 import { createTaskReader, createDispatchTaskSinks } from './dispatch-task-io.mjs';
+import { prioritySyncOperation, PRIORITY_SYNC_OP, finishPriorityOutcome } from './priority-sync.mjs';
+import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sync-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -294,6 +296,15 @@ export const OPERATIONS = Object.freeze({
     declaration: dispatchTaskOperation({ readTask: createTaskReader() }),
     sinks: createDispatchTaskSinks({ extraArgs: agentArgsFromEnv() }),
     finish: finishTaskOutcome,
+  }),
+  // #3383 — keeps the `## Priority order` section of the epic's tracker card in step with the cards: drops resolved
+  // lines, adds unlisted ones with an unwritten `why`, renumbers, and flags cards that landed but are still open.
+  // A dry run by default; `--apply` rewrites the section in the checkout it is run from and never commits or pushes.
+  // `finish` prints the plan as a readable diff first (plain mode); `--json` carries the same plan as `verdict`.
+  [PRIORITY_SYNC_OP]: () => ({
+    declaration: prioritySyncOperation({ readFacts: createPrioritySyncReader() }),
+    sinks: createPrioritySyncSinks(),
+    finish: finishPriorityOutcome,
   }),
   [EXPLORE_OP]: () => ({
     declaration: exploreOperation(),
