@@ -1,0 +1,22 @@
+{
+  "id": "dispatch-provider-registration",
+  "title": "How should a new agent vendor (Codex, Antigravity) register with mechanical dispatch? Self-registering descriptors, generated indexes and explicit tables, grounded against the prototype dispatcher",
+  "status": "open",
+  "summary": "Grounds decision #3658, which proposes replacing the hand-edited DISPATCH_PROVIDER_REGISTRY with self-registering provider descriptors so that adding an Antigravity or Codex provider does not collide with other lanes. THE LOAD-BEARING FINDING: the card names the wrong table. DISPATCH_PROVIDER_REGISTRY (prototype branch only) is keyed by launch KIND -- build, prepare, fix, prepare-decision, ci-heal -- and its key set is closed by LAUNCH_KINDS (six members, five rows, checked at module load). It already removed the collision the card describes: five lanes adding if-arms to one router became one import plus one row each, and four kinds landed that way on the same day. A new agent VENDOR is not a row there. On the prototype branch a vendor lives in three parallel tables inside the wrappers -- DELIVERY_AGENT_PROVIDERS, FIX_AGENT_PROVIDERS and CI_HEAL_AGENT_PROVIDERS, in files of 1856, 852 and 862 lines, each with a roughly 90-line vendor object -- plus PROVIDERS, EXECUTOR_PROVIDERS and EXECUTABLE_PROVIDER in dispatch-contracts.mjs and inline vendor names in the provider-routing cascade. That is the real collision surface for Antigravity, and it is wider than the card says. The three tables are held equal by tests, so every vendor must cover every kind: a vendor that runs build and fix but not ci-heal cannot be stated. And one deliveryAgent marker applies across all three kinds, so once a vendor may lack a kind the marker needs a rule for that case. PRIOR ART: discovery (Python entry points, VS Code contributes manifests, Java ServiceLoader) is used where third parties install plugins the host cannot know about. Where one team owns every plugin in one repo, the trend runs to explicit imports: ESLint flat config reversed its name-based plugin resolution and calls it one of its biggest regrets, Vite and Rollup take an explicit plugin array, the Vercel AI SDK registry is an explicit object keyed providerId:modelId, Backstage makes discovery an opt-in. Every surveyed system keeps trust and ordering out of the plugin. In-repo, the per-entry file pattern (researchTopics, blocks, backlog) is proven for data, and the static import plus keyed table (OPERATIONS in run.mjs, 51 commits since August) for executable registries; the merge-risk statute already classes a distinct-key keyed table as optimistic-merge. Reshapes the card into four forks: which axis the ruling governs, how a vendor is collected, what a descriptor may declare (mechanics, never trust or cascade order), and what an item's vendor marker does when that vendor cannot run a kind. How a broken descriptor fails and where the work is built are settled by precedent.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "dispatch",
+    "provider",
+    "registry",
+    "plugin-discovery",
+    "codex",
+    "antigravity",
+    "operations",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}

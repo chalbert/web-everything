@@ -1,0 +1,104 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3658-self-registering-provider-descriptors-for-dispatch-provider/">#3658</a> proposes
+that mechanical-dispatch providers register themselves through descriptor files instead of being
+hand-edited into one shared table, so that adding an Antigravity or Codex provider does not collide with
+other lanes. This survey tests that claim against the code and against how other plugin systems do it. The
+full working is in <a href="/reports/2026-09-21-provider-registration-grounding.md">the session report</a>.
+Prototype-branch files were read at <code>origin/lane/mechanical-dispatcher</code> <code>13affbab1</code>;
+main at <code>18798aec3</code>.</p>
+
+<h2>Finding 1 — the card names the wrong table</h2>
+
+<p><code>DISPATCH_PROVIDER_REGISTRY</code> (prototype branch,
+<code>scripts/operations/dispatch-provider-registry.mjs:77</code>) is keyed by <strong>launch kind</strong>:
+<code>build</code>, <code>prepare</code>, <code>fix</code>, <code>prepare-decision</code>,
+<code>ci-heal</code>. Its keys must be members of <code>LAUNCH_KINDS</code> (six members,
+<code>dispatch-lane.mjs:188</code>), checked when the module loads. Five kinds have a row; one more
+(<code>investigate</code>) can be added, and then the table is full.</p>
+
+<p>That table already fixed the collision the card describes. Before it, five lanes each added an
+<code>if (kind === …)</code> arm to one router in a 2000-line file. After the extraction on 2026-09-12, the
+four sibling kinds landed the same day as one import and one row each.</p>
+
+<h2>Finding 2 — the real collision surface is the vendor axis</h2>
+
+<p>A new vendor is the command-line tool that runs the agent. It is not a row in the kind table. On the
+prototype branch, adding one means editing:</p>
+
+<ul>
+<li><code>DELIVERY_AGENT_PROVIDERS</code> in <code>deliver-item-wrapper.mjs</code> (1856 lines), plus a
+vendor object of about 90 lines;</li>
+<li><code>FIX_AGENT_PROVIDERS</code> in <code>fix-dispatch-wrapper.mjs</code> (852 lines), plus its vendor
+object;</li>
+<li><code>CI_HEAL_AGENT_PROVIDERS</code> in <code>ci-heal-dispatch-wrapper.mjs</code> (862 lines), plus its
+vendor object;</li>
+<li><code>PROVIDERS</code>, <code>EXECUTOR_PROVIDERS</code> and <code>EXECUTABLE_PROVIDER</code> in
+<code>scripts/lib/dispatch-contracts.mjs</code>;</li>
+<li>and the router's cascade names vendors inline (<code>scripts/lib/provider-routing.mjs:423</code>,
+<code>:452</code>, <code>:500-512</code>).</li>
+</ul>
+
+<p>So the card's worry is real, and wider than it says. It is just aimed at the wrong file.</p>
+
+<h2>Finding 3 — the three vendor tables are forced equal, so a vendor cannot skip a kind</h2>
+
+<p>The wrapper tests assert that the fix and ci-heal tables hold exactly the build table's vendor names. So
+a vendor added to one table only fails CI. The consequence is the opposite of drift: every vendor must cover
+every kind. "Antigravity runs build and fix but not ci-heal" cannot be stated. And one
+<code>deliveryAgent:</code> marker on an item applies to all three kinds, so once a vendor may lack a kind,
+the marker needs a rule for that case.</p>
+
+<h2>Finding 4 — what main has</h2>
+
+<p>Main has the <code>provider</code> port (#3579) with one implementation, <code>defaultClaudeProvider</code>
+(<code>scripts/operations/dispatch-lane-io.mjs:1016</code>). It also has a
+<code>DELIVERY_AGENT_PROVIDERS</code> table whose <code>codex</code> entry is a stub that throws. The kind
+registry, the fix and ci-heal vendor tables, the real Codex delivery provider and
+<code>dispatch-contracts.mjs</code> exist only on the prototype branch.</p>
+
+<h2>Prior art</h2>
+
+<table>
+<thead><tr><th>System</th><th>How a plugin registers</th><th>Who decides trust / order</th></tr></thead>
+<tbody>
+<tr><td>Python entry points</td><td>manifest (<code>entry_points.txt</code>) found without importing the plugin</td><td>the host; name clashes are "the consumer's" to resolve</td></tr>
+<tr><td>VS Code extensions</td><td>declarative <code>contributes</code> manifest; code loads on activation</td><td>the marketplace and the user install</td></tr>
+<tr><td>Java <code>ServiceLoader</code></td><td><code>META-INF/services</code> manifest; bad entry raises an error during iteration</td><td>the caller iterating</td></tr>
+<tr><td>Go <code>database/sql</code></td><td><code>init()</code> side effect of an explicit import; duplicate name panics</td><td>the caller names the driver</td></tr>
+<tr><td>ESLint flat config</td><td>explicit imported plugin objects — replaced name-based discovery</td><td>the config author</td></tr>
+<tr><td>Vite / Rollup</td><td>explicit plugin array</td><td>array order in the config</td></tr>
+<tr><td>Vercel AI SDK</td><td><code>createProviderRegistry({ anthropic, openai })</code>, ids <code>providerId:modelId</code></td><td>the caller picks the model</td></tr>
+<tr><td>Backstage backend</td><td>explicit <code>backend.add(import(…))</code>; discovery is opt-in</td><td>the app</td></tr>
+</tbody>
+</table>
+
+<p>Two patterns hold across the survey. <strong>Discovery</strong> is used where third parties install
+plugins the host cannot know about. Where one team owns every plugin in one repo, the trend is toward
+<strong>explicit imports</strong>; ESLint's own post calls its custom name-based resolution "one of our
+biggest regrets". And <strong>no surveyed system lets a plugin declare its own trust or its own
+priority</strong>: that stays with the host.</p>
+
+<h2>In-repo precedent</h2>
+
+<ul>
+<li>One file per entry plus a glob loader is proven for <em>data</em>: research topics (#1145), blocks
+(#882), backlog items.</li>
+<li>A static import plus a keyed table is the repo's pattern for <em>executable</em> registries:
+<code>OPERATIONS</code> in <code>scripts/operations/run.mjs</code>, <code>constellation-repos.mjs</code>,
+the kind registry itself.</li>
+<li>The merge-risk statute
+(<a href="/docs/agent/platform-decisions/#merge-risk-optimistic-with-targeted-lock">#merge-risk-optimistic-with-targeted-lock</a>)
+already classes a keyed table with distinct-key additions as safe for optimistic merge.</li>
+</ul>
+
+<h2>What this reshapes</h2>
+
+<p>"Self-registering vs hand-edited table" splits into four questions, each a fork on the card: which axis
+the ruling governs (kind or vendor); how a vendor is collected (runtime discovery or an explicit index); what
+a descriptor may declare (mechanics only: the kinds it can run, never trust or cascade order); and what an
+item's vendor marker does when that vendor cannot run a kind. How a broken descriptor fails and where the
+work is built turned out to be settled by precedent, not forks. <em>Corrected after the skeptic pass:</em>
+the first draft said nothing checks the three tables agree; two tests do.</p>
+{% endraw %}
