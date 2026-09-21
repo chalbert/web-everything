@@ -8,7 +8,7 @@ dateOpened: "2026-09-20"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "565e49cab664b0057ec7b69e8e367d095868f8ea"
 tags: [review, drain, review-escalation, acceptance, merge-commit, decision-prep]
-relatedTo: ["2409", "2884", "3021", "3024", "3184", "3692"]
+relatedTo: ["2409", "2884", "3021", "3024", "3179", "3184", "3692"]
 relatedReport: reports/2026-09-21-merge-only-approval-carry-grounding.md
 ---
 
@@ -142,6 +142,27 @@ Each has one coherent branch or is settled by precedent.
   writes its own durable comment with its own heading, so it never reads as a fresh review. Because a carry
   always runs over a live acceptance, `writeOrder` (we:scripts/lib/review-label-provider.mjs:165-167) is
   swap-first there; the "swap" adds nothing (the label is already on), so the comment is the whole record.
+- **Bind the stamp to the proven head (guardrail, required).** The proof is computed when the drain probes;
+  the stamp is written later, by a child process. `--to=restamp` today stamps whatever head is live *when it
+  runs*: `runReviewLabelCli` re-reads `headRefOid` (we:scripts/review-set-label.mjs:709) and writes it as
+  `reviewed-sha` (`buildReviewedShaMarker(headSha)`, `:1142`). `restampAcceptance` passes the head it means
+  only inside the free-text `--reason` (we:scripts/merge-ai-prs.mjs:715-731, the string at `:720`); nothing
+  parses it, and no `--expect-head` flag exists in either file. So if the replay proves H1 and the author
+  pushes H2 before the stamp, H2 gets blessed. The build must therefore:
+  - add `--expect-head=<full sha>` to we:scripts/review-set-label.mjs, and for `--to=restamp` make it
+    **required**: refuse (non-zero exit, no comment, no label move) when it is missing or when the live
+    `headRefOid` read at `:709` differs from it;
+  - have `restampAcceptance` take the proven SHA as its own argument and pass it as `--expect-head` (the drain's
+    own rebase path passes the `newCommit` it pushed; the carry passes `chain[0].sha` from the proof);
+  - record both ends in the carry comment: the source `reviewed-sha` it carries **from** and the destination
+    head it stamps. The earlier draft of this card had that "record source reviewed-sha, destination head"
+    guardrail; it is restored here.
+
+  The race window is seconds and needs a push inside it, but the result would be an unreviewed tree honoured
+  silently, so this is not optional. The old digest design did not have this gap because it compared
+  fingerprints computed at apply time. The same check also closes the same race on today's drain re-stamp.
+  **Follow-up, stated, not built here:** a standards check that flags any `--to=restamp` (or future carry)
+  call site that does not pass an expected head.
 - **The carry never creates an acceptance.** `restamp`'s refusals stay: no `review:accepted`, `review:human`
   still present, or `review:changes` → refuse (we:scripts/review-set-label.mjs:272-302). Actor independence is
   not waived; the carry is stamped `--actor=drain`, names the original clearer, and is not a clearance.
@@ -162,7 +183,8 @@ Each has one coherent branch or is settled by precedent.
   (#3350, a code-comment rule at we:scripts/merge-ai-prs.mjs:3711-3714) stands. This ruling decides only what an
   approval survives when such a push happens anyway.
 - **Forged markers.** The carry rides an ordinary PR comment, the single-tenant trust model #2409 accepted.
-  Not re-opened here.
+  Not re-opened here. But this ruling adds no *new* comment marker that a gate trusts: see Fork 4's build
+  note, which routes the anti-test-tampering gate through the #3179 ledger instead.
 
 ## Fork 1 — What proves an outside push only merged main?
 
@@ -186,9 +208,20 @@ manifest, so a plain replay would never match them.
   - It is Gerrit's mechanism for `TRIVIAL_REBASE` / `MERGE_FIRST_PARENT_UPDATE`: re-merge, compare trees.
   - It needs no marker from the accept, only the `reviewed-sha` every acceptance has. That is what #2365
     lacked.
-  - It fails safe. `merge-tree` uses the same merge as `git merge`, with all merge bases. An author's custom
-    merge driver, rerere or `-X` option can only cause a missed carry, never a wrong one. A hand edit hidden in
-    a merge commit changes the tree and fails.
+  - It fails safe, **under two stated conditions**. `merge-tree` uses the same merge as `git merge`, with all
+    merge bases. A hand edit hidden in a merge commit changes the tree and fails.
+    - *Condition 1 — a hermetic replay (pinned assumption).* The replay runs with no rerere
+      (`-c rerere.enabled=false`), no configured merge drivers, the default strategy with no `-X` options, and
+      attributes read from the empty tree (`-c attr.tree=<empty tree>`, so a `.gitattributes` in the PR, the
+      checkout or the host cannot pick a driver). With that pinned, an author's custom driver, rerere or `-X`
+      option makes the author's tree differ from git's plain merge, so it can only cause a missed carry.
+    - *Condition 2 — Fork 2 (a).* A built-in attribute such as `merge=union` needs no repo config and lives in
+      the PR's own tree. If the replay ever honoured it, the author's merge and the replay would union the same
+      way, the trees would match, and the carry would include text nobody reviewed. The hermetic pin above
+      stops the replay honouring it; Fork 2 (a) is the second wall, because a union only matters in a file both
+      sides changed, and (a) refuses to carry those. **If Fork 2 is ratified as (b), this "never wrong" claim
+      no longer holds as stated** and the hermetic pin becomes the only defence.
+    - Both conditions have Definition-of-done cases below.
   - **Against it:** some legitimate merges miss (custom options, criss-cross oddities) and re-park as today.
 - **(b) Keep the text digests as the only proof (today).** Rejected on merit: a digest cannot tell a base move
   from a relocation (#3021's pinned residual, we:scripts/lib/review-escalation.mjs:1260-1280), and it exists
@@ -207,7 +240,10 @@ export function mergeOnlyCarry({ reviewedSha, reviewedPaths, chain, readFailed }
   // chain: head → reviewedSha. Each: { sha, parents, prParent, mainParentIsMainAncestor,
   //                                    replayClean, replayTree, tree, mainSidePaths }
   if (readFailed || !reviewedSha || !chain?.length) return { carries: false, reason: 'unproven' };
-  for (const c of chain) {
+  for (const [i, c] of chain.entries()) {
+    // linkage: the pure function re-checks the walk, it does not trust the probe to have built one path
+    if (i + 1 < chain.length && c.prParent !== chain[i + 1].sha)
+      return { carries: false, reason: `${c.sha}: chain is disconnected` };
     if (c.parents.length !== 2 || !c.prParent || !c.mainParentIsMainAncestor)
       return { carries: false, reason: `${c.sha} is not a merge of main into the reviewed branch` };
     if (!c.replayClean) return { carries: false, reason: `${c.sha}: the merge had conflicts` };
@@ -221,13 +257,16 @@ export function mergeOnlyCarry({ reviewedSha, reviewedPaths, chain, readFailed }
 // probe: git merge-tree --write-tree <p1> <p2>        exit 0 = clean; first line = tree
 //        git rev-parse <sha>^{tree}
 //        git diff --name-only <prParent> <sha>         = mainSidePaths (no merge-base needed)
+//        every replay runs hermetic: -c rerere.enabled=false -c attr.tree=<empty tree>, no drivers, no -X
+// apply: restamp --expect-head=<chain[0].sha>        refuses if the live head moved after the proof
 ```
 
 Replayed: #2365 → carries (clean, `0490ef4a…` both sides, no shared files); #2347 → no carry (conflicts in 3
 files).
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT → applied. The skeptic confirmed soundness (a clean, tree-equal replay
-can only miss, never wrongly carry) but found the first draft keyed the walk on parent *position*, which
+can only miss, never wrongly carry — later made conditional on a hermetic replay and Fork 2 (a) by the PR
+#2378 review) but found the first draft keyed the walk on parent *position*, which
 rejects every drain merge (main is their first parent) and any PR-side-second merge. The PR side is now found
 by ancestry, the fork is scoped to outside pushes, and the reviewed SHA is resolved to full length (the gate
 accepts prefixes). Mixed chains and true rebases are now stated outcomes, not code-only.
@@ -308,10 +347,27 @@ branch (done).
     touching the PR's files (Fork 2), a new tier path (re-derived every pass).
   - **Build note (not the policy):** the carry must not copy the `cleared-human` marker. That marker is by
     design written only by `--to=clear-human` (we:scripts/lib/review-escalation.mjs:1473-1475), and the
-    anti-test-tampering gate's own docblock says not to extend that comment primitive further (`:1520-1530`).
-    The carry writes a distinct `carried-human-from: <sha>` marker instead, and the anti-test-tampering gate
-    learns to accept a carry whose origin is a real `clear-human` comment. The durable non-comment ledger that
-    docblock asks for is the better home once it exists.
+    anti-test-tampering gate's own docblock says not to extend that comment primitive further (`:1516-1531`).
+  - **How the carry reaches the anti-test-tampering gate — recommended: through the ledger, not a comment.**
+    `parseLatestHumanClearedSha` (`:1480`) reads comment *content* only, never authorship. A new
+    `carried-human-from: <sha>` comment marker that the gate trusted would be a second forgeable,
+    authorship-blind primitive of the same kind: anyone who can post a comment could pair
+    `reviewed-sha: <tampered head>` with `carried-human-from: <a real cleared sha>` and suppress the re-park.
+    That needs the same access as forging `cleared-human` today, so it is not a new capability, but it widens
+    exactly what the docblock says to stop widening. So the recommended build is:
+    - The carry's effect on the anti-test-tampering gate is **gated on #3179** (the local, non-comment ledger
+      written only by the CLI's own execution, the `we:scripts/lib/review-baseline-state.mjs` pattern). Once
+      #3179 lands, `--to=restamp` running as a carry of a human clearance writes a ledger entry for the new head,
+      and the gate reads the ledger.
+    - Until #3179 lands, a carried human clearance **does not** suppress the anti-test-tampering re-park. The
+      staleness gate still carries (the Fork 4 (a) policy holds); only a PR that also has a test-tampering hit
+      re-parks `review:human`, as it does today. That is the fail-closed direction and costs a second look only
+      on that narrow set.
+    - The carry comment may still name its origin (`carried-human-from: <sha>`) for the human reader, but no
+      gate parses it.
+    - **Rejected alternative:** ship the comment marker now and pin the forgery residual with a test. It works,
+      but it builds a second gate on the primitive the docblock says to retire, and #3179 would then have two
+      readers to migrate instead of one.
   - **Statute composition.**
     [#clear-human-requires-current-head-advisory-review](../docs/agent/platform-decisions.md#clear-human-requires-current-head-advisory-review)
     is a precondition on the `clear-human` act; a carry is not that act and never stamps a clearance-shaped
@@ -329,6 +385,10 @@ branch (done).
 **Skeptic:** REFUTED as first drafted, SURVIVES-WITH-AMENDMENT → applied. The draft re-emitted
 `cleared-human`, which contradicts the marker's written design and the anti-test-tampering gate's "do not
 extend" note, and blurs two anchors. It now uses a distinct marker and states how it composes with both.
+
+**Independent review (PR #2378, security lens):** the distinct `carried-human-from` marker, read by the
+anti-test-tampering gate, was itself a second forgeable comment primitive. Applied: the gate's use of a carry
+now waits on the #3179 ledger, and until then a carried human clearance does not suppress that gate.
 
 **Screen:** clear, with a minor impl leak (the marker is how (a) is built, not the policy) → the marker moved
 to a build note and the option is titled "Same rule for both".
@@ -378,8 +438,21 @@ These are build criteria for the eventual ruling; they do not assert that a ruli
 - A drain re-stamp whose merged lane tip is not covered by the acceptance: re-parks, never re-stamps.
 - A drain `rebaseDropContent` merge on an accepted PR: re-parks (Fork 3).
 - A merge commit with a hand edit (tree ≠ git's merge): re-parks.
-- A carried human clearance survives the anti-test-tampering gate via `carried-human-from`, and no carry
-  comment contains `cleared-human` (Fork 4).
+- A disconnected chain (each entry a clean merge of main, the last entry's PR parent equal to `reviewed-sha`,
+  but some `chain[i].prParent !== chain[i+1].sha`): `mergeOnlyCarry` returns no carry (Fork 1).
+- The head moves between probe and stamp (the replay proves H1; H2 is pushed before the restamp child runs):
+  `--to=restamp --expect-head=H1` refuses, nothing is stamped, and the next pass judges H2 from scratch. A
+  restamp with no `--expect-head` also refuses.
+- The carry comment records both the source `reviewed-sha` and the destination head.
+- Hermetic replay: a PR that adds `.gitattributes` with `merge=union` on a file, plus a same-file main edit
+  merged in by the author with the union driver: re-parks. Run it twice: once with Fork 2's file test on (it
+  re-parks there), and once with the file test bypassed, to prove the hermetic replay (`attr.tree` = empty
+  tree) conflicts on its own.
+- Hermetic replay: an author merge produced with rerere enabled or a `-X ours`/`-X theirs` option, where that
+  changed the result: re-parks, even when the drain's clone has rerere enabled in its own config.
+- A carried human clearance with a test-tampering hit on the net diff: re-parks `review:human` while #3179 is
+  unbuilt. No carry comment contains `cleared-human`. A comment carrying `carried-human-from` alone (no ledger
+  entry) never suppresses the anti-test-tampering re-park (Fork 4).
 - A read failure: no carry, no revocation, retried next pass.
 - Missing acceptance, a review hold, or `review:changes`: the carry refuses.
 

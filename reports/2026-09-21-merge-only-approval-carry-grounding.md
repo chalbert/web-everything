@@ -32,6 +32,10 @@ Date: 2026-09-21. Session: prepare-3735. Main read at `9002a5f1e`.
   `rebase?.action === 'rebased' && !!v.humanCleared && !v.reviewHeld`. Nothing compares the old markers.
   `decideSetLabel('restamp')` (`we:scripts/review-set-label.mjs:272-302`) checks labels only. The docstring at
   `we:scripts/merge-ai-prs.mjs:2196-2199` claims a contribution check that the code does not perform.
+- `--to=restamp` stamps whatever head is live when the child runs: `runReviewLabelCli` re-reads `headRefOid`
+  (`we:scripts/review-set-label.mjs:709`) and writes it as `reviewed-sha` (`:1142`). `restampAcceptance`
+  (`we:scripts/merge-ai-prs.mjs:715-731`) names the head it means only in the free-text `--reason` (`:720`).
+  No `--expect-head` flag exists. A head pushed between the drain's decision and the stamp gets stamped.
 - A stale acceptance parks the PR (`review:human` when the tier or label requires it, otherwise
   `review:pending`), strips `ready-to-merge`, and never removes `review:accepted` (`:4291-4314`). Revoking an
   operator clearance posts a notice (`:4260-4273`); on a read failure that revocation is suppressed (#3184).
@@ -98,3 +102,23 @@ or the fingerprint escape. Same-turf anchors: `#parked-pr-conflict-dispatched-no
 - Why the #2365 accept could not compute its net diff (no digests stamped).
 - Whether the re-stamp gap (an author push re-stamped by the drain's own rebase) has ever fired in practice.
 - GitHub's exact comparison method (not published).
+- Whether `git merge-tree` honours `attr.tree` on every git version the drain hosts run (documented in the
+  local git 2.50.1 manual; not tested against the drain's hosts).
+
+## 7. Corrections after the independent review (PR #2378)
+
+A correctness + security panel returned `changes`. Applied to the card:
+
+1. **Chain linkage.** The proposed pure `mergeOnlyCarry` now asserts `chain[i].prParent === chain[i+1].sha`
+   itself instead of trusting the probe's walk; the Definition of done has a disconnected-chain case.
+2. **Bind the stamp to the proven head.** The proof is computed at probe time and applied later, so the
+   carry (and today's drain re-stamp) must pass `--expect-head=<proven sha>`, required for `--to=restamp`,
+   refused when the live head differs. The carry comment records the source `reviewed-sha` and the
+   destination head. A standards check for restamp call sites is a stated follow-up, not built.
+3. **No new forgeable gate input.** A `carried-human-from` comment marker read by the anti-test-tampering gate
+   would be a second authorship-blind primitive (`parseLatestHumanClearedSha`,
+   `we:scripts/lib/review-escalation.mjs:1480`; docblock `:1516-1531`). The card now gates that part of Fork 4
+   on the #3179 ledger; until then a carried human clearance does not suppress that gate.
+4. **"Fails safe" is now conditional and tested.** It holds only for a hermetic replay (no rerere, no drivers,
+   no `-X`, attributes from the empty tree) and, as a second wall, Fork 2 (a). A `merge=union` attribute in
+   the PR's own tree would otherwise make the author's merge and the replay agree on unreviewed text.

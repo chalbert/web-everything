@@ -85,4 +85,18 @@ that rule; and whether <code>review:human</code> differs from <code>review:accep
 than forked: fail closed when the proof cannot run; re-stamp only when the lane tip the drain merged was
 covered (a bug fix the grounding found); the drain as the single verifier; and full re-clearance after a
 conflicted merge.</p>
+
+<h2>Guardrails added after review</h2>
+
+<ul>
+<li>The replay must be hermetic: no rerere, no configured merge drivers, no <code>-X</code> options, and
+attributes read from the empty tree. Otherwise a <code>merge=union</code> attribute in the PR's own tree
+could make the author's merge and the replay agree on text nobody reviewed. Refusing to carry when main
+touched the PR's own files is the second wall.</li>
+<li>The proof is computed before the stamp is written, so the stamp must name the head that was proven
+(<code>--expect-head</code>) and refuse if the head has moved since.</li>
+<li>The pure decision re-checks that the chain of merges is connected, instead of trusting the probe.</li>
+<li>A carried human clearance does not feed the anti-test-tampering gate through a new comment marker; that
+waits on the non-comment ledger (#3179).</li>
+</ul>
 {% endraw %}
