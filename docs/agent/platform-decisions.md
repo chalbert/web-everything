@@ -3542,7 +3542,7 @@ outlive the spelling it was written under. Three clauses:
    (`#NNN (cleared as <hash>)`) so an unfamiliar hash is never a mystery.
 
 This composes with, and does not amend, the two homes above: the sidecar stays session-local and unguarded; this
-rule only fixes how a stored id is *matched*. Build: [x238swe](/backlog/x238swe-translate-birth-hash-ids-to-current-numbers-when-the-conveyo/).
+rule only fixes how a stored id is *matched*. Build: [3786](/backlog/3786-translate-birth-hash-ids-to-current-numbers-when-the-conveyo/).
 
 ---
 
