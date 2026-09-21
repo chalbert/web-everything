@@ -26,7 +26,7 @@ import {
   resolveNodeModulesVolume, resolveTestUnitDepsImage, frontieruiSiblingRoot,
   readAlternatesPrimaryRoot, buildContainerRunArgs, execContainerized,
   containerCliAvailable, containerImageAvailable, containerfileExists,
-  nodeModulesVolumeAvailable, testUnitDepsContainerfileExists,
+  nodeModulesVolumeAvailable, testUnitDepsContainerfileExists, realContainerProofPlan,
 } from '../container-exec.mjs';
 
 describe('resolveContainerImage/Cpus/Memory — env override, sane fallback (mirrors heavy-admission.mjs#resolveCap)', () => {
@@ -248,12 +248,77 @@ describe('nodeModulesVolumeAvailable — presence probe, injectable (mirrors con
   });
 });
 
-// ── REAL integration proof — self-skips when the `container` CLI or POC image isn't present (Apple-Silicon
-// -only tool; #3621's own permanent-portability finding) so this suite stays green in CI/on any other host. ──
-const HAVE_CLI = containerCliAvailable();
-const HAVE_IMAGE = HAVE_CLI && containerImageAvailable();
+describe('realContainerProofPlan — the skip/run decision for the REAL blocks below, over an injected exec seam', () => {
+  const IMAGES = 'NAME  TAG  DIGEST\nwe-heavy-admission  poc  abc123\n';
+  const VOLUMES = 'NAME  TYPE  DRIVER  OPTIONS\nwe-test-unit-node-modules  named  local\n';
+  const EMPTY_IMAGES = 'NAME  TAG  DIGEST\n';
+  const EMPTY_VOLUMES = 'NAME  TYPE  DRIVER  OPTIONS\n';
+  /** A fake `container` binary: answers `--version`, `image list` and `volume list` from the given listings. */
+  const fakeContainer = ({ images = IMAGES, volumes = VOLUMES, cli = true } = {}) => (bin, argv) => {
+    if (!cli) throw Object.assign(new Error('spawn container ENOENT'), { code: 'ENOENT' });
+    if (argv[0] === '--version') return 'container CLI version 1.3.1';
+    if (argv[0] === 'image') return images;
+    if (argv[0] === 'volume') return volumes;
+    throw new Error(`unexpected container invocation: ${argv.join(' ')}`);
+  };
 
-describe.skipIf(!HAVE_CLI || !HAVE_IMAGE)('REAL container integration — proves the argv this module builds actually runs', () => {
+  it('runs when the CLI and the image are present', () => {
+    expect(realContainerProofPlan({ execFile: fakeContainer() })).toEqual({ run: true, missing: [] });
+  });
+
+  it('skips, naming the image, when the image is absent — the machine that never built the local POC image', () => {
+    expect(realContainerProofPlan({ execFile: fakeContainer({ images: EMPTY_IMAGES }) }))
+      .toEqual({ run: false, missing: [`image ${DEFAULT_CONTAINER_IMAGE}`] });
+  });
+
+  it('skips on a different image or a same-name different-tag image (only the exact one the tests run counts)', () => {
+    expect(realContainerProofPlan({ execFile: fakeContainer({ images: 'NAME TAG DIGEST\nnode 22-alpine def456\n' }) }).run).toBe(false);
+    expect(realContainerProofPlan({ execFile: fakeContainer({ images: 'NAME TAG DIGEST\nwe-heavy-admission dev def456\n' }) }).run).toBe(false);
+  });
+
+  it('skips when the CLI is absent, reporting only that cause', () => {
+    expect(realContainerProofPlan({ execFile: fakeContainer({ cli: false }) }))
+      .toEqual({ run: false, missing: ['the `container` CLI'] });
+  });
+
+  it('a volume-mounting block needs the volume AND the image — the volume alone is not enough (the bug this pins)', () => {
+    // The volume is present and the image is not: the shape of the machine this regressed on. `container run`
+    // would try to PULL the bare local image name from the default registry and die with a 401.
+    expect(realContainerProofPlan({ needsNodeModulesVolume: true, execFile: fakeContainer({ images: EMPTY_IMAGES }) }))
+      .toEqual({ run: false, missing: [`image ${DEFAULT_CONTAINER_IMAGE}`] });
+  });
+
+  it('a volume-mounting block skips, naming the volume, when only the image is present', () => {
+    expect(realContainerProofPlan({ needsNodeModulesVolume: true, execFile: fakeContainer({ volumes: EMPTY_VOLUMES }) }))
+      .toEqual({ run: false, missing: [`volume ${DEFAULT_NODE_MODULES_VOLUME}`] });
+  });
+
+  it('a volume-mounting block names every missing prerequisite, and runs when all are present', () => {
+    expect(realContainerProofPlan({ needsNodeModulesVolume: true, execFile: fakeContainer({ images: EMPTY_IMAGES, volumes: EMPTY_VOLUMES }) }).missing)
+      .toEqual([`image ${DEFAULT_CONTAINER_IMAGE}`, `volume ${DEFAULT_NODE_MODULES_VOLUME}`]);
+    expect(realContainerProofPlan({ needsNodeModulesVolume: true, execFile: fakeContainer() })).toEqual({ run: true, missing: [] });
+  });
+
+  it('a block that does not mount the volume does not require it', () => {
+    expect(realContainerProofPlan({ execFile: fakeContainer({ volumes: EMPTY_VOLUMES }) }).run).toBe(true);
+  });
+
+  it('probes the image and volume an explicit override names, not the defaults', () => {
+    const exec = fakeContainer({ images: 'NAME TAG DIGEST\ncustom img1\n', volumes: 'NAME TYPE\ncustom-vol named\n' });
+    expect(realContainerProofPlan({ needsNodeModulesVolume: true, image: 'custom:img1', volume: 'custom-vol', execFile: exec }).run).toBe(true);
+    expect(realContainerProofPlan({ needsNodeModulesVolume: true, execFile: exec }).run).toBe(false);
+  });
+});
+
+// ── REAL integration proof — self-skips when a prerequisite of the `container run` these blocks perform is
+// absent (Apple-Silicon-only tool; #3621's own permanent-portability finding): the `container` CLI, the LOCAL
+// POC image (built on the machine, never pulled — an absent image makes `container run` try the default
+// registry and fail with a 401), and, for the volume block, the baked node_modules volume. That keeps this
+// suite green in CI/on any other host, or a machine that never built the image; where all are present the
+// assertions run for real. The decision is `realContainerProofPlan`, proven above with a fake exec seam. ──
+const REAL_PROOF = realContainerProofPlan();
+
+describe.skipIf(!REAL_PROOF.run)('REAL container integration — proves the argv this module builds actually runs', () => {
   let dir;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'container-exec-test-')); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
@@ -283,9 +348,11 @@ describe.skipIf(!HAVE_CLI || !HAVE_IMAGE)('REAL container integration — proves
 // block's own documented limits above. This block proves the SAME node_modules-volume-shadow mechanism end to
 // end against a real container, cheaply — a real host `node_modules` directory of this repo's own actual
 // `vitest`/`esbuild` package must NEVER be reachable inside the guest once nodeModulesVolume is set. ──
-const HAVE_NODE_MODULES_VOLUME = HAVE_CLI && nodeModulesVolumeAvailable();
+// It ALSO needs the run-time image: its tests run `container run … <image>` too, and probing only the volume
+// let a machine with the volume but no image fail on a registry 401 instead of skipping.
+const REAL_VOLUME_PROOF = realContainerProofPlan({ needsNodeModulesVolume: true });
 
-describe.skipIf(!HAVE_CLI || !HAVE_NODE_MODULES_VOLUME)('REAL test:unit node_modules-volume integration', () => {
+describe.skipIf(!REAL_VOLUME_PROOF.run)('REAL test:unit node_modules-volume integration', () => {
   it('the volume genuinely shadows a host-mounted node_modules — the LINUX-built package.json wins, not the host darwin one', () => {
     const dir = mkdtempSync(join(tmpdir(), 'container-exec-nm-test-'));
     try {
