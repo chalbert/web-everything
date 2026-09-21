@@ -96,6 +96,19 @@ older, less machine-parseable conventions (numbered lists, unlabeled defaults, u
 lines). For any `parseOk: false` prepared item, read `backlog/<NUM>-*.md` directly and hand-author
 just that one card into the rendered HTML before publishing — never the whole page.
 
+**A decision with an open pull request is listed, not dropped.** The ratifications and preparations awaiting
+review are exactly the decisions you most want to see, so the generator lists them in their own **"In review: a
+PR is open"** section at the TOP of the page — each row has the PR number linked, its kind (`ratification` from a
+`ratify #N:` title, `preparation` from `prepare #N:`, otherwise `other PR`) and a one-line state — instead of
+leaving them off. In the data file the row carries `pr: { number, state: 'open', kind, title, url, repo }`, and
+`counts` is `{ open, prepared, inReview }`: `open` and `prepared` count every listed decision **including** the
+in-review ones. A decision that is *both* blocked by another item and has an open PR is listed there too (with
+`blockedBy`); a blocked decision with no PR stays excluded. An in-review row is a compact table row on top, and — the hard rule above still holds — a **prepared** in-review
+decision also keeps its full `.dcard` in the prepared section (tagged with its PR); the ranked table and the
+upstream table list only the decisions with no open PR. `check-readiness.mjs` supplies the list (`inReview` beside
+`selection.tierB`) from its one open-PR read; nothing here calls `gh` a second time. To run the whole CLI offline
+over a fixture: `WE_BACKLOG_DIR=<dir> WE_OPEN_PRS_FILE=<gh-pr-list.json> node scripts/gen-decision-docket.mjs data --no-fetch`.
+
 **This does NOT close `backlog/3562`.** #3562 is the standing MECHANICAL PASS — wired into the
 conveyor's own tick loop, auto-dispatching `/prepare` for the un-prepared top-N via
 `scripts/conveyor/tick-core.mjs`'s existing spawn/guard primitives, and auto-publishing through

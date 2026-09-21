@@ -21,12 +21,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeReadiness, computeSelection, computeBatchPack, buildReadinessReport, spliceStaleEdges } from './readiness/engine.mjs';
+import { computeReadiness, computeSelection, projectSelectionItem, computeBatchPack, buildReadinessReport, spliceStaleEdges } from './readiness/engine.mjs';
 import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } from './readiness/reservations.mjs';
 import { parseHolds, emptyHoldState, heldNums } from './readiness/prepare-hold-state.mjs';
 import { LOCI } from './check-standards-rules.mjs';
 import { checkMainStaleness } from './lib/main-staleness.mjs';
-import { openPrItemNums } from './lib/open-pr-items.mjs';
+import { openPrsByItem } from './lib/open-pr-items.mjs';
 import { slugFromName } from './backlog/id.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 
@@ -148,8 +148,18 @@ if (heldSet.size) {
 // selection surfaces, exactly like `dropHeld`. Fail-soft + boundary-only (needs `gh` + network, so it lives
 // here, never in the byte-deterministic `computeSelection`): no gh/offline → skip silently. `--no-pr-scan`
 // opts out (CI/tests / a deliberately PR-blind run); skipped under `--no-fetch` (that flag = "no network").
-if (!process.argv.includes('--no-pr-scan') && !process.argv.includes('--no-fetch')) {
-  const pr = openPrItemNums();
+// IN-REVIEW decisions (the Decision Docket): the open-PR exclusion below drops a decision whose ratification /
+// preparation PR is open from `selection.tierB`, and a BLOCKED decision (tier C) was never in it — but those are
+// exactly the decisions the operator wants LISTED, marked as in review, not silently absent. The scan already holds
+// each PR's identity, so the same `gh` read also fills `inReview` (every open decision, tier B or C, with an open PR,
+// carrying its PRs) — the docket adds no second network call. `WE_OPEN_PRS_FILE=<path>` (a `gh pr list --json
+// headRefName,title,number,url` array) stands in for `gh` so a test/fixture run is offline, like `WE_BACKLOG_DIR`.
+const inReview = [];
+const prScanFile = process.env.WE_OPEN_PRS_FILE;
+if (!process.argv.includes('--no-pr-scan') && (prScanFile || !process.argv.includes('--no-fetch'))) {
+  const pr = openPrsByItem(prScanFile
+    ? { run: () => ({ status: 0, stdout: readFileSync(prScanFile, 'utf8'), stderr: '' }), repos: ['chalbert/web-everything'] }
+    : undefined);
   const prSet = new Set(pr.nums);
   if (prSet.size) {
     const dropPr = (list) => (list || []).filter((it) => !prSet.has(String(it.num).padStart(3, '0')));
@@ -159,6 +169,16 @@ if (!process.argv.includes('--no-pr-scan') && !process.argv.includes('--no-fetch
     selection.tierB = dropPr(selection.tierB);
     selection.filler = dropPr(selection.filler);
     console.error(`${DIM}· excluded ${prSet.size} item(s) with an open PR from selection: ${[...prSet].map((n) => '#' + n).join(', ')}${RST}`);
+    for (const it of items) {
+      const prs = pr.byItem[String(it.num).padStart(3, '0')];
+      if (it.status !== 'open' || it.kind !== 'decision' || !prs) continue;
+      inReview.push({
+        ...projectSelectionItem(it),
+        blockedBy: (it.blockers || []).filter((b) => b.status !== 'resolved').map((b) => String(b.num)),
+        prs,
+      });
+    }
+    inReview.sort((a, b) => Number(a.num) - Number(b.num));
   } else if (pr.unavailable) {
     console.error(`${DIM}· open-PR exclusion skipped (${pr.reason}) — pass --no-pr-scan to silence${RST}`);
   }
@@ -199,7 +219,7 @@ if (JSON_MODE) {
     mySession: MY_SESSION ?? null,
     foreign: [...foreign.entries()].map(([num, session]) => ({ num, session })),
   };
-  writeLineSync(1, JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), unshaped: unshaped.map((it) => ({ num: it.num, id: it.id })), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
+  writeLineSync(1, JSON.stringify({ ...report, selection, inReview, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), unshaped: unshaped.map((it) => ({ num: it.num, id: it.id })), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
   process.exit(0);
 }
 

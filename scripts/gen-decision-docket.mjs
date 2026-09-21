@@ -25,9 +25,14 @@
  * unstarted (no branch/PR exists for it as of this write).
  *
  * USAGE
- *   node scripts/gen-decision-docket.mjs data   [--ref=<git-ref>] [--allow-stale] [--limit=N] [--out=reports/decision-docket-data.json]
+ *   node scripts/gen-decision-docket.mjs data   [--ref=<git-ref>] [--allow-stale] [--no-fetch] [--limit=N] [--out=reports/decision-docket-data.json]
  *   node scripts/gen-decision-docket.mjs render [--data=reports/decision-docket-data.json] [--out=reports/decision-docket.html]
- *   node scripts/gen-decision-docket.mjs all    [--ref=<git-ref>] [--allow-stale] [--limit=N]   # both steps, default paths
+ *   node scripts/gen-decision-docket.mjs all    [--ref=<git-ref>] [--allow-stale] [--no-fetch] [--limit=N]   # both steps, default paths
+ *
+ * IN REVIEW: an open decision with an OPEN pull request (a ratification or preparation awaiting review) is listed,
+ * with a `pr` field, in the page's own "In review: a PR is open" section — not silently excluded. A decision that is
+ * blocked by another item AND has an open PR is listed there too; a blocked decision with no PR stays excluded.
+ * check-readiness.mjs supplies both lists from its one open-PR read (`inReview` beside `selection.tierB`).
  *
  * `--allow-stale` bypasses check-readiness.mjs's own diverged-local-main guard — safe to pass whenever `--ref`
  * already points at real, current state (e.g. `--ref=origin/main`), since the ranking read and the file read
@@ -36,12 +41,14 @@
  * `--ref` reads backlog files via `git show <ref>:<path>` instead of the working tree — use this when the
  * current checkout isn't a fresh `main` (e.g. `--ref=origin/main`), so the docket reflects real landed state
  * rather than whatever this checkout happens to have on disk.
+ *
+ * `--no-fetch` (with `WE_BACKLOG_DIR` and `WE_OPEN_PRS_FILE`) runs the whole CLI offline over a fixture corpus.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildDecisionRecord } from './lib/decision-docket-data.mjs';
+import { buildDecisionRecord, computeCounts } from './lib/decision-docket-data.mjs';
 import { renderDocketHtml } from './lib/decision-docket-render.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,25 +67,31 @@ function parseFlags(argv) {
   return flags;
 }
 
-/** Read one backlog file's raw text, either off the working tree or a specific git ref (read-only either way). */
+/**
+ * Read one backlog file's raw text, either off the working tree or a specific git ref (read-only either way).
+ * `WE_BACKLOG_DIR` points the working-tree read at another corpus — the same override the loader honours, so a
+ * fixture run ranks AND reads one directory.
+ */
 function readBacklogFile(id, ref) {
   const relPath = `backlog/${id}.md`;
   try {
     if (ref) return execFileSync('git', ['show', `${ref}:${relPath}`], { cwd: ROOT, encoding: 'utf8' });
-    return readFileSync(join(ROOT, relPath), 'utf8');
+    return readFileSync(join(process.env.WE_BACKLOG_DIR || join(ROOT, 'backlog'), `${id}.md`), 'utf8');
   } catch {
     return null;
   }
 }
 
 /**
- * Run `check:readiness --select --json` and return its parsed `selection.tierB` array. check-readiness.mjs's
- * own docs warn never to PIPE `--json` through a pager (head/tail truncate the payload, not just the view, so
- * it stops parsing entirely) — capturing the full stdout buffer straight into this process is the safe
- * alternative that warning itself recommends (redirect-to-a-file-then-read is the shell-side equivalent of
- * what `execFileSync` does here in-process).
+ * Run `check:readiness --select --json` and return its parsed `{ tierB, inReview }`. `tierB` is the ranked open
+ * decisions with NO open PR; `inReview` is every open decision (ready or blocked) that HAS one, each carrying its
+ * open PRs — check-readiness already reads the open PRs for its own exclusion, so the docket adds no second
+ * network call. check-readiness.mjs's own docs warn never to PIPE `--json` through a pager (head/tail truncate
+ * the payload, not just the view, so it stops parsing entirely) — capturing the full stdout buffer straight into
+ * this process is the safe alternative that warning itself recommends (redirect-to-a-file-then-read is the
+ * shell-side equivalent of what `execFileSync` does here in-process).
  */
-function loadTierBRanking({ allowStale } = {}) {
+function loadReadiness({ allowStale, noFetch } = {}) {
   const args = ['scripts/check-readiness.mjs', '--select', '--json'];
   // check-readiness.mjs refuses to rank against a checkout whose local `main` has diverged from
   // origin/main (own local commits ahead, or behind) rather than silently ranking against stale state. This
@@ -86,33 +99,44 @@ function loadTierBRanking({ allowStale } = {}) {
   // (e.g. `--ref=origin/main` itself) can pass `--allow-stale` to bypass that guard; it never changes what
   // gets READ (still `--ref`), only whether the RANKING step tolerates a diverged local `main`.
   if (allowStale) args.push('--allow-stale');
+  // `--no-fetch` = no network: no origin fetch, and no `gh` open-PR read unless `WE_OPEN_PRS_FILE` supplies the
+  // list offline (how the fixture test runs this whole CLI without touching the network).
+  if (noFetch) args.push('--no-fetch');
   const out = execFileSync('node', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const json = JSON.parse(out);
-  return json.selection?.tierB ?? [];
+  return { tierB: json.selection?.tierB ?? [], inReview: json.inReview ?? [] };
 }
 
-function buildData({ ref, limit, allowStale } = {}) {
-  const tierB = loadTierBRanking({ allowStale });
-  const ranked = [...tierB].sort((a, b) => (b.leverageScore ?? 0) - (a.leverageScore ?? 0));
+function byLeverage(a, b) {
+  return (b.leverageScore ?? 0) - (a.leverageScore ?? 0) || Number(a.num) - Number(b.num);
+}
+
+function buildData({ ref, limit, allowStale, noFetch } = {}) {
+  const { tierB, inReview } = loadReadiness({ allowStale, noFetch });
+  const ranked = [...tierB].sort(byLeverage);
+  // `--limit` trims the ranked docket only: an in-review decision is never cut (it is not competing for a slot —
+  // it is listed BECAUSE a PR is open), and check-readiness never puts one in `tierB`.
   const limited = limit ? ranked.slice(0, limit) : ranked;
+  const reviewNums = new Set(inReview.map((e) => String(e.num)));
+  const entries = [...limited.filter((e) => !reviewNums.has(String(e.num))), ...[...inReview].sort(byLeverage)];
   const now = new Date();
-  const items = limited.map((entry) => buildDecisionRecord(entry, readBacklogFile(entry.id, ref), now));
+  const items = entries.map((entry) => buildDecisionRecord(entry, readBacklogFile(entry.id, ref), now));
   return {
     generatedAt: now.toISOString(),
     generatedFromRef: ref || null,
     targetCount: limit ?? null,
+    counts: computeCounts(items),
     items,
   };
 }
 
 function cmdData(flags) {
-  const data = buildData({ ref: flags.ref, limit: flags.limit ? Number.parseInt(flags.limit, 10) : null, allowStale: !!flags['allow-stale'] });
+  const data = buildData({ ref: flags.ref, limit: flags.limit ? Number.parseInt(flags.limit, 10) : null, allowStale: !!flags['allow-stale'], noFetch: !!flags['no-fetch'] });
   const outPath = flags.out ? resolve(ROOT, flags.out) : DEFAULT_DATA_PATH;
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(data, null, 2)}\n`);
-  const preparedCount = data.items.filter((i) => i.prepared).length;
   const parseIssues = data.items.filter((i) => i.prepared && !i.parseOk).length;
-  process.stdout.write(`wrote ${data.items.length} decision record(s) (${preparedCount} prepared, ${parseIssues} with parse warnings) to ${outPath}\n`);
+  process.stdout.write(`wrote ${data.counts.open} decision record(s) (${data.counts.prepared} prepared, ${data.counts.inReview} in review, ${parseIssues} with parse warnings) to ${outPath}\n`);
   return outPath;
 }
 
@@ -134,7 +158,7 @@ function main(argv) {
   if (sub === 'data') { cmdData(flags); return; }
   if (sub === 'render') { cmdRender(flags); return; }
   if (sub === 'all') { cmdData(flags); cmdRender(flags); return; }
-  process.stderr.write('usage: gen-decision-docket.mjs <data|render|all> [--ref=<git-ref>] [--allow-stale] [--limit=N] [--data=<path>] [--out=<path>]\n');
+  process.stderr.write('usage: gen-decision-docket.mjs <data|render|all> [--ref=<git-ref>] [--allow-stale] [--no-fetch] [--limit=N] [--data=<path>] [--out=<path>]\n');
   process.exitCode = 2;
 }
 
