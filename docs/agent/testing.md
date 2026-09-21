@@ -2,6 +2,64 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## Shadow reviewer agreement evidence
+
+`review-runner.mjs` appends each shadow prediction through `appendVerdict` as `verdict: observed`,
+`mode: shadow`, boolean `wouldClear`, and `applied: false` / `mutated: false`. The builder and reader
+reject shadow metadata on bearing verdicts. The existing non-bearing fold keeps these rows in history
+without changing clearance, outstanding holds, review-round counts, or live label drift comparisons.
+Append failures are reported best-effort on stderr and do not abort the shadow report.
+
+Query the durable evidence offline with
+`node scripts/lib/verdict-ledger.mjs shadow-agreement --repo=chalbert/web-everything --human-actor=nic --json`.
+Use the exact declared human actor stored in your verdict rows. Without `--human-actor`, only the explicit
+`clear-human` ceremony is a human outcome; with it, accepted/changes rows for that actor also qualify.
+Declared attribution is not identity verification. `summarizeShadowAgreement` compares the latest preceding
+prediction against the next qualifying human outcome for the same repo and PR, consuming each pair once.
+It reports superseded predictions and unmatched pending predictions separately. This is PR-level outcome
+agreement, not proof that two reviews covered identical content, and it does not enable enforcement.
+`summarizeAgreement` retains its separate ledger-versus-live-label drift meaning.
+
+Tests redirect `WE_VERDICT_LEDGER_DIR` and `CONVEYOR_JURY_DIR` into temporary directories and drive the
+runner with a read-only `gh` fixture; a file in place of the ledger directory probes real append failure.
+
+## Constellation conveyor probes
+
+Inject `exec` and `fetchOpenPrs` into `makeCliMechanicalPasses` to inspect each repo's argv
+and snapshot lifetime without spawning workers. Review briefs select the checkout with
+`--repo` on the pool `acquire`; release stays `--all-pools --session=<slug>` (it sweeps every pool).
+The fix and review refusal writers preserve each other's actions in `unsupported-repo.json`.
+CI history keeps WE's filename and adds the constellation key for sibling repos, including
+when `CONVEYOR_CI_QUEUE_FILE` supplies the base path. Subprocess tests that use fake `gh`
+still acquire the throttle lock; set `LANE_POOL_ROOT` to a temporary directory in a sandbox.
+
+## Runner activity report
+
+`node scripts/operations/run.mjs runner-activity --json` reports driver health in `verdict` using
+the machine-global singleton lease (PID and heartbeat), process command identity, and the driven
+checkout's existing `.conveyor/driver-status.json` (zero-based tick number, timestamp, planned
+dispatch lists and the tick core's own held-work stalls). A single snapshot proves recency, not
+continuous progress between observations. Fresh evidence with no self-diagnosed stall is
+`alive-and-idle`; `dispatching` is an independent boolean for sessions actually listed alive.
+An expired heartbeat/tick or a self-diagnosed stall is `alive-and-stalled`; a lease whose PID no
+longer identifies the runner is `dead`; no lease is `down`. The stale window is the existing runner
+lease duration. Missing first-tick data stays null, with the fresh lease providing startup evidence.
+
+In-flight rows reuse `inFlightDispatchesFor`, `stampLiveness`, and `dispatchStillHolds`. Terminal
+dispatch effects supply `applied`/`failed` outcomes. Their dispatch-step finish time orders recent
+outcomes; legacy records without it explicitly report a `last-attempt-proxy`. Call-log completion
+is not dispatch completion: a dispatch call can complete without launching anything.
+
+The IO shell places all synchronous file/store reads inside a 10-second, SIGKILL-bounded snapshot
+subprocess; process/session reads have a 2-second bound within it. A failed required read is an
+operation error, never `down`. Corrupt individual run records are counted as partial history, and
+an unavailable session listing preserves unknown liveness. This report performs no restart,
+reaping, tick execution, or liveness write-back. For runner-activity only, CLI persistence (including
+resume reads, all run-record writes, and call-log appends) uses separate 2-second SIGKILL-bounded
+children. Store failures refuse the invocation; call-log failures remain best-effort. Other operations
+retain their existing CLI stores. Relative runner script paths are resolved against the runner PID's
+cwd before identity checking and deriving the checkout; cwd itself is not the checkout.
+
 ## Proof-based verification — observe before you claim
 
 The first rule of verifying anything here is **observe the real running system; don't reason about
@@ -45,6 +103,24 @@ compute-only declaration must return its data directly, not a Promise; test the 
 `run.mjs <operation> --json` route as well as the reader. For transcript reports, use bounded
 chunked reads for full scans and reuse the agent-health `tailLines` helper for model tails.
 A no-hit truncated scan means `unknown`, not proof that no delegation occurred.
+
+### Gates in git fixtures
+
+When a publish gate runs the suite that tests its own caller, use a fixture-local npm script in the
+temporary git repo to verify gate arguments and green/red handling without recursively launching the
+suite. Exercise real subprocesses and git transport. Emit gate chatter in the fixture too: a CLI's
+machine-readable JSON stdout must remain parseable when its child gate prints output.
+
+### Passive-wait hook regression probes
+
+Test Stop/SubagentStop with distinct parent and subagent JSONL files: SubagentStop prefers
+`agent_transcript_path`, falling back to `transcript_path` only when absent; an unreadable or malformed
+selected file fails open. Keep Monitor cases event-specific: any Monitor call plus passive-wait
+language blocks SubagentStop, even with its immediate "started" result, while Stop permits it.
+Agent/Task remain excluded for both events.
+The PreToolUse Monitor guard denies only when `agent_id` identifies a subagent and leaves main-session
+watches alone. Exercise each script through stdin as well as its pure decision functions; these
+probes verify local decisions and wiring, not whether the upstream harness fires every hook.
 
 ### Nested CLI isolation probes
 
@@ -160,6 +236,28 @@ plugs/__tests__/e2e/sw-fixtures/          # static fixture server + SW/page + re
 ## Coverage
 Enforced in `vitest.config.ts` — **80% minimum** for lines, functions, branches, statements over `plugs/**/*.ts` and `blocks/**/*.ts`. Excluded: `**/index.ts`, `**/__tests__/**`, `*.test.ts`, `*.spec.ts`, config files.
 
+### Per-diff trust-chain branch floor (#2876)
+
+`check:standards` runs the separate `diff-branch-coverage` check with an 80% floor
+(`DIFF_BRANCH_COVERAGE_FLOOR` in `scripts/lib/diff-branch-coverage.mjs`). Generate
+`coverage/coverage-final.json` with `npx vitest run --coverage` after editing source.
+The default base is `HEAD` (staged + unstaged + untracked additions); for committed
+branch changes, set `DIFF_COVERAGE_BASE` to the intended base commit, typically the
+PR merge-base. The gate reports its base and does not fetch or guess a remote base.
+
+Only added/replaced lines in `isTrustChainTier` files are attributed. Deletions,
+empty diffs and changes outside the tier require no coverage report. Each Istanbul
+branch outcome whose parent or arm range intersects changed lines counts once;
+multiline ranges include body edits. This conservatively includes V8 function ranges.
+An empty branch map is valid (no branches); missing files, malformed counters and
+reports older than changed source fail closed. The timestamp check catches ordinary
+stale local reports, but is not a source hash or provenance attestation: generate
+coverage in the same checkout, after edits, and do not reuse copied reports.
+
+The result says how many branches introduced or touched by this diff were exercised.
+It does not establish implementation correctness or assertion quality. The existing
+scoped-planes coverage thresholds remain independent.
+
 ## Commands
 ```bash
 npm test                            # all unit + integration
@@ -231,3 +329,150 @@ If a sibling's primary checkout is missing entirely, provision warns and skips t
 3. **Parameterization** — passing args via attributes (`args-*`).
 4. **Reliability** — error handling, timeouts, forgivable failures.
 5. **Deferred/Lazy** — interaction with the loading/visibility Intent.
+
+### Stale-state inventory
+
+`node scripts/operations/run.mjs stale-state --json` inventories this checkout's active/preparing
+backlog claims, its repository lane pool, and the configured operation run store. Read
+`verdict.records` together with `verdict.gaps`; a failed source enumeration is never an empty-source
+claim. Corrupt run records remain visible as unknown. Lane status preserves lease read/parse failures
+as `readError`; the inventory retains each such lane as a lease record with unknown owner liveness.
+
+`pidAlive` records the current probe of the recorded PID; `ownerPidAlive` drives the verdict.
+The lease `pid` is the acquire CLI, not the agent, so leases without a durable `agentPid` have unknown
+owner liveness even if their recorded PID is dead. Probes reuse `reconcile-pass.mjs#probePid`;
+null/invalid PIDs and foreign-host PIDs remain unknown. TTL and run completion never prove death.
+Claims do not normally record an owner or PID; the report preserves that missing evidence as null.
+
+`hasUnsafeWork` reuses lane status cleanliness and supplements its behind count with a read-only
+count of commits absent from local origin refs. No fetch occurs: remote ref freshness is a named
+limit, and false is never cleanup authorization. Unassociated claims/runs have null work safety.
+Age is milliseconds since the recorded acquisition/start time, or null when missing/unreadable.
+
+The CLI normally persists runs and call telemetry even for compute-only operations. This inventory
+uses the existing memory run store and omits the optional call logger to honor its zero-write contract.
+All child git reads inherit `GIT_OPTIONAL_LOCKS=0` so status does not refresh an index. Cleanup stays
+with supported manual lifecycle commands; never edit lease/claim files by hand.
+
+## Dispatch eligibility reports
+
+When the runner is alive but an item does not move, use
+`node scripts/operations/run.mjs dispatch-eligibility --item=NNN --json` (omit `--item` for
+all cleared queue entries). Supply the runner's `--bookkeepingFile=<path>` when available.
+The report reuses `dispatch-lane-io.mjs#readTick` and `dispatch-lane.mjs#shapeDispatchRead`.
+`verdict.items[].gates` records the executed short-circuit path; later gates were not evaluated.
+`buildAdmission.selection` records the existing `selectClearedRows` / `clearedNotReady` checks;
+`buildAdmission.gates` is `dispatchPlan`'s ordered build trace. A build hold can route to preparation
+or PR repair; `buildAdmission.prepare` records `planPrepareSpawns`'s guard, existing-PR and lane checks.
+The first blocking gate names the failing recorded condition, including that alternate prepare route. `markers` are observed values, not additional
+admission rules: a missing `deliveryAgent` is not a refusal in this path, and an omitted
+`deliveryTarget` resolves to `main`.
+
+Attach the JSON, observation time, item id, and expected progress to a starvation bug filed
+through the `file-item` operation. Preserve `guardsFrom`, dropped bookkeeping and unreadable
+record counts: an incomplete observation must not read as a complete guard check.
+
+Eligibility reads explicitly send `config.verbose: false` to the tick CLI: omitting it advances
+and persists the runner's bounded diagnostic verbose window, even if liveness recording is disabled.
+The prepare trace records `dispatch-paused` before its other gates so an unscoped item's build
+`scope` hold does not mask the pause. Whole-queue shaping errors appear on the affected entry as
+`error` with `eligible: false`; single-item invariant failures retain the CLI error contract.
+
+## Claude subagent usage
+
+`node scripts/operations/agent-usage-report.mjs --session=<id>` extracts usage automatically from
+Claude's persisted parent and child transcripts. Omit `--session` to use `CLAUDE_CODE_SESSION_ID`
+with the cwd project slug; `--transcript=<parent.jsonl>` is the unambiguous cross-project form.
+Run ingestion after the children finish: records are append-only snapshots, and a later scan of the
+same agent does not update an earlier snapshot. This CLI does not install a scheduler or Claude hook.
+It is suitable for a serialized session-end job; overlapping writers are not supported.
+
+The script streams **every line** of each child, reusing `inspect-agent-health/agent-health.mjs`'s
+project root, decorated-id handling and transcript resolver. `CLAUDE_PROJECTS_DIR` overrides that
+root (set before module import). Sidecar `toolUseId` and parent `tool_result.tool_use_id` link the
+actual `Agent` dispatch; structured `toolUseResult.agentId` or textual `agentId:` supplies the child
+when the sidecar is absent. Task metadata prefers the sidecar description, then dispatch description,
+otherwise null; raw prompts are never a fallback. Descriptions are capped at 200 characters, including
+an ellipsis when truncated. Explicit child paths must resolve inside `PROJECTS_DIR` after symlink
+resolution; outside paths (including sibling-prefix collisions) are rejected and counted in `skipped`.
+The resolver compares against the physical project-store root while preserving `PROJECTS_DIR` for
+diagnostics. ID-search candidates use the same containment check; escaping symlinks are skipped before
+choosing the newest valid hit. Regression fixtures must include a deliberately symlinked store root:
+realpath-normalized temporary roots alone mask mismatches between logical and physical paths.
+Missing children and malformed transcript rows are counted explicitly.
+
+The local sidecar is `.operations/agent-usage/<day>.jsonl`, covered by the existing `.operations/`
+gitignore rule. Like `call-log-store.mjs`, its default root is the **script's checkout**, never cwd.
+Separate physical lane clones therefore have separate defaults; set `OPERATION_AGENT_USAGE_DIR` to
+one absolute directory to aggregate across them. Each timestamp day's `agentId` is the dedupe key;
+no historical directory scan occurs on append. The first physical transcript line supplies the timestamp,
+otherwise mtime does. For mtime-only transcripts, ingest after they stop changing so the day stays stable.
+
+Records retain `task`, `modelTier`, `delegatedProvider`, `delegatedModel`, every `delegations` occurrence,
+nullable `outcome`, `timestamp`/`timestampSource`, `agentId`, `sessionId`, transcript paths and `toolUseId`.
+A single Claude model/provider is a string; multiple distinct models/providers are arrays so mixed runs
+are not silently assigned to their last provider. `delegatedModel` is a `{command, model}` object, an
+array for repeated invocations, or null for none. `delegations` additionally records the provider and
+whether its model was explicit, the current script default, or unspecified. Codex's default comes from
+its real exported `CODEX_MODEL`. Gemini's wrapper has **no pinned default**: it delegates model selection
+to agy, so absent flags yield null, not a guessed model. The current Codex pin is a fallback inference,
+not proof of the pin a historical checkout used.
+
+Both command fields contain only the detected invocation's normalized argv, with content-bearing
+`task`, `task-file`, `prompt`, `message`, `description`, `body` and `text` values replaced by
+`[redacted]` (case-insensitive, both separate and equals forms). The result is capped at 300 characters,
+including a truncation ellipsis. Shell wrappers and adjacent commands are not copied into this summary;
+model extraction still uses the original parsed flags. Keep this transformation pure and redact before
+capping: truncating raw content still leaks its prefix.
+
+Only assistant `Bash` tool uses executing the named direct-task script count as delegation. The
+conservative shell classifier understands literal script paths, node, common wrappers, shell `-c`,
+quotes, comments, separators and heredocs. It does not evaluate shell variables, aliases or dynamically
+generated commands. This counts recorded invocations, not proof that the external provider succeeded.
+PR outcomes retain nearby text evidence for a created/opened/merged/rejected/closed PR or a bare PR URL;
+these are best-effort transcript observations, not independently verified GitHub state or attribution.
+
+`node scripts/operations/agent-usage-report.mjs --report --days=7` prints dispatch counts by exact
+Claude model string, delegated provider and day. `--since=YYYY-MM-DD` is inclusive; `--days=N` includes
+today in UTC. `--json` works in both scan and report modes. Each distinct model/provider observed in a
+mixed dispatch receives one count, so category sums can exceed total dispatches. Missing models count
+as `unknown`. Corrupt store rows are skipped and counted; scans also report corruption encountered in
+target day files. Keep this unscored operational log separate from the committed delegation trial scorecard.
+
+Tests under `scripts/operations/__tests__/agent-usage-report.test.mjs` create temporary project trees and
+redirect the store. They exercise missing sidecars/children, full reads beyond the health helper's tail
+budget, shell false positives, model changes, day rotation, reruns, corrupt rows and the actual CLI.
+
+### Cross-clone numbering regression
+
+`lane-drain-numbering.test.mjs` must exercise two separate repositories: a blocker numbered in
+clone A, then a dependent landed in clone B with an empty local ledger. The shared `origin/main`
+`bornAs` record supplies the fallback; local-ledger persistence alone cannot prove this path.
+Unknown references report `in-flight` when a provisional item is visible in the checkout or a
+local/remote branch tree, otherwise `unresolvable` (potentially dead, not proven dead: refs may be
+unfetched). Dry-run returns the same diagnostics without changing numbering state. The fallback
+visits explicit reference syntax, preserving bare birth-hash prose and `resolutionNote` quotes;
+the older local-ledger blind-rewrite behavior is unchanged.
+
+### Multi-repo check contract
+
+`scripts/__tests__/multi-repo-checks.test.mjs` scans non-test JS/TS sources in
+`scripts/conveyor`, `scripts/operations`, `skills-src/conveyor`, and `scripts/lib`.
+The pure TypeScript-AST scanner ignores comments, checks repository scoping on gh
+calls, and rejects duplicated constellation slugs. Specific exceptions live in
+`scripts/lib/we-only-checks.json`; an exception with no remaining finding fails
+with “remove this entry”. This is a Vitest contract, not a standards-gate rule.
+The isolated parked-review workflow cannot import the shared table; its table is
+pinned to `CONSTELLATION_REPOS` by `scripts/lib/__tests__/review-core.test.mjs`.
+
+### Operator notification probes
+
+`operator-notify` consumes only `operator-queue`'s `ready` rows. Tests inject the notifier,
+including child CLI probes; never exercise real desktop delivery in this suite. Persisted
+successes deduplicate until an item leaves NEEDS YOU; queue errors preserve all prior keys.
+The operations IO fidelity gate requires the shared real-repo fixture even for filesystem
+state: the notifier test proves its external state path leaves that checkout clean.
+
+A core file that dynamically imports its CLI cannot await that import at module scope when
+its CLI statically imports the core. A staged Node probe of that cycle exits 13 with unsettled
+top-level await. Defer the import with `.then(...)`, and test both entry paths as subprocesses.

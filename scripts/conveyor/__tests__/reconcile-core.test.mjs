@@ -322,6 +322,37 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
     expect(plan.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: 5 });
   });
 
+  // #3383 — THE PR #2117 / #2298 REGRESSION. A `bounced` PR that ALSO carries `review:human` can run round
+  // after round without ever completing a repair-and-rearm cycle (the fix keeps failing/stalling), so it never
+  // posts a `REARM_COMMENT_MARKER` comment no matter how many rounds actually run — `countRearmComments` alone
+  // stays at 0 forever for this population. Confirmed live on `#2117`: 33 advisory-panel comments against the
+  // identical findings, 2026-09-15T00:24Z through 19:13Z, roughly every 20-90 minutes, no end condition — and a
+  // further burst on `#2298`. What DOES post once per completed round is the advisory comment itself
+  // (`ADVISORY_NOTE_MARKER`, `we:scripts/operations/review-pr.mjs#renderAdvisoryNote`) — this pins that counting
+  // THOSE is what makes the cap actually bind for this population, with NO durableCounts map supplied at all
+  // (mirrors the case above's own "the PR's own re-arm comments bind the cap even when the shell supplied no
+  // map at all").
+  it('#3383 — PR #2117/#2298 regression: repeated advisory-panel comments alone (never a re-arm marker) still trip the cap on a review:human PR', () => {
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one` });
+    const burned = pr1563({
+      labels: lbl('review:changes', 'review:human'),
+      comments: [finding(), ...Array.from({ length: 5 }, (_, i) => advisoryRound(i + 1))],
+    });
+    const plan = planReconcile({ prs: [burned], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: 5, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('#3383 — advisory rounds one below the cap still dispatch — the fix does not over-tighten the cap', () => {
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n}` });
+    const notYetBurned = pr1563({
+      labels: lbl('review:changes', 'review:human'),
+      comments: [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP - 1 }, (_, i) => advisoryRound(i + 1))],
+    });
+    const plan = planReconcile({ prs: [notYetBurned], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 1563, attempts: NEGOTIATION_ROUND_CAP - 1 })]);
+  });
+
   it('one attempt below the cap still dispatches — the cap binds AT the cap, not before it', () => {
     const plan = planReconcile({ prs: [pr1563()], agents: [], durableCounts: { 1563: 4 }, now: NOW });
     expect(plan.dispatch.map((d) => d.attempts)).toEqual([4]);
@@ -630,4 +661,14 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates(null, null)).toEqual([]);
     expect(selectStatusCandidates(undefined, undefined)).toEqual([]);
   });
+});
+
+it('binds names only for the invocation repo', () => {
+  const agents = ['review-49', 'review-fui-49', 'fix-fui-49', 'review-pa-49'].map((name) => ({ name }));
+  expect(bindAgents({ number: 49 }, agents, 'frontierui').map((b) => b.agent.name)).toEqual(['review-fui-49', 'fix-fui-49']);
+  expect(bindAgents({ number: 49 }, agents).map((b) => b.agent.name)).toEqual(['review-49']);
+  const pr = pr1563({ number: 49 });
+  const live = [{ name: 'review-fui-49', pidAlive: true, pid: 1 }];
+  expect(planReconcile({ prs: [pr], agents: live, repo: 'frontierui' }).refusals.some((r) => r.kind === 'live-process')).toBe(true);
+  expect(planReconcile({ prs: [pr], agents: live }).dispatch).toHaveLength(1);
 });

@@ -4,8 +4,9 @@ kind: story
 size: 2
 tier: pinned
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-15"
 tags: []
 deliveryAgent: codex
 ---

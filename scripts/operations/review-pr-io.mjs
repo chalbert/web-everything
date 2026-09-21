@@ -36,6 +36,9 @@ import { currentActorId } from '../lib/review-independence.mjs';
 // always couples a comment with a label swap — #2644 — and this step swaps no label). `createGhProvider`'s
 // `postComment` is the SAME primitive that single home already uses, imported rather than re-implemented.
 import { createGhProvider } from '../lib/review-label-provider.mjs';
+// The `advisory:accepted` / `advisory:changes` label the `advise` step's SECOND effect applies — the pure plan
+// (`planAdvisoryLabels`) lives in the leaf, the writes go through the same provider port as the note above.
+import { ADVISORY_LABEL_META, advisoryCoversHead, labelNames, planAdvisoryLabels } from '../lib/advisory-labels.mjs';
 // #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
 import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
@@ -438,7 +441,7 @@ export function isPreWriteRefusal(text) {
  * THE SINKS, bound to a repo root and an output channel.
  *
  * @param {{root?: string, out?: (line: string) => void, runNode?: Function, postComment?: Function, json?: boolean,
- *   readLabels?: Function, setLabels?: Function}} [o] -
+ *   readLabels?: Function, setLabels?: Function, labelProvider?: object}} [o] -
  *   `runNode` is the injectable subprocess runner (`(argv) => stdout`), so the label sink is testable without
  *   `gh`; `postComment` is the injectable `(repo, pr, body) => void` the `advise` sink posts through (#xlw02hw),
  *   so it too is testable without `gh` — defaults to `createGhProvider().postComment`. `readLabels` (`(repo, pr)
@@ -478,6 +481,9 @@ export function createReviewPrSinks({
   // mechanical-dispatcher — the `AWAITING_ADVISORY_CLEAR` sink's own two primitives (see the header note above).
   readLabels = createGhProvider().readLabels,
   setLabels = createGhProvider().setLabels,
+  // The forge port the ADVISORY_LABEL sink reads live PR state and writes labels through — injectable so the sink
+  // is testable with no `gh`, exactly like `postComment` above. Defaults to the same real provider.
+  labelProvider = createGhProvider(),
 } = {}) {
   return {
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
@@ -650,6 +656,32 @@ export function createReviewPrSinks({
       }
       setLabels(payload.repo, payload.pr, { remove: [REVIEW_LABELS.awaitingAdvisory] });
       return { cleared: true };
+    },
+
+    // ── `advise`'s ADVISORY_LABEL — `advisory:accepted` / `advisory:changes`, never a `review:*` decision. ────
+    // The pure decision is `planAdvisoryLabels`; this sink only adds the two guards that need LIVE state:
+    //   • the PR must STILL carry `review:human` (a cleared PR is no longer human-gated; its advisory is moot);
+    //   • the PR's head must STILL be the commit the panel judged (`reviewedHead`). A push during the review
+    //     means the label would describe a head that no longer exists — the exact staleness the sweep in
+    //     `we:scripts/conveyor/advisory-label-sweep.mjs` exists to catch afterwards, refused here up front.
+    // Both refusals are a quiet `{ applied: false, reason }`, not an error: nothing landed and nothing is owed.
+    // It adds only an `advisory:*` label and removes only the opposite one and `review:pending` — never
+    // `review:human`, never `review:accepted` (`planAdvisoryLabels` cannot produce either).
+    [REVIEW_EFFECTS.ADVISORY_LABEL]: async (payload) => {
+      const state = labelProvider.readPrState(payload.repo, payload.pr);
+      const labels = labelNames(state?.labels);
+      if (!labels.includes('review:human')) return { applied: false, reason: 'not-human-gated' };
+      if (!payload.reviewedHead) return { applied: false, reason: 'unpinned-basis' };
+      if (!advisoryCoversHead({ head: payload.reviewedHead }, state?.headRefOid)) {
+        return { applied: false, reason: 'head-moved' };
+      }
+      const plan = planAdvisoryLabels({ outcome: payload.outcome, currentLabels: labels });
+      if (plan.reason) return { applied: false, reason: plan.reason };
+      if (!plan.add && plan.remove.length === 0) return { applied: false, reason: 'already-current' };
+      // `gh pr edit --add-label` refuses a label the repo has never had; ensure is create-or-update (`--force`).
+      if (plan.add) labelProvider.ensureLabel(payload.repo, plan.add, ADVISORY_LABEL_META[plan.add]);
+      labelProvider.setLabels(payload.repo, payload.pr, { add: plan.add ?? undefined, remove: plan.remove });
+      return { applied: true, added: plan.add, removed: plan.remove };
     },
   };
 }

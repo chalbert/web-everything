@@ -209,9 +209,11 @@ export function readTick({
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
   now = () => new Date(),
+  all = false,
+  verbose,
 } = {}) {
   const key = normNum(num);
-  if (!key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
+  if (!all && !key) throw new TypeError(`dispatch-lane-io: \`num\` must be an item id, got ${JSON.stringify(num)}`);
 
   // THE CALLER'S BOOKKEEPING, or none. A missing file is a REFUSAL, not a silent fall back to `{}`: a caller
   // that named a file meant to dispatch under its live guards, and quietly dropping them is precisely the
@@ -227,6 +229,13 @@ export function readTick({
     bookkeepingSource = 'file';
   }
 
+  // An explicit verbose setting bypasses tick-core's read-and-advance of the
+  // persisted diagnostic window. Read-only reports must supply false.
+  if (verbose != null) {
+    const payload = JSON.parse(stdin);
+    stdin = JSON.stringify({ ...payload, config: { ...payload.config, verbose } });
+  }
+
   let tick;
   try {
     tick = JSON.parse(String(runNode([tickCli(root)], { cwd: root, input: stdin })));
@@ -235,6 +244,45 @@ export function readTick({
     throw new Error(`dispatch-lane-io: could not read the conveyor tick — ${msg}`);
   }
   const decisions = tick && typeof tick.decisions === 'object' && tick.decisions ? tick.decisions : {};
+  if (all) {
+    if (!tick?.decisions?.admission) {
+      throw new Error('dispatch-lane-io: tick has no admission evidence for the whole queue');
+    }
+    const evidence = tick.decisions.admission;
+    const keys = [...new Set([
+      ...evidence.queue.filter((row) => row.buildQueued),
+      ...(evidence.cleared ?? []), ...evidence.held, ...evidence.planned,
+    ].map((row) => normNum(row.num)).filter(Boolean))];
+    const items = loadItems();
+    const observedAt = now();
+    const tickJson = JSON.stringify(tick);
+    const texts = new Map();
+    if (String(bookkeepingFile || '').trim()) texts.set(bookkeepingFile, readText(bookkeepingFile));
+    const cachedText = (path) => {
+      if (!texts.has(path)) texts.set(path, readText(path));
+      return texts.get(path);
+    };
+    let agentsRead = false;
+    let agents;
+    let agentsError;
+    const cachedAgents = () => {
+      if (!agentsRead) {
+        agentsRead = true;
+        try { agents = listAgents(); } catch (error) { agentsError = error; }
+      }
+      if (agentsError) throw agentsError;
+      return agents;
+    };
+    // One tick and one item corpus for the entire report. Reuse the SAME selection and
+    // guard reader for each id; never run a second scheduler or persist hypothetical guards.
+    return keys.map((id) => readTick({
+      num: id, root, exec, bookkeepingFile,
+      runNode: () => tickJson, readText: cachedText, loadItems: () => items,
+      listInFlightDispatches, listAgents: cachedAgents, recordLiveness, laneRefForPr, checkAlreadyDone,
+      now: () => observedAt,
+    }));
+  }
+
   // `pr` is an OPTIONAL extra filter — every existing call site (the launch-list scan below, `suppressed`)
   // passes only `rows` and gets the original num-only match; `dispatchedGuard`'s fix/ci-heal branches are the
   // only callers that pass it (see the comment above that selection for why).
@@ -312,6 +360,15 @@ export function readTick({
 
   return {
     resolvedNum: key,
+    admission: tick.decisions?.admission ? {
+      cleared: match(tick.decisions.admission.cleared),
+      prepare: match(tick.decisions.admission.prepare),
+      selection: match(tick.decisions.admission.selection)?.gates ?? [],
+      queueRow: match(tick.decisions.admission.queue),
+      held: match(tick.decisions.admission.held),
+      planned: match(tick.decisions.admission.planned),
+      gates: match(tick.decisions.admission.traces)?.gates ?? [],
+    } : null,
     launch,
     // WHICH LIST IT CAME OUT OF. It picks the brief below, and the session slug and the lane scope in the
     // declaration — one answer, read three times, rather than three re-derivations that can disagree.
@@ -435,9 +492,16 @@ export function normalizeHandle(x) {
  *
  * The listing carries THREE element shapes in one response — measured, see the fixture: rows with
  * `cwd+id+kind+name+sessionId+startedAt+state`, rows that add `pid+status+waitingFor`, and rows carrying
- * neither `state` nor `status` nor `id` at all. `sessionId` is the ONE field present on every one of them, and
- * it is the only field anything here reads; `id` in particular is absent from half the listing and is NOT
- * reliably the `sessionId` prefix, so nothing should key off it.
+ * neither `state` nor `status` nor `id` at all. `sessionId` is the ONE field present on every one of them.
+ *
+ * BOTH `sessionId` AND `id` ARE COLLECTED (#3331). Until this change only `sessionId` was, on the reasoning
+ * that `id` "is absent from half the listing and is NOT reliably the `sessionId` prefix, so nothing should key
+ * off it". The first half is true and harmless — an absent `id` simply contributes nothing — and the second
+ * half is beside the point now, because nothing DERIVES an `id`: the short id a handle is compared against is
+ * the one `claude --bg` PRINTED for that very session ({@link parseBackgroundedId}), not a prefix guessed off
+ * a uuid. Collecting it is what makes a real, CLI-assigned handle findable at all; see {@link buildAgentArgv}
+ * for why the handle can no longer be a minted uuid. Widening the set cannot produce a false `live: true` for
+ * a minted uuid either — a 36-char uuid never equals an 8-char short id.
  *
  * An EMPTY result from a NON-EMPTY listing is the signal the callers act on: the response parsed, and not one
  * element yielded an id — which is a shape this code does not understand, not a machine with no agents on it.
@@ -446,7 +510,13 @@ export function normalizeHandle(x) {
  * @returns {Set<string>}
  */
 export function listedSessionIds(sessions) {
-  const ids = (Array.isArray(sessions) ? sessions : []).map((s) => normalizeHandle(s?.sessionId)).filter(Boolean);
+  const ids = [];
+  for (const s of (Array.isArray(sessions) ? sessions : [])) {
+    for (const field of ['sessionId', 'id']) {
+      const v = normalizeHandle(s?.[field]);
+      if (v) ids.push(v);
+    }
+  }
   return new Set(ids);
 }
 
@@ -682,6 +752,8 @@ export function findItem(key, loadItems, pocRegistry = null) {
   const rawTarget = typeof it.deliveryTarget === 'string' && it.deliveryTarget.trim() ? it.deliveryTarget.trim() : null;
   return {
     num: String(it.num),
+    status: it.status ?? null,
+    deliveryAgent: it.deliveryAgent ?? null,
     slug: String(it.slug),
     specPath: `backlog/${it.num}-${it.slug}.md`,
     // Already repo-qualified by the loader (`we:scripts/...`), which is the form the brief's `--scope` wants.
@@ -716,7 +788,7 @@ export function resolveDeliveryBase(target, num, registry) {
 
 /** `readTick` bound to one root — the shape the declaration wants. */
 export function createTickReader(bindings = {}) {
-  return ({ num, bookkeepingFile }) => readTick({ ...bindings, num, bookkeepingFile });
+  return ({ num, bookkeepingFile, all = false, verbose = bindings.verbose }) => readTick({ ...bindings, num, bookkeepingFile, all, verbose });
 }
 
 /**
@@ -1367,9 +1439,14 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
     throw notApplied('dispatch-lane: refusing a brief that begins with `-` — an argument parser can read it as a flag');
   }
   if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
+  // CATCH-UP MERGE (2026-09-21): `--session-id` is NOT emitted. Both sides fixed #3331; `main` additionally
+  // DROPPED the flag from the argv (it is discarded by `claude --bg`, which says so on stderr), and main's
+  // wider, non-conflicted test surface pins that argv shape. Dropping a flag the CLI provably ignores is not a
+  // behaviour change — the handle still comes from the spawn's own stdout confirmation
+  // ({@link parseBackgroundedHandle}), exactly as this branch's own #3331 remedy already did.
+  void sessionId;
   return [
     '--bg',
-    '--session-id', String(sessionId),
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
     ...extraArgs.map(String),

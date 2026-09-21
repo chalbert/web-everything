@@ -74,6 +74,8 @@ vi.mock('../../lib/judge-spawn.mjs', async (importOriginal) => {
 const { createDefaultJudge, resolveJudgeProvider, JUDGE_PROVIDER_NAMES, unwrapJudgeOutcome } = await import('../cli-adapter.mjs');
 const { judgeSpawn } = await import('../../lib/judge-spawn.mjs');
 
+const { buildReviewJudgeRequest, buildReviewAdvisoryJudgeRequest, DEFAULT_LENS } = await import('../review-pr.mjs');
+
 describe('JUDGE_PROVIDER_NAMES', () => {
   it('is exactly claude, codex, antigravity — additive, claude first/default', () => {
     expect(JUDGE_PROVIDER_NAMES).toEqual(['claude', 'codex', 'antigravity']);
@@ -192,6 +194,40 @@ describe('createDefaultJudge — providerName selection end to end (no injected 
     await expect(judgeFn({
       mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: ['Read'], cwd: '/tmp/x',
     })).rejects.toThrow(/TOOL-FREE panelist only/);
+  });
+
+  it('providerName: \'codex\' with an EXPLICITLY EMPTY allowedTools array is tool-free, not tool-bearing (PR #2115 review: [] is truthy in JS)', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'codex' });
+    const returned = await judgeFn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: [],
+    });
+    expect(returned).toBeDefined();
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+  });
+
+  it('the SAME empty allowedTools array stays REFUSED for the default claude provider - the codex normalisation must not weaken the shared guard', async () => {
+    const judgeFn = createDefaultJudge({ provider: async () => ({ value: {}, costUsd: 0 }) });
+    await expect(judgeFn({
+      mandate: 'm', input: 'i', shape: { type: 'object' }, allowedTools: [], cwd: '/tmp/x',
+    })).rejects.toThrow(/non-empty array/);
+  });
+
+  // PR #2115 human review (CONFIRMED, correctness): the two tests above only ever pass a SYNTHETIC tool-free or
+  // hand-built tool-bearing request — neither proves anything about `review-pr.mjs`'s REAL judge steps, which
+  // are `review-pr`'s only current caller of this dispatch's `--judge-provider`/`--provider` threading
+  // (`we:scripts/operations/review-dispatch.mjs`). `buildReviewJudgeRequest` is the actual recipe those steps
+  // use, and it is UNCONDITIONALLY tool-bearing (`REVIEW_JUROR_TOOLS`, by ratified design — see its own header).
+  // This drives THAT real request, not a stand-in, to pin down the actual, intended outcome: `--provider=codex`
+  // can never reach a real `review-pr` judge step today.
+  it('the REAL review-pr.mjs judge request (not a synthetic stand-in) is refused for providerName: \'codex\'', async () => {
+    const judgeFn = createDefaultJudge({ providerName: 'codex', cwd: '/tmp/x' });
+    const read = {
+      repo: 'o/r', pr: 1, title: 't', body: '', netChangedFiles: ['a.mjs'], diffText: 'diff',
+    };
+    const request = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+    expect(request.allowedTools).toBeTruthy();
+    await expect(judgeFn(request)).rejects.toThrow(/TOOL-FREE panelist only/);
   });
 });
 
@@ -345,3 +381,96 @@ describe('createDefaultJudge — a REQUEST-level `providerName` overrides the fa
     expect(antigravityJudgeSpawnCalls[0].model).not.toBe('opus');
   });
 });
+
+describe('createDefaultJudge - a codex-routed request never carries the lane cwd or a Claude model name (PR #2117 review)', () => {
+  it('a request pinned to codex never receives the factory\'s lane cwd', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ cwd: '/some/lane' });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'codex' });
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls[0].cwd).toBeUndefined();
+  });
+
+  it('a factory whose OWN provider is codex never receives the lane cwd either', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'codex', cwd: '/some/lane' });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' } });
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls[0].cwd).toBeUndefined();
+  });
+
+  it('the CLAUDE provider still receives the factory\'s cwd (the fix is codex-only)', async () => {
+    const calls = [];
+    const stub = async (req) => { calls.push(req); return { value: {}, costUsd: 0 }; };
+    const judgeFn = createDefaultJudge({ cwd: '/some/lane', provider: stub });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe('/some/lane');
+  });
+
+  it('a request\'s OWN Claude model name is stripped before it reaches codex', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'codex' });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, model: 'sonnet' });
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls[0].model).toBe('gpt-6-astra'); // catch-up merge: the branch pins CODEX_MODEL as the seat's own default
+  });
+
+  it('a request pinned to codex is stripped of its own model even when the factory default is claude', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({});
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'codex', model: 'sonnet' });
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls[0].model).toBe('gpt-6-astra'); // catch-up merge: the branch pins CODEX_MODEL as the seat's own default
+  });
+
+  it('the claude provider still receives the request\'s model (the strip is codex-only)', async () => {
+    const calls = [];
+    const stub = async (req) => { calls.push(req); return { value: {}, costUsd: 0 }; };
+    const judgeFn = createDefaultJudge({ provider: stub });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, model: 'sonnet' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].model).toBe('sonnet');
+  });
+});
+
+describe('createDefaultJudge - the REAL review-pr requests route correctly through ONE factory (PR #2117 review: dispatch/`--provider=codex` composed path)', () => {
+  const read = { repo: 'o/r', pr: 1, title: 't', body: '', netChangedFiles: ['a.mjs'], diffText: 'diff' };
+
+  it('a mandatory (tool-bearing) seat goes to the claude provider WITH its lane cwd and tools; the advisory seat goes to codex with NO tools, NO cwd, NO model', async () => {
+    const claudeCalls = [];
+    const claudeStub = async (req) => { claudeCalls.push(req); return { value: {}, costUsd: 0 }; };
+    const judgeFn = createDefaultJudge({ cwd: '/some/lane', provider: claudeStub });
+
+    await judgeFn(buildReviewJudgeRequest({ read, lens: DEFAULT_LENS }));
+    expect(claudeCalls).toHaveLength(1);
+    expect(Array.isArray(claudeCalls[0].allowedTools)).toBe(true);
+    expect(claudeCalls[0].allowedTools.length).toBeGreaterThan(0);
+    expect(claudeCalls[0].cwd).toBe('/some/lane');
+
+    codexJudgeSpawnCalls.length = 0;
+    await judgeFn(buildReviewAdvisoryJudgeRequest({ read }));
+    expect(claudeCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls[0].allowedTools).toBeUndefined();
+    expect(codexJudgeSpawnCalls[0].cwd).toBeUndefined();
+    expect(codexJudgeSpawnCalls[0].model).toBe('gpt-6-astra'); // catch-up merge: the branch pins CODEX_MODEL as the seat's own default
+  });
+
+  it('`--provider=codex` for the whole run (factory providerName codex) is refused at the first tool-bearing seat - exactly why review-dispatch refuses it', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'codex', cwd: '/some/lane' });
+    await expect(judgeFn(buildReviewJudgeRequest({ read, lens: DEFAULT_LENS }))).rejects.toThrow(/TOOL-FREE panelist only/);
+    expect(codexJudgeSpawnCalls).toHaveLength(0);
+  });
+
+  it('the opt-in advisory seat still runs on codex under the same whole-run `--provider=codex` factory', async () => {
+    codexJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ providerName: 'codex', cwd: '/some/lane' });
+    await expect(judgeFn(buildReviewAdvisoryJudgeRequest({ read }))).resolves.toBeDefined();
+    expect(codexJudgeSpawnCalls).toHaveLength(1);
+    expect(codexJudgeSpawnCalls[0].cwd).toBeUndefined();
+  });
+});
+
+

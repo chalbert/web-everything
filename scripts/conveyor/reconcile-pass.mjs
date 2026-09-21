@@ -42,8 +42,11 @@
  * cannot corrupt anything, and a lease taken inside a one-shot read is a lease nothing releases when the process
  * is killed.
  */
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { countRearmComments } from './rearm-review.mjs';
 // #3383 mechanical-dispatcher round-cap fix — see `advisory-round-count.mjs`'s own header (PR #2117: six
@@ -82,7 +85,7 @@ export const PR_LIST_LIMIT = 200;
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultReadPrs({ exec = execFileSync, repo = null } = {}) {
+export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
   if (repo) argv.push('--repo', repo);
   const out = exec('gh', argv, {
@@ -253,9 +256,11 @@ export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
   now = Date.now(), repo = null, queueScope = {},
 } = {}) {
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
   const prs = scopePrsToQueue(readPrs({ repo }), { label: 'reconcile-pass', ...queueScope });
   const agents = enrich(readAgents({}));
-  const plan = planReconcile({ prs, agents, durableCounts: durableCountsFrom(prs), now });
+  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now });
   return { ...plan, prs: prs.length, agents: agents.length };
 }
 
@@ -271,7 +276,11 @@ if (IS_CLI) {
   }
   let result;
   try {
-    result = runReconcilePass({ repo: typeof flags.repo === 'string' ? flags.repo : null });
+    result = runReconcilePass({
+      repo: typeof flags.repo === 'string' ? flags.repo : null,
+      ...(typeof flags['prs-file'] === 'string' ? { readPrs: () => readPrsFromFile(flags['prs-file']) } : {}),
+      ...(typeof flags['agents-file'] === 'string' ? { readAgents: () => readPrsFromFile(flags['agents-file']) } : {}),
+    });
   } catch (e) {
     process.stderr.write(`✗ reconcile pass could not read state: ${String((e && e.message) || e).split('\n')[0]}\n`);
     process.exit(1);

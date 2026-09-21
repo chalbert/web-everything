@@ -36,8 +36,8 @@
  * ── IO IS INJECTED, AND THIS FILE REACHES NOTHING ───────────────────────────────────────────────────────────
  *
  * Same split as {@link ./review-pr.mjs} / {@link ./review-pr-io.mjs}: the declaration is the WHAT, and
- * {@link ./dispatch-lane-io.mjs} is the only place it touches the world. Its whole static import graph is
- * `./registry.mjs` + `./step-kinds.mjs` — no `node:` specifier at all, so the step fns hold no spawner in
+ * {@link ./dispatch-lane-io.mjs} is the only place it touches the world. Its static import graph is
+ * `./registry.mjs` + `./step-kinds.mjs` + the pure session-slug helper — no `node:` specifier at all, so the step fns hold no spawner in
  * lexical scope and the fill below is unit-testable with a two-line stub.
  *
  * That is also why {@link planTickCoreSelection the selection} happens in the io shell rather than here: item
@@ -62,6 +62,7 @@
  * PURE. No fs, no clock, no process, no network in this file.
  */
 
+import { mintSessionSlug, PR_KINDS } from '../conveyor/session-slug.mjs';
 import { op } from './registry.mjs';
 // #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
 // consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
@@ -416,10 +417,7 @@ export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
  * once fix/ci-heal dispatch is reachable at all — which is what THIS item (#3332) does — so `#xm33exe` is
  * filed rather than silently left for the next reader to rediscover.
  *
- * MIRRORED, NOT IMPORTED, and deliberately: this file reaches nothing (its whole import graph is
- * `./registry.mjs` + `./step-kinds.mjs`), and importing the core here would put the conveyor's tick machinery
- * inside the pure declaration. The agreement is asserted instead, against the core's OWN function, in
- * `we:scripts/operations/__tests__/dispatch-lane.test.mjs`.
+ * Minting is shared with the core through the pure session-slug module.
  *
  * ATTEMPT-TAGGED BUILD SLUGS (#3110): `attempt` rides the SAME trailing slot this file's own reap-side sibling
  * already tolerated (`we:scripts/conveyor/lease-reaper.mjs`'s `conveyor-2500b` example) — `''` for a first
@@ -432,20 +430,33 @@ export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
  * @param {'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
  *   pre-#3165 caller is byte-identical.
  * @param {string|number|null} [pr] - the PR number, required in practice for `fix`/`ci-heal` (#3332). Falls
- *   back to `num` when absent so this function never throws — the refusal for a genuinely missing PR belongs
- *   to `fillBrief`'s "no value for {{PR_NUM}}" check, not here.
+ *   back to `num` when absent.
  * @param {string} [attempt] - this dispatch's attempt tag (#3110; see {@link attemptTagFor}), `''` for a first
  *   attempt. Only ever non-empty for `kind === 'build'`.
+ * @param {string} [repo] - constellation repo key; item kinds require WE.
  * @returns {string}
  */
-export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '') {
-  const id = `${String(num).trim()}${attempt}`;
-  if (kind === 'prepare-decision') return `prepare-decision-${id}`;
-  if (kind === 'prepare') return `prepare-${id}`;
-  if (kind === 'investigate') return `investigate-${id}`;
-  if (kind === 'fix') return `fix-${String(pr ?? num).trim()}`;
-  if (kind === 'ci-heal') return `ci-heal-${String(pr ?? num).trim()}`;
-  return `conveyor-${id}`;
+export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '', repo = 'we') {
+  // CATCH-UP MERGE (2026-09-21): `main`'s repo-TAGGED minting (`mintSessionSlug` → `fix-fui-49`) and this
+  // branch's own tolerances are BOTH kept. `mintSessionSlug` is the single grammar wherever it accepts the
+  // shape; where it refuses one this branch legitimately produces — `investigate` (not a minted kind), a
+  // PR-keyed repair whose item number is null (#3634), an attempt tag riding a PR kind — the branch's literal
+  // grammar answers instead, byte-identical to before.
+  if (kind === 'investigate') return `investigate-${String(num).trim()}${attempt}`;
+  const isPrKind = PR_KINDS.includes(kind);
+  const id = isPrKind ? (pr ?? num) : num;
+  try {
+    return mintSessionSlug({
+      kind: kind === 'build' ? 'conveyor' : kind, id, repo, attempt: isPrKind ? '' : attempt,
+    });
+  } catch {
+    const raw = `${String(id).trim()}${isPrKind ? '' : attempt}`;
+    if (kind === 'prepare-decision') return `prepare-decision-${raw}`;
+    if (kind === 'prepare') return `prepare-${raw}`;
+    if (kind === 'fix') return `fix-${raw}`;
+    if (kind === 'ci-heal') return `ci-heal-${raw}`;
+    return `conveyor-${raw}`;
+  }
 }
 
 /**
@@ -749,7 +760,15 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   const inFlight = raw.inFlightDispatches && typeof raw.inFlightDispatches === 'object' ? raw.inFlightDispatches : { runs: [], unreadable: 0 };
   const allRuns = Array.isArray(inFlight.runs) ? inFlight.runs : [];
 
+  // Record the very conditions used below, preserving short-circuit order. A trace never
+  // evaluates a later gate on a path that returned early.
+  const gates = [];
+  const blocked = (name, condition, observed) => {
+    gates.push({ name, pass: !condition, observed });
+    return condition;
+  };
   const base = {
+    gates,
     asked: String(num ?? ''),
     num: resolvedNum,
     // WHICH AGENT this call is about, on every exit — a non-dispatch that says "not cleared" is a different
@@ -824,7 +843,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // same lane to a second agent while the first was still listed as running.
   const holdingRuns = allRuns.filter((r) => dispatchStillHolds(r, raw.observedAt, { expectedWithinMinutes: base.expectedWithinMinutes }));
   const agedOutRuns = allRuns.filter((r) => !holdingRuns.includes(r));
-  if (holdingRuns.length) {
+  if (blocked('in-flight-dispatch', holdingRuns.length > 0, { runs: allRuns, holdingRuns, observedAt: raw.observedAt ?? null })) {
     // WHICH KIND OF HOLD IT IS, in the operator's own line: a session `claude agents` still lists is a
     // materially different fact from one whose liveness nothing could establish, and the remedies differ.
     const liveHolds = holdingRuns.filter((r) => r.live === true);
@@ -862,7 +881,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // `dispatch-lane-io.mjs` for why a false positive here must stay recoverable rather than silently correcting
   // the backlog's own frontmatter.
   const alreadyDone = raw.alreadyDone && typeof raw.alreadyDone === 'object' ? raw.alreadyDone : null;
-  if (alreadyDone && alreadyDone.done && alreadyDone.pr && typeof alreadyDone.pr === 'object') {
+  if (blocked('already-done', !!(alreadyDone && alreadyDone.done && alreadyDone.pr && typeof alreadyDone.pr === 'object'), alreadyDone)) {
     const { pr } = alreadyDone;
     return {
       ...base,
@@ -898,7 +917,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // core's launch decision, which is why it is checked independent of `launch` (a live #3398-shaped bug: the
   // core cleared it for `spawnBuilds` anyway, three times, with an open `blockedBy` the whole time).
   const openBlockers = Array.isArray(raw.item?.openBlockers) ? raw.item.openBlockers.map(String).filter(Boolean) : [];
-  if (openBlockers.length) {
+  if (blocked('blockedBy', openBlockers.length > 0, openBlockers)) {
     return {
       ...base,
       inFlightRuns: [],
@@ -921,7 +940,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     };
   }
 
-  if (!launch) {
+  if (blocked('tick-launch', !launch, { launch, suppressed, admission: raw.admission ?? null })) {
     return {
       ...base,
       inFlightRuns: [],
@@ -937,21 +956,25 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       // The core's own word for why, or the honest "it was not in this tick's launch set at all" — which is
       // what an unscoped, lease-overlapped or not-cleared item looks like from here (a blocked item is caught
       // above, before this branch, with its own more specific reason).
-      holdReason: suppressed
+      holdReason: suppressed?.by === 'capacity-cap'
+        ? 'suppressed by the tick concurrency capacity cap'
+        : suppressed
         ? `suppressed by the in-flight build guard (${suppressed.by === 'lane' ? `lane ${suppressed.lane} is held` : 'an agent is already in flight for this item'})`
-        : 'the tick core did not clear this item for dispatch — it is not in `decisions.spawnBuilds`, '
+        : raw.admission?.held
+          ? `the build planner held this item: ${raw.admission.held.reason}`
+          : 'the tick core did not clear this item for dispatch — it is not in `decisions.spawnBuilds`, '
           + '`decisions.spawnPrepareScope`, `decisions.spawnPrepareDecision`, `decisions.spawnInvestigations`, '
           + '`decisions.spawnFixes` or `decisions.spawnCiHeals`',
     };
   }
 
-  if (launch.lane == null || String(launch.lane).trim() === '') {
+  if (blocked('assigned-lane', launch.lane == null || String(launch.lane).trim() === '', launch.lane ?? null)) {
     throw new Error(`dispatch-lane.read: the tick core cleared #${resolvedNum} but assigned it no lane — refusing to dispatch without one`);
   }
   const item = raw.item && typeof raw.item === 'object' ? raw.item : null;
   const specPath = String(item?.specPath || '').trim();
   const itemScope = Array.isArray(item?.scope) ? item.scope.map(String).filter(Boolean) : [];
-  if (!specPath) {
+  if (blocked('item-spec', !specPath, specPath)) {
     throw new Error(`dispatch-lane.read: no backlog file resolved for #${resolvedNum} — the brief needs the item's spec path`);
   }
   // THE LANE-LEASE SCOPE, and the word `scope` doing two jobs is what made this look like a blocker (#3165).
@@ -979,7 +1002,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // card (#3165) sets one rule for both prepare kinds, so this is recorded rather than silently widened.
   const repairsExistingPr = launchKind === 'fix' || launchKind === 'ci-heal';
   const scope = launchKind === 'build' || repairsExistingPr ? itemScope : [`we:${specPath}`];
-  if ((launchKind === 'build' || repairsExistingPr) && !itemScope.length) {
+  if (blocked('scope', (launchKind === 'build' || repairsExistingPr) && !itemScope.length, { launchKind, scope })) {
     // Unreachable through the core (`dispatch-plan` holds an unscoped item `unshaped-no-scope` and auto-prepares
     // it, so it never reaches `spawnBuilds`, `spawnFixes` or `spawnCiHeals`) — refused anyway, because an empty
     // `--scope` declares a lane that owns no paths and the scope-lease collector would let an overlapping

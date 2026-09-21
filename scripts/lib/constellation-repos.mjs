@@ -4,7 +4,7 @@
  * A parked PR can live in any of the constellation repos. Two vocabularies name a repo and they are NOT the same:
  *   • the internal repo KEY — `we` / `frontierui` / `plateau-app` — used everywhere in-process (the ledger subject
  *     `${key}#${pr}`, the discovered-PR `repo` field, the review reporting).
- *   • the gh SLUG — `chalbert/web-everything` / `frontierui` / `plateau-app` — passed to `gh --repo`.
+ *   • the gh SLUG — `chalbert/web-everything` / `chalbert/frontierui` / `chalbert/plateau-app` — passed to `gh --repo`.
  * A tool that parses a `--repo=<slug>` flag but hard-codes the key (the #2830 review's M3 defect: `--repo=…frontierui`
  * read FrontierUI but emitted `repo: 'we'`, so the ledger subject pointed at an unrelated WE PR) crosses the two
  * silently. This module is the ONE mapping between them, so no consumer keeps its own key literal.
@@ -16,9 +16,9 @@
  *  caller must never derive a key from a basename by hand. Frozen — the single source both the convergence
  *  workflow and the scheduled runner read (never a second copy). */
 export const CONSTELLATION_REPOS = Object.freeze({
-  we: { slug: 'chalbert/web-everything', path: '', dirs: ['web-everything', 'webeverything'] },
-  frontierui: { slug: 'frontierui', path: '$HOME/workspace/frontierui', dirs: ['frontierui'] },
-  'plateau-app': { slug: 'plateau-app', path: '$HOME/workspace/plateau-app', dirs: ['plateau-app'] },
+  we: { slug: 'chalbert/web-everything', slugTag: '', path: '', dirs: ['web-everything', 'webeverything'] },
+  frontierui: { slug: 'chalbert/frontierui', slugTag: 'fui', path: '$HOME/workspace/frontierui', dirs: ['frontierui'] },
+  'plateau-app': { slug: 'chalbert/plateau-app', slugTag: 'pa', path: '$HOME/workspace/plateau-app', dirs: ['plateau-app'] },
 });
 
 /**
@@ -72,4 +72,14 @@ export function repoKeyForSlug(slugOrKey) {
     if (key === v || meta.slug === v) return key;
   }
   return null;
+}
+
+/** Session tag for a known repo key, or null. */
+export function repoSlugTag(key) {
+  return Object.hasOwn(CONSTELLATION_REPOS, key) ? CONSTELLATION_REPOS[key].slugTag : null;
+}
+
+/** Untagged sessions belong to WE. */
+export function repoKeyForSlugTag(tag = '') {
+  return Object.entries(CONSTELLATION_REPOS).find(([, meta]) => meta.slugTag === tag)?.[0] ?? null;
 }

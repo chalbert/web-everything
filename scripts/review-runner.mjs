@@ -26,7 +26,8 @@
  *      injectable so the enforce-era wiring can point it at a live convergence dispatch instead.
  *   3. Run the ledger through the EXISTING seams IN SHADOW (`runnerShadowPlan`, mode hard-coded to SHADOW) → a
  *      plan of what it WOULD do (clear / keep-parked) that applies NOTHING, and emit a structured shadow-log
- *      record per PR (`buildShadowRecord`).
+ *      record per PR (`buildShadowRecord`), also appended best-effort to the verdict ledger as non-bearing
+ *      `observed` rows marked `mode: shadow` (#3217). Only local observation storage changes.
  *
  * SINGLETON-LOCKED (daemon parity): the runner takes an exclusive, TTL-leased singleton lock (the SAME atomic
  * `O_EXCL`/reclaim primitive the resident drain daemon's lease uses, `we:scripts/readiness/file-locks.mjs`) under
@@ -58,7 +59,8 @@ import {
 } from './readiness/file-locks.mjs';
 import { resolveDispositionConfig } from './lib/review-policy.mjs';
 import { readJuryLog } from './lib/jury-ledger.mjs';
-import { repoKeyForSlug } from './lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from './lib/constellation-repos.mjs';
+import { appendVerdict, buildVerdictRecord, VERDICTS } from './lib/verdict-ledger.mjs';
 import {
   partitionRunnerPRs, runnerShadowPlan, buildShadowRecord,
 } from './lib/review-runner-core.mjs';
@@ -77,7 +79,7 @@ export const RUNNER_LEASE_MINUTES = DEFAULT_LEASE_MINUTES;
  *  prove the acquire/release owner-match round-trips (a drift in this format would make release a silent no-op). */
 export function runnerOwner() { return `${hostname()}:${process.pid}:review-runner`; }
 
-const DEFAULT_REPO_SLUG = 'chalbert/web-everything';
+const DEFAULT_REPO_SLUG = CONSTELLATION_REPOS.we.slug;
 
 // ── tiny flags parser (matches review-core-cli.mjs) ───────────────────────────────────────────────────────────
 function parseFlags(argv) {
@@ -185,6 +187,28 @@ export function runShadowPass(clearable, config, loadLedger = loadLedgerFromDura
   return records;
 }
 
+/** Persist observations through the verdict ledger's single writer. Per-row failures, including refused
+ * records, never abort the pass or suppress its report. The injected writer supports failure-path probes. */
+export function appendShadowRecords(records, repo, append = appendVerdict) {
+  for (const r of records) {
+    try {
+      if (r.mode !== 'shadow' || r.applied !== false || r.mutated !== false) {
+        throw new TypeError('not an unapplied shadow observation');
+      }
+      const result = append(buildVerdictRecord({
+        repo, pr: r.pr, at: new Date().toISOString(), verdict: VERDICTS.OBSERVED,
+        mode: 'shadow', wouldClear: r.wouldClear, reason: r.reason,
+        findingCount: r.outstandingFindings, source: 'review-runner', channel: 'shadow',
+      }));
+      if (!result.ok) throw new Error(result.errors.join('; '));
+    } catch (e) {
+      try {
+        process.stderr.write(`review-runner: verdict-ledger append failed for ${r.subject} (shadow, non-fatal) — ${String((e && e.message) || e)}\n`);
+      } catch { /* even a closed stderr must not cost the shadow report */ }
+    }
+  }
+}
+
 // ── the CLI (gated on direct invocation) ──────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) main(process.argv.slice(2));
@@ -243,6 +267,20 @@ function main(argv) {
     // 2 + 3. Shadow-dispose each clearable PR (read the durable ledger → seams in SHADOW → record).
     const config = resolveDispositionConfig({});
     const records = runShadowPass(clearable, config);
+
+    // Jury subjects use internal keys; the shared verdict ledger requires the SAME owner/name as human rows.
+    // Resolve short constellation names via gh rather than inventing an owner. This too is best-effort.
+    try {
+      const candidate = repoSlug.includes('/') ? repoSlug : CONSTELLATION_REPOS[repoKey].slug;
+      const ledgerRepo = candidate.includes('/') ? candidate : JSON.parse(execFileSync('gh', [
+        'repo', 'view', candidate, '--json', 'nameWithOwner',
+      ], { encoding: 'utf8' })).nameWithOwner;
+      appendShadowRecords(records, ledgerRepo);
+    } catch (e) {
+      try {
+        process.stderr.write(`review-runner: could not resolve verdict-ledger repo (shadow, non-fatal) — ${String((e && e.message) || e)}\n`);
+      } catch { /* best-effort diagnostic */ }
+    }
 
     // Emit the shadow log.
     const summary = {

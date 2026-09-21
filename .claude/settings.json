@@ -83,6 +83,35 @@
             "command": "node scripts/guard-bash.mjs"
           }
         ]
+      },
+      {
+        "matcher": "Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-monitor-subagent.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-stop-passive-wait.mjs"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard-stop-passive-wait.mjs"
+          }
+        ]
       }
     ],
     "PostToolUse": [

@@ -73,6 +73,13 @@
  * DROP a member, RENAME one without re-registering, or weaken an invariant to make a diff pass: every
  * such change is human-reviewed by construction. That is the point.
  */
+import { createRequire } from 'node:module';
+
+// #2892 — the anchored-rule-heading grammar (`### … {#anchor}`) the statute-anchor trigger reads, imported from
+// the ONE inventory `rules-loader.cjs` exposes (`extractAnchors`) so the render, the `codifiedIn:` gate and this
+// trigger can never disagree about what an anchored rule heading is. The loader requires its markdown renderer
+// lazily, so importing it here costs no renderer and adds no hot-path dependency.
+const { extractAnchors } = createRequire(import.meta.url)('./rules-loader.cjs');
 
 /**
  * The trust chain, as explicit versioned config. Each entry is one member of the machinery that decides
@@ -516,4 +523,245 @@ export function isPolicySpecPath(path) {
  */
 export function isPolicyDerivationPath(path) {
   return POLICY_DERIVATION_BASENAMES.has(basenameOf(path));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #2892 — THE PRINCIPLE SURFACE (enforces the ratified `#human-is-principle-surface-not-path`, #2840).
+//
+// A human is required for a PRINCIPLE, not for the implementation that carries it. `isPrincipleSurface` is the
+// canonical, mechanical form of that definition: the UNION of three triggers, evaluated per changed file against
+// that file's own base-vs-head hunks (the #2890 `diffHunks` plumbing):
+//   1. `isStatuteAnchorEdit`   — a rule-text edit to the statute layer (a whitespace / reflow-only touch no longer fires).
+//   2. `isMarkedInvariantEdit` — an edit to a `@principle`/`@invariant` block that already exists in BASE.
+//   3. `isDeclarativeLeashPath`— the pinned `POLICY_SPEC` floor: whole-file, permanent, the ONE surviving path term.
+//
+// FAIL DIRECTION. The human trigger is a SUPERSET of the post-#2785 path gate except for the ONE intended
+// narrowing (the statute term, whole-file → rule-text). So an input the content triggers cannot evaluate resolves
+// toward the gate that existed BEFORE this change, never away from it: no hunks / an unattributable section / a
+// binary, deleted, renamed or newly-created statute doc → the statute term FIRES (today's whole-file behaviour).
+// The narrowing is exactly two shapes and no more: a hunk whose removed and added text are the same once
+// whitespace is collapsed (reflow), and a pure file-mode change. The marker term is purely ADDITIVE above that
+// line, so with no hunks it contributes nothing rather than firing on every file.
+// Over-firing costs a person once; under-firing is silent.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The STATUTE layer (#2412) — `platform-decisions.md` and any statute doc. Editing the cite-able cluster
+ *  rules is a governance change a human must ratify. Lives HERE (moved from `review-escalation.mjs`, which
+ *  re-exports it) because `isStatuteAnchorEdit` below needs the path predicate and this module cannot import the
+ *  rubric that imports it. Also drives the rubric's blast-radius term, which is why the patterns are exported. */
+export const STATUTE_PATHS = Object.freeze([
+  /^docs\/agent\/platform-decisions\.md$/,   // the statute layer (cite-able cluster rules)
+  /^docs\/agent\/.*statute/i,                // any statute doc
+]);
+
+/** Does this repo-relative path edit the statute layer? Pure. (#2412) */
+export function isStatutePath(path) {
+  const p = String(path || '');
+  return STATUTE_PATHS.some((re) => re.test(p));
+}
+
+/** Trigger 3 — the DECLARATIVE-LEASH path floor (#2771/#2785, pinned permanent by #2840). Named here so
+ *  `isPrincipleSurface` reads as the union it is; it is `isPolicySpecPath`, re-exported by the rubric under the
+ *  same name. Path-only: a leash file has no behaviour-preserving edit, so its hunks are never consulted. */
+export const isDeclarativeLeashPath = isPolicySpecPath;
+
+/**
+ * The most lines BELOW a `@principle`/`@invariant` marker that belong to its block. A marked block is the
+ * marker line plus the contiguous NON-BLANK lines that follow, at most this many.
+ *
+ * WHY A CAP AT ALL: a content trigger only sees the diff's hunks, and a hunk carries three lines of context on
+ * each side of a change. An edit more than three lines below a marker would arrive with the marker OUTSIDE the
+ * hunk, invisible — so a block that could extend further would be silently editable. Capping the block at the
+ * context width makes the grammar and the evidence agree: every line the grammar calls "inside the block" is
+ * one whose hunk is guaranteed to show the marker. Keep a marked assertion compact (a marker, then the assertion
+ * in a few lines); a longer guarantee is marked at each of its compact statements. Assumes default `-U3` hunks —
+ * a `-U0` producer would show no context and hide every marker not itself edited.
+ */
+export const MARKED_BLOCK_MAX_LINES = 3;
+
+/** A marker sits at the START of a comment line — `// @invariant …`, `/* @principle …`, ` * @invariant …`,
+ *  `# @principle …`, `<!-- @invariant … -->`. Anchoring to the comment leader is what keeps PROSE that merely
+ *  MENTIONS the tokens (docs, this file's own comments, `\`@principle\`` in a string) from reading as a marker. */
+const MARKER_LINE_RE = /^\s*(?:\/\/+|\/\*+|\*+|#+|<!--)\s*@(?:principle|invariant)(?![\w-])/;
+
+/**
+ * Parse ONE file's unified-diff section (its `diff --git` header through its last hunk) into `{unevaluable, deleted, structural, modeOnly, hunks}`,
+ * each hunk a list of `{op: ' '|'-'|'+', text}` in diff order, plus `modeOnly` — true iff the section is a pure
+ * file-mode change (an `old mode`/`new mode` pair and nothing else: no rename, copy, creation or deletion), and
+ * `structural` — true iff the section renames, copies or creates the file (it is about MORE than a hunk's text).
+ * Returns `null` when `fileHunks` is not a string (NOT COMPUTED), and `{unevaluable:true}` for a binary patch
+ * (there are no `+`/`-` lines to read).
+ * Header lines before the first `@@` are inspected only for the section's SHAPE — `deleted file mode`, binary
+ * markers, `old mode`/`new mode`, and `rename`/`copy`/`similarity index`/`new file mode`; hunk lines
+ * never start with `@`, so a `@@` line always opens the next hunk and a removed line that reads `-- x` (`--- x`)
+ * can never be mistaken for a file header (headers are only read BEFORE the first hunk).
+ */
+export function parseFileHunks(fileHunks) {
+  if (typeof fileHunks !== 'string') return null;
+  const raw = fileHunks.split('\n');
+  if (raw.length && raw[raw.length - 1] === '') raw.pop();
+  let deleted = false;
+  let modeChange = false;
+  let structural = false;                 // rename / copy / creation — the section is about MORE than a mode bit
+  const hunks = [];
+  let cur = null;
+  for (const line of raw) {
+    if (line.startsWith('@@')) { cur = []; hunks.push(cur); continue; }
+    if (!cur) {
+      if (line.startsWith('deleted file mode')) deleted = true;
+      if (line.startsWith('old mode ') || line.startsWith('new mode ')) modeChange = true;
+      if (/^(?:rename |copy |similarity index |new file mode )/.test(line)) structural = true;
+      if (line.startsWith('Binary files ') || line.startsWith('GIT binary patch')) return { unevaluable: true, deleted, structural, modeOnly: false, hunks: [] };
+      continue;
+    }
+    if (line.startsWith('\\')) continue;                       // "\ No newline at end of file"
+    const op = line[0];
+    if (op === '+' || op === '-' || op === ' ') cur.push({ op, text: line.slice(1) });
+    else if (line === '') cur.push({ op: ' ', text: '' });      // a context line whose lone space a tool stripped
+  }
+  return { unevaluable: false, deleted, structural, modeOnly: modeChange && !structural && !deleted && hunks.length === 0, hunks };
+}
+
+const collapseWhitespace = (s) => s.replace(/\s+/g, ' ').trim();
+
+/** A line that carries markdown BLOCK STRUCTURE the reflow exemption must not blur: an ATX heading (`### … {#id}`),
+ *  a code fence, or a setext-heading underline (`===` / `---`). Re-wrapping prose leaves these lines untouched; merging a heading into the line below it, or
+ *  splitting one, changes them. */
+const isStructuralLine = (l) => /^\s{0,3}(?:#{1,6}\s|```|~~~|=+\s*$|-{2,}\s*$)/.test(l);
+/** An INDENTED-CODE line (4+ leading spaces or a tab): giving a paragraph line this indent turns it into a code block. */
+const isIndentedCodeLine = (l) => /^(?: {4,}|\t)\S/.test(l);
+/** A LIST-ITEM or BLOCKQUOTE line (`- x`, `1. x`, `> x`): merging two items into one line, or nesting one, changes how
+ *  many of these a change has. Counted, not compared textually — re-wrapping an item's prose must stay a reflow. */
+const isListOrQuoteLine = (l) => /^\s*(?:[-*+]\s|\d+[.)]\s|>)/.test(l);
+
+/** Is this change block a pure REFLOW / whitespace touch? Its removed and added text must be identical once all
+ *  whitespace is collapsed AND its heading / fence lines must match one-for-one (collapsed, in order). The second
+ *  half is what stops `### Rule {#a}⏎⏎body` → `### Rule {#a} body` (same words, a different heading) from reading
+ *  as whitespace; a change in how many lines are INDENTED-CODE (4+ spaces), LIST items or BLOCKQUOTE lines is not a reflow either. Blank lines carry no structure the ratified narrowing protects, so adding or removing them alone
+ *  is still whitespace. */
+function isReflowOnly({ removed, added }) {
+  if (collapseWhitespace(removed.join(' ')) !== collapseWhitespace(added.join(' '))) return false;
+  const structure = (ls) => ls.filter(isStructuralLine).map(collapseWhitespace);
+  const a = structure(removed);
+  const b = structure(added);
+  const indented = (ls) => ls.filter(isIndentedCodeLine).length;
+  return a.length === b.length && a.every((x, i) => x === b[i]) && indented(removed) === indented(added)
+    && removed.filter(isListOrQuoteLine).length === added.filter(isListOrQuoteLine).length;
+}
+
+/** A hunk's CHANGE BLOCKS: each maximal run of `-`/`+` lines not interrupted by a context line, as its removed and
+ *  added text. A pure reflow is one block; a MOVED line is two blocks (its `-` and its `+`), unbalanced apiece. */
+function changeBlocks(hunk) {
+  const blocks = [];
+  let cur = null;
+  for (const l of hunk) {
+    if (l.op === ' ') { cur = null; continue; }
+    if (!cur) { cur = { removed: [], added: [] }; blocks.push(cur); }
+    (l.op === '-' ? cur.removed : cur.added).push(l.text);
+  }
+  return blocks;
+}
+
+/**
+ * Trigger 1 — WHAT KIND of statute-anchor edit this file's hunks carry, or `null` for none. `'unevaluable'`
+ * (fail-closed: no hunks / binary / deleted), `'anchor-heading'` (an anchored `### … {#anchor}` rule heading was
+ * added, removed or altered — read with `extractAnchors`, the loader's own grammar), or `'rule-body'` (any other
+ * rule text changed). A CHANGE BLOCK — a run of `-`/`+` lines with no context line between — whose removed and
+ * added text are IDENTICAL once whitespace is collapsed is a reflow / whitespace touch and does not fire (the
+ * ratified narrowing). The unit is the block, not the hunk, on purpose: a line MOVED across an anchored heading
+ * inside one hunk is a `-X` block and a `+X` block separated by context, each unbalanced on its own, so it fires
+ * — judged per hunk, its removed and added text would cancel and a relocation would read as whitespace.
+ *
+ * The narrowing is deliberately no finer than that. A hunk shows only three lines of context, so a line's
+ * enclosing rule section is not knowable from it, and a one-character TYPO fix inside a rule body is
+ * mechanically indistinguishable from a meaning change — both fire. That over-fires by a person's glance, never
+ * the reverse.
+ */
+export function statuteAnchorEditKind(changedFile, fileHunks) {
+  if (!isStatutePath(changedFile)) return null;
+  const parsed = parseFileHunks(fileHunks);
+  if (!parsed || parsed.unevaluable || parsed.deleted) return 'unevaluable';
+  // A section that RENAMES, COPIES or CREATES the file put rule text at THIS path — whatever its hunks say (a
+  // near-identical file renamed in with a whitespace-only tweak has hunks that all "balance"). It fires, exactly
+  // as the whole-file gate did. A section with NO hunks and no such structure is a pure mode change (no text
+  // moved: not an edit); a hunk-less section that is neither has nothing to compare and fails closed.
+  if (parsed.structural) return 'unevaluable';
+  if (parsed.hunks.length === 0) return parsed.modeOnly ? null : 'unevaluable';
+  let kind = null;
+  const isAnchorHeading = (t) => /^#{1,6}\s/.test(t) && extractAnchors(t).anchors.size > 0;
+  for (const hunk of parsed.hunks) {
+    for (const block of changeBlocks(hunk)) {
+      if (isReflowOnly(block)) continue;
+      if ([...block.removed, ...block.added].some(isAnchorHeading)) return 'anchor-heading';
+      kind = 'rule-body';
+    }
+  }
+  return kind;
+}
+
+/** Trigger 1 — is this a statute-anchor edit (`platform-decisions.md` rule text changed)? Pure. `fileHunks` is the
+ *  file's own diff section; `null`/absent resolves FAIL-CLOSED to `true` for a statute path (today's whole-file gate). */
+export function isStatuteAnchorEdit(changedFile, fileHunks) {
+  return statuteAnchorEditKind(changedFile, fileHunks) !== null;
+}
+
+/**
+ * Trigger 2 — does this file's diff EDIT or REMOVE a `@principle`/`@invariant` block that already exists in
+ * BASE? Pure. Only the base side is read: a marker on a `+` line is a NEW invariant, which is implementation
+ * enforcing an already-ruled principle (#2839), not an edit of a guarantee. A block is touched when any of its
+ * lines is removed/changed (`-`) or a line is inserted directly inside or after it (see `MARKED_BLOCK_MAX_LINES`
+ * for the block's extent). A whitespace-only touch of a marked block DOES fire — an inserted blank line can
+ * detach a block's tail from its marker, so the marker term does not get the statute term's reflow exemption.
+ *
+ * Absent/unparseable/binary hunks → `false`: this trigger is additive above the post-#2785 gate, so it cannot
+ * resolve toward "fire" on a file it was never able to read (that would human-gate every PR scored without a
+ * clone). A marked-block edit in a file scored WITHOUT hunks is therefore not caught by this term — the named
+ * residual of the additive axis. It is visible, not silent: `scoreEscalation` lists on `signals.hunksUnavailable` every
+ * scored file it had no diff section for (the whole diff not computed, or hunks that do not cover the path), so a consumer (and the human reading the verdict) can tell "no marked edit" from
+ * "could not look".
+ */
+export function isMarkedInvariantEdit(changedFile, fileHunks) {
+  const parsed = parseFileHunks(fileHunks);
+  if (!parsed || parsed.unevaluable) return false;
+  for (const lines of parsed.hunks) {
+    const base = [];                      // the hunk's BASE-side lines, in order
+    const insertedAfter = new Map();      // base index → count of `+` lines inserted directly after it
+    for (const l of lines) {
+      if (l.op === '+') insertedAfter.set(base.length - 1, (insertedAfter.get(base.length - 1) || 0) + 1);
+      else base.push({ text: l.text, removed: l.op === '-' });
+    }
+    for (let m = 0; m < base.length; m += 1) {
+      if (!MARKER_LINE_RE.test(base[m].text)) continue;
+      let end = m;
+      while (end + 1 < base.length && end + 1 - m <= MARKED_BLOCK_MAX_LINES && base[end + 1].text.trim() !== '') end += 1;
+      for (let i = m; i <= end; i += 1) {
+        if (base[i].removed) return true;
+        // An insertion lands INSIDE the block only while the new line would still be within the cap.
+        if (i - m < MARKED_BLOCK_MAX_LINES && insertedAfter.get(i)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Which of the three triggers fire for this file's diff — `'leash-path' | 'statute-anchor' | 'marked-invariant'`.
+ *  Pure; `isPrincipleSurface` is exactly "this list is non-empty", and the rubric reads it to word its reasons. */
+export function principleSurfaceTriggers(changedFile, fileHunks) {
+  const out = [];
+  if (isDeclarativeLeashPath(changedFile)) out.push('leash-path');
+  if (isStatuteAnchorEdit(changedFile, fileHunks)) out.push('statute-anchor');
+  if (isMarkedInvariantEdit(changedFile, fileHunks)) out.push('marked-invariant');
+  return out;
+}
+
+/**
+ * THE composition (#2840). Is `changedFile`'s diff — `fileHunks`, that file's own base-vs-head section — a
+ * principle surface, i.e. does it need a HUMAN? Pure. The leash-path term is UNCONDITIONAL (an empty or absent
+ * `fileHunks` still fires for a `POLICY_SPEC` file) — that is the pinned floor `check:standards` asserts.
+ * `principleSurfaceTriggers` above is this same union reported as a list (for the rubric's signals and reasons);
+ * a test pins the two equal over the whole trigger matrix, so neither can grow a term the other lacks.
+ */
+// @invariant principle-surface-is-the-union (#human-is-principle-surface-not-path) — the leash-path floor is unconditional and the two content triggers join it; never drop a term
+export function isPrincipleSurface(changedFile, fileHunks) {
+  return isDeclarativeLeashPath(changedFile) || isStatuteAnchorEdit(changedFile, fileHunks) || isMarkedInvariantEdit(changedFile, fileHunks);
 }

@@ -1,25 +1,24 @@
 /**
  * @file scripts/conveyor/advisory-round-count.mjs
- * @description THE DURABLE, RESTART-SURVIVING ATTEMPT COUNT FOR A `review:human` PR'S ADVISORY ROUNDS
- *   (epic #3383, mechanical-dispatcher). Mirrors `we:scripts/conveyor/rearm-review.mjs#countRearmComments`'s
- *   own shape and reason for existing, for a population that marker cannot see.
+ * @description THE DURABLE, RESTART-SURVIVING ATTEMPT COUNT FOR A `review:human` PR'S ADVISORY ROUNDS (#3383).
+ *   Mirrors `we:scripts/conveyor/rearm-review.mjs#countRearmComments`'s own shape and reason for existing, for
+ *   a population that marker cannot see.
  *
- * THE GAP THIS CLOSES — confirmed live on PR #2117, 2026-09-14: SIX separate full advisory-panel runs posted
- * against the IDENTICAL commit range `a443ada1..e0769309` (zero commits between them), roughly every 20-50
- * minutes, with no end condition. `we:scripts/conveyor/reconcile-core.mjs#planReconcile`'s round cap
- * (`NEGOTIATION_ROUND_CAP`, 5) is real and correctly wired for a `bounced` PR — but for `needs-human`, the
- * `attempts` figure it fed on was `countRearmComments`, which counts the re-arm marker `record`'s label swap
- * posts after a repaired `review:changes` bounce. A `review:human` PR's label swap is REFUSED by
- * `we:scripts/review-set-label.mjs#decideSetLabel` (INVARIANT 2, correct and untouched) — `review:pending`
- * never clears, no bounce ever happens, and so no re-arm comment is EVER posted for this population. The
- * counter that was supposed to bind the cap stayed at 0 (or 1, if a human separately bounced it once) across
- * all six rounds, so `attempts >= roundCap` never fired.
- *
- * THE FIX: count the THING THAT ACTUALLY HAPPENED EACH ROUND instead — the automatic advisory-panel comment
- * `we:scripts/operations/review-pr.mjs`'s `advise` step posts on every completed run for a `review:human` PR
- * (#xlw02hw). One advisory round posts exactly one such comment, so counting them recovers "how many times the
- * panel has already run against this PR" from the PR's own durable thread — no parallel state store (#2612
- * invariant), same discipline `countRearmComments` already uses.
+ * THE GAP THIS CLOSES — confirmed LIVE on `chalbert/web-everything#2117`: 33 separate advisory-panel comments
+ * posted against the SAME "Findings (7)" content between 2026-09-15T00:24Z and 2026-09-15T19:13Z (roughly every
+ * 20-90 minutes, no end condition), and a further burst on `#2298` on 2026-09-18/19. Both PRs carry
+ * `review:changes` + `review:human`, so `classifyPr` (`we:scripts/progress-board.mjs`) reads them as `bounced`
+ * and `we:scripts/conveyor/reconcile-core.mjs#planReconcile` dispatches a `fix` round for each, capped by
+ * `NEGOTIATION_ROUND_CAP` (5) — BUT the cap is fed by `attempts = countRearmComments(pr.comments)`, and
+ * `countRearmComments` counts the marker `we:scripts/conveyor/rearm-review.mjs` posts ONLY when a bounced PR is
+ * successfully repaired and re-armed `review:changes → review:pending`. A PR whose fix round never actually
+ * completes a rearm (the repair keeps failing, stalling, or getting reassigned) never posts that marker — so
+ * `attempts` stays 0 forever, no matter how many rounds actually ran, and `attempts >= roundCap` never fires.
+ * What DOES post once per completed round for exactly this population is the automatic advisory-panel comment
+ * `we:scripts/operations/review-pr.mjs`'s `advise` step posts on every run against a `review:human` PR
+ * (#xlw02hw) — it runs unconditionally, independent of whether the round goes on to repair/rearm anything.
+ * Counting THOSE recovers "how many times this PR has actually been run against" from the PR's own durable
+ * thread — no parallel state store (#2612 invariant), same discipline `countRearmComments` already uses.
  *
  * BUILD AND COUNT SHARE ONE MARKER SO THEY CAN NEVER DRIFT (the same rule `REARM_COMMENT_MARKER` states for
  * itself). `renderAdvisoryNote` (`we:scripts/operations/review-pr.mjs`) imports {@link ADVISORY_NOTE_MARKER}

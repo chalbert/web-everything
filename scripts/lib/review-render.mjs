@@ -111,6 +111,137 @@ function renderFindingLine(f) {
   return `- ${line}`;
 }
 
+// ── #2447 — THE graduatedTo RESOLUTION BASIS ─────────────────────────────────────────────────────────────
+// A lane that resolves an item via `graduatedTo` (the deliverable already landed in an earlier commit) opens a
+// BACKLOG-ONLY PR: a status splice, with the "why no code" note living only in the PR body. A reviewer or
+// label-lander scanning the changed-file list + `ready-to-merge` reads that as a HOLLOW resolve and strips a
+// valid label (batch-2026-07-11, #2403 / PR #421). These pure helpers derive the basis from the data a surface
+// already holds (the lane manifest, the resolve frontmatter in the diff, the PR body) and render it as a
+// one-line banner every review/label surface can put UP FRONT.
+//
+// PRESENTATION ONLY: the basis never feeds a gate, a label, or a merge decision — it explains a diff, it does not
+// clear one. That is why it lives here (engine tier) and why reading a body-sourced value is acceptable.
+
+/** Frontmatter/body `graduatedTo` values that name no deliverable (an umbrella or no-graduation resolve). */
+const NO_GRADUATION = new Set(['', 'none', 'null', '~']);
+/** Cap on the rendered raw value — a free-text `graduatedTo` must not turn the one-line banner into a paragraph. */
+const MAX_GRADUATED_TO_LEN = 160;
+
+/**
+ * Normalize one raw `graduatedTo` value → the trimmed, unquoted, single-line string, or `null` when it names no
+ * deliverable (`none`, empty, a non-string). Backticks are stripped so the value renders safely inside a code
+ * span; an over-long free-text value is truncated with an ellipsis. Pure.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+export function normalizeGraduatedTo(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.replace(/[\r\n]+/g, ' ').replace(/`/g, '').trim();
+  const quoted = s.match(/^(["'])(.*)\1$/);
+  if (quoted) s = quoted[2].trim();
+  if (NO_GRADUATION.has(s.toLowerCase())) return null;
+  return s.length > MAX_GRADUATED_TO_LEN ? `${s.slice(0, MAX_GRADUATED_TO_LEN - 1)}…` : s;
+}
+
+/**
+ * Read the `graduatedTo` a resolve commit ADDED to a backlog item's frontmatter, off a unified diff text
+ * (`git diff` / `gh pr diff`). Only a `+graduatedTo:` line inside a `backlog/*.md` file section counts — the same
+ * key quoted in a script, a doc, or a removed (`-`) line is ignored. First match wins. Pure; `null` when absent.
+ * @param {string|null|undefined} diffText
+ * @returns {string|null}
+ */
+export function graduatedToFromDiff(diffText) {
+  if (typeof diffText !== 'string' || !diffText) return null;
+  let inBacklogItem = false;
+  for (const line of diffText.split('\n')) {
+    // Every `diff --git` header resets the section, so a header this regex cannot parse (a quoted path) can
+    // never leave a PREVIOUS backlog section open over a code file.
+    if (line.startsWith('diff --git ')) { inBacklogItem = /\sb\/backlog\/[^/\s]+\.md$/.test(line); continue; }
+    if (!inBacklogItem || line.startsWith('+++')) continue;
+    const m = line.match(/^\+graduatedTo:\s*(.*)$/);
+    if (m) {
+      const value = normalizeGraduatedTo(m[1]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * Read a `graduatedTo: <value>` resolution note from a PR BODY — the free-text carrier the #2403 incident used.
+ * Matches a line whose content STARTS with the key (optionally bulleted, bolded, or code-spanned:
+ * `- **graduatedTo:** 6b5874f7`, `` `graduatedTo: 6b5874f7` ``), and skips fenced code blocks and `>` quotes so a
+ * pasted example never reads as this PR's basis. Pure; `null` when absent or `none`.
+ * @param {string|null|undefined} body
+ * @returns {string|null}
+ */
+export function graduatedToFromBody(body) {
+  if (typeof body !== 'string' || !body) return null;
+  let fenced = false;
+  for (const line of body.split('\n')) {
+    const t = line.trim();
+    if (/^(```|~~~)/.test(t)) { fenced = !fenced; continue; }
+    if (fenced || t.startsWith('>')) continue;
+    const m = t.replace(/^[-*]\s+/, '').replace(/\*\*|__|`/g, '').match(/^graduatedTo\s*:\s*(.+)$/);
+    if (m) {
+      const value = normalizeGraduatedTo(m[1]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * Derive the resolution basis a review/label surface should show up front, or `null` when there is none. Pure.
+ *
+ * Fires ONLY for a documented dedup-resolve, i.e. ALL of:
+ *  - a `graduatedTo` names a deliverable (first non-`none` of `manifest` → resolve frontmatter in `diffText` →
+ *    `body`, the most structured carrier first; a caller that does not keep the body may pass the value it already
+ *    extracted with {@link graduatedToFromBody} as `bodyGraduatedTo`);
+ *  - the changed-file list is KNOWN and non-empty (an unreadable diff never claims "no code change");
+ *  - every changed file is under `backlog/` — a code resolve that ALSO sets `graduatedTo` (pointing at the file
+ *    it just wrote) is a normal resolve, not "already landed", and gets no banner;
+ *  - it is not a cross-repo couple (its impl half carries code even when the WE carrier is backlog-only).
+ *
+ * `ref` is the value's first token (`6b5874f7 (review-core …)` → `6b5874f7`); `isCommit` says whether that token is
+ * shaped like a commit SHA, so a surface can phrase a path/item pointer differently if it wants to.
+ * @param {{manifest?: {graduatedTo?: string, repos?: Array<object>}|null, diffText?: string|null,
+ *   body?: string|null, bodyGraduatedTo?: string|null, graduatedTo?: string|null, changedFiles?: string[]|null,
+ *   crossRepo?: boolean}} [o]
+ * @returns {{graduatedTo: string, ref: string, isCommit: boolean, source: ('explicit'|'manifest'|'frontmatter'|'body')}|null}
+ */
+export function deriveResolutionBasis({ manifest = null, diffText = null, body = null, bodyGraduatedTo = null, graduatedTo = null, changedFiles = null, crossRepo = false } = {}) {
+  if (!Array.isArray(changedFiles) || changedFiles.length === 0) return null;
+  if (!changedFiles.every((f) => typeof f === 'string' && /^backlog\//.test(f))) return null;
+  const manifestRepos = manifest && Array.isArray(manifest.repos) ? manifest.repos.length : 0;
+  if (crossRepo === true || manifestRepos > 1) return null;
+  const candidates = [
+    ['explicit', normalizeGraduatedTo(graduatedTo)],
+    ['manifest', normalizeGraduatedTo(manifest?.graduatedTo)],
+    ['frontmatter', graduatedToFromDiff(diffText)],
+    ['body', graduatedToFromBody(body) || normalizeGraduatedTo(bodyGraduatedTo)],
+  ];
+  const hit = candidates.find(([, value]) => value);
+  if (!hit) return null;
+  const [source, value] = hit;
+  const ref = value.split(/\s+/)[0];
+  return { graduatedTo: value, ref, isCommit: /^[0-9a-f]{7,40}$/i.test(ref), source };
+}
+
+/**
+ * Render a resolution basis as the one-line banner a review/label surface puts UP FRONT, or `null` when there is no
+ * basis (so the caller omits the line entirely and a normal code resolve renders byte-identically). Pure.
+ * @param {{graduatedTo?: string, ref?: string}|null|undefined} basis — a {@link deriveResolutionBasis} result.
+ * @returns {string|null}
+ */
+export function renderResolutionBasisBanner(basis) {
+  const value = normalizeGraduatedTo(basis?.graduatedTo);
+  if (!value) return null;
+  const ref = normalizeGraduatedTo(basis?.ref) || value.split(/\s+/)[0];
+  return `> 📦 **Resolution basis:** \`graduatedTo: ${value}\` — no code change — deliverable already landed in \`${ref}\`. `
+    + 'A backlog-only diff here is a documented dedup-resolve, not a hollow one.';
+}
+
 /**
  * Render the full PR review-comment body from a review panel's structured result (#2432). Pure — a
  * deterministic function of its input, no I/O and no dates. EXTENDS `renderPanelVerdictTable`: the per-lens
@@ -126,9 +257,15 @@ function renderFindingLine(f) {
  * table (#xqa9ttq) — e.g. a Codex advisory seat renders `simplicity (codex)` instead of a bare `simplicity`
  * indistinguishable from a Claude row. Threaded straight into `renderPanelVerdictTable`; omitted entirely, the
  * table renders exactly as it did before this param existed.
+ *
+ * #2447 — a `resolutionBasis` ({@link deriveResolutionBasis}) renders its banner directly under the heading, ahead
+ * of the verdict, so a backlog-only graduatedTo resolve explains itself before anyone reads the file list. Absent
+ * ⇒ no line, and the body is byte-identical to before.
+ *
  * @param {{findings?: Array<object>, verdict?: string, disposition?: {mode?: string, autoLand?: boolean}|string,
  *   lensVerdicts?: Object<string, string>, mandatoryLenses?: string[], lenses?: string[], heading?: string,
- *   lensProviders?: Object<string, string>}} [o]
+ *   lensProviders?: Object<string, string>,
+ *   resolutionBasis?: {graduatedTo: string, ref: string}|null}} [o]
  * @returns {string} the markdown PR-comment body.
  */
 export function renderPanelComment({
@@ -140,9 +277,13 @@ export function renderPanelComment({
   lenses = PANEL_LENSES,
   lensProviders,
   heading = 'PR review',
+  resolutionBasis = null,
 } = {}) {
   const list = normalizeFindings(findings);
   const lines = [`## ${heading}`, ''];
+
+  const basisBanner = renderResolutionBasisBanner(resolutionBasis);
+  if (basisBanner) lines.push(basisBanner, '');
 
   const verdictLabel = verdict != null && verdict !== ''
     ? (VERDICT_LABELS[verdict] ?? String(verdict))

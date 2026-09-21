@@ -95,6 +95,8 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { deliveredItemNumsFromPr } from '../lib/open-pr-items.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
@@ -236,7 +238,7 @@ export function buildDuplicateFindingBody({ pr, duplicates } = {}) {
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultListOpenPrs({ exec = execFileSync, repo = null } = {}) {
+export function defaultListOpenPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,title,body,labels,files'];
   if (repo) argv.push('--repo', repo);
@@ -311,12 +313,15 @@ if (IS_CLI) {
   const verb = argv.find((a) => !a.startsWith('--')) || 'sweep';
   const repo = flag('repo') || null;
   const dryRun = argv.includes('--dry-run');
+  const prsFile = flag('prs-file');
   if (verb !== 'sweep') {
-    writeLineSync(2, `usage: duplicate-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run]`);
+    writeLineSync(2, `usage: duplicate-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]`);
     process.exitCode = 2;
   } else {
     try {
-      const results = watchDuplicatePrs({ repo, dryRun });
+      const results = watchDuplicatePrs({
+        repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}),
+      });
       for (const r of results) {
         const verb2 = dryRun ? 'would flag' : r.error ? 'FAILED to flag' : 'flagged';
         writeLineSync(2, `  ⚠ PR #${r.pr}: ${verb2} as a duplicate of item(s) ${r.itemNums.map((n) => `#${n}`).join(', ')}${r.error ? ` (${r.error})` : ''}`);

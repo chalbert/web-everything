@@ -56,6 +56,10 @@
  * `reason`/`reasons` set is supplied — retired/unknown tokens dropped, never thrown, #2632) — matching how
  * `reduce` reads its input. Flags `--reason` / `--reasons`
  * (comma-sep) override the JSON's fields, same as `reduce`.
+ * #2447 — `comment` also renders the graduatedTo RESOLUTION BASIS banner up front: pass a pre-derived
+ * `resolutionBasis`, or the raw carriers `deriveResolutionBasis` reads — `changedFiles` plus any of `graduatedTo` /
+ * `manifest` / `diff` / `body` (and `crossRepo`). `--graduated-to=<value>` overrides the JSON's `graduatedTo`. The
+ * banner fires only for a backlog-only diff, so a normal code resolve renders exactly as before.
  *
  * Exit codes: 0 = ok; 2 = usage error (unknown subcommand / bad flags / no input); 1 = a derivation threw
  * (e.g. a missing mandatory-lens verdict) — the message is printed as `{error}`. NOTE (#2632): a RETIRED or
@@ -83,7 +87,7 @@ import {
   // `input.lens` enum is `[...PANEL_LENSES]`, and the decision-prose lens set is not in it.
   PANEL_LENSES,
 } from './lib/review-core.mjs';
-import { renderPanelComment } from './lib/review-render.mjs';
+import { renderPanelComment, deriveResolutionBasis } from './lib/review-render.mjs';
 // #3335 — the two pure derivations the `shape` subcommand COMPOSES and never restates. `scoreEscalation` turns a
 // file list into `{reasons, signals, humanRequired, careLevel}`; `routeReviewShape` (#3309) turns that same list
 // plus the care level into the lens VOCABULARY and the `panelRigorForCareLevel` dial. Neither is re-implemented
@@ -268,7 +272,8 @@ export function buildMandateText({ kind, lens, findings, round, roundCap, diffBa
  * `renderPanelComment` (`./lib/review-render.mjs`).
  * @param {{findings?: Array<object>, verdict?: string, disposition?: object|string, humanRequired?: boolean,
  *   reason?: string, reasons?: string[], lensVerdicts?: Object<string,string>, mandatoryLenses?: string[],
- *   lenses?: string[], heading?: string}} [input]
+ *   lenses?: string[], heading?: string, resolutionBasis?: object|null, graduatedTo?: string,
+ *   changedFiles?: string[], manifest?: object, diff?: string, body?: string, crossRepo?: boolean}} [input]
  * @returns {string} the markdown PR-comment body.
  */
 export function buildComment(input = {}) {
@@ -283,6 +288,13 @@ export function buildComment(input = {}) {
     mandatoryLenses,
     lenses,
     heading,
+    resolutionBasis,
+    graduatedTo,
+    changedFiles,
+    manifest,
+    diff,
+    body,
+    crossRepo,
   } = input || {};
 
   const normalized = normalizeFindings(findings);
@@ -306,6 +318,10 @@ export function buildComment(input = {}) {
     mandatoryLenses,
     lenses,
     heading,
+    // #2447 — a supplied basis wins; otherwise derive it from whichever raw carriers the caller passed.
+    resolutionBasis: resolutionBasis !== undefined
+      ? resolutionBasis
+      : deriveResolutionBasis({ graduatedTo, changedFiles, manifest, diffText: diff, body, crossRepo }),
   });
 }
 
@@ -402,6 +418,7 @@ function runComment(flags, asJson) {
   if (typeof flags.reason === 'string') input.reason = flags.reason;
   if (typeof flags.reasons === 'string') input.reasons = flags.reasons.split(',').map((s) => s.trim()).filter(Boolean);
   if (typeof flags.heading === 'string') input.heading = flags.heading;
+  if (typeof flags['graduated-to'] === 'string') input.graduatedTo = flags['graduated-to'];
 
   let markdown;
   try {

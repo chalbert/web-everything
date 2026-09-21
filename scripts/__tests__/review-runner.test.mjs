@@ -13,17 +13,88 @@
  *   • `repoKeyForSlug` — the #2830 M3 slug↔key mapper the runner derives its ledger key from (fail-closed on an
  *     unknown slug, so `--repo` can never silently key an unrelated repo).
  */
-import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runShadowPass, acquireLease, releaseLease, runnerOwner } from '../review-runner.mjs';
+import { runShadowPass, appendShadowRecords, acquireLease, releaseLease, runnerOwner } from '../review-runner.mjs';
+import { readVerdictLedger, foldVerdictLedger } from '../lib/verdict-ledger.mjs';
 import { readLockEntry } from '../readiness/file-locks.mjs';
 import { resolveDispositionConfig } from '../lib/review-policy.mjs';
 import { VERDICTS, MANDATORY_LENSES } from '../lib/jury-core.mjs';
-import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 
 const CONFIG = resolveDispositionConfig();
+
+describe('#3217 durable shadow observations', () => {
+  let root;
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  function isolate() {
+    root = mkdtempSync(join(tmpdir(), 'review-runner-ledger-'));
+    vi.stubEnv('WE_VERDICT_LEDGER_DIR', join(root, 'ledger'));
+    vi.stubEnv('CONVEYOR_JURY_DIR', join(root, 'jury'));
+  }
+
+  it('round-trips both pass outcomes through the single writer without granting clearance', () => {
+    isolate();
+    const records = runShadowPass([
+      { pr: 1, repo: 'we', labels: ['review:pending'] },
+      { pr: 2, repo: 'we', labels: ['review:pending'] },
+    ], CONFIG, (subject) => subject === 'we#1' ? cleanDiverseLedger() : []);
+    appendShadowRecords(records, 'chalbert/web-everything');
+    const rows = readVerdictLedger('chalbert/web-everything');
+    expect(rows.map((r) => r.wouldClear)).toEqual([true, false]);
+    for (const r of rows) {
+      expect(r).toMatchObject({ verdict: 'observed', mode: 'shadow', applied: false, mutated: false, clears: false });
+      expect(foldVerdictLedger(rows).get(r.pr)).toMatchObject({ current: null, clears: false, outstandingHolds: [] });
+    }
+    expect(records.every((r) => !r.applied && !r.mutated)).toBe(true);
+  });
+
+  it.each(['throws', 'refuses'])('continues appending after a writer %s, even if stderr throws', (failure) => {
+    const records = runShadowPass([1, 2].map((pr) => ({ pr, repo: 'we', labels: ['review:pending'] })), CONFIG, () => []);
+    const append = vi.fn().mockImplementationOnce(() => {
+      if (failure === 'throws') throw new Error('disk full');
+      return { ok: false, errors: ['refused'] };
+    }).mockReturnValue({ ok: true });
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => { throw new Error('closed'); });
+    expect(() => appendShadowRecords(records, 'chalbert/web-everything', append)).not.toThrow();
+    expect(append).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])('CLI reports normally with ledger failure=%s and makes only GitHub reads', (fail) => {
+    isolate();
+    mkdirSync(join(root, 'bin'));
+    // Any unexpected command, including a label/comment/merge writer, fails the child probe.
+    writeFileSync(join(root, 'bin', 'gh'), `#!/bin/sh
+echo "$1 $2" >> "$WE_TEST_GH_CALLS"
+if [ "$1 $2" = "pr list" ]; then
+  [ "$3" = "--repo" ] && [ "$4" = "${CONSTELLATION_REPOS.we.slug}" ] || exit 98
+  echo '[{"number":42,"labels":[{"name":"review:pending"}]}]'
+else
+  exit 99
+fi
+`, { mode: 0o755 });
+    if (fail) writeFileSync(join(root, 'ledger'), 'not a directory');
+    const child = spawnSync(process.execPath, ['scripts/review-runner.mjs', '--no-lock', '--json'], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`,
+        WE_TEST_GH_CALLS: join(root, 'gh-calls') },
+    });
+    expect(child.status, child.stderr).toBe(0);
+    expect(readFileSync(join(root, 'gh-calls'), 'utf8')).toBe('pr list\n');
+    expect(JSON.parse(child.stdout)).toMatchObject({ ranPass: true, mode: 'shadow', mutations: 0 });
+    if (fail) expect(child.stderr).toContain('verdict-ledger append failed');
+    else expect(readVerdictLedger('chalbert/web-everything')).toEqual([
+      expect.objectContaining({ pr: 42, mode: 'shadow', wouldClear: false, applied: false, mutated: false }),
+    ]);
+  });
+});
 // the fixed sentinel the runner keys its singleton lock by (mirrors RUNNER_LEASE_PATH in review-runner.mjs).
 const LEASE_PATH = '<review-runner:singleton>';
 
@@ -126,4 +197,9 @@ describe('repoKeyForSlug — the #2830 M3 slug↔key mapper (fail-closed)', () =
     expect(repoKeyForSlug('')).toBeNull();
     expect(repoKeyForSlug(undefined)).toBeNull();
   });
+});
+
+it('recognizes owner-qualified sibling slugs', () => {
+  expect(repoKeyForSlug('chalbert/frontierui')).toBe('frontierui');
+  expect(repoKeyForSlug('chalbert/plateau-app')).toBe('plateau-app');
 });

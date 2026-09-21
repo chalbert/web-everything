@@ -796,12 +796,17 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
 
     const commitCallIdx = run.calls.findIndex((c) => c.cmd === 'git' && c.args[0] === 'commit');
+    const addCallIdx = run.calls.findIndex((c) => c.cmd === 'git' && c.args[0] === 'add');
     const stepCallIdx = run.calls.findIndex((c) => c.cmd === 'node' && c.args[1] === 'step');
     expect(commitCallIdx).toBeGreaterThan(-1);
+    expect(addCallIdx).toBeGreaterThan(-1);
     expect(stepCallIdx).toBeGreaterThan(-1);
+    expect(addCallIdx).toBeLessThan(commitCallIdx);
     expect(commitCallIdx).toBeLessThan(stepCallIdx); // committed before the NEXT step call reads the lane
 
+    const addCall = run.calls[addCallIdx];
     const commitCall = run.calls[commitCallIdx];
+    expect(addCall.args.slice(2)).toEqual(commitCall.args.slice(4)); // add's paths equal commit's paths
     expect(commitCall.args).toEqual(['commit', '-F', `${lane}/.converge-commit-msg-r1.txt`, '--', 'src/foo.mjs']);
     expect(commitCall.args).not.toContain('-A');
     expect(commitCall.args).not.toContain('.converge-obs-1-0.json'); // this wrapper's own bookkeeping, never committed

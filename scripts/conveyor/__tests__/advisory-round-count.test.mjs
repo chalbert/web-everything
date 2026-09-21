@@ -1,8 +1,8 @@
 /**
  * @file scripts/conveyor/__tests__/advisory-round-count.test.mjs
- * @description Pins {@link countAdvisoryComments} (#3383 mechanical-dispatcher) — the durable, restart-surviving
- *   count of how many advisory-panel rounds have already run against a `review:human` PR. Mirrors
- *   `rearm-review.test.mjs`'s own `countRearmComments` cases, for the sibling counter this item adds.
+ * @description Pins {@link countAdvisoryComments} (#3383) — the durable, restart-surviving count of how many
+ *   advisory-panel rounds have already run against a `review:human` PR. Mirrors `rearm-review.test.mjs`'s own
+ *   `countRearmComments` cases, for the sibling counter this item adds.
  */
 import { describe, it, expect } from 'vitest';
 import { countAdvisoryComments, ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';

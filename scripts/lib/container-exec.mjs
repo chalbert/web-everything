@@ -83,7 +83,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 /** The image this POC proved `check:standards` against — `node:22-alpine` plus `git` (alpine's base image
  *  ships no git at all, and `check-standards.mjs` shells out to it for its provenance/surface-classifier
@@ -203,6 +203,8 @@ export function buildContainerRunArgs({
   command, cwd, alternatesPrimaryRoot = null, nodeModulesVolume = null, extraReadOnlyMounts = [],
   image = DEFAULT_CONTAINER_IMAGE, cpus = DEFAULT_CONTAINER_CPUS, memory = DEFAULT_CONTAINER_MEMORY,
 }) {
+  // Direct callers may supply a relative checkout; bind mounts and guest paths must be absolute.
+  cwd = resolve(cwd);
   const args = ['run', '--rm', '--cpus', String(cpus), '--memory', String(memory)];
   args.push('--volume', `${cwd}:${cwd}:rw`);
   if (alternatesPrimaryRoot) args.push('--volume', `${alternatesPrimaryRoot}:${alternatesPrimaryRoot}:ro`);
@@ -246,7 +248,8 @@ export function buildContainerRunArgs({
  * @param {(path:string)=>boolean} [opts.exists]  defaults to a real `existsSync` — injectable for tests
  */
 export function execContainerized(command, opts = {}) {
-  const cwd = opts.cwd || process.cwd();
+  // Resolve before deriving sibling/alternates paths as well as the checkout mount.
+  const cwd = resolve(opts.cwd || process.cwd());
   const env = opts.env || process.env;
   const execFile = opts.execFile || ((bin, argv, o) => execFileSync(bin, argv, o));
   const readAlternates = opts.readAlternates || readAlternatesPrimaryRoot;
@@ -281,7 +284,15 @@ export function containerCliAvailable(execFile = (bin, argv, o) => execFileSync(
 export function containerImageAvailable(image = DEFAULT_CONTAINER_IMAGE, execFile = (bin, argv, o) => execFileSync(bin, argv, o)) {
   try {
     const out = execFile('container', ['image', 'list'], { stdio: ['ignore', 'pipe', 'ignore'] });
-    return String(out).split('\n').some((line) => line.trim().startsWith(image.split(':')[0]) && line.includes(image.split(':')[1] || 'latest'));
+    // The listing has separate NAME and TAG columns; prefixes and tag substrings are different images.
+    const tagIndex = image.lastIndexOf(':');
+    const hasTag = tagIndex > image.lastIndexOf('/');
+    const name = hasTag ? image.slice(0, tagIndex) : image;
+    const tag = (hasTag ? image.slice(tagIndex + 1) : '') || 'latest';
+    return String(out).split('\n').some((line) => {
+      const [listedName, listedTag] = line.trim().split(/\s+/);
+      return listedName === name && listedTag === tag;
+    });
   } catch { return false; }
 }
 
@@ -293,6 +304,37 @@ export function nodeModulesVolumeAvailable(volume = DEFAULT_NODE_MODULES_VOLUME,
     const out = execFile('container', ['volume', 'list'], { stdio: ['ignore', 'pipe', 'ignore'] });
     return String(out).split('\n').some((line) => line.trim().split(/\s+/)[0] === volume);
   } catch { return false; }
+}
+
+/**
+ * Whether a REAL `container run` proof can run here, and if not, which prerequisites are missing. Every real
+ * proof runs `container run … <image>`, so the run-time image is required by EVERY block; a block that also
+ * mounts the baked `node_modules` volume passes `needsNodeModulesVolume`. A missing image is a reason to
+ * skip, not a failure: `container run` with an absent local-only image name tries to PULL it from the default
+ * registry (`registry-1.docker.io/library/…`) and dies with a 401 — a machine that never built the POC image
+ * is unconfigured, not broken.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.needsNodeModulesVolume]  also require the baked node_modules volume
+ * @param {string} [opts.image]                    defaults to {@link DEFAULT_CONTAINER_IMAGE} — what
+ *                                                 {@link buildContainerRunArgs} runs when no image is passed
+ * @param {string} [opts.volume]                   defaults to {@link resolveNodeModulesVolume}
+ * @param {(bin:string, argv:string[], o:object)=>any} [opts.execFile]  injectable for tests
+ * @returns {{ run: boolean, missing: string[] }}  `missing` names each absent prerequisite, for a skip reason
+ */
+// @test-only-export-ok: the skip/run decision for this module's own REAL-container integration blocks — the
+// test file asks it before declaring each describe block, so the guard is one probed, unit-tested rule instead
+// of two hand-written HAVE_* expressions that can drift from what the tests actually run.
+export function realContainerProofPlan({
+  needsNodeModulesVolume = false, image = DEFAULT_CONTAINER_IMAGE, volume = resolveNodeModulesVolume(), execFile,
+} = {}) {
+  const probeArgs = execFile ? [execFile] : [];
+  // No CLI ⇒ every other probe would throw into `false` anyway; report the one real cause.
+  if (!containerCliAvailable(...probeArgs)) return { run: false, missing: ['the `container` CLI'] };
+  const missing = [];
+  if (!containerImageAvailable(image, ...probeArgs)) missing.push(`image ${image}`);
+  if (needsNodeModulesVolume && !nodeModulesVolumeAvailable(volume, ...probeArgs)) missing.push(`volume ${volume}`);
+  return { run: missing.length === 0, missing };
 }
 
 /** Path to this POC's own `Containerfile`, so a build helper (or a human) never has to hardcode it twice. */

@@ -31,6 +31,7 @@
  *   node scripts/push-if-green.mjs --repo=~/workspace/frontierui --gate="npm run check:standards"
  *   node scripts/push-if-green.mjs --repo=~/workspace/plateau-app --gate="npm run build"
  *   node scripts/push-if-green.mjs --assume-green        # caller already gated green — skip the gate, just ff-push
+ *   node scripts/push-if-green.mjs --sha=<commit>        # gate + publish exactly this ancestor of local main
  *   node scripts/push-if-green.mjs --dry-run             # gate + report the push decision, but do NOT push
  *   node scripts/push-if-green.mjs --json                # machine-readable result
  *
@@ -38,6 +39,7 @@
  *   --repo=<path>     checkout to publish (default: the cwd's git toplevel)
  *   --gate=<cmd>      the gate command to run in that repo (default: "npm run test:unit && npm run check:standards")
  *   --branch=<ref>    the branch to publish (default: "main")
+ *   --sha=<commit>    publish this resolved commit from local branch history; skip JIT numbering
  *   --remote=<name>   the remote to push to (default: "origin")
  *   --assume-green    skip running the gate — the caller has already verified green (integrator path)
  *   --dry-run         run the gate + decide, but never push
@@ -73,6 +75,7 @@ const REMOTE = typeof flags.remote === 'string' ? flags.remote : 'origin';
 const ASSUME_GREEN = !!flags['assume-green'];
 const DRY_RUN = !!flags['dry-run'];
 const AS_JSON = !!flags.json;
+const HAS_SHA = Object.hasOwn(flags, 'sha');
 
 // ── git helpers (throw-on-error) ────────────────────────────────────────────────────────────────────
 const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -96,11 +99,26 @@ if (head !== BRANCH) {
   );
 }
 
+// Pin an explicit source before gating; reject malformed input and commits outside our branch history.
+let sourceSha = null;
+if (HAS_SHA) {
+  sourceSha = typeof flags.sha === 'string' && flags.sha
+    ? tryGit(['rev-parse', '--verify', '--end-of-options', `${flags.sha}^{commit}`]) : null;
+  if (!sourceSha) {
+    emit({ repo: REPO, pushed: false, gate: 'skipped', reason: 'no-such-sha', detail: `source commit "${flags.sha}" not found — pass --sha=<commit>.` }, 3);
+  }
+  const branchTip = git(['rev-parse', BRANCH]);
+  if (tryGit(['merge-base', '--is-ancestor', sourceSha, branchTip]) === null) {
+    emit({ repo: REPO, pushed: false, gate: 'skipped', reason: 'sha-not-on-branch', detail: `source commit ${sourceSha.slice(0, 8)} is NOT an ancestor of local ${BRANCH} (${branchTip.slice(0, 8)}) — refusing to push.` }, 3);
+  }
+}
+
 // ── 2. Green-gate precondition — run the gate unless the caller already verified green ────────────────
 let gate = 'assumed-green';
 if (!ASSUME_GREEN) {
   try {
-    execSync(GATE, { cwd: REPO, stdio: 'inherit' });
+    // Scoped JSON callers parse stdout as one result; send gate chatter to stderr in this mode.
+    execSync(GATE, { cwd: REPO, stdio: HAS_SHA && AS_JSON ? ['inherit', 2, 2] : 'inherit' });
     gate = 'green';
   } catch {
     emit(
@@ -113,7 +131,7 @@ if (!ASSUME_GREEN) {
 // ── 3. Is there anything to push? Compare local BRANCH to remote-tracking, ff-only ────────────────────
 // Fetch the remote branch WITHOUT modifying the working tree (updates only the remote-tracking ref).
 tryGit(['fetch', REMOTE, BRANCH, '--quiet']);
-let local = git(['rev-parse', BRANCH]);
+let local = sourceSha ?? git(['rev-parse', BRANCH]);
 const remote = tryGit(['rev-parse', `${REMOTE}/${BRANCH}`]);
 
 if (remote && remote === local) {
@@ -151,7 +169,8 @@ if (DRY_RUN) {
 // failure REFUSES the push (fail closed) rather than landing an item this script already knows would be
 // un-numbered — strictly better than the old best-effort-after-the-fact shape, since nothing reaches origin
 // un-numbered in the first place. Skipped in `--dry-run` (no mutation) and for any non-`main` branch.
-if (!DRY_RUN && BRANCH === 'main') {
+// A --sha publish owns only the named commit; numbering would leave an extra, unpublished local commit.
+if (!DRY_RUN && BRANCH === 'main' && !HAS_SHA) {
   const numbering = await numberPendingHashesBeforePush(REPO);
   if (numbering.attempted && numbering.error) {
     emit(
@@ -165,11 +184,12 @@ if (!DRY_RUN && BRANCH === 'main') {
 }
 
 // ── 4. Fast-forward push (explicit refspec; never --force) ────────────────────────────────────────────
+const refspec = HAS_SHA ? `${sourceSha}:refs/heads/${BRANCH}` : `${BRANCH}:${BRANCH}`;
 try {
-  git(['push', REMOTE, `${BRANCH}:${BRANCH}`]);
+  git(['push', REMOTE, refspec]);
 } catch (e) {
   emit(
-    { repo: REPO, pushed: false, gate, reason: 'push-failed', detail: `git push ${REMOTE} ${BRANCH}:${BRANCH} failed (${String(e && e.message || e).split('\n')[0]}) — origin unchanged.` },
+    { repo: REPO, pushed: false, gate, reason: 'push-failed', detail: `git push ${REMOTE} ${refspec} failed (${String(e && e.message || e).split('\n')[0]}) — origin unchanged.` },
     3,
   );
 }

@@ -200,8 +200,11 @@ const GATE = typeof flags.gate === 'string' ? flags.gate : resolveDefaultGate({ 
 //    overwrite an existing TERMINAL (`green`/`red`) record belonging to a DIFFERENT sha with a `running` marker
 //    — destroying a sibling run's recorded result before any CAS could protect it. Refuse to clobber a terminal
 //    record for a foreign sha (a `running`/absent/own-sha marker is fine to overwrite: re-verifying is legitimate).
+//    #3538: a terminal record already merged into origin/main is spent. Only a successful ancestry check
+//    permits replacing it; tryGit returns null for non-ancestors and errors (including a missing ref).
 const preStart = readMarker();
-if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {
+if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha
+    && tryGit(['merge-base', '--is-ancestor', preStart.sha, 'origin/main']) === null) {
   emit(
     {
       sha: headSha, status: 'superseded', reason: 'superseded', exitCode: null,

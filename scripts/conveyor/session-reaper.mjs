@@ -44,6 +44,8 @@
  * `kind !== 'background'` guard above, but "should never happen" is not the same as "cannot happen".
  */
 
+import { parseSessionSlug } from './session-slug.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 

@@ -3,10 +3,11 @@ bornAs: x6qdz9n
 kind: story
 size: 5
 parent: "3029"
-status: active
+status: resolved
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:skills-src/conveyor/investigation-agent-brief.md", "we:scripts/check-standards-rules.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-07"
 dateStarted: "2026-09-08"
+dateResolved: "2026-09-19"
 tags: []
 ---
 

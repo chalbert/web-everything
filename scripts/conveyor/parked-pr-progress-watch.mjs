@@ -48,12 +48,16 @@
  * `parked-pr-conflict-watch.mjs` and `duplicate-pr-watch.mjs` lines — the same "piggyback on a pass the
  * headless runner already ticks" shape, so neglect is checked every tick with no new cron/daemon.
  */
+import { mintSessionSlug } from './session-slug.mjs';
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { REVIEW_LABELS, REVIEW_HOLD_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
@@ -150,9 +154,9 @@ export function isParkedCandidate(pr) {
  * @param {{pr:number|string, agents?:Array<{name?:string, startedAt?:number|string}>, sinceMs?:number|null}} o
  * @returns {boolean}
  */
-export function everDispatchedReviewOrFix({ pr, agents = [], sinceMs = null } = {}) {
-  const reviewName = `review-${pr}`;
-  const fixName = `fix-${pr}`;
+export function everDispatchedReviewOrFix({ pr, agents = [], repo = 'we', sinceMs = null } = {}) {
+  const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
+  const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const rows = (Array.isArray(agents) ? agents : []).filter((a) => a?.name === reviewName || a?.name === fixName);
   if (!rows.length) return false; // never dispatched at all, at any time — unaffected by sinceMs
   if (!Number.isFinite(sinceMs)) return true; // no time anchor given — the original unscoped "ever" behavior
@@ -225,7 +229,7 @@ export function labeledAtFor(events, labelName) {
  * @returns {boolean}
  */
 export function isNeglectedPr({
-  pr, labels = [], agents = [], labelEvents = [], now = Date.now(),
+  pr, repo = 'we', labels = [], agents = [], labelEvents = [], now = Date.now(),
   thresholdHours = DEFAULT_NEGLECT_THRESHOLD_HOURS, hours, labeledAt,
 } = {}) {
   if (!isParkedCandidate({ labels })) return false; // covers both the dedup skip and "not parked at all"
@@ -234,7 +238,7 @@ export function isNeglectedPr({
   const h = hours === undefined ? parkedHours(at, now) : hours;
   if (h === null || h < thresholdHours) return false;
   const sinceMs = at === null || at === undefined ? null : (at instanceof Date ? at.getTime() : new Date(at).getTime());
-  return !everDispatchedReviewOrFix({ pr, agents, sinceMs: Number.isFinite(sinceMs) ? sinceMs : null });
+  return !everDispatchedReviewOrFix({ pr, agents, repo, sinceMs: Number.isFinite(sinceMs) ? sinceMs : null });
 }
 
 /**
@@ -273,7 +277,7 @@ export function buildNeglectFindingBody({ pr, headRefName, holdLabel, parkedHour
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) {
+export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,labels'];
   if (repo) argv.push('--repo', repo);
@@ -356,6 +360,8 @@ export function watchNeglectedPrs({
   queueScope = {},
 } = {}) {
   const threshold = thresholdHours ?? neglectThresholdHours(env);
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`parked-pr-progress-watch: --repo ${repo} is not a constellation repo`);
   const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-progress-watch', ...queueScope });
   const candidates = prs.filter(isParkedCandidate);
   const results = [];
@@ -388,7 +394,7 @@ export function watchNeglectedPrs({
     // behavior no matter what the pure core supports.
     const labeledAt = labeledAtFor(events, holdLabel);
     const hours = parkedHours(labeledAt, now);
-    const neglected = isNeglectedPr({ pr: pr.number, labels: pr.labels, agents, hours, labeledAt, thresholdHours: threshold });
+    const neglected = isNeglectedPr({ repo: repoKey, pr: pr.number, labels: pr.labels, agents, hours, labeledAt, thresholdHours: threshold });
     if (!neglected) continue;
     const entry = { pr: pr.number, holdLabel, parkedHours: hours, neglected: true, posted: false };
     if (dryRun) { results.push(entry); continue; }
@@ -411,12 +417,15 @@ if (IS_CLI) {
   const verb = argv.find((a) => !a.startsWith('--')) || 'sweep';
   const repo = flag('repo') || null;
   const dryRun = argv.includes('--dry-run');
+  const prsFile = flag('prs-file');
   if (verb !== 'sweep') {
-    writeLineSync(2, `usage: parked-pr-progress-watch.mjs sweep [--repo=<owner/name>] [--dry-run]`);
+    writeLineSync(2, `usage: parked-pr-progress-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]`);
     process.exitCode = 2;
   } else {
     try {
-      const results = watchNeglectedPrs({ repo, dryRun });
+      const results = watchNeglectedPrs({
+        repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}),
+      });
       for (const r of results) {
         const verb2 = dryRun ? 'would flag' : r.error ? 'FAILED to flag' : 'flagged';
         const hoursText = Number.isFinite(r.parkedHours) ? ` (parked ~${Math.round(r.parkedHours)}h)` : '';

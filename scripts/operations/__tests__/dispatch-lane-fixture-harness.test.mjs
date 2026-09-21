@@ -251,13 +251,11 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
 
       const seen = kase.fakeClaude.lastArgv();
       expect(seen).toContain('--bg');
-      // #3331 — the CLI IGNORES `--session-id` on a `--bg` spawn and mints its own id; the flag is still sent
-      // (kept for forward-compat — `buildAgentArgv`'s own docblock) but its VALUE is never what `result.handle`
-      // ends up being. The handle comes from the CLI's own stdout confirmation line (`parseBackgroundedHandle`),
-      // never from the flag we asked for — so asserting equality between the two would assert the exact bug
-      // `#3331` fixed.
-      expect(seen[seen.indexOf('--session-id') + 1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-      expect(seen[seen.indexOf('--session-id') + 1]).not.toBe(result.handle);
+      // CATCH-UP MERGE (2026-09-21) — the argv no longer carries `--session-id` at all (`main` dropped it and
+      // `buildAgentArgv`'s own note explains why keeping a flag the CLI provably discards changes nothing).
+      // `result.handle` is the id the CLI itself printed, read by `parseBackgroundedHandle`.
+      expect(seen).not.toContain('--session-id');
+      expect(result.handle).toMatch(/^[0-9a-f]{8}$/);
       expect(seen[seen.indexOf('-n') + 1]).toBe(`conveyor-${NUM}`);
       expect(seen[seen.length - 1]).toBe(read.prompt);
     } finally {

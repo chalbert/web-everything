@@ -74,6 +74,7 @@ import {
   findGitHookAllFlags,
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
+  checkLeashPin,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 // #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
@@ -96,7 +97,10 @@ import {
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
 } from './lib/citation-check.mjs';
-import { TRUST_CHAIN } from './lib/gate-config.mjs';
+import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
+// #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
+import { scoreEscalation } from './lib/review-escalation.mjs';
+import { scanDiffBranchCoverage } from './lib/diff-branch-coverage.mjs';
 import { isHash } from './backlog/id.mjs';
 
 const require = createRequire(import.meta.url);
@@ -117,6 +121,10 @@ const errors = [];
 const warnings = [];
 const err = (m, descriptor) => errors.push({ message: m, descriptor });
 const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
+
+// #2876 — separate from the scoped-planes average; failures stay blocking.
+const diffBranchCoverage = scanDiffBranchCoverage(ROOT);
+for (const e of diffBranchCoverage.errors) err(e.message, e.descriptor);
 
 // ── Failure descriptors (#095 → fed to the auto-fix agent #196) ────────────────
 // Every descriptor carries a `kind` (the failure class a fixer matches on) and `fix`: the routing
@@ -2286,6 +2294,22 @@ try {
   }
 }
 
+// ── 17c. Leash pin (#2892 — enforces #2840 trigger 3; guards #2838's flip-edit safeguard) ──────
+// No declarative-leash (`POLICY_SPEC`) file may be dropped from the human gate — checked against the roster AND
+// against the real `scoreEscalation`, so neither a reclassification nor a rubric edit can quietly hand the
+// contract (and with it the shadow→enforce flip) to an agent panel. Pure rule + its rationale live in
+// check-standards-rules.mjs (`checkLeashPin`); this only wires the real roster, rubric and filesystem in.
+{
+  const pin = checkLeashPin({
+    specBasenames: POLICY_SPEC_BASENAMES,
+    roster: TRUST_CHAIN,
+    isHumanGated: (path, hunks) => scoreEscalation({ changedFiles: [path], diffHunks: hunks }).humanRequired,
+    homeExists: (rel) => existsSync(join(ROOT, rel)),
+  });
+  for (const e of pin.errors) err(e.message, e.descriptor);
+  for (const w of pin.warnings) warn(w.message, w.descriptor);
+}
+
 // ── 17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ────────
 // #2678 Fork 1 ratified (b) — WARN (never error, never deny) on a file that is BOTH oversized and
 // scope-collision-heavy, keyed on a size+collision composite (never raw line count), with a
@@ -2584,6 +2608,7 @@ if (filesArg || LOCAL_MODE) {
 
 // ── Report ────────────────────────────────────────────────────────────────────
 const summary = {
+  diffBranchCoverage,
   blocks: blocks.length, plugs: plugs.length, protocols: protocols.length, intents: intents.length,
   capabilities: capabilities.length, terms: semantics.length, research: research.length, backlog: backlog.length,
   errors: errors.length, warnings: warnings.length,
@@ -2623,6 +2648,7 @@ if (JSON_MODE) {
 } else {
   const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', CYN = '\x1b[36m', DIM = '\x1b[2m', RST = '\x1b[0m';
   console.log(`${DIM}check-standards — Web Everything${RST}`);
+  console.log(diffBranchCoverage.message);
   if (scopeNote) console.log(`${CYN}  scope${RST} ${DIM}${scopeNote}${RST}`);
   if (localNote) console.log(`${CYN}  local${RST} ${DIM}${localNote}${RST}`);
   for (const w of warnings) console.log(`${YEL}  warn${RST} ${w.message}`);

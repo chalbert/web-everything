@@ -50,6 +50,13 @@
  * conflict or writes a fix — it only decides which of the two existing downstream pipelines a fresh conflict
  * reaches.
  *
+ * RESOLVED CONFLICTS OWE A FRESH REVIEW. Once GitHub confirms `mergeable: MERGEABLE` on a previously
+ * flagged PR still carrying `review:changes`, hand it to `we:scripts/conveyor/rearm-review.mjs` — the SAME
+ * sanctioned hand-back an ordinary repaired bounce uses. Removing only the conflict label stranded this
+ * pass's bounce forever; resurrecting an old `review:accepted` would certify a diff predating the resolution.
+ * The watcher still posts no clearance comment of its own: rearm owns the durable comment and the
+ * `review:changes → review:pending` swap, preserving `review:human`. UNKNOWN is not proof of resolution.
+ *
  * PURE-CORE / IO-SHELL SPLIT (mirrors `we:scripts/conveyor/branch-drift.mjs` and
  * `we:scripts/conveyor/review-status-tag.mjs`):
  *   • {@link isParkedConflictTarget} and {@link planConflictLabelChange} are PURE — no fs/git/gh/clock.
@@ -73,9 +80,11 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
-import { hasUnclearedReviewLabel, hasReviewLabel, REVIEW_LABELS, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
+import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
@@ -141,17 +150,19 @@ export function isParkedConflictTarget(pr) {
 }
 
 /**
- * PURE: what to add/remove so `currentLabels` shows the `merge-status:conflicting` label iff `isConflicting`,
- * and whether THIS call is the first time it's being added (the one moment a comment is owed). Mirrors
+ * PURE: add the conflict marker on detection, remove it on confirmed resolution, and report the transition.
+ * `isResolved` comes from GitHub's
+ * mergeable field, independently of the parked-review predicate; an unknown result must keep the marker
+ * so a later confirmed resolution can still trigger the hand-back. Mirrors
  * `we:scripts/conveyor/review-status-tag.mjs#planStatusLabelChange`'s add/remove shape.
- * @param {{isConflicting:boolean, currentLabels?:Array<{name?:string}|string>}} o
- * @returns {{add:string|null, remove:string[], newlyDetected:boolean}}
+ * @param {{isConflicting:boolean, isResolved?:boolean, currentLabels?:Array<{name?:string}|string>}} o
+ * @returns {{add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean}}
  */
-export function planConflictLabelChange({ isConflicting, currentLabels = [] } = {}) {
+export function planConflictLabelChange({ isConflicting, isResolved = false, currentLabels = [] } = {}) {
   const names = currentLabels.map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean);
   const already = names.includes(CONFLICT_LABEL);
   if (isConflicting && !already) return { add: CONFLICT_LABEL, remove: [], newlyDetected: true };
-  if (!isConflicting && already) return { add: null, remove: [CONFLICT_LABEL], newlyDetected: false };
+  if (!isConflicting && already && isResolved) return { add: null, remove: [CONFLICT_LABEL], newlyDetected: false, newlyResolved: true };
   return { add: null, remove: [], newlyDetected: false };
 }
 
@@ -277,7 +288,7 @@ export function buildConflictFindingBody(pr) {
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) {
+export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,mergeable,mergeStateStatus,labels,files'];
   if (repo) argv.push('--repo', repo);
@@ -326,6 +337,17 @@ export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) 
 }
 
 /**
+ * Hand a resolved conflict back through the existing repaired-bounce CLI for a fresh independent review.
+ * @param {{pr:object, repo:string|null, exec?:Function}} o
+ */
+export function defaultPostConflictRearm({ pr, repo, exec = execFileSync }) {
+  const argv = [join(REPO_ROOT, 'scripts', 'conveyor', 'rearm-review.mjs'), String(pr?.number),
+    '--actor=parked-pr-conflict-watch (conflict resolved)'];
+  if (repo) argv.push(`--repo=${repo}`);
+  exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+}
+
+/**
  * THE IO SHELL. Lists open PRs, classifies each, applies the label change + posts the one-time comment when a
  * PR newly transitions into conflict, and reports what happened. Never throws on a per-PR write failure — one
  * bad `gh` call must not stop the sweep from checking the rest (mirrors this file's siblings' best-effort
@@ -340,12 +362,15 @@ export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) 
  * checkout the operator scoped to its own `.conveyor/queue.json` narrows the candidate list here, at the ONE
  * point the whole-repo listing enters the pass, so every downstream decision (label, comment, finding,
  * stand-down) is scoped by construction rather than by remembering to re-filter at each write site.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, listPrFiles?:Function, queueScope?:object}} [o]
- * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, commented:boolean, error?:string, routedTo?:string}>}
+ *
+ * On `newlyResolved`, a remaining `review:changes` bounce goes to {@link defaultPostConflictRearm}.
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, listPrFiles?:Function, queueScope?:object}} [o]
+ * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
 export function watchParkedPrConflicts({
   repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false,
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
+  postRearm = defaultPostConflictRearm,
   listPrFiles = defaultListPrFiles, queueScope = {},
 } = {}) {
   const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-conflict-watch', ...queueScope });
@@ -365,7 +390,9 @@ export function watchParkedPrConflicts({
   let resolvedRepo = repo;
   for (const pr of Array.isArray(prs) ? prs : []) {
     const isConflicting = isParkedConflictTarget(pr);
-    const plan = planConflictLabelChange({ isConflicting, currentLabels: pr?.labels });
+    const plan = planConflictLabelChange({
+      isConflicting, isResolved: String(pr?.mergeable || '').toUpperCase() === 'MERGEABLE', currentLabels: pr?.labels,
+    });
     if (!plan.add && plan.remove.length === 0) continue;
     const entry = { num: pr?.number, isConflicting, ...plan, commented: false };
     if (dryRun) { results.push(entry); continue; }
@@ -412,6 +439,13 @@ export function watchParkedPrConflicts({
         } catch (e2) {
           entry.error = String((e2 && e2.message) || e2).split('\n')[0];
         }
+      } else if (plan.newlyResolved && hasReviewLabel(pr?.labels, REVIEW_LABELS.changes)) {
+        try {
+          postRearm({ pr, repo: resolvedRepo });
+          entry.routedTo = 'rearm-review';
+        } catch (e2) {
+          entry.error = String((e2 && e2.message) || e2).split('\n')[0];
+        }
       }
     } catch (e) {
       entry.error = String((e && e.message) || e).split('\n')[0];
@@ -428,12 +462,15 @@ if (IS_CLI) {
   const verb = argv.find((a) => !a.startsWith('--')) || 'sweep';
   const repo = flag('repo') || null;
   const dryRun = argv.includes('--dry-run');
+  const prsFile = flag('prs-file');
   if (verb !== 'sweep') {
-    writeLineSync(2, `usage: parked-pr-conflict-watch.mjs sweep [--repo=<owner/name>] [--dry-run]`);
+    writeLineSync(2, `usage: parked-pr-conflict-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]`);
     process.exitCode = 2;
   } else {
     try {
-      const results = watchParkedPrConflicts({ repo, dryRun });
+      const results = watchParkedPrConflicts({
+        repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}),
+      });
       for (const r of results) {
         const verb2 = dryRun ? 'would' : r.error ? 'FAILED to' : 'did';
         const what = r.add ? `apply ${CONFLICT_LABEL}${r.commented ? ' + comment' : ''}` : `remove ${r.remove.join(',')}`;

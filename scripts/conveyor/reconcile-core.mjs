@@ -104,20 +104,13 @@ import { classifyPr } from '../progress-board.mjs';
 import { reduceCheckState } from '../operations/pr-status.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../lib/jury-core.mjs';
 import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
-// #3383 mechanical-dispatcher round-cap fix — see this module's own header note on REFUSAL 3 below, and
-// `advisory-round-count.mjs`'s header for the PR #2117 incident this closes.
+// #3383 — see this module's own REFUSAL 3 note below, and `advisory-round-count.mjs`'s header for the
+// `#2117`/`#2298` incident this closes.
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
-// `sessionSlugFor` (not a NEW pure slug file, unlike `review-session-slug.mjs`) — `we:scripts/operations/
-// dispatch-lane.mjs` has NO `node:` import of its own (its whole static graph is `./registry.mjs` +
-// `./step-kinds.mjs`, per that file's own header), so it is exactly as safe for this PURE module to import as
-// `review-session-slug.mjs` already is. Reused rather than duplicated: `fix-<pr>` is ALREADY the session-slug
-// convention `dispatch-lane.mjs`'s own tick-core-driven fix dispatch fills `{{SESSION_SLUG}}` with (#3332), and
-// `we:scripts/conveyor/reconcile-fix-dispatch.mjs` (#3438) names its own spawned fix sessions with the same
-// function — a second definition of `fix-<pr>` here would be the exact drift risk `review-session-slug.mjs`'s
-// own file header was written to avoid for the review slug.
+// Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 
 /**
@@ -142,6 +135,11 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review']);
  *                          dead. Refuses AND surfaces, because nobody is coming to answer it.
  *   `liveness-unknown`   — a session is bound but its `pid` is absent or unprobed. Absence of a field is never
  *                          evidence of death, so this refuses rather than dispatching over a possibly-live agent.
+ *                          If the session is CONFIRMED stuck by other means (GH #77683 — listed forever, and
+ *                          `claude stop`/`claude rm` fail or silently no-op against it), the fix is
+ *                          `we:scripts/operations/clear-stuck-session.mjs` (`node scripts/operations/run.mjs
+ *                          clear-stuck-session --session=<id>`), which replays THIS function's own verdict
+ *                          rather than re-deriving a second one — never a manual `~/.claude/jobs/<id>/` move.
  *   `owed-elsewhere`     — real work is owed, by a job this pass does not run (a human clear, a CI heal, a
  *                          rebase). Named rather than dropped, so the PR is visible in the report.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
@@ -304,7 +302,7 @@ export function countFindings(comments) {
  * @param {Array<object>} agents
  * @returns {Array<{agent:object, cwd:string, sha:string}>}
  */
-export function bindAgents(pr, agents) {
+export function bindAgents(pr, agents, repo = 'we') {
   const sha = String(pr?.headRefOid ?? '');
   const list = Array.isArray(agents) ? agents : [];
   const bound = new Map();
@@ -322,7 +320,7 @@ export function bindAgents(pr, agents) {
     // #3438 — BOTH name-based slugs, unioned the same way path 1 and path 2 already are: a PR can legitimately
     // have a live review agent OR a live fix agent bound to it by name, and this pass must refuse dispatching
     // whichever kind is already running.
-    const slugs = [reviewSessionSlug(prNumber), sessionSlugFor(prNumber, 'fix')];
+    const slugs = [reviewSessionSlug(prNumber, repo), sessionSlugFor(prNumber, 'fix', null, '', repo)];
     for (const a of list) {
       if (a && slugs.includes(String(a.name ?? ''))) {
         bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
@@ -354,7 +352,10 @@ export function isAwaitingPermission(agent) {
  *      "busy" is how a 211-hour block stays invisible. The distinct kind is the whole point.
  *   2. `live-process` — a bound session with a probed-live pid. Something IS working this PR; do not pile on.
  *   3. `liveness-unknown` — bound, but the `pid` is absent (4 of 17 entries carry none) or was not probed.
- *      Absence of a field is never evidence of death, so this REFUSES. It does not read as idle.
+ *      Absence of a field is never evidence of death, so this REFUSES. It does not read as idle. A session
+ *      confirmed stuck by other means (the GH #77683 zombie bug — `claude stop`/`claude rm` fail or no-op) is
+ *      cleared via `we:scripts/operations/clear-stuck-session.mjs`, never by hand-moving its job directory or
+ *      re-deriving a second liveness check.
  *   4. Only when every bound session is probed DEAD (`pidAlive === false`) does this return `null`, meaning
  *      "nothing live here, the caller may dispatch".
  *
@@ -431,7 +432,7 @@ export function assessLiveness(bound) {
  *   `we:scripts/lib/jury-core.mjs` rather than re-declared here.
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
-export function planReconcile({ prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP } = {}) {
+export function planReconcile({ repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP } = {}) {
   const dispatch = [];
   const refusals = [];
   const notes = [];
@@ -468,7 +469,7 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
 
     // ── REFUSAL 4 — liveness, from a live process. The binding is derived and its evidence travels with the
     // refusal, because the derivation itself has been observed to be wrong (#3283).
-    const live = assessLiveness(bindAgents(pr, agents));
+    const live = assessLiveness(bindAgents(pr, agents, repo));
     if (live) {
       refuse(live.kind, {
         pid: live.pid, cwd: live.cwd, sha: live.sha, sessionId: live.sessionId, why: live.why,
@@ -522,16 +523,15 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
     // supply the map cannot silently reset a burned PR to zero. NO in-process tally is consulted, by design:
     // this pass is one-shot, it carries nothing in, and a cap a restart can reset is not a cap.
     //
-    // #3383 — `countAdvisoryComments` IS UNIONED IN, not swapped for `countRearmComments`. A `needs-human` PR's
-    // `review:pending` label never clears (INVARIANT 2, `decideSetLabel`), so its `record` step never bounces
-    // and NO re-arm comment is ever posted for it — `countRearmComments` alone stayed pinned at 0 across all
-    // SIX real advisory rounds PR #2117 ran (confirmed live 2026-09-14, identical commit range every time),
-    // which is exactly why the cap never bound. What DOES post once per completed round for that population is
-    // the automatic advisory-panel comment (`we:scripts/operations/review-pr.mjs`'s `advise` step, #xlw02hw) —
-    // counting THAT recovers the real round count. Kept as a `Math.max` alongside the rearm count, not a
-    // replacement: a PR can carry BOTH kinds of history (a `review:human` PR that was once bounced and re-armed
-    // before also picking up advisory rounds), and the cap must bind on whichever count is higher, never reset
-    // by only reading one of the two.
+    // #3383 — `countAdvisoryComments` is UNIONED IN, not swapped for `countRearmComments`. A `bounced` PR that
+    // ALSO carries `review:human` can run round after round without ever completing a repair-and-rearm cycle
+    // (the fix keeps failing/stalling), so `countRearmComments` alone can stay pinned at 0 forever even though
+    // real rounds are running — confirmed live on `#2117` (33 advisory comments against the identical findings
+    // between 2026-09-15T00:24Z and 19:13Z, roughly every 20-90 minutes, no end condition) and `#2298`. What DOES
+    // post once per completed round for that population is the automatic advisory-panel comment
+    // (`we:scripts/operations/review-pr.mjs`'s `advise` step, #xlw02hw) — counting THAT recovers the real round
+    // count. Kept as a `Math.max` alongside the rearm count, never a replacement: a PR can carry BOTH kinds of
+    // history, and the cap must bind on whichever count is higher, never reset by reading only one of the two.
     const attempts = Math.max(
       Number(counts[prNumber]) || 0,
       countRearmComments(pr?.comments),

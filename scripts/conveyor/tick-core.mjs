@@ -135,6 +135,7 @@
  *   `blocked` — had NO other surface at all before this.
  */
 
+import { mintSessionSlug } from './session-slug.mjs';
 import { normNum } from './queue-store.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
 // The kind-scoped pause's PURE half (epic #3383) — the same predicate `dispatch-plan.mjs` uses for its own
@@ -189,7 +190,7 @@ function laneNumFromOverlapReason(reason) {
  * VERBOSE (opt-in, `opts.verbose`, live-toggleable via `driver-verbose.mjs` — never a firehose of unrelated
  * internals, bounded to the SAME dispatch/skip/stall surface as the terse trace): adds (1) every CANDIDATE that
  * was held this tick, including the reasons the terse trace deliberately omits because they already have their
- * own lifecycle note elsewhere (`needs-slice`/`needs-decision`/`unshaped-no-scope`, passed in as `opts.allHeld`
+ * own lifecycle note elsewhere (`needs-slice`/`needs-decision`/`needs-investigation`/`unshaped-no-scope`, passed in as `opts.allHeld`
  * — the UNFILTERED `plan.held`) — "why was THIS one passed over" for every candidate, not only the ones that
  * already got a terse entry; and (2) for a `overlaps lane-<n>` stall, the actual lane row from `opts.lanes`
  * (`state.lanes`, already an input every `planTick` call has) — who really holds it (`session`), its effective
@@ -209,6 +210,9 @@ export function buildDecisionTrace(d, { verbose = false, allHeld = [], lanes = [
   }
   for (const s of Array.isArray(dec.spawnPrepareDecision) ? dec.spawnPrepareDecision : []) {
     trace.push({ kind: 'dispatch', num: s.num, text: `dispatched #${s.num}: prepare decision forks` });
+  }
+  for (const s of Array.isArray(dec.spawnInvestigations) ? dec.spawnInvestigations : []) {
+    trace.push({ kind: 'dispatch', num: s.num, text: `dispatched #${s.num}: auto-investigate (needs-investigation item)` });
   }
   for (const s of Array.isArray(dec.spawnFixes) ? dec.spawnFixes : []) {
     trace.push({ kind: 'dispatch', num: s.num, pr: s.pr ?? null, text: `dispatched fix for PR #${s.pr ?? '?'} (#${s.num}): review:changes bounce` });
@@ -414,6 +418,7 @@ function clearedQueueNums(queue) {
  *  The agreement is asserted by a test instead (`__tests__/tick-core.test.mjs`, cross-checked against
  *  `sessionSlugFor`'s own output). Only the BUILD kind matches — `fix-`, `prepare-`, `prepare-decision-`, and
  *  `ci-heal-` sessions are deliberately excluded, since conflating them would durably-guard the wrong loop's num. */
+// Build sessions identify WE items only.
 const BUILD_SESSION_RE = /^conveyor-(\d+)[a-z]?$/i;
 
 /**
@@ -579,10 +584,10 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * item HOLDS (a note, no spawn — atomic `acquire` would fail one race anyway). Pure — mutates nothing; returns
  * the spawns, the new guard entries, the lanes it consumed, and any hold notes.
  *
- * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number }} ctx
+ * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number, now?:number|null, trace?:boolean, dispatchPaused?:boolean, pausedKinds?:string[]|null }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, investigationSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, now = null } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -592,11 +597,21 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
   const consumedLanes = [];
   const notes = [];
 
+  const admission = [];
   const plan = (num, kind, sink) => {
     const key = normNum(num);
-    if (guardNums.has(key)) return; // live prepare-guard entry → already in flight
-    if (openPrForNum(prs, num)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
-    if (lanes.length === 0) { notes.push({ kind: 'prepare-no-lane', num, text: `no free lane to auto-prepare #${num}` }); return; }
+    const gates = [];
+    if (trace) admission.push({ num, kind, gates });
+    const blocked = (name, condition, observed) => {
+      if (trace) gates.push({ name, pass: !condition, observed });
+      return condition;
+    };
+    const paused = dispatchPaused === true || (Array.isArray(pausedKinds) && pausedKinds.includes(kind));
+    if (blocked('dispatch-paused', paused, paused)) return;
+    if (blocked('prepare-guard', guardNums.has(key), { num: key, guards: [...guardNums] })) return; // live prepare-guard entry → already in flight
+    const existingPr = openPrForNum(prs, num);
+    if (blocked('existing-PR', !!existingPr, existingPr ?? null)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
+    if (blocked('prepare-lane-capacity', lanes.length === 0, [...lanes])) { notes.push({ kind: 'prepare-no-lane', num, text: `no free lane to auto-prepare #${num}` }); return; }
     const lane = lanes.shift();
     consumedLanes.push(lane);
     guardNums.add(key); // a decision and a scope item never share a num, but stay safe against a duplicate row
@@ -611,7 +626,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
   // #3567 — every held `needs-investigation` candidate spawns ONE investigate agent, no `prepared` gate: an
   // investigation is a single dispatched investigator, not a two-phase prepare-then-ratify lifecycle.
   for (const i of Array.isArray(investigations) ? investigations : []) if (i?.num != null) plan(i.num, 'investigate', investigationSpawns);
-  return { scopeSpawns, decisionSpawns, investigationSpawns, newGuards, consumedLanes, notes };
+  return { scopeSpawns, decisionSpawns, investigationSpawns, newGuards, consumedLanes, notes, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -870,9 +885,7 @@ export function clearTerminalCiHealAttempts(ciHealAttempts, prs) {
  */
 export function releaseSessionForNum(num, prepareKindByNum) {
   const kind = prepareKindByNum instanceof Map ? prepareKindByNum.get(normNum(num)) : undefined;
-  if (kind === 'prepare-decision') return `prepare-decision-${num}`;
-  if (kind === 'prepare') return `prepare-${num}`;
-  return `conveyor-${num}`;
+  return mintSessionSlug({ kind: ['prepare', 'prepare-decision'].includes(kind) ? kind : 'conveyor', id: num });
 }
 
 /**
@@ -1234,22 +1247,22 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    lanes. #3609 — a manual dispatch-pause holds these too, not just `plan.launch` (which dispatch-plan.mjs
   //    already empties to `dispatch-paused` holds when paused): these spawns are computed straight off
   //    `state.unshaped` / `state.decisions` / `state.investigations` / `state.prs`, never off `plan.launch`, so
-  //    this tick's OWN `dispatchPaused` input — not a re-read of `plan.held` — is what gates them.
-  //    Already-live guards are untouched either way.
-  //    KIND-SCOPED (epic #3383): the three prepare-family kinds are held INDEPENDENTLY, by emptying the
-  //    candidate list each one is computed from rather than by stubbing out the whole call. That keeps the
-  //    lane arithmetic honest — a held kind consumes no lane, so an UNHELD sibling kind still gets the lanes
-  //    it would have had — and it degrades to the exact former stub when all three are held (empty inputs
-  //    produce empty spawns, empty guards, empty consumed lanes and no notes).
+  //    this tick's OWN `dispatchPaused` input — not a re-read of `plan.held` — is what gates them. Already-live
+  //    guards are untouched either way.
+  //    KIND-SCOPED (epic #3383): the three prepare-family kinds are held INDEPENDENTLY. `pausedKinds` is handed
+  //    straight to `planPrepareSpawns`, so a held kind short-circuits at its OWN `dispatch-paused` admission gate
+  //    (traced, #xupukxa) and consumes no lane — an UNHELD sibling kind still gets the lanes it would have had.
   const prep = planPrepareSpawns({
-    unshaped: kindPaused('prepare') ? [] : unshaped,
-    decisions: kindPaused('prepare-decision') ? [] : decisions,
-    investigations: kindPaused('investigate') ? [] : investigations,
+    unshaped,
+    decisions,
+    investigations,
     prs,
     livePrepareGuards: prepare.live,
     availableLanes,
     tick,
     now,
+    trace: true,
+    pausedKinds,
   });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
@@ -1422,11 +1435,22 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   });
 
   const decisionsOut = {
+    // Carry the planner's evidence verbatim; a reporter must never reconstruct its gates.
+    admission: {
+      queue,
+      cleared: Array.isArray(plan.cleared) ? plan.cleared : null,
+      selection: Array.isArray(plan.selection) ? plan.selection : [],
+      held: Array.isArray(plan.held) ? plan.held : [],
+      planned: Array.isArray(plan.launch) ? plan.launch : [],
+      traces: Array.isArray(plan.admission) ? plan.admission : [],
+      prepare: prep.admission ?? [],
+    },
     counts,
     spawnBuilds: launched.spawn,
     suppressedBuilds: launched.suppressed,
     spawnPrepareScope: prep.scopeSpawns,
     spawnPrepareDecision: prep.decisionSpawns,
+    spawnInvestigations: prep.investigationSpawns,
     spawnFixes: fixPlan.spawns,
     spawnCiHeals: ciHealPlan.spawns,
     armWatchers: watch.arm,

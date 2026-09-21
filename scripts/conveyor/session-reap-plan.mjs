@@ -111,6 +111,7 @@
 // #3383 item 11 — the pure verdict classifier: REUSED, never re-derived. `session-verdicts.mjs` imports only the
 // (import-free) `land-advance-tools.mjs`.
 import { classifySession, DEFAULT_STALL_MINUTES } from './session-verdicts.mjs';
+import { repoKeyForSlugTag } from '../lib/constellation-repos.mjs';
 
 // `normalizeHandle` is a one-line local copy of `../operations/dispatch-lane-io.mjs#normalizeHandle`, kept HERE on purpose:
 // importing it would drag that whole IO module (run store, action dispatch, lease reaper, pr-watch) into this pure
@@ -182,8 +183,16 @@ export function sessionTarget(name) {
   const s = String(name ?? '');
   let m = s.match(/^(?:conveyor|prepare-decision|prepare)-(\d+)[a-z]?$/i);
   if (m) return { kind: 'item', id: m[1] };
-  m = s.match(/^(?:review|fix|ci-heal)-(\d+)[a-z]?$/i);
-  if (m) return { kind: 'pr', id: m[1] };
+  // CATCH-UP MERGE (2026-09-21): `main`'s repo-TAGGED PR slugs (`review-fui-49`, minted by
+  // `we:scripts/conveyor/session-slug.mjs#mintSessionSlug`) parse here too. An UNTAGGED name keeps this
+  // branch's own meaning exactly — no `repo` at all, never a guessed `we` — which is what lets the resolver
+  // fall back to the session's own ledger entry (see this function's own docblock above).
+  m = s.match(/^(?:review|fix|ci-heal)-(?:([a-z]+)-)?(\d+)[a-z]?$/i);
+  if (m) {
+    if (!m[1]) return { kind: 'pr', id: m[2] };
+    const repo = repoKeyForSlugTag(m[1].toLowerCase());
+    return repo === null ? null : { kind: 'pr', id: m[2], repo };
+  }
   return null;
 }
 

@@ -27,7 +27,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createRegistry } from './registry.mjs';
-import { createFileRunStore, newRunId } from './run-store.mjs';
+import { createFileRunStore, createMemoryRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
 import {
   createDefaultJudge, runOperationCli, buildCliSpec, cwdFlagValue, hasJsonFlag,
@@ -43,16 +43,25 @@ import { createReviewPrepReader, createReviewPrepSinks } from './review-prep-io.
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
+import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from './graduation-progress-report.mjs';
+import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { wipAgentsOperation, WIP_AGENTS_OP } from './wip-agents.mjs';
 import { createWipAgentsReader } from './wip-agents-io.mjs';
 import { landAdvanceOperation, LAND_ADVANCE_OP } from './land-advance.mjs';
 import { createLandAdvanceReader } from './land-advance-io.mjs';
 import { createPrReader } from './pr-status-io.mjs';
+import { staleStateOperation, STALE_STATE_OP } from './stale-state.mjs';
+import { createStaleStateReader } from './stale-state-io.mjs';
+import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
+import { createPrReconcileReader } from './pr-status-io.mjs';
+import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
+import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
+import { dispatchEligibilityOperation, DISPATCH_ELIGIBILITY_OP } from './dispatch-eligibility.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 // mechanical-dispatcher #3383 Part 2 follow-up — see `defaultFreshenPrimaryCheckout`'s own docblock for why
 // this is the ONE place the real (git-shelling) freshen function is wired in, rather than a default anywhere
@@ -112,8 +121,9 @@ export const OPERATIONS = Object.freeze({
   //
   // #xqa9ttq — `codexAdvisory` reads `REVIEW_PR_CODEX_ADVISORY=1` off the environment (`codexAdvisoryFromEnv`,
   // `we:scripts/operations/review-pr.mjs`), OFF by default — see that flag's own docs for why it is an env
-  // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
-  // `record-verdict-io.mjs`'s registration below reads the SAME env var. It composes with `json` above
+  // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed). The env var
+  // only decides how a NEW run is STARTED here; `record-verdict-io.mjs`'s resume registration reads the SAVED
+  // RUN's own roster instead (`codexAdvisoryFromRun`, PR #2117 review). It composes with `json` above
   // rather than replacing it: the two knobs are independent (one shapes stdout, the other seats a juror).
   // #x8n4crp — `correctnessAdvisory` reads `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY=1` off the environment
   // (`correctnessAdvisoryFromEnv`), a SEPARATE env var from `codexAdvisory`'s own — the two Codex seats are
@@ -229,12 +239,28 @@ export const OPERATIONS = Object.freeze({
   // reviewer could only run it by hand-writing the wiring. Same no-sinks reasoning as `suggest-next`.
   // #xewnork — did a check actually RUN on the head that is there now? Read-only, same no-sinks reasoning as
   // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
+  [STALE_STATE_OP]: () => ({
+    declaration: staleStateOperation({ readState: createStaleStateReader() }),
+    sinks: {},
+  }),
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
     sinks: {},
   }),
+  [PR_RECONCILE_OP]: () => ({
+    declaration: prReconcileOperation({ readPrs: createPrReconcileReader() }),
+    sinks: {},
+  }),
+  [RUNNER_ACTIVITY_OP]: () => ({
+    declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
   [GATE_HEALTH_OP]: () => ({
     declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
+    sinks: {},
+  }),
+  [GRADUATION_PROGRESS_REPORT_OP]: () => ({
+    declaration: graduationProgressReportOperation({ readScorecards: createScorecardReader() }),
     sinks: {},
   }),
   // #xrpo1 — the gap: no operation reached `deriveReviewDisposition` (`we:scripts/lib/review-core.mjs`), so a
@@ -249,6 +275,12 @@ export const OPERATIONS = Object.freeze({
   // #3037 — the first operation whose effect STARTS work instead of finishing it. Its one sink launches a
   // delivery agent and returns an in-flight marker; the matching OBSERVER is registered by the waker
   // (`we:scripts/operations/wake.mjs`), which is the process that polls it. Both live in `dispatch-lane-io.mjs`.
+  [DISPATCH_ELIGIBILITY_OP]: () => ({
+    declaration: dispatchEligibilityOperation({
+      readTick: createTickReader({ recordLiveness: (stamped) => stamped }),
+    }),
+    sinks: {},
+  }),
   [DISPATCH_LANE_OP]: () => ({
     declaration: dispatchLaneOperation({ readTick: createTickReader() }),
     // `WE_DISPATCH_AGENT_ARGS` is read HERE rather than defaulted inside the sink: the permission mode, the
@@ -416,15 +448,20 @@ if (IS_CLI) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
   }
+  // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
+  // stale-state promises zero filesystem writes, including engine bookkeeping.
+  const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores()
+    : name === STALE_STATE_OP ? { store: createMemoryRunStore(), callLog: undefined }
+    : { store: createFileRunStore(), callLog: createFileCallLogStore() };
   runOperationCli({
     declaration,
     argv: rest,
     registry,
-    store: createFileRunStore(),
+    store: cliStores.store,
     // #3451 — the real, file-backed call-visibility signal. A compute-only operation (gate-health,
     // suggest-next, verify, pr-status) settles in one `driveRun` sweep and never gets a run record; this
     // is the ONLY trace a real CLI invocation of one of those leaves behind.
-    callLog: createFileCallLogStore(),
+    callLog: cliStores.callLog,
     sinks,
     // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
     // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot

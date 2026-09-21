@@ -149,9 +149,11 @@ import { guardedDispatch } from './action-dispatch.mjs';
 import { createActionStore } from './action-store.mjs';
 import { actionResource, normalizeRepo } from './action-record.mjs';
 import { DRIVER_ID } from './tick-mutex.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -207,7 +209,10 @@ export function reviewBriefPath(root = REPO_ROOT) {
  *  `JUDGE_PROVIDER` (#xqa9ttq) is ALWAYS filled, even when nobody asked for anything but the default: see
  *  `dispatchReview`'s own `judgeProvider = 'claude'` default — never blank, so `fillReviewBrief`'s
  *  every-declared-placeholder-must-have-a-value refusal never fires for the ordinary, opt-out case. */
-export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER']);
+export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO']);
+
+/** #xqa9ttq (PR #2115 review, CONFIRMED) - judge providers that are TOOL-FREE ONLY (#3581) and so can never serve review-pr's judge steps, every one of which is tool-bearing (REVIEW_JUROR_TOOLS, by ratified design). */
+export const TOOL_FREE_ONLY_JUDGE_PROVIDERS = Object.freeze(['codex']);
 
 /** Any run of separators a placeholder name might be typo'd with, canonicalized — same shape as `dispatch-
  *  lane.mjs#canonicalPlaceholder`, scoped to this brief's own three names. */
@@ -384,22 +389,24 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {})
 }
 
 /**
- * SHAPE one dispatch request. PURE — separated from the actual fill/spawn so a caller (and a test) can see
- * exactly what would be sent before anything is filled or spawned.
+ * Shape one dispatch request and verify the selected checkout before filling or spawning.
  *
  * @param {{pr: number|string, repo: string}} o
  * @returns {{pr: number, repo: string, sessionSlug: string}}
  */
-export function planReviewDispatch({ pr, repo } = {}) {
+export function planReviewDispatch({ pr, repo, checkoutExists = existsSync, home = homedir() } = {}) {
   const prNum = Number(pr);
   if (!Number.isInteger(prNum) || prNum <= 0) {
     throw new Error(`review-dispatch: --pr must be a positive integer, got ${JSON.stringify(pr)}`);
   }
   const repoStr = String(repo ?? '').trim();
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repoStr)) {
-    throw new Error(`review-dispatch: --repo must be an \`owner/repo\` slug, got ${JSON.stringify(repo)}`);
+  const repoKey = repoKeyForSlug(repoStr);
+  if (repoKey === null) throw new Error(`review-dispatch: --repo ${repoStr} is not a constellation repo`);
+  const laneRepo = repoKey === 'we' ? '.' : resolve(CONSTELLATION_REPOS[repoKey].path.replace(/^\$HOME(?=\/|$)/, home));
+  if (repoKey !== 'we' && !checkoutExists(laneRepo)) {
+    throw new Error(`unsupported-repo: ${repoKey} checkout does not exist at ${laneRepo}`);
   }
-  return { pr: prNum, repo: repoStr, sessionSlug: reviewSessionSlug(prNum) };
+  return { pr: prNum, repo: CONSTELLATION_REPOS[repoKey].slug, repoKey, laneRepo, sessionSlug: reviewSessionSlug(prNum, repoKey) };
 }
 
 /**
@@ -423,8 +430,10 @@ export function planReviewDispatch({ pr, repo } = {}) {
  *   `review-loop-cli.mjs` invocation (brief step 2) is told to pass `--provider=<this>`. One of
  *   `JUDGE_PROVIDER_NAMES`; defaults to `'claude'`, today's behaviour, unchanged — this is OPT-IN. Note what
  *   this does NOT do: it never makes the DISPATCHED SESSION ITSELF (a tool-bearing `claude --bg` agent) run on
- *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` spawns underneath it, which is the one part
- *   of this whole dispatch `#3581`'s ratified sequencing actually clears Codex for.
+ *   Codex — only the TOOL-FREE judge steps `review-loop-cli.mjs` could spawn underneath it would ever be
+ *   eligible (#3581: Codex is tool-free-only). `codex` is now REFUSED here before anything is read or spawned
+ *   (see {@link TOOL_FREE_ONLY_JUDGE_PROVIDERS}), as review-pr's real judge steps are tool-bearing and would be
+ *   refused at the first judge step. `claude` is the only accepted value today.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
@@ -436,6 +445,7 @@ export function dispatchReview({
   checkStaleness,
   judgeProvider = 'claude',
   now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID,
+  checkoutExists = existsSync, home = homedir(),
 } = {}) {
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
@@ -448,9 +458,17 @@ export function dispatchReview({
   if (!JUDGE_PROVIDER_NAMES.includes(judgeProvider)) {
     throw new Error(`review-dispatch: \`judgeProvider\` must be one of ${JUDGE_PROVIDER_NAMES.join('|')}, got ${JSON.stringify(judgeProvider)}`);
   }
-  const planned = planReviewDispatch({ pr, repo: normalizeRepo(repo) });
+  const planned = planReviewDispatch({ pr, repo: normalizeRepo(repo), checkoutExists, home });
+  if (TOOL_FREE_ONLY_JUDGE_PROVIDERS.includes(judgeProvider)) {
+    throw new Error(
+      `review-dispatch: \`judgeProvider: ${JSON.stringify(judgeProvider)}\` is refused - it is a TOOL-FREE-only provider (#3581) and every judge step review-pr runs is tool-bearing, `
+      + 'so a dispatched review would be refused at its first judge step. Use the default `claude`. '
+      + 'A tool-free Codex seat is a per-request pin inside the review-pr declaration, not a dispatch-wide flag. '
+      + 'Opt in with REVIEW_PR_CODEX_ADVISORY=1 in the environment instead.',
+    );
+  }
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
-    PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
+    PR: planned.pr, REPO: planned.repo, LANE_REPO: planned.laneRepo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
   });
   const sessionId = String(mintSessionId());
   // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
@@ -480,7 +498,7 @@ export function dispatchReview({
   if (guarded.held) return guarded;
   const agentId = guarded.result.handle;
   return {
-    sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
+    sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, repoKey: planned.repoKey, prompt,
     unknownTokens,
     // #xqa9ttq — the provider the dispatched session will judge with, echoed back so the CLI (and any
     // programmatic caller) can report WHICH judge was seated without re-deriving the default.

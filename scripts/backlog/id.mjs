@@ -111,6 +111,33 @@ export function swapHashes(text, entries) {
 }
 
 /**
+ * Visit explicit cross-references for cross-clone repair (#2903). Bare hashes in prose (including
+ * birth-hash tables) are evidence, not pointers. Frontmatter reference fields accept both YAML
+ * list styles; free-text fields such as resolutionNote are preserved as authored.
+ * The existing local-ledger rewrite remains separate from this narrower fallback.
+ */
+export function mapHashReferences(content, visit) {
+  let frontmatter = false;
+  let referenceField = false;
+  let fenced = false;
+  return content.split('\n').map((line, index) => {
+    if (line === '---' && (index === 0 || frontmatter)) {
+      frontmatter = !frontmatter;
+      return line;
+    }
+    if (frontmatter) {
+      if (/^\S/.test(line)) referenceField = /^(blockedBy|parent|relatedTo|supersedes|supersededBy):/.test(line);
+      return referenceField ? line.replace(/\bx[0-9a-z]{6}\b/g, visit) : line;
+    }
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; return line; }
+    if (fenced) return line;
+    // Explicit #refs and backlog paths/URLs; a bare `bornAs` value is deliberately not matched.
+    return line.replace(/#x[0-9a-z]{6}\b|backlog\/x[0-9a-z]{6}\b/g,
+      (ref) => ref.replace(/x[0-9a-z]{6}/, visit));
+  }).join('\n');
+}
+
+/**
  * Compute the renames + content rewrites to number one-or-more provisional items — the PURE core of the
  * drain's at-land numbering (#2288). Given every backlog file (stem `name` + raw `content`) and a
  * `ledger` mapping each in-flight `hash → assigned NNN`, it returns:

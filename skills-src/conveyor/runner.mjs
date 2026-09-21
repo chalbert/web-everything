@@ -67,7 +67,7 @@ import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
-import { runGhSync } from '../../scripts/lib/gh-throttle.mjs';
+import { execFileSync } from 'node:child_process';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { QUEUE_SCOPE_ENV, isQueueScopeEnabled, readScopedQueueIds } from '../../scripts/conveyor/queue-scope.mjs';
 import { writeLineSync } from '../../scripts/lib/write-all-sync.mjs';

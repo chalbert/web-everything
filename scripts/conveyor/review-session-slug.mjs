@@ -1,3 +1,4 @@
+import { mintSessionSlug } from './session-slug.mjs';
 /**
  * @file scripts/conveyor/review-session-slug.mjs
  * @description The `review-<pr>` session-name convention (#3279), single-sourced.
@@ -20,8 +21,8 @@
  *  distinct from `we:scripts/operations/dispatch-lane.mjs#sessionSlugFor`'s `conveyor-<num>` / `prepare-<num>`
  *  slugs: a review dispatch is not a build or a prepare, and a shared namespace risks two different dispatch
  *  kinds racing to release the SAME slug's lane lease. */
-export function reviewSessionSlug(pr) {
+export function reviewSessionSlug(pr, repo = 'we') {
   const id = String(pr ?? '').trim();
   if (!id) throw new Error('review-session-slug: needs a PR number to derive a session slug');
-  return `review-${id}`;
+  return mintSessionSlug({ kind: 'review', id, repo });
 }

@@ -1163,6 +1163,10 @@ describe('buildDecisionTrace — plain-language per-tick "why" (2026-09-14, #352
     const trace = buildDecisionTrace({ spawnBuilds: [{ num: 10, lane: 4 }] });
     expect(trace).toEqual([{ kind: 'dispatch', num: 10, lane: 4, text: 'dispatched #10 to lane-4: build' }]);
   });
+  it('traces a dispatched investigation (#3567) so no dispatch kind is missing from the trace', () => {
+    const trace = buildDecisionTrace({ spawnInvestigations: [{ num: 12, lane: 6 }] });
+    expect(trace).toEqual([{ kind: 'dispatch', num: 12, text: 'dispatched #12: auto-investigate (needs-investigation item)' }]);
+  });
   it('traces a suppressed (already-dispatching) build as a skip', () => {
     const trace = buildDecisionTrace({ suppressedBuilds: [{ num: 11, lane: 5, by: 'num' }] });
     expect(trace).toEqual([{ kind: 'skip', num: 11, text: 'skipped #11: already dispatching (matched a live guard by num)' }]);

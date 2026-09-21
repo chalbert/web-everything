@@ -342,7 +342,7 @@ function hasOpenBlockers(item) {
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, trace = false } = {}) {
   // The pause is per-KIND now, and this core only ever decides ONE kind: `build`. Resolving the marker's
   // declared scope through the shared predicate (rather than reading the raw boolean) is what makes an
   // old-format `{paused:true}` — and every caller that still passes only the boolean — keep holding builds,
@@ -363,12 +363,19 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
 
   const launch = [];
   const held = [];
+  const admission = [];
   const launched = []; // { num, lane, scope } — SCOPED items launched THIS tick, for the rival-pair check
 
   // ── ONE pass over the queue in rank order. An unscoped item is NEVER launched (auto-prepare, not a serial
   //    floor): it is held `unshaped-no-scope` for the /conveyor skill to prepare its scope upstream. ──
   for (const item of items) {
     const num = item.num;
+    const gates = [];
+    if (trace) admission.push({ num, gates });
+    const blocked = (name, condition, observed) => {
+      if (trace) gates.push({ name, pass: !condition, observed });
+      return condition;
+    };
 
     // 0. GROUND TRUTH (#3457/#3460) — a real merged PR already closes this item out. Checked FIRST, ahead of
     //    every other branch: `blocked`, `needs-slice`, `needs-decision` and the scope/overlap reads below are
@@ -379,7 +386,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    simply trusts what it was handed, same as every other enrichment field on `item`. HOLDS, never
     //    auto-resolves — see `ALREADY_DONE_HINT` and `we:scripts/operations/dispatch-lane-io.mjs`'s
     //    `filterAlreadyDoneCandidates` docblock for why a false positive here must stay recoverable.
-    if (item.alreadyDonePr) {
+    if (blocked('already-done', !!item.alreadyDonePr, item.alreadyDonePr ?? null)) {
       held.push({ num, reason: 'already-done' });
       continue;
     }
@@ -389,7 +396,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    emits only READY items (isReady requires every blockedBy resolved), so their openBlockers is always
     //    []. It is kept as defense-in-depth for DIRECT core use (a future shell that feeds an unfiltered queue)
     //    and is pinned by the unit tests below. Checked FIRST for every item, scoped or not.
-    if (hasOpenBlockers(item)) {
+    if (blocked('blockedBy', hasOpenBlockers(item), { openBlockers: item.openBlockers ?? [], blockedBy: item.blockedBy ?? [] })) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
@@ -404,7 +411,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    blockers clear. `isGroupingKind` (scripts/check-standards-rules.mjs) is the single source of truth
     //    for the grouping-kind set, shared with conveyor-state.mjs, so a future grouping kind needs one
     //    update, not several scattered `kind === 'epic'` checks.
-    if (isGroupingKind(item.kind)) {
+    if (blocked('grouping-kind', isGroupingKind(item.kind), item.kind ?? null)) {
       held.push({ num, reason: 'needs-slice' });
       continue;
     }
@@ -416,7 +423,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    prepare/present TRIGGER: the /conveyor skill reads this hold (and `state.decisions`) and routes by the
     //    decision's prepared state — UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks.
     //    A BLOCKED decision is still `blocked` (checked first): it can't be prepared until its blockers clear.
-    if (item.kind === 'decision') {
+    if (blocked('decision-kind', item.kind === 'decision', item.kind ?? null)) {
       held.push({ num, reason: 'needs-decision' });
       continue;
     }
@@ -440,7 +447,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    file header): [] is not a meaningful "touches nothing" build, so it is treated identically to absent.
     //    Keying on the NORMALIZED scope's emptiness catches all four (undefined / non-array / [] / all-blank).
     const scope = normScope(item.scope);
-    if (scope.length === 0) {
+    if (blocked('scope', scope.length === 0, scope)) {
       held.push({ num, reason: 'unshaped-no-scope' });
       continue;
     }
@@ -450,14 +457,14 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    them is exactly what turned #3464's own incident into an unresolvable conflict. Hold until a fresh
     //    `branch-drift.mjs sweep` clears it. Checked before the lease/rival gates — same "blanket hold, not a
     //    lane-scheduling concern" precedence as the checks above.
-    if (driftScope.length > 0 && scopesOverlap(scope, driftScope)) {
+    if (blocked('branch-drift', driftScope.length > 0 && scopesOverlap(scope, driftScope), { scope, driftScope })) {
       held.push({ num, reason: 'branch-drift-blocked' });
       continue;
     }
 
     // 5. Overlaps a RUNNING lane's held scope — that lane owns those paths; hold behind it.
     const leaseHit = activeLeases.find((l) => scopesOverlap(scope, l.scope));
-    if (leaseHit) {
+    if (blocked('scope-overlap-lease', !!leaseHit, { scope, lease: leaseHit ?? null })) {
       held.push({ num, reason: `overlaps lane-${leaseHit.lane}` });
       continue;
     }
@@ -466,7 +473,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    one holds on the lane its rival took. A higher rival that did NOT launch is absent here, so it never
     //    spuriously blocks a lower item — the hold is only against work that is actually starting.
     const rival = launched.find((r) => scopesOverlap(scope, r.scope));
-    if (rival) {
+    if (blocked('scope-overlap-rival', !!rival, { scope, rival: rival ?? null })) {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
       continue;
     }
@@ -478,14 +485,14 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    A KIND-SCOPED pause (epic #3383) that does not name `build` never reaches here at all: this core's
     //    only launch kind is `build`, so a `fix`/`ci-heal`-only pause leaves this gate open and the item
     //    launches normally (the scoped kinds are held in `tick-core.mjs`, which owns those spawns).
-    if (buildPaused) {
+    if (blocked('dispatch-paused', buildPaused, buildPaused)) {
       held.push({ num, reason: 'dispatch-paused' });
       continue;
     }
     // 7. Disjoint — launch it on the next free lane, or hold for want of one. `capacity-cap` (#xupukxa) fires
     //    instead of `no free lane` when a physical free lane exists but the concurrency ceiling withheld it —
     //    a DIFFERENT reason on purpose, since the remedy differs (raise the cap / wait vs. free a lane).
-    if (free.length === 0) {
+    if (blocked('lane-capacity', free.length === 0, { freeLanes: [...free], capacityLimited })) {
       held.push({ num, reason: capacityLimited ? 'capacity-cap' : 'no free lane' });
       continue;
     }
@@ -494,7 +501,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     launched.push({ num, lane, scope });
   }
 
-  return { launch, held };
+  return { launch, held, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -510,10 +517,15 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<{num:*}>} the cleared rows, rank order preserved
  */
-export function selectClearedRows(rows, clearedKeys, norm) {
+export function selectClearedRows(rows, clearedKeys, norm, observe = null) {
   const cleared = clearedKeys instanceof Set ? clearedKeys : new Set(clearedKeys);
   const key = typeof norm === 'function' ? norm : (x) => String(x);
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && cleared.has(key(r.num)));
+  return (Array.isArray(rows) ? rows : []).filter((r) => {
+    if (!r) return false;
+    const pass = cleared.has(key(r.num));
+    observe?.(r.num, { name: 'queue-membership', pass, observed: { cleared: pass } });
+    return pass;
+  });
 }
 
 /**
@@ -528,12 +540,17 @@ export function selectClearedRows(rows, clearedKeys, norm) {
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<*>} the cleared ids with no ready row, original spelling preserved
  */
-export function clearedNotReady(clearedEntries, readyRows, norm) {
+export function clearedNotReady(clearedEntries, readyRows, norm, observe = null) {
   const key = typeof norm === 'function' ? norm : (x) => String(x);
   const ready = new Set((Array.isArray(readyRows) ? readyRows : []).map((r) => key(r?.num)));
   return (Array.isArray(clearedEntries) ? clearedEntries : [])
     .map((e) => (e && typeof e === 'object' ? e.num : e))
-    .filter((n) => n != null && String(n) !== '' && !ready.has(key(n)));
+    .filter((n) => {
+      if (n == null || String(n) === '') return false;
+      const pass = ready.has(key(n));
+      observe?.(n, { name: 'readiness', pass, observed: { inReadyBuildQueue: pass } });
+      return !pass;
+    });
 }
 
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
@@ -599,10 +616,16 @@ async function main(argv) {
   }
   const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
   const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
-  const rows = selectClearedRows(bqRows, cleared, normNum);
+  const selection = new Map();
+  const observeSelection = (num, gate) => {
+    const key = normNum(num);
+    if (!selection.has(key)) selection.set(key, { num: key, gates: [] });
+    selection.get(key).gates.push(gate);
+  };
+  const rows = selectClearedRows(bqRows, cleared, normNum, observeSelection);
   // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never
   // silently dropped (#2613 review, required 2b).
-  const notReady = clearedNotReady(sidecar, bqRows, normNum);
+  const notReady = clearedNotReady(sidecar, bqRows, normNum, observeSelection);
   let byNum = new Map();
   try {
     const { createRequire } = await import('node:module');
@@ -729,7 +752,7 @@ async function main(argv) {
 
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -740,6 +763,14 @@ async function main(argv) {
     plan.held.push(pr ? { num, reason: 'already-done', alreadyDonePr: pr } : { num, reason: 'cleared-but-not-ready' });
   }
 
+  // Membership/readiness evidence comes from the selection above, including cleared
+  // entries which never reached the pure build planner.
+  plan.selection = [...selection.values()];
+  const notReadyKeys = new Set(notReady.map(normNum));
+  plan.cleared = sidecar.map((entry) => ({
+    num: normNum(entry.num),
+    ready: !notReadyKeys.has(normNum(entry.num)),
+  }));
   if (flags.json) {
     // Drain synchronously before exit — `process.stdout.write` is async to a pipe and the `process.exit(0)`
     // below would drop the unflushed tail, truncating this JSON for an `execFileSync`/pipe consumer (exactly

@@ -78,6 +78,7 @@
  * RESERVED (permanent memory, #2350) leases are NEVER reaped, on every axis.
  */
 
+import { parseSessionSlug } from './session-slug.mjs';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -133,8 +134,9 @@ import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from './driver-watch
 /** Shared match, so {@link itemNumFromSession} and {@link sessionSlugAttemptTag} can never disagree about
  *  where the retry-suffix letter sits — same reason {@link laneRefItemNum} names for its own couple. */
 function matchSessionSlug(session) {
-  const m = String(session ?? '').match(/^(?:conveyor|fix|prepare-decision|prepare)-(\d+)([a-z]?)$/i);
-  return m ? { num: m[1], tag: m[2].toLowerCase() } : null;
+  const parsed = parseSessionSlug(session);
+  return parsed?.repo === 'we' && (parsed.itemKind || parsed.kind === 'fix')
+    ? { num: parsed.id, tag: parsed.attempt } : null;
 }
 
 export function itemNumFromSession(session) {

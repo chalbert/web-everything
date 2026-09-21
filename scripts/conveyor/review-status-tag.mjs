@@ -24,6 +24,8 @@
  * `fix-<pr>`, the same slugs `we:scripts/operations/review-dispatch.mjs#reviewSessionSlug` and
  * `we:scripts/operations/dispatch-lane.mjs`'s own `fix-${id}` mint), rather than sharing that binding.
  */
+import { mintSessionSlug } from './session-slug.mjs';
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,9 +53,9 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>}} o
  * @returns {{role:'review'|'fix', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [] } = {}) {
-  const reviewName = `review-${pr}`;
-  const fixName = `fix-${pr}`;
+export function deriveReviewStatus({ pr, agents = [], repo = 'we' } = {}) {
+  const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
+  const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const list = Array.isArray(agents) ? agents : [];
   // Prefer a `working` match over a `blocked` one for the SAME name (several historical rows can share a
   // name) — a session actually making progress right now is more informative than a stuck sibling. A `done`/
@@ -90,8 +92,10 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
 export function tagReviewStatus({ pr, repo, listAgents = defaultListAgents, provider = createGhProvider() } = {}) {
+  const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
   const agents = listAgents();
-  const status = deriveReviewStatus({ pr, agents });
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey });
   const currentLabels = provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

@@ -6,9 +6,10 @@
  *   discipline of proving the atomic fs layer for real, not just its pure decision logic).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   DEFAULT_ADMISSION_CAP, DEFAULT_TIMEOUT_MS, ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, slotPath,
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
@@ -16,6 +17,7 @@ import {
   acquireSlotBlocking, admissionStatus,
   runUnderAdmission, shellQuoteWord,
 } from '../heavy-admission.mjs';
+import { readLockEntry } from '../file-locks.mjs';
 
 const T0 = Date.parse('2026-09-03T12:00:00.000Z');
 const iso = (ms) => new Date(ms).toISOString();
@@ -23,6 +25,22 @@ const iso = (ms) => new Date(ms).toISOString();
 let lockRoot;
 beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'heavy-admission-test-')); });
 afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+describe('CLI relative --repo', () => {
+  it('resolves the repo before deriving the shared admission root and owner', () => {
+    const repo = join(lockRoot, '.lanes', 'test-pool', 'lane-1');
+    mkdirSync(repo, { recursive: true });
+    const env = { ...process.env };
+    delete env.LANE_POOL_ROOT;
+    execFileSync(process.execPath, [
+      resolve('scripts/readiness/heavy-admission.mjs'),
+      'acquire', '--repo=.', '--cap=1', '--json',
+    ], { cwd: repo, env, encoding: 'utf8' });
+    const held = heldSlots({ lockRoot: join(lockRoot, '.lanes', '.admission', 'heavy'), cap: 1 });
+    expect(held).toHaveLength(1);
+    expect(held[0].owner).toBe(realpathSync(repo));
+  });
+});
 
 describe('resolveCap — env override, clamped sane', () => {
   it('defaults when unset', () => expect(resolveCap({})).toBe(DEFAULT_ADMISSION_CAP));
@@ -112,6 +130,13 @@ describe('tryAcquireSlot / releaseOwnedSlot / heldSlots — cap independent slot
     const soonAfter = T0 + 1000;
     const r = tryAcquireSlot({ lockRoot, cap, owner: 'B', nowMs: soonAfter, nowIso: iso(soonAfter) });
     expect(r.ok).toBe(false);
+  });
+
+  it('forwards its own computed selfPid — not the raw omitted pid parameter — into the stored lock entry (#3679)', () => {
+    const cap = 1;
+    tryAcquireSlot({ lockRoot, cap, owner: 'A', nowMs: T0, nowIso: iso(T0) }); // pid intentionally omitted
+    const entry = readLockEntry(lockRoot, slotPath(0));
+    expect(entry.pid).toBe(process.pid); // BUG forwarded the raw (defaulted-null) `pid` param, so entry.pid was `null`
   });
 
   it('release is idempotent for an owner holding nothing', () => {

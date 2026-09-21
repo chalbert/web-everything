@@ -3650,3 +3650,106 @@ export function gitHookAllFlagError(file, hit) {
     + `a tree the operator already has), or write \`# ${GITHOOK_ALL_ALLOW} <why>\` on that line or the one above.`
     + `\n    ${hit.text}`;
 }
+
+// ── Leash pin (#2892 — enforces #2840 trigger 3, guards #2838's flip-edit safeguard) ───────────────
+// The declarative-leash files — the review-policy contract (which owns `careJury.disposition.landMode`, the
+// shadow→enforce switch), the roster, the invariant / conformance suites — are human-gated AS WHOLE FILES,
+// permanently (`#human-is-principle-surface-not-path`, trigger 3): they ARE the encoded principle, so no edit to
+// one is behaviour-preserving. #2838's whole safety story leans on that floor ("the flip edit is itself
+// `review:human`"): if the contract could quietly leave the human gate, the single most oversight-reducing edit
+// in the system would become agent-clearable. This rule is the standing assertion that it has not.
+//
+// TWO INDEPENDENT ANGLES, so a regression has to fool both:
+//   1. CLASSIFICATION — every pinned basename is still in `POLICY_SPEC_BASENAMES` (the roster still calls it a
+//      declarative-leash file). Catches a `leash: 'code'` reclassification or a dropped roster entry.
+//   2. BEHAVIOUR — the REAL rubric (`scoreEscalation`, injected as `isHumanGated`) still returns
+//      `humanRequired` for a diff that touches the file, whether the file's own hunks are a whitespace-only touch
+//      (a hunk the STATUTE term would exempt, so only the path floor can hold it) or were NOT COMPUTED at all.
+//      Catches the composition itself (`isPrincipleSurface` / the rubric's term) losing the unconditional path
+//      floor while the roster still looks right — the case a roster-only check cannot see.
+// A third, cheap check keeps the pin from going VACUOUS: a pinned entry whose registered `homes` no longer exist
+// on disk is a renamed/deleted file the roster still "protects" — the pin then guards nothing.
+//
+// FAIL DIRECTION. All findings are hard ERRORS (there is no warn-first flag: on the current tree none fires, and
+// each names a change that reduces human oversight). The one WARNING is growth: a leash file the roster gained
+// that this snapshot does not yet name — its later removal would go unpinned.
+//
+// The snapshot is EVERY `POLICY_SPEC_BASENAMES` member as of this rule. It is a snapshot on purpose, not derived
+// from the roster: a derived pin would shrink in lockstep with the thing it guards. Read it as a SECOND KEY, not a
+// lock: this file is engine-tier (an edit escalates to the committee), so removing a name here is not by itself
+// human-gated. What makes dropping a leash file a human decision is that it cannot be done WITHOUT a human-gated
+// edit — the roster lives in `gate-config.mjs` (a declarative-leash file), the unconditional path floor in its
+// `isPrincipleSurface` (marked), and the rubric's `humanRequired` derivation in `review-escalation.mjs` (marked).
+// This rule is what turns a slip in any of them — a typo'd `leash:` value, a floor made conditional, a renamed
+// file the roster still names — into a red gate instead of a silent under-gate.
+export const LEASH_PIN_SNAPSHOT = Object.freeze([
+  'review-policy.contract.json',
+  'review-policy.conformance.test.mjs',
+  'review-runner-core.mjs',
+  'review-runner.mjs',
+  'check-standards.contract.json',
+  'check-standards.conformance.test.mjs',
+  'review-independence.mjs',
+  'gate-config.mjs',
+  'gate-invariants.test.mjs',
+]);
+
+/** A REAL-shaped diff section for `path` whose only change is whitespace — exactly the hunk a content trigger
+ *  exempts, so the human gate holding for it can only be the leash-path floor. Pure. */
+function whitespaceTouchDiff(path) {
+  return `diff --git a/${path} b/${path}\nindex 0000000..1111111 100644\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n- x\n+ x \n`;
+}
+
+/**
+ * Assert no pinned declarative-leash file has been dropped from the human gate. Pure — every input is injected so
+ * a test drives it with synthetic rosters; `check-standards.mjs` wires the real ones.
+ * @param {{pinned?:readonly string[], specBasenames:ReadonlySet<string>, roster:Array<{file:string,tier?:string,leash?:string,homes?:string[]}>,
+ *          isHumanGated:(path:string, hunks:string|null)=>boolean, homeExists?:(rel:string)=>boolean}} o
+ * @returns {{errors:Array<{message:string,descriptor?:object}>, warnings:Array<{message:string,descriptor?:object}>}}
+ */
+export function checkLeashPin({ pinned = LEASH_PIN_SNAPSHOT, specBasenames, roster = [], isHumanGated, homeExists = () => true } = {}) {
+  const errors = [];
+  const warnings = [];
+  const descriptor = (file, extra = {}) => ({ kind: 'leash-pin', fix: 'model', file, global: true, ...extra });
+  const GATE_FILE = 'scripts/lib/gate-config.mjs';
+  for (const name of pinned) {
+    if (!specBasenames || !specBasenames.has(name)) {
+      errors.push({
+        message: `leash pin (#2892): \`${name}\` is no longer in POLICY_SPEC_BASENAMES — a declarative-leash file was reclassified or dropped from the roster. `
+          + 'These files are human-gated as whole files, permanently (#human-is-principle-surface-not-path trigger 3); dropping one lets an agent panel clear an edit to the encoded policy '
+          + '(including #2838\'s shadow→enforce flip). Restore its `leash: \'spec\'` entry, or — only if a human ratified the removal — remove it from LEASH_PIN_SNAPSHOT in the same change.',
+        descriptor: descriptor(GATE_FILE, { pinned: name, angle: 'classification' }),
+      });
+      continue; // the behavioural angle below would only repeat the finding
+    }
+    const entry = roster.find((e) => e && e.file === name);
+    const homes = Array.isArray(entry?.homes) ? entry.homes : [];
+    if (homes.length && !homes.some((h) => homeExists(h))) {
+      errors.push({
+        message: `leash pin (#2892): pinned leash file \`${name}\` has no registered home on disk (${homes.join(', ')}) — it was renamed or deleted while the roster still names it, so the pin now guards nothing. `
+          + 'Re-register the renamed file (the roster matches by BASENAME, so a rename needs its `file` updated) and update LEASH_PIN_SNAPSHOT with it.',
+        descriptor: descriptor(GATE_FILE, { pinned: name, angle: 'vacuous' }),
+      });
+    }
+    const probe = homes[0] || name;
+    for (const hunks of [whitespaceTouchDiff(probe), null]) {
+      if (!isHumanGated(probe, hunks)) {
+        errors.push({
+          message: `leash pin (#2892): the rubric no longer requires a human for \`${probe}\` (diffHunks ${hunks === null ? 'not computed' : 'a whitespace-only touch of that file'}) although it is a pinned declarative-leash file. `
+            + 'The leash-path floor of isPrincipleSurface must be UNCONDITIONAL — independent of the diff content — so no hunk shape (or a missing one) can route an edit to the encoded policy to the committee.',
+          descriptor: descriptor('scripts/lib/review-escalation.mjs', { pinned: name, angle: 'behaviour', hunks: hunks === null ? 'null' : 'whitespace-only' }),
+        });
+      }
+    }
+  }
+  const pinnedSet = new Set(pinned);
+  for (const name of specBasenames || []) {
+    if (!pinnedSet.has(name)) {
+      warnings.push({
+        message: `leash pin (#2892): \`${name}\` is a declarative-leash file the roster gained but LEASH_PIN_SNAPSHOT does not name — add it so a future removal is caught.`,
+        descriptor: descriptor('scripts/check-standards-rules.mjs', { pinned: name, angle: 'unpinned-growth' }),
+      });
+    }
+  }
+  return { errors, warnings };
+}

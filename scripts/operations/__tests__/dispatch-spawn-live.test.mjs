@@ -65,7 +65,10 @@ describe('dispatching an agent, against a real process', () => {
 
     const seen = fake.lastArgv();
     expect(seen).toContain('--bg');
-    expect(seen[seen.indexOf('--session-id') + 1]).toBe('11111111-2222-3333-4444-555555555555');
+    // #3331 — `--session-id` IS NOT SENT. `claude --bg` discards it (the shim now models that, and says so on
+    // stderr exactly as 2.1.269 does), so passing it only encoded a false premise about who owns the id.
+    expect(seen).not.toContain('--session-id');
+    expect(seen).not.toContain('11111111-2222-3333-4444-555555555555');
     expect(seen[seen.indexOf('-n') + 1]).toBe('conveyor-4242');
     // The prompt survives as the trailing operand rather than being eaten as a flag — the thing the sink's
     // own comment says was never checked against a real parser.

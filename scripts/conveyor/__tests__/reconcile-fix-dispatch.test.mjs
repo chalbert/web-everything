@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { createActionStore } from '../../operations/action-store.mjs';
 import { describe, it, expect, vi } from 'vitest';
 import {
-  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
+  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
@@ -175,6 +175,13 @@ describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
     expect(calls).toEqual([{ file: 'gh', argv: ['pr', 'diff', '2220', '--name-only'], cwd: '/repo' }]);
   });
 
+  it('pins the `gh` call to the given repo with `--repo` (the multi-repo guard requires it)', () => {
+    const calls = [];
+    const exec = (file, argv) => { calls.push(argv); return 'a.mjs\n'; };
+    fetchPrDiffScope(7, { exec, root: '/repo', repo: 'owner/name' });
+    expect(calls).toEqual([['pr', 'diff', '7', '--name-only', '--repo', 'owner/name']]);
+  });
+
   it('drops blank lines (a trailing newline must not become an empty `we:` path)', () => {
     const exec = () => 'one/file.mjs\n\n\n';
     expect(fetchPrDiffScope(1, { exec, root: '/repo' })).toEqual(['we:one/file.mjs']);
@@ -228,7 +235,6 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
       // `we:scripts/operations/dispatch-lane-io.mjs`. This branch's provider-port design (#3331's remedy
       // here) fixes the REPORTED id, not the argv.
       '--bg',
-      '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'fix-1764',
       // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
       // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
@@ -820,5 +826,77 @@ describe('null-item dispatch composition', () => {
     const prompt = buildResumePrompt({ pr: 2347, itemNum: null });
     expect(prompt).toContain('New work on PR #2347,');
     expect(prompt).not.toMatch(/item #|undefined|null/);
+  });
+});
+
+it('refuses a direct sibling fix before spawning', () => {
+  const calls = [];
+  expect(() => dispatchFix({ itemNum: '3438', pr: 49, laneRef: 'lane/3438-x', scope: ['we:x'], lane: 9 }, {
+    root: '/repo', repo: 'frontierui', readBrief: () => REAL_TEMPLATE_STUB,
+    mintSessionId: () => 'session', spawnAgent: (argv) => { calls.push(argv); return ''; },
+  })).toThrow(/unsupported-repo/);
+  expect(calls).toEqual([]);
+});
+
+it('refuses foreign fixes and CI-heals without touching a lane or dispatch sink', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { recordUnsupported, readUnsupported } = await import('../unsupported-repo.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'fix-refusals-'));
+  const unsupportedPath = join(dir, 'rows.json');
+  const calls = [];
+  try {
+    recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'review', prNumber: 9 }], path: unsupportedPath });
+    const options = { root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+      reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 49, headRefName: 'lane/3438-wire-reconcile-pass', labels: ['review:changes'] }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
+      findItemFn: findItemStub, loadItems: () => [], pickFreeLanes: () => { calls.push('pool'); return [2]; },
+      tryResume: () => calls.push('resume'), dispatch: () => calls.push('dispatch'),
+    };
+    const result = runReconcileFixDispatch(options);
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual(['fix', 'ci-heal'].map((action, i) => ({ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 49 + i, action, why: expect.any(String) })));
+    expect(calls).toEqual([]);
+    expect(readUnsupported({ path: unsupportedPath })).toHaveLength(3);
+    runReconcileFixDispatch({ ...options, reconcile: () => ({ dispatch: [], refusals: [] }) });
+    expect(readUnsupported({ path: unsupportedPath })).toEqual([expect.objectContaining({ action: 'review', prNumber: 9 })]);
+    expect(() => runReconcileFixDispatch({ repo: 'unknown/repo' })).toThrow(/not a constellation repo/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('refuses a foreign resume before listing or spawning agents', () => {
+  const calls = [];
+  expect(() => tryResumeFix({ pr: 49, isConflict: true }, { repo: 'frontierui', root: '/repo',
+    listAgentsAll: () => { calls.push('list'); return []; }, spawnAgent: () => calls.push('spawn'),
+  })).toThrow(/unsupported-repo/);
+  expect(calls).toEqual([]);
+});
+
+// #3634 review (ported from `main`) — the PR-diff fallback filename sanitiser. The surrounding refusal SHAPE is
+// this branch's (`no-item-num` is not a refusal here; see `planFixesFromReconcile`'s docblock), so only the
+// filter's own cases are carried over, not `main`'s item-resolution gate.
+describe('#3634 review — the PR-diff fallback filters hostile filenames', () => {
+  const epic3383 = { num: '3383', slug: 's', specPath: 'backlog/3383-x.md', scope: [] };
+  const findEpicStub = (key) => (key === '3383' ? epic3383 : null);
+
+  it('drops hostile PR-diff filenames from the fence instead of passing them into the brief', () => {
+    const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+    const fallback = () => ['we:ok/file.mjs', 'we:x,we:scripts', 'we:a b.md', 'we:../escape.mjs', 'we:dir/*.mjs', 'we:bad\nname.md', 'we:/abs.mjs'];
+    const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], fallback);
+    expect(refusals).toEqual([]);
+    expect(planned[0].scope).toEqual(['we:ok/file.mjs']);
+    expect(planned[0].scopeSource).toBe('pr-diff');
+  });
+
+  it('refuses `no-scope` when EVERY fallback filename is hostile', () => {
+    const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+    const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => ['we:x,we:scripts']);
+    expect(planned).toEqual([]);
+    expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+  });
+
+  it('isSafeFallbackScopeEntry accepts ordinary repo paths and rejects comma/space/control/`..`/glob/leading-slash', () => {
+    for (const ok of ['we:scripts/conveyor/a-b_c.mjs', 'we:docs/x.v2.md', 'we:.github/workflows/ci.yml']) expect(isSafeFallbackScopeEntry(ok)).toBe(true);
+    for (const bad of ['we:x,we:scripts', 'we:a b', 'we:a\tb', 'we:a\u0000b', 'we:a/../b', 'we:a/*.js', 'we:a/{b,c}', 'we:a/[b]', 'we:/abs', 'we:', '', null]) expect(isSafeFallbackScopeEntry(bad)).toBe(false);
   });
 });

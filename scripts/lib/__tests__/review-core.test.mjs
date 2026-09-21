@@ -2683,3 +2683,20 @@ describe('review-parked-prs.mjs — required-check read goes through the shared 
     expect(CHECK_STATES).toEqual(['green', 'red', 'pending', 'unchecked']);
   });
 });
+
+it('the sandbox parked-review repo table uses the shared owner-qualified slugs', async () => {
+  const { CONSTELLATION_REPOS } = await import('../constellation-repos.mjs');
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../workflows/review-parked-prs.mjs'), 'utf8');
+  // The harness body cannot import modules; pin its isolated pure table to the authoritative mapping.
+  const table = src.match(/const REPOS = (\{[\s\S]*?\n\});/)[1];
+  const repos = new Function(`return (${table});`)();
+  const discover = src.match(/function discoverPrompt\(\) \{[\s\S]*?\n\}/)[0];
+  const prompt = new Function(`const REPOS = ${table}; const RETURN_HYGIENE = ''; const REVIEW_PENDING = 'review:pending';
+    ${discover}; return discoverPrompt();`)();
+  for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
+    expect(prompt).toContain(`gh pr list --repo ${slug} --label review:pending`);
+  }
+  expect(prompt).not.toContain('checkout path if it exists');
+  expect(Object.fromEntries(Object.entries(repos).map(([key, { slug }]) => [key, slug])))
+    .toEqual(Object.fromEntries(Object.entries(CONSTELLATION_REPOS).map(([key, { slug }]) => [key, slug])));
+});

@@ -42,6 +42,10 @@ import { homedir } from 'node:os';
 import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
 import { collapseRollupToLatestPerName } from '../merge-ai-prs.mjs';
 import { CI_TRUTH_EXCLUDED_CHECKS } from '../operations/pr-status.mjs';
+// #3296 — `countStandDownComments` recovers "has a fixer already stood down here" from the PR's own comments
+// (the same durable marker `reconcile-core.mjs`'s `planReconcile` already reads). Shaping it into the PR row
+// here — rather than re-deriving it in the board — keeps the marker single-sourced at its one definition.
+import { countStandDownComments } from '../conveyor/stand-down.mjs';
 // #2659 — the infra-blocked state: a delivery/prepare agent that PUSHED its lane ref but failed PR-open on an
 // outside dependency lands here (not a stall / gate-red). `deriveInfraByNum` is PURE (no fs/clock — it takes the
 // raw store + injected `now`), safe for the pure core; the IO shell reads the sidecar via `readInfraStore`.
@@ -217,11 +221,19 @@ export function ciRollup(statusCheckRollup) {
 
 /**
  * Shape the in-flight PR section from
- * `gh pr list --json number,state,statusCheckRollup,labels,headRefName,mergeStateStatus`.
+ * `gh pr list --json number,state,statusCheckRollup,labels,headRefName,mergeStateStatus,comments`.
  * `mergeStateStatus` is carried through raw (e.g. `BEHIND`) so the tick's CI-heal loop can spot a
  * not-landable BEHIND+parked PR (`tick-core.mjs` isBehind/isCiHealTarget, #2666/#2738).
+ *
+ * `stoodDown` (#3296) is derived here, once, from the PR's own comments via {@link countStandDownComments} —
+ * the SAME durable signal `reconcile-core.mjs`'s `planReconcile` reads to refuse re-dispatching a fixer. A
+ * stand-down makes **no label change** (`stand-down.mjs`'s own contract: "the PR was left EXACTLY as the
+ * reviewer left it"), so a stood-down PR still carries whatever `review:*` label it had — without this flag
+ * a board or dashboard reading only `labels` cannot tell "parked for ordinary review" from "a fixer already
+ * gave up and a human is the intended next step" apart. Shaping it into the row (rather than leaving every
+ * consumer to re-scan `comments` itself) keeps the marker single-sourced at `stand-down.mjs`.
  * @param {Array<object>|null|undefined} prList
- * @returns {Array<{num:(string|null), prNumber:(number|null), state:string, ci:string, labels:string[], mergeStateStatus:string}>}
+ * @returns {Array<{num:(string|null), prNumber:(number|null), state:string, ci:string, labels:string[], mergeStateStatus:string, stoodDown:boolean}>}
  */
 export function shapePrs(prList) {
   const rows = Array.isArray(prList) ? prList : [];
@@ -236,6 +248,7 @@ export function shapePrs(prList) {
       : [],
     // Raw gh mergeable-state (e.g. `BEHIND`) — the CI-heal loop's BEHIND branch reads this (#2666/#2738).
     mergeStateStatus: String(p?.mergeStateStatus || ''),
+    stoodDown: countStandDownComments(p?.comments) > 0,
   }));
 }
 
@@ -473,21 +486,25 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  * sets, and the skill's §3b would aim a prepare-scope agent at a container — the very hazard #2645 closes (and the
  * exact regression a cleared `kind:feature` reached before #2998's fix, since only `epic` was excluded here).
  * A `kind:decision` is excluded for the SAME reason (#2647): it is held `needs-decision` before the scope gate (a
- * decision is prepared/presented, never scope-authored), and surfaces ONLY in {@link deriveDecisions}. So the two
- * surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
+ * decision is prepared/presented, never scope-authored), and surfaces ONLY in {@link deriveDecisions}. A
+ * `kind:investigation` is excluded too (#3567): it is held `needs-investigation` before the scope gate and is
+ * spawned straight off `plan.held`, never scope-authored. So the surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
  * `clearedNums` is injected (else the committed frontmatter flag), so `unshaped` tracks exactly what the operator
  * cleared this session. Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope+kind-enriched by the shell)
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-grouping, non-decision rows (spelling kept)
+ * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-grouping, non-decision, non-investigation rows (spelling kept)
  */
 export function deriveUnshaped(buildQueue, clearedNums = null) {
   return shapeQueue(buildQueue, clearedNums)
     // Grouping kinds (epic/feature) are held `needs-slice` and decisions `needs-decision`, both BEFORE the scope
     // gate (see deriveNeedsSlice / deriveDecisions) — exclude both so a scope-less container/decision is not
     // double-surfaced as unshaped (which would drive §3b to prepare-scope a container #2645/#2998, or a decision
-    // that needs no build scope #2647).
-    .filter((r) => r.buildQueued && !isGroupingKind(r.kind) && r.kind !== 'decision' && normScope(r.scope).length === 0)
+    // that needs no build scope #2647). A `kind:investigation` is excluded for the same reason (#3567): the
+    // dispatcher holds it `needs-investigation` before the scope gate, and `planPrepareSpawns` shares ONE guard set
+    // across both lists — so surfacing it here would spawn a wrong-kind prepare-scope agent and silently swallow
+    // the real investigate spawn.
+    .filter((r) => r.buildQueued && !isGroupingKind(r.kind) && r.kind !== 'decision' && r.kind !== 'investigation' && normScope(r.scope).length === 0)
     .map((r) => ({ num: r.num, scope: r.scope }));
 }
 
@@ -815,7 +832,10 @@ async function main(argv) {
   // 3. In-flight lane PRs (this repo's open PRs).
   let prList;
   try {
-    const prArgs = ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName,mergeStateStatus'];
+    // `comments` (#3296) is read so `shapePrs` can derive `stoodDown` — the durable stand-down marker lives on
+    // the PR's own comment thread, and this is the tick's only PR read, so it must carry the field or `shapePrs`
+    // has nothing to scan.
+    const prArgs = ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName,mergeStateStatus,comments'];
     if (typeof flags.repo === 'string') prArgs.push(`--repo=${flags.repo}`);
     const out = execFileSync('gh', prArgs, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
     prList = JSON.parse(out || '[]');

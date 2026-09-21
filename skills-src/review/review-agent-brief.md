@@ -21,6 +21,7 @@
 | Placeholder | What `review-dispatch.mjs` fills it with |
 |---|---|
 | `{{PR}}` | the PR number to review — e.g. `1234` |
+| `{{LANE_REPO}}` | lane-pool checkout selector: `.` for WE, absolute checkout path otherwise |
 | `{{REPO}}` | the `owner/repo` the PR lives in — e.g. `chalbert/web-everything` |
 | `{{SESSION_SLUG}}` | a per-dispatch lane-lease slug, e.g. `review-1234` |
 | `{{JUDGE_PROVIDER}}` | the run's `JudgeProvider`. Always `claude` in practice — `codex` is refused at the command line, see step 2 (`#xu2pp2m`) |
@@ -84,7 +85,7 @@ without anyone having to notice and manually retry. This is still bounded, not t
 this step's own next paragraph forbids — one call, one deadline.
 
 ```bash
-LANE=$(node scripts/lane-pool.mjs acquire --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=30000 --adopt) && echo "$LANE"
+LANE=$(node scripts/lane-pool.mjs acquire --repo={{LANE_REPO}} --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=30000 --adopt) && echo "$LANE"
 ```
 
 If this still fails after that bounded wait, the pool genuinely has no free lane — report the completion
@@ -154,7 +155,7 @@ node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --s
 ### 4. Release your lane and exit
 
 `$LANE` holds the lane's absolute PATH (that's what `acquire` printed to stdout in step 1), not a bare
-number — do not try to extract one from it. Release by session instead, which needs no lane number at all:
+number — do not try to extract one from it. Release by session instead, which needs no lane number at all (`--all-pools` sweeps every pool, so it also finds a lane acquired in another repo's pool):
 
 ```bash
 node scripts/lane-pool.mjs release --all-pools --session={{SESSION_SLUG}}

@@ -3,7 +3,7 @@ bornAs: xnb0gxj
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["3456", "3611", "3608", "3610", "3612", "3609", "3593", "3594", "3569", "xyp1wsl", "xfxt77w", "3427"]
+relatedTo: ["3456", "3611", "3608", "3610", "3612", "3609", "3593", "3594", "3569", "3716", "3711", "3427"]
 dateOpened: "2026-09-07"
 tags: [conveyor, capacity, isolation, container, apple-silicon, platform]
 ---
@@ -26,9 +26,9 @@ Folded in per the operator's own follow-up the same night, captured here rather 
 Expanded research question: beyond resource caps, could the SAME container also serve as the enforcement
 boundary for two other things filed separately tonight — (a) restricting a dispatched agent to declared
 operations only (no arbitrary shell commands), and (b) file-scope enforcement (blocking an edit outside an
-item's declared scope, the concern behind we:backlog/xyp1wsl-epic-edit-time-scope-enforcement-with-a-request-extension-es.md
-and its build-ready first slice we:backlog/xfxt77w-block-an-edit-write-outside-a-dispatched-lane-s-own-declared.md,
-both filed but not yet merged, PR #2032). Checked before writing this in: xyp1wsl/xfxt77w cover ONLY the
+item's declared scope, the concern behind we:backlog/3716-epic-edit-time-scope-enforcement-with-a-request-extension-es.md
+and its build-ready first slice we:backlog/3711-block-an-edit-write-outside-a-dispatched-lane-s-own-declared.md,
+both filed but not yet merged, PR #2032). Checked before writing this in: 3716/3711 cover ONLY the
 file-scope half (b); no existing item covers (a) — searched for any "restrict to declared operations only"
 enforcement mechanism and found only we:backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever.md
 (ratified, codified in we:docs/agent/platform-decisions.md#operations-declared-once-callers-generated), which
@@ -41,8 +41,8 @@ ground, not a rediscovery.
    `<op>`) — no general shell exposed to the dispatched agent. Structurally stronger than a permission check: the
    capability to run an arbitrary command would not exist in the environment at all, so there is nothing to bypass.
 2. Read-only filesystem mounts outside the item's own declared `scope:` paths — the same protection
-   xyp1wsl/xfxt77w's guard-hook approach provides, but enforced by the mount itself rather than a PreToolUse
-   hook that has to correctly intercept every Edit/Write call (and, as xyp1wsl's own epic body admits, we:scripts/guard-bash.mjs
+   3716/3711's guard-hook approach provides, but enforced by the mount itself rather than a PreToolUse
+   hook that has to correctly intercept every Edit/Write call (and, as 3716's own epic body admits, we:scripts/guard-bash.mjs
    today has NO scope-vs-edit-target check at all — a dispatched agent writing a file via a raw Bash redirect
    or `sed -i` rather than the Edit/Write tool would sail past the planned we:scripts/guard-lane.mjs arm entirely;
    a read-only mount would block that write regardless of which tool or command performed it).
@@ -54,7 +54,7 @@ spawns `claude --bg` on the host directly. The container needs real outbound net
 agent cannot function without it) plus git/npm/gh tooling reachable from inside it — "locked down" here means
 "only the declared-operations entrypoint is reachable from the agent's own shell," not "no network." This is a
 materially bigger architectural shift than either the resource-cap work above or the guard-hook work already
-filed tonight (xyp1wsl/xfxt77w) — not a small addition riding along with either.
+filed tonight (3716/3711) — not a small addition riding along with either.
 
 **Recommended priority ordering, stated as this research's own view, grounded in tonight's evidence:** hard
 boundaries (this container approach) > scanners (we:backlog/3594's compliance scanner) > prose doctrine
@@ -65,8 +65,8 @@ bad pattern only after the fact, and prose doctrine is what gets written down on
 enforced. Future hardening work on this axis should sequence in that order — hard boundary first where one is
 buildable, scanner as the interim/cheaper catch, doctrine as the fallback for whatever neither yet covers.
 
-**Supersede or complement xyp1wsl/xfxt77w? Judgment, with reasoning:** complement in the near term, likely
-supersede for the scope-enforcement half specifically if this container work ever ships. xfxt77w is already a
+**Supersede or complement 3716/3711? Judgment, with reasoning:** complement in the near term, likely
+supersede for the scope-enforcement half specifically if this container work ever ships. 3711 is already a
 build-ready, cheap, incremental win against the two tools (Edit/Write) it actually covers, and it does not
 require the architectural shift above — it should land on its own timeline, not wait on this decision. But it
 is structurally weaker than a read-only mount: it covers Edit/Write only, and by its own epic's admission
@@ -75,7 +75,7 @@ closes for free, regardless of which tool or command the agent used. If the cont
 built, its read-only mount would make the we:scripts/guard-lane.mjs scope arm redundant for every
 dispatched-lane session running inside a container — at that point keeping both is unnecessary defense in
 depth rather than a real second line of defense, since the container's boundary cannot be bypassed the way a
-per-tool hook can. Net: build xfxt77w now for its own cheap, real interim value; treat it as scaffolding for
+per-tool hook can. Net: build 3711 now for its own cheap, real interim value; treat it as scaffolding for
 this container work, not as permanent belt-and-suspenders alongside it.
 
 ## Amendment (2026-09-08) — decouple lane count from CPU: low-cpu lane containers + a separate heavy-command core pool

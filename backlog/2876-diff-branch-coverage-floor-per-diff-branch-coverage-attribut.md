@@ -3,9 +3,11 @@ bornAs: x0za326
 kind: story
 size: 3
 parent: "2873"
-status: open
+status: resolved
 blockedBy: ["2875"]
 dateOpened: "2026-08-02"
+dateStarted: "2026-09-19"
+dateResolved: "2026-09-19"
 tags: [conveyor, self-approval, spec-first]
 ---
 

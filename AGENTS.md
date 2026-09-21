@@ -67,6 +67,7 @@
 | Choosing a **vision capability** — tiny on-device classifier vs. small VLM vs. hosted, and where each runs (the cascade) | [docs/agent/vision-tiers.md](docs/agent/vision-tiers.md) |
 | **How an automated writer reaches `main`** — the writer operating model: automation **isolates by default** (clone → `lane/*` → integrator auto-merge), `main` is **convergence-only for automation**, the human is the single trusted writer with direct commit/push; near-term enforcement is **convention** (the serial `/batch` still commits on the current branch per Rule 104 as the interim) + the future server-side **bot-principal** branch rule | [platform-decisions.md#pr-flow-rollout-mechanism](docs/agent/platform-decisions.md#pr-flow-rollout-mechanism) |
 | **Manually developing / testing an edit in a lane** — pick a lane, boot its own dev pair (export `.env.local` ports), the FUI-sibling symlink (#1943), rendering via static build | [docs/agent/testing.md](docs/agent/testing.md) → "Developing & manually testing in a lane" |
+| Comparing **Claude Code / Codex / Antigravity CLI** capabilities — hooks, permissions, tools, config, models, streams, identity, resume; source evidence and open questions | [docs/agent/agent-cli-capability-map.md](docs/agent/agent-cli-capability-map.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 
@@ -75,7 +76,7 @@
 - **Plugs** 60 — 31 active · 26 concept · 1 draft · 2 experimental
 - **Blocks** 81 — 39 active · 12 concept · 30 draft
 - **Intents** 100 — 6 active · 37 concept · 57 draft
-- **Glossary terms** 345 · **Research topics** 308 (304 open)
+- **Glossary terms** 345 · **Research topics** 310 (306 open)
 - **Projects** 46: range-anchor, suggested-edit, webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webgraph, webguards, webidentity, webinjectors, webintents, webintl, webisolation, weblayout, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webprocess, webrealtime, webregistries, webreliability, webreporting, webresources, webrouting, webstates, webtheme, webtraces, webtraits, webvalidation, webworkflows
 <!-- /AUTO-GENERATED:inventory -->
 

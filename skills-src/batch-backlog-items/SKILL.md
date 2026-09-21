@@ -73,7 +73,8 @@ the per-item chat-rename — a batch labels the session **once**.
    on the /backlog Active-work tab, see *Working an item* → *Keep it in sync*) →
    **gate in the item's own locus** (look up `LOCI[item.locus]` in `check-standards-rules.mjs`: run
    `gateCommand` in `repoPath`, probe `devServerProbe` for any render check, do any `closeoutDiscipline`;
-   a WE item is just `npm run check:standards`). **Pass `--scope=<batch-slug>` to the WE gates** —
+   a WE item is just `npm run check:standards`; prove any guard `## Done when` criteria via
+   `node scripts/operations/run.mjs mutation-check --checkout=<lane> --target=<file> --find="<pattern>" --replace="<pattern>" --suite=<suite>` — see *Prove a guard fails — mutation-check* below). **Pass `--scope=<batch-slug>` to the WE gates** —
    `npm run check:standards -- --scope=<batch-slug>` (file-keyed, #952) and `npm run check:health --
    --scope=<batch-slug>` (id-keyed, #957) both demote *concurrent* sessions' findings to non-failing notes
    and surface only your changeset, so the gate-red diagnosis below is deterministic, not a manual `grep
@@ -401,3 +402,21 @@ that risk is now handled at **drain** time (rebase-retry) rather than by a produ
 > *is* the agreed opt-in stance: linear is the safe default you reach for, parallel is the explicit `/workflow`
 > choice. (Earlier this was a `--parallel`-off default flipped to default-on under #1147, then re-split into
 > `/workflow`; #2183 further makes the parallel path a PR fan-out — same reversible opt-in underneath.)
+
+## Prove a guard fails — mutation-check (#3219)
+
+When an item's `## Done when` criteria demand proving a guard actually fails when the bug it names returns, run the declared **`mutation-check`** operation (`we:scripts/operations/mutation-check.mjs`, #3219). It replaces ad-hoc shell or python heredocs with a safe, verified mutate → run → restore transaction in the target checkout:
+
+```
+node scripts/operations/run.mjs mutation-check --checkout=<lane> --target=<file> --find="<pattern>" --replace="<pattern>" --suite=<suite> [--json]
+```
+
+- **Why use it**: a green test suite proves the code passes the tests, not that the tests would catch the bug if reintroduced. Running vitest against a manually mutated file risks leaving mutants behind if the run dies or aborts. `mutation-check` captures the original bytes, runs the baseline suite first (must be green), applies the mutant, runs the named suite, and unconditionally restores the original file in a verified `finally` block.
+- **Flags**:
+  - `--checkout=<lane>` — the working tree / lane clone to mutate in (required; never defaulted to cwd for safety).
+  - `--target=<file>` — file the bug goes back into, relative to `checkout` (required).
+  - `--find="<pattern>"` — exact literal text in `target` to replace (required; literal, not regex).
+  - `--replace="<pattern>"` — exact literal text to replace it with (required).
+  - `--suite=<suite>` — the vitest suite expected to catch the mutant (required; passed to `vitest run <suite>`).
+  - `--json` — optional JSON output including the full verdict and probe findings.
+- **Outcomes**: three-valued — `killed` (the guard caught the mutant; passes), `survived` (the mutant stayed green; **blocking** defect — the guard is vacuous), or `unrun` (the pattern was not found, the baseline was red, or the runner crashed; also **blocking**).

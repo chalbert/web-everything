@@ -184,7 +184,7 @@ report-path derivation still works (both sides use the minted id), but its liven
 Not the same root cause, checked before concluding it: `we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix`
 passed **no `--append-system-prompt-file` at all** — the one dispatch path in the repo missing it.
 `createDispatchSinks` has always passed `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE` (so the tick-core fix dispatch was
-covered) and `we:scripts/operations/review-dispatch.mjs` passes its review-side twin (#xy8di3v), but this one
+covered) and `we:scripts/operations/review-dispatch.mjs` passes its review-side twin (#3606), but this one
 passed nothing.
 
 `we:skills-src/conveyor/fix-agent-brief.md` opens with *"**This is a TEMPLATE, not a runnable skill.**"* and

@@ -13,6 +13,7 @@ import {
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
   usageReportSecretReadReason,
+  isDirectTaskInvocation, backgroundedDirectTaskReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
@@ -21,6 +22,54 @@ import {
 } from '../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+describe('guard-bash — backgrounded direct tasks are denied (#3383)', () => {
+  it('isDirectTaskInvocation matches either exact script operand, not a mention or a different script', () => {
+    for (const command of [
+      'node scripts/codex-direct-task.mjs',
+      'node scripts/codex-direct-task.mjs --task="x"',
+      'node scripts/gemini-direct-task.mjs',
+      'node scripts/gemini-direct-task.mjs --task="x" --dir=/tmp/work',
+      'node /absolute/path/scripts/codex-direct-task.mjs --task="x"',
+      'node "/absolute/path with spaces/gemini-direct-task.mjs" --task="x"',
+      'cd /tmp && node scripts/codex-direct-task.mjs',
+      'nohup node scripts/codex-direct-task.mjs',
+    ]) expect(isDirectTaskInvocation(command), command).toBe(true);
+    for (const command of [
+      'node scripts/codex-judge-spawn.mjs --task="x"',
+      'node scripts/my-codex-direct-task.mjs',
+      'node scripts/codex-direct-task.mjs.bak',
+      'node scripts/other.mjs scripts/codex-direct-task.mjs',
+      'echo "node scripts/codex-direct-task.mjs --task=x"',
+      '# node scripts/gemini-direct-task.mjs --task=x',
+      'echo done # node scripts/codex-direct-task.mjs',
+      'cat <<\'EOF\'\nnode scripts/codex-direct-task.mjs\nEOF',
+    ]) expect(isDirectTaskInvocation(command), command).toBe(false);
+  });
+  it('backgroundedDirectTaskReason fires only when BOTH a direct task AND backgrounded', () => {
+    for (const script of ['codex', 'gemini']) {
+      const command = `node scripts/${script}-direct-task.mjs --task="x"`;
+      expect(backgroundedDirectTaskReason(command, true)).toMatch(/SYNCHRONOUS/);
+      for (const background of [`${command} &`, `nohup ${command}`, `setsid ${command}`, `${command}; disown`]) {
+        expect(backgroundedDirectTaskReason(background)).toMatch(/FOREGROUND/);
+      }
+      expect(backgroundedDirectTaskReason(command)).toBeNull();
+      expect(backgroundedDirectTaskReason(command, false)).toBeNull();
+      expect(backgroundedDirectTaskReason(`${command} > log 2>&1 && echo done`)).toBeNull();
+      expect(backgroundedDirectTaskReason(`${command} &> log || echo failed`)).toBeNull();
+    }
+    expect(backgroundedDirectTaskReason('sleep 60 &')).toBeNull();
+    expect(backgroundedDirectTaskReason('npm run dev &')).toBeNull();
+    expect(backgroundedDirectTaskReason('node scripts/codex-judge-spawn.mjs', true)).toBeNull();
+  });
+  it('decide denies the tool-param and shell-background forms and allows foreground', () => {
+    const command = 'node scripts/codex-direct-task.mjs --task="x"';
+    expect(decide(command, { runInBackground: true })).toMatch(/FOREGROUND/);
+    expect(decide('node scripts/gemini-direct-task.mjs --task="x" &')).toMatch(/SYNCHRONOUS/);
+    expect(decide(command)).toBeNull();
+    expect(decide('node scripts/gemini-direct-task.mjs --task="x"')).toBeNull();
+  });
+});
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
   it('isVerificationRun matches the verification set (verify-lane / check:standards / test:unit), not a mention', () => {
@@ -585,6 +634,37 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
   const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
   const allowed = (c) => expect(reason(c), c).toBeNull();
 
+  it.each([
+    "sed -i'' -e 's/x/y/' backlog/a.md",
+    'sed -i"" -e \'s/x/y/\' backlog/a.md',
+    "perl -0pi -e 's/x/y/' reports/a.md",
+    "perl -0pi.bak -e 's/x/y/' reports/a.md",
+    '(sed -i s/x/y/ backlog/a.md)',
+    '{ sed -i s/x/y/ backlog/a.md; }',
+    "sed -n 'w backlog/x.md' f",
+    "sed -n 'p;w backlog/x.md' f",
+    "sed -n '{w backlog/x.md\n}' f",
+    "sed -n '1,/x/w backlog/x.md' f",
+    "sed -n '/re/,$w backlog/x.md' f",
+    "sed -n '/re/,+2w backlog/x.md' f",
+    "sed -n '/re/I w backlog/x.md' f",
+  ])('denies the confirmed write regression: %s', (command) => {
+    denied(command);
+    expect(fileWriteTargets(command).some((path) => /^(backlog|reports)\//.test(path))).toBe(true);
+  });
+
+  it.each([
+    'grep foo backlog/a.md',
+    "sed -n 's/x/y/p' backlog/a.md",
+    'cat reports/a.md',
+    "(sed -n 's/x/y/p' backlog/a.md)",
+    "{ sed -n 'p' reports/a.md; }",
+    "perl -0p -e 's/x/y/' reports/a.md",
+  ])('allows read-only mentions after the regression fixes: %s', (command) => {
+    allowed(command);
+    expect(fileWriteTargets(command)).toEqual([]);
+  });
+
   it('still denies a REAL sed/perl in-place edit or tee write into backlog|reports (unchanged from before)', () => {
     denied('sed -i s/x/y/ backlog/2200-a.md');
     denied("sed -i '' s/x/y/ backlog/2200-a.md"); // BSD empty in-place suffix
@@ -625,6 +705,242 @@ describe('guard-bash — sed/tee/perl backlog|reports write vs. mere-mention (#3
   it('does NOT deny a sed `w`-command/`w`-flag write whose target is NOT backlog|reports', () => {
     allowed("sed 's/x/y/w /tmp/scratch.md' file.txt");
     allowed("sed -n '/pat/w /tmp/scratch.md' file.txt");
+  });
+
+  // #2108 review r3 — SED_ADDR_W missed a NEGATED address (`/pat/!w file`), GNU's `first~step` address
+  // extension (`0~3w file`), and the uppercase `W` command — three more real sed write shapes with no
+  // `-i`/`--in-place` anywhere, verified against real sed to genuinely write the named file.
+  it('denies a sed address-write via negation, GNU step address, or the uppercase W command (#2108 review r3)', () => {
+    denied("sed -n '/pat/!w backlog/2200-a.md' file.txt");
+    denied("sed -n '3,5!w backlog/2200-a.md' file.txt");
+    denied("sed -n '0~3w backlog/2200-a.md' file.txt");
+    denied("sed -n '/pat/W backlog/2200-a.md' file.txt");
+  });
+
+  // #2108 review r3 — an earlier GNU-only flag that takes a SEPARATE argument (`-l N`) shifted the
+  // no-`-e`/no-`-f` fallback's "first operand" pick onto that consumed numeral instead of the real
+  // script, so the actual `w`-write in the script text was never scanned at all.
+  it('still finds the sed script (and its w-write) past a preceding arg-taking flag like -l N (#2108 review r3)', () => {
+    denied("sed -l 80 's/x/y/w backlog/2200-a.md' file.txt");
+  });
+
+  // #2108 review r3 — the deny arm's `atCommand` gate never matched a `gsed` invocation even though
+  // fileWriteTargets/sedScriptTexts already support prog === 'gsed' internally — unreachable from here.
+  it('denies a gsed in-place write into backlog|reports, matching sed (#2108 review r3 coverage gap)', () => {
+    denied('gsed -i s/x/y/ backlog/2200-a.md');
+  });
+
+  // PR #2108 review finding (backlog#x7k9gep follow-up): perl script text open() writes into backlog|reports
+  it('denies a perl script text open() write into backlog|reports (#2108 review finding)', () => {
+    denied('perl -e \'open(F, ">", "backlog/x.md"); print F "x"\'');
+    denied('perl -e \'open(my $fh, ">>", "reports/r.md") or die; print $fh 1\'');
+    denied('perl -e \'open(F, ">backlog/x.md"); print F 1\'');
+    denied("perl -e \"open F, '>>backlog/x.md'\"");
+    denied('perl -E \'open(F, ">:utf8", "backlog/x.md")\'');
+  });
+
+  it('does NOT deny a perl script that opens for read or merely mentions a backlog|reports path (#2108 review finding)', () => {
+    allowed('perl -e \'open(F, "<", "backlog/x.md"); print <F>\'');
+    allowed('perl -e \'open(F, "backlog/x.md")\'');
+    allowed('perl -e \'print "backlog/x.md"\'');
+    allowed('perl -ne \'print\' backlog/1.md');
+    allowed('perl -e \'open(F, ">", "/tmp/x.txt")\'');
+  });
+
+  it('denies perl -ne and -lane scripts opening backlog|reports for write', () => {
+    denied("perl -ne 'open(O, \">>\", \"backlog/x.md\"); print O $_' in.txt");
+    denied("perl -lane 'open(O, \">\", \"reports/r.md\")' in.txt");
+  });
+
+  it('allows a perl script file or a loop flag without in-place write mentioning backlog', () => {
+    allowed('perl backlog/1.md');
+    allowed("perl -pe 's/x/y/' backlog/1.md");
+  });
+
+  it('fileWriteTargets extracts literal paths from perl open() and returns empty for reads/mentions', () => {
+    expect(fileWriteTargets('perl -e \'open(F, ">", "backlog/x.md"); print F "x"\'')).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets('perl -e \'open(my $fh, ">>", "reports/r.md") or die; print $fh 1\'')).toEqual(['reports/r.md']);
+    expect(fileWriteTargets('perl -e \'open(F, ">backlog/x.md"); print F 1\'')).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets("perl -e \"open F, '>>backlog/x.md'\"")).toEqual(['backlog/x.md']);
+    expect(fileWriteTargets('perl -E \'open(F, ">:utf8", "backlog/x.md")\'')).toEqual(['backlog/x.md']);
+
+    expect(fileWriteTargets('perl -e \'open(F, "<", "backlog/x.md"); print <F>\'')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'open(F, "backlog/x.md")\'')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'print "backlog/x.md"\'')).toEqual([]);
+    expect(fileWriteTargets('perl -ne \'print\' backlog/1.md')).toEqual([]);
+    expect(fileWriteTargets('perl -e \'open(F, ">", "/tmp/x.txt")\'')).toEqual(['/tmp/x.txt']);
+  });
+});
+
+// #2108 review r4 — table-driven differential coverage. Every command below was DENIED on `main` (the raw
+// CORPUS_MD text match) and really writes into backlog|reports, so it must stay denied; the read-only
+// twins in the second table must stay allowed (the whole point of #3390).
+describe('guard-bash — sed/tee/perl write-shape tables + ReDoS bound (#2108 review r4)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+
+  it.each([
+    // in-place suffix spellings — the suffix is ANY text glued to `-i`
+    'sed -i~ s/x/y/ backlog/a.md',
+    'sed -i_bak s/x/y/ backlog/a.md',
+    'sed -i.bak.1 s/x/y/ backlog/a.md',
+    "sed -i.orig -e 's/x/y/' backlog/a.md",
+    'sed -Ei s/x/y/ backlog/a.md',
+    'sed -ni s/x/y/p backlog/a.md',
+    'gsed -i~ s/x/y/ reports/a.md',
+    "perl -i.bak.1 -pe 's/x/y/' backlog/a.md",
+    "perl -i~ -pe 's/x/y/' backlog/a.md",
+    "perl -0777 -pi -e 's/x/y/' backlog/a.md",
+    'tee -p backlog/a.md',
+    'tee --output-error=warn backlog/a.md',
+  ])('denies an in-place/tee write spelling: %s', denied);
+
+  it.each([
+    // sed write shapes the structured scan cannot parse — the fail-closed script-text scan catches them
+    "sed -n '\\,a,w reports/x.md' f", // custom-delimiter address
+    "sed 's/[/]/b/w reports/x.md' f", // delimiter inside a bracket expression
+    "sed -n 's/a/b/gw reports/x.md' f",
+    "sed -e'w backlog/x.md' f", // script attached to -e
+    "sed -ne'w backlog/x.md' f",
+    "sed -n -e p -e'w backlog/x.md' f",
+    "sed -n 'y/a/b/;w backlog/x.md' f",
+    "sed -n 'e echo hi > backlog/a.md' f", // the `e` command runs a shell
+    "sed -i '' 's/x/y/w backlog/a.md' /tmp/scratch.md", // BSD `-i ''`: the script is NOT the empty operand
+    "sed -l 80 -n 'w backlog/x.md' f",
+  ])('denies a sed script-text write: %s', denied);
+
+  it.each([
+    "perl -e'open(F,\">backlog/x.md\")'", // attached -e
+    "perl -ne'open(O,\">>backlog/x.md\")' f",
+    "perl -e 'system(\"echo hi > backlog/a.md\")'",
+    "perl -e 'rename(\"/tmp/x\",\"backlog/a.md\")'",
+    "perl -MFile::Copy=cp -e 'cp(\"/tmp/x\",\"backlog/a.md\")'",
+    "perl -e '$f=\"backlog/a.md\"; open(F,\">\",$f)'", // path held in a variable
+    "perl -e 'open(F,\">\",\"backlog/\".\"x.md\")'", // path built by concatenation
+    "perl -e 'open(F,\">\",q(backlog/x.md))'",
+    "perl -e 'system(\"cp /tmp/x backlog/a.md\")'",
+  ])('denies a perl script-text write the literal-open() scan cannot parse: %s', denied);
+
+  it.each([
+    "sed -n 's/backlog\\/x.md/y/' f", // mentions a corpus path in the PATTERN, writes nothing
+    "sed -n '/reports\\/x.md/p' f",
+    "sed -n 'p' backlog/a.md",
+    "sed -ne'p' backlog/a.md",
+    "sed -n 's/a/b/w /tmp/scratch.md' backlog/a.md", // w target is scratch; backlog is only READ
+    "sed -i '' 's/x/y/' /tmp/scratch.md",
+    'sed -i~ s/x/y/ /tmp/scratch.md',
+    "perl -Ilib -e 'print 1' backlog/a.md", // `-Ilib` is an include dir, not `-i`
+    "perl -Mfeature=say -e 'say 1' backlog/a.md",
+    "perl -ne'print' backlog/a.md",
+    "perl -e 'open(F,\"<\",\"backlog/x.md\"); print <F>'",
+    "perl -e 'print \"see backlog/x.md\"'",
+    "perl -e 'open(F,\">\",\"/tmp/x.txt\")'",
+    'tee -p /tmp/scratch.md',
+  ])('still allows a read-only / scratch-only invocation: %s', allowed);
+
+  it('scans a pathologically long escaped sed script in bounded time (SED_SUB_W was exponential)', () => {
+    for (const cmd of [
+      `sed 's/${'\\'.repeat(200)}' f`,
+      `sed -n 's/${'\\.'.repeat(60)}/x/g' backlog/x.md`,
+      `sed -n '/${'\\/'.repeat(200)}' f`,
+    ]) {
+      const t = performance.now();
+      reason(cmd);
+      expect(performance.now() - t, cmd.slice(0, 40)).toBeLessThan(250);
+    }
+  });
+});
+
+describe('guard-bash — differential write-shape table (#2108 review r5)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+  const inPlaceCases = [];
+  for (const prog of ['sed', 'gsed', 'perl']) {
+    for (const inplace of ['-i', '-i.bak', '-i~', ...(prog === 'perl' ? ['-pi'] : [])]) {
+      for (const script of ['-e s/x/y/', '-es/x/y/', '-nes/x/y/', "-e's/x/y/'",
+        ...(prog === 'perl' ? [] : ['--expression=s/x/y/'])]) {
+        inPlaceCases.push(`${prog} ${inplace} ${script} backlog/a.md`);
+      }
+      if (prog !== 'perl') {
+        for (const script of ['-fx.sed', '-ne s/x/y/', '-nf x.sed', '--file=x.sed', '-es/a/b/ -es/c/d/']) {
+          inPlaceCases.push(`${prog} ${inplace} ${script} backlog/a.md`);
+        }
+      }
+    }
+  }
+  it.each(inPlaceCases)('denies parsed in-place target: %s', denied);
+  it.each([
+    'perl -pi -es/x/z/ backlog/a.md',
+    `perl -pe 'BEGIN{$^I=".bak"}' backlog/a.md`,
+    `perl -e 'open(F,">",shift); print F 1' backlog/a.md`,
+    `perl -e 'open(F,">",$ARGV[0])' backlog/a.md`,
+    `perl -e 'unlink shift' backlog/a.md`,
+    `perl -e 'open(F,shift)' '>backlog/a.md'`,
+    `perl -e '$INPLACE_EDIT=""' backlog/a.md`,
+    `perl -e '$^I=""; @ARGV=("backlog/a.md"); while(<>){s/x/y/; print}'`,
+    `perl -e 'unlink "backlog/a.md"'`,
+    `perl -e 'chmod 0644, "backlog/a.md"'`,
+    `perl -e 'truncate("backlog/a.md",0)'`,
+    `perl -e 'sysopen(F,"backlog/a.md",1)'`,
+    `perl -e 'open(F,"|tee backlog/a.md")'`,
+    `perl -e 'open(F,"<",shift); open(G,">",shift)' backlog/a.md`,
+    `perl -e 'open(F,"<","|tee backlog/a.md")'`,
+    'perl fix.pl backlog/a.md',
+    'perl -I lib fix.PM reports/a.md',
+    'perl fix.t backlog/a.md',
+    `sed '1e cp /tmp/x backlog/a.md' f`,
+    `sed -n '1e tee backlog/a.md' f`,
+    `sed 's/x/y/e' backlog/a.md`,
+    `sed 's/x/y/eg' backlog/a.md`,
+    `sed 's|x|y|ge; # backlog/a.md' f`,
+    `sed -n -f - f <<< 'w backlog/a.md'`,
+    `sed -n -f /dev/stdin f <<< 'w backlog/a.md'`,
+    `sed -n --file=- f <<< 'w backlog/a.md'`,
+    `sed -n -f - f <<< '1e tee backlog/a.md'`,
+    `sed -i -e s/x/y/ -- backlog/a.md`,
+    `perl -fi s/x/y/ backlog/a.md`, // perl -f is not a script option
+  ])('denies differential write shape: %s', denied);
+  it.each([
+    'sed -n -es/x/y/p backlog/a.md',
+    'sed -es/x/y/ backlog/a.md',
+    'perl -es/x/z/ backlog/a.md',
+    `perl -ne 'print' backlog/a.md`,
+    `perl -pe 's/x/y/' backlog/1.md`,
+    `perl -ne 'print if /x/' reports/123-foo.md`,
+    `perl -0p -e 's/x/y/' reports/a.md`,
+    `perl -ne 'print if /rename|unlink|link/' backlog/a.md`, // builtin NAMES inside a regex are not calls
+    `perl -ne 'print "rename\\n" if /mkdir/' reports/a.md`,
+    `perl -Ilib -e 'print 1' backlog/a.md`,
+    `perl -I lib -e 'print 1' backlog/a.md`,
+    `perl -e 'open(F,"<",shift); print <F>' backlog/a.md`,
+    `perl -e 'open(F,"<:utf8",shift); open(G,"<",shift)' backlog/a.md`,
+    'perl backlog/1.md',
+    'perl fix.other backlog/a.md', // accepted script-extension limit
+    'sed -f script.sed backlog/a.md',
+    'sed -i -es/x/y/ /tmp/x.md',
+    'perl -pi -es/x/z/ /tmp/x.md',
+    `sed -n -f - backlog/a.md <<< 'p'`,
+    `sed -- -i backlog/a.md`,
+    `sed -n '1,120p' backlog/3390-guard-bash-sed-tee-perl-corpus-fp.md`,
+    `sed -n '/^## /p' ~/workspace/web-everything/backlog/3390-x.md`,
+    `cd ~/workspace/x && sed -n '1,40p' backlog/2108-y.md | head`,
+  ])('allows read-only / scratch twin and reviewer-shell regression: %s', allowed);
+
+  // Exercise each new regex through the public scanner, including escaped near misses.
+  it.each([
+    ['SED_SUB_E', `sed 's/${'\\'.repeat(2000)}' backlog/a.md`],
+    ['SED_EXEC', `sed '/${'\\/'.repeat(1000)}' backlog/a.md`],
+    ['SED_EXEC whitespace', `sed '${' '.repeat(100)}# backlog/a.md' f`],
+    ['PERL_MUTATING', `perl -e '${'\\'.repeat(2000)} $INPLACE_EDI' backlog/a.md`],
+    ['PERL_WRITE_PRIMITIVE', `perl -e '${'\\'.repeat(2000)} system "read backlog/a.md"'`],
+    ['PERL_OPEN_WORD', `perl -e '${'openly '.repeat(400)}' backlog/a.md`],
+    ['PERL_READ_OPEN', `perl -e 'open(${ ' '.repeat(2000)}F,"<",shift)' backlog/a.md`],
+    ['PERL_OPEN_STRING', `perl -e 'open(F,"<","${'\\'.repeat(2000)}")' backlog/a.md`],
+    ['script extension', `perl ${'a'.repeat(2000)}.other backlog/a.md`],
+  ])('bounds %s scanning', (_name, cmd) => {
+    const start = performance.now();
+    reason(cmd);
+    expect(performance.now() - start).toBeLessThan(250);
   });
 });
 
@@ -2497,4 +2813,136 @@ describe('guard-bash — a decision-authoring agent may never run the mechanical
     // the identical command with no dispatchKind at all (interactive) — untouched
     expect(decide('node scripts/backlog.mjs prepare-stamp 2568')).toBeNull();
   });
+});
+
+describe('guard-bash — every script-scanning regex is linear on hostile runs (#2108 review r6)', () => {
+  const runs = [' ', '\t', '\\', ';', '{', '/', '\\/', '; ', '{ ', ';/', 's', 'w ', 'e '];
+  const wrappers = [
+    (p) => `sed -n '${p}x' backlog/a.md`,
+    (p) => `sed -n ';${p}' backlog/a.md`,
+    (p) => `sed -n '{${p}' backlog/a.md`,
+    (p) => `sed -n -e '${p}' backlog/a.md`,
+    (p) => `sed 's/a/b/${p}' backlog/a.md`,
+    (p) => `perl -ne '${p}' backlog/a.md`,
+    (p) => `perl -e 'open(${p}' backlog/a.md`,
+    (p) => `perl -e 'print "${p}' backlog/a.md`,
+    (p) => `perl -e 'open(F,">${p}' backlog/a.md`,
+    (p) => `perl -e 'open(F,">", "${p}' backlog/a.md`,
+    // Corpus text reaches the allow-list, including literal blanking and interpolated code.
+    (p) => `perl -e 'print "backlog/a.md"; ${p}'`,
+    (p) => `perl -e 'print "backlog/a.md @{${p}}"'`,
+  ];
+  it.each(wrappers.flatMap((wrap, w) => runs.map((run) => [w, JSON.stringify(run), wrap(run.repeat(3000))])))
+    ('bounds wrapper %s with run %s', (_wrapper, _run, cmd) => {
+      const start = performance.now();
+      fileWriteTargets(cmd);
+      expect(performance.now() - start).toBeLessThan(250);
+    });
+  it.each([
+    "sed -n '1s/a/b/w backlog/x.md' f",
+    "sed -n '/x/Is/a/b/w backlog/x.md' f",
+    "sed -n '/x/IMs/a/b/w backlog/x.md' f",
+    "sed -n '$!s/a/b/w backlog/x.md' f",
+    "sed 's/a/b/e' backlog/x.md",
+    "sed '/x/Is/a/b/e' backlog/x.md",
+  ])('the s-command start bound still finds a real write/exec: %s', (cmd) => {
+    expect(reason(cmd), cmd).toMatch(/locus-prefix/);
+  });
+  it('bounds the exact reviewer whitespace repro', () => {
+    const cmd = `sed -n '${' '.repeat(3000)}x' f`;
+    const start = performance.now();
+    fileWriteTargets(cmd);
+    expect(performance.now() - start).toBeLessThan(250);
+  });
+});
+
+describe('guard-bash — GNU-abbreviated long options and variable-held flags fail closed (#2108 review r6)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+  it.each([
+    ...['--in', '--i', '--in-pl', '--in-pla', '--in-place', '--in-place=.bak'].map((flag) => `sed ${flag} s/x/y/ backlog/a.md`),
+    'gsed --in-pl s/x/y/ backlog/a.md',
+    'sed --i --expr=s/x/y/ backlog/a.md',
+    'sed --in --expression s/x/y/ backlog/a.md',
+    'sed --in --fil=x.sed backlog/a.md',
+    'sed --in --file x.sed backlog/a.md',
+    'sed --expr=s/x/y/w\\ backlog/a.md f',
+    "sed --expr='w backlog/x.md' f",
+    'sed --l 80 --in s/x/y/ backlog/a.md',
+    'sed --line-length=80 --i s/x/y/ backlog/a.md',
+    "sed --e 'w backlog/a.md' f",
+    'sed --in --fi x.sed backlog/a.md',
+    'sed $OPTS s/x/y/ backlog/a.md',
+    'sed ${I} s/x/y/ backlog/a.md',
+    'sed "$OPTS" s/x/y/ backlog/a.md',
+    'sed -$X s/x/y/ backlog/a.md',
+    "perl $OPTS -e 's/x/y/' backlog/a.md",
+    'sed --$L s/x/y/ backlog/a.md',
+    'sed --in-$Y s/x/y/ backlog/a.md',
+    'sed -n$X s/x/y/ backlog/a.md',
+    'sed "${I}" s/x/y/ backlog/a.md',
+    'sed "$(flags)" s/x/y/ backlog/a.md',
+    'sed `flags` s/x/y/ backlog/a.md',
+    "perl -n$X -e 's/x/y/' reports/a.md",
+  ])('denies hidden editor flags or abbreviated writes: %s', denied);
+  it.each([
+    'sed --follow-symlinks -n p backlog/a.md',
+    'sed --fo -n p backlog/a.md',
+    'sed --quiet --expr=p backlog/a.md',
+    'sed --in s/x/y/ /tmp/x.md',
+    'sed $OPTS s/x/y/ /tmp/x.md',
+    "sed -n '$p' backlog/a.md",
+    "sed -n 's/x$/y/' backlog/a.md",
+    "sed -n -e '$p' backlog/a.md",
+    "perl -ne 'print $x' backlog/a.md",
+    "perl -e'print $x' backlog/a.md",
+    "sed -n '${START}p' backlog/a.md",
+    'sed --f -n p backlog/a.md',
+    'sed --unknown -n p backlog/a.md',
+    'sed --in --f s/x/y/ /tmp/x.md',
+    "sed -ne'$p' backlog/a.md",
+    "sed --expr='$p' backlog/a.md",
+    'sed -f $SCRIPT backlog/a.md',
+    "perl -I $LIB -e 'print' backlog/a.md",
+    "perl -Mfeature=say -e 'say' backlog/a.md",
+  ])('allows read-only and scratch twins: %s', allowed);
+});
+
+describe('guard-bash — a perl script naming a corpus path must be provably read-only (#2108 review r6)', () => {
+  const denied = (c) => expect(reason(c), c).toMatch(/locus-prefix/);
+  const allowed = (c) => expect(reason(c), c).toBeNull();
+  it.each([
+    ...[
+      'sed -i s/x/y/ backlog/a.md', 'perl -pi -e s/x/y/ backlog/a.md',
+      'git checkout -- backlog/a.md', 'patch backlog/a.md < x.diff', 'rm backlog/a.md',
+    ].map((cmd) => `perl -e 'system("${cmd}")'`),
+    `perl -e 'system("printf","x",">","backlog/a.md")'`,
+    ...['append', 'edit', 'edit_lines', 'touch', 'remove', 'spew_utf8'].map((method) =>
+      `perl -e 'path("backlog/a.md")->${method}("x")'`),
+    `perl -e 'File::Slurper::write_text("backlog/a.md","x")'`,
+    `perl -e 'IO::File->new("backlog/a.md","w")'`,
+    `perl -e 'File::Path::remove_tree("backlog/a.md")'`,
+    `perl -MFile::Slurper=write_text -e 'write_text("backlog/a.md","x")'`,
+    `perl -e 'eval "unlink q(backlog/a.md)"'`,
+    `perl -e '&system("rm backlog/a.md")'`,
+    ...['exec', 'qx', 'require', 'use', 'do', 'unlink'].map((name) => `perl -e '${name} "backlog/a.md"'`),
+    ...['s', 'm', 'y', 'tr', 'q', 'qq', 'qw', 'qr'].map((op) => `perl -e '${op}/backlog\/a.md/'`),
+    `perl -e 'print "@{[system(q(rm backlog/a.md))]}"'`,
+    'perl -e \'print "${\\system(q(rm backlog/a.md))}"\'',
+    `perl -e 'print "$(system(q(rm backlog/a.md)))"'`,
+    "perl - backlog/a.md <<'X'\nopen(F,\">\",shift)\nX",
+  ])('denies corpus code outside the read-only vocabulary: %s', denied);
+  it.each([
+    `perl -e 'open(F,"<","backlog/x.md"); while(<F>){print}'`,
+    `perl -e 'print "see backlog/x.md\\n"'`,
+    `perl -e 'open(IN, "<", "reports/a.md"); my @l = <IN>; print scalar(@l)'`,
+    `perl -e 'open(F,"<","backlog/x.md"); print <F>'`,
+    `perl -e 'print "see backlog/x.md"'`,
+    `perl -e 'open(F,">","/tmp/x.txt")'`,
+    `perl -e 'my $system = "backlog/a.md"; print $system'`,
+    `perl -e 'print "system backlog/a.md"'`,
+    `perl -e 'print "backlog/a.md", "escaped \\"quote\\""'`,
+    'perl - /tmp/x.md',
+    "perl - /tmp/x.md <<'X'\nopen(F,\">\",shift)\nX",
+  ])('allows provably read-only corpus code and scratch stdin: %s', allowed);
 });

@@ -47,7 +47,7 @@ import { advance, runStatus } from './engine.mjs';
 import { applyPendingEffects } from './effect-executor.mjs';
 import { createRegistry } from './registry.mjs';
 import {
-  reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor, codexAdvisoryFromEnv, correctnessAdvisoryFromEnv,
+  reviewPrOperation, REVIEW_EFFECTS, confirmAnswerFor, codexAdvisoryFromRun, correctnessAdvisoryFromEnv,
   antigravityReviewFromEnv,
 } from './review-pr.mjs';
 
@@ -272,14 +272,16 @@ export async function advanceReviewPrToWriteUp(record, { to, store, sinks = crea
   if (!answer || !record || record.op !== 'review-pr') return record;
 
   const registry = createRegistry();
-  // #xqa9ttq / #x8n4crp / #3383 — SAME THREE ENV VARS `run.mjs` READS (`REVIEW_PR_CODEX_ADVISORY`,
-  // `REVIEW_PR_CODEX_CORRECTNESS_ADVISORY`, `REVIEW_PR_ANTIGRAVITY_REVIEW`). This registration must seat the
-  // same roster the run was STARTED with, or a resume here would be reasoning about a run shape that no longer
-  // exists — see `codexAdvisoryFromEnv`/`correctnessAdvisoryFromEnv`/`antigravityReviewFromEnv`'s own docs
-  // (`we:scripts/operations/review-pr.mjs`).
+  // #xqa9ttq / #x8n4crp / #3383 — the roster this resume registers must be the roster the run was STARTED
+  // with, or it would be reasoning about a run shape that no longer exists.
+  // PR #2117 review: the CODEX advisory seat now comes from the SAVED RUN (`codexAdvisoryFromRun`), not the
+  // ambient env, so a resume in a process with a different `REVIEW_PR_CODEX_ADVISORY` still registers the
+  // right step list. The correctness + antigravity seats (#x8n4crp / #3383) still read their own env vars
+  // (`REVIEW_PR_CODEX_CORRECTNESS_ADVISORY`, `REVIEW_PR_ANTIGRAVITY_REVIEW`) — see each factory's own docs
+  // (`we:scripts/operations/review-pr.mjs`); porting them to the saved run is the same follow-on.
   registry.register(reviewPrOperation({
     readPr: createReviewPrReader(),
-    codexAdvisory: codexAdvisoryFromEnv(),
+    codexAdvisory: codexAdvisoryFromRun(record),
     correctnessAdvisory: correctnessAdvisoryFromEnv(),
     antigravityReview: antigravityReviewFromEnv(),
   }));

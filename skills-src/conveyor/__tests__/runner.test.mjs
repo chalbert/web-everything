@@ -737,7 +737,7 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
     cp.execFileSync.mockImplementation(execFileSync);
     if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
-    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'chalbert/web-everything', exec: cp.execFileSync });
     await mechanicalPasses({ out: {} });
 
     const dispatchCalls = calls.filter((c) => c.join(' ').includes('review-dispatch.mjs'));
@@ -755,12 +755,12 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
     cp.execFileSync.mockImplementation(execFileSync);
     if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
-    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'chalbert/web-everything', exec: cp.execFileSync });
     await mechanicalPasses({ out: {} });
 
     const roundTagCalls = calls.filter((c) => c.join(' ').includes('review-round-tag.mjs'));
     expect(roundTagCalls).toHaveLength(1);
-    expect(roundTagCalls[0]).toEqual(expect.arrayContaining(['99', '--repo=owner/repo', '--round=3']));
+    expect(roundTagCalls[0]).toEqual(expect.arrayContaining(['99', '--repo=chalbert/web-everything', '--round=3']));
   });
 
   it('still runs the informative review-status-tag.mjs sweep even when the dispatch above it failed', async () => {
@@ -772,7 +772,7 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
     cp.execFileSync.mockImplementation(execFileSync);
     if (typeof spawn === 'function') cp.spawn.mockImplementation(spawn);
 
-    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'chalbert/web-everything', exec: cp.execFileSync });
     await mechanicalPasses({ out: {} });
 
     const statusTagCalls = calls.filter((c) => c.join(' ').includes('review-status-tag.mjs'));
@@ -835,7 +835,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
     cp.execFileSync.mockImplementation(execFileSync);
     cp.spawn.mockImplementation(makeSpawnRouter(calls));
 
-    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo', exec: cp.execFileSync });
     await mechanicalPasses({ out: {} });
 
     // The exact relative script path (or literal flag) each call carries, in the order both subprocess APIs saw them

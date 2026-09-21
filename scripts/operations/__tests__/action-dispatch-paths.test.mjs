@@ -38,13 +38,19 @@ it.each(['held', 'unavailable'])('review, fix and dispatch-lane all refuse %s be
   expect(cli).toMatchObject({ code: 75, mode: 'held' });
   expect(spawnAgent).not.toHaveBeenCalled();
 });
-it('a review blocks a fix on the same PR, while another repo is independent', () => {
+it('a review blocks a fix on the same PR; a FOREIGN repo is refused before the record is ever consulted', () => {
   const actions = createActionStore();
   const spawnAgent = vi.fn(() => 'backgrounded · aabbccdd · review-77');
   dispatchReview({ pr: 77, repo: 'we', root: '/fake-primary', actions, spawnAgent, checkStaleness: () => ({ fresh: true }), readBrief: () => reviewBrief });
   expect(dispatchFix(planned, { root: '/fake-primary', actions, spawnAgent, readBrief: () => fixBrief }).held).toBe(true);
-  expect(dispatchFix(planned, { repo: 'frontierui', root: '/fake-primary', actions, spawnAgent, readBrief: () => fixBrief }).agentId).toBe('aabbccdd');
-  expect(spawnAgent).toHaveBeenCalledTimes(2);
+  // CATCH-UP MERGE (2026-09-21): this case used to assert that the SAME PR number in ANOTHER repo dispatches
+  // independently of the WE action record. `main` has since made `dispatchFix` refuse any repo but WE outright
+  // (`unsupported-repo` — a foreign fix needs its own brief and gate), and that refusal fires at the top of the
+  // function, BEFORE the record is read. So the foreign half is now asserted as the refusal it actually is; the
+  // record's own repo-independence is no longer exercisable from here and is recorded in this merge's report.
+  expect(() => dispatchFix(planned, { repo: 'frontierui', root: '/fake-primary', actions, spawnAgent, readBrief: () => fixBrief }))
+    .toThrow(/unsupported-repo/);
+  expect(spawnAgent).toHaveBeenCalledTimes(1);
 });
 it.each(['held', 'unavailable'])('land-advance defers %s without errors or a follow-up ledger entry', async (reason) => {
   const writeLedger = vi.fn();

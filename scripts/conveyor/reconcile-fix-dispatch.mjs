@@ -57,6 +57,7 @@ import { guardedDispatch } from '../operations/action-dispatch.mjs';
 import { createActionStore } from '../operations/action-store.mjs';
 import { actionResource } from '../operations/action-record.mjs';
 import { DRIVER_ID } from '../operations/tick-mutex.mjs';
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -74,6 +75,8 @@ import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, fillBrief, session
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
+import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
@@ -142,7 +145,10 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       // fallback is always safe (never a looser fence than a declared scope would have been).
       let fallback = [];
       try { fallback = resolveFallbackScope(pr, itemNum) || []; } catch { fallback = []; }
-      if (Array.isArray(fallback) && fallback.length) {
+      // The filenames are PR-author-controlled and `dispatchFix` joins `scope` with ',' into the agent's brief,
+      // so keep only entries that cannot smuggle extra fence entries or brief text (see isSafeFallbackScopeEntry).
+      fallback = Array.isArray(fallback) ? fallback.filter(isSafeFallbackScopeEntry) : [];
+      if (fallback.length) {
         scope = fallback;
         scopeSource = 'pr-diff';
       }
@@ -170,6 +176,25 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
 }
 
 /**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#isSafeFallbackScopeEntry — may this PR-diff filename become a
+ * scope-fence entry? PURE. A PR author controls its filenames, and `dispatchFix` joins `scope` with ',' into the
+ * fix agent's `SCOPE:` token, so a name like `x,we:scripts` would read as TWO fence entries (the second a whole
+ * directory the PR never touched) and free text in a name would land in the brief. Rejects: `,`, any whitespace
+ * or control character, a `..` path segment, a leading `/`, and glob metacharacters (`* ? [ ] { }`). A rejected
+ * file is DROPPED from the fallback fence (never a looser fence, only a narrower one); if none survive the
+ * caller reports `no-scope`. Declared item `scope:` (trusted backlog frontmatter) is not filtered.
+ * @param {string} entry - a `we:`-prefixed path.
+ * @returns {boolean}
+ */
+export function isSafeFallbackScopeEntry(entry) {
+  if (typeof entry !== 'string') return false;
+  const path = entry.replace(/^[a-z][a-z0-9-]*:/i, '');
+  if (!path || path.startsWith('/')) return false;
+  if (/[,\s*?[\]{}]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return false;
+  return !path.split('/').includes('..');
+}
+
+/**
  * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchPrDiffScope — `#3634`'s real fallback-scope reader: ONE
  * `gh pr diff <pr> --name-only` call, reduced to the `we:`-prefixed path list {@link planFixesFromReconcile}'s
  * `resolveFallbackScope` wants (the SAME repo-qualified form the canonical loader already produces for a
@@ -177,12 +202,15 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
  * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
  * as it did before this fallback existed, never throws the whole pass over one bad read.
  * @param {number} pr
- * @param {{exec?:Function, root?:string}} [o]
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug) pins the `gh` call
+ *   to that repo, the same `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use.
  * @returns {string[]}
  */
-export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT } = {}) {
+export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT, repo = null } = {}) {
   try {
-    const out = exec('gh', ['pr', 'diff', String(pr), '--name-only'], {
+    const argv = ['pr', 'diff', String(pr), '--name-only'];
+    if (repo) argv.push('--repo', repo);
+    const out = exec('gh', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
     });
     return String(out || '')
@@ -347,6 +375,7 @@ export function tryResumeFix(planned, {
   resolveHead = resolveLaneHead,
   wait = defaultConfirmWait,
 } = {}) {
+  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
   assertNotALaneCheckout(root);
   if (!planned.isConflict) return { resumed: false, resumeAttempt: null };
 
@@ -370,7 +399,7 @@ export function tryResumeFix(planned, {
   // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
   const candidateCwd = candidateRow?.cwd || null;
   const candidateHead = candidateCwd ? resolveHead(candidateCwd) : null;
-  const expectedNames = new Set([...(planned.itemNum ? [sessionSlugFor(planned.itemNum, 'build')] : []), sessionSlugFor(planned.pr, 'fix')]);
+  const expectedNames = new Set([...(planned.itemNum ? [sessionSlugFor(planned.itemNum, 'build')] : []), sessionSlugFor(planned.pr, 'fix', null, '', repo)]);
   const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
   const headConfirmed = Boolean(planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
   const ownershipConfirmed = headConfirmed && nameConfirmed;
@@ -482,9 +511,10 @@ export function dispatchFix(planned, {
   extraArgs = [],
   resumeAttempt = null,
 } = {}) {
+  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
   assertNotALaneCheckout(root);
 
-  const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr);
+  const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
     ITEM_NUM: planned.itemNum ?? '',
     ATTRIBUTION_KIND: planned.attributionKind ?? (planned.itemNum ? 'WE' : 'PR'),
@@ -551,11 +581,24 @@ export function runReconcileFixDispatch({
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
-  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root }),
+  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
   checkStaleness,
+  prsFile, unsupportedPath,
 } = {}) {
-  assertMainNotStale(root, checkStaleness);
-  const reconciled = reconcile({ repo });
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
+  if (repoKey === 'we') assertMainNotStale(root, checkStaleness);
+  const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
+  if (repoKey !== 'we') {
+    // Foreign fixes need their own brief and gate; never consult or lease the WE pool.
+    const refusals = (reconciled.dispatch ?? []).filter((entry) => ['fix', 'ci-heal'].includes(entry.kind)).map((entry) => ({
+      kind: 'unsupported-repo', repo: repoKey, prNumber: entry.prNumber, action: entry.kind,
+      why: 'Fix and CI-heal dispatch require a repo-specific brief and gate; the existing worker is WE-only.',
+    }));
+    const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
+    recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
+    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
+  }
   const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope);
 
   const lanes = [...pickFreeLanes()];
@@ -576,7 +619,7 @@ export function runReconcileFixDispatch({
     if (entry.isConflict) {
       let attempt;
       try {
-        attempt = tryResume(entry, { root, repo: entry.repo ?? repo ?? 'we', actions });
+        attempt = tryResume(entry, { root, repo: entry.repo ?? repoKey, actions });
       } catch (e) {
         refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
         continue;
@@ -595,7 +638,7 @@ export function runReconcileFixDispatch({
     }
     const lane = lanes.shift();
     try {
-      const result = dispatch({ ...entry, lane }, { root, repo: entry.repo ?? repo ?? 'we', actions, extraArgs: agentArgsFromEnv(), resumeAttempt });
+      const result = dispatch({ ...entry, lane }, { root, repo: entry.repo ?? repoKey, actions, extraArgs: agentArgsFromEnv(), resumeAttempt });
       if (result?.held) { refusals.push({ pr: entry.pr, kind: 'held', why: result.reason }); lanes.unshift(lane); }
       else dispatched.push(result);
     } catch (e) {
@@ -617,7 +660,7 @@ if (IS_CLI) {
   }
   let result;
   try {
-    result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null });
+    result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] });
   } catch (e) {
     process.stderr.write(`✗ reconcile-fix-dispatch failed: ${String((e && e.message) || e).split('\n')[0]}\n`);
     process.exit(1);
@@ -633,7 +676,7 @@ if (IS_CLI) {
       const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
       lines.push(`  → fix    PR #${d.pr} (${d.itemNum ? `item #${d.itemNum}` : 'no item number'}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
     }
-    for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
+    for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');
   }
 }
