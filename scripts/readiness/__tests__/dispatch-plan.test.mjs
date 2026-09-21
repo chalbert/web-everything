@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  queueFileRows,
   dispatchPlan, selectClearedRows, clearedNotReady,
   // #3457/#3460 — the age-gated already-done ground-truth enrichment (Fork 2(b)).
   isStaleEnoughForGroundTruth, ALREADY_DONE_AGE_GATE_MS,
@@ -903,5 +904,17 @@ describe('dispatchPausedHint — the operator gloss narrows to a scoped pause (e
     expect(hint).toContain('build, prepare, prepare-decision, investigate');
     expect(hint).toContain('dispatch-pause.mjs clear');
     expect(hint).not.toBe(DISPATCH_PAUSED_HINT);
+  });
+});
+
+// #3720 — `--queue-file` (land-advance's item-pull): the caller's list sets membership and order.
+describe('queueFileRows (--queue-file)', () => {
+  const norm = (n) => String(n).replace(/^#/, '');
+  it('keeps the file order, accepts ids as strings, numbers or {num}, and drops repeats and blanks', () => {
+    expect(queueFileRows(JSON.stringify(['3653', 3674, { num: '3486' }, '3653', '', null]), norm)).toEqual([{ num: '3653' }, { num: '3674' }, { num: '3486' }]);
+  });
+  it('refuses anything that is not a JSON array', () => {
+    expect(() => queueFileRows('{"a":1}', norm)).toThrow(/JSON array/);
+    expect(() => queueFileRows('nope', norm)).toThrow();
   });
 });

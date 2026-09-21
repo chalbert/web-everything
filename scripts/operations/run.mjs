@@ -48,6 +48,7 @@ import { wipAgentsOperation, WIP_AGENTS_OP } from './wip-agents.mjs';
 import { createWipAgentsReader } from './wip-agents-io.mjs';
 import { landAdvanceOperation, LAND_ADVANCE_OP } from './land-advance.mjs';
 import { createLandAdvanceReader } from './land-advance-io.mjs';
+import { canonicalRoot as landAdvanceCanonicalRoot } from './land-advance-gate.mjs';
 import { createPrReader } from './pr-status-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
@@ -108,7 +109,8 @@ import { writeAllSync } from '../lib/write-all-sync.mjs';
  * declaration is what {@link ./http-adapter.mjs} derives a route table from, with no third entry anywhere.
  */
 export const OPERATIONS = Object.freeze({
-  [LAND_ADVANCE_OP]: () => ({ declaration: landAdvanceOperation({ readInputs: createLandAdvanceReader() }), sinks: {} }),
+  // Plan only (no sinks). #3720: the item-pull half reads the canonical checkout's sidecars, as the CLI does.
+  [LAND_ADVANCE_OP]: () => ({ declaration: landAdvanceOperation({ readInputs: createLandAdvanceReader({ canonicalRoot: landAdvanceCanonicalRoot().root }) }), sinks: {} }),
   [WIP_AGENTS_OP]: () => ({ declaration: wipAgentsOperation({ readAgents: createWipAgentsReader() }), sinks: {} }),
   // `json` is the ONE operation-table entry that reads its `resolveOperation(name, opts)` opts at all — every
   // other builder below still takes none, and passing the extra argument to a zero-arg arrow is a harmless

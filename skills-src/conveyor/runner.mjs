@@ -684,6 +684,11 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // only once the whole tick returns.
     await runQuietHeartbeating(join(scriptsDir, 'conveyor', 'verify-dispatch.mjs'),
       { repo, heartbeat, label: 'conveyor/verify-dispatch.mjs' });
+    // #3720 — the runner's completed tick is a completion event: call the ONE land-advance operation, the same one
+    // the `Stop` hook calls. `--mode=dispatch` only asks — land-advance stays plan-only (and records a run record)
+    // until the operator's opt-in is set and no pause marker is, both read from the canonical checkout; a concurrent
+    // hook-started call makes this one exit `busy`. `forwardRepo: false` — it takes no GH-slug flag.
+    await runQuiet('operations/land-advance-cli.mjs', ['--mode=dispatch', '--caller=runner-tick'], { forwardRepo: false });
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is

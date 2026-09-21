@@ -18,6 +18,11 @@ import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { capToConcurrency } from '../lib/lane-concurrency.mjs';
 import { extractManifestFromBody } from '../readiness/lane-manifest.mjs';
 import { repairOwed, queueFirstHold, orderForHold, deferralReason, REPAIR_RETRY_CAP } from './land-advance-repair.mjs';
+import { planItems, DEFAULT_MAX_ITEMS_PER_CALL } from './land-advance-items.mjs';
+import { REFUSAL_KINDS } from '../conveyor/reconcile-core.mjs';
+/** reconcile-pass refusals that hold a review or fix dispatch (#3720: "a refusal is reported, never overridden").
+ *  `no-findings` holds only a fix: it is reconcile's reason a PR is owed a review rather than a fixer. */
+const RECONCILE_HOLDS = REFUSAL_KINDS.filter((k) => k !== 'no-findings');
 export const LAND_ADVANCE_OP = 'land-advance';
 export const OWED_ACTIONS = Object.freeze(['dispatch-review', 'dispatch-fix', 'dispatch-ci-heal', 'dispatch-conflict-fix', 'fold-into-prototype', 'wait-on-drain', 'stale-label', 'needs-operator', 'escalate', 'none', 'graduation-owed', 'reap-owed', 'delegation-trial-owed']);
 export const FOLLOW_UP_VERDICTS = Object.freeze(['progressing', 'finished', 'stalled', 'dead', 'waiting-permission', 'target-moved-on', 'ambiguous']);
@@ -37,6 +42,8 @@ const labels = (p) => (p.labels ?? []).map((v) => typeof v === 'string' ? v : v.
  */
 export const SLOT_VERDICTS = Object.freeze(['progressing', 'stalled', 'waiting-permission']);
 const holdsSlot = (s) => isLive(s) && (s.verdict === undefined || SLOT_VERDICTS.includes(s.verdict));
+// TODO(#3807): replace this load gate (`os.loadavg()` over the cores, against 1.5) with the tracked `dispatch-budget`
+// config's weighted budget and its emergency floor once #3807 lands; the statute says "No load-average gate".
 export function capacityFor({ sessions = [], freeLanes = 'unknown', cap = 3, load = 0, loadThreshold = 1.5 }) {
   const live = sessions.filter((s) => s.kind === 'background' && holdsSlot(s) && /^(review-|fix-|ci-heal-|conveyor-|prepare)/.test(s.name ?? '')).length;
   const known = Number.isInteger(freeLanes) && freeLanes >= 0 && Number.isFinite(load);
@@ -127,6 +134,8 @@ export function planLandAdvance(inputs) {
     }
     if (action.startsWith('dispatch-') && worker(action === 'dispatch-review' ? 'review' : 'fix').includes('ambiguous')) extra.refusal = { kind: 'ambiguous', why: 'name-only session matches multiple repositories' };
     if (action.startsWith('dispatch-') && followUps.some((e) => e.target === subject && followUpVerdict(e, e.evidence, now) === 'ambiguous')) extra.refusal = { kind: 'ambiguous', why: 'prior dispatch identity or outcome is unresolved' };
+    const rc = inputs.reconcileRefusals?.[subject];
+    if (['dispatch-review', 'dispatch-fix'].includes(action) && rc && (RECONCILE_HOLDS.includes(rc.kind) || (rc.kind === 'no-findings' && action === 'dispatch-fix'))) extra.refusal = { kind: rc.kind, why: `reconcile-pass refuses: ${rc.why}` };
     if (extra.refusal) evidence.push(extra.refusal.why);
     add(subject, action, evidence, since, { repo: p.repo, pr: p.number, slug: p.slug, dispatchable: action.startsWith('dispatch-') && !extra.refusal && !p.isDraft, ...extra });
   }
@@ -158,7 +167,10 @@ export function planLandAdvance(inputs) {
     r.packetId = `${r.kind}-${r.subject}`.replace(/[^a-zA-Z0-9_-]/g, '-');
     r.packet = `would-write ${inputs.escalationsDir ?? '~/.operations/escalations'}/${r.packetId}.json`;
   }
-  return { generatedAt: new Date(now).toISOString(), capacity, queueFirst: hold, rows, proposed, deferred, errors, prototype: inputs.prototype ?? null, escalations: inputs.escalations ?? [], alerts: inputs.alerts ?? [] };
+  // Item-pull (#3720): owed PR work is finishing work already in flight, so it takes the budget first; new items
+  // get what is left, capped per call. `inputs.items` is the item reader's output, absent when it did not run.
+  const items = inputs.items ? planItems({ ...inputs.items, budget: capacity.budget - proposed.length, maxItems: inputs.maxItemsPerCall ?? DEFAULT_MAX_ITEMS_PER_CALL }) : null;
+  return { generatedAt: new Date(now).toISOString(), capacity, queueFirst: hold, rows, proposed, deferred, items, errors, prototype: inputs.prototype ?? null, escalations: inputs.escalations ?? [], alerts: inputs.alerts ?? [] };
 }
 export function renderTable(plan) {
   const safe = (x) => String(x).replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
@@ -170,7 +182,26 @@ export function renderTable(plan) {
     '| Subject | Owed | Waiting | Evidence |', '| --- | --- | --- | --- |',
     ...plan.rows.map((r) => `| ${safe(r.subject)} | ${r.owedAction} | ${age(r.ageMs)} | ${safe([...r.evidence, r.packet].filter(Boolean).join('; '))} |`),
     ...plan.deferred.map((r) => `Deferred ${r.subject}: ${r.reason}`),
+    ...(plan.items ? [`Items proposed: ${plan.items.proposed.map((i) => `#${i.num} (line ${i.rank}) → lane-${i.lane}`).join(', ') || 'none'}`,
+      ...plan.items.deferred.map((i) => `Item held #${i.num} (line ${i.rank ?? '—'}): ${i.reason}`),
+      ...plan.items.skipped.map((i) => `Item skipped #${i.num} (line ${i.rank ?? 'claimed'}): ${i.reason}`)] : []),
+    ...(plan.mode ? [`Mode: ${plan.mode.mode} (${plan.mode.why})`] : []),
     ...(plan.escalations?.filter((e) => e.status === 'open').map((e) => `Open escalation ${e.id}: ${e.question}`) ?? [])].join('\n');
+}
+/**
+ * Plan or dispatch (#3720). Dispatch needs BOTH the operator's durable opt-in file and no pause marker, both read
+ * from the canonical checkout (`land-advance-gate.mjs`); `--apply`/`--mode=dispatch` alone only asks. Any pause
+ * (even a kind-scoped one) and an unreadable gate both mean plan. The opt-in has separate `prs` and `items` kinds.
+ */
+export function decideMode({ requested = 'plan', gate = {} } = {}) {
+  const plan = (why) => ({ mode: 'plan', prs: false, items: false, why });
+  if (requested !== 'dispatch') return plan('plan requested (the default)');
+  if (gate.error) return plan(`gate unreadable, so plan only: ${gate.error}`);
+  if (gate.ambiguous?.length) return plan(`canonical checkout is ambiguous (${gate.ambiguous.join(', ')}), so plan only`);
+  if (gate.paused) return plan(`dispatch-pause marker is set${gate.pausePath ? ` at ${gate.pausePath}` : ''}`);
+  const optIn = gate.optIn ?? {};
+  if (optIn.prs !== true && optIn.items !== true) return plan(`no operator opt-in${gate.optInPath ? ` at ${gate.optInPath}` : ''}`);
+  return { mode: 'dispatch', prs: optIn.prs === true, items: optIn.items === true, why: 'operator opt-in set and no pause marker' };
 }
 export function landAdvanceOperation({ readInputs } = {}) {
   if (typeof readInputs !== 'function') throw new TypeError('land-advance needs readInputs()');

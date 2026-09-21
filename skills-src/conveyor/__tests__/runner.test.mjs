@@ -857,6 +857,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/parked-pr-progress-watch.mjs sweep --repo=owner/repo',
       'node /scripts/conveyor/verify-dispatch.mjs --repo=owner/repo',
+      'node /scripts/operations/land-advance-cli.mjs --mode=dispatch --caller=runner-tick', // #3720
     ]);
   });
 });
@@ -1042,5 +1043,19 @@ describe('readHostSample — the one IO edge that touches node:os, kept to exact
     expect(s.cpuCount).toBeGreaterThan(0);
     // hostMetrics must accept this real shape with no coercion surprises.
     expect(() => hostMetrics(s)).not.toThrow();
+  });
+});
+
+// #3720 — the runner's completed tick calls land-advance (the same operation the `Stop` hook calls), asking for
+// dispatch; land-advance's own gate keeps it plan-only until the operator opts in.
+describe('makeCliMechanicalPasses — calls land-advance at the end of the pass', () => {
+  it('runs land-advance-cli.mjs --mode=dispatch --caller=runner-tick, without the GH slug', async () => {
+    const calls = [];
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation((cmd, args) => { calls.push([cmd, ...args]); return args.join(' ').includes('reconcile-pass.mjs') ? '{"dispatch":[],"refusals":[]}' : ''; });
+    cp.spawn.mockImplementation(makeSpawnRouter(calls));
+    await makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' })({ out: {} });
+    const la = calls.filter((c) => c.join(' ').includes('land-advance-cli.mjs'));
+    expect(la).toEqual([['node', '/scripts/operations/land-advance-cli.mjs', '--mode=dispatch', '--caller=runner-tick']]);
   });
 });

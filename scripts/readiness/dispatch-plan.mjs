@@ -510,6 +510,27 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
  * @param {(n:*)=>string} norm  the id normalizer (queue-store `normNum`)
  * @returns {Array<{num:*}>} the cleared rows, rank order preserved
  */
+/**
+ * `--queue-file` contents → build-queue-shaped rows, in the file's order (#3720). PURE. The file is a JSON array of
+ * item ids (string, number, or `{num}`); a repeat keeps its first position. Anything else throws.
+ * @param {string} text
+ * @param {(n:*)=>string} norm
+ * @returns {Array<{num:string}>}
+ */
+export function queueFileRows(text, norm) {
+  const list = JSON.parse(text);
+  if (!Array.isArray(list)) throw new TypeError('queue file must be a JSON array of item ids');
+  const seen = new Set();
+  const rows = [];
+  for (const entry of list) {
+    const num = String(entry && typeof entry === 'object' ? entry.num : entry ?? '').trim();
+    if (!num || seen.has(norm(num))) continue;
+    seen.add(norm(num));
+    rows.push({ num });
+  }
+  return rows;
+}
+
 export function selectClearedRows(rows, clearedKeys, norm) {
   const cleared = clearedKeys instanceof Set ? clearedKeys : new Set(clearedKeys);
   const key = typeof norm === 'function' ? norm : (x) => String(x);
@@ -587,7 +608,11 @@ async function main(argv) {
   //    longer arms a conveyor build. Enrich each with its predicted `scope` + `openBlockers` from the backlog
   //    loader (build-queue doesn't emit them). Dynamic-import keeps the pure core import-clean.
   const { readQueueFile, resolveQueuePath, normNum } = await import('../conveyor/queue-store.mjs');
-  const sidecar = readQueueFile(resolveQueuePath()); // script-location + env override — matches conveyor-state
+  // `--queue-file=<json>` (#3720, land-advance's item-pull): membership AND order come from the caller's list (epic
+  // #3383's Priority order), not the sidecar + build-queue ranking. Every hold below still applies unchanged; the
+  // `blocked` branch is what gates an unready item here, since this path skips build-queue's ready filter.
+  const queueFile = typeof flags['queue-file'] === 'string' ? flags['queue-file'] : null;
+  const sidecar = queueFile ? [] : readQueueFile(resolveQueuePath()); // script-location + env override — matches conveyor-state
   const cleared = new Set(sidecar.map((e) => normNum(e.num)));
   // `--backlog-dir` (#3445) points this read (and, via `WE_BACKLOG_DIR` below, the byNum enrichment require
   // just past it) at a fixture corpus instead of the live `backlog/` directory — the dispatcher-fixture-root
@@ -597,9 +622,17 @@ async function main(argv) {
     bqArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
     process.env.WE_BACKLOG_DIR = flags['backlog-dir'];
   }
-  const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
-  const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
-  const rows = selectClearedRows(bqRows, cleared, normNum);
+  let rows;
+  let bqRows = [];
+  if (queueFile) {
+    const { readFileSync } = await import('node:fs');
+    try { rows = queueFileRows(readFileSync(queueFile, 'utf8'), normNum); }
+    catch (e) { fail(`could not read --queue-file ${queueFile}: ${String(e.message || e).split('\n')[0]}`); }
+  } else {
+    const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
+    bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
+    rows = selectClearedRows(bqRows, cleared, normNum);
+  }
   // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never
   // silently dropped (#2613 review, required 2b).
   const notReady = clearedNotReady(sidecar, bqRows, normNum);

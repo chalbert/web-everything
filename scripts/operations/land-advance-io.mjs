@@ -32,6 +32,7 @@ import { allowedToolsArg, ALLOWED_TOOLS_BY_KIND } from './land-advance-tools.mjs
 import { classifySession } from '../conveyor/session-verdicts.mjs';
 import { makeEvidenceResolver } from '../conveyor/session-verdicts-io.mjs';
 import { listEscalations, buildEscalationPacket, writeEscalationPacket } from './land-advance-escalations.mjs';
+import { createItemReader, queueItemInto } from './land-advance-items-io.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runDefault = (program, args) => String(execFileSync(program, args, { cwd: ROOT, encoding: 'utf8', timeout: 30000, stdio: 'pipe' }));
 const missing = (fn, fallback) => { try { return fn(); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } };
@@ -89,7 +90,14 @@ export function createLandAdvanceReader(ports = {}) {
     resolveFallbackScope = (pr) => run('gh', ['pr', 'diff', String(pr), '--repo', 'chalbert/web-everything', '--name-only']).trim().split('\n').filter(Boolean).map((p) => `we:${p}`),
     followUpEvidence, refreshPrototype = false, readPrototype, isPidAlive = defaultIsPidAlive,
     readPrComments = (pr) => JSON.parse(run('gh', ['pr', 'view', String(pr.number), '--repo', pr.slug, '--json', 'comments'])).comments ?? [],
-    sessionEvidence = (followUps) => makeEvidenceResolver({ followUps, jobsDir, home }) } = ports;
+    sessionEvidence = (followUps) => makeEvidenceResolver({ followUps, jobsDir, home }),
+    // #3720, both only when the caller names the canonical checkout (the CLI and run.mjs always do). Item-pull reads
+    // the Priority order through dispatch-plan. reconcile-pass owns what a PR is owed and every refusal; its
+    // `live-process` binding (cwd + HEAD sha) sees sessions a name match cannot, so it is read once for `we` (the only
+    // repo it plans) and attached as refusals. A failed read is a source error, so apply refuses on half a picture.
+    canonicalRoot = null, readItems = canonicalRoot ? createItemReader({ root: canonicalRoot }) : null,
+    readReconcile = canonicalRoot ? () => JSON.parse(String(execFileSync('node', ['scripts/conveyor/reconcile-pass.mjs', '--json', '--repo=chalbert/web-everything'],
+      { cwd: ROOT, encoding: 'utf8', timeout: 180000, maxBuffer: 64 * 1024 * 1024, stdio: 'pipe' }))) : null } = ports;
   return function readInputs() {
     const errors = [], get = (source, fn, fallback) => { try { return fn(); } catch (e) { errors.push({ source, message: String(e.message ?? e) }); return fallback; } };
     const slugs = JSON.parse(io.readFileSync(sweptReposPath, 'utf8'));
@@ -176,9 +184,11 @@ export function createLandAdvanceReader(ports = {}) {
         ...observed } };
     }, { ...entry, evidence: { ambiguous: true } }));
     const load = get('load', machineLoad, null);
+    const items = readItems ? get('items', readItems, null) : undefined;
+    const reconcileRefusals = readReconcile ? get('reconcile', () => Object.fromEntries((readReconcile().refusals ?? []).map((r) => [`we#${r.prNumber}`, { kind: r.kind, why: r.why }])), {}) : {};
     return { now: capturedAt, prs, sessions, history: history.entries, historyCapped: history.capped, alerts, trials, results, prototype,
       fixPlans, repairEvidence, detached, followUps, escalationsDir, jobsDir, escalations: get('escalations', () => listEscalations({ dir: escalationsDir, fs: io }), []),
-      freeLanes: errors.some((e) => e.source === 'sessions') ? 'unknown' : lanes?.length ?? 'unknown', cap, load, loadThreshold, errors };
+      freeLanes: errors.some((e) => e.source === 'sessions') ? 'unknown' : lanes?.length ?? 'unknown', cap, load, loadThreshold, errors, reconcileRefusals, ...(items ? { items } : {}) };
   };
 }
 export function createLandAdvanceApplier(ports = {}) {
@@ -189,16 +199,18 @@ export function createLandAdvanceApplier(ports = {}) {
     writeLedger = (e) => writeFollowUp(e), reap = () => run('node', ['scripts/conveyor/session-reaper.mjs']),
     escalationsDir = join(home, 'workspace/.operations/escalations'),
     expectedResultPathFor = (result) => result?.expectedResultPath ?? (result?.sessionSlug ? completionPath(result.sessionSlug) : null),
-    writePacket = (packet) => writeEscalationPacket(packet, { dir: escalationsDir }) } = ports;
-  return async function apply(plan) {
-    const dispatched = [], errors = [], deferred = [];
+    writePacket = (packet) => writeEscalationPacket(packet, { dir: escalationsDir }),
+    canonicalRoot = null, queueItem = (num) => { if (!canonicalRoot) throw new Error('no canonical checkout to queue items into'); queueItemInto(canonicalRoot, num, now); } } = ports;
+  // `allow` is the operator opt-in's kinds (land-advance-gate.mjs). The default keeps the PR half's old behaviour.
+  return async function apply(plan, allow = { prs: true, items: false }) {
+    const dispatched = [], errors = [], deferred = [], queued = [];
     let target = null;
-    if (plan.errors.length) return { dispatched, errors: [{ message: 'Required evidence failed; refusing apply' }], deferred };
+    if (plan.errors.length) return { dispatched, queued, errors: [{ message: 'Required evidence failed; refusing apply' }], deferred };
     try {
       for (const row of plan.rows.filter((r) => r.owedAction === 'escalate')) await writePacket(buildEscalationPacket(row, now(), plan.escalations.find((p) => p.id === row.packetId)));
       if (plan.rows.some((r) => r.owedAction === 'reap-owed')) await reap();
       let remaining = plan.capacity.budget;
-      for (const row of plan.proposed) {
+      for (const row of allow.prs ? plan.proposed : []) {
         target = row.subject;
         const capacity = capacityFor({ ...plan.capacity, ...await readCapacity() });
         if (!remaining || !capacity.budget) { deferred.push({ target: row.subject, reason: 'capacity' }); break; }
@@ -218,7 +230,9 @@ export function createLandAdvanceApplier(ports = {}) {
         await writeLedger(entry); dispatched.push({ ...entry, result }); remaining--;
         if (!session) throw new Error('Dispatch returned no addressable session');
       }
+      // Items are queued, not spawned: the runner's tick launches them through dispatch-lane under its own guards.
+      for (const item of allow.items ? plan.items?.proposed ?? [] : []) { target = `item:${item.num}`; await queueItem(item.num); queued.push(item.num); }
     } catch (e) { errors.push({ target, message: String(e.message ?? e) }); }
-    return { dispatched, errors, deferred };
+    return { dispatched, queued, errors, deferred };
   };
 }

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { planLandAdvance, capacityFor, followUpVerdict, OWED_ACTIONS, repoKeyFromSlug, sessionMatch, renderTable } from '../land-advance.mjs';
+import { planLandAdvance, capacityFor, followUpVerdict, OWED_ACTIONS, repoKeyFromSlug, sessionMatch, renderTable, decideMode } from '../land-advance.mjs';
+import { priorityQueue } from '../land-advance-items.mjs';
+import { dispatchPlan } from '../../readiness/dispatch-plan.mjs';
 import { CONSTELLATION_REPOS } from '../../lib/constellation-repos.mjs';
 const today = JSON.parse(readFileSync('scripts/operations/__fixtures__/land-advance/today.json'));
 const now = Date.parse('2026-09-20T00:00:00Z');
@@ -120,5 +122,77 @@ describe('session verdict rows (#3383 item 11)', () => {
     expect(p.rows.map((r) => [r.subject, r.owedAction])).toEqual([['session:fold-2220', 'escalate']]);
     expect(p.rows[0]).toMatchObject({ kind: 'session-waiting-permission', packetId: 'session-waiting-permission-session-fold-2220' });
     expect(p.rows.some((r) => r.owedAction === 'needs-operator')).toBe(false);
+  });
+});
+// #3720 remainder — the card's own Done-when 1 cases for the item-pull half, the budget, and the mode decision.
+// Item plans come from the REAL `dispatchPlan` core, so scope refusal and overlap are its rules, never a copy.
+describe('#3720 item-pull, budget and mode (the card\'s Done-when cases)', () => {
+  const tracker = (lines) => ['# t', '', '## Priority order', '', ...lines, '', '## Next', ''].join('\n');
+  const items = (queue, extra = {}) => ({ queue: queue.map(({ num }, i) => ({ num, rank: i + 1 })), skipped: [], itemPlan: dispatchPlan({ queue, leases: [], freeLanes: [31, 32, 33] }), ...extra });
+  it('budget 0 when free lanes are 0 — nothing proposed, PR or item', () => {
+    const p = plan({ freeLanes: 0, prs: [pr(1)], items: items([{ num: '10', scope: ['scripts/a.mjs'] }]) });
+    expect(p.capacity.budget).toBe(0);
+    expect(p.proposed).toEqual([]);
+    expect(p.items.proposed).toEqual([]);
+    expect(p.items.deferred).toMatchObject([{ num: '10', reason: 'capacity' }]);
+  });
+  it('budget 0 when live sessions are at the ceiling — nothing proposed', () => {
+    const sessions = [1, 2, 3].map((n) => ({ name: `review-${n}`, kind: 'background', liveness: 'live-active' }));
+    const p = plan({ cap: 3, sessions, prs: [pr(1)], items: items([{ num: '10', scope: ['scripts/a.mjs'] }]) });
+    expect(p.capacity).toMatchObject({ budget: 0, live: 3 });
+    expect(p.proposed).toEqual([]);
+    expect(p.items.proposed).toEqual([]);
+  });
+  it('an item with no declared scope is refused (dispatch-plan holds it unshaped-no-scope)', () => {
+    const p = plan({ items: items([{ num: '10' }, { num: '11', scope: [] }]), maxItemsPerCall: 3 });
+    expect(p.items.proposed).toEqual([]);
+    expect(p.items.deferred.map((d) => [d.num, d.reason])).toEqual([['10', 'unshaped-no-scope'], ['11', 'unshaped-no-scope']]);
+  });
+  it('two items whose scopes overlap never dispatch in one call', () => {
+    const p = plan({ items: items([{ num: '10', scope: ['scripts/operations/'] }, { num: '11', scope: ['scripts/operations/land-advance.mjs'] }, { num: '12', scope: ['docs/x.md'] }]), maxItemsPerCall: 3 });
+    expect(p.items.proposed.map((i) => i.num)).toEqual(['10', '12']);
+    expect(p.items.deferred).toMatchObject([{ num: '11', reason: expect.stringMatching(/^overlaps lane-/) }]);
+  });
+  it('owed PR work takes the budget first; items get the rest, capped per call (default 1)', () => {
+    const q = items([{ num: '10', scope: ['a/'] }, { num: '12', scope: ['b/'] }]);
+    const p = plan({ freeLanes: 2, prs: [pr(1)], items: q });
+    expect(p.proposed.map((r) => r.subject)).toEqual(['we#1']);
+    expect(p.items.proposed.map((i) => i.num)).toEqual(['10']);
+    expect(p.items.deferred).toMatchObject([{ num: '12', reason: 'capacity' }]);
+    expect(plan({ freeLanes: 8, items: q }).items.deferred).toMatchObject([{ num: '12', reason: 'per-call-cap' }]);
+  });
+  it('the queue source is the Priority order: claimed, design-first, operator and in-flight lines are skipped', () => {
+    const text = tracker([
+      '1. #3768 · 5 · B · Clears: design first.',
+      '2. #3653 · 3 · A · Clears: CI.',
+      '3. #3658 · decision · C · Clears: a ruling.',
+      '4. #3674 · 3 · A · Clears: needs-operator-fast-forward before it can run.',
+      '5. #3486 · 3 · A · Graduation slice.',
+      '6. #3720 · 5 · A · Removes: queueing by hand.',
+      '- #3443 · epic · claimed · not ordered',
+    ]);
+    const { queue, skipped } = priorityQueue(text, { inFlight: ['3486'] });
+    expect(queue).toEqual([{ num: '3653', rank: 2 }, { num: '3720', rank: 6 }]);
+    expect(skipped.map((s) => [s.num, s.reason])).toEqual([['3443', 'claimed'], ['3768', 'design-first'], ['3658', 'operator-decision'], ['3674', 'needs-operator-fast-forward'], ['3486', 'in-flight']]);
+    expect(() => priorityQueue('# no section')).toThrow(/Priority order/);
+  });
+  it('mode: plan by default; dispatch only with an operator opt-in AND no pause marker', () => {
+    const optIn = { prs: true, items: false };
+    expect(decideMode({})).toMatchObject({ mode: 'plan', prs: false, items: false });
+    expect(decideMode({ requested: 'dispatch', gate: { optIn: {} } })).toMatchObject({ mode: 'plan', why: expect.stringContaining('opt-in') });
+    expect(decideMode({ requested: 'dispatch', gate: { optIn, paused: true } })).toMatchObject({ mode: 'plan', why: expect.stringContaining('pause') });
+    expect(decideMode({ requested: 'dispatch', gate: { optIn, error: 'bad json' } })).toMatchObject({ mode: 'plan' });
+    expect(decideMode({ requested: 'dispatch', gate: { optIn } })).toMatchObject({ mode: 'dispatch', prs: true, items: false });
+  });
+});
+describe('#3720 owed PR work honours reconcile-pass refusals', () => {
+  it('a live-process refusal holds a review; no-findings holds a fix but not a review', () => {
+    const p = plan({ prs: [pr(2419), pr(2421), pr(2170, { labels: ['review:changes'] })], fixPlans: { 'we#2170': { planned: { pr: 2170 } } },
+      reconcileRefusals: { 'we#2419': { kind: 'live-process', why: 'a bound session has a LIVE pid' }, 'we#2421': { kind: 'no-findings', why: 'none' }, 'we#2170': { kind: 'no-findings', why: 'none' } } });
+    const row = (n) => p.rows.find((r) => r.pr === n);
+    expect(row(2419)).toMatchObject({ owedAction: 'dispatch-review', dispatchable: false, refusal: { kind: 'live-process' } });
+    expect(row(2421)).toMatchObject({ owedAction: 'dispatch-review', dispatchable: true });
+    expect(row(2170)).toMatchObject({ owedAction: 'dispatch-fix', dispatchable: false, refusal: { kind: 'no-findings' } });
+    expect(p.proposed.map((r) => r.pr)).toEqual([2421]);
   });
 });
