@@ -2949,6 +2949,15 @@ graduate."* Four clauses:
    commits behind `main` behind a silently-failing auto-sync loop; (d) drift is still actively reconciled per
    branch, never tolerated (`we:scripts/conveyor/branch-drift.mjs`) — a drifted branch still holds its own
    items.
+5. **A POC branch is not a pull-request target, so it gets no CI of its own and the drain never lands a
+   pull request against one (#3805, ratified 2026-09-21).** Work lands inside a POC branch by direct push or
+   `we:scripts/operations/poc-land.mjs`, gated by the item's own tests (clause 2); CI runs where it is
+   load-bearing, at the graduation pull request to `main` (clause 3). So neither the workflows' `pull_request`
+   filters nor the drain's `requiredCheck = 'test'` contract
+   ([#repo-drain-check-contract](#repo-drain-check-contract)) is widened for a POC base. Instead the drain
+   **holds, with a named reason,** any pull request whose base is not the repo's default branch
+   (`base is not <default> (<base>)`), rather than waiting forever on a check that cannot run. A human who
+   opened one on purpose merges it by hand or re-targets it; the drain never closes it.
 
 **What this amendment DELETES from the prior rule.** The claim that a divergent branch is inherently "a
 temporary build tool, not the default steady state" that must be wound down, and the assumption that there is
@@ -2957,7 +2966,9 @@ only ever one such branch at a time.
 **Lineage:** #3637 (ratified 2026-09-12, operator, in conversation; `bornAs: x7ppgg6`), amending epic
 `#3383`'s own operating doctrine rule 10 — the before/after and full design (transport, completion signal,
 registry shape) sit on `#3637` itself and in `we:skills-src/mechanical-delivery-doctrine/SKILL.md` (rule 10),
-which carries the epic-scoped operational detail and cites this anchor as the canonical statute. Composes
+which carries the epic-scoped operational detail and cites this anchor as the canonical statute. Clause 5:
+`#3805` (ratified 2026-09-21, operator: Fork 1 (c) neither CI nor a relaxed drain, Fork 2 (a) hold with a named
+reason; supersedes `#3653`, resolves `#3674` through its Fork 2 build). Composes
 with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the mechanism this rule exempts a POC landing
 from, and the one graduation still uses undiluted) and
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (tests/build validation is the

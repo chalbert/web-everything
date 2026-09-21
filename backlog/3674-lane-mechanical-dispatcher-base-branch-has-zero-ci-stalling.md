@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "3383"
 status: open
-scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/pr-land.mjs", "we:.github/workflows/ci.yml", "we:.github/workflows/review-gate.yml"]
+scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs.test.mjs"]
 dateOpened: "2026-09-14"
 tags: []
 ---
@@ -23,6 +23,10 @@ This is not a one-off: it will stall every future PR targeting this base branch 
 
 The two candidate fixes above, plus a third (neither: no pull requests against the prototype), are filed as decision card 3805, `relatedTo` this card and #3653. Re-verified today: the branch is still unprotected (404), its tip has 0 check-runs, `we:scripts/merge-ai-prs.mjs` still defaults `requiredCheck = 'test'`, and no pull request has been opened against the base since 2026-09-15 (the operator's ruling made the direct push the delivery path). Do not build either fix before that card is ruled.
 
+## Ruling applied (2026-09-21, #3805)
+
+#3805 ruled Fork 1 (c) neither and Fork 2 (a): neither candidate fix above is built. Instead this card is now the **build for Fork 2 (a)**: add one arm to `classifyPr` in `we:scripts/merge-ai-prs.mjs`, ahead of the required-check arm, that skips a pull request whose `baseRefName` is not the repo's default branch with the reason `base is not <default> (<base>)`. Pass the default branch in from the caller; do not hardcode `'main'`. `baseRefName` is already in the drain's `gh pr list --json` fields. Add tests to `we:scripts/__tests__/merge-ai-prs.test.mjs`: non-default base held with the named reason (even when `test` is not green), default base unchanged. Do not touch the workflow files, `we:scripts/pr-land.mjs`, or `#repo-drain-check-contract`.
+
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/__tests__/merge-ai-prs.test.mjs -t "base is not"` passes, and `grep -n "base is not" we:scripts/merge-ai-prs.mjs` matches the new arm (both fail before this item lands).
