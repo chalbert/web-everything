@@ -14,7 +14,7 @@
  * auto-land past" reading in one sense (nothing routes) and its most dangerous misreading in another (an
  * unreadable PR looking like a clean one) — so the refusal tests below matter as much as the happy-path ones.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,6 +24,7 @@ import { isReadOnlyDeclaration } from '../http-adapter.mjs';
 import { importGraph } from './import-graph.mjs';
 import { OPERATIONS } from '../run.mjs';
 import { buildEscalationReasonBlock } from '../../lib/review-escalation.mjs';
+import { deriveReviewDisposition, UnknownReasonError } from '../../lib/review-core.mjs';
 import {
   routePrOutcomeOperation, shapeRouteRead, planRouteOutcome,
   ROUTE_PR_OUTCOME_OP, ROUTE_OUTCOME_REFUSALS, ROUTE_ACTIONS,
@@ -31,6 +32,14 @@ import {
 import {
   deriveRouteFinding, shapeGhView, viewArgv, labelNames, createRouteOutcomeReader,
 } from '../route-pr-outcome-io.mjs';
+
+// `deriveReviewDisposition` is wrapped, not replaced: it delegates to the REAL function unless a test queues a
+// throw with `mockImplementationOnce`, so every other test in this file still exercises the real disposition
+// logic. ESM exports cannot be spied on in place, so the module has to be mocked up front (#3495).
+vi.mock('../../lib/review-core.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, deriveReviewDisposition: vi.fn(actual.deriveReviewDisposition) };
+});
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +49,8 @@ const bodyWith = (reasons) => `Some PR description.\n\nMore prose.${buildEscalat
 const view = (over = {}) => ({
   number: 1234, title: 'a PR', url: 'https://github.com/o/r/pull/1234', body: '', labels: [], ...over,
 });
+
+afterEach(() => { deriveReviewDisposition.mockClear(); });
 
 describe('deriveRouteFinding — pulls its three cases straight from deriveReviewDisposition', () => {
   it('a DEADLOCK reason (non-convergence) routes to human, never auto-land — the loop already failed to converge', () => {
@@ -111,6 +122,29 @@ describe('deriveRouteFinding — the null-disposition cases are NOT the same cas
     expect(f.disposition).toBeNull();
     expect(f.refusal).toBe('unrecognized-reasons');
     expect(f.escalationReason).toEqual(['some-future-reason-token']);
+  });
+
+  it('the unknown-token throw IS the dedicated `UnknownReasonError` — the type the catch is keyed on', () => {
+    // Not stubbed: the real function, so this pins that the refusal above is reached through the same error
+    // class `deriveRouteFinding` narrows to, not through a message coincidence.
+    const err = (() => { try { deriveReviewDisposition({ reasons: ['some-future-reason-token'] }); } catch (e) { return e; } })();
+    expect(err).toBeInstanceOf(UnknownReasonError);
+    expect(err.unknownReasons).toEqual(['some-future-reason-token']);
+    expect(err.message).toMatch(/unknown reason\(s\): some-future-reason-token/);
+  });
+
+  it('an UNRELATED throw from `deriveReviewDisposition` PROPAGATES — it is not an `unrecognized-reasons` refusal (#3495)', () => {
+    // A future precondition check or an internal bug must surface, not be reclassified as the ordinary
+    // "nothing to route" reading. The reason token here is VALID, so the only thing that can fail is the stub.
+    deriveReviewDisposition.mockImplementationOnce(() => { throw new TypeError('cannot read properties of undefined'); });
+    expect(() => deriveRouteFinding({ repo: 'o/r', view: view({ body: bodyWith(['blast-radius']) }) }))
+      .toThrow(TypeError);
+  });
+
+  it('an unrelated throw that merely SOUNDS like the unknown-token one still propagates — the match is on the type, not the text', () => {
+    deriveReviewDisposition.mockImplementationOnce(() => { throw new Error('deriveReviewDisposition: unknown reason(s): impostor'); });
+    expect(() => deriveRouteFinding({ repo: 'o/r', view: view({ body: bodyWith(['blast-radius']) }) }))
+      .toThrow(/impostor/);
   });
 
   it('refusal is always one of the declared, closed set', () => {
@@ -330,6 +364,34 @@ describe('the declaration', () => {
       { registry },
     );
     expect(run.verdict.action).toBe('land');
+  });
+
+  it('an unrelated throw from `deriveReviewDisposition` fails the run instead of reporting `unrouted` (#3495)', () => {
+    // The real operation, driven read → route through the registry (#2949) — the run record is what a caller
+    // reads, so it is the run that must NOT come out as a clean `unrouted`/`unrecognized-reasons` verdict.
+    deriveReviewDisposition.mockImplementationOnce(() => { throw new TypeError('cannot read properties of undefined'); });
+    const registry = createRegistry();
+    registry.register(routePrOutcomeOperation({
+      readPrView: () => deriveRouteFinding({ repo: 'o/r', view: view({ body: bodyWith(['blast-radius']) }) }),
+    }));
+    // The engine has no catch around a step's fn, so the reader's throw reaches the caller: the run cannot
+    // complete with a verdict at all, let alone the `unrecognized-reasons` one.
+    expect(() => advanceWhileRunning(
+      startRun({ op: ROUTE_PR_OUTCOME_OP, id: 'run-rpo-4', input: { repo: 'o/r', pr: 1234 }, registry }),
+      { registry },
+    )).toThrow(TypeError);
+  });
+
+  it('while a GENUINE unknown token through the same wiring still yields `unrouted` / `unrecognized-reasons`', () => {
+    const registry = createRegistry();
+    registry.register(routePrOutcomeOperation({
+      readPrView: () => deriveRouteFinding({ repo: 'o/r', view: view({ body: bodyWith(['some-future-reason-token']) }) }),
+    }));
+    const run = advanceWhileRunning(
+      startRun({ op: ROUTE_PR_OUTCOME_OP, id: 'run-rpo-5', input: { repo: 'o/r', pr: 1234 }, registry }),
+      { registry },
+    );
+    expect(run.verdict).toMatchObject({ action: 'unrouted', refusal: 'unrecognized-reasons', disposition: null });
   });
 
   it('and "unrouted" for a PR that never carried an escalation block', () => {

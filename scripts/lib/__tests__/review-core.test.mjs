@@ -47,6 +47,7 @@ import {
   REVIEW_DISPOSITIONS,
   REVIEW_REASONS,
   deriveReviewDisposition,
+  UnknownReasonError,
   buildPanelMandate,
   buildPanelFindings,
   derivePanelVerdict,
@@ -500,6 +501,18 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
   it('throws on an unknown reason and on no reason at all (exhaustive discipline)', () => {
     expect(() => deriveReviewDisposition({ reason: 'made-up' })).toThrow(/unknown reason/);
     expect(() => deriveReviewDisposition({})).toThrow(/at least one reason/);
+  });
+
+  it('the unknown-reason throw is the dedicated `UnknownReasonError`; the empty-input throw is NOT (#3495)', () => {
+    // A caller (`deriveRouteFinding`) narrows its catch to this type, so the two failure causes must stay apart.
+    expect(() => deriveReviewDisposition({ reasons: ['made-up', 'gate-self'] })).toThrow(UnknownReasonError);
+    try { deriveReviewDisposition({ reasons: ['made-up', 'gate-self'] }); } catch (e) {
+      expect(e.unknownReasons).toEqual(['made-up']);
+    }
+    let empty;
+    try { deriveReviewDisposition({}); } catch (e) { empty = e; }
+    expect(empty).toBeInstanceOf(Error);
+    expect(empty).not.toBeInstanceOf(UnknownReasonError);
   });
 
   // Regression guard (#2285): the drain's real `reasons` array (from scoreEscalation) carries DECORATED strings,

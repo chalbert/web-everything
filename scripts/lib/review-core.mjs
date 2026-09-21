@@ -581,6 +581,22 @@ export function canonicalizeReason(raw, vocabulary = ALL_REASON_TOKENS) {
 }
 
 /**
+ * The ONE error `deriveReviewDisposition` throws for a genuinely unrecognized reason token (#3495). A dedicated
+ * type — not a message match — so a caller that must tell "this reason is not in the vocabulary" apart from any
+ * OTHER failure (a future precondition check, an internal bug) can `instanceof` it instead of collapsing every
+ * throw into the same reading. The message is unchanged (`deriveReviewDisposition: unknown reason(s): …`), so a
+ * caller that only matches the text keeps working. `unknownReasons` carries the offending raw strings.
+ */
+export class UnknownReasonError extends Error {
+  /** @param {string[]} unknownReasons the raw reason strings that canonicalized to no known token. */
+  constructor(unknownReasons) {
+    super(`deriveReviewDisposition: unknown reason(s): ${unknownReasons.join(', ')}`);
+    this.name = 'UnknownReasonError';
+    this.unknownReasons = unknownReasons;
+  }
+}
+
+/**
  * Derive what a review surface DOES about an escalated PR, from the reason(s) it escalated for (#2285). Pure,
  * exhaustive over REVIEW_REASONS, strictest-reason-wins when several apply. Returns `{ mode, autoLand }`:
  *   • mode: `converge` → run the panel↔editor negotiation loop; `human` → hand to a human, do not converge.
@@ -601,7 +617,8 @@ export function canonicalizeReason(raw, vocabulary = ALL_REASON_TOKENS) {
  * `size (1080 ≥ 400 changed lines)`, `dismissed-findings (…)`, `cross-repo impl+WE couple`) — each is
  * canonicalized to its bare token via `canonicalizeReason` before the
  * precedence check, so `deriveReviewDisposition({ reasons })` works when handed the parked array as-is. Still
- * throws `unknown reason(s)` on a genuinely unrecognized reason and `at least one reason` on empty input.
+ * throws `UnknownReasonError` (`unknown reason(s)`) on a genuinely unrecognized reason and a plain `Error`
+ * (`at least one reason`) on empty input.
  *
  * @param {{reason?: string, reasons?: string[]}} o - one reason, or several (several ⇒ strictest wins); each may
  *   be a bare token OR a decorated `scoreEscalation` reason string.
@@ -612,7 +629,7 @@ export function deriveReviewDisposition({ reason, reasons } = {}) {
   if (!raw.length) throw new Error('deriveReviewDisposition: at least one reason is required');
   const canon = raw.map((r) => ({ raw: r, token: canonicalizeReason(r) }));
   const unknown = canon.filter((c) => c.token == null).map((c) => c.raw);
-  if (unknown.length) throw new Error(`deriveReviewDisposition: unknown reason(s): ${unknown.join(', ')}`);
+  if (unknown.length) throw new UnknownReasonError(unknown);
   const list = canon.map((c) => c.token);
   if (list.some((r) => DEADLOCK_REASONS.includes(r))) return { mode: REVIEW_DISPOSITIONS.HUMAN, autoLand: false };
   if (list.some((r) => HUMAN_SENSITIVITY_REASONS.includes(r))) return { mode: REVIEW_DISPOSITIONS.CONVERGE, autoLand: false };
