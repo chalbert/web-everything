@@ -13,6 +13,8 @@
 - 43. Enforce Shared Gate At Write-Time — PreToolUse(Edit|Write) hook scans content + denies the write; #883
 - 104. Edit-Work Runs In A Lane Clone — edits land via lane-clone → ready-to-merge PR, NEVER direct to main (#2183/#2190); never branch a shared checkout; [[single-session-should-use-a-lane]]
 - 105. Claim Ignores Git State — backlog ownership=status:active NOT the working tree; uncommitted edits never a drop-reason
+- 148. Worker Model Routing — Sonnet default; Opus = design of hard stuff only and delegates execution; never Fable; never hand-set the model; fix limiting operations on the prototype
+- 149. Operation Limit Fixed On The Prototype — an operation with a limitation is fixed on the prototype, never worked around in private notes
 
 <!-- categories: everything else, recall-gated — open the sub-index whose keywords match the task -->
 - **[Constellation & Placement](index-arch.md)** — placement · WE/FUI/Plateau · boundary · contract · impl · home · migration (21 rules)

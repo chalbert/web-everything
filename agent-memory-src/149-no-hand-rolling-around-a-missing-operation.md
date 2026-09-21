@@ -20,6 +20,8 @@ covers this work), the right response is to build one or extend an existing one,
 (filing a backlog item itself — lane acquire, scaffold, author, commit, land, dispatch review — was hand-rolled
 roughly a dozen times in one session before being identified as its own missing operation).
 
+**Sharpened 2026-09-22 (operator: "If operation has some limitation, we just fix. This is what the prototype is for"):** the same rule covers an operation that EXISTS but has a limitation. Fix the operation on the prototype (`lane/mechanical-dispatcher`, epic #3383; see [[prototype-fix-what-you-find-by-default]]). Never route around it, and never record the workaround in a private handoff note as if it were the way to do it. Real case (2026-09-21): about 40 workers were set to Opus by hand through the process-wide env var `WE_DISPATCH_AGENT_ARGS`, against [[workflow-lane-model-policy]].
+
 **How to apply:** when a task's steps have no declared operation in `scripts/operations/run.mjs` and no skill
 wraps one either, don't just do the steps by hand and move on. Either (a) build the operation now if the gap
 blocks real progress and is small enough to build in-session, or (b) file it as its own backlog item with real
