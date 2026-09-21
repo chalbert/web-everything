@@ -116,18 +116,20 @@ git push origin lane/mechanical-dispatcher-catchup   # the staging ref only; a p
 // Fork 3 (b), illustration only (the build picks the shape): one line per frozen branch, read from the record on the ops branch
 { kind: 'branch-sync', branch: 'lane/mechanical-dispatcher', state: 'agent-failed',   // or 'gate-red'; 'awaiting-fast-forward' only if Fork 2 (b) is ruled
   behind: 58, signature: '3e72ad5516ad', since: '2026-09-14T23:04:44Z',
-  line: 'lane/mechanical-dispatcher: the reconcile agent could not resolve the merge; see its report' }
+  line: '<the exact line for this state, from the table below, filled in>' }
 ```
 
-**What the operator sees (Fork 3 (b); the wording is illustrative, the build picks the exact text).**
+**What the operator sees (Fork 3 (b)). The wording below is exact and is ruled with the fork; words in braces are filled in by the build.**
 
 Nothing is shown while the agent is working or while nothing is wrong. A line appears only in these states:
 
-| State | The line |
+| State | The line, exactly |
 | --- | --- |
-| `agent-failed` | ⚠ prototype sync: the reconcile agent could not resolve the merge (58 files, stuck since Sep 14 19:04). Its report: <link>. Next: resolve it on the staging ref by hand, or re-dispatch the agent. |
-| `gate-red` | ⚠ prototype sync: the merge is resolved but the tests fail at <sha>; nothing was promoted (since Sep 21 14:10). The failing run: <link>. |
-| `unknown` | ⚠ prototype sync: status unknown, the alert record could not be read or the last push of it failed. Do not assume all clear. |
+| `agent-failed` | ⚠ Prototype sync stuck for {age}: the reconcile agent could not resolve the merge of main into {branch} ({n} files conflict). Its report: {report}. Next: resolve it by hand on {staging}, or have a session retry the agent. |
+| `gate-red` | ⚠ Prototype sync stuck for {age}: the merge into {branch} is resolved but the tests fail at {sha}, so nothing was pushed. The failing run: {run}. Next: fix the tests on {staging}; the sync pushes it once they pass. |
+| `unknown` | ⚠ Prototype sync: status unknown ({reason}). Do not assume it is fine. Next: check {record}. |
+
+`{age}` reads "20 minutes", "3 hours" or "7 days". `{reason}` is one of "the alert record could not be read" or "the alert record could not be saved". `{record}` is the record's file on the ops branch. The desktop notice uses the title "Prototype sync stuck" and the line's first sentence as its body. The wip report shows the same line plus the time the state began. When nothing is wrong, no line and no "all clear" message is shown.
 
 - **Where it appears.** (1) The first line of the turn digest, on every turn, once #3726 delivers the digest by hook. (2) A row in the wip report's needs-you section, attention first, showing the same line and its age. (3) Until #3726 lands: a desktop notice when the state is entered, repeated at the existing re-nag interval.
 - **One line per stuck branch**, never a stream. The age in the line is the only escalation: "stuck 7 days" reads louder than "stuck 20 minutes" without a second mechanism.
