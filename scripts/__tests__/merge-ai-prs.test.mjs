@@ -4,10 +4,11 @@
  *   name was split into the `merge-ai-prs-*.test.mjs` siblings; this one covers only the #2447 slice.) A
  *   backlog-only PR that resolves its item via `graduatedTo` must lead its durable park/skip comment with the
  *   "no code change — deliverable already landed" banner, while every other PR's comment — and the dedupe keyed
- *   on its text — stays byte-identical.
+ *   on its text — stays byte-identical. Also the non-default-base hold (#3674, ruled #3805 Fork 2 (a)): a PR whose
+ *   base is not the repo's default branch is skipped with `base is not <default> (<base>)`.
  */
 import { describe, it, expect } from 'vitest';
-import { withResolutionBasis, buildDrainReasonComment, hasDrainReasonComment, buildDrainVerdicts } from '../merge-ai-prs.mjs';
+import { withResolutionBasis, buildDrainReasonComment, hasDrainReasonComment, buildDrainVerdicts, classifyPr, isRebaseDropCandidate } from '../merge-ai-prs.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 import { deriveResolutionBasis, graduatedToFromBody } from '../lib/review-render.mjs';
 
@@ -55,5 +56,49 @@ describe('buildDrainVerdicts — carries the graduatedTo sources the escalation 
     const v = verdictFor(ghPr(422, 'what changed and why'), null);
     expect(v.manifestGraduatedTo).toBe(null);
     expect(v.bodyGraduatedTo).toBe(null);
+  });
+});
+
+describe('classifyPr — base is not the default branch: held with a named reason (#3674)', () => {
+  const green = [{ name: 'test', conclusion: 'SUCCESS' }];
+  const ghPr = (number, baseRefName, extra = {}) => ({ number, title: 't', body: 'what changed and why', headRefName: `lane/${number}-x`, baseRefName, statusCheckRollup: green, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', labels: [{ name: 'ready-to-merge' }], ...extra });
+  // The drain's real wiring: runCli resolves each repo's default branch and threads it as `defaultBranchOf`.
+  const verdictFor = (pr, defaultBranchOf) => buildDrainVerdicts({ prsByRepo: new Map([[null, [pr]]]), readOf: () => ({ commits: [{ oid: 'abc' }], manifest: null }), repos: [null], defaultBranchOf })[0];
+
+  it('base is not main (lane/mechanical-dispatcher): skipped with the exact reason, even with `test` green', () => {
+    const v = verdictFor(ghPr(2198, 'lane/mechanical-dispatcher'), () => 'main');
+    expect(v.testGreen).toBe(true);
+    expect(v.decision).toBe('skip');
+    expect(v.reason).toBe('base is not main (lane/mechanical-dispatcher)');
+    expect(v.reviewHeld).toBe(false);
+  });
+
+  it('base is not <default>: the arm sits ahead of the required-check arm (a red `test` still names the base)', () => {
+    const v = classifyPr(ghPr(2156, 'lane/mechanical-dispatcher', { statusCheckRollup: [] }), { defaultBranch: 'main' });
+    expect(v.testGreen).toBe(false);
+    expect(v.reason).toBe('base is not main (lane/mechanical-dispatcher)');
+  });
+
+  it('base is not <default> compares against the INJECTED default branch, never a literal main', () => {
+    const onTrunk = verdictFor(ghPr(10, 'trunk'), () => 'trunk');
+    expect(onTrunk.decision).toBe('merge');
+    const onMain = verdictFor(ghPr(11, 'main'), () => 'trunk');
+    expect(onMain.decision).toBe('skip');
+    expect(onMain.reason).toBe('base is not trunk (main)');
+  });
+
+  it('base is not <default>: a PR on the default branch is unaffected, and an unresolved default leaves the arm inert', () => {
+    const onDefault = verdictFor(ghPr(12, 'main'), () => 'main');
+    expect(onDefault.decision).toBe('merge');
+    expect(onDefault.reason).toBe(classifyPr(ghPr(12, 'main')).reason);
+    expect(verdictFor(ghPr(13, 'lane/mechanical-dispatcher'), () => null).decision).toBe('merge');
+  });
+
+  it('base is not <default>: the held PR is never a rebase-drop candidate (the rebase pass would re-flip it to merge)', () => {
+    const behind = ghPr(14, 'lane/mechanical-dispatcher', { mergeStateStatus: 'BEHIND' });
+    const v = verdictFor(behind, () => 'main');
+    expect(v.reason).toBe('base is not main (lane/mechanical-dispatcher)');
+    expect(isRebaseDropCandidate(v)).toBe(false);
+    expect(isRebaseDropCandidate(verdictFor(ghPr(15, 'main', { mergeStateStatus: 'BEHIND' }), () => 'main'))).toBe(true);
   });
 });

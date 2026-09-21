@@ -573,8 +573,14 @@ export function hasStaleReviewPendingBesideAccept({ currentLabels = [] } = {}) {
  * held PR through. `allowPendingReview` mirrors the #2423 per-PR relief valve: a PR the operator named in
  * `--no-review-escalation=<pr#>` may still merge past `review:pending` (NEVER past `review:changes`/`review:human`,
  * which stay held even when relieved). A PR with NO review label at all is unaffected — it merges exactly as before.
+ *
+ * NON-DEFAULT BASE (#3674, ruled #3805 Fork 2 (a)). A PR whose `baseRefName` is not the repo's default branch is
+ * SKIPPED with `base is not <default> (<base>)`, AHEAD of the required-check arm: a prototype base such as
+ * `lane/mechanical-dispatcher` runs no CI, so its `test` check can never report and the PR would otherwise sit
+ * `checking` forever with no reason. `defaultBranch` is the caller's per-repo resolution (never a literal
+ * `'main'`); when it or `baseRefName` is unknown the arm is inert and the chain behaves exactly as before.
  */
-export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-merge', allowPendingReview = false } = {}) {
+export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-merge', allowPendingReview = false, defaultBranch = null } = {}) {
   const num = pr?.number;
   const title = pr?.title || '';
   const aiGenerated = isAiGeneratedPr(pr);
@@ -588,6 +594,8 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   const humanCleared = hasLabel(pr, REVIEW_LABELS.accepted);
   const certified = certifyLabel || aiGenerated || humanCleared; // #2195: the label OR every-commit-AI OR a human clear certifies
   const testGreen = isRequiredCheckGreen(pr, requiredCheck);
+  const base = typeof pr?.baseRefName === 'string' ? pr.baseRefName : '';
+  const offDefaultBase = typeof defaultBranch === 'string' && defaultBranch !== '' && base !== '' && base !== defaultBranch;
   const state = String(pr?.mergeStateStatus || '').toUpperCase();
   const mergeable = String(pr?.mergeable || '').toUpperCase();
   const landableState = state === 'CLEAN' || state === 'UNSTABLE'; // UNSTABLE = mergeable, only non-required checks red
@@ -614,6 +622,9 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
       ? 'human-cleared (review:accepted), required check green, cleanly mergeable'
       : 'AI-generated, required check green, cleanly mergeable';
   if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer), no "${trustLabel}" label, and not human-cleared (review:accepted)`; }
+  // #3674 — ahead of the required-check arm, so a non-default base is held with its real reason (even when `test`
+  // is green) instead of waiting on a check that never runs there.
+  else if (offDefaultBase) { decision = 'skip'; reason = `base is not ${defaultBranch} (${base})`; }
   else if (!testGreen) { decision = 'skip'; reason = `required check "${requiredCheck}" is not green`; }
   else if (mergeable !== 'MERGEABLE') { decision = 'skip'; reason = `not mergeable (mergeable=${mergeable || 'UNKNOWN'})`; }
   else if (!landableState) { decision = 'skip'; reason = `merge state ${state || 'UNKNOWN'} (BEHIND⇒needs rebase, DIRTY/BLOCKED/DRAFT⇒not landable) — left for its author`; }
@@ -627,7 +638,7 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   // blocker does it flag `reviewHeld`, so the downstream passes see the hold in isolation. No review label ⇒ never
   // held ⇒ a no-op for the common case (#2820-review-fix finding 3 — "checked LAST so earlier reasons win").
   else if (reviewUncleared) { decision = 'skip'; reviewHeld = true; reason = `unsatisfied review hold ("${heldLabel}") present without review:accepted — refusing to merge regardless of "${trustLabel}" (#2820)`; }
-  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, reviewHeld, testGreen, state, mergeable };
+  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, reviewHeld, testGreen, state, mergeable, offDefaultBase };
 }
 
 /**
@@ -652,6 +663,8 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
  */
 export function isRebaseDropCandidate(v) {
   if (!v || v.decision !== 'skip') return false;
+  // #3674 — a non-default-base hold is never rebuilt onto main: the rebase pass would flip it back to `merge`.
+  if (v.offDefaultBase) return false;
   const certified = !!(v.certifyLabel || v.aiGenerated);
   if (!certified || !v.testGreen) return false;
   const state = String(v.state || '').toUpperCase();
@@ -1301,10 +1314,11 @@ export async function readRemoteManifestViaApi({ exec, repo, headRef, apiArgs = 
  * #xc7p3q9 — the couple half of the verdict build, extracted so runCli AND the test suite drive the SAME
  * narrowing→classify→attach path (Fix 4: the round-5 regressions all came from tests hand-building verdicts that
  * diverged from runCli's real wiring). Pure. `readOf(repo, num)` returns the per-PR `{ commits, manifest }` read.
- * @param {{prsByRepo:Map, readOf:function, repos:Array, requiredCheck?:string, escalationRelief?:object, label?:(string|null), isLocalRepo?:function, localSlug?:(string|null)}} o
+ * `defaultBranchOf(repo)` returns that repo's default branch (#3674), fed to `classifyPr`'s non-default-base arm.
+ * @param {{prsByRepo:Map, readOf:function, repos:Array, requiredCheck?:string, escalationRelief?:object, label?:(string|null), isLocalRepo?:function, localSlug?:(string|null), defaultBranchOf?:function}} o
  * @returns {Array} verdicts (classify + manifest fields attached; NOT yet couple-joined)
  */
-export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null } = {}) {
+export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, defaultBranchOf = () => null } = {}) {
   const verdicts = [];
   const relief = escalationRelief || { prs: [], passWide: false };
   for (const repo of (Array.isArray(repos) ? repos : [])) {
@@ -1312,7 +1326,7 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
     for (const p of prs) {
       const read = (typeof readOf === 'function' ? readOf(repo, p.number) : null) || {};
       p.commits = read.commits || [];
-      const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label) });
+      const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label), defaultBranch: (typeof defaultBranchOf === 'function' ? defaultBranchOf(repo) : null) || null });
       // #2502 — the tip commit's SHA, threaded onto every emitted verdict and, via the `{...v}` spread used to
       // build `remaining`/`plan.ready`/`plan.deferred`, onto each of the six result buckets a caller (the
       // drain-daemon stuck detector) actually reads: toMerge/merged/skipped/parked/deferred/failed — NOT
@@ -1453,9 +1467,9 @@ export function narrowPrsByRepo(listings, { onlyPr = null, onlyRepo = null, repo
  * num)` returns the per-PR `{ commits, manifest }` read.
  * @returns {{prsByRepo:Map, verdicts:Array}}
  */
-export function prepareDrainVerdicts({ listings, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null } = {}) {
+export function prepareDrainVerdicts({ listings, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, defaultBranchOf = () => null } = {}) {
   const prsByRepo = narrowPrsByRepo(listings, { onlyPr, onlyRepo, repos, isLocalRepo });
-  const verdicts = buildDrainVerdicts({ prsByRepo, readOf, repos, requiredCheck, escalationRelief, label, isLocalRepo, localSlug });
+  const verdicts = buildDrainVerdicts({ prsByRepo, readOf, repos, requiredCheck, escalationRelief, label, isLocalRepo, localSlug, defaultBranchOf });
   return { prsByRepo, verdicts };
 }
 
@@ -1470,11 +1484,11 @@ export function prepareDrainVerdicts({ listings, repos = [], onlyPr = null, only
  * Pure.
  * @returns {{prsByRepo:Map, verdicts:Array, carrierHealth:Map, plan:{ready:Array, deferred:Array, staleLandedOpenItems:Array}}}
  */
-export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set() } = {}) {
+export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, defaultBranchOf = () => null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set() } = {}) {
   let prsByRepo = null;
   let vs = verdicts;
   if (!Array.isArray(vs)) {
-    const prep = prepareDrainVerdicts({ listings, repos, onlyPr, onlyRepo, readOf, requiredCheck, escalationRelief, label, isLocalRepo, localSlug });
+    const prep = prepareDrainVerdicts({ listings, repos, onlyPr, onlyRepo, readOf, requiredCheck, escalationRelief, label, isLocalRepo, localSlug, defaultBranchOf });
     vs = prep.verdicts;
     prsByRepo = prep.prsByRepo;
   }
@@ -3315,6 +3329,10 @@ async function runCli() {
   // unfiltered open-PR context, and the (possibly `--label`-scoped) merge-candidate sweep.
   const ctxReadCache = new Map();   // collectOpenPrContext: (repo, num, sha) → { manifest, commits }
   const sweepReadCache = new Map(); // the merge-candidate loop: (repo, num, sha) → { commits, manifest }
+  // #3674 — each swept repo's default branch (`gh repo view --json defaultBranchRef`), resolved once per run and
+  // reused across `--watch` passes. A failed read stays unresolved (retried next pass) and leaves the
+  // non-default-base arm inert for that repo, so the chain degrades to its pre-#3674 behaviour, never to a land.
+  const defaultBranchByRepo = new Map();
   // #2417 review — returns `{ commits, degraded }`. `degraded:true` means the gh read THREW (a swallowed transient
   // failure): the empty `[]` is a fallback, not a confirmed "no commits", so `fetchPrReadsCached` declines to cache
   // it and re-fetches next `--watch` pass rather than latching an empty read for the head-SHA lifetime. Behaviour
@@ -3550,7 +3568,17 @@ async function runCli() {
     try { const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); return { repo, prs: JSON.parse(stdout.trim() || '[]') }; }
     catch (e) { return { repo, err: String(e.message || e).split('\n')[0] }; }
   };
-  const listings = await mapWithConcurrency(REPOS, REPOS.length, listOne);
+  const resolveDefaultBranch = async (repo) => {
+    if (defaultBranchByRepo.has(repo)) return;
+    try {
+      const { stdout } = await execFileP('gh', ['repo', 'view', ...(repo ? [repo] : []), '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name'], { encoding: 'utf8' });
+      const name = stdout.trim();
+      if (name) defaultBranchByRepo.set(repo, name);
+    } catch (e) {
+      if (!AS_JSON) process.stderr.write(`  ⚠ ${repo || 'cwd repo'}: default branch unresolved (${String(e.message || e).split('\n')[0]}) — the non-default-base hold is off for it this pass (#3674)\n`);
+    }
+  };
+  const [listings] = await Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]);
   const listErr = listings.find((l) => l.err);
   if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 3);
   // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
@@ -3599,6 +3627,7 @@ async function runCli() {
     label,
     isLocalRepo,
     localSlug,
+    defaultBranchOf: (repo) => defaultBranchByRepo.get(repo) ?? null,
   }));
   // #2393 — the `stackParents` proof-of-land gate's SECOND proof source: a parent that landed in a PRIOR drain
   // session, read off `origin/main`'s durable `bornAs:<hash>` record (#2392). Computed ONCE per pass over every
