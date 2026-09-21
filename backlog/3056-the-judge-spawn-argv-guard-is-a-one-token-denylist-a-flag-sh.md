@@ -2,8 +2,11 @@
 bornAs: x5340nd
 kind: decision
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: "docs/agent/platform-decisions.md#argv-builder-validates-caller-strings-at-its-own-seam"
 preparedDate: "2026-08-16"
 relatedTo: ["3028", "3050", "3029"]
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs"]
@@ -22,12 +25,63 @@ that gap against a structurally similar, already-ratified statute
 ([we:docs/agent/platform-decisions.md#guard-unresolvable-reexecution-denies](../docs/agent/platform-decisions.md#guard-unresolvable-reexecution-denies))
 and a recurring CLI-hygiene pattern (below), then states one fork with a **bold recommended default**, a
 resolved sub-question on `cli`/`cwd`/`env`, an inline skeptic attack and a fresh-context two-confusion screen —
-see `relatedReport` for the session's grounding notes. The fork and the recommendation are **not yet ratified**;
-prep brings the item to Definition of Ready, it does not decide it.
+see `relatedReport` for the session's grounding notes. *(At prep time the fork was not yet ratified — prep brings
+an item to Definition of Ready, it does not decide it. It was ratified 2026-09-21: see the ruling below.)*
+
+## Ruling — RATIFIED 2026-09-21
+
+**Ratified by the operator (Nicolas Gilbert) on 2026-09-21 — Fork 1 approved as prepared: option (c).**
+`buildJudgeArgv` validates `model` and `mandate` at its own seam and **refuses** any value whose first character
+is `-`. A flag-shaped option value is **refused, not tolerated on the greedy-parse mitigation** — so the guard's
+correctness no longer rests on how the `claude` CLI parses a flag-shaped value, and the "unverified third-party
+parser" dependency the prep recorded is retired rather than merely recorded. The losing options keep the costs
+recorded under Fork 1: (a) a position-aware allowlist re-derives after assembly a fact the builder knows at the
+source and couples the guard to the argv order; (b) extending the denylist can only name traps already found, so it
+survives only as the `--bare` trap record underneath. `cli` / `cwd` / `env` are not part of this ruling
+(answered below: a different question).
+
+**The rule** is codified as
+[we:docs/agent/platform-decisions.md#argv-builder-validates-caller-strings-at-its-own-seam](../docs/agent/platform-decisions.md#argv-builder-validates-caller-strings-at-its-own-seam).
+**The build** is the follow-on story `xg8nixa` (parent #3029): the two-field refusal, one shared predicate with the
+adapter's existing check, and the structural per-field test the skeptic's amendment asked for.
+
+## Re-grounding at ratification (2026-09-21) — what moved since the prep
+
+The prep read `main` at `1fb43d7a`; [we:scripts/lib/judge-spawn.mjs](../scripts/lib/judge-spawn.mjs) has taken
+~19 commits since and the callers now exist. Re-checked against the tree at ratification. **The default holds;
+four facts changed and are folded in here.**
+
+- **The "no production callers" bound is gone.** The judge now runs from real code:
+  [we:scripts/operations/review-pr.mjs](../scripts/operations/review-pr.mjs),
+  [we:scripts/operations/review-prep.mjs](../scripts/operations/review-prep.mjs),
+  [we:scripts/lib/judge-panel.mjs](../scripts/lib/judge-panel.mjs) and the operations adapter. #3050, #3035 and
+  #3028 are all resolved. What is still true: every `model` those declarations pass is a literal
+  (`JUDGE_MODEL = 'sonnet'`), and no `mandate` starts with `-` (the built-in mandates open "You are …").
+- **`model` now has an operator-typed path.** `--model=<alias>` is a real control flag on the derived command line
+  (#3151). The adapter already refuses a `-`-leading `model`/`effort` twice — at parse, and again in
+  `assertSafeJudgeRequest` in
+  [we:scripts/operations/cli-adapter.mjs](../scripts/operations/cli-adapter.mjs). That is option (c)'s own
+  pattern, applied one layer out — supporting evidence for the default. But it guards only the operations path:
+  `buildJudgeArgv` (the seam `judge-panel`, `measure-judge-spawn` and any direct caller pass through) is still
+  unguarded, and **`mandate` is unguarded at both layers**.
+- **A second rule for one field is a known defect.** The adapter's own comment records that two *different*
+  rules for one field shipped a blocker once (review of PR #1472, `budget: null`). So the build shares **one** predicate
+  between the builder and the adapter rather than adding a second inline check.
+- **`cwd` is no longer fully unchecked.** `assertLaneCwd` now refuses a tool-bearing juror without a lane `cwd`.
+  This does not change the `cli`/`cwd`/`env` answer below; it only corrects the prep's "unchecked" wording.
+
+**Inline attack on the default, run against the moved tree:** (1) *Does the operator `--model` path flip it?* No —
+it strengthens (c), and the adapter already refuses it; the builder seam is the missing second layer. (2) *Can a
+value bypass a first-character `-` check?* A leading space (`" --x"`) is not a flag to the CLI, so it is not a
+bypass; the adapter trims before checking, so the build pins one behaviour for both. A non-ASCII dash is not a
+flag to any CLI. A NUL byte is rejected by Node's `spawn` itself. (3) *Does the card body now quoted in the
+review-prep mandate make `mandate` untrusted?* The mandate opens with fixed prose, so the leading-dash check
+never trips on a real one, and it is a cheap structural backstop for the day a declaration builds one from input.
+No finding survives; the default is unchanged.
 
 ## What the guard actually does
 
-Read against `main` at `1fb43d7a`:
+*(Prep-time snapshot — read against `main` at `1fb43d7a`; the current state is in the re-grounding section above.)*
 
 - [we:scripts/lib/judge-spawn.mjs#FORBIDDEN_ARGV](../scripts/lib/judge-spawn.mjs) is a frozen array with **one
   entry**: `'--bare'`. Its comment states the reason — `--bare` forces key-based auth and cannot see a
@@ -128,10 +182,12 @@ denylist's narrowness even though no such flag is reachable today.
 
 ## The bound — say it plainly
 
-**This is a robustness gap, not a live exploit.**
+**This is a robustness gap, not a live exploit.** *(The "no callers" claim in the first bullet is a prep-time
+snapshot and is superseded — callers exist now; see the re-grounding section. The conclusion — first-party
+values only, no attacker path — still holds.)*
 
-- No caller passes an attacker-influenced `model` or `mandate`. `judgeSpawn` has **no production callers at all**
-  yet: the only importers are its own tests and
+- No caller passes an attacker-influenced `model` or `mandate`. ~~`judgeSpawn` has **no production callers at all**
+  yet:~~ *(prep-time, superseded)* `judgeSpawn` had no production callers at prep time: the only importers are its own tests and
   [we:scripts/measure-judge-spawn.mjs](../scripts/measure-judge-spawn.mjs), a fact #3050 also records. The judge
   step kind in [we:scripts/operations/step-kinds.mjs](../scripts/operations/step-kinds.mjs) *declares* a request
   and never performs one, and the only `model:` in that tree is the literal `'sonnet'` in
@@ -289,17 +345,18 @@ bound the whole card rests on (above, "The bound") — #3035 is the trigger to r
 
 ## Acceptance
 
-- [ ] The fork above is ruled, with the losing options' costs recorded.
-- [ ] Whatever is ruled, the record states plainly whether a flag-shaped option value is *refused* or
-      *deliberately tolerated on the greedy-parse mitigation* — silence is not an acceptable outcome.
-- [ ] If the ruling keeps relying on greedy parsing, the assumption about the CLI's parser is either **verified
+- [x] The fork above is ruled, with the losing options' costs recorded. *(Ruling section, top.)*
+- [x] Whatever is ruled, the record states plainly whether a flag-shaped option value is *refused* or
+      *deliberately tolerated on the greedy-parse mitigation* — **refused.**
+- [x] If the ruling keeps relying on greedy parsing, the assumption about the CLI's parser is either **verified
       against the real binary** and the result recorded with its conditions, or explicitly recorded as an
-      unverified dependency on third-party behaviour.
+      unverified dependency on third-party behaviour. *(Moot: the ruling does not rely on greedy parsing.)*
 - [ ] A test asserts whatever is ruled, in the existing pure-seam style of
       [we:scripts/lib/__tests__/judge-spawn.test.mjs](../scripts/lib/__tests__/judge-spawn.test.mjs) — injected
-      `spawnFn`, no process started.
-- [ ] The existing `--bare` refusal is unchanged; its two assertions still fire.
-- [ ] Whether `cli` / `cwd` / `env` deserve the same treatment is answered one way or the other, not left silent.
+      `spawnFn`, no process started. *(Carried to the build story `xg8nixa`; a decision item ships no code.)*
+- [ ] The existing `--bare` refusal is unchanged; its two assertions still fire. *(Carried to `xg8nixa`.)*
+- [x] Whether `cli` / `cwd` / `env` deserve the same treatment is answered one way or the other, not left silent.
+      *(No — see below.)*
 
 ## Neighbours — related, not duplicated
 
@@ -309,9 +366,9 @@ bound the whole card rests on (above, "The bound") — #3035 is the trigger to r
   should assert the helper never emits `--bare`."* **It owns that one trap, not the generalisation.** Nothing on
   it asks whether the guard should cover flags beyond it, and it is resolved, so it cannot absorb this. This card
   is the general question its single-entry denylist leaves open.
-- **#3050** (open) fans `judgeSpawn` out to N jurors and requires `assertNoForbiddenArgv` to fire per child. It
+- **#3050** (resolved since the prep) fans `judgeSpawn` out to N jurors and requires `assertNoForbiddenArgv` to fire per child. It
   **propagates** the guard; it does not change what the guard checks. If this card is ruled toward a stronger
   guard, #3050 inherits it for free.
 - **#3029** (open epic) is the parent — the operation engine this helper serves.
-- **#3035** (open) is the `review-pr` operation, the first real consumer. It is where a non-fixture `model` value
+- **#3035** (resolved since the prep) is the `review-pr` operation, the first real consumer. It is where a non-fixture `model` value
   would first be declared, which is when this stops being purely hypothetical.
