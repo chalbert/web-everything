@@ -4501,3 +4501,13 @@ The host sampler now answers "how much to reserve for the system and VS Code, fo
 **Not verified here:** the live sampler was not reloaded; the reload command is in the result file of the refine-host-sampler job (the operator's jobs directory, outside the repo). Overhead was measured over 3-minute runs into a temp directory, not over a day. `calibrate` never ran for real. `ps -M` thread counts and `ps time` were checked on this host only. The `container` class saw no real container work in the runs.
 
 Checks: 5 new test files, 170 new tests, existing sampler tests unchanged and passing; `check:standards` 0 errors; `check-priority --strict` reports 3 findings (card #3784 missing, #3690 and #3495 listed but resolved) that come from main having moved, not from this change.
+
+## Session update (2026-09-21) — host sampler follow-up: an admission wrapper nested under a slot holder is part of that admitted run, not a second unslotted holder (code commit 3d79733d7)
+
+A follow-up to the schema-2 sampler commit a0c27874c, found by running the built sampler against the live host: `we:scripts/verify-lane.mjs` holds its own admission slot and then re-enters the admission wrapper for its gate. The wrapper (`we:scripts/readiness/heavy-admission.mjs run`) under the slot holder was read as a SECOND, unslotted holder, so the vitest CPU was charged to it and the real slot showed 0 percent. Now a wrapper that sits under a process that already holds a slot is part of that admitted run, and its CPU is charged to the slot (code commit below).
+
+**What changed:** `holderTable` in `we:scripts/operations/host-sampler-attribution.mjs` skips a `run` wrapper whose ancestor holds a slot (`insideSlot`). One new test in `we:scripts/operations/__tests__/host-sampler-attribution.test.mjs` pins it. Nothing else changed; every record and field is as described in the previous note.
+
+**Not verified here:** on the live host the fix was checked only by the fake-process-table test, not by a second real verify-lane run; the live sampler still runs the old build until the operator reloads it.
+
+Checks: `we:scripts/operations/__tests__`, `we:scripts/__tests__` and `we:scripts/lib/__tests__` 327 files and 11497 tests pass (12 skipped); `check:standards` 0 errors.
