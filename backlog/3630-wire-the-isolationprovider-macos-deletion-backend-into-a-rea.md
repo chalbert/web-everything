@@ -47,6 +47,34 @@ assumed. Concretely open:
 
 Not urgent — #3581's own ratified pacing already holds full delivery-agent-shaped Codex work behind the review/fix-dispatch pilot landing and proving out first, and this item's own call-site question (1, above) depends on that pilot's own progress to even be answerable concretely.
 
+## Finding (2026-09-21) — three of four points are done on the prototype branch only; this card stays open
+
+Verified against `origin/main` (`e71426493`) and `origin/lane/mechanical-dispatcher` (`5ab89f87b`). PR #2118 (the port and its backends) merged on 2026-09-11, so the "open, unmerged" wording above is stale. PR #2169 (the first `--provider=codex` delivery run) merged on 2026-09-13.
+
+**On main: no call site.** `we:scripts/lib/isolation-provider.mjs` is imported only by its own test (`we:scripts/lib/__tests__/isolation-provider.test.mjs`, 78 tests, passing on main) and named in a comment of `we:scripts/lib/__tests__/container-exec.test.mjs` and in docs (`we:docs/agent/testing.md`, `we:docs/agent/platform-decisions.md`). Nothing else under `we:scripts/` imports it. The Codex delivery provider, its test, `we:scripts/lib/codex-model-routing.mjs`, `we:scripts/lib/usage-report-secret-paths.mjs`, `we:scripts/lib/spawn-to-completion.mjs`, `we:scripts/operations/minimal-context-provider.mjs` and `we:scripts/operations/telemetry-store.mjs` do not exist on main, and main's `we:scripts/operations/deliver-item-wrapper.mjs` still carries only the throwing `CODEX_PROVIDER` seam.
+
+**On the prototype branch: the call site exists, but it does not use a port backend.** The write-capable Codex path is `we:scripts/operations/codex-delivery-provider.mjs`. It imports one helper, `buildNativeDenyCodexArgs` (`:132`), and splices it into the argv at `:364` inside `buildCodexDeliveryArgv` (`:342`). No factory (`createMacosDeletionIsolationProvider`, `createConfigOverrideIsolationProvider`, `createNativeDenyWithHistoryStripIsolationProvider`) has a call site on main or on the branch. The helper is reached through `CODEX_PROVIDER` (`we:scripts/operations/deliver-item-wrapper.mjs:830`, selected with `--provider=codex`), `FIX_CODEX_PROVIDER` (`we:scripts/operations/fix-dispatch-wrapper.mjs:392`, argv at `:432`) and `CI_HEAL_CODEX_PROVIDER` (`we:scripts/operations/ci-heal-dispatch-wrapper.mjs:443`, argv at `:477`). `we:scripts/operations/__tests__/codex-delivery-provider.test.mjs` (41 tests), `we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs` (146) and the isolation suite (78) pass on the branch: 265 tests.
+
+| Point | State | Evidence |
+| --- | --- | --- |
+| 1. Pick the first real call site | done on the branch only, with a different backend than the title names | the paths above; the deletion backend, the one in the title, is not used |
+| 2. How the returned cwd composes with lane-pool lease, reap and scope | resolved on the branch by not creating a scratch clone | the agent runs with `-C <lane>` in the pooled lane clone itself (`we:scripts/operations/codex-delivery-provider.mjs:376`); the wrapper acquires and releases that lane (`we:scripts/operations/deliver-item-wrapper.mjs:309`, `releaseClaimAndLane`); `assertDenyPathsUsable` (`:216`) refuses a deny entry that covers the agent's own lane |
+| 3. Live proof, through the wired call site, that `we:AGENTS.md` is not recovered automatically, and what a deliberate read does | **not shown** | the provider header (`:100-107`) records a live check of the flags (codex-cli 0.153.4, 2026-09-12: a real write-mode run was asked whether any instructions file had been auto-loaded and said none had) and a raw `codex sandbox -P locked` run for write and network confinement (`:58-77`); PR #2169 shows the wired path delivering. No record found of the auto-load check run through the wired provider, nor a statement of what a deliberate in-session read does under the native deny |
+| 4. State the honest limit for the backend wired | done on the branch | the header residual notes (`:84-98`): reads outside the lane stay open, sibling-lane reads stay open, and the deny is model-cooperation inside `codex exec`; the port header on main (`we:scripts/lib/isolation-provider.mjs:1-50`) states the three backends' limits |
+
+**Files that graduate (owned by #3443, under #3580).** In dependency order, each as its own slice from a lane cut from `origin/main`, with the per-file freshness rule of decision #3804 (port a diff, never copy a file main has moved):
+
+1. `we:scripts/lib/codex-model-routing.mjs` with `we:scripts/lib/__tests__/codex-model-routing.test.mjs`
+2. `we:scripts/lib/usage-report-secret-paths.mjs` and `we:scripts/lib/spawn-to-completion.mjs`
+3. `we:scripts/operations/minimal-context-provider.mjs` and `we:scripts/operations/telemetry-store.mjs`
+4. `we:scripts/operations/codex-delivery-provider.mjs` with `we:scripts/operations/__tests__/codex-delivery-provider.test.mjs`
+5. the `CODEX_PROVIDER` block of `we:scripts/operations/deliver-item-wrapper.mjs` (the file exists on main, so this is a diff), then `we:scripts/operations/deliver-item-run.mjs` (the `--provider` flag)
+6. `we:scripts/operations/fix-dispatch-wrapper.mjs`, `we:scripts/operations/fix-run.mjs`, `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` and `we:scripts/operations/ci-heal-run.mjs`, if the fix and ci-heal kinds graduate with it
+
+Whether a file in that list already has a graduation slice was not checked here.
+
+**Not resolved, and why.** Point 3 has no evidence, and points 1, 2 and 4 are not on main. What is owed here once the code is on main: run the auto-load check and a deliberate read of `we:AGENTS.md` through the wired provider, and record both outcomes on this card. The title names the deletion backend; the wired path uses the native-deny argv instead, so the title no longer describes the work.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
