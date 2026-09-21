@@ -1,8 +1,9 @@
 ---
+bornAs: x4ozdck
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["x8i1gsp", "3811"]
+relatedTo: ["3827", "3811"]
 dateOpened: "2026-09-21"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "a4ff83ea6cb18f1fb7adb1a2a795044dada6bd7d"
@@ -15,7 +16,7 @@ On the gated plateau-app deploy a home-screen launch of /wip ends on the dashboa
 
 Operator rule 7 (2026-09-21): "If unsure we should have a design review". This card is that review, prepared. It does not change plateau-app. All line numbers are chalbert/plateau-app `main` at `14b45e0` (PR #157's merge), re-read on 2026-09-21. PR #158 (open, head `7906cf0`) moves `isProductRoute` / `rememberReturnTo` / `takeReturnTo` verbatim into `plateau:src/return-to.ts`.
 
-**Why this sits under #3383.** The /wip page is the operator's view of #3383's subtree (`plateau:docs/wip-page.md:3-4`), like its siblings #3736 and #3809. The generic gate hardening cards from the PR #156 review (#3810, #3811) have no parent; the traversal card filed with this one (`x8i1gsp`) follows that convention.
+**Why this sits under #3383.** The /wip page is the operator's view of #3383's subtree (`plateau:docs/wip-page.md:3-4`), like its siblings #3736 and #3809. The generic gate hardening cards from the PR #156 review (#3810, #3811) have no parent; the traversal card filed with this one (`3827`) follows that convention.
 
 ## FOUND (verified)
 
@@ -105,7 +106,7 @@ The behaviour question: after the code, where may the visitor be sent back to? A
 - **(c) The Worker keeps its own exact list, e.g. `new Set(['/wip'])`**, in the style of `PUBLIC_ASSETS`. This is the PR #158 fix worker's proposal. It is safe, because the splash only ever writes one of a few fixed strings. Rejected: every other deep link (a shared `/backlog/3383` link) still lands on `/`, and each new deep-link route needs a Worker edit. It buys no safety over (a), because (a) is already off-origin-proof.
 - **(d) Copy `PRODUCT_ROUTES` into the Worker with prefix matching.** Rejected: two copies that drift, and the copy inherits the `/wip/../x` hole unless it is fixed twice.
 
-**The SPA's traversal hole is a separate build item: `x8i1gsp`** (size 1, ready for an agent). Its executable Done-when is that `isProductRoute('/wip/../x')` is false. Today `/wip/../x` passes `isProductRoute` because it starts with `/wip/` (`plateau:src/main.ts:276-278`). Under the default, the gate does not depend on it. The SPA should still be fixed either way.
+**The SPA's traversal hole is a separate build item: `3827`** (size 1, ready for an agent). Its executable Done-when is that `isProductRoute('/wip/../x')` is false. Today `/wip/../x` passes `isProductRoute` because it starts with `/wip/` (`plateau:src/main.ts:276-278`). Under the default, the gate does not depend on it. The SPA should still be fixed either way.
 
 *Skeptic:* REFUTED the first default ((b), the shared `isProductRoute` module), for the reasons listed under (b). The default flipped to (a), the skeptic's proposed amendment, taken as written.
 *Screen:* flagged(impl) on the first framing, which asked "one shared module or a Worker-local list". Nobody outside the code sees that. It was re-framed as the behaviour question above: which deep links survive, and whether a request path is written back. Where the check lives is now a consequence of that answer, with its security reason stated.
