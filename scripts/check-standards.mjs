@@ -20,7 +20,8 @@
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative, resolve, isAbsolute } from 'node:path';
+import { dirname, join, relative, resolve, isAbsolute, sep } from 'node:path';
+import { isLaneLocus, resolveReal } from './guard-lane.mjs';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
 import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLocal } from './readiness/claimScope.mjs';
@@ -583,7 +584,7 @@ try {
       return Number.isFinite(epoch) ? epoch : null;
     } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)
   };
-  const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor });
+  const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) });
   for (const msg of stranded.errors) err(msg);
   for (const msg of stranded.warnings) warn(msg);
   // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.

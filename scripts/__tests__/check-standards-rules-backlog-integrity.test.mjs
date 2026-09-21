@@ -213,6 +213,16 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
   it('ignores non-backlog paths and non-.md files', () => {
     expect(strandedHashesOnMain(['scripts/xabcdef-thing.mjs', 'backlog/README', 'reports/xabcdef-r.md'])).toEqual({ errors: [], warnings: [] });
   });
+  it('inLane: a genuine strand is a WARNING naming the primary/drain remedy, never an error (a lane cannot repair it)', () => {
+    const { errors, warnings } = strandedHashesOnMain(['backlog/001-a.md', 'backlog/xbvktb4-stranded.md'], { inLane: true });
+    expect(errors).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/NON-NUMERIC leading id "xbvktb4"/);
+    expect(warnings[0]).toMatch(/PRIMARY checkout/);
+  });
+  it('inLane false (the default) keeps the hard error for a genuine strand', () => {
+    expect(strandedHashesOnMain(['backlog/xbvktb4-stranded.md'], { inLane: false }).errors).toHaveLength(1);
+  });
 
   // #2956 — the drain's own in-flight numbering window (merge commit pushed, JIT-numbering commit not yet
   // pushed, measured 7-73s trailing gap) must NOT hard-error; a genuine strand — same shape, just old — still
