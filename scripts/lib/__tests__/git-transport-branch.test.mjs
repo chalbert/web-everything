@@ -95,6 +95,22 @@ describe('what it pushes, and when it does not', () => {
     expect(added).toEqual(['ops/x/a.json', 'ops/x/b.json']);
   });
 
+  // #3779: starting a branch is opt-in. Every existing transport must still refuse a branch CI never created.
+  it('never asks whether the branch exists unless the caller opted into creating it', () => {
+    const s = stub();
+    stage(s);
+    expect(s.calls.some((c) => c.args?.[0] === 'ls-remote')).toBe(false);
+  });
+
+  it('with `createIfAbsent`, starts a missing branch as an orphan and pushes a full refname', () => {
+    const s = stub({ onRun: (args) => (args[0] === 'ls-remote' ? '' : undefined) });
+    expect(stage(s, { createIfAbsent: true })).toMatchObject({ pushed: true, created: true });
+    const verbs = s.calls.filter((c) => c.args).map((c) => c.args[0]);
+    expect(verbs).not.toContain('fetch');
+    expect(s.calls.find((c) => c.args?.[0] === 'read-tree').args).toEqual(['read-tree', '--empty']);
+    expect(s.calls.find((c) => c.args?.[0] === 'push').args).toContain('HEAD:refs/heads/ops/x');
+  });
+
   it('refuses a call with nothing to stage rather than pushing an empty commit', () => {
     const s = stub();
     expect(() => stage(s, { files: [] })).toThrow(/nothing to stage/);
