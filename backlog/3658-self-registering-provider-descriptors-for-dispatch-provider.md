@@ -254,8 +254,9 @@ were rewritten or removed as above; what remains is merit (expressiveness, visib
 
 **Fork-existence.** A forced invariant. (b) and (c) are **excluded**: a descriptor that declares its own
 fitness or trust would certify itself, against the ratified rule that trust is earned from trial data and
-promoted only by an explicit act (#3690;
-[#model-probation-graduation-criteria](../docs/agent/platform-decisions.md#model-probation-graduation-criteria)),
+promoted only by an explicit act (ratified statute:
+[#model-probation-graduation-criteria](../docs/agent/platform-decisions.md#model-probation-graduation-criteria),
+"promotion is always an explicit human decision grounded in accumulated data, never automatic"),
 and one that declares its cascade position would move the routing order out of the router, against #3717's
 fixed criteria.
 
