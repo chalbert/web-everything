@@ -4397,3 +4397,34 @@ What landed on `main` since the last note, and the operator's rulings of 2026-09
 - The handoff should be tracked on an `ops/*` branch rather than left as an untracked file.
 
 Owed work is on cards, not listed here: see the priority order above.
+
+## Session update (2026-09-21) — priority-sync built: a declared operation keeps the Priority order section in step with the cards (dry run by default), check-priority warns on unwritten why lines (code commit 83b45d0ce)
+
+Built on the prototype branch (no PR): code straight to `lane/mechanical-dispatcher`, cards stay on `main`. The operator asked for the maintained `## Priority order` section to be kept current by a mechanical operation, and to start on the suggested items.
+
+**What landed.**
+
+- `we:scripts/operations/priority-sync.mjs` (declaration and pure planner) and `we:scripts/operations/priority-sync-io.mjs` (reader and sink), registered in `we:scripts/operations/run.mjs`. Steps: `read` (compute), `plan` (compute, pure), `apply` (effect). `priority-sync`, run through `we:scripts/operations/run.mjs`, is a dry run that prints the plan as a diff; `--apply` rewrites the section in place; `--json` carries the same plan as data. It never commits, never pushes and never resolves a card. `--help` is derived from the declaration.
+- The planner drops the line of any card that is not live; adds every live-tree card with no line (band from the card's own fields, order by rule 3, `status: active` to the claimed list); renumbers the whole list; rewrites the `Updated:` line; puts `why: (unwritten)` on every line it adds; and flags, without changing anything, an open or active card that a merged PR or a commit on `origin/main` names ("landed but still open: resolve it"). A `pinned by operator` line is never moved or dropped; a delegation-section card is never moved out or given a new neighbour by the operation, and its `operator-added` marker stays.
+- `check-priority` now WARNS on every line that still carries `why: (unwritten)` and never fails on it; `--strict-why` makes it fail. `parsePriorityOrder` entries gained an `unwritten` field and the result a `warnings` list; existing behaviour is otherwise unchanged. The marker lives in `we:scripts/lib/priority-markers.mjs` so the declaration can share it and stay a leaf.
+- The ranker fields (tier, leverage, human gate) come from the real loader `we:src/_data/backlog.js`, run in a child process over a temporary directory holding the merged cards (it reads its directory once, from `WE_BACKLOG_DIR`). Nothing is recomputed by hand. If the child cannot run, the read says `ranker: 'fields'` and leverage reads as 0.
+
+**Used for real, once.** On the branch tip against a freshly fetched `origin/main` (`18798aec3`), the plan is 0 added, 0 dropped, 0 moved, 20 flagged: the section is already in sync (138 open cards under #3383, 144 lines), so `--apply` had nothing to write, no section commit was made, and `check-priority --ref=origin/main --strict` passes. To see it work on the real cards, six lines of a scratch copy were deleted and one stale line added: the plan re-added #3486, #3468, #3739, #3777 and #3783 (the last one to the claimed list) and dropped the stale line; the copy was then restored, and nothing of that reached a commit.
+
+**Flagged, for a person to judge (20).** A merged PR or a `#<n>`-led commit on `origin/main` names each of these open cards: #3369, #3398, #3441, #3443, #3447, #3467, #3474, #3562, #3566, #3594, #3605, #3621, #3627, #3639, #3643, #3671, #3690, #3740, #3751, #3767. Many are partial landings (a slice, a follow-up, a graduation), so this is a list to read, not a list to resolve. Nothing was resolved.
+
+**The smallest readings taken where the card and the section's rules were silent (change any of these by a ruling):**
+
+- Existing lines are never re-ranked (their order encodes a tier, P0 to P3 or OFF, that only a person can judge). A new line goes AFTER the last line of its band, ordered among the other new lines by rule 3. The exceptions are dependencies: a new card that blocks an existing line goes just before it, and a new card never sits in an earlier band than its blocker.
+- Band from fields: a decision, or a card the loader marks human-gated, is C; an epic, or a card whose body carries `DESIGN TO SETTLE` or an `Open fork` heading, is B; the rest is A. There is no field for "uncleared design-first" or for "touches the operator's deployed files", so those stay a person's call. Measured against the 124 existing lines in bands A to C, the fields agree on 102; the 22 differences are the judgment the operation leaves alone (containers, intake stories, operator policy).
+- A line whose card changed state is re-filed with its prose kept: ordered to claimed when the card is now `active`, claimed to its band when it is `open` again, either to the off-path list when the card is outside the live tree and the line is not `operator-added`. A line in the delegation section or a pinned line is flagged, never re-filed. An out-of-tree card with no line is ignored (the universe is unbounded).
+- A line whose id is no card but is some card's `bornAs` (a JIT-numbered hash id) is renamed in place.
+- "Landed" means a merge commit whose branch name carries the card number, or a non-merge subject that STARTS with `#<card>`; commits starting `drain:`, `backlog:` or `prepare:`, and `lane/prepare-*` merges, do not count (numbering, filing and preparing leave a card open on purpose).
+- The sink writes with `writeFileSync`, like `append-note`, not through the guarded card writer, and refuses (as not applied) when the section on disk changed since the plan.
+- The `Updated:` line is replaced in place (date, `priority-sync`, counts, and the standing "Derived by the rules below" tail kept); the previous update's history is in git.
+
+**How it should join the mechanical loop later (NOT built):** run `priority-sync` (dry run) after every landing on `main` and after every catch-up merge; `--apply` and push in the same push when the plan has only drops, renames and re-filings; hand a plan with adds to a worker whose one job is the unwritten `why:` sentences and the placement. A conveyor pass could then treat "plan not empty" as a to-do, and `check-priority --strict-why` as the gate that ends it.
+
+**The unwritten-why list:** none yet, because nothing was added on the real run.
+
+Tests: `scripts/operations/__tests__` plus `scripts/__tests__` plus `scripts/lib/__tests__` were 318 files and 11,180 passing (12 skipped) before, 320 files and 11,249 passing after (69 new: 65 table tests and 4 real-repository tests). The one existing test edited is the module map in `we:scripts/operations/__tests__/http-adapter.test.mjs`, which requires a deliberate one-line entry for every new operation. `check:standards` 0 errors, 1,816 warnings (unchanged from baseline).
