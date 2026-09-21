@@ -67,6 +67,10 @@ The runner is stopped, not machine-readably paused: `we:.conveyor/dispatch-pause
 - **Where the marker and the opt-in are read matters.** `dispatch-pause` resolves `.conveyor/` from the SCRIPT'S own location and fails OPEN when the file is missing. A hook firing inside a lane clone would read that clone's empty `.conveyor/` and see "not paused". Read both from one canonical checkout: the live runner's (`we:scripts/conveyor/resolve-runner-checkout.mjs`), else the primary checkout. Never the caller's own clone. This is the per-checkout-sidecar problem that decision #3722 rules on properly.
 - Item-pull (starting new work) is the riskiest half. Give it its own opt-in, separate from review and fix dispatch of work already in flight.
 
+## Finding (2026-09-21): the load gate here is superseded by the emergency floor in the tracked config
+
+Capacity step 1 above adds a load gate (`os.loadavg()[0]` over the core count means budget 0). The operator's rule v4 (2026-09-21) replaces reactive load pacing with a declared-cost weighted budget plus an EMERGENCY FLOOR only (instantaneous CPU busy above 95 for two readings in a row, or available RAM under 8 GB). The statute in `we:docs/agent/platform-decisions.md` also says "No load-average gate". Before building this card's gate, read the budget, the weights and the floor from the tracked `dispatch-budget` config of card x5fkzgl instead of computing a second capacity number here; card x9ls7aa only REPORTS a floor breach, so enforcing the floor at dispatch time is this operation's job.
+
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/land-advance.test.mjs` passes; its cases fail before this item lands:

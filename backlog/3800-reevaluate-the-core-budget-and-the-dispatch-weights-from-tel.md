@@ -29,6 +29,10 @@ Reevaluate the core budget and the dispatch weights from telemetry, and ratify a
 4. **Evidence and authority.** Use the `reservation-inputs` rollup as the evidence; changes go through #3737's record-and-rollback rules and the operator applies them.
 5. **One home for the numbers**, so the statute, the lane ceiling and the orchestrator's rule cannot disagree.
 
+## Finding (2026-09-21): three cards now cover the process this one names
+
+Operator, 2026-09-21: "keep adjusting as we learn. Suggest adjustment regularly, create a process that survives handoff" and "Do we need heavy worker and light worker count?". This card stays the first reevaluation and the per-hardware formula. Design point 5 (one home for the numbers) is built by card x5fkzgl (the tracked `dispatch-budget` config, each change a reviewed commit with a dated reason). The regular suggestion is card x9ls7aa (a read-only `capacity-review` operation returning raise, hold or lower on the runner tick, shown in `/wip`). The heavy-versus-light count question is the open decision x3pvhaf (default: one weighted budget plus the heavy pool). The "which clean window counts" point (design point 1) needs the annotation reader that card x9ls7aa lists as missing.
+
 ## Done when
 
 1. **Observable, dated** — at the first checkpoint (2026-09-22, about 13:06 EDT) and again after 5 to 7 clean days, `node we:scripts/operations/host-sampler.mjs lane-load --json` and its `reservation-inputs` rollup are recorded on this card with the clean-window bounds (excluding the eleventy and photo-dedupe period). The evidence is the rollup, not a reading taken at one moment.
