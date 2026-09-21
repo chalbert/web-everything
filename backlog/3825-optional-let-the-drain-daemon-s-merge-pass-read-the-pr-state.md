@@ -1,8 +1,9 @@
 ---
+bornAs: x34tegz
 kind: story
 size: 5
 status: open
-blockedBy: ["x909kb7"]
+blockedBy: ["3824"]
 scope: ["we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-21"
 tags: []

@@ -60,9 +60,9 @@ The attack fails; the ruling is not amended. A fresh sub-agent skeptic pass on t
 **Codified as:** a one-off ruling. The build work carries it: it is not a standing rule for we:docs/agent/platform-decisions.md.
 
 **Spin-offs filed:**
-- `xclicg5` — build the read-only PR state feed (size 5).
-- `x909kb7` — move `pr-watch` and `wait-green` onto the feed (size 3), `blockedBy` `xclicg5` and #3670.
-- `x34tegz` — optional: let the drain daemon's merge pass read the feed (size 5), `blockedBy` `x909kb7`, filed unqueued behind a field-coverage check.
+- `3823` — build the read-only PR state feed (size 5).
+- `3824` — move `pr-watch` and `wait-green` onto the feed (size 3), `blockedBy` `3823` and #3670.
+- `3825` — optional: let the drain daemon's merge pass read the feed (size 5), `blockedBy` `3824`, filed unqueued behind a field-coverage check.
 - #3670 amended in place: the `we:scripts/merge-ai-prs.mjs` call sites, the per-minute points budget and the call-volume recording are now in its scope (size 5 to 8).
 
 ## Supported by default (not decisions)
@@ -82,4 +82,4 @@ The attack fails; the ruling is not amended. A fresh sub-agent skeptic pass on t
 ## Done when
 
 1. **Observable** — Fork 1 is ruled, and #3670 carries the per-minute budget, the `merge-ai-prs` sites and the call-volume recording.
-2. **Follow-on** — on ratifying (b), the state-feed story (WE) and the `pr-watch` / `wait-green` adoption story are filed, the latter `blockedBy` #3670 where they share files, plus an optional story for the drain daemon's merge pass to read the feed. Their ordering is a backlog call, not part of this ruling. **Done 2026-09-21:** filed as `xclicg5`, `x909kb7` and `x34tegz`, and #3670 amended (see *Ruling*).
+2. **Follow-on** — on ratifying (b), the state-feed story (WE) and the `pr-watch` / `wait-green` adoption story are filed, the latter `blockedBy` #3670 where they share files, plus an optional story for the drain daemon's merge pass to read the feed. Their ordering is a backlog call, not part of this ruling. **Done 2026-09-21:** filed as `3823`, `3824` and `3825`, and #3670 amended (see *Ruling*).

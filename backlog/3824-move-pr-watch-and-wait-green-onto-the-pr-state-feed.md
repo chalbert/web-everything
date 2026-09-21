@@ -1,8 +1,9 @@
 ---
+bornAs: x909kb7
 kind: story
 size: 3
 status: open
-blockedBy: ["xclicg5", "3670"]
+blockedBy: ["3823", "3670"]
 scope: ["we:scripts/conveyor/pr-watch.mjs", "we:scripts/wait-green.mjs"]
 dateOpened: "2026-09-21"
 tags: []
