@@ -72,18 +72,18 @@ Built on the prototype branch (`0f1d0fb8f`, contained in `origin/lane/mechanical
 
 #3801 was ruled on 2026-09-21. Forks 1 and 2 keep the build; Forks 3, 4 and 5 and the *Settled by statute* points change it. This card is now the umbrella for that work and carries no size (its children do). The five forks listed above are ruled; read #3801's `## Ruling`, not the list above, for what holds. Every child is built on the prototype branch `lane/mechanical-dispatcher` (commit straight to it, no PR, one tracker note per push) and reaches `main` through #3443. The children, in the ruling's order (`blockedBy` edges on the cards):
 
-- **Fork 5 and the statute's override points** — the `deliveryAgent:` marker with a required `deliveryAgentReason:` is the one override; both process-wide variables retired; `routed` never overwritten; an override gets its own triple's supervision (`x07d2yq`).
-- **Statute: `executed` is the vendor actually spawned**, and the record says when a Claude converge editor also edited the lane (`xxabopb`, `blockedBy` `x07d2yq`).
-- **Fork 2** — no path produces `other` or `self-fix`; the two G1 defaults removed (`x004wgy`).
-- **Fork 3, core** — the subject axis (work task type, role kind, review lens); the authoring roles stay on Claude and record their tier (`xm3i597`).
-- **Fork 3, review** — `review-dispatch` becomes a router caller (`x2vf12v`, `blockedBy` `xm3i597`).
-- **Fork 4, policy** — `unsizedCardPolicy`, `defaultSize` and `fixSizeSource` as one setting (`xlq2jh7`).
-- **Fork 4, fix path** — `fix` and `ci-heal` take the `fixSizeSource` chain (`xbz4sn2`, `blockedBy` `xlq2jh7`).
-- **Fork 4, field** — a task's estimate field, distinct from points (`x00f4mm`).
-- **Fork 4, prepare** — prepare authors the size or estimate (`xi8dngi`, `blockedBy` `x00f4mm`).
-- **Fork 4, admission** — an unsized card is held and sent to prepare unless `default-size` is set (`xxvinxv`, `blockedBy` `xlq2jh7`, `x00f4mm`, `xi8dngi`).
+- **Fork 5 and the statute's override points** — the `deliveryAgent:` marker with a required `deliveryAgentReason:` is the one override; both process-wide variables retired; `routed` never overwritten; an override gets its own triple's supervision (`3840`).
+- **Statute: `executed` is the vendor actually spawned**, and the record says when a Claude converge editor also edited the lane (`3848`, `blockedBy` `3840`).
+- **Fork 2** — no path produces `other` or `self-fix`; the two G1 defaults removed (`3838`).
+- **Fork 3, core** — the subject axis (work task type, role kind, review lens); the authoring roles stay on Claude and record their tier (`3845`).
+- **Fork 3, review** — `review-dispatch` becomes a router caller (`3846`, `blockedBy` `3845`).
+- **Fork 4, policy** — `unsizedCardPolicy`, `defaultSize` and `fixSizeSource` as one setting (`3843`).
+- **Fork 4, fix path** — `fix` and `ci-heal` take the `fixSizeSource` chain (`3844`, `blockedBy` `3843`).
+- **Fork 4, field** — a task's estimate field, distinct from points (`3839`).
+- **Fork 4, prepare** — prepare authors the size or estimate (`3842`, `blockedBy` `3839`).
+- **Fork 4, admission** — an unsized card is held and sent to prepare unless `default-size` is set (`3849`, `blockedBy` `3843`, `3839`, `3842`).
 
-**Order with the sibling cards (#3801).** #3784 (turning supervision enforcement on) is `blockedBy` the statute and Fork 2, 3 and 5 children above and by the decision card on what satisfies a `full` route for a single-worker lane (`xyn92zm`). #3798 (the router header) stays independent.
+**Order with the sibling cards (#3801).** #3784 (turning supervision enforcement on) is `blockedBy` the statute and Fork 2, 3 and 5 children above and by the decision card on what satisfies a `full` route for a single-worker lane (`3850`). #3798 (the router header) stays independent.
 
 **Not sliced here:** the subject key and positive control for `prepare`, `prepare-decision` and `investigate` (#3801 follow-up 4); until they are prepared those three stay on Claude. Follow-ups 1 to 3 of #3801 (the planner build, the configurable graduation policy, a stamp-required gate) are not this card's.
 

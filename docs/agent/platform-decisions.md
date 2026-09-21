@@ -3010,8 +3010,8 @@ points, ruled here:
    resolution the agent cannot make on merit, including one that changes a test's assertions, comes back as a
    decision card. This amends #3556 (merge only; staging ref only; promotion by the pass). Two open
    decisions may add to this point, and do not change it until ruled: what the pass checks about test and
-   gate files before it promotes (`x86eyvl`), and how the agent is kept from pushing to the shared branch
-   (`xm96s8j`).
+   gate files before it promotes (`3841`), and how the agent is kept from pushing to the shared branch
+   (`3847`).
 3. **Alert.** The operator is alerted only when they must act (the agent's one attempt failed, or the tests
    on the resolved staging ref are red). Nothing is raised while the agent works. It is a line in the every-turn turn digest plus a row in the wip
    report, and it fails visible: an unreadable record is "status unknown", never "all clear". The record is

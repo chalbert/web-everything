@@ -1,9 +1,10 @@
 ---
+bornAs: x2vf12v
 kind: story
 size: 3
 parent: "3717"
 status: open
-blockedBy: ["xm3i597"]
+blockedBy: ["3845"]
 scope: ["we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/dispatch-task-type.mjs"]
 dateOpened: "2026-09-21"
 tags: []

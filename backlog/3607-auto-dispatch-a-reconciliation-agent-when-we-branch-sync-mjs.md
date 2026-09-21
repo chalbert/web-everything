@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3556"
 status: open
-blockedBy: ["x86eyvl", "xm96s8j"]
+blockedBy: ["3841", "3847"]
 scope: ["we:scripts/conveyor/branch-sync.mjs", "we:skills-src/conveyor/branch-sync-fix-brief.md", "we:scripts/conveyor/__tests__/branch-sync.test.mjs"]
 dateOpened: "2026-09-07"
 tags: []
@@ -81,7 +81,7 @@ Ratified by we:backlog/3556-auto-dispatch-a-reconciliation-agent-when-we-branch-
    - lock held → no push, no alert; retried on the next pass;
    - `autoSync: false` (or `WE_POC_BRANCH_SYNC=0`) → no push, no alert.
 
-   The promotion is carried out by the loop in #3797, whose Done-when 1 lists the same cases; one test may serve both. Two security questions about this gate are open decisions, not rules yet: what the pass checks about test and gate files before it promotes (`x86eyvl`), and how the agent is kept from pushing to the shared branch (`xm96s8j`).
+   The promotion is carried out by the loop in #3797, whose Done-when 1 lists the same cases; one test may serve both. Two security questions about this gate are open decisions, not rules yet: what the pass checks about test and gate files before it promotes (`3841`), and how the agent is kept from pushing to the shared branch (`3847`).
 
 *Done-when 2, 4, 6 and 8 were edited in place on 2026-09-21 to match decision #3804 (it amends #3556's brief: merge only, staging ref only, promotion by the pass, the cap keyed on the conflicting file set).*
 
