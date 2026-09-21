@@ -1,0 +1,171 @@
+2026-09-20 10:57 EDT
+- load 8.21 on 12 cores · workers 3 of 3
+- runner: not live
+  - Attention items are NOT auto-handled
+- 3 PRs open from before today
+  - oldest plateau-app#148 (12d 19h)
+- operator queue: none (checked 10:57)
+
+## Attention
+- **web-everything#2349**
+  - CI failed (ci:failed label) and no
+    fixer is running
+  - since 10:22 (35m)
+  - remedy: no handler
+- **web-everything#2344**
+  - merge conflict (DIRTY) and no fix is
+    running
+  - since 10:12 (44m)
+  - remedy: auto (runner down)
+- **web-everything#2170**
+  - changes requested (review:changes) and
+    no fixer is running
+  - since 09-19 17:59 (16h 58m)
+  - remedy: auto (runner down)
+- **web-everything#2344**
+  - changes requested (review:changes) and
+    no fixer is running
+  - since 10:12 (44m)
+  - remedy: auto (runner down)
+- **plateau-app#148**
+  - a review session is running but the PR
+    has no reviewing tag
+  - since 08:34 (2h 23m)
+  - remedy: auto (runner down)
+- **web-everything#2344**
+  - tag says fixing but no fix session is
+    running
+  - since 10:12 (44m)
+  - remedy: auto (runner down)
+- **review-148 (PR #148)**
+  - no activity for 2h 10m and no result
+    file
+  - since 08:47 (2h 10m)
+  - remedy: no handler
+- **fix-2347 (PR #2347)**
+  - no activity for 46m and no result file
+  - since 10:11 (46m)
+  - remedy: no handler
+- **10 sessions**
+  - finished but the process is still
+    running: proto-note, unstick-2072,
+    fold-2220, fix-2347, wip-no-done,
+    graduation-1 +4 more
+  - since 09-19 21:34 (13h 22m)
+  - remedy: run: session-reaper
+- **3 PRs**
+  - opened before today and still open;
+    oldest is plateau-app#148
+  - since 09-07 15:26 (12d 19h)
+  - remedy: no handler
+- **conveyor runner**
+  - No singleton runner lease exists; no
+    runner is registered. How long it has
+    been down: unknown.
+  - since unknown
+  - remedy: start: /conveyor
+
+43 dead session records (no process):
+nothing to act on.
+
+## Work items
+- **plateau-app#148** blocked-on:review
+  stalled
+  - WE #2717: FT webcases registry — gr…
+  - since 09-07 15:29 (12d 19h)
+  - ↳ review-148 stalled
+    - runs on claude-sonnet-5
+    - since 08:34 (2h 23m)
+- **web-everything#2108** fixing
+  - fix(guard-bash): sed/tee/perl backl…
+  - since 10:30 (26m)
+  - next: fixer pushes a fix
+  - ↳ fix-2108 idle
+    - runs on claude-sonnet-5; delegated
+      to Codex gpt-6-astra (cli 0.155.1)
+    - since 10:16 (41m)
+- **web-everything#2170**
+  blocked-on:changes requested
+  - docs: point stuck-session cleanup a…
+  - since 09-19 17:59 (16h 58m)
+  - next: fixer deferred: no free worker
+    slot (3 of 3 workers running, 12 free
+    lanes)
+- **web-everything#2344** blocked-on:merge
+  conflict
+  - graduate #3443: reconcile-fix-dispa…
+  - since 10:12 (44m)
+  - next: fixer deferred: no free worker
+    slot (3 of 3 workers running, 12 free
+    lanes)
+- **web-everything#2349** blocked-on:drain
+  (stuck: ci:failed; no live fixer)
+  - graduate #3443: clear-stuck-session…
+  - since 10:22 (35m)
+  - next: escalation packet for triage
+- **session shared-tick-1** working
+  - runs on claude-sonnet-5; delegated to
+    Codex gpt-6-astra (cli 0.155.1)
+  - since 09:30 (1h 26m)
+- **session fix-2347** stalled
+  - runs on claude-sonnet-5
+  - since 10:03 (54m)
+  - next: PR #2347 is not open
+- **session wip-report** working
+  - runs on claude-sonnet-5
+  - since 10:48 (9m)
+
+8 open decisions in the docket (built
+2026-09-14 14:32 EDT) — docket may be
+stale
+
+## Done since 2026-09-20 07:57 EDT (last 3 h; no earlier /wip stamp)
+- 08:03 web-everything#2343 landed
+  memory: prototype findings go in the
+  epic tracker, not full items
+- 08:06 web-everything#2341 landed
+  File decision x2len1z: where backlog ids
+  are assigned so a hash id cannot reach
+  main
+- 08:18 plateau-app#153 landed
+  WE #3140: safe-edit sandbox verify-gate
+  wired over declared rules
+- 08:42 web-everything#2345 landed
+  backlog: file x4e6oux — drain deferral
+  names the blocking impl PR instead of
+  couple-carrier:unknown
+- 09:16 plateau-app#155 landed
+  converge fixes — bound headShaChurnCount
+  by passes examined, not SHAs collected
+- 09:16 web-everything#2346 landed
+  memory: drain old PR queue before new
+  work; search for an operation before
+  asking the operator
+- 09:19 plateau-app#149 landed
+  WE #2759: provenance-tier spine —
+  three-tier enum, agent-asserted base
+  tier, proof bundle + gate min-tier knob
+- 09:19 plateau-app#150 landed
+  Capture dated design snapshots per
+  feature-tracker epic (WE #2688)
+- 09:19 web-everything#2348 landed
+  operator-notify: notify the operator
+  when a review:human PR is ready
+- 10:18 web-everything#2347 landed
+  Make the conveyor's checks multi-repo,
+  and guard against single-repo checks
+- 10:37 web-everything#2350 landed
+  backlog: file decision — may
+  family/benchmark data act as a capped
+  prior toward supervision graduation?
+
+## Next
+- we#2170: fix deferred — no free worker
+  slot (3 of 3 workers running, 12 free
+  lanes)
+- we#2344: fix deferred — no free worker
+  slot (3 of 3 workers running, 12 free
+  lanes)
+
+## Needs you
+Needs you: none

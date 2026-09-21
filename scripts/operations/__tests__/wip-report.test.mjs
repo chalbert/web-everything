@@ -14,7 +14,9 @@ const RAW = JSON.parse(readFileSync(resolve('scripts/operations/__fixtures__/wip
 const clone = () => structuredClone(RAW);
 /** Collapse every run of whitespace: a bullet that wrapped onto continuation lines reads as one line again. */
 const flat = (t) => t.replace(/\s+/g, ' ');
-const run = (raw, opts) => { const report = buildReport(composeInput(raw), opts); return { report, text: renderReport(report) }; };
+// The compact tables are the default; every assertion below pins the stacked-BULLETS layout (`--bullets`, the fallback), so it asks for it.
+const BULLETS = { style: 'bullets' };
+const run = (raw, opts) => { const report = buildReport(composeInput(raw), opts); return { report, text: renderReport(report, BULLETS) }; };
 const STATE_RE = /^(reviewing|waiting-for-reviewer|fixing|waiting-CI|waiting-merge|needs-operator|landed|unknown|blocked-on:.+)$/;
 
 /** The operator saw `review-148` blocked for two hours; the capture caught its transcript freshly touched, so age it. */
@@ -281,7 +283,7 @@ describe('Needs you (operator-queue lines, verbatim)', () => {
   });
 });
 
-describe('one layout for a phone and a desktop terminal (stacked bullets, no tables)', () => {
+describe('the stacked-bullets fallback (`--bullets`): one layout for a phone and a desktop terminal, no tables', () => {
   const remedy = (r) => (r === 'no-handler' ? 'no handler' : r);
   /** `#2344` and `#2349` under review, each with a live review session nested under its PR (a second tonight shape). */
   function withReviewingChildren() {
@@ -342,7 +344,7 @@ describe('one layout for a phone and a desktop terminal (stacked bullets, no tab
     });
     it('(d) is byte-identical for identical input', () => {
       expect(run(make()).text).toBe(text);
-      expect(renderReport(report)).toBe(text);
+      expect(renderReport(report, BULLETS)).toBe(text);
     });
   });
 
@@ -458,7 +460,7 @@ describe('a remedy reads auto only when a live executor can act (runner liveness
   });
   it('the down runner row carries how long it has been down from the last tick or heartbeat, else says unknown', () => {
     const now = Date.parse('2026-09-20T15:00:00Z');
-    const rowFor = (runner) => { const raw = base(runner); const report = buildReport(composeInput(raw)); return { row: rowsFor(report, 'runner-not-live')[0], text: renderReport(report) }; };
+    const rowFor = (runner) => { const raw = base(runner); const report = buildReport(composeInput(raw)); return { row: rowsFor(report, 'runner-not-live')[0], text: renderReport(report, BULLETS) }; };
     const tick = rowFor({ ...RUNNERS.down, lastTick: { at: '2026-09-19T23:00:00Z' } });
     expect(tick.row.since).toBe(Date.parse('2026-09-19T23:00:00Z'));
     expect(tick.row.what).toContain('Down since its last tick or heartbeat.');
@@ -478,10 +480,10 @@ describe('a remedy reads auto only when a live executor can act (runner liveness
   });
   it('the rendered text shows the runner-aware remedy, never a bare `auto` while the runner is down', () => {
     const raw = withPr(RUNNERS.down, PR_RULES['conflict-no-fix-in-flight']);
-    const text = flat(renderReport(buildReport(composeInput(raw))));
+    const text = flat(renderReport(buildReport(composeInput(raw)), BULLETS));
     expect(text).toContain('remedy: auto (runner down)');
     expect(text).not.toMatch(/remedy: auto(?! \()/);
-    const live = flat(renderReport(buildReport(composeInput(withPr(RUNNERS.live, PR_RULES['conflict-no-fix-in-flight'])))));
+    const live = flat(renderReport(buildReport(composeInput(withPr(RUNNERS.live, PR_RULES['conflict-no-fix-in-flight']))), BULLETS));
     expect(live).toMatch(/remedy: auto(?! \()/);
   });
   it('keeps the remedy vocabulary closed: every value is pinned, phone-short, and no row ever leaves it', () => {
@@ -507,7 +509,7 @@ describe('a remedy reads auto only when a live executor can act (runner liveness
   it('is deterministic: identical input gives byte-identical output for each runner state', () => {
     for (const runner of Object.values(RUNNERS)) {
       const raw = withStalledReview(); raw.runner = runner;
-      expect(renderReport(buildReport(composeInput(structuredClone(raw))))).toBe(renderReport(buildReport(composeInput(structuredClone(raw)))));
+      expect(renderReport(buildReport(composeInput(structuredClone(raw))), BULLETS)).toBe(renderReport(buildReport(composeInput(structuredClone(raw))), BULLETS));
     }
   });
 });

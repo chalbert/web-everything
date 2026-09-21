@@ -4,9 +4,12 @@
  * processes. No fs, clock, env, network or `gh`: every fact is injected, so identical input gives byte-identical
  * output. The IO shell that gathers the facts is `wip-report-io.mjs`; the CLI is `wip-report-cli.mjs`.
  *
- * Shape (in this order): a short header (the time, then one bullet each for load + workers, runner, old PRs and the operator
+ * Shape (in this order): a short header (the time, then a line each for load + workers, runner, old PRs and the operator
  * queue), `## Attention`, `## Work items`, `## Done since <last-wip>`, `## Next`,
- * `## Needs you`. Nothing here is composed by a model. Rows are per WORK ITEM (a PR, or an item that live sessions work
+ * `## Needs you`. Two render styles of the same data: compact tables (the default, for a phone held vertically) and the
+ * stacked-bullets fallback (`--bullets`). The Attention findings are also classified (`wip-report-queue.mjs`, pure: queued for a
+ * live handler / a gap that needs a backlog item / overdue); the compact style shows that, and nothing here files anything.
+ * Nothing here is composed by a model. Rows are per WORK ITEM (a PR, or an item that live sessions work
  * on), and the live sessions nest under it. Decisions live in the docket, never here: the report only says how many are open
  * (a count line, flagged when the docket file is over 24 h old) and never presents a decision as operator work.
  *
@@ -29,6 +32,7 @@ import { classifyAgents } from './wip-agents.mjs';
 import { planLandAdvance } from './land-advance.mjs';
 import { dispatchGrammar } from '../conveyor/session-verdicts.mjs';
 import { parseTaskSessionName } from '../lib/dispatch-contracts.mjs';
+import { buildQueue, gapsLine, overdueLine } from './wip-report-queue.mjs';
 
 /** The CLOSED state vocabulary of a PR row. `blocked-on:<what>` carries a plain-words reason after the colon. */
 export const PR_STATES = Object.freeze([
@@ -111,6 +115,10 @@ const clip = (s, n = 36) => (String(s).length > n ? `${String(s).slice(0, n - 1)
 const oneLine = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ');
 const repoName = (slug) => String(slug ?? '').split('/').at(-1);
 const prRef = (p) => `${repoName(p.slug ?? p.repo)}#${p.number}`;
+/** Short ids of the swept repos, for the phone-short PR reference; `we` is the id land-advance already uses. An unknown repo keeps its name. */
+export const REPO_SHORT = Object.freeze({ 'web-everything': 'we', 'plateau-app': 'pa', frontierui: 'fui' });
+/** The phone-short PR reference: `we#2349`, `pa#148`. */
+const prShort = (p) => { const name = p.repo ?? repoName(p.slug); return `${REPO_SHORT[name] ?? name}#${p.number}`; };
 const labelsOf = (p) => (p.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 
 // ── sessions ────────────────────────────────────────────────────────────────────────────────────
@@ -257,7 +265,7 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
     const mine = bound(p), planRow = planRows.get(`${p.repo}#${p.number}`) ?? null;
     for (const x of mine) boundSet.add(x.session.sessionId);
     const state = derivePrState(p, { sessions: mine, planRow });
-    return { type: 'pr', ref: prRef(p), repo: p.repo, number: p.number, title: p.title, state, since: toMs(p.updatedAt), createdAt: toMs(p.createdAt),
+    return { type: 'pr', ref: prRef(p), short: prShort(p), repo: p.repo, number: p.number, title: p.title, state, since: toMs(p.updatedAt), createdAt: toMs(p.createdAt),
       next: nextFor(state, planRow, deferred, capacity), planAction: planRow?.owedAction ?? null, proposed: proposed.has(`${p.repo}#${p.number}`),
       sessions: mine.map((x) => ({ name: x.session.name, id: x.session.id, state: sessionWords(x.session), agent: agentWords(x.session), since: startedMs(x.session, now) })) };
   });
@@ -282,36 +290,38 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
   const attention = [];
   const runnerLive = input.runner?.state === 'alive-and-idle', runnerKnown = input.runner && input.runner.state !== 'unknown';
   const runnerStatus = input.runner ? (runnerLive ? 'live' : runnerKnown ? 'not live' : 'unknown') : 'unknown';
-  const add = (rule, item, what, sinceMs, remedy) => attention.push({ rule, item, what, since: finite(sinceMs) ? sinceMs : null, remedy: resolveRemedy(rule, remedy ?? ATTENTION_RULES[rule].remedy, runnerStatus) });
+  // `target` names the ONE thing a finding is about (a PR, a session) and is what the queue's dedup key is built from; an aggregate
+  // finding (a count of sessions, the runner) has none. `ref` is its phone-short spelling, for the compact table.
+  const add = (rule, item, what, sinceMs, remedy, { target = '', ref = '' } = {}) => attention.push({ rule, item, target, ref, what, since: finite(sinceMs) ? sinceMs : null, remedy: resolveRemedy(rule, remedy ?? ATTENTION_RULES[rule].remedy, runnerStatus) });
   for (const p of prs) {
-    const ls = labelsOf(p), mine = bound(p), ref = prRef(p), planRow = planRows.get(`${p.repo}#${p.number}`);
+    const ls = labelsOf(p), mine = bound(p), ref = prRef(p), planRow = planRows.get(`${p.repo}#${p.number}`), who = { target: prShort(p), ref: prShort(p) };
     const fixer = mine.some((x) => ['fix', 'ci-heal'].includes(x.binding.role)), reviewer = mine.some((x) => x.binding.role === 'review');
     const updated = toMs(p.updatedAt);
     // Dispatch handlers exist only when the owed table says one can act (a refusal is "no handler").
     const dispatchRemedy = planRow?.owedAction?.startsWith('dispatch-') && planRow.dispatchable ? 'auto' : 'no-handler';
-    if (ls.includes('ci:failed') && !fixer) add('ci-failed-no-fixer', ref, 'CI failed (ci:failed label) and no fixer is running', updated, dispatchRemedy);
-    if ((p.mergeStateStatus === 'DIRTY' || p.mergeable === 'CONFLICTING') && !fixer) add('conflict-no-fix-in-flight', ref, `merge conflict (${p.mergeStateStatus ?? 'CONFLICTING'}) and no fix is running`, updated, dispatchRemedy);
-    if (ls.includes('review:changes') && !fixer) add('changes-requested-no-fixer', ref, 'changes requested (review:changes) and no fixer is running', updated, dispatchRemedy);
-    if (ls.includes('review:pending') && !reviewer) add('review-pending-no-reviewer', ref, 'waiting for a review (review:pending) and no reviewer is running', toMs(p.createdAt), dispatchRemedy);
+    if (ls.includes('ci:failed') && !fixer) add('ci-failed-no-fixer', ref, 'CI failed (ci:failed label) and no fixer is running', updated, dispatchRemedy, who);
+    if ((p.mergeStateStatus === 'DIRTY' || p.mergeable === 'CONFLICTING') && !fixer) add('conflict-no-fix-in-flight', ref, `merge conflict (${p.mergeStateStatus ?? 'CONFLICTING'}) and no fix is running`, updated, dispatchRemedy, who);
+    if (ls.includes('review:changes') && !fixer) add('changes-requested-no-fixer', ref, 'changes requested (review:changes) and no fixer is running', updated, dispatchRemedy, who);
+    if (ls.includes('review:pending') && !reviewer) add('review-pending-no-reviewer', ref, 'waiting for a review (review:pending) and no reviewer is running', toMs(p.createdAt), dispatchRemedy, who);
     const tagFixing = ls.some((l) => ['review-status:fixing', 'review-status:fix-stalled'].includes(l)), tagReviewing = ls.some((l) => ['review-status:reviewing', 'review-status:review-stalled'].includes(l));
     const stale = [], startOf = (role) => Math.min(...mine.filter((x) => (role === 'fix' ? ['fix', 'ci-heal'].includes(x.binding.role) : x.binding.role === role)).map((x) => startedMs(x.session, now) ?? Infinity));
     if (tagFixing && !fixer) stale.push(['tag says fixing but no fix session is running', updated]);
     if (tagReviewing && !reviewer) stale.push(['tag says reviewing but no review session is running', updated]);
     if (fixer && !tagFixing) stale.push(['a fix session is running but the PR has no fixing tag', startOf('fix')]);
     if (reviewer && !tagReviewing) stale.push(['a review session is running but the PR has no reviewing tag', startOf('review')]);
-    if (stale.length) add('stale-tag', ref, stale.map((e) => e[0]).join('; '), stale[0][1]);
+    if (stale.length) add('stale-tag', ref, stale.map((e) => e[0]).join('; '), stale[0][1], undefined, who);
   }
   for (const x of live.filter((x) => isStuck(x.session))) {
     const s = x.session, remedy = s.action === 'escalate' ? 'auto' : 'no-handler';
-    add('session-stalled', `${s.name}${x.binding?.kind === 'pr' ? ` (PR #${x.binding.number})` : ''}`, s.verdict === 'waiting-permission' ? `blocked on a permission prompt: ${s.waitingFor ?? 'no detail'}` : `no activity for ${age(s.transcriptAgeMs)} and no result file`, quietSinceMs(s, now), remedy);
+    add('session-stalled', `${s.name}${x.binding?.kind === 'pr' ? ` (PR #${x.binding.number})` : ''}`, s.verdict === 'waiting-permission' ? `blocked on a permission prompt: ${s.waitingFor ?? 'no detail'}` : `no activity for ${age(s.transcriptAgeMs)} and no result file`, quietSinceMs(s, now), remedy, { target: s.name, ref: s.name });
   }
-  if (unreaped.length) add('session-finished-unreaped', `${unreaped.length} session${unreaped.length === 1 ? '' : 's'}`, `finished but the process is still running: ${unreaped.slice(0, 6).map((s) => s.name).join(', ')}${unreaped.length > 6 ? ` +${unreaped.length - 6} more` : ''}`, Math.min(...unreaped.map((s) => startedMs(s, now) ?? Infinity)));
+  if (unreaped.length) add('session-finished-unreaped', `${unreaped.length} session${unreaped.length === 1 ? '' : 's'}`, `finished but the process is still running: ${unreaped.slice(0, 6).map((s) => s.name).join(', ')}${unreaped.length > 6 ? ` +${unreaped.length - 6} more` : ''}`, Math.min(...unreaped.map((s) => startedMs(s, now) ?? Infinity)), undefined, { ref: `x${unreaped.length}` });
   const pre = prs.filter((p) => toMs(p.createdAt) != null && dayKey(toMs(p.createdAt)) < dayKey(now)).sort((a, b) => toMs(a.createdAt) - toMs(b.createdAt));
-  if (pre.length) add('pre-today-pr-open', `${pre.length} PR${pre.length === 1 ? '' : 's'}`, `opened before today and still open; oldest is ${prRef(pre[0])}`, toMs(pre[0].createdAt));
+  if (pre.length) add('pre-today-pr-open', `${pre.length} PR${pre.length === 1 ? '' : 's'}`, `opened before today and still open; oldest is ${prRef(pre[0])}`, toMs(pre[0].createdAt), undefined, { ref: `x${pre.length}` });
   // ONE worker count for the header, over-capacity and the Next lines: land-advance's own (`capacityFor`, which counts only
   // sessions whose verdict holds a slot). Without a plan, fall back to the live dispatch-named sessions counted here.
   const workers = capacity ? capacity.live : live.filter((x) => x.binding).length;
-  if (capacity && workers > capacity.cap) add('over-capacity', `${workers} workers`, `${workers} workers are running and the cap is ${capacity.cap}`, null);
+  if (capacity && workers > capacity.cap) add('over-capacity', `${workers} workers`, `${workers} workers are running and the cap is ${capacity.cap}`, null, undefined, { ref: `x${workers}` });
   if (runnerKnown && !runnerLive) {
     // How long it has been down: the newest sign of life the runner report carries (last tick or heartbeat). No source -> unknown.
     const lastAlive = Math.max(...[input.runner.lastTick?.at, input.runner.runner?.heartbeatAt].map(toMs).filter(finite), -Infinity);
@@ -323,8 +333,8 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
   // Done since the last /wip (or the fallback window).
   const lastMs = toMs(input.lastWip), sinceMs = lastMs ?? now - DONE_FALLBACK_MS;
   const done = [
-    ...(input.merged ?? []).filter((m) => toMs(m.mergedAt) > sinceMs && toMs(m.mergedAt) <= now).map((m) => ({ at: toMs(m.mergedAt), text: `${prRef(m)} landed — ${m.title}`, state: 'landed' })),
-    ...(input.completions ?? []).filter((c) => c.status === 'done' && toMs(c.updatedAt) > sinceMs && toMs(c.updatedAt) <= now).map((c) => ({ at: toMs(c.updatedAt), text: `${c.session} finished${c.outcome ? ` — ${String(c.outcome).split('\n')[0]}` : ''}`, state: 'completed' })),
+    ...(input.merged ?? []).filter((m) => toMs(m.mergedAt) > sinceMs && toMs(m.mergedAt) <= now).map((m) => ({ at: toMs(m.mergedAt), text: `${prRef(m)} landed — ${m.title}`, state: 'landed', ref: prShort(m), detail: m.title })),
+    ...(input.completions ?? []).filter((c) => c.status === 'done' && toMs(c.updatedAt) > sinceMs && toMs(c.updatedAt) <= now).map((c) => ({ at: toMs(c.updatedAt), text: `${c.session} finished${c.outcome ? ` — ${String(c.outcome).split('\n')[0]}` : ''}`, state: 'completed', ref: c.session, detail: c.outcome ? String(c.outcome).split('\n')[0] : '' })),
   ].sort((a, b) => a.at - b.at || a.text.localeCompare(b.text));
 
   // Next: only what land-advance owes and has proposed or deferred.
@@ -343,16 +353,20 @@ export function buildReport(input, { bindSession = defaultBindSession } = {}) {
     preToday: { count: pre.length, oldest: oldest ? { ref: prRef(oldest), ageMs: now - toMs(oldest.createdAt) } : null, known: input.prs != null },
     operatorQueue: needsYou == null ? 'unknown' : needsYou.length ? `${needsYou.length}` : 'none', checkedAt: clock(now),
   };
-  return { generatedAt: new Date(now).toISOString(), header, attention, attentionCounts: { dead: deadCount, unreaped: unreaped.length },
+  // Pure classification of the findings (queued / gap / overdue). It only computes and shows: nothing here files an item.
+  const queue = buildQueue(attention, { now });
+  return { generatedAt: new Date(now).toISOString(), header, attention, queue, attentionCounts: { dead: deadCount, unreaped: unreaped.length },
     workItems: [...items, ...itemRows, ...otherRows], docketAvailable: input.docket != null,
     docket: input.docket == null ? null : { total: docketItems.length, generatedAt: toMs(input.docket.generatedAt), stale: !(now - toMs(input.docket.generatedAt) <= DOCKET_STALE_MS) },
     done: { since: sinceMs, fallback: lastMs == null, rows: done, merged: input.merged != null }, next, capacity, needsYou, errors: input.errors ?? [] };
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────────────────────────
-// ONE output for a phone and a desktop terminal: plain markdown, no tables, no HTML, no flag, no width detection. Every
-// fact is a short bullet, and a bullet longer than WRAP_AT columns wraps onto continuation lines indented under its text
-// (markdown reads those as the same paragraph). `## Needs you` is the operator queue's own text and is never wrapped.
+// TWO styles of ONE report (same `buildReport` data, no width detection): the COMPACT TABLES default ({@link renderCompact}, below the
+// bullets), designed for a phone held vertically, and the STACKED BULLETS fallback ({@link renderBullets}, selected by `--bullets` or
+// `WIP_REPORT_STYLE=bullets`), kept byte-for-byte as it was. Bullets style: plain markdown, no tables, no HTML. Every fact is a short
+// bullet, and a bullet longer than WRAP_AT columns wraps onto continuation lines indented under its text (markdown reads those as
+// the same paragraph). `## Needs you` is the operator queue's own text and is never wrapped.
 const remedyWords = (r) => (r === 'no-handler' ? 'no handler' : r);
 /** Wrap width in columns; a single word longer than this stays whole on its own line. */
 export const WRAP_AT = 42;
@@ -372,7 +386,8 @@ const bullet = (text, depth = 0) => wrap(text, `${'  '.repeat(depth)}- `);
 /** A landed/finished row is `<head> — <detail>`: the head stays on the bullet, the detail goes on the next indented line. */
 const splitDone = (text) => { const i = text.indexOf(' — '); return i < 0 ? [text, ''] : [text.slice(0, i), text.slice(i + 3)]; };
 
-export function renderReport(r) {
+/** The stacked-bullets fallback style (`--bullets`). Unchanged since the commit that introduced it. */
+export function renderBullets(r) {
   const { header: h } = r, now = Date.parse(r.generatedAt);
   const out = [];
   out.push(h.time);
@@ -443,4 +458,133 @@ export function renderReport(r) {
   else for (const line of r.needsYou) out.push(`- ${line}`);
   for (const e of r.errors) out.push('', ...wrap(`Source error: ${e.source}: ${e.message}`));
   return out.join('\n');
+}
+
+// ── compact tables (the default) ────────────────────────────────────────────────────────────────
+// Made for a phone held vertically, where stacked bullets waste lines. Work items, Done and Attention are markdown tables of
+// at most 3 short columns and at most ROW_MAX characters a row (unpadded cells, so the row is only its own text). Nothing is
+// blank inside a table or between a table and its heading, and sections are separated by ONE blank line. A short `- ` note
+// goes under a table only when a row needs detail (a `- ` bullet, because a plain line right under a table row would be read
+// as one more row). Attention shows only the findings still waiting for a person: `report.queue` (wip-report-queue.mjs) moves a
+// finding with a live handler to a `queued` Work-items row, and turns a finding with no handler into one `N gaps queued` line.
+/** Widest table row, in characters. */
+export const ROW_MAX = 35;
+/** Widest title cell, in characters (a row that is already wide cuts its title further). */
+export const TITLE_MAX = 18;
+const cellText = (s) => oneLine(s).replace(/\|/g, '/').trim();
+const cut = (s, n) => (n <= 0 ? '' : s.length > n ? (n === 1 ? '…' : `${s.slice(0, n - 1).trimEnd()}…`) : s);
+const rowLen = (c) => 1 + c.length + c.reduce((n, s) => n + s.length, 0);
+/**
+ * One table row of unpadded cells, never longer than {@link ROW_MAX}. The `flex` cell (a title) is cut first, to at most
+ * {@link TITLE_MAX} and to whatever room the other cells leave; only if that is not enough is the longest other cell cut too.
+ */
+export function tableRow(cells, flex = cells.length - 1) {
+  const c = cells.map(cellText);
+  const others = c.reduce((n, s, i) => n + (i === flex ? 0 : s.length), 0);
+  c[flex] = cut(c[flex], Math.min(TITLE_MAX, Math.max(0, ROW_MAX - 1 - c.length - others)));
+  while (rowLen(c) > ROW_MAX) { const i = c.reduce((m, s, j) => (s.length > c[m].length ? j : m), 0); c[i] = cut(c[i], c[i].length - 1); }
+  return `|${c.join('|')}|`;
+}
+/** A markdown table: the header row, the separator row, then the rows. */
+export const mdTable = (headers, rows, flex) => [tableRow(headers, flex), `|${headers.map(() => '-').join('|')}|`, ...rows.map((r) => tableRow(r, flex))];
+/** `3m`, `11h`, `2d`; `?` when unknown. */
+const ageShort = (ms) => (!finite(ms) ? '?' : ms >= 86400000 ? `${Math.floor(ms / 86400000)}d` : ms >= 3600000 ? `${Math.floor(ms / 3600000)}h` : `${Math.floor(ms / 60000)}m`);
+
+const STATE_SHORT = Object.freeze({ reviewing: 'review', 'waiting-for-reviewer': 'wait-rev', fixing: 'fixing', 'waiting-CI': 'wait-CI', 'waiting-merge': 'to-merge',
+  'needs-operator': 'you', landed: 'landed', unknown: 'unknown', working: 'working', idle: 'idle', stalled: 'stalled', queued: 'queued' });
+/** A state at most 8 characters wide, plus the plain words that would be lost (`detail`, for a note), or `null`. */
+export function shortState(state) {
+  const s = oneLine(state);
+  if (STATE_SHORT[s]) return { short: STATE_SHORT[s], detail: null };
+  const m = /^blocked-on:(.+)$/.exec(s);
+  if (m) return { short: 'blocked', detail: `blocked on ${m[1]}` };
+  if (/^blocked on /.test(s)) return { short: 'blocked', detail: s };
+  if (/^waiting on /.test(s)) return { short: 'waiting', detail: s };
+  return { short: cut(s, 8), detail: s.length > 8 ? s : null };
+}
+const REMEDY_SHORT = Object.freeze({ auto: 'auto', 'auto (runner down)': 'auto:down', 'auto (runner unknown)': 'auto:?', 'run: session-reaper': 'run reaper', 'start: /conveyor': '/conveyor', 'no-handler': 'none' });
+const ATTENTION_LABEL = Object.freeze({ 'ci-failed-no-fixer': 'CI failed', 'conflict-no-fix-in-flight': 'conflict', 'changes-requested-no-fixer': 'changes', 'review-pending-no-reviewer': 'no review',
+  'stale-tag': 'stale tag', 'session-stalled': 'stuck', 'session-finished-unreaped': 'unreaped', 'pre-today-pr-open': 'old PRs', 'over-capacity': 'over cap', 'runner-not-live': 'runner down' });
+/** Attention rules whose row label does not say enough alone: they get a note with the finding's own words. */
+const NOTE_RULES = ['session-stalled', 'session-finished-unreaped', 'pre-today-pr-open', 'over-capacity'];
+const findingLabel = (a) => [ATTENTION_LABEL[a.rule] ?? a.rule, a.ref].filter(Boolean).join(' ');
+/** A `- ` note under a table, wrapped like a bullet. */
+const note = (text) => wrap(text, '- ', '  ');
+
+function compactHeader(h) {
+  const out = [h.time];
+  out.push(`${h.load == null ? 'load unknown' : `load ${h.load.toFixed(2)} on ${h.cores ?? '?'} cores`} · ${h.workers ? `workers ${h.workers.live} of ${h.workers.cap}` : 'workers unknown'}`);
+  out.push(h.runner === 'live' ? 'runner: live' : h.runner === 'not live' ? 'runner not live: nothing auto-handled' : 'runner: unknown (source unavailable)');
+  out.push(...wrap(!h.preToday.known ? 'old PRs: unknown' : !h.preToday.count ? 'old PRs: none' : `old PRs: ${h.preToday.count}, oldest ${h.preToday.oldest.ref} (${age(h.preToday.oldest.ageMs)})`, '', '  '));
+  out.push(h.operatorQueue === 'none' ? `queue: none (checked ${h.checkedAt})` : h.operatorQueue === 'unknown' ? 'queue: unknown (could not read it)' : `queue: ${h.operatorQueue} waiting on you`);
+  return out;
+}
+
+/** The compact-tables style (the default). Pure. */
+export function renderCompact(r) {
+  const now = Date.parse(r.generatedAt), q = r.queue, sections = [compactHeader(r.header)];
+
+  const attn = ['## Attention'], gaps = gapsLine(q);
+  if (q.shown.length) {
+    attn.push(...mdTable(['finding', 'since', 'remedy'], q.shown.map((a) => [findingLabel(a), a.since == null ? '?' : ageShort(Math.max(0, now - a.since)), REMEDY_SHORT[a.remedy] ?? a.remedy]), 0));
+    for (const a of q.shown.filter((x) => NOTE_RULES.includes(x.rule))) attn.push(...note(`${findingLabel(a)}: ${oneLine(a.what)}`));
+  }
+  if (gaps) attn.push(...note(gaps));
+  for (const o of q.overdue) attn.push(...note(overdueLine(o)));
+  if (r.attentionCounts.dead) attn.push(...note(`${r.attentionCounts.dead} dead session record${r.attentionCounts.dead === 1 ? '' : 's'} (no process): nothing to act on.`));
+  if (!q.shown.length && !gaps && !q.overdue.length) attn.splice(1, 0, 'Nothing needs attention.');
+  sections.push(attn);
+
+  const work = ['## Work items'], rows = [], notes = [];
+  const detailNote = (id, st, next) => {
+    const parts = [st.detail, next && next !== '—' && /not open|several repos/.test(next) ? `next: ${oneLine(next)}` : null].filter(Boolean);
+    if (parts.length) notes.push(...note(`${id}: ${parts.join('; ')}`));
+  };
+  for (const w of r.workItems) {
+    const st = shortState(w.state);
+    if (w.type === 'pr') rows.push([w.short ?? w.ref, w.title, st.short]);
+    else if (w.type === 'item') rows.push([String(w.ref).replace(/^item /, ''), '', st.short]);
+    else rows.push(['sess', w.sessions[0].name, st.short]);
+    detailNote(w.type === 'pr' ? (w.short ?? w.ref) : w.type === 'item' ? String(w.ref).replace(/^item /, '') : w.sessions[0].name, st, w.next);
+    if (w.type !== 'session') {
+      for (const s of w.sessions) {
+        const ss = shortState(s.state);
+        rows.push(['↳', s.name, ss.short]);
+        const agent = /delegated|unknown/.test(s.agent) ? s.agent : null;
+        if (ss.detail || agent) notes.push(...note(`${oneLine(s.name)}: ${[ss.detail, agent && oneLine(agent)].filter(Boolean).join('; ')}`));
+      }
+    }
+  }
+  for (const h of q.handledRows) rows.push([h.target ? h.ref : findingLabel({ rule: h.rules[0], ref: h.ref }), h.words, 'queued']);
+  if (rows.length) work.push(...mdTable(['item', 'title', 'state'], rows, 1), ...notes);
+  else work.push('No open PRs or live sessions.');
+  work.push(...note(!r.docketAvailable ? 'Open decisions: not listed (no decision docket data on this machine).'
+    : `${r.docket.total} open decision${r.docket.total === 1 ? '' : 's'} in the docket (built ${Number.isFinite(r.docket.generatedAt) ? stamp(r.docket.generatedAt) : 'unknown date'})${r.docket.stale ? ' — docket may be stale' : ''}`));
+  sections.push(work);
+
+  const done = [r.done.fallback ? `## Done since ${stamp(r.done.since)} (last 3 h; no earlier /wip stamp)` : `## Done since ${stamp(r.done.since)}`];
+  if (r.done.rows.length) done.push(...mdTable(['time', 'item', 'title'], r.done.rows.map((d) => [clock(d.at), d.ref ?? splitDone(oneLine(d.text))[0], d.detail ?? splitDone(oneLine(d.text))[1]]), 2));
+  else done.push(r.done.merged ? 'Nothing landed or finished in this window.' : 'No finished-session records in this window.');
+  if (!r.done.merged) done.push(...note('Merged PRs: unknown (could not list them).'));
+  sections.push(done);
+
+  const next = ['## Next'];
+  if (r.next == null) next.push('Unknown (land-advance could not run).');
+  else if (!r.next.length) next.push('Nothing owed.');
+  else for (const n of r.next) next.push(...bullet(`${n.text}${n.reason === 'capacity' ? ` (${capacityWords(r.capacity)})` : ''}`));
+  sections.push(next);
+
+  // Needs you: the operator queue's own lines, verbatim and unwrapped, exactly as in the bullets style.
+  const needs = ['## Needs you'];
+  if (r.needsYou == null) needs.push('Needs you: unknown (operator queue could not be read)');
+  else if (!r.needsYou.length) needs.push('Needs you: none');
+  else for (const line of r.needsYou) needs.push(`- ${line}`);
+  sections.push(needs);
+  if (r.errors.length) sections.push(r.errors.flatMap((e) => note(`Source error: ${e.source}: ${e.message}`)));
+  return sections.map((s) => s.join('\n')).join('\n\n');
+}
+
+/** Render the structured report: compact tables by default, `{ style: 'bullets' }` for the stacked-bullets fallback. */
+export function renderReport(r, { style = 'compact' } = {}) {
+  return style === 'bullets' ? renderBullets(r) : renderCompact(r);
 }
