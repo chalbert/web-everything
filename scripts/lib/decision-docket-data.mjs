@@ -29,6 +29,57 @@
 /** One rendered fork option's disposition. */
 export const OPTION_KINDS = Object.freeze({ DEFAULT: 'default', REJECTED: 'rejected', OPEN: 'open' });
 
+/** What an open PR on a decision IS, read off its title prefix ("ratify #N: …", "prepare #N: …"). */
+export const PR_KINDS = Object.freeze({ RATIFICATION: 'ratification', PREPARATION: 'preparation', OTHER: 'other' });
+
+/**
+ * The kind of an open PR for decision `itemNum`, from its title's leading verb. `ratify #N` → ratification,
+ * `prepare #N` → preparation; anything else — including a `ratify #M` that names a DIFFERENT item, or a PR that
+ * merely mentions the decision — is `other`. PURE.
+ * @param {string} title
+ * @param {string|number} itemNum
+ * @returns {'ratification'|'preparation'|'other'}
+ */
+export function classifyPrKind(title, itemNum) {
+  const m = /^\s*(ratif(?:y|ies)|prepar(?:e|es))\s+#0*(\d+)\b/i.exec(String(title ?? ''));
+  if (!m || Number(m[2]) !== Number(itemNum)) return PR_KINDS.OTHER;
+  return /^ratif/i.test(m[1]) ? PR_KINDS.RATIFICATION : PR_KINDS.PREPARATION;
+}
+
+const PR_KIND_ORDER = { [PR_KINDS.RATIFICATION]: 0, [PR_KINDS.PREPARATION]: 1, [PR_KINDS.OTHER]: 2 };
+
+/**
+ * The ONE open PR a decision row is listed under: a ratification beats a preparation beats any other PR (the
+ * row exists to say what the operator can act on), then the newest number. Returns `null` for no PRs. PURE.
+ * @param {string|number} itemNum
+ * @param {Array<{number?:number|null, title?:string, url?:string|null, repo?:string}>} prs - every open PR that lands the item.
+ * @returns {{ number: number|null, state: 'open', kind: string, title: string, url: string|null, repo: string|null }|null}
+ */
+export function pickPr(itemNum, prs) {
+  const rows = (prs || []).map((p) => ({
+    number: p.number ?? null,
+    state: 'open',
+    kind: classifyPrKind(p.title, itemNum),
+    title: String(p.title ?? ''),
+    url: p.url ?? null,
+    repo: p.repo ?? null,
+  }));
+  rows.sort((a, b) => PR_KIND_ORDER[a.kind] - PR_KIND_ORDER[b.kind] || (b.number ?? 0) - (a.number ?? 0));
+  return rows[0] ?? null;
+}
+
+/**
+ * The docket's headline counts. `open` and `prepared` count EVERY listed decision, in-review ones included (a
+ * decision with an open PR is still an open decision, and its `preparedDate` is still set); `inReview` is how
+ * many of those have an open PR. PURE.
+ * @param {Array<{prepared?:boolean, pr?:object|null}>} items
+ * @returns {{ open: number, prepared: number, inReview: number }}
+ */
+export function computeCounts(items) {
+  const list = items || [];
+  return { open: list.length, prepared: list.filter((i) => i.prepared).length, inReview: list.filter((i) => i.pr).length };
+}
+
 /** A fenced-code opener/closer line: any indent, then 3+ backticks or tildes (the CommonMark fence). */
 const FENCE_LINE_RE = /^\s*(`{3,}|~{3,})/;
 
@@ -526,7 +577,8 @@ export function ageDays(dateOpened, now = new Date()) {
  * item's raw file text (frontmatter + body). PURE. Never throws — a body that fails to parse still yields a
  * record (with `prepared: true` but `forks: []` and `parseOk: false`), so the caller can render an honest
  * "parse incomplete" card rather than silently dropping the item or fabricating its content.
- * @param {object} rankedEntry - one entry from `suggest-next --tier=B --json`'s `suggested` array.
+ * @param {object} rankedEntry - one entry from `check:readiness --select --json`'s `selection.tierB` (or its
+ *   `inReview` list, which adds `prs` — every open PR landing the item — and `blockedBy`).
  * @param {string|null} fileText - the full raw markdown file (frontmatter + body), or null if unavailable.
  * @param {Date} [now]
  * @returns {object}
@@ -541,6 +593,10 @@ export function buildDecisionRecord(rankedEntry, fileText, now = new Date()) {
     directUnblocks: rankedEntry.directUnblocks ?? 0,
     transitiveUnblocks: rankedEntry.transitiveUnblocks ?? 0,
     unblocksToReady: rankedEntry.unblocksToReady ?? 0,
+    // Set only for a decision with an OPEN pull request (the docket's "In review" section): the PR it is listed
+    // under, and any still-open blockers (a blocked decision with a PR is listed too, saying what blocks it).
+    pr: pickPr(rankedEntry.num, rankedEntry.prs),
+    blockedBy: (rankedEntry.blockedBy ?? []).map(String),
   };
 
   if (!fileText) {

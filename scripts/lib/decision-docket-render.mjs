@@ -225,14 +225,15 @@ function renderCard(item) {
     ? ''
     : `<p><strong>Parse incomplete</strong> — ${renderWarning((item.warnings || []).join(' ') || 'this item\'s forks did not match the documented prepared-fork shape.')} Ratify from <code>backlog/${escapeHtml(item.num)}-*.md</code> directly until this is fixed.</p>`;
   // Every card here IS a prepared item with full fork detail by construction (only `prepared` items reach
-  // `renderCard` at all — see renderDocketHtml below), so `data-status`/`data-detail` are fixed; only the age
-  // bucket varies per item. These mirror the summary table's own filter attributes so the SAME toolbar filters
+  // `renderCard` at all — see renderDocketHtml below), so `data-detail` is fixed; `data-status` is `review` for a
+  // decision with an open PR, else `ready`; the age bucket varies per item. These mirror the summary table's own filter attributes so the SAME toolbar filters
   // both the ranking table and this full-detail section together.
+  const review = item.pr ? ` · ${escapeHtml(prLabel(item.pr))} in review` : '';
   return `
-    <div class="dcard" id="${anchorId(item)}" data-status="ready" data-detail="full" data-age="${ageClass(item.ageInDays)}">
+    <div class="dcard" id="${anchorId(item)}" data-status="${item.pr ? 'review' : 'ready'}" data-detail="full" data-age="${ageClass(item.ageInDays)}">
       <div class="hd">
         <span class="num">#${escapeHtml(item.num)}</span><span class="nm">${mdInline(item.title)}</span>
-        <span class="meta">prepared ${escapeHtml(item.preparedDate || '—')} · unblocks ${item.directUnblocks} · waiting ${item.ageInDays}d</span>
+        <span class="meta">prepared ${escapeHtml(item.preparedDate || '—')} · unblocks ${item.directUnblocks} · waiting ${item.ageInDays}d${review}</span>
       </div>
       <div class="bd">
         ${digestHtml}
@@ -263,17 +264,88 @@ function renderTableRow(item) {
       </tr>`;
 }
 
+/** A PR link only ever points at http(s): the url comes from `gh`, but the data file is plain JSON on disk. */
+function safeHref(url) {
+  return typeof url === 'string' && /^https:\/\//i.test(url) ? url : null;
+}
+
+/** "PR #2376" for a web-everything PR, "frontierui PR #12" for a sibling repo's (the number alone is ambiguous). */
+function prLabel(pr) {
+  const repoName = pr.repo && !/(^|\/)web-everything$/.test(pr.repo) ? `${pr.repo.split('/').pop()} ` : '';
+  return pr.number == null ? `${repoName}open PR` : `${repoName}PR #${pr.number}`;
+}
+
+const PR_KIND_LABEL = { ratification: 'ratification', preparation: 'preparation', other: 'other PR' };
+const PR_KIND_ORDER = { ratification: 0, preparation: 1, other: 2 };
+// One line each — what the open PR means for the decision, in plain words. Derived from `pr.kind` alone, so the
+// same data always renders the same sentence (no free text from the PR body reaches the page).
+const PR_STATE_LINE = {
+  ratification: 'Ratification proposed; merging the PR rules this decision.',
+  preparation: 'Preparation in review; its forks land when the PR merges.',
+  other: 'An open PR touches this decision.',
+};
+
+function renderReviewRow(item) {
+  const cls = ageClass(item.ageInDays);
+  const pr = item.pr;
+  const pill = item.prepared
+    ? '<span class="pill prepd">prepared</span>'
+    : '<span class="pill warnp">needs prep</span>';
+  const agePct = Math.min(100, Math.round((item.ageInDays / 90) * 100));
+  const href = safeHref(pr.url);
+  const label = escapeHtml(prLabel(pr));
+  const link = href ? `<a href="${escapeHtml(href)}" title="${escapeHtml(pr.title)}">${label}</a>` : label;
+  const blocked = (item.blockedBy || []).length ? ` Blocked by ${item.blockedBy.map((n) => `#${escapeHtml(n)}`).join(', ')}.` : '';
+  const kind = PR_KIND_LABEL[pr.kind] ?? PR_KIND_LABEL.other;
+  // A prepared in-review decision keeps its full `.dcard` in the prepared section (the docket's hard rule: every
+  // prepared item it lists shows its fork breakdown), so its title jumps there; an un-prepared one has no card.
+  const titleHtml = item.prepared
+    ? `<a href="#${anchorId(item)}">${mdInline(item.title)}</a>`
+    : mdInline(item.title);
+  return `      <tr class="${cls}" data-status="review" data-detail="table" data-age="${cls}">
+        <td class="n mono">#${escapeHtml(item.num)}</td>
+        <td class="ti">${titleHtml} ${pill}</td>
+        <td class="mono">${link}</td>
+        <td><span class="pill batchp">${escapeHtml(kind)}</span> ${escapeHtml(PR_STATE_LINE[pr.kind] ?? PR_STATE_LINE.other)}${blocked}</td>
+        <td class="n mono">${item.directUnblocks}</td>
+        <td class="agec"><span class="bar"><i style="width:${agePct}%"></i></span><span class="mono age">${item.ageInDays}d</span></td>
+      </tr>`;
+}
+
+/** The "In review: a PR is open" section — listed first so a ratification awaiting review is the first thing seen. */
+function renderReviewSection(reviewItems) {
+  const rows = reviewItems.map(renderReviewRow).join('\n');
+  return `<section id="in-review">
+  <h2>Open decisions with a pull request</h2>
+  <h3>In review: a PR is open</h3>
+  <p>Each decision here already has an open pull request &mdash; a ratification or a preparation waiting on review. They are listed in this section rather than in the ranked tables below, so nothing is hidden while its PR is open. A decision that is also blocked by another item is listed here too, with what blocks it.</p>
+  <div class="tw"><table>
+    <thead><tr><th>ID</th><th class="ti">Decision</th><th>Pull request</th><th>State</th><th class="n">Unblocks</th><th>Waiting</th></tr></thead>
+    <tbody>
+${rows}
+    </tbody>
+  </table></div>
+</section>
+
+`;
+}
+
 /**
  * Render the full Decision Docket page from the clean data JSON and the real `template.html` content. PURE:
  * no fs, no clock reads unless `now` is supplied — the same inputs always produce the same output.
- * @param {{ items: object[], generatedAt?: string, generatedFromRef?: string, targetCount?: number }} data
+ * @param {{ items: object[], counts?: object, generatedAt?: string, generatedFromRef?: string, targetCount?: number }} data
  * @param {string} templateHtml - the raw content of `skills-src/decision-docket/template.html`.
  * @param {{ now?: Date }} [opts]
  * @returns {string}
  */
 export function renderDocketHtml(data, templateHtml, { now = new Date() } = {}) {
-  const items = Array.isArray(data.items) ? [...data.items] : [];
-  items.sort((a, b) => (b.leverageScore ?? 0) - (a.leverageScore ?? 0));
+  const all = Array.isArray(data.items) ? [...data.items] : [];
+  all.sort((a, b) => (b.leverageScore ?? 0) - (a.leverageScore ?? 0));
+  // A decision with an open PR is listed in its own "In review" section (ratifications first, then preparations,
+  // then any other PR; leverage order within a kind — `sort` is stable). Everything below is the rest of the docket.
+  const reviewItems = all.filter((i) => i.pr)
+    .sort((a, b) => (PR_KIND_ORDER[a.pr.kind] ?? 2) - (PR_KIND_ORDER[b.pr.kind] ?? 2));
+  const items = all.filter((i) => !i.pr);
 
   const prepared = items.filter((i) => i.prepared);
   const needsPrep = items.filter((i) => !i.prepared);
@@ -283,8 +355,20 @@ export function renderDocketHtml(data, templateHtml, { now = new Date() } = {}) 
   const kicker = `Session docket · web-everything · ${humanDate(now)}`;
 
   const rows = items.map(renderTableRow).join('\n');
-  const cards = prepared.map(renderCard).join('\n');
+  // Every PREPARED decision gets its card, in-review ones included (see renderReviewRow); ranked order.
+  const cards = all.filter((i) => i.prepared).map(renderCard).join('\n');
   const upstreamRows = needsPrep.map(renderTableRow).join('\n');
+
+  const reviewSection = reviewItems.length ? renderReviewSection(reviewItems) : '';
+  const lede = reviewItems.length
+    ? `<b>${all.length} are open: ${reviewItems.length} ${reviewItems.length === 1 ? 'has' : 'have'} a pull request open, ${prepared.length} more ${prepared.length === 1 ? 'is' : 'are'} prepared and awaiting ratification, and ${needsPrep.length} need${needsPrep.length === 1 ? 's' : ''} preparation.</b>`
+    : `<b>${prepared.length} are prepared and awaiting ratification.</b>`;
+  const reviewStat = reviewItems.length
+    ? `\n    <div class="stat r"><div class="v">${reviewItems.length}</div><div class="k">In review &mdash; PR open</div></div>`
+    : '';
+  const reviewFilter = reviewItems.length
+    ? '\n    <button type="button" class="fbtn" data-group="status" data-value="review">In review</button>'
+    : '';
 
   const provenance = [
     `Generated ${now.toISOString()}`,
@@ -297,8 +381,8 @@ export function renderDocketHtml(data, templateHtml, { now = new Date() } = {}) 
 <header class="mast">
   <p class="kicker">${escapeHtml(kicker)}</p>
   <h1>Decision Docket</h1>
-  <p class="lede">Every open decision on the board, ranked by what it unblocks and how long it has waited. <b>${prepared.length} are prepared and awaiting ratification.</b></p>
-  <div class="stats">
+  <p class="lede">Every open decision on the board, ranked by what it unblocks and how long it has waited. ${lede}</p>
+  <div class="stats">${reviewStat}
     <div class="stat a"><div class="v">${prepared.length}</div><div class="k">Ready to ratify</div></div>
     <div class="stat"><div class="v">${needsPrep.length}</div><div class="k">Need preparation</div></div>
     <div class="stat s"><div class="v">${stale.length}</div><div class="k">Waiting 61+ days</div></div>
@@ -308,7 +392,7 @@ export function renderDocketHtml(data, templateHtml, { now = new Date() } = {}) 
 <div class="filters" role="group" aria-label="Filter the docket">
   <div class="filtergroup">
     <span class="flabel">Status</span>
-    <button type="button" class="fbtn active" data-group="status" data-value="all">All</button>
+    <button type="button" class="fbtn active" data-group="status" data-value="all">All</button>${reviewFilter}
     <button type="button" class="fbtn" data-group="status" data-value="ready">Ready to ratify</button>
     <button type="button" class="fbtn" data-group="status" data-value="prep">Needs prep</button>
   </div>
@@ -328,7 +412,7 @@ export function renderDocketHtml(data, templateHtml, { now = new Date() } = {}) 
   <span class="filtercount" id="docket-filter-count"></span>
 </div>
 
-<section>
+${reviewSection}<section>
   <h2>The docket — ranked by leverage</h2>
   <h3>Prepared and not-yet-prepared, one table for context and ranking ONLY</h3>
   <p><code>unblocks</code> is how many items name this decision as a blocker. <code>to&nbsp;ready</code> is how many of those would become immediately agent-ready once it is ruled. <strong>This table never substitutes for the fork breakdown below</strong>.</p>

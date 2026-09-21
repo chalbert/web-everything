@@ -116,27 +116,11 @@ export function computeReadiness(items) {
 }
 
 /**
- * The deterministic SELECTION view — the same ranking the `/backlog/` Prioritisation tab renders,
- * exposed as a CLI so the `next-backlog-item` / `batch-backlog-items` skills CONSUME it instead of
- * re-globbing `backlog/*.md` and re-running the readiness rubric in prose (the bug: the tab found 23
- * batchable items instantly, while a hand-derived `/batch` pass found 2 after minutes). It is a pure
- * projection of loader-derived fields (`tier` #249, `batchable`/`leverageScore` #254) — it RECOMPUTES
- * NOTHING. The skills run this once for the ranked shortlist, then apply the only judgment a field
- * can't decide: the body-fork pre-flight, on the shortlist only.
- *
- * Ordering (deterministic; same state → same order): leverage desc (unblock-the-chain-first) →
- * smaller first (task=0, then `size`) → NNN asc. The Tier-A list and its `batchable`
- * subset share this order; Tier B (decisions, one nod away) is ranked by leverage for decision-mode.
- *
- * @param {Array<object>} items  Loader items — each carries `tier`, `batchable`, `leverageScore`,
- *   `directUnblocks`, `transitiveUnblocks`, `unblocksToReady` (all `src/_data/backlog.js` derivations).
- * @returns {{
- *   counts: { open: number, tierA: number, tierB: number, tierC: number, batchable: number, inFlight: number },
- *   tierA: Array<object>, batchable: Array<object>, tierB: Array<object>, inFlight: Array<object>,
- * }}
+ * The ONE projection of a loader item into a selection row (every `computeSelection` list uses it; exported so a
+ * CLI-boundary consumer — the Decision Docket's in-review rows — projects a row the SAME way instead of copying it).
  */
-export function computeSelection(items) {
-  const project = (it) => ({
+export function projectSelectionItem(it) {
+  return {
     num: it.num, id: it.id, title: it.title, kind: it.kind,
     size: it.size, tier: it.tier, batchable: !!it.batchable,
     batchCost: it.batchCost,
@@ -165,7 +149,31 @@ export function computeSelection(items) {
     transitiveUnblocks: it.transitiveUnblocks ?? 0,
     unblocksToReady: it.unblocksToReady ?? 0,
     priority: it.priority ?? null,
-  });
+  };
+}
+
+/**
+ * The deterministic SELECTION view — the same ranking the `/backlog/` Prioritisation tab renders,
+ * exposed as a CLI so the `next-backlog-item` / `batch-backlog-items` skills CONSUME it instead of
+ * re-globbing `backlog/*.md` and re-running the readiness rubric in prose (the bug: the tab found 23
+ * batchable items instantly, while a hand-derived `/batch` pass found 2 after minutes). It is a pure
+ * projection of loader-derived fields (`tier` #249, `batchable`/`leverageScore` #254) — it RECOMPUTES
+ * NOTHING. The skills run this once for the ranked shortlist, then apply the only judgment a field
+ * can't decide: the body-fork pre-flight, on the shortlist only.
+ *
+ * Ordering (deterministic; same state → same order): leverage desc (unblock-the-chain-first) →
+ * smaller first (task=0, then `size`) → NNN asc. The Tier-A list and its `batchable`
+ * subset share this order; Tier B (decisions, one nod away) is ranked by leverage for decision-mode.
+ *
+ * @param {Array<object>} items  Loader items — each carries `tier`, `batchable`, `leverageScore`,
+ *   `directUnblocks`, `transitiveUnblocks`, `unblocksToReady` (all `src/_data/backlog.js` derivations).
+ * @returns {{
+ *   counts: { open: number, tierA: number, tierB: number, tierC: number, batchable: number, inFlight: number },
+ *   tierA: Array<object>, batchable: Array<object>, tierB: Array<object>, inFlight: Array<object>,
+ * }}
+ */
+export function computeSelection(items) {
+  const project = projectSelectionItem;
   // Smaller-first key: a `task` is bounded sub-work (0); a sized story uses its points; anything
   // unsized sorts last. Effort tiebreak only — leverage dominates. (The pre-#487 "issue before idea"
   // tiebreak is gone with the type axis; fix-vs-feature is now an optional `tags: [fix]`, not a rank input.)

@@ -4,7 +4,7 @@
  *   and unit-tested without a real `gh`.
  */
 import { describe, it, expect } from 'vitest';
-import { itemNumsFromPr, extractItemNums, openPrItemNums, deliveredItemNumsFromPr } from '../open-pr-items.mjs';
+import { itemNumsFromPr, extractItemNums, openPrItemNums, openPrsByItem, deliveredItemNumsFromPr } from '../open-pr-items.mjs';
 
 describe('itemNumsFromPr', () => {
   it('a batch lane ref → the item numbers, with the YYYY-MM-DD date prefix NOT read as items', () => {
@@ -323,5 +323,31 @@ describe('openPrItemNums (multi-repo)', () => {
   it('the WE read failing is unavailable, as before', () => {
     const run = (args) => (args.includes('chalbert/web-everything') ? { status: 1, stdout: '', stderr: 'boom' } : { status: 0, stdout: '[]' });
     expect(openPrItemNums({ run })).toEqual({ nums: [], unavailable: true, reason: 'boom' });
+  });
+});
+
+describe('openPrsByItem (the PR identity the Decision Docket lists under each item)', () => {
+  const prs = [
+    { number: 2376, headRefName: 'lane/ratify-3375', title: 'ratify #3375: proof', url: 'https://github.com/o/we/pull/2376' },
+    { number: 12, headRefName: 'lane/3375-impl', title: 'impl', url: 'https://github.com/o/fui/pull/12' },
+  ];
+
+  it('keeps every PR under each item it lands, with its repo, number, title and url — from ONE gh call per repo', () => {
+    const calls = [];
+    const run = (args) => { calls.push(args); const repo = args[args.indexOf('--repo') + 1]; return { status: 0, stdout: JSON.stringify(repo === 'o/we' ? [prs[0]] : [prs[1]]) }; };
+    const r = openPrsByItem({ run, repos: ['o/we', 'o/fui'] });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('headRefName,title,number,url');
+    expect(r.nums).toEqual(['3375']);
+    expect(r.byItem['3375']).toEqual([
+      { repo: 'o/we', number: 2376, title: 'ratify #3375: proof', url: 'https://github.com/o/we/pull/2376', headRefName: 'lane/ratify-3375' },
+      { repo: 'o/fui', number: 12, title: 'impl', url: 'https://github.com/o/fui/pull/12', headRefName: 'lane/3375-impl' },
+    ]);
+  });
+
+  it('fails soft like openPrItemNums: a failing primary repo is unavailable, and openPrItemNums drops byItem', () => {
+    expect(openPrsByItem({ run: () => ({ status: 1, stdout: '', stderr: 'no gh\n' }), repos: ['o/we'] })).toEqual({ nums: [], byItem: {}, unavailable: true, reason: 'no gh' });
+    const r = openPrItemNums({ run: () => ({ status: 0, stdout: JSON.stringify([prs[0]]) }), repos: ['o/we'] });
+    expect(r).toEqual({ nums: ['3375'] });
   });
 });
