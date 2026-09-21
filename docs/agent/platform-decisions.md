@@ -3521,6 +3521,29 @@ The migration trigger is the same one clause 3 above names (`#2703`); this home 
 Ratified against a two-round skeptic pass that landed both times — the fourth-home governance gap and the
 contention defect above are findings it forced, not afterthoughts.
 
+**Extended 2026-09-21 (Nicolas, operator; #3605, bornAs xn7yaiz)** — a rule for **any session-local sidecar that
+stores a backlog id**, from the cleared-for-build queue (`we:.conveyor/queue.json`) drifting when the drain
+JIT-renumbers a card from its birth hash to `#NNN` (#2288). A stored id is a *reference*, and a reference can
+outlive the spelling it was written under. Three clauses:
+
+1. **Translate at the reader, through `bornAs`.** The store module's pure core owns one translation step
+   (birth-hash → current number, using the `bornAs` proof-of-land #2392 on the backlog the reader already loads).
+   Every reader applies it once, right after reading the file, so a new reader gets it by reusing the loader
+   rather than re-deriving it. The stored spelling is never trusted to match a current number.
+2. **The drain never rewrites a conveyor sidecar.** Re-keying at JIT-number time reaches only a runner that is
+   live at that moment, misses entries already stale and hashes typed later, and adds a second unsynchronized
+   writer to a file whose store is last-write-wins by design. (Supporting context, not authority: the drain
+   already keeps its own writes inside its own clone, [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary).)
+3. **Only an operator write corrects the file, and the dispatch tick never does.** The operator CLIs apply the
+   translation before they add or remove and write the result back, so any operator action leaves correct ids
+   on disk and `remove <NNN>` removes an entry stored under its hash. A read-repair write from the tick is
+   rejected: an operator `add` landing between the tick's read and its write is silently lost, and under a
+   fixture `--backlog-dir` the tick would translate against the wrong corpus. Display shows both spellings
+   (`#NNN (cleared as <hash>)`) so an unfamiliar hash is never a mystery.
+
+This composes with, and does not amend, the two homes above: the sidecar stays session-local and unguarded; this
+rule only fixes how a stored id is *matched*. Build: [x238swe](/backlog/x238swe-translate-birth-hash-ids-to-current-numbers-when-the-conveyo/).
+
 ---
 
 ### Event-driven land is WAKE-only — one polling drain stays the sole writer; a webhook may wake it, never add a second writer; the merge-queue build defers behind measured saturation {#event-driven-land-is-wake-only}
