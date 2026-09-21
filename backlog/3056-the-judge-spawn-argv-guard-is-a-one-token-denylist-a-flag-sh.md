@@ -42,7 +42,7 @@ survives only as the `--bare` trap record underneath. `cli` / `cwd` / `env` are 
 
 **The rule** is codified as
 [we:docs/agent/platform-decisions.md#argv-builder-validates-caller-strings-at-its-own-seam](../docs/agent/platform-decisions.md#argv-builder-validates-caller-strings-at-its-own-seam).
-**The build** is the follow-on story `xg8nixa` (parent #3029): the two-field refusal, one shared predicate with the
+**The build** is the follow-on story `3789` (parent #3029): the two-field refusal, one shared predicate with the
 adapter's existing check, and the structural per-field test the skeptic's amendment asked for.
 
 ## Re-grounding at ratification (2026-09-21) — what moved since the prep
@@ -353,8 +353,8 @@ bound the whole card rests on (above, "The bound") — #3035 is the trigger to r
       unverified dependency on third-party behaviour. *(Moot: the ruling does not rely on greedy parsing.)*
 - [ ] A test asserts whatever is ruled, in the existing pure-seam style of
       [we:scripts/lib/__tests__/judge-spawn.test.mjs](../scripts/lib/__tests__/judge-spawn.test.mjs) — injected
-      `spawnFn`, no process started. *(Carried to the build story `xg8nixa`; a decision item ships no code.)*
-- [ ] The existing `--bare` refusal is unchanged; its two assertions still fire. *(Carried to `xg8nixa`.)*
+      `spawnFn`, no process started. *(Carried to the build story `3789`; a decision item ships no code.)*
+- [ ] The existing `--bare` refusal is unchanged; its two assertions still fire. *(Carried to `3789`.)*
 - [x] Whether `cli` / `cwd` / `env` deserve the same treatment is answered one way or the other, not left silent.
       *(No — see below.)*
 

@@ -1,9 +1,10 @@
 ---
+bornAs: xocztro
 kind: story
 size: 3
 parent: "3318"
 status: open
-blockedBy: ["xjcwinh"]
+blockedBy: ["3790"]
 scope: ["we:scripts/lib/jury-core.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []

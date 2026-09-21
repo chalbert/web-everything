@@ -23,9 +23,9 @@ tags: [review, jury, evidence, burden-of-proof, governance, decision-prep]
 panel verdict; earns a round; counted apart from blockers). Codified as a **new anchor**,
 [`#creator-owed-proof-not-reviewer-rederivation`](/docs/agent/platform-decisions.md#creator-owed-proof-not-reviewer-rederivation),
 cross-referenced as a sibling of `#agent-convergence-independent-validation`. The mechanism is carved into two
-build stories: [xjcwinh](/backlog/xjcwinh-add-the-unverifiable-as-submitted-disposition-to-the-jury-a/) (the
+build stories: [3790](/backlog/3790-add-the-unverifiable-as-submitted-disposition-to-the-jury-a/) (the
 disposition, Fork 1 + the invariant) and
-[xocztro](/backlog/xocztro-add-a-verified-test-top-rung-to-the-jury-evidence-ladder-fed/) (the evidence rung, Fork 2),
+[3791](/backlog/3791-add-a-verified-test-top-rung-to-the-jury-evidence-ladder-fed/) (the evidence rung, Fork 2),
 chained in that order because both edit `we:scripts/lib/jury-core.mjs`.
 
 A reviewer may answer **"unverifiable as submitted"** — distinct from accept/changes — when a claim about the creator's own code carries nothing a reviewer can cheaply check. It routes as a new `DISPOSITIONS` member in we:scripts/lib/jury-core.mjs, gated by a precondition question asked before the existing three-question blocker test (#2950), reusing [#3312](/backlog/3312-findings-are-admitted-by-evidence-kind/)'s `evidenceKind` ladder for what counts as proof. It earns a round like a blocker but is counted separately, so [#3318](/backlog/3318-review-efficacy-watch/)'s metrics tell "reviewer found a bug" apart from "creator skipped proof." The refusal is the durable signal, routed through two already-shipped pipelines — no new harvest mechanism.
@@ -169,7 +169,7 @@ Care level: `elevated` — the change touches shared review-panel machinery (`we
 
 ## Done when
 
-This is a **decision**, not a build — "done" is the item reaching Definition of Ready, which the gates below confirm, not code shipping. The mechanism was carved at ratification (2026-09-21) into two `blockedBy`-chained build stories, xjcwinh (the disposition) and xocztro (the evidence rung), each carrying its own tier-1 criteria; this item reached DoR via the **stated-as-fork** path.
+This is a **decision**, not a build — "done" is the item reaching Definition of Ready, which the gates below confirm, not code shipping. The mechanism was carved at ratification (2026-09-21) into two `blockedBy`-chained build stories, 3790 (the disposition) and 3791 (the evidence rung), each carrying its own tier-1 criteria; this item reached DoR via the **stated-as-fork** path.
 
 1. **Observable** — `preparedDate` is stamped, `npm run check:standards` is 0 errors, and `check:item -- 3375` (or its landed `NNN`) passes.
 2. **Observable** — the `/research/` topic renders (`we:src/_data/researchTopics/creator-owed-proof-not-reviewer-rederivation.json` + its `.njk` write-up), and this item's `relatedReport` resolves.
