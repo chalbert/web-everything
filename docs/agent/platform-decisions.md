@@ -4738,6 +4738,71 @@ that reads the supervision level; turning such a gate on is separately-scoped wo
 [#calibration-veto-clearing](#calibration-veto-clearing) (`#3673`). Full reasoning:
 [#3690](/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/).
 
+### An agent vendor registers by one descriptor module in one explicit static index; a descriptor declares mechanics only; a marked vendor that cannot run a kind is refused for `build` and repaired-around for `fix`/`ci-heal`, recorded apart from routing {#agent-vendor-registry}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
+amendments (`#3658`).** Governs how an agent *vendor* (Claude, Codex, Antigravity, and any later one) is added
+to the mechanical dispatch path. The card as filed named the launch-kind table
+(`DISPATCH_PROVIDER_REGISTRY`); the prep found the collision is on the vendor axis, in three per-wrapper
+vendor tables, not in that table. Five rules:
+
+1. **The rule governs the vendor axis; the kind table stays a closed, hand-edited, load-checked table.** A
+   kind exists because `we:scripts/operations/dispatch-lane.mjs` names it in `LAUNCH_KINDS`,
+   `BRIEF_REQUIRED_BY_KIND` and `sessionSlugFor`. A per-kind descriptor could not make a kind exist, so it
+   would only look like ownership of a set it cannot change. Converting only the kind table (the card as
+   filed) leaves the vendor collision untouched.
+2. **One descriptor module per vendor, listed in one explicit static index.** Each vendor is one file,
+   `we:scripts/operations/agent-providers/<vendor>.mjs`, holding its per-kind spawn adapters.
+   `we:scripts/operations/agent-provider-registry.mjs` imports every descriptor statically and checks them at
+   load; every wrapper and every `*-run.mjs` selector resolves a vendor through it, per kind. The set of
+   vendors that can run is therefore visible in source and in the import graph. **Runtime directory discovery
+   is rejected**: a stray, half-written or leftover file would become a live dispatch path with no line that
+   says so, and graph-derived checks would go blind. **Three per-wrapper tables are rejected**: tests hold
+   them equal, so every vendor must cover every kind or none, and a vendor's per-kind capability cannot be
+   stated. The index is hand-written, with a test that it and the `agent-providers/` directory list the same
+   vendors.
+3. **A descriptor declares mechanics only.** Its fields are `name`, `routingProvider` (the provenance id in
+   `PROVIDERS`), `kinds` (one spawn adapter per launch kind it can run; a missing kind is a hard *cannot*) and
+   informational `sandbox` facts that no gate reads. A descriptor **never** declares its own fitness, trust,
+   supervision level or cascade rank: that would be self-certification, against
+   [#model-probation-graduation-criteria](#model-probation-graduation-criteria) and
+   [#delegation-trial-record-graduation](#delegation-trial-record-graduation), and a rank spread across files
+   would make the routing order depend on which files merged. Which vendor is *offered* stays the router's
+   call (`we:scripts/lib/provider-routing.mjs`, fixed criteria); a descriptor never makes, weighs or orders it,
+   and registering a vendor grants it no operation
+   ([#agent-mutations-through-typed-operations](#agent-mutations-through-typed-operations)).
+4. **A marked vendor that cannot run this kind: refuse for `build`, fall back for repairs, and record it in
+   its own fields.** For `build` the `deliveryAgent:` marker is a per-item choice of who *delivers*, so a
+   vendor without a `build` adapter is refused by name **before a lane is acquired**. Quietly delivering with
+   Claude would replace the human's explicit choice for the one kind the marker exists for. For `fix` and
+   `ci-heal` the dispatch falls back to `claude-restricted`, because a repair to an open PR should still
+   happen and who delivered the item is not at stake. The fallback is recorded as `requestedVendor`,
+   `executedVendor` and `reason`, kept **apart** from the router's `routedProvider`/`executedProvider`, so a
+   marker fallback is never counted as a router delegation gap in the trial data.
+5. **A broken descriptor fails loudly at load, naming the file.** Every descriptor is checked when the
+   registry loads (`name` unique, `routingProvider` in `PROVIDERS`, every `kinds` key in `LAUNCH_KINDS`, every
+   adapter has a `spawn`), and a failure throws a `TypeError` naming the file, the field and the rule. It is
+   never skipped and never checked only on first use. An unknown vendor name is refused by name before a lane
+   is acquired. The registry is imported only by the wrappers and the `*-run.mjs` entry points, never by
+   `we:scripts/lib/dispatch-contracts.mjs` or `we:scripts/operations/dispatch-lane-io.mjs`, so no import cycle
+   forms and spawn code stays out of the pure library.
+
+**Reach.** Governs vendor registration on the mechanical dispatch path, and only that. The kind table, the
+routing call, the trial record and the typed-operation catalog keep their existing homes and owners; the
+conveyor still starts agents only through the `dispatch-lane` operation
+([#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation)), and a
+descriptor's spawn adapter runs only inside the wrapper that operation launches.
+
+**Where it is built.** The three vendor tables, the kind registry and `we:scripts/lib/dispatch-contracts.mjs`
+exist only on the declared POC branch `lane/mechanical-dispatcher`
+([#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode)). The refactor lands there and
+reaches main through `#3443`'s small reviewed slices; only this codification lands on main.
+
+**Lineage:** ratified via `#3658` (2026-09-21), filed under the background mechanical dispatcher epic `#3383`,
+grounded in `/research/dispatch-provider-registration/` and
+`we:reports/2026-09-21-provider-registration-grounding.md`. Full reasoning:
+[#3658](/backlog/3658-self-registering-provider-descriptors-for-dispatch-provider/).
+
 ### Every reviewer seat holds the same tool surface — declared operations only — inside a provider-independent container; the mandatory seats move only after a replay parity gate; the Codex seat inherits the calibration veto {#reviewer-tool-surface-and-containment}
 
 **Ratified 2026-09-21 by the operator (Nicolas Gilbert), all four forks as prepared, no amendments
