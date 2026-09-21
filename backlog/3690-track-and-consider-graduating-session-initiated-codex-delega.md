@@ -186,7 +186,7 @@ point stands regardless — the constraint is an instruction, not a boundary.
     with no ruling covering it.
   - It routes authority to the anchor that already owns it, rather than to a property of one script. The
     transport finding above is then a **defect to fix**, not a foundation to build on — **filed as its own
-    item, `x9avg7g`, scoped to `we:scripts/codex-direct-task.mjs`**, rather than ruled here.
+    item, `3782`, scoped to `we:scripts/codex-direct-task.mjs`**, rather than ruled here.
   - **Against it:** it widens what ratifying this card settles, from one function to a shared data contract.
     That width is the point — the data is already shared.
 - **(b) Rule only the supervision dial.** Rejected as the excluded branch: it leaves the N = 1 fitness test
@@ -288,7 +288,7 @@ budget with named precision, recall, detection-time and reset-time properties.
 **The target evidence shape, ratified as direction.** A **concurrent-baseline comparison** — the same task run
 through Claude and through the delegated provider, judged on the difference — is the evidence shape this model
 should reach, and it is what a follow-on finding should prefer over raising N. It needs a harness that does
-not exist, so it is **filed as its own item — `xoiscdi`, scoped to `we:scripts/conveyor/`** — rather than
+not exist, so it is **filed as its own item — `3783`, scoped to `we:scripts/conveyor/`** — rather than
 ruled here. Two hand-produced comparative rows already sit in the store (`claude-native/claude-sonnet-5`
 against `antigravity/claude-sonnet-4-6` on the same PR 2223 diff, both `scoredAt` 2026-09-15T14:35), which is
 the shape that item mechanizes.
@@ -422,7 +422,7 @@ recorded field. (2) *Statute overlap:* found and reconciled — the sub-fork B s
 **Screen:** flagged(prio) → fixed, then superseded by the rewrite. The screen found options rejected on data
 rate, spend and a missing harness — reachability, not merit. Both are gone: the reachability claim was
 factually wrong and is deleted, and the concurrent-baseline option was moved out of the fork into a ratified
-direction plus its own filed item (`xoiscdi`). Q1 clear on the main fork and both sub-forks: the shape, the
+direction plus its own filed item (`3783`). Q1 clear on the main fork and both sub-forks: the shape, the
 predicate and the re-graduation rule each bind every triple and are observable to any dispatcher.
 
 ## Fork 3 — Who may move a level: the operator, or the data?
