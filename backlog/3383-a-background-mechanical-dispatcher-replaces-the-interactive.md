@@ -4336,3 +4336,42 @@ Card #3730 (with the prompt template from the first point of #3752) is built on 
 **Not verified here:** a live worker (owed as the orchestrator's first dispatch through the operation); that the real `claude` CLI accepts `--permission-mode` and the single-token `--allowedTools=` spelling (the fake CLI accepts them, commander 10 parses them as intended); `runner-activity` itself (it is not on this branch).
 
 Checks: 53 new tests; `scripts/operations/__tests__` plus `scripts/conveyor/__tests__` 177 files and 5156 tests before, 178 files and 5209 after; `check:standards` 0 errors; `check-priority --strict` OK.
+
+## Session update (2026-09-20) — #3717 wired mechanically: taskType derived from the dispatch, routeDispatch called before the spawn, routed/executed recorded
+
+Built on the prototype branch under the operator's 2026-09-21 ruling ("G2 is FOLDED INTO #3717: one router
+path and one wiring card, built WHERE THE PROVIDER PORTS ARE"), so no PR: code straight to
+`lane/mechanical-dispatcher`, card stays on `main`.
+
+**The reconcile gate the ruling set passed.** `we:scripts/lib/dispatch-contracts.mjs#routeDispatch` (G1) already composes
+BOTH `we:scripts/lib/provider-routing.mjs#selectProvider` and `#selectSupervisionLevel`, so this wiring adds NO second entry
+point — it adds the one input `routeDispatch` was missing to be callable from a real dispatch.
+
+**What landed.**
+
+- `we:scripts/lib/dispatch-task-type.mjs` — the pure `taskType` derivation from the dispatch itself (kind,
+  cause, declared scope), with three outcomes: a derived `taskType`, the ROLE path (no `taskType`, provider
+  cascade never consulted), or a named REFUSAL. `self-fix` and `other` are unreachable; `conflict-resolution`
+  comes only from the `conflict` CAUSE, which only `we:scripts/conveyor/reconcile-fix-dispatch.mjs` knows.
+- `we:scripts/lib/dispatch-contracts.mjs#decideDispatchRoute` — the composition: derivation → profile → `routeDispatch`.
+  Pure; the scorecards arrive as data. Records `routed` AND `executed`, the supervision level, the audit
+  trail, and an explicit `--provider-override` with its mandatory reason (an unexplained override is refused).
+- `we:scripts/operations/dispatch-lane.mjs`: the io shell computes the route (the contract's import graph reaches `node:fs`, and the
+  declaration is asserted to reach nothing that can act, so the CALL is on the io side and the CONSEQUENCE —
+  the refusal — is in the pure half). The decision rides the verdict and the effect payload into the run
+  record; the sink writes `routedProvider`/`executedProvider`/`routedTaskType`/`supervisionLevel`.
+- `we:scripts/operations/review-dispatch.mjs` records the role path; `we:scripts/conveyor/reconcile-fix-dispatch.mjs` feeds the conflict cause to the router.
+- `we:scripts/gen-dispatch-routing-table.mjs` + `npm run gen:dispatch-routing-table` publish the table into
+  `we:docs/agent/dispatcher-runbook.md`, with a drift test.
+
+**Supervision is RECORDED, not enforced.** #3690 is unratified, so the gate sits behind
+`WE_DISPATCH_SUPERVISION_ENFORCE`, off by default; the default path is byte-identical to before.
+
+**The finding the operator wants.** Under today's `we:scripts/conveyor/run-scorecards.json` every route resolves to `claude`, and
+not because the cascade preferred it: the 18 records carry NO `taskType` and NO `outcome`, so the router's
+`{provider, model, taskType}` trust unit can never accumulate a clean trial. Delegation to Codex/Antigravity
+is structurally unreachable until trials are scored WITH a taskType — that is the next blocker, not the
+wiring. With six synthetic clean codex `bugfix` trials the same call returns `both`, so the mechanism works.
+
+Tests: 455 files / 14,426 passing (was 14,426 before with 4 new suites' 59 tests added); `check:standards`
+0 errors, 1816 warnings (unchanged from baseline).

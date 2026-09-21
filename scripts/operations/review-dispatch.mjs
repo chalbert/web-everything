@@ -158,6 +158,10 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, parseBackgroundedId, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
+// #3717 — the `taskType` derivation. A review is a JUDGING role: it changes no product code, so it has no
+// router `taskType` and the provider cascade is never consulted for it. That answer is DERIVED here, from the
+// dispatch kind, and recorded on the result — it is not a sentence anyone typed.
+import { taskTypeFor } from '../lib/dispatch-task-type.mjs';
 // #xqa9ttq — the single source of truth for the `claude`/`codex` juror-provider enum, shared with
 // `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
 // cannot silently drift out of step with what `review-loop-cli.mjs` (which the dispatched session runs)
@@ -482,9 +486,28 @@ export function dispatchReview({
   return {
     sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
     unknownTokens,
+    // #3717 — THE ROUTE THIS DISPATCH TOOK, recorded rather than assumed. `outcome: 'role'` with
+    // `taskType: null` IS the mechanical answer for a review (see `dispatch-task-type.mjs`'s own docblock for
+    // why the role path is a third outcome and not a `taskType`), so nothing here chooses a provider: the
+    // judge seat is `judgeProvider` just below, which is an explicit, already-recorded input.
+    routing: reviewDispatchRoute(),
     // #xqa9ttq — the provider the dispatched session will judge with, echoed back so the CLI (and any
     // programmatic caller) can report WHICH judge was seated without re-deriving the default.
     judgeProvider,
+  };
+}
+
+/**
+ * #3717 — the review dispatch's route, derived from its kind alone. Its own function so the record has ONE
+ * shape and the derivation is asserted rather than inlined at the return.
+ *
+ * @returns {{outcome: string, role: string|null, taskType: null, routed: null, executed: null, reason: string}}
+ */
+export function reviewDispatchRoute() {
+  const derived = taskTypeFor({ kind: 'review', cause: null, scopePaths: [] });
+  return {
+    outcome: derived.outcome, role: derived.role, taskType: null, routed: null, executed: null,
+    reason: derived.reason,
   };
 }
 
