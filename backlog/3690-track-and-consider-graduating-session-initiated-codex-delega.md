@@ -862,11 +862,11 @@ amendment. Codified at
 - It does **not** turn supervision enforcement on. `WE_DISPATCH_SUPERVISION_ENFORCE` stays off; the routing
   build [#3717](/backlog/3717-choose-the-dispatch-provider-mechanically-from-fixed-criteri/) keeps the gate
   behind that switch. Turning it on is filed as its own design-first story,
-  [x784irf](/backlog/x784irf-turn-dispatch-supervision-enforcement-on-now-that-3690-is-rat/).
+  [3784](/backlog/3784-turn-dispatch-supervision-enforcement-on-now-that-3690-is-rat/).
 - It does **not** change any threshold value. `DEFAULT_BACKDOWN_THRESHOLDS` in
   we:scripts/lib/provider-routing.mjs is untouched; N and `k` stay for an ordinary batched finding.
 - It builds none of the code the forks imply (the `informative` field, the root-cause field and post-miss
-  bar, the ratified promotion list, the corrected router header). Those are open questions on x784irf's
+  bar, the ratified promotion list, the corrected router header). Those are open questions on 3784's
   design section. The two items the prepare pass already filed are unchanged: `3782` (the scratch clone's
   real-remote `origin`) and `3783` (the concurrent-baseline harness).
 
