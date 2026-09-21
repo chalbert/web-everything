@@ -76,13 +76,33 @@ export function stageOnTransportBranch({
   // still prunes, so a refusal never leaks a worktree. Generic by default: a transport with nothing to assert
   // passes nothing.
   assertReady = null,
+  // #3779: START THE BRANCH when the remote does not have it yet, instead of dying on `invalid reference`.
+  // Off by default, so every existing transport keeps its one extra guarantee: a branch that CI created is the
+  // only branch it will write to, and a typo in a branch name fails rather than minting a new branch. The
+  // handoff home turns it on for its first push only; the new branch is an ORPHAN (no parent, only `files`),
+  // never a fork of whatever `board` has checked out.
+  createIfAbsent = false,
 } = {}) {
   if (!board || !branch) throw new TypeError('git-transport-branch: `board` and `branch` are both required');
   if (!files.length) throw new TypeError('git-transport-branch: nothing to stage — `files` is empty');
 
   const wt = join(board, '.operations', 'transport', `wt-${now()}`);
   mkdir(dirname(wt), { recursive: true });
+  const created = createIfAbsent
+    && !run(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: board }).trim();
   try {
+    if (created) {
+      // An orphan WITHOUT a checkout: `--no-checkout` keeps the board's files out of the worktree, the
+      // symbolic-ref points HEAD at the unborn branch, and `read-tree --empty` drops the index the add seeded
+      // from the board's HEAD. `checkout --orphan` would do all three but writes the board's whole tree first.
+      // The stale local branch goes first: branch refs are shared by every worktree, and a leftover from an
+      // earlier run would become the new commit's parent.
+      try { run(['update-ref', '-d', `refs/heads/${branch}`], { cwd: board }); } catch { /* none */ }
+      run(['worktree', 'add', '--force', '--no-checkout', '--detach', wt, 'HEAD'], { cwd: board });
+      run(['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: wt });
+      run(['read-tree', '--empty'], { cwd: wt });
+      return writeCommitPush({ run, mkdir, write, wt, files, message, branch, created, assertReady, board });
+    }
     // AN EXPLICIT REFSPEC, never a bare `fetch origin <branch>` (#3264). The bare form writes `FETCH_HEAD` and
     // creates `refs/remotes/origin/<branch>` only when the CLONE'S CONFIGURED refspec covers it — true of a full
     // clone, false of a `--single-branch` one, which is what a cloud-session checkout is. The `worktree add`
@@ -95,21 +115,7 @@ export function stageOnTransportBranch({
     run(['worktree', 'add', '--force', '--detach', wt, `origin/${branch}`], { cwd: board });
     run(['checkout', '-B', branch, `origin/${branch}`], { cwd: wt });
 
-    if (assertReady) assertReady({ run, wt, board, branch });
-
-    for (const file of files) {
-      const abs = join(wt, file.path);
-      mkdir(dirname(abs), { recursive: true });
-      write(abs, file.content);
-      run(['add', '--', file.path], { cwd: wt });
-    }
-
-    const staged = run(['diff', '--cached', '--name-only'], { cwd: wt }).trim();
-    if (!staged) return { paths: files.map((f) => f.path), pushed: false, reason: 'identical content already staged' };
-
-    run(['commit', '--quiet', '-m', message], { cwd: wt });
-    run(['push', '--quiet', 'origin', `HEAD:${branch}`], { cwd: wt });
-    return { paths: files.map((f) => f.path), pushed: true };
+    return writeCommitPush({ run, mkdir, write, wt, files, message, branch, created, assertReady, board });
   } finally {
     // ALWAYS, and in this order: remove the directory, then prune the registration. Dropping either one leaves
     // the next run on this branch wedged.
@@ -118,6 +124,26 @@ export function stageOnTransportBranch({
     // board's checkout, so pruning elsewhere leaves a stale registration in the repo that will need it (#3261).
     try { run(['worktree', 'prune'], { cwd: board }); } catch { /* best effort */ }
   }
+}
+
+/** The tail both starts share: the caller's check, the writes, and the commit + push (never a force). */
+function writeCommitPush({ run, mkdir, write, wt, files, message, branch, created, assertReady, board }) {
+  if (assertReady) assertReady({ run, wt, board, branch, created });
+
+  for (const file of files) {
+    const abs = join(wt, file.path);
+    mkdir(dirname(abs), { recursive: true });
+    write(abs, file.content);
+    run(['add', '--', file.path], { cwd: wt });
+  }
+
+  const staged = run(['diff', '--cached', '--name-only'], { cwd: wt }).trim();
+  if (!staged) return { paths: files.map((f) => f.path), pushed: false, reason: 'identical content already staged' };
+
+  run(['commit', '--quiet', '-m', message], { cwd: wt });
+  // A FULL refname: on a created branch the remote has no `<branch>` for a short name to resolve against.
+  run(['push', '--quiet', 'origin', created ? `HEAD:refs/heads/${branch}` : `HEAD:${branch}`], { cwd: wt });
+  return { paths: files.map((f) => f.path), pushed: true, ...(created ? { created: true } : {}) };
 }
 
 function defaultGit(args, opts) {

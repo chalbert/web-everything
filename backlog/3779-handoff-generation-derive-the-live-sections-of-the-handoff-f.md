@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3383"
 status: open
-scope: ["we:.claude/commands/handoff.md", "we:.claude/commands/continue.md", "we:scripts/operations/run.mjs"]
+scope: ["we:.claude/commands/handoff.md", "we:.claude/commands/continue.md", "we:scripts/operations/run.mjs", "we:scripts/operations/handoff-home.mjs", "we:scripts/lib/git-transport-branch.mjs"]
 dateOpened: "2026-09-20"
 tags: []
 ---
@@ -34,3 +34,16 @@ ADDED 2026-09-21 (operator ruling). The words below were typed by the operator i
 2. **Executable** — a test asserts that a hand-kept part over the word cap fails the write.
 3. **Executable** — a test asserts the tracked /handoff command text calls the generator and no longer asks the model to compose pull request statuses (the command is tracked in source by #3767 and #3759).
 4. **Human verify** — a version produced this way carries every fact the live sections of version 10 held.
+
+## Slice A: location
+
+Builds design point 4 only, as ruled on 2026-09-21. Design points 1, 2, 3 and 5 (the generator, the generated and hand-kept split, the in-flight source, the word cap) stay unbuilt until #3775 and #3776 settle; the Done-when list above is theirs.
+
+What ships: `we:scripts/operations/handoff-home.mjs` with three verbs. `path` prints the working copy (`~/workspace/.operations/handoff/`, outside `~/.claude/`). `pull` fast-forwards it from `origin/ops/handoff`. `push` commits both files (the snapshot and the operator's rules file) onto `ops/handoff` through `we:scripts/lib/git-transport-branch.mjs`, the same transport as `ops/review-requests` and `ops/pr-views`. The transport gained one opt-in, `createIfAbsent`, so the first push can start the branch as an orphan. `push` never forces, refuses when the remote moved since the last pull, and runs a publish gate first: `scrubPublish` on both files, and on a PUBLIC repository also any personal home-directory path. The repository is PUBLIC, so the first real push is the operator's call, not an agent's.
+
+Done when (slice A):
+
+1. **Executable** — the suite `we:scripts/operations/__tests__/handoff-home.test.mjs` passes under `npx vitest run` against real git (a temp bare origin): `path` output, `pull` into an empty and into a populated directory, a first `push` that creates `ops/handoff` holding exactly the two files, a second `push` that lands a fast-forward commit, a `push` refused on a diverged remote with the remote and the working copy left untouched, and a `push` refused when the scrub flags a file.
+2. **Executable** — running `we:scripts/operations/handoff-home.mjs` with the verb `path` prints a directory that ends in `/workspace/.operations/handoff` and contains no `/.claude/`.
+3. **Executable** — `grep -c handoff-home` reports at least 1 for each of `we:.claude/commands/continue.md` and `we:.claude/commands/handoff.md`, and neither file types an absolute directory for the handoff files (the commands ask `path`, run `pull` before reading and `push` after writing).
+4. **Human verify** — the operator decides whether the handoff may go to a branch of a PUBLIC repository, then runs the first `push`.
