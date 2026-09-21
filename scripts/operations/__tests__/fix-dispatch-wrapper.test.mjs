@@ -520,6 +520,25 @@ describe('dispatchFix', () => {
     expect(run.mock.calls.some((c) => c[1]?.[1] === 'release')).toBe(true);
   });
 
+  it('#3656 — when the finding scratch-file write fails after a successful acquire (the lane directory is gone), '
+    + 'releases the lane, reports blocked-on-infra, and rethrows the ORIGINAL write error', async () => {
+    // Real mechanism, no mock of the code under test: acquire hands back a path whose directory does not
+    // exist, so the wrapper's own real `writeFileSync` throws ENOENT.
+    const goneLane = join(lane, 'vanished-between-acquire-and-write');
+    const run = fakeRun({ lanePath: goneLane });
+    const provider = { spawn: vi.fn() };
+    let thrown;
+    try {
+      await dispatchFix({ pr: 2108, repo: 'chalbert/web-everything' }, provider, { run, newSessionId: () => 's' });
+    } catch (e) { thrown = e; }
+    expect(thrown?.code).toBe('ENOENT');
+    expect(String(thrown?.path)).toContain(FIX_FINDING_SCRATCH_FILENAME);
+    expect(run.mock.calls.some((c) => c[1]?.[1] === 'release')).toBe(true);
+    const doneCall = run.mock.calls.find((c) => c[1]?.includes('--status=done'));
+    expect(doneCall[1]).toEqual(expect.arrayContaining(['--outcome=blocked-on-infra']));
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
   // ==============================================================================================
   // Bug #xu2pp2m/2 regression (confirmed live on real PR #2027, 2026-09-09): a report left over from a PRIOR
   // dispatch attempt at the SAME PR (same `sessionSlug`, `fix-2108`) must never be mistaken for the CURRENT

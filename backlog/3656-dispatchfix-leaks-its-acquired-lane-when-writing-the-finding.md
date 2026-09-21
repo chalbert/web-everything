@@ -14,4 +14,4 @@ Found 2026-09-13 while fixing a real Codex fix-kind sandbox bug (commit a0d328fb
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run fix-dispatch-wrapper -t "#3656"` passes (in `we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs`). The test makes the scratch-file write fail for real (acquire returns a lane directory that no longer exists, so `writeFileSync` throws ENOENT) and asserts the lane is released, `blocked-on-infra` is reported, the agent is never spawned, and the original ENOENT error propagates. It fails on the old code (no release) and passes once the write sits inside `dispatchFix`'s release-on-failure try.

@@ -4628,3 +4628,15 @@ Card #3724 (a story under #3718): one declared, read-only operation that replace
 **Not verified here:** #3725 and #3721 are open, so `live` lane counts and session counts are not trustworthy yet (the caveats say so). The digest was not run through the HTTP adapter. `--advance` and the consumer cursor are covered by tests, not exercised on the real state root.
 
 Checks: `we:scripts/operations/__tests__` 129 files and 4007 tests pass (before: 128 files and 3950; the 57 new tests are the difference); `check:standards` reports 1 error, already on the branch tip and not from this change: the tracker file carries an opaque token, the published-page address in the earlier tracker-page note (this change touches no backlog file, and this note adds no such token); it was queued 12 minutes behind other lanes in the heavy-admission wrapper before it ran. `check-priority --strict` exits 1 with 17 findings (12 open cards filed under #3383 that have no line, 5 listed cards now resolved) that come from cards that landed on `origin/main` after this branch's tip, not from this change; `priority-sync --apply` after the branch catches up clears them, and it was not run here so this note does not edit the priority section the orchestrator also edits.
+
+## Session update (2026-09-21) — #3656 dispatchFix no longer leaks its lane when the scratch-file write throws
+
+**#3656 fixed on this branch.** `dispatchFix` in `we:scripts/operations/fix-dispatch-wrapper.mjs` wrote the finding scratch file right after `acquireLane` succeeded, outside the try/catch that calls `releaseAllPools`. Any throw from that write (disk full, permissions, a lane directory that vanished) rethrew with the lane still held. Re-checked on the branch tip first: the defect was there.
+
+**Fix:** the write now sits at the top of the existing release-on-failure try. A failure reports `blocked-on-infra`, releases the lane, and rethrows the original error. The `finally` that removes the scratch file already uses `force: true`, so it is harmless when the write never happened. Only that function changed.
+
+**Test:** `we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs`, new `#3656` case. It makes the write fail for real: acquire returns a lane path whose directory does not exist, so the real `writeFileSync` throws ENOENT. It asserts the lane is released, `blocked-on-infra` is reported, the agent is never spawned, and the original ENOENT (with the scratch filename in its path) propagates. On the old code it fails at the release assertion; on the new code it passes.
+
+**Done when (executable)** is now real on the card: `npx vitest run fix-dispatch-wrapper -t "#3656"`.
+
+Checks: `fix-dispatch-wrapper` 60 tests pass (59 before). Neighbours `dispatch-lane-fix-wiring`, `autofix-review-findings`, `reconcile-fix-dispatch` pass too (156 across the four files). `check:standards` reports the one error already on the branch tip (an opaque-token match in this card), nothing new. Card #3656 is not resolved here; it resolves once this is on main.

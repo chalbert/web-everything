@@ -744,10 +744,12 @@ export async function dispatchFix(
     return { ...planned, lanePath: null, result: 'blocked-on-infra (no free lane)' };
   }
 
-  writeFileSync(`${lanePath}/${FIX_FINDING_SCRATCH_FILENAME}`, `${target.findingBody}\n`);
-
   let agentReport;
   try {
+    // #3656 — INSIDE the release-on-failure try: the lane is already held here, so a throwing scratch-file
+    // write (disk full, permissions, a lane directory that vanished after acquire) must release it and rethrow
+    // the original error exactly like an agent-turn failure does, never leak it.
+    writeFileSync(`${lanePath}/${FIX_FINDING_SCRATCH_FILENAME}`, `${target.findingBody}\n`);
     // #3383 — THE EXPENSIVE SPAN. A fixer agent turn shares the delivery agent's 60-minute ceiling
     // (`FIX_AGENT_SPAWN_TIMEOUT_MS === DELIVERY_AGENT_SPAWN_TIMEOUT_MS`) and, until now, was timed by nothing.
     // `spanAroundAsyncWithCpu` (per-process-attribution follow-on) closes it `ok` on return and `error` on
