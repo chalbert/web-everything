@@ -7,7 +7,7 @@ scope: ["we:scripts/lane-drain.mjs", "we:scripts/lib/open-pr-items.mjs", "we:scr
 dateOpened: "2026-09-21"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "12dd24e0e934a05a442335426480f6ef7e8e880b"
-relatedTo: ["3816", "3779", "3441", "3473"]
+relatedTo: ["3816", "3779", "3441", "3473", "3575"]
 tags: []
 ---
 
@@ -51,6 +51,8 @@ Rule how the drain avoids setting `status: resolved` on a whole card when a PR f
 **Skeptic:** not run as a separate pass; #3816 raises the question without a verdict.
 
 ## Not in this decision
+
+The general question of how a split card is delivered (child cards, feature flag, integration branch, stacked PRs) and which event counts as "finished" is folded into #3575 as its Fork 5. This card rules only the drain's narrow fix; Fork 1 (B) is the interim safety net until that fork is decided and built.
 
 The build and its executable Done-when (written for (B)) stay on #3816. The extractor rules themselves (#3441, #3473) are not changed under (B): #3816's Done-when item 2 pins that the extractor still returns `['3779']` for PR #2392.
 
