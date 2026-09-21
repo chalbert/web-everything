@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-21T14:18:11.930Z",
+  "generatedAt": "2026-09-21T14:38:26.350Z",
   "generatedFromRef": "origin/main",
   "targetCount": null,
   "counts": {
     "open": 81,
-    "prepared": 44,
-    "inReview": 2
+    "prepared": 45,
+    "inReview": 0
   },
   "items": [
     {
@@ -3459,6 +3459,26 @@
       "warnings": []
     },
     {
+      "num": "3188",
+      "title": "Should an agent session be restricted to declared operations, with bash denied by default",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-08-18",
+      "ageInDays": 35,
+      "digest": [],
+      "forks": [],
+      "gate": null,
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
       "num": "3358",
       "title": "Pin the FUI sibling ref in the WE deploy build so a deploy is reproducible",
       "prepared": false,
@@ -4284,58 +4304,172 @@
       "warnings": []
     },
     {
-      "num": "3188",
-      "title": "Should an agent session be restricted to declared operations, with bash denied by default",
-      "prepared": false,
-      "preparedDate": null,
-      "leverageScore": 0,
-      "directUnblocks": 0,
-      "transitiveUnblocks": 0,
-      "unblocksToReady": 0,
-      "pr": {
-        "number": 2381,
-        "state": "open",
-        "kind": "other",
-        "title": "docs: record the operator's 2026-09-21 rulings (#3188, #3772, #3779, #3717, codex-wrapper memory)",
-        "url": "https://github.com/chalbert/web-everything/pull/2381",
-        "repo": "chalbert/web-everything"
-      },
-      "blockedBy": [],
-      "dateOpened": "2026-08-18",
-      "ageInDays": 35,
-      "digest": [],
-      "forks": [],
-      "gate": null,
-      "doneWhen": [],
-      "parseOk": true,
-      "warnings": []
-    },
-    {
       "num": "3735",
       "title": "May a review:human approval carry across a push that only merges main into the reviewed branch?",
-      "prepared": false,
-      "preparedDate": null,
+      "prepared": true,
+      "preparedDate": "2026-09-21",
       "leverageScore": 0,
       "directUnblocks": 0,
       "transitiveUnblocks": 0,
       "unblocksToReady": 0,
-      "pr": {
-        "number": 2378,
-        "state": "open",
-        "kind": "other",
-        "title": "prepare: bring decision #3735 (approval carry across a merge of main) to ready-to-ratify",
-        "url": "https://github.com/chalbert/web-everything/pull/2378",
-        "repo": "chalbert/web-everything"
-      },
+      "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-20",
       "ageInDays": 2,
-      "digest": [],
-      "forks": [],
+      "digest": [
+        "A review:human clearance is revoked by any head move. On web-everything#2347 (2026-09-20) a conflict-fix worker's plain merge commit efa134d33 re-parked an operator-cleared PR and cost a second approval. The content-keyed carry-over already in we:scripts/lib/review-escalation.mjs (acceptanceCoversHead, reviewed-contribution) would NOT have saved it: the conflict resolution changed 8 of the PR's own +/- lines. Decides what, if anything, may carry an approval across a main-merge or conflict-resolution push, and what record and guardrails that needs across we:scripts/review-set-label.mjs and we:scripts/merge-ai-prs.mjs.",
+        "**Prepared 2026-09-21.** Four forks follow, each with a bold default. The short version: an approval\ncarries across a push only when the drain can **replay the merge itself** and get the pushed tree\nbyte-for-byte, with no conflict and without main touching the PR's own files. Anything else re-parks, as\ntoday. Grounding: [report](/reports/2026-09-21-merge-only-approval-carry-grounding.md) · research topic\n[/research/merge-only-approval-carry/](/research/merge-only-approval-carry/)."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "What proves an outside push only merged main?",
+          "why": "**Fork-existence.** A real either/or, with one broken branch. (c) is **broken**: a commit message proves\nnothing (`efa134d33` was titled \"Merge origin/main …\" and changed 8 of the PR's lines). Between (a) and (b)\nthe call is whether a merge-only push gets a replay route at all; with (b) it does not.\n\nScope: pushes the drain did not make. The drain's own merges are covered by the re-stamp rule above and\nFork 3; they always put main as the *first* parent (`commit-tree -p <base> -p <mergeRef>`,\nwe:scripts/lib/rebase-drop-manifest.mjs:190, we:scripts/lib/rebase-drop-content.mjs:368) and drop the\nmanifest, so a plain replay would never match them.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Replay the merges — recommended.** Resolve `reviewed-sha` to a full SHA. Walk from the live head back\nto it. Every commit on the way must be a merge with exactly two parents where one parent is (or descends\nfrom) the reviewed SHA — the PR side, found by ancestry, not by position — and the other is an ancestor of\n`origin/main`. For each such merge, `git merge-tree --write-tree <parent 1> <parent 2>` must exit 0 and\nprint a tree **equal** to the merge's own tree. Then Fork 2's file test.\n- **Stated outcomes:** a non-merge commit anywhere on the path (the author added a commit and then merged\n  main) → no carry. A true rebase (rewritten history) is out of scope here; it stays with the digest tiers\n  under #3054, where Gerrit's `TRIVIAL_REBASE` would be the model if it is ever taken up.\n- It is Gerrit's mechanism for `TRIVIAL_REBASE` / `MERGE_FIRST_PARENT_UPDATE`: re-merge, compare trees.\n- It needs no marker from the accept, only the `reviewed-sha` every acceptance has. That is what #2365\n  lacked.\n- It fails safe, **under two stated conditions**. `merge-tree` uses the same merge as `git merge`, with all\n  merge bases. A hand edit hidden in a merge commit changes the tree and fails.\n  - *Condition 1 — a hermetic replay (pinned assumption).* The replay runs with no rerere\n    (`-c rerere.enabled=false`), no configured merge drivers, the default strategy with no `-X` options, and\n    attributes read from the empty tree (`-c attr.tree=<empty tree>`, so a `.gitattributes` in the PR, the\n    checkout or the host cannot pick a driver). With that pinned, an author's custom driver, rerere or `-X`\n    option makes the author's tree differ from git's plain merge, so it can only cause a missed carry.\n  - *Condition 2 — Fork 2 (a).* A built-in attribute such as `merge=union` needs no repo config and lives in\n    the PR's own tree. If the replay ever honoured it, the author's merge and the replay would union the same\n    way, the trees would match, and the carry would include text nobody reviewed. The hermetic pin above\n    stops the replay honouring it; Fork 2 (a) is the second wall, because a union only matters in a file both\n    sides changed, and (a) refuses to carry those. **If Fork 2 is ratified as (b), this \"never wrong\" claim\n    no longer holds as stated** and the hermetic pin becomes the only defence.\n  - Both conditions have Definition-of-done cases below.\n- **Against it:** some legitimate merges miss (custom options, criss-cross oddities) and re-park as today."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Keep the text digests as the only proof (today).** Rejected on merit: a digest cannot tell a base move\nfrom a relocation (#3021's pinned residual, we:scripts/lib/review-escalation.mjs:1260-1280), and it exists\nonly when the accept could stamp it — #2365's could not, so its provably identical tree re-parked."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Trust the commit's shape, message or pusher** (`isMechanicalMergeCommit`). Rejected as broken: #2347."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**`git patch-id` of the net diff (GitLab).** Rejected: it ignores whitespace and line numbers, weaker than\na tree comparison, with the same relocation blindness as (b)."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**Default: (a).**"
+            },
+            {
+              "kind": "text",
+              "text": "**Code shape** — Fork 1 (a), a pure decision over facts an I/O probe collects:"
+            },
+            {
+              "kind": "code",
+              "text": "// we:scripts/lib/review-escalation.mjs — pure; the probe sits beside computeNetDiffText in merge-ai-prs.mjs\nexport function mergeOnlyCarry({ reviewedSha, reviewedPaths, chain, readFailed }) {\n  // chain: head → reviewedSha. Each: { sha, parents, prParent, mainParentIsMainAncestor,\n  //                                    replayClean, replayTree, tree, mainSidePaths }\n  if (readFailed || !reviewedSha || !chain?.length) return { carries: false, reason: 'unproven' };\n  for (const [i, c] of chain.entries()) {\n    // linkage: the pure function re-checks the walk, it does not trust the probe to have built one path\n    if (i + 1 < chain.length && c.prParent !== chain[i + 1].sha)\n      return { carries: false, reason: `${c.sha}: chain is disconnected` };\n    if (c.parents.length !== 2 || !c.prParent || !c.mainParentIsMainAncestor)\n      return { carries: false, reason: `${c.sha} is not a merge of main into the reviewed branch` };\n    if (!c.replayClean) return { carries: false, reason: `${c.sha}: the merge had conflicts` };\n    if (c.replayTree !== c.tree) return { carries: false, reason: `${c.sha}: tree differs from git's own merge` };\n    if (c.mainSidePaths.some((p) => reviewedPaths.has(p)))              // Fork 2\n      return { carries: false, reason: `${c.sha}: main changed this PR's files` };\n  }\n  if (chain.at(-1).prParent !== reviewedSha) return { carries: false, reason: 'path does not reach reviewed-sha' };\n  return { carries: true, from: reviewedSha, to: chain[0].sha, tree: chain[0].tree };\n}\n// probe: git merge-tree --write-tree <p1> <p2>        exit 0 = clean; first line = tree\n//        git rev-parse <sha>^{tree}\n//        git diff --name-only <prParent> <sha>         = mainSidePaths (no merge-base needed)\n//        every replay runs hermetic: -c rerere.enabled=false -c attr.tree=<empty tree>, no drivers, no -X\n// apply: restamp --expect-head=<chain[0].sha>        refuses if the live head moved after the proof"
+            },
+            {
+              "kind": "text",
+              "text": "Replayed: #2365 → carries (clean, `0490ef4a…` both sides, no shared files); #2347 → no carry (conflicts in 3\nfiles)."
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. The skeptic confirmed soundness (a clean, tree-equal replay\ncan only miss, never wrongly carry — later made conditional on a hermetic replay and Fork 2 (a) by the PR\n#2378 review) but found the first draft keyed the walk on parent *position*, which\nrejects every drain merge (main is their first parent) and any PR-side-second merge. The PR side is now found\nby ancestry, the fork is scoped to outside pushes, and the reviewed SHA is resolved to full length (the gate\naccepts prefixes). Mixed chains and true rebases are now stated outcomes, not code-only.",
+          "screen": "clear. It also asked for the \"forced invariant\" label to go (done: (b) and (d) are coherent,\nweaker rivals) and for the rebase scope to be stated (done).",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "A clean merge where main changed the PR's own files",
+          "why": "**Fork-existence.** A real either/or. When main edits a file the PR also edits, in hunks that do not overlap,\ngit merges cleanly and Fork 1's replay matches. That merge either carries or it does not.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Does not carry — recommended.** Carry only when the files main's side brought in\n(`git diff --name-only <PR-side parent> <merge>`, which needs no merge base) share nothing with the files\nthe reviewed PR changed. Otherwise re-park as today.\n- The reviewer judged the PR's lines against the file as it was. A clean merge in the same file is where a\n  semantic clash hides: main changes a signature the PR's hunk calls, a few lines away.\n- It matches GitLab's code-owner rule (drop the approval when a later change touches the owner's files) and\n  the brief's constraint that a merge touching the PR's files must not carry.\n- It still carries the common case: #2365's five files and main's twelve were disjoint.\n- **Against it, stated plainly:** a PR on a busy file re-parks on every unrelated main edit to that file. A\n  statute PR edits we:docs/agent/platform-decisions.md, which main touches almost daily, so **most\n  `review:human` statute PRs will not carry** under (a). That removes much of Fork 4's practical benefit\n  for the human tier."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Carry any clean replay.** Rejected on merit: it certifies a file state the reviewer never saw on the\nstrength of \"git found no textual overlap\". The `test` check narrows that gap, but docs and statute text\nhave no tests."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Carry when the edits in a shared file are far apart** (a hunk-distance test). Rejected on merit:\ndistance in lines is not a semantic boundary. A renamed function at the top of a file breaks a call at the\nbottom, and any threshold is arbitrary."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**Default: (a).**"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. \"Main's side\" was first computed from a merge base, which is\nambiguous on a criss-cross history; it is now the diff from the PR-side parent to the merge. The cost to\nstatute PRs was understated and is now stated. The skeptic noted the fork sits close to a strictness setting;\nit stays a fork because (b) certifies an unseen file state, which is a correctness difference, not a value\nof one knob.",
+          "screen": "clear. The missing middle option (hunk distance) was added and rejected on merit.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "Do the drain's own content-resolving merges obey Fork 2?",
+          "why": "**Fork-existence.** A real either/or. `rebaseDropContent` (we:scripts/merge-ai-prs.mjs:3763-3793) is the\ndrain's fallback when the manifest is not the only conflict; it auto-resolves non-overlapping hunks and is\nre-stamped today. A conflict means both sides touched the file, so every such merge touches a PR file. Either\nthe drain's merges follow Fork 2 or they are exempt; one event cannot have both rules.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**They obey Fork 2 — recommended.** A `rebaseDropContent` merge on an accepted PR re-parks instead of\nre-stamping. `rebaseDropManifest` merges (manifest only, no PR file touched) still re-stamp, under the\nre-stamp gap fix above.\n- One rule for one event. An author's merge of main and the drain's merge of main are judged the same way.\n- **Against it:** **every** content-resolving drain merge of an accepted PR will re-park, not some. How\n  often that happens was not measured."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Exempt the drain's own merges; keep re-stamping them.** Rejected on merit: the drain's auto-resolution\ncertifies exactly the same unseen file state Fork 2 (a) refuses to certify for an author, and the drain is\nthe actor that moves heads most often."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**Default: (a).**"
+            }
+          ],
+          "skeptic": "REFUTED on mechanism, principle SURVIVES → rewritten. The first draft said the drain's manifest\nmerges \"pass the replay trivially\"; they do not (main is their first parent, the manifest conflict makes the\nreplay exit non-zero, and the collision heal changes the tree). The drain now checks its *input* (the lane tip\nit merged) instead of replaying its output, and that check became a bug fix under *Supported by default*. The\ncost is now stated as \"every content merge\", not \"some\".",
+          "screen": "clear. It also asked that the re-stamp bug fix be split out as a default that holds under either\nbranch (done).",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 4,
+          "crux": "Does the rule differ for `review:human` and `review:accepted`?",
+          "why": "**Fork-existence.** A real either/or: a human clearance either carries under the same proof or never does.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**Same rule for both — recommended.** A replay-proven merge that did not touch the PR's files leaves the\nPR exactly as the operator approved it. Asking again asks them to approve nothing new; #2365's second\nclearance took 69 seconds and was recorded without independence, which is the rubber-stamp shape.\n- Everything that could change the human's judgment re-parks anyway: a conflict (settled above), main\n  touching the PR's files (Fork 2), a new tier path (re-derived every pass).\n- **Build note (not the policy):** the carry must not copy the `cleared-human` marker. That marker is by\n  design written only by `--to=clear-human` (we:scripts/lib/review-escalation.mjs:1473-1475), and the\n  anti-test-tampering gate's own docblock says not to extend that comment primitive further (`:1516-1531`).\n- **How the carry reaches the anti-test-tampering gate — recommended: through the ledger, not a comment.**\n  `parseLatestHumanClearedSha` (`:1480`) reads comment *content* only, never authorship. A new\n  `carried-human-from: <sha>` comment marker that the gate trusted would be a second forgeable,\n  authorship-blind primitive of the same kind: anyone who can post a comment could pair\n  `reviewed-sha: <tampered head>` with `carried-human-from: <a real cleared sha>` and suppress the re-park.\n  That needs the same access as forging `cleared-human` today, so it is not a new capability, but it widens\n  exactly what the docblock says to stop widening. So the recommended build is:\n  - The carry's effect on the anti-test-tampering gate is **gated on #3179** (the local, non-comment ledger\n    written only by the CLI's own execution, the `we:scripts/lib/review-baseline-state.mjs` pattern). Once\n    #3179 lands, `--to=restamp` running as a carry of a human clearance writes a ledger entry for the new head,\n    and the gate reads the ledger.\n  - Until #3179 lands, a carried human clearance **does not** suppress the anti-test-tampering re-park. The\n    staleness gate still carries (the Fork 4 (a) policy holds); only a PR that also has a test-tampering hit\n    re-parks `review:human`, as it does today. That is the fail-closed direction and costs a second look only\n    on that narrow set.\n  - The carry comment may still name its origin (`carried-human-from: <sha>`) for the human reader, but no\n    gate parses it.\n  - **Rejected alternative:** ship the comment marker now and pin the forgery residual with a test. It works,\n    but it builds a second gate on the primitive the docblock says to retire, and #3179 would then have two\n    readers to migrate instead of one.\n- **Statute composition.**\n  [#clear-human-requires-current-head-advisory-review](../docs/agent/platform-decisions.md#clear-human-requires-current-head-advisory-review)\n  is a precondition on the `clear-human` act; a carry is not that act and never stamps a clearance-shaped\n  marker, so the anchor's text does not reach it. Its intent (an independent look at what lands) is served\n  because nothing lands that differs from the cleared PR except files the PR does not touch.\n  [#review-pending-clean-verdict-mechanical-accept](../docs/agent/platform-decisions.md#review-pending-clean-verdict-mechanical-accept)\n  keeps `review:human` human-only; the carry does not clear `review:human` — it keeps an existing human\n  clearance attached to a proven-identical PR."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Never carry a human clearance.** Rejected on merit: the human tier's protection is that a human saw\nthis content, and the proof shows the content is the same. Note Fork 2's cost: in practice many human-tier\nPRs will re-park anyway, so (a) versus (b) matters mostly for human-tier PRs outside the busiest files."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**Default: (a).**"
+            },
+            {
+              "kind": "text",
+              "text": "**Independent review (PR #2378, security lens):** the distinct `carried-human-from` marker, read by the\nanti-test-tampering gate, was itself a second forgeable comment primitive. Applied: the gate's use of a carry\nnow waits on the #3179 ledger, and until then a carried human clearance does not suppress that gate."
+            }
+          ],
+          "skeptic": "REFUTED as first drafted, SURVIVES-WITH-AMENDMENT → applied. The draft re-emitted\n`cleared-human`, which contradicts the marker's written design and the anti-test-tampering gate's \"do not\nextend\" note, and blurs two anchors. It now uses a distinct marker and states how it composes with both.",
+          "screen": "clear, with a minor impl leak (the marker is how (a) is built, not the policy) → the marker moved\nto a build note and the option is titled \"Same rule for both\".",
+          "parseOk": false,
+          "warning": "Fork 4: no option marked RECOMMENDED — default could not be identified."
+        }
+      ],
       "gate": null,
-      "doneWhen": [],
-      "parseOk": true,
-      "warnings": []
+      "doneWhen": [
+        "1. **Executable** — a vitest run of the proposed test file `we:scripts/__tests__/review-human-carry-over.test.mjs` (proposed, does not exist yet) fails before the ruling's build lands and passes after. It holds the cases in the definition of done above.",
+        "2. The ruling is recorded on this card, and codified as a platform-decisions anchor (none today covers review binding to a commit). The review-ceremony guidance in `we:docs/agent/delivery-loop.md` is updated only if the ruling changes behaviour."
+      ],
+      "parseOk": false,
+      "warnings": [
+        "Fork 4: no option marked RECOMMENDED — default could not be identified."
+      ]
     }
   ]
 }
