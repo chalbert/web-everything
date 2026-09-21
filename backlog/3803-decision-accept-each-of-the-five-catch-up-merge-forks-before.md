@@ -6,6 +6,8 @@ status: open
 relatedTo: ["3772", "3443", "3804", "3802", "3805", "3797"]
 scope: ["we:skills-src/conveyor/runner.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-21"
+preparedDate: "2026-09-21"
+preparedAgainstSha: "36cb7683e7f1165cf720f53e80faf8bea7b888c6"
 relatedReport: reports/2026-09-21-catchup-merge-forks-grounding.md
 tags: []
 ---
