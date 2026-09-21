@@ -107,8 +107,10 @@ Each has one coherent branch, or is settled by precedent. They are recorded so t
   (`#model-routing` in we:docs/agent/backlog-workflow.md: the call is never delegated; context:
   [#deterministic-core-thin-judgment](../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
 - **Trust is earned from the trial record, not declared.** The unit `{provider, model, taskType}`, the
-  evidence bar and who moves a level belong to #3690 (ratified by the operator 2026-09-21 as prepared; the
-  record is being written) and to
+  evidence bar and who moves a level belong to #3690 (ratified by the operator 2026-09-21 as prepared,
+  resolved, codified at
+  [#delegation-trial-record-graduation](../docs/agent/platform-decisions.md#delegation-trial-record-graduation))
+  and to
   [#model-probation-graduation-criteria](../docs/agent/platform-decisions.md#model-probation-graduation-criteria).
   This card does not touch them. Fork 3 keeps them out of descriptors.
 - **Authority over what a delegated agent may DO stays with the typed-operation catalog**
