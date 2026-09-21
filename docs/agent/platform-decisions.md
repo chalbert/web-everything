@@ -4686,6 +4686,86 @@ that reads the supervision level; turning such a gate on is separately-scoped wo
 [#calibration-veto-clearing](#calibration-veto-clearing) (`#3673`). Full reasoning:
 [#3690](/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/).
 
+### Every reviewer seat holds the same tool surface — declared operations only — inside a provider-independent container; the mandatory seats move only after a replay parity gate; the Codex seat inherits the calibration veto {#reviewer-tool-surface-and-containment}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), all four forks as prepared, no amendments
+(`#3675`).** The card's two 2026-09-19 steers (one tool surface for every reviewer whatever the provider;
+"allow some tools, ideally only codified operations"), relayed through a peer session, stand ratified with
+it. Extends [#agent-mutations-through-typed-operations](#agent-mutations-through-typed-operations) and
+[#operations-declared-once-callers-generated](#operations-declared-once-callers-generated) to the review
+seat, and composes with [#calibration-veto-clearing](#calibration-veto-clearing) and
+[#model-probation-graduation-criteria](#model-probation-graduation-criteria). Four clauses:
+
+1. **Surface — a reviewer's only tools are declared operations, delivered as typed MCP tools; every
+   built-in shell, read, write and edit tool is removed, for every provider.** One operation server serves
+   Claude and Codex alike. The catalog gains four operations (`inspect-file`, `inspect-search`,
+   `inspect-git` with typed subcommands only, `run-suite`), and `mutation-check` gains confinement: the
+   server, never the model, pins the checkout and `--target` must resolve inside it. This is the
+   reviewer-seat form of #agent-mutations-through-typed-operations clause 1 — the operation catalog is how a
+   reviewer's reads become sandboxed, since neither provider's native sandbox confines them — and the
+   typed-tool caller clause 1 of #operations-declared-once-callers-generated names. A capability gap is a
+   `missing-operation` finding: halt and surface, never a workaround
+   ([#dispatched-agent-never-runs-commands-directly](#dispatched-agent-never-runs-commands-directly)).
+   **Enforcement differs in kind and is stated, not hidden:** for Claude it is preventive (`--tools ""` with
+   the `system/init` tool list asserted in the run record); for Codex it is detective (every tool executed
+   appears as an item in the `--json` stream, and any item that is not a server call voids the run and fails
+   closed) plus a per-release canary that fails when a release changes the tool list. A provider that cannot
+   be reduced to the operation server's tools cannot seat a tool-bearing review. **Raw shell and writes for
+   the reviewer stay the pre-declared escalation, never the default:** a raw surface adds an exfiltration
+   path under prompt injection from PR text, leaves the model's "I ran it and it reddened" claim
+   unverifiable where `mutation-check`'s typed outcome cannot be forged, and conflicts with clause 1's
+   network-and-installs rule; it may be invoked only inside the clause 2 container, with a network policy and
+   no token in the guest, and only if the clause 3 replay shows the operations surface missing findings the
+   raw surface catches.
+2. **Containment — every tool-bearing seat's model and its operation server run inside a container over a
+   history-stripped, throwaway full clone (siblings included), never a pooled lane.** The container is the
+   only preventive boundary that does not depend on enumerating a provider's tools, and it also contains the
+   operation server, which runs outside Codex's own sandbox. It is ruled as a **backend-neutral OS-level
+   isolation provider** behind the seam in `we:scripts/lib/isolation-provider.mjs`, so it does not pre-empt
+   the open Apple-`container`-versus-other-backend choice on
+   [#3621](/backlog/3621-real-os-level-resource-isolation-per-dispatched-lane-is-appl/). Conditions: a
+   network policy for the guest; no auth token inside the guest (a host-side proxy, not the interim in-guest
+   path); the mount is the stripped clone only. Until the container backend exists, a tool-bearing seat runs
+   on the host only where its tool list is preventively verified (Claude); a provider whose list is only
+   detectively verifiable does not seat a tool-bearing review on the host. Where the PR's own test suite
+   executes is a separate, coexisting matter: it routes through `we:scripts/readiness/heavy-admission.mjs run
+   --container` wherever one is available.
+3. **Evidence — the mandatory Claude seats (correctness, security) do not move onto the new surface until a
+   replay parity gate passes, then a non-blocking shadow run.** Replay the recorded review corpus
+   (`we:scripts/review-corpus/mine-review-corpus.mjs`) through the operations surface and today's surface;
+   the new surface must not miss a confirmed label the old one caught. The replay includes PR #2107 and a
+   constructed severity-ambiguous case. Codex's advisory seat moves first because it blocks nothing.
+   Moving every seat on ratification is rejected as an unmeasured reduction on the land gate.
+4. **Veto — the tool-bearing Codex seat inherits the #2107 calibration veto; it is the same role.**
+   [#calibration-veto-clearing](#calibration-veto-clearing) governs: replaying #2107 through the
+   operations-only Codex seat is the clause 1 root-cause diagnostic (record which of `introduced` /
+   `worseThanBase` / `parallelizable` diverged and whether tools changed it). Trials before that finding do
+   not count; trials after carry the tool surface, the pinned `-m` and the `codex --version` (Codex reports
+   no model id), and a tool-bearing trial gets no easier bar
+   ([#model-probation-graduation-criteria](#model-probation-graduation-criteria) clause 4). A fresh role
+   identity that starts clean is rejected: it would let a configuration change wipe a veto.
+
+**Supported by default, not decisions.** Re-seat Codex on the `correctness` lens (tools on the `simplicity`
+lens change nothing); context isolation is composed (`-c project_doc_max_bytes=0`, a history-stripped
+clone, the native deny for the doctrine file, a path denial inside `inspect-file`); the Codex seat stays
+advisory and `--judge-provider=codex` stays refused, pointing at the per-request pin
+`REVIEW_PR_CODEX_ADVISORY=1`.
+
+**Not built here, by design.** This ruling builds nothing: the operation server, the four declarations, the
+`mutation-check` confinement, the launch recipes with their per-release canary, the container provider, and
+the juror-replay harness are separately-scoped, separately-prioritized items. Known defect to fix before the
+`inspect-git` operation is built: it needs history, but the strip factory clones with `--depth 1`
+(`we:scripts/lib/isolation-provider.mjs:261`). Not verified at ratification: whether the Apple guest network
+can be restricted, whether `--restricted` keeps `we:CLAUDE.md` out of a Claude reviewer's context, and
+whether Antigravity can be reduced to the server's tools at all (`#3633` found its in-process tools ignore
+its sandbox), which would make clause 1's same-surface rule unhonourable for that provider.
+
+**Lineage:** ratified via `#3675` (2026-09-21), filed under the background mechanical dispatcher epic
+`#3383`, grounded in `/research/codex-review-seat-tool-surface-and-isolation/` and
+`we:reports/2026-09-19-codex-review-seat-tool-surface.md`; Forks 1 and 2 were re-derived on merit and
+red-teamed on 2026-09-21 before ratification. Full reasoning:
+[#3675](/backlog/3675-give-codex-s-review-seat-container-scoped-write-access-to-a/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
