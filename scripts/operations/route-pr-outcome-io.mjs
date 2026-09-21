@@ -32,7 +32,7 @@
  */
 import { execFileSync } from 'node:child_process';
 
-import { deriveReviewDisposition } from '../lib/review-core.mjs';
+import { deriveReviewDisposition, UnknownReasonError } from '../lib/review-core.mjs';
 import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { parseEscalationReason } from '../review-detail.mjs';
 
@@ -96,6 +96,10 @@ export function shapeGhView(raw) {
  *     real drift between the scorer and the disposition function behind the same "nothing to route" reading an
  *     ordinary unparked PR gets — exactly the kind of silent collapse `./resolve.mjs`'s own header warns against.
  *
+ * A THROW FROM `deriveReviewDisposition` OTHER THAN `UnknownReasonError` PROPAGATES (#3495) — it is not an
+ * `unrecognized-reasons` refusal, and reclassifying it as one would present an internal failure as an ordinary
+ * "nothing to route" reading.
+ *
  * @param {{repo:string, view:{number:number,title:string,url:string,body:string,labels:string[]}}} o
  */
 export function deriveRouteFinding({ repo, view }) {
@@ -116,7 +120,12 @@ export function deriveRouteFinding({ repo, view }) {
   } else {
     try {
       disposition = deriveReviewDisposition({ reasons: escalationReason });
-    } catch {
+    } catch (err) {
+      // ONLY the one error `deriveReviewDisposition` documents for an unrecognized reason token is the
+      // `unrecognized-reasons` refusal (#3495). Anything else — a future precondition check, an internal bug —
+      // is a failure, not "nothing to route", and must surface: the same silent-collapse-between-distinct-causes
+      // `createRouteOutcomeReader` refuses for a failed `gh` call.
+      if (!(err instanceof UnknownReasonError)) throw err;
       refusal = 'unrecognized-reasons';
     }
   }

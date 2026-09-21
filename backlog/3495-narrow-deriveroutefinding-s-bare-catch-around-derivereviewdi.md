@@ -2,9 +2,11 @@
 bornAs: xqiok5m
 kind: task
 parent: "3443"
-status: open
-scope: ["we:scripts/operations/route-pr-outcome-io.mjs", "we:scripts/operations/__tests__/route-pr-outcome.test.mjs"]
+status: resolved
+scope: ["we:scripts/operations/route-pr-outcome-io.mjs", "we:scripts/operations/__tests__/route-pr-outcome.test.mjs", "we:scripts/lib/review-core.mjs", "we:scripts/lib/__tests__/review-core.test.mjs"]
 dateOpened: "2026-09-05"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
 tags: []
 ---
 
