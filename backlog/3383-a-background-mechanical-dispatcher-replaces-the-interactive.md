@@ -4509,3 +4509,58 @@ A follow-up to the schema-2 sampler commit a0c27874c, found by running the built
 **Not verified here:** on the live host the fix was checked only by the fake-process-table test, not by a second real verify-lane run; the live sampler still runs the old build until the operator reloads it.
 
 Checks: `we:scripts/operations/__tests__`, `we:scripts/__tests__` and `we:scripts/lib/__tests__` 327 files and 11497 tests pass (12 skipped); `check:standards` 0 errors.
+
+## Session update (2026-09-21) — compact tracker page and a declared tracker-refresh operation: the default page is ~55 KB (was ~307 KB), the refresh is mechanical up to the Artifact call, first page published (code commit 837588300)
+
+The operator asked whether the Prototype Tracker Artifact is up to date ("is the list just upcoming items, in priority order; there is a lot of prose, is it required and useful") and ruled a compact page (the top of the list as a table, the notes collapsed), published by a worker, with the refresh made mechanical. Built on this branch (code commit 837588300; no PR, per the prototype rule) and published once by hand: **https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv** (private). No page had been published before, so there was nothing to be stale.
+
+**What exists:**
+
+- `we:scripts/lib/prototype-tracker-compact.mjs` (new, pure) and `we:scripts/lib/prototype-tracker-compact-io.mjs`: the compact page. `node we:scripts/prototype-tracker.mjs render` now prints it by default; `--full` prints the old page, byte for byte (a golden captured before the change). New flags: `--ref` (where card titles are also read from, default `origin/main`, `none` for the checkout only), `--base-url`, `--top`. `--out` did write a file all along (the brief said it did not); it now reports bytes, not characters.
+- The page, top to bottom: title, tip sha and render time, the goal in at most two lines; NEEDS YOU (the operator-queue script's own lines, or "none", or "unavailable: <why>", never a guessed "none"); UP NEXT (top 15 as a 4-column table: rank, `#card` with a short title cut to about 40 characters from the card's own H1, band, size; claimed cards tagged; "N more", Claimed and Off-path collapsed); a counts strip; NOTES (the latest note's title and date, its full text collapsed, older notes as titles only, Done when collapsed). No script.
+- `we:scripts/operations/tracker-refresh.mjs` (declaration, a leaf like `priority-sync`), `we:scripts/operations/tracker-refresh-io.mjs`, `we:scripts/operations/tracker-refresh-state.mjs`, registered in `we:scripts/operations/run.mjs`. `node we:scripts/operations/run.mjs tracker-refresh --apply` runs: fetch, `priority-sync --apply`, `check-priority --strict`, the compact render written to the page file, a content hash against the state file (`{ url, id, lastPublishedHash, lastPublishedAt }`), and, when the page changed, the publish worker's brief. The three files are under the operator's operations directory (listed under **Files** below). Its last stdout line is exactly `publish: needed` or `publish: current`. Dry run by default. `we:scripts/operations/tracker-refresh-state.mjs verify` and `record` are the two commands the worker runs around its one Artifact call, so it never hashes or hand-writes the state.
+- `we:scripts/lib/tracker-page-hash.mjs`: the content hash. It drops the stamp (tip sha and render time) before hashing.
+- The skill text (`we:skills-src/prototype-tracker/SKILL.md`) documents the compact render and the refresh chain.
+
+**Sizes and counts (measured on this branch, 2026-09-21):** the full page 306,931 bytes; the compact page 55,608 bytes (target 60 KB). Priority list at publish: 135 ordered lines (A 62, B 43, C 30), 7 claimed, 2 off-path, 0 unwritten; 135 + 7 = the 142 lines `check-priority` reports. Before publishing I checked the page against `we:scripts/operations/operator-queue.mjs` (both "none"), the first five table rows against the first five list lines (#3768, #3653, #3674, #3772, #3696), and the counts against `check-priority`.
+
+**Forks, ruled here, open to review:**
+
+- The hash ignores the tip sha as well as the render time. The brief said the render timestamp only; but the tip changes on every push to this branch, so the page would read "needed" on every fire even when nothing it shows changed. A commit that changes what the page shows still changes the hash.
+- The throttle is a named constant, `PUBLISH_MIN_INTERVAL_MINUTES` = 30, in `we:scripts/operations/tracker-refresh.mjs`. The operation prints `dispatch: due: <command>` or `dispatch: wait` on the line above the last line; the orchestrator dispatches `dispatch-task --brief=... --session=tracker-publish` only when the last line is `publish: needed` AND that line says due. There is no orchestrator code in this repo to edit, so the wiring is the skill text plus that machine-readable line.
+- `check-priority --strict` failing inside the refresh does not stop it: the page is rendered and hashed (it shows the card as it is), the drift is printed, and the exit code is 1. A failed sync or render exits 1 with no `publish:` line, which the orchestrator reads as "do not dispatch".
+- The refresh runs `priority-sync --apply`, which edits the tracker card in the checkout and leaves it uncommitted. Whoever runs the refresh in a clone owns committing that edit.
+- Card numbers are plain text: the published page has no base URL, so `/backlog/<n>/` links would not resolve. `--base-url` turns them on.
+- `we:scripts/operations/operator-queue.mjs` is on `main`, not on this branch (the brief named it as if it were here). The page reads its NEEDS YOU section from the first checkout that has the script (the same search `/wip` makes, plus the operator's main checkout).
+- I also ran `priority-sync --apply` on this card's own section, in this commit: `main` resolved #3675, #3690 and #3495 and filed #3784 since the last sync (`check-priority --strict` failed on exactly those four). The new line for #3784 carries a written reason. 19 landed-but-open cards are still flagged for someone to resolve; I did not resolve them.
+- `we:scripts/operations/__tests__/http-adapter.test.mjs` gained one line, the map entry every new operation needs.
+
+**Done when (executable)** (the `we:` is the repo prefix, drop it to run a command):
+
+1. `node we:scripts/prototype-tracker.mjs render | wc -c` prints a number under 61440, and `node we:scripts/prototype-tracker.mjs render --full | wc -c` prints about 300000 (before: one page, 306,931).
+2. `node we:scripts/operations/run.mjs tracker-refresh --apply` ends with `publish: current` right after a publish is recorded, and with `publish: needed` after any change to a card title, the list or the notes.
+3. The state file (see **Files**) names the published page above.
+
+**Files** (operations directory, outside the repo):
+
+```
+~/workspace/.operations/tracker/prototype-tracker.html   the rendered compact page
+~/workspace/.operations/tracker/artifact.json            the state: { url, id, lastPublishedHash, lastPublishedAt }
+~/workspace/.operations/jobs/tracker-publish-task.md     the publish worker's brief
+~/workspace/.operations/jobs/tracker-publish.result.md   the worker's result
+```
+
+**Refresh by hand** (the operation does the first step; the Artifact call is the only part a session must make):
+
+```
+node we:scripts/operations/run.mjs tracker-refresh --apply
+# then, with the Artifact tool:
+#   Artifact(action:"read",    url:"https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv")
+#   Artifact(action:"publish", file_path:"~/workspace/.operations/tracker/prototype-tracker.html", url:"https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv")
+node we:scripts/operations/tracker-refresh-state.mjs record --html=~/workspace/.operations/tracker/prototype-tracker.html --url=https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv
+# or, without the operation:  node we:scripts/prototype-tracker.mjs render > page.html   and publish page.html
+```
+
+**Not verified here:** the publish worker itself (a dispatched worker reading the brief and calling the Artifact tool) has not run; I published by hand and recorded the state with the same `record` command the brief names, so the state file and the `publish: current` line are real but the worker path is not. The orchestrator's queue check does not call `tracker-refresh` yet (no code for it here). The page was seen at 390 px in Chromium (no horizontal overflow) but not on the operator's phone. This page shows the notes up to the one before this note: this note is newer than the page, so the next refresh reads `publish: needed`.
+
+Checks: 76 new tests (27 pure compact, 7 real `render` over a real git repo, 36 pure `tracker-refresh` including the state command, 6 real `tracker-refresh` over a real repo and a temp `.operations` directory); `we:scripts/operations/__tests__`, `we:scripts/__tests__` and `we:scripts/lib/__tests__` 326 files, 11,402 passed and 12 skipped (before the rebase; the 11 touched suites re-run after it: 257 passed); `check:standards` 0 errors; `check-priority --ref=origin/main --strict` OK (137 open cards, 142 lines).
