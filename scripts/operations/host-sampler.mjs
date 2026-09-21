@@ -34,7 +34,20 @@
  * CLI:  host-sampler.mjs once [--json] [--dry-run] [--quiet] [--burst] [--fresh-sessions] [--sessions-every=300]
  *       host-sampler.mjs loop [--interval=30] [--max-samples=N] [--dry-run]   (adaptive cadence; the launchd job)
  *       host-sampler.mjs rollover [--all] [--dry-run]                          (gzip finished days + write rollups)
+ *       host-sampler.mjs pressure [--window=10m] [--at=<ISO>] [--json] [--dir=<telemetry dir>]  (smoothed admit/hold brake, read-only)
+ *       host-sampler.mjs lane-load [--days=7] [--json] [--dir=<telemetry dir>]     (the lane load model over the last N days, read-only)
+ *       host-sampler.mjs calibrate --family=vitest --concurrency=1,2,3,4 [--reps=1] [--dry-run] [--yes]   (loads the machine: plan only without --yes)
  * Never kills anything, never touches a limit, never writes outside its own state dir + the telemetry dir.
+ *
+ * SCHEMA 2 (capacity refinement, 2026-09-21; every record carries `attributes.schema = 2` and `attributes.quality`).
+ * Purely ADDITIVE: every schema-1 record and field is unchanged, the file stays JSONL, existing readers ignore the new
+ * names. It answers "how much to RESERVE for the system/VS Code, for heavy commands and for lanes":
+ *   host-sampler-selfcheck.mjs   TRUE host user/sys/idle CPU (kernel tick deltas, no spawn), own overhead, heartbeat, quality
+ *   host-sampler-classes.mjs     the fixed command-class table (`check-standards`, `verify-lane`, `system-macos`, ...)
+ *   host-sampler-attribution.mjs every process joined to its lane and its heavy-admission holder; worker lifecycle
+ *   host-sampler-rollup.mjs      hourly per-class percentiles, burst episodes, `reservation-inputs` (+ `lane-load-model`), `smoothedPressure`
+ *   host-sampler-episodes.mjs    one EPISODE record per heavy command run (start, end, CPU-seconds, peak RSS, concurrency), the hardware profile
+ *   host-sampler-calibrate.mjs   `calibrate`: a fixed reference workload solo and k-concurrent (opt-in: prints a plan unless --yes)
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -46,9 +59,15 @@ import { fileURLToPath } from 'node:url';
 import { redactCommandLine } from './command-redact.mjs';
 import { BURST_TOP_PROCESSES, TOP_PROCESSES, diskRate, parsePsWide, pickTop, readCwds, readExtras, selectAndAttribute } from './host-sampler-extras.mjs';
 import { GUARD_TIERS, freeBytesOf, guardTier, maybeEscalate, runRollover } from './host-sampler-retention.mjs';
+import { PRESSURE_DEFAULTS, parseDuration, pressureSamples, readLaneLoadModel, readPressureSamples, renderLaneLoad, renderPressure, replayPressure } from './host-sampler-rollup.mjs';
+import { cleanupRealDir, makeRealRunner, parseLevels, prepareRealDir, runCalibration } from './host-sampler-calibrate.mjs';
 import {
   TELEMETRY_ROOT, createFileTelemetryStore, dayKey, newMetric, resourceAttributes, serializeTelemetryEvent, telemetryDir, telemetryEnabled,
 } from './telemetry-store.mjs';
+import { admissionDetail, attributeProcesses, diffWorkers, holderTable, sessionPidMap, summarizeWorkers } from './host-sampler-attribution.mjs';
+import { HARDWARE_KEYS, findHeavyRuns, hardwareProfileDue, nextWaiters, parseHardwareProfile, parsePsTimes, parseThreadCounts, stepEpisodes } from './host-sampler-episodes.mjs';
+import { COMMAND_CLASSES, HEAVY_CLASSES, classifyCommandClass, summarizeClasses } from './host-sampler-classes.mjs';
+import { SCHEMA_VERSION, assessQuality, heartbeatGap, makeChildMeter, measureHostCpu } from './host-sampler-selfcheck.mjs';
 import { classifySession, VERDICTS } from '../conveyor/session-verdicts.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES, LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
@@ -302,16 +321,38 @@ export function buildSample(raw) {
   const sessions = raw.agents ? { ...summarizeSessions({ agents: raw.agents.agents, facts, now: raw.nowMs }), ageS: raw.sessionsAgeS } : null;
   const lanes = reconcileLanes({ lanes: raw.lanes, nowMs: raw.nowMs, psPids, psCommands, agentCwds: liveAgents.map((a) => a.cwd).filter(Boolean) });
   const n = raw.mode === 'burst' ? BURST_TOP_PROCESSES : TOP_PROCESSES;
+  // ── schema 2: command classes, lane/holder attribution, worker lifecycle (all pure over the same rows) ──
+  const agentRows = (raw.agents?.agents ?? []).map((a) => ({ ...a, pid: Number.isInteger(a.pid) && psPids.has(a.pid) ? a.pid : null }));
+  const sessionByPid = sessionPidMap(agentRows);
+  const classes = tier.families ? summarizeClasses(rows, { sessionByPid }) : null;
+  const attribution = tier.families ? attributeProcesses({ rows, lanes: raw.lanes ?? [], cwds: raw.cwds ?? {}, sessionByPid, admission: raw.admission ?? null, nowMs: raw.nowMs }) : null;
+  const admissionInfo = tier.families ? admissionDetail({ admission: raw.admission ?? null, nowMs: raw.nowMs }) : null;
+  const workerSummary = tier.families && raw.agents ? summarizeWorkers({ agents: agentRows, rows, sessionByPid }) : null;
+  const lifecycle = workerSummary ? diffWorkers({ prev: raw.workerState?.prev, live: workerSummary.live, nowMs: raw.nowMs, prevMs: raw.workerState?.prevMs ?? null }) : null;
+  // heavy-run EPISODES: one record per heavy command invocation, when it ends (operator addition 2026-09-21)
+  const runs = tier.families ? findHeavyRuns({ rows, lanes: raw.lanes ?? [], cwds: raw.cwds ?? {}, sessionByPid, holders: holderTable({ admission: raw.admission ?? null, rows, nowMs: raw.nowMs }), nowMs: raw.nowMs, redact: redactCommandLine }) : [];
+  const episodes = tier.families
+    ? stepEpisodes({ prev: raw.episodeState?.prev, runs, probe: raw.runProbe ?? {}, waiters: raw.episodeState?.waiters ?? {}, nowMs: raw.nowMs, intervalS: raw.intervalS ?? DEFAULT_INTERVAL_SEC,
+      ctx: { activeLanes: lanes.leased, workersLive: workerSummary?.total ?? null, busyPct: raw.hostCpu?.busyPct ?? null, idlePct: raw.hostCpu?.idlePct ?? null } })
+    : null;
+  const quality = assessQuality({ psRows: rows, hostCpu: raw.hostCpu ?? null, extras: raw.extras ?? null, expectExtras: tier.detail && !raw.noExtrasExpected, admission: raw.admission ?? null, agents: raw.agents ?? null, expectAgents: false, childFailed: raw.childFailed ?? [] });
   const top = tier.detail
     ? selectAndAttribute({ rows, agents: liveAgents, lanes: raw.lanes ?? [], cwds: raw.cwds ?? {}, n, familyOf: classifyFamily, redact: redactCommandLine })
     : [];
   return {
     at: raw.at, host: raw.host, families, sessions, lanes, top, tier: tier.name, mode: raw.mode ?? 'normal', intervalS: raw.intervalS ?? DEFAULT_INTERVAL_SEC,
     admission: raw.admission, probe: raw.probe, extras: tier.detail ? (raw.extras ?? null) : null, ioRate: raw.ioRate ?? null, psRowCount: rows.length,
+    schema: SCHEMA_VERSION, quality: quality.quality, failedProbes: quality.failed, hostCpu: raw.hostCpu ?? null, classes, attribution, admissionInfo,
+    workers: workerSummary, workerEvents: lifecycle?.events ?? [], workerNext: lifecycle?.next ?? null,
+    heavyRuns: runs.length, episodes: episodes?.finished ?? [], episodeNext: episodes?.next ?? null,
+    waitersNext: tier.families ? nextWaiters(raw.episodeState?.waiters, raw.admission ?? null, raw.nowMs) : null,
+    hardware: tier.families ? (raw.hardwareProfile ?? null) : null,
   };
 }
 
 const baseName2 = (p) => String(p).replace(/^.*\//, '');
+/** A record is capped at 3800 bytes; a serializer that sheds attributes would silently drop lane figures, so bound them. */
+const MAX_LANES_RECORDED = 12;
 
 /**
  * PURE. Shape a sample into the metric-sample array `newMetric` records, gated by the guard tier: `full` writes
@@ -323,7 +364,7 @@ const baseName2 = (p) => String(p).replace(/^.*\//, '');
 export function sampleToMetrics(s) {
   const tier = GUARD_TIERS.find((t) => t.name === s.tier) ?? GUARD_TIERS[0];
   if (!tier.light) return [];
-  const base = { source: SOURCE, sample: s.at, mode: s.mode, interval_s: s.intervalS };
+  const base = { source: SOURCE, sample: s.at, mode: s.mode, interval_s: s.intervalS, ...(s.schema ? { schema: s.schema, quality: s.quality } : {}) };
   const m = (name, value, unit, attributes = {}) => ({ name, value: Number.isFinite(value) ? value : 0, unit, attributes: { ...base, ...attributes } });
   const out = [];
   const [l1, l5, l15] = s.host.load ?? [];
@@ -331,6 +372,11 @@ export function sampleToMetrics(s) {
   out.push(m('host.mem.free_bytes', s.host.freeBytes, 'bytes'), m('host.mem.total_bytes', s.host.totalBytes, 'bytes'));
   if (s.probe) out.push(m('host.probe.spawn_ms', s.probe.spawnMs, 'ms'), m('host.probe.spin_overshoot_ms', s.probe.spinOvershootMs, 'ms'));
   if (!tier.families) return out;
+  if (s.hostCpu) {
+    const c = s.hostCpu;
+    out.push(m('host.cpu.busy_pct', c.busyPct, 'percent', { user_pct: c.userPct, sys_pct: c.sysPct, nice_pct: c.nicePct, idle_pct: c.idlePct, window_s: c.windowS, cpu_source: c.source, ncpu: c.cores, hw_ncpu: s.host.hwNcpu ?? null, physical_cpu: s.host.physicalCpu ?? null, core_busy_max: c.coreBusyMax, cores_over90: c.coresOver90 }));
+  }
+  if (s.self) out.push(m('host.sampler.self', s.self.durationMs, 'ms', { cpu_ms: s.self.cpuMs, child_wall_ms: s.self.childWallMs, child_calls: s.self.childCalls, roster_ms: s.self.rosterMs, cpu_ms_upper_bound: s.self.cpuMsUpperBound, heartbeat_gap_s: s.self.heartbeatGapS, heartbeat_missed: s.self.heartbeatMissed, heartbeat_missed_total: s.self.heartbeatMissedTotal, failed: (s.failedProbes ?? []).join(',') }));
 
   const cpu = {}; const n = {}; const mem = {};
   let cpuTotal = 0; let nTotal = 0; let memTotal = 0;
@@ -340,6 +386,49 @@ export function sampleToMetrics(s) {
     cpuTotal += x.cpuPct; nTotal += x.count; memTotal += x.memBytes;
   }
   out.push(m('host.family.cpu_pct', Math.round(cpuTotal * 10) / 10, 'percent', cpu), m('host.family.count', nTotal, 'count', n), m('host.family.mem_bytes', memTotal, 'bytes', mem));
+  if (s.classes) {
+    const cc = {}; const cn = {}; const cm = {};
+    let ct = 0; let nt = 0; let mt = 0;
+    for (const k of COMMAND_CLASSES) { const x = s.classes[k]; cc[`cpu.${k}`] = x.cpuPct; cn[`n.${k}`] = x.count; cm[`mem.${k}`] = x.memBytes; ct += x.cpuPct; nt += x.count; mt += x.memBytes; }
+    out.push(m('host.class.cpu_pct', Math.round(ct * 10) / 10, 'percent', cc), m('host.class.count', nt, 'count', cn), m('host.class.mem_bytes', mt, 'bytes', cm));
+  }
+  if (s.attribution) {
+    const a = s.attribution;
+    const laneAttrs = { unlaned_cpu: a.unlaned.cpuPct, unlaned_mem: a.unlaned.memBytes, share: a.laneShare };
+    const lanes = Object.entries(a.perLane).sort((x, y) => y[1].cpuPct - x[1].cpuPct || x[0].localeCompare(y[0])).slice(0, MAX_LANES_RECORDED);
+    for (const [k, v] of lanes) {
+      laneAttrs[`cpu.${k}`] = v.cpuPct; laneAttrs[`mem.${k}`] = v.memBytes; laneAttrs[`n.${k}`] = v.count;
+      laneAttrs[`hcpu.${k}`] = Math.round(HEAVY_CLASSES.reduce((t, c) => t + (v.byClass[c]?.cpuPct ?? 0), 0) * 10) / 10; // the lane's heavy-command CPU: its heavy phases vs its light ones
+    }
+    laneAttrs.lanes = Object.keys(a.perLane).length;
+    out.push(m('lane.attribution.cpu_pct', Object.values(a.perLane).reduce((t, v) => t + v.cpuPct, 0), 'percent', laneAttrs));
+    out.push(m('host.heavy.roots', a.heavyRoots.count, 'count', {
+      by_class: Object.entries(a.heavyRoots.byClass).sort(([x], [y]) => x.localeCompare(y)).map(([k, v]) => `${k}:${v}`).join(','),
+      unadmitted_cpu: a.unadmittedHeavy.cpuPct, unadmitted_n: a.unadmittedHeavy.count, unadmitted_mem: a.unadmittedHeavy.memBytes, held: s.admission?.heldCount ?? null, cap: s.admission?.cap ?? null,
+    }));
+    for (const h of a.holders) {
+      out.push(m('heavy.admission.holder', h.heldForS ?? 0, 'count', {
+        holder: h.id, slot: h.slot, owner: baseName2(h.owner ?? ''), pid: h.pid, alive: h.alive, unslotted: h.unslotted, elapsed_s: h.elapsedS,
+        cpu_pct: h.cpuPct, mem_bytes: h.memBytes, procs: h.count, classes: Object.entries(h.byClass).map(([k, v]) => `${k}:${v.count}`).join(','),
+      }));
+    }
+  }
+  if (s.admissionInfo && s.admissionInfo.stale.length) {
+    out.push(m('heavy.admission.stale_markers', s.admissionInfo.stale.length, 'count', {
+      owners: s.admissionInfo.stale.map((x) => `${x.pool ? `${x.pool}/` : ''}${x.owner}@${String(x.requestedAt ?? '').slice(0, 10)}`).join(',').slice(0, 300), oldest_age_s: s.admissionInfo.oldestStaleAgeS, flagged: 'stale-not-deleted',
+    }));
+  }
+  for (const e of s.episodes ?? []) out.push(m('heavy.run.episode', e.wall_s, 'count', e));
+  if (s.hardware) {
+    const h = s.hardware;
+    out.push(m('host.hardware.profile', h.ncpu, 'count', { ncpu: h.ncpu, physical_cpu: h.physicalCpu, logical_cpu: h.logicalCpu, performance_cores: h.performanceCores, efficiency_cores: h.efficiencyCores, mem_bytes: h.memBytes, mem_gib: h.memGiB, chip: h.chip, model: h.model, os_version: h.osVersion, os_build: h.osBuild, architecture: h.architecture }));
+  }
+  if (s.workers) {
+    const w = s.workers; const wa = { no_pid: w.rosterWorkingNoPid, roster_age_s: s.sessions?.ageS ?? null };
+    for (const [k, v] of Object.entries(w.byKind)) { wa[`n.${k}`] = v.count; wa[`cpu.${k}`] = v.cpuPct; wa[`mem.${k}`] = v.memBytes; wa[`heavy_cpu.${k}`] = v.heavyCpuPct; }
+    out.push(m('host.workers.live', w.total, 'count', wa));
+    for (const e of s.workerEvents) out.push(m('dispatch.worker.event', 1, 'count', { event: e.event, kind: e.kind, name: e.name, session_id: e.sessionId, at: e.at, discovered: e.discovered }));
+  }
   if (s.sessions) {
     const attrs = { total: s.sessions.total, unknown: s.sessions.unknownLiveness, ageS: s.sessions.ageS };
     for (const [v, c] of Object.entries(s.sessions.verdicts)) attrs[`verdict.${v}`] = c;
@@ -456,20 +545,50 @@ async function loadSessions({ dir, nowMs, everySec, fresh, noRefresh = false, re
   }
 }
 
+/** Set once a hardware profile record has been written by THIS process (the record is due once per sampler start, then daily). */
+const hardwareEmitted = { v: false };
+/** Test hook: forget that this process already recorded the hardware profile. */
+export const resetHardwareEmitted = () => { hardwareEmitted.v = false; };
+export const MAX_PROBE_PIDS = 300;
+
+/** IO. The hardware profile from ONE `sysctl` (constants, so the caller caches it in the state file). A missing key (no
+ *  `hw.perflevel*` on Intel) makes sysctl exit non-zero but the rest still prints, which {@link makeChildMeter} accepts. */
+function readHardware(exec) {
+  try {
+    const profile = parseHardwareProfile(exec('sysctl', [...HARDWARE_KEYS], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }));
+    return profile ? { hwNcpu: profile.ncpu, physicalCpu: profile.physicalCpu, ...profile } : null;
+  } catch { return null; }
+}
+
+const uniqueByPid = (rows) => { const seen = new Set(); return rows.filter((r) => (seen.has(r.pid) ? false : (seen.add(r.pid), true))); };
+
+/** The classes whose processes are worth a cwd lookup so their LANE can be attributed (system daemons and the operator's apps are not). */
+const CWD_LOOKUP_CLASSES = new Set(COMMAND_CLASSES.filter((k) => !['system-macos', 'vscode', 'other', 'claude-infra'].includes(k)));
+export const MAX_CWD_LOOKUPS = 60;
+
+/** PURE. The processes to look a cwd up for: the lane-relevant classes, busiest first, at most {@link MAX_CWD_LOOKUPS}. */
+export function pickCwdCandidates(rows, cap = MAX_CWD_LOOKUPS) {
+  return rows.filter((r) => CWD_LOOKUP_CLASSES.has(classifyCommandClass(r.command))).sort((a, b) => b.pcpu - a.pcpu || b.rssKb - a.rssKb || a.pid - b.pid).slice(0, cap);
+}
+
 /** Read every raw fact for one sample. One `ps`, one lease sweep, one admission read, two probes, a few sub-10 ms
  *  collectors, and `lsof` only for top processes whose cwd is not cached. */
 export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT_SESSIONS_EVERY_SEC, fresh = false, mode = 'normal', intervalS = DEFAULT_INTERVAL_SEC, tier = GUARD_TIERS[0], io = {} } = {}) {
   const nowMs = (io.nowMs ?? Date.now)();
   const cpuNow = io.hrMs ?? (() => Number(process.hrtime.bigint()) / 1e6);
+  const meter = io.meter ?? makeChildMeter({ now: cpuNow });
+  const selfMeta = { t0Hr: cpuNow(), cpu0: process.cpuUsage(), meter, rosterMs: 0 };
   const dir = stateDir(env);
   const stateFile = join(dir, 'state.json');
   const state = io.state ?? readJson(stateFile, {});
   const burst = mode === 'burst';
   const psText = io.ps
     ? io.ps()
-    : (() => { try { return execFileSync('ps', ['-Awwo', 'pid=,ppid=,pcpu=,rss=,etime=,command='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } })();
+    : (() => { try { return meter.exec('ps', ['-Awwo', 'pid=,ppid=,pcpu=,rss=,etime=,command='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } })();
   const psRows = parsePsWide(psText);
+  const rosterT0 = cpuNow();
   const sessions = io.sessions ? { data: io.sessions, ageS: 0 } : await loadSessions({ dir, nowMs, everySec: sessionsEverySec, fresh, noRefresh: burst });
+  if (sessions.ageS === 0 && !io.sessions) selfMeta.rosterMs = Math.round((cpuNow() - rosterT0) * 10) / 10; // wall of the `claude agents --json` refresh (an upper bound on its CPU)
   const poolParent = defaultPoolRoot(CHECKOUT_ROOT, env);
   let admission = io.admission ?? null;
   if (!admission) try {
@@ -477,17 +596,33 @@ export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT
     admission = existsSync(lockRoot) ? admissionStatus({ lockRoot, cap: resolveCap(env) }) : { cap: resolveCap(env), heldCount: 0, freeCount: resolveCap(env), held: [], waiting: [], staleWaiting: [] };
   } catch { /* unreadable admission root = no admission facts */ }
   const probe = io.probe ?? {
-    spawnMs: measureSpawn({ now: cpuNow, run: () => { spawnSync(process.execPath, ['-e', '0'], { stdio: 'ignore' }); } }),
+    spawnMs: measureSpawn({ now: cpuNow, run: () => { meter.spawnSync(process.execPath, ['-e', '0'], { stdio: 'ignore' }); } }),
     spinOvershootMs: spinOvershoot({ now: cpuNow }),
   };
   const lanes = io.lanes ?? readLanes(poolParent);
+  const nextState = { ...state };
+  // TRUE host CPU (kernel tick deltas over the window since the previous sample) and the hardware core count, read once.
+  let hostCpu = io.hostCpu ?? null;
+  if (!io.hostCpu && !io.ps) { const r = measureHostCpu({ prev: state.cpuTicks ?? null, nowMs }); hostCpu = r.cpu; nextState.cpuTicks = r.ticks; }
+  let hw = io.hw ?? state.hw ?? null;
+  if (!hw && !io.ps) { hw = readHardware(meter.exec); if (hw) nextState.hw = hw; }
+  const hardwareProfile = hw && hardwareProfileDue({ emittedThisProcess: hardwareEmitted.v, lastAtMs: state.hwProfileAtMs, nowMs }) && !io.ps ? hw : null;
+  // heavy-run probe: cumulative CPU time and thread counts of the processes of any heavy run. TWO cheap `ps` reads (~25 ms
+  // each) only WHILE a heavy run exists; none otherwise.
+  let runProbe = io.runProbe ?? null;
+  if (!runProbe && !io.ps) {
+    const pids = findHeavyRuns({ rows: psRows, nowMs }).flatMap((r) => r.treePids).slice(0, MAX_PROBE_PIDS);
+    if (pids.length) {
+      const read = (args) => { try { return meter.exec('ps', args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } };
+      runProbe = { cpu: parsePsTimes(read(['-o', 'pid=,time=', '-p', pids.join(',')])), threads: parseThreadCounts(read(['-M', '-o', 'pid=', '-p', pids.join(',')])) };
+    }
+  }
 
   // extras + attribution inputs (detail tier only)
   let extras = null; let ioRate = null; let cwds = {};
-  const nextState = { ...state };
   if (tier.detail) {
     const slowDue = !burst && (!state.slow || nowMs - state.slow.atMs >= SLOW_EVERY_SEC * 1000);
-    extras = io.extras ?? readExtras({ slow: slowDue });
+    extras = io.extras ?? readExtras({ slow: slowDue, exec: meter.exec });
     if (slowDue) nextState.slow = { atMs: nowMs, therm: extras.therm, disk: extras.disk };
     else if (state.slow) { extras = { ...extras, therm: extras.therm ?? state.slow.therm, disk: extras.disk ?? state.slow.disk }; }
     if (extras.io) {
@@ -496,12 +631,12 @@ export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT
     }
     const cache = state.cwds ?? {};
     const startKey = (r) => `${r.pid}:${Math.floor((nowMs / 1000 - (r.etimeS ?? 0)) / 60)}`;
-    const wanted = pickTop(psRows, burst ? BURST_TOP_PROCESSES : TOP_PROCESSES);
+    const wanted = uniqueByPid([...pickTop(psRows, burst ? BURST_TOP_PROCESSES : TOP_PROCESSES), ...pickCwdCandidates(psRows)]);
     const keep = {};
     const missing = [];
     for (const r of wanted) { const k = startKey(r); if (cache[k]) { keep[k] = cache[k]; cwds[r.pid] = cache[k]; } else missing.push(r); }
     if (missing.length && !burst) {
-      const fresh2 = io.cwds ? io.cwds(missing.map((r) => r.pid)) : readCwds(missing.map((r) => r.pid));
+      const fresh2 = io.cwds ? io.cwds(missing.map((r) => r.pid)) : readCwds(missing.map((r) => r.pid), { exec: meter.exec });
       for (const r of missing) if (fresh2[r.pid]) { keep[startKey(r)] = fresh2[r.pid]; cwds[r.pid] = fresh2[r.pid]; }
     }
     nextState.cwds = keep;
@@ -509,8 +644,27 @@ export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT
   if (!io.state && !io.noStateWrite) writeJsonAtomic(stateFile, nextState);
   return {
     at: new Date(nowMs).toISOString(), nowMs,
-    host: io.host ?? { load: loadavg(), cpuCount: cpus().length, freeBytes: freemem(), totalBytes: totalmem() },
+    host: { ...(io.host ?? { load: loadavg(), cpuCount: cpus().length, freeBytes: freemem(), totalBytes: totalmem() }), hwNcpu: hw?.hwNcpu ?? null, physicalCpu: hw?.physicalCpu ?? null },
     psRows, agents: sessions.data, sessionsAgeS: sessions.ageS, lanes, admission, probe, extras, ioRate, cwds, tier, mode, intervalS,
+    hostCpu, childFailed: meter.summary().failed, noExtrasExpected: !!io.extras, selfMeta,
+    workerState: { prev: state.workers, prevMs: state.lastSample?.atMs ?? null },
+    episodeState: { prev: state.runs, waiters: state.waiters ?? {} }, runProbe, hardwareProfile,
+    heartbeat: { prevAtMs: state.lastSample?.atMs ?? null, prevExpectedS: state.lastSample?.intervalS ?? null, missedTotal: Number(state.heartbeatMissed) || 0 },
+  };
+}
+
+/** The sampler's own cost for this sample: wall, own CPU, the children's wall (an upper bound on their CPU), heartbeat. */
+function finalizeSelf(raw, io = {}) {
+  const hr = io.hrMs ?? (() => Number(process.hrtime.bigint()) / 1e6);
+  const m = raw.selfMeta;
+  const child = m.meter.summary();
+  const used = process.cpuUsage(m.cpu0);
+  const cpuMs = Math.round(((used.user + used.system) / 1000) * 10) / 10;
+  const hb = heartbeatGap({ prevAtMs: raw.heartbeat.prevAtMs, nowMs: raw.nowMs, expectedS: raw.intervalS, prevExpectedS: raw.heartbeat.prevExpectedS, missedTotal: raw.heartbeat.missedTotal });
+  return {
+    durationMs: Math.round((hr() - m.t0Hr) * 10) / 10, cpuMs, childWallMs: child.wallMs, childCalls: child.calls, rosterMs: m.rosterMs,
+    cpuMsUpperBound: Math.round((cpuMs + child.wallMs + m.rosterMs) * 10) / 10,
+    heartbeatGapS: hb.gapS, heartbeatMissed: hb.missed, heartbeatMissedTotal: hb.missedTotal,
   };
 }
 
@@ -535,8 +689,18 @@ export async function runOnce({ env = process.env, dryRun = false, fresh = false
       if (tier.name !== 'full') maybeEscalate({ tier, freeBytes: free, dir: telDir, escalationsDir: io.escalationsDir ?? join(TELEMETRY_ROOT, '.operations', 'escalations'), now: (io.nowMs ?? Date.now)() });
     }
     const raw = await collectRaw({ env, sessionsEverySec, fresh, mode, intervalS, tier, io: dryRun ? { ...io, noStateWrite: true } : io });
-    const sample = buildSample(raw);
+    const built = buildSample(raw);
+    const sample = { ...built, self: finalizeSelf(raw, io) };
     const metrics = sampleToMetrics(sample);
+    if (!dryRun && !io.state) {
+      const stateFile = join(stateDir(env), 'state.json');
+      const cur = readJson(stateFile, {});
+      const next = { ...cur, lastSample: { atMs: raw.nowMs, intervalS: raw.intervalS }, heartbeatMissed: sample.self.heartbeatMissedTotal };
+      if (built.workerNext) next.workers = built.workerNext;
+      if (built.episodeNext) { next.runs = built.episodeNext; next.waiters = built.waitersNext ?? {}; }
+      if (built.hardware) { next.hwProfileAtMs = raw.nowMs; hardwareEmitted.v = true; }
+      writeJsonAtomic(stateFile, next);
+    }
     if (dryRun) return { sample, written: 0, failed: 0, tier: tier.name };
     const resource = resourceAttributes();
     const day = dayKey(sample.at);
@@ -577,6 +741,16 @@ function renderSummary(r) {
   const x = s.extras;
   if (x?.mem) lines.push(`  memory: available ${(x.mem.availableBytes / 1024 ** 3).toFixed(1)} GiB, compressed ${(x.mem.compressedBytes / 1024 ** 3).toFixed(1)} GiB, swap used ${(x.swap?.swapUsedBytes / 1024 ** 3 || 0).toFixed(2)} GiB, pressure level ${x.swap?.pressureLevel ?? '?'}`);
   if (x?.disk || s.ioRate || x?.therm) lines.push(`  disk/thermal: ${x?.disk ? `${(x.disk.freeBytes / 1024 ** 3).toFixed(0)} GiB free` : 'free ?'}, io ${s.ioRate ? `${(s.ioRate.bytesPerS / 1024 ** 2).toFixed(1)} MiB/s` : 'n/a (first sample)'}, cpu speed limit ${x?.therm ? `${x.therm.cpuSpeedLimitPct}%` : '?'}`);
+  if (s.hostCpu) lines.push(`  host CPU (${s.hostCpu.source}, ${s.hostCpu.windowS}s window): user ${s.hostCpu.userPct}% sys ${s.hostCpu.sysPct}% idle ${s.hostCpu.idlePct}% busy ${s.hostCpu.busyPct}% on ${s.hostCpu.cores} cores (hw.ncpu ${s.host.hwNcpu ?? '?'}), busiest core ${s.hostCpu.coreBusyMax}%`);
+  if (s.classes) lines.push(`  classes (cpu% of one core / procs): ${COMMAND_CLASSES.filter((k) => s.classes[k].count && (s.classes[k].cpuPct >= 1 || k.startsWith('claude') || k === 'vitest')).map((k) => `${k} ${s.classes[k].cpuPct}/${s.classes[k].count}`).join(', ')}`);
+  if (s.attribution) {
+    const a = s.attribution;
+    lines.push(`  lanes: ${Object.keys(a.perLane).length} with processes (${Object.entries(a.perLane).slice(0, 4).map(([k, v]) => `${k.replace(/^web-everything\//, '')} ${v.cpuPct}%/${Math.round(v.memBytes / 1024 ** 2)}MB`).join(', ')}); ${Math.round((a.laneShare ?? 0) * 100)}% of all CPU is lane-attributed; heavy commands running ${a.heavyRoots.count} (${a.unadmittedHeavy.count} processes outside any admission holder)`);
+    for (const h of a.holders) lines.push(`  holder ${h.id} pid ${h.pid ?? '?'} held ${h.heldForS ?? '?'}s: ${h.cpuPct}% CPU, ${Math.round(h.memBytes / 1024 ** 2)} MB, ${h.count} procs`);
+  }
+  if (s.admissionInfo?.stale.length) lines.push(`  STALE waiting markers (flagged, not deleted): ${s.admissionInfo.stale.map((x) => `${x.owner}@${String(x.requestedAt).slice(0, 10)}`).join(', ')}`);
+  if (s.workers) lines.push(`  workers live: ${Object.entries(s.workers.byKind).filter(([, v]) => v.count).map(([k, v]) => `${k} ${v.count} (${v.cpuPct}%/${Math.round(v.memBytes / 1024 ** 2)}MB)`).join(', ') || 'none'}${s.workerEvents.length ? `; events: ${s.workerEvents.map((e) => `${e.event} ${e.name}`).join(', ')}` : ''}`);
+  if (s.self) lines.push(`  self: ${s.self.durationMs} ms wall, ${s.self.cpuMs} ms own CPU, children <= ${s.self.childWallMs} ms, roster ${s.self.rosterMs} ms, heartbeat gap ${s.self.heartbeatGapS ?? 'n/a'} s; quality ${s.quality}${s.failedProbes?.length ? ` (failed: ${s.failedProbes.join(', ')})` : ''}`);
   const unattr = s.top.filter((p) => p.session === 'unattributed').length;
   lines.push(`  top ${s.top.length} processes recorded (${s.top.length - unattr} session-attributed, ${s.top.filter((p) => p.lane !== 'unattributed').length} lane-attributed)`);
   for (const p of s.top.slice(0, 6)) lines.push(`    ${String(p.cpuPct).padStart(6)}%  ${p.family.padEnd(14)} ${p.lane.padEnd(24)} ${String(p.session).padEnd(16)} ${p.command.slice(0, 70)}`);
@@ -585,7 +759,8 @@ function renderSummary(r) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function main(argv = process.argv.slice(2), env = process.env) {
+/** Test seam for the `calibrate` command: a fake runner so no test ever loads the machine. */
+export async function main(argv = process.argv.slice(2), env = process.env, calibrateIo = null) {
   const cmd = argv.find((a) => !a.startsWith('--')) || 'once';
   const flag = (n) => argv.find((a) => a === `--${n}` || a.startsWith(`--${n}=`));
   const val = (n, d) => { const f = flag(n); return f && f.includes('=') ? f.slice(f.indexOf('=') + 1) : d; };
@@ -601,6 +776,51 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     const res = runRollover({ dir: telemetryDir(), all: !!flag('all'), dryRun: !!flag('dry-run') });
     process.stdout.write(`${res.length ? res.map((x) => `${x.day}: ${x.ok ? `ok ${x.rawBytes} -> ${x.gzBytes} bytes` : `SKIPPED ${x.reason}`}`).join('\n') : 'nothing due'}\n`);
     return 0;
+  }
+  if (cmd === 'pressure') {
+    const windowMs = parseDuration(val('window', '10m'));
+    if (!windowMs) { process.stderr.write('host-sampler: --window must look like 10m, 90s or 1h\n'); return 2; }
+    // `--at=<ISO time>` evaluates the brake AS OF that instant (to replay a finished file); the default is now
+    const at = val('at', null); const atMs = at ? Date.parse(at) : Date.now();
+    if (!Number.isFinite(atMs)) { process.stderr.write('host-sampler: --at must be an ISO time such as 2026-09-21T12:30:00Z\n'); return 2; }
+    const nowMs = atMs;
+    const { events, files } = readPressureSamples({ dir: val('dir', null) ? resolve(val('dir', '')) : telemetryDir(), nowMs, leadMs: 6 * windowMs });
+    const r = replayPressure({ samples: pressureSamples(events), windowMs, now: nowMs });
+    process.stdout.write(`${flag('json') ? JSON.stringify({ ...r, thresholds: PRESSURE_DEFAULTS, provisional: true, files }, null, 2) : renderPressure(r, { nowMs })}\n`);
+    return 0;
+  }
+  if (cmd === 'lane-load') {
+    const days = Math.max(1, Math.min(60, Number(val('days', 7)) || 7));
+    const { model, days: read } = readLaneLoadModel({ dir: val('dir', null) ? resolve(val('dir', '')) : telemetryDir(), nowMs: Date.now(), days });
+    process.stdout.write(`${flag('json') ? JSON.stringify({ ...model, daysRead: read }, null, 2) : renderLaneLoad(model)}\n`);
+    return 0;
+  }
+  if (cmd === 'calibrate') {
+    const levels = parseLevels(val('concurrency', '1,2,3,4'));
+    if (!levels) { process.stderr.write('host-sampler: --concurrency must be a comma list of integers 1..8, e.g. 1,2,3,4\n'); return 2; }
+    const yes = !!flag('yes');
+    const dryRun = !yes || !!flag('dry-run'); // the default, and anything short of an explicit --yes, is the plan only
+    const io = calibrateIo ?? {};
+    const target = dryRun ? null : createFileTelemetryStore({ dir: telemetryDir() });
+    const resource = dryRun ? null : resourceAttributes();
+    const r = await runCalibration({
+      family: val('family', 'vitest'), levels, reps: Math.max(1, Number(val('reps', 1)) || 1), yes, dryRun,
+      runner: io.runner ?? makeRealRunner(), prepareDir: io.prepareDir ?? prepareRealDir(CHECKOUT_ROOT), cleanupDir: io.cleanupDir ?? cleanupRealDir,
+      record: (rec) => {
+        if (!target) return;
+        // a calibration record travels with the host's load1 and core count (the same `sample` id) so the readers, which
+        // group records into samples around `host.cpu.load1`, see it; `mode: 'calibration'` keeps it out of the load statistics
+        const at = { source: SOURCE, sample: `calibration-${rec.id}`, mode: 'calibration', interval_s: 0, schema: SCHEMA_VERSION, quality: 'ok' };
+        const lines = [
+          newMetric({ name: 'host.cpu.load1', kind: 'sampler', value: loadavg()[0], unit: 'count', timestamp: rec.end, attributes: at, resource }),
+          newMetric({ name: 'host.cpu.count', kind: 'sampler', value: cpus().length, unit: 'count', timestamp: rec.end, attributes: at, resource }),
+          newMetric({ name: 'heavy.run.episode', kind: 'sampler', value: rec.wall_s, unit: 'count', timestamp: rec.end, attributes: { ...at, ...rec }, resource }),
+        ].map((e) => serializeTelemetryEvent(e));
+        for (const line of lines) if (line) target.append(line, dayKey(rec.end));
+      },
+    });
+    process.stdout.write(`${r.error ? `calibrate: ${r.error}` : r.text}\n`);
+    return r.error ? 2 : 0;
   }
   if (cmd === 'loop') {
     const releaseLoop = acquireLock(join(stateDir(env), 'loop.lock'));
@@ -631,7 +851,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     } finally { releaseLoop(); }
     return 0;
   }
-  process.stderr.write('usage: host-sampler.mjs once [--json] [--dry-run] [--quiet] [--fresh-sessions] [--sessions-every=300] | loop [--interval=30] [--max-samples=N] [--dry-run] | rollover [--all] [--dry-run]\n');
+  process.stderr.write('usage: host-sampler.mjs once [--json] [--dry-run] [--quiet] [--fresh-sessions] [--sessions-every=300] | loop [--interval=30] [--max-samples=N] [--dry-run] | rollover [--all] [--dry-run] | pressure [--window=10m] [--at=ISO] [--json] [--dir=DIR] | lane-load [--days=7] [--json] | calibrate --family=vitest --concurrency=1,2,3,4 [--yes]\n');
   return 2;
 }
 

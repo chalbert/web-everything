@@ -267,6 +267,34 @@ export const METRIC_NAMES = Object.freeze([
   // (1 normal, 2 warn, 4 critical); `thermal_limit_pct` is `pmset -g therm` CPU_Speed_Limit (100 = unthrottled).
   'host.mem.available_bytes', 'host.mem.compressed_bytes', 'host.mem.swap_used_bytes', 'host.mem.pressure_level',
   'host.disk.free_bytes', 'host.disk.io_bytes_per_s', 'host.cpu.thermal_limit_pct',
+  // ── CAPACITY REFINEMENT (#3383, sampler schema 2, 2026-09-21) — the reservation question: how much to keep back for
+  // the system/VS Code, for heavy commands and for lanes. All are ADDITIVE; every record above keeps its meaning.
+  // `host.cpu.busy_pct` = TRUE whole-machine busy % (100 - idle) from the kernel's per-core tick deltas, attrs
+  // user_pct/sys_pct/nice_pct/idle_pct/window_s/cpu_source/ncpu/hw_ncpu/core_busy_max/cores_over90.
+  'host.cpu.busy_pct',
+  // Per COMMAND-CLASS figures (`host-sampler-classes.mjs`): value = all-class total, the class in the attribute KEYS
+  // (`cpu.check-standards`), exactly like `host.family.*`.
+  'host.class.cpu_pct', 'host.class.count', 'host.class.mem_bytes',
+  // Per-LANE CPU/RSS/process count over EVERY process (value = lane-attributed CPU total; attrs `cpu.<lane>`,
+  // `mem.<lane>`, `n.<lane>`, `unlaned_cpu`, `share`) and the number of concurrent TOP-LEVEL heavy commands
+  // (`host.heavy.roots`, attrs `by_class`, `unadmitted_cpu`, `unadmitted_n`, `held`, `cap`).
+  'lane.attribution.cpu_pct', 'host.heavy.roots',
+  // One record per heavy-admission HOLDER (value = seconds held; attrs slot/owner/pid/alive/cpu_pct/mem_bytes/procs/
+  // classes/unslotted) and one for the STALE waiting markers (value = count; attrs owners/oldest_age_s). Stale
+  // markers are flagged, never deleted.
+  'heavy.admission.holder', 'heavy.admission.stale_markers',
+  // Live sessions by KIND (build|prepare|review|task|interactive): value = total live, attrs `n.<kind>`,
+  // `cpu.<kind>`, `mem.<kind>`, `heavy_cpu.<kind>`; and the EDGE-TRIGGERED start/finish of each (`dispatch.worker.event`,
+  // value 1, attrs event/kind/name/session_id/at/discovered).
+  'host.workers.live', 'dispatch.worker.event',
+  // The sampler's own cost and health per sample: value = sampling wall ms; attrs cpu_ms, child_wall_ms, child_calls,
+  // roster_ms, heartbeat_gap_s, heartbeat_missed_total, quality (`ok`|`partial`), failed (the probes that failed).
+  'host.sampler.self',
+  // ONE record per heavy command RUN, written when it ENDS (`host-sampler-episodes.mjs`): value = wall seconds, attrs = the
+  // episode record (family, lane, session, start/end, cpu_s, peak RSS/procs/threads, admission, concurrency at start and
+  // at peak, host busy/idle at start; `calibration: true` for `host-sampler.mjs calibrate` runs). And the HARDWARE PROFILE
+  // (once per sampler start and daily): value = ncpu, attrs = physical/performance/efficiency cores, memory, chip, model, OS.
+  'heavy.run.episode', 'host.hardware.profile',
   // ANY limit change (lane cap, worker cap, heavy-admission size) emits one of these — `value` is the NEW value,
   // attributes carry `limit`, `old`, `new`, `reason`, `who` — so before/after windows can be compared later.
   'config.limit.changed',

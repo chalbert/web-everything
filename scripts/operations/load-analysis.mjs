@@ -47,6 +47,59 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const sortedAsc = (list) => list.filter((x) => x != null).sort((a, b) => a - b);
 const round = (v, d = 2) => (v == null ? null : Math.round(v * 10 ** d) / 10 ** d);
 
+const keyed = (attrs, prefix) => Object.fromEntries(Object.entries(attrs ?? {}).filter(([k, v]) => k.startsWith(prefix) && num(v) != null).map(([k, v]) => [k.slice(prefix.length), v]));
+
+/**
+ * PURE. The schema-2 capacity facts of ONE sample's metrics (true host CPU, per-command-class CPU/RSS/count, per-lane
+ * figures, heavy-admission holders, live workers by kind, lifecycle events, the sampler's own cost). `null` for a
+ * schema-1 sample, which has none of them: every reader must treat `cap == null` as "not recorded", never as zero.
+ * @param {object[]} metrics
+ */
+export function extractCapacity(metrics) {
+  const by = (name) => metrics.filter((m) => m.name === name);
+  const first = (name) => by(name)[0];
+  const busy = first('host.cpu.busy_pct');
+  const cls = first('host.class.cpu_pct');
+  const self = first('host.sampler.self');
+  const holders = by('heavy.admission.holder');
+  const workers = first('host.workers.live');
+  const lane = first('lane.attribution.cpu_pct');
+  const roots = first('host.heavy.roots');
+  const stale = first('heavy.admission.stale_markers');
+  const hw = first('host.hardware.profile');
+  const episodeRecs = by('heavy.run.episode');
+  const events = by('dispatch.worker.event').map((m) => m.attributes ?? {});
+  if (!busy && !cls && !self && !holders.length && !workers && !lane && !roots && !hw && !episodeRecs.length) return null;
+  const ba = busy?.attributes ?? {};
+  const classCpu = keyed(cls?.attributes, 'cpu.');
+  const classMem = keyed(first('host.class.mem_bytes')?.attributes, 'mem.');
+  const classN = keyed(first('host.class.count')?.attributes, 'n.');
+  const wa = workers?.attributes ?? {};
+  const kinds = {};
+  for (const k of ['build', 'prepare', 'review', 'task', 'interactive']) {
+    if (num(wa[`n.${k}`]) != null) kinds[k] = { n: wa[`n.${k}`], cpu: num(wa[`cpu.${k}`]) ?? 0, mem: num(wa[`mem.${k}`]) ?? 0, heavyCpu: num(wa[`heavy_cpu.${k}`]) ?? 0 };
+  }
+  const sa = self?.attributes ?? {};
+  const qa = (busy ?? cls ?? self ?? roots ?? lane ?? workers ?? hw ?? episodeRecs[0])?.attributes ?? {};
+  return {
+    schema: num(qa.schema), quality: qa.quality ?? null,
+    busyPct: num(busy?.value), userPct: num(ba.user_pct), sysPct: num(ba.sys_pct), idlePct: num(ba.idle_pct), windowS: num(ba.window_s), coreBusyMax: num(ba.core_busy_max), hwNcpu: num(ba.hw_ncpu),
+    classCpu: cls ? classCpu : null, classMem: cls ? classMem : null, classN: cls ? classN : null,
+    laneCpu: lane ? keyed(lane.attributes, 'cpu.') : null, laneMem: lane ? keyed(lane.attributes, 'mem.') : null, laneN: lane ? keyed(lane.attributes, 'n.') : null,
+    laneHeavyCpu: lane ? keyed(lane.attributes, 'hcpu.') : null,
+    laneShare: num(lane?.attributes?.share), unlanedCpu: num(lane?.attributes?.unlaned_cpu),
+    hardware: hw ? { ...(hw.attributes ?? {}) } : null,
+    episodes: episodeRecs.map((m) => ({ ...(m.attributes ?? {}), wall_s: num(m.value) })),
+    heavyRoots: num(roots?.value), heavyRootsByClass: roots?.attributes?.by_class ?? '', unadmittedCpu: num(roots?.attributes?.unadmitted_cpu), unadmittedN: num(roots?.attributes?.unadmitted_n),
+    held: num(roots?.attributes?.held), admissionCap: num(roots?.attributes?.cap),
+    holders: holders.map((m) => ({ id: m.attributes?.holder ?? null, heldForS: num(m.value), cpuPct: num(m.attributes?.cpu_pct) ?? 0, memBytes: num(m.attributes?.mem_bytes) ?? 0, procs: num(m.attributes?.procs) ?? 0, classes: m.attributes?.classes ?? '', unslotted: m.attributes?.unslotted === true })),
+    staleMarkers: num(stale?.value) ?? 0,
+    workers: workers ? { total: num(workers.value) ?? 0, byKind: kinds } : null,
+    events: events.map((e) => ({ event: e.event, kind: e.kind, name: e.name, sessionId: e.session_id, at: e.at, discovered: e.discovered === true })),
+    self: self ? { durationMs: num(self.value), cpuMs: num(sa.cpu_ms), cpuMsUpperBound: num(sa.cpu_ms_upper_bound), heartbeatGapS: num(sa.heartbeat_gap_s), heartbeatMissedTotal: num(sa.heartbeat_missed_total) } : null,
+  };
+}
+
 /** Group metric events into samples (one per group holding a `host.cpu.load1`). @param {object[]} events */
 export function groupSamples(events) {
   const groups = new Map();
@@ -99,6 +152,7 @@ export function groupSamples(events) {
       pressure: one('host.mem.pressure_level'), swapUsed: one('host.mem.swap_used_bytes'), available: one('host.mem.available_bytes'),
       diskFree: one('host.disk.free_bytes'), diskIo: one('host.disk.io_bytes_per_s'), thermLimit: one('host.cpu.thermal_limit_pct'),
       admitted: sum('dispatch.admitted'), denied: sum('dispatch.denied'),
+      cap: extractCapacity(g.metrics),
     });
   }
   return samples.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0) || a.key.localeCompare(b.key));

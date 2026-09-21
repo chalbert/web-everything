@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
+import { buildCapacityRollup } from './host-sampler-rollup.mjs';
 import { groupSamples, SAMPLER_SOURCE } from './load-analysis.mjs';
 import { buildEscalationPacket, listEscalations, writeEscalationPacket } from './land-advance-escalations.mjs';
 import { parseTelemetryLines, percentile } from './telemetry.mjs';
@@ -94,7 +95,8 @@ const topN = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1] || a[0].
 /**
  * PURE + DETERMINISTIC. The permanent per-day summary: per-family CPU percentiles, sample counts, busy windows,
  * the worst samples with their attribution, probe percentiles, and attributed-vs-unattributed CPU shares.
- * Same events in, byte-identical JSON out (no clock, sorted keys).
+ * Same events in, byte-identical JSON out (no clock, sorted keys). `schema: 2` adds the `capacity` section
+ * ({@link buildCapacityRollup}); every `v: 1` field is unchanged, so a `v: 1` reader keeps working (`v` is the rollup FORMAT, `schema` the sampler's record schema).
  * @param {object[]} events @param {{day:string}} o
  */
 export function buildDailyRollup(events, { day }) {
@@ -131,7 +133,7 @@ export function buildDailyRollup(events, { day }) {
   const max = (list) => { const v = list.filter(Number.isFinite); return v.length ? Math.max(...v) : null; };
   const min = (list) => { const v = list.filter(Number.isFinite); return v.length ? Math.min(...v) : null; };
   return {
-    v: 1, day, cores,
+    v: 1, schema: 2, day, cores,
     samples: { total: samples.length, sampler: samples.filter((s) => s.source === SAMPLER_SOURCE).length, burst: samples.filter((s) => s.mode === 'burst').length },
     load1: pctl(samples.map((s) => s.load1)),
     probe: { spawnMs: pctl(samples.map((s) => s.spawnMs)), spinOvershootMs: pctl(samples.map((s) => s.spinMs)) },
@@ -148,6 +150,8 @@ export function buildDailyRollup(events, { day }) {
     memory: { pressureMax: max(samples.map((s) => s.pressure)), swapUsedMaxBytes: max(samples.map((s) => s.swapUsed)), availableMinBytes: min(samples.map((s) => s.available)) },
     disk: { freeMinBytes: min(samples.map((s) => s.diskFree)), ioBytesPerSMax: max(samples.map((s) => s.diskIo)) },
     thermal: { cpuSpeedLimitMinPct: min(samples.map((s) => s.thermLimit)) },
+    // schema 2 (capacity refinement): additive. `capacity.present` is false for a day of schema-1 samples only.
+    capacity: buildCapacityRollup(samples),
   };
 }
 

@@ -156,7 +156,12 @@ export function parseDf(text) {
 
 // ── IO EDGE ─────────────────────────────────────────────────────────────────────────────────────────────
 
-const run = (exec, cmd, args) => { try { return exec(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000, maxBuffer: 4 * 1024 * 1024 }); } catch { return ''; } };
+// A non-zero exit that still printed output is a SUCCESS for our purposes: `lsof -p a,b,c` exits 1 when ANY pid has
+// vanished since `ps`, yet prints every other pid's cwd. Discarding that output (the original `catch { return '' }`)
+// left the cwd cache empty on a busy host, so lane attribution read `unattributed` for nearly every process.
+const run = (exec, cmd, args) => {
+  try { return exec(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000, maxBuffer: 4 * 1024 * 1024 }); } catch (e) { return typeof e?.stdout === 'string' ? e.stdout : ''; }
+};
 
 /** Resolve cwds for `pids` with ONE `lsof`. Returns `{}` on any failure (attribution then falls to argv/session). */
 export function readCwds(pids, { exec = execFileSync } = {}) {
