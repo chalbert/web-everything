@@ -4377,3 +4377,23 @@ wiring. With six synthetic clean codex `bugfix` trials the same call returns `bo
 
 Tests: 455 files / 14,426 passing (was 14,426 before with 4 new suites' 59 tests added); `check:standards`
 0 errors, 1816 warnings (unchanged from baseline).
+
+## Session update (2026-09-21) — what landed on main (PRs #2360, #2362, #2363; cards #3782, #3783) and the operator's rulings of 2026-09-21: operations only for dispatch, auto-mode workers, delegation first, mechanical catch-up, handoff on an ops branch
+
+What landed on `main` since the last note, and the operator's rulings of 2026-09-21. The prototype branch itself is still behind `main`; the catch-up merge has not landed here, and this note does not claim it.
+
+**Landed on `main` (all merged):**
+
+- PR #2360, card #3767: the `/wip`, `continue` and `handoff` commands are tracked in source (`we:.claude/commands/wip.md`, `we:.claude/commands/continue.md`, `we:.claude/commands/handoff.md`, with a test in `we:scripts/__tests__/sync-commands-deploy.test.mjs`). The card itself still read `status: open` on `main` when this note was written, so its line in the priority order stays until it is resolved.
+- PR #2362: the container-exec test skip fix. The second real-container block in `we:scripts/lib/__tests__/container-exec.test.mjs` guarded on the CLI and the volume but also ran the image, so it failed with a 401 when the local image was absent; the guard now covers the image too.
+- PR #2363: decision #3690 prepared, tagged `✓ ready to ratify`, with five forks and a bold default on each, and the research topic `/research/delegation-graduation-and-supervision-tiers/`. It filed two follow-up cards: #3782 (outside #3383) and #3783 (child of #3718, claimed). Both are now on the priority list of this card, in the claimed and off-path lists, and `check-priority --strict` passes again.
+
+**Rulings by the operator, 2026-09-21:**
+
+- Operations only for dispatch: a worker is launched through a declared operation, never a hand-written spawn. `dispatch-task` is built for this (#3730, see the update above).
+- Workers run in auto mode. `acceptEdits` hangs a background session on a prompt nobody answers.
+- Delegation to Codex and Antigravity comes first in the priority order (already applied, see the update above).
+- The prototype must be kept up to date mechanically: a merge commit (not a rebase), landed through a staging ref, then the mechanical loop re-run after each catch-up. The catch-up job pushes only to `lane/mechanical-dispatcher-catchup`.
+- The handoff should be tracked on an `ops/*` branch rather than left as an untracked file.
+
+Owed work is on cards, not listed here: see the priority order above.
