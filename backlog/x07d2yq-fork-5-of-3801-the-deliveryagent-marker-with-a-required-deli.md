@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "3717"
 status: open
-scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs", "we:scripts/operations/delivery-agent-marker.mjs", "we:scripts/operations/fix-run.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/dispatch-providers/"]
+scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs", "we:scripts/operations/delivery-agent-marker.mjs", "we:scripts/operations/fix-run.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/dispatch-providers/build.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs"]
 dateOpened: "2026-09-21"
 tags: []
 ---
