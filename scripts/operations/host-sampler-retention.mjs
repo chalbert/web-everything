@@ -18,7 +18,8 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { buildCapacityRollup } from './host-sampler-rollup.mjs';
 import { groupSamples, SAMPLER_SOURCE } from './load-analysis.mjs';
 import { buildEscalationPacket, listEscalations, writeEscalationPacket } from './land-advance-escalations.mjs';
-import { parseTelemetryLines, percentile } from './telemetry.mjs';
+import { maxOf, minOf, parseEventsFromBuffer } from './host-sampler-tail.mjs';
+import { percentile } from './telemetry.mjs';
 
 const GIB = 1024 ** 3;
 
@@ -108,7 +109,7 @@ export function buildDailyRollup(events, { day }) {
   const families = {};
   for (const name of Object.keys(fam).sort()) {
     const c = pctl(fam[name].cpu);
-    families[name] = { cpu: c, countMax: fam[name].count.length ? Math.max(...fam[name].count) : 0, samplesPresent: fam[name].cpu.length };
+    families[name] = { cpu: c, countMax: maxOf(fam[name].count) ?? 0, samplesPresent: fam[name].cpu.length };
   }
   // busy windows: consecutive samples above the core count, merged across gaps up to 3x the typical spacing
   const busy = [];
@@ -130,8 +131,8 @@ export function buildDailyRollup(events, { day }) {
     at: s.atMs == null ? null : new Date(s.atMs).toISOString(), load1: r1(s.load1), topFamilies: s.topFamilies,
     topProcesses: (s.procs ?? []).slice(0, 5).map((p) => ({ cpuPct: r1(p.cpuPct), family: p.family, session: p.session, lane: p.lane, command: p.command.slice(0, 80) })),
   }));
-  const max = (list) => { const v = list.filter(Number.isFinite); return v.length ? Math.max(...v) : null; };
-  const min = (list) => { const v = list.filter(Number.isFinite); return v.length ? Math.min(...v) : null; };
+  const max = (list) => maxOf(list.filter(Number.isFinite));
+  const min = (list) => minOf(list.filter(Number.isFinite));
   return {
     v: 1, schema: 2, day, cores,
     samples: { total: samples.length, sampler: samples.filter((s) => s.source === SAMPLER_SOURCE).length, burst: samples.filter((s) => s.mode === 'burst').length },
@@ -201,7 +202,7 @@ export function rolloverDay({ dir, day, dryRun = false }) {
   try {
     const before = statSync(raw);
     const buf = readFileSync(raw);
-    const events = parseTelemetryLines(buf.toString('utf8')).events;
+    const events = parseEventsFromBuffer(buf).events;
     const rollup = buildDailyRollup(events, { day });
     const gz = gzipSync(buf, { level: 9 });
     if (!gunzipSync(gz).equals(buf)) return { day, ok: false, reason: 'gzip round-trip mismatch' };

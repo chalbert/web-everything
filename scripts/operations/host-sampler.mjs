@@ -784,7 +784,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, cali
     const at = val('at', null); const atMs = at ? Date.parse(at) : Date.now();
     if (!Number.isFinite(atMs)) { process.stderr.write('host-sampler: --at must be an ISO time such as 2026-09-21T12:30:00Z\n'); return 2; }
     const nowMs = atMs;
-    const { events, files } = readPressureSamples({ dir: val('dir', null) ? resolve(val('dir', '')) : telemetryDir(), nowMs, leadMs: 6 * windowMs });
+    const { events, files } = readPressureSamples({ dir: val('dir', null) ? resolve(val('dir', '')) : telemetryDir(), nowMs, leadMs: 6 * windowMs, windowMs });
     const r = replayPressure({ samples: pressureSamples(events), windowMs, now: nowMs });
     process.stdout.write(`${flag('json') ? JSON.stringify({ ...r, thresholds: PRESSURE_DEFAULTS, provisional: true, files }, null, 2) : renderPressure(r, { nowMs })}\n`);
     return 0;

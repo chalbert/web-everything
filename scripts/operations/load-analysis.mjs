@@ -100,6 +100,10 @@ export function extractCapacity(metrics) {
   };
 }
 
+/** Max / min of a list WITHOUT spreading it into a call: a spread of ~125k+ items overflows the stack, and a day can hold that many. */
+const maxLoop = (list) => { let m = -Infinity; for (const v of list) if (v > m) m = v; return m; };
+const minLoop = (list) => { let m = Infinity; for (const v of list) if (v < m) m = v; return m; };
+
 /** Group metric events into samples (one per group holding a `host.cpu.load1`). @param {object[]} events */
 export function groupSamples(events) {
   const groups = new Map();
@@ -195,7 +199,7 @@ export function analyzeLoad(events, { sinceMs = null, cores = null, otel = null 
     const edges = BUCKET_EDGES[dim];
     const have = samples.filter((s) => s[key] != null);
     missing[dim] = samples.length - have.length;
-    maxObserved[dim] = have.length ? Math.max(...have.map((x) => x[key])) : null;
+    maxObserved[dim] = have.length ? maxLoop(have.map((x) => x[key])) : null;
     buckets[dim] = edges.map((_, i) => {
       const label = bucketLabel(edges[i], edges);
       const inBucket = have.filter((s) => bucketLabel(s[key], edges) === label);
@@ -220,7 +224,7 @@ export function analyzeLoad(events, { sinceMs = null, cores = null, otel = null 
   const stamped = samples.filter((s) => s.atMs != null);
   const sampler = samples.filter((s) => s.source === SAMPLER_SOURCE);
   const samplerTimes = sampler.map((s) => s.atMs).filter((t) => t != null);
-  const spanHours = samplerTimes.length > 1 ? (Math.max(...samplerTimes) - Math.min(...samplerTimes)) / 3_600_000 : 0;
+  const spanHours = samplerTimes.length > 1 ? (maxLoop(samplerTimes) - minLoop(samplerTimes)) / 3_600_000 : 0;
   const busySamplerSamples = sampler.filter((s) => s.load1 > coresOf(s)).length;
 
   return {

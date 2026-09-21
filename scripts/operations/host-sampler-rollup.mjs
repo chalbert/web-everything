@@ -16,13 +16,13 @@
  * EVERY THRESHOLD HERE IS PROVISIONAL: the first days of schema-2 data have to set them ({@link PRESSURE_DEFAULTS},
  * {@link EPISODE_DEFAULTS}). PURE: no fs, clock, env, process. The IO edge is {@link readPressureSamples}.
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
 
 import { CONTAINER_ACTIVE_CPU_PCT, NOT_QUIET_CLASSES, HEAVY_CLASSES, SYSTEM_CLASSES, WORKER_KINDS } from './host-sampler-classes.mjs';
 import { groupSamples } from './load-analysis.mjs';
-import { parseTelemetryLines, percentile } from './telemetry.mjs';
+import { maxOf, readEventsFile, readEventsTail } from './host-sampler-tail.mjs';
+import { percentile } from './telemetry.mjs';
 
 // ── small stats ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ export function smoothedPressure({ samples, windowMs = PRESSURE_DEFAULTS.windowM
   const busySource = !busy.length ? 'none' : estimated === 0 ? 'host-cpu' : estimated === busy.length ? 'ps-sum-estimate' : 'mixed';
   const out = (decision, reason) => ({ pressure, p90CpuBusy: p90Busy, p90Load1PerCore: p90Load, decision, reason, n: inWin.length, windowMs, busySource });
   if (inWin.length < h.minSamples) return out('admit', `insufficient-data: ${inWin.length} sample(s) in the window, need ${h.minSamples}`);
-  const newest = Math.max(...inWin.map((s) => s.atMs));
+  const newest = maxOf(inWin.map((s) => s.atMs)) ?? -Infinity;
   if (now - newest > h.staleAfterMs) return out('admit', `stale-data: newest sample is ${Math.round((now - newest) / 1000)} s old`);
   const busyHi = p90Busy != null && p90Busy > h.holdBusyPct;
   const loadHi = p90Load != null && p90Load > h.holdLoadPerCore;
@@ -121,8 +121,12 @@ export function replayPressure({ samples, windowMs = PRESSURE_DEFAULTS.windowMs,
   const sorted = (Array.isArray(samples) ? samples : []).filter((s) => fin(s?.atMs) != null && s.atMs <= now).sort((a, b) => a.atMs - b.atMs);
   let previous = hysteresis.previous ?? 'admit';
   const transitions = [];
+  // `sorted` is time-ordered, so each step's window (now - windowMs, now] is a slice found by two moving indexes: O(samples), not O(samples^2)
+  let lo = 0; let hi = 0;
   for (const s of sorted) {
-    const r = smoothedPressure({ samples: sorted, windowMs, now: s.atMs, hysteresis: { ...hysteresis, previous } });
+    while (hi < sorted.length && sorted[hi].atMs <= s.atMs) hi += 1;
+    while (lo < hi && sorted[lo].atMs <= s.atMs - windowMs) lo += 1;
+    const r = smoothedPressure({ samples: sorted.slice(lo, hi), windowMs, now: s.atMs, hysteresis: { ...hysteresis, previous } });
     if (r.decision !== previous) transitions.push({ at: new Date(s.atMs).toISOString(), from: previous, to: r.decision, reason: r.reason });
     previous = r.decision;
   }
@@ -154,24 +158,28 @@ export function parseDuration(text) {
 }
 
 /**
- * IO. The telemetry events needed to evaluate the brake at `nowMs`: today's day file and, when the window (plus the
- * hysteresis lead-in) reaches back before UTC midnight, yesterday's (raw or gzipped). Read-only.
- * @returns {{events:object[], files:string[]}}
+ * IO. The telemetry events needed to evaluate the brake at `nowMs`: the last `windowMs` plus the hysteresis lead-in
+ * `leadMs`, read from the END of each UTC day file (raw or gzipped) that span touches, so the cost follows the span and
+ * NOT the file (a full day is ~100 MB / 150k+ records). Records after `nowMs` are skipped (`--at` in the past; that scan
+ * walks past them, so it grows with how far back the instant is). Read-only.
+ * @returns {{events:object[], files:string[], scanned:number, parsed:number}}
  */
-export function readPressureSamples({ dir, nowMs, leadMs = 0 }) {
+export function readPressureSamples({ dir, nowMs, leadMs = 0, windowMs = PRESSURE_DEFAULTS.windowMs }) {
   // utc-day-slice-ok: the telemetry day files are keyed by UTC day (telemetry-store#dayKey)
   const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
-  const days = [...new Set([dayOf(nowMs - leadMs), dayOf(nowMs)])];
-  const events = []; const files = [];
-  for (const day of days) {
+  const fromMs = nowMs - leadMs - windowMs;
+  const days = [];
+  for (let ms = Date.parse(`${dayOf(fromMs)}T00:00:00.000Z`); ms <= nowMs && days.length < 62; ms += 86_400_000) days.push(dayOf(ms));
+  const events = []; const files = []; let scanned = 0; let parsed = 0;
+  for (const day of days) { // oldest day first, each day's records oldest first: the order a whole-file read gave
     const raw = join(dir, `${day}.jsonl`); const gz = join(dir, `${day}.jsonl.gz`);
-    let text = null;
-    try { if (existsSync(raw)) text = readFileSync(raw, 'utf8'); else if (existsSync(gz)) text = gunzipSync(readFileSync(gz)).toString('utf8'); } catch { text = null; }
-    if (text == null) continue;
+    const r = readEventsTail({ raw, gz, fromMs, toMs: nowMs });
+    if (!r.found) continue;
     files.push(existsSync(raw) ? raw : gz);
-    events.push(...parseTelemetryLines(text).events);
+    for (const e of r.events) events.push(e);
+    scanned += r.scanned; parsed += r.parsed;
   }
-  return { events, files };
+  return { events, files, scanned, parsed };
 }
 
 /** PURE. The human rendering of one brake verdict. */
@@ -184,7 +192,7 @@ export function renderPressure(r, { nowMs = null } = {}) {
     `  p90 load1/core  ${r.p90Load1PerCore ?? 'n/a'}      hold > ${p.holdLoadPerCore}   release < ${p.releaseLoadPerCore}`,
     `  reason: ${r.reason}`,
   ];
-  if (r.transitions?.length) lines.push(`  transitions in the file: ${r.transitions.length} (last: ${r.transitions[r.transitions.length - 1].at} ${r.transitions[r.transitions.length - 1].from} -> ${r.transitions[r.transitions.length - 1].to})`);
+  if (r.transitions?.length) lines.push(`  transitions in the replayed span: ${r.transitions.length} (last: ${r.transitions[r.transitions.length - 1].at} ${r.transitions[r.transitions.length - 1].from} -> ${r.transitions[r.transitions.length - 1].to})`);
   lines.push('  thresholds are PROVISIONAL: the collected data has to set them.');
   return lines.join('\n');
 }
@@ -246,15 +254,15 @@ function episodes(samples, cfg = EPISODE_DEFAULTS) {
     const holderTop = rank(holderCpu)[0];
     const live = g.map((s) => s.cap?.workers?.total).filter((v) => v != null);
     const peakByKind = {};
-    for (const k of WORKER_KINDS) { const v = g.map((s) => s.cap?.workers?.byKind?.[k]?.n).filter((x) => x != null); if (v.length) peakByKind[k] = Math.max(...v); }
+    for (const k of WORKER_KINDS) { const v = g.map((s) => s.cap?.workers?.byKind?.[k]?.n).filter((x) => x != null); if (v.length) peakByKind[k] = maxOf(v); }
     const inside = events.filter((e) => e.atMs >= startMs && e.atMs <= endMs);
     return {
       start: new Date(startMs).toISOString(), durationS: Math.round((endMs - startMs) / 1000), samples: g.length,
-      peakLoad1: r2(Math.max(...g.map((s) => s.load1))), peakBusyPct: g.some((s) => fin(s.cap?.busyPct) != null) ? r2(Math.max(...g.map((s) => s.cap?.busyPct ?? 0))) : null,
+      peakLoad1: r2(maxOf(g.map((s) => s.load1))), peakBusyPct: g.some((s) => fin(s.cap?.busyPct) != null) ? r2(maxOf(g.map((s) => s.cap?.busyPct ?? 0))) : null,
       responsibleClass: top[0]?.[0] ?? null, responsibleShare: total > 0 && top[0] ? r2(top[0][1] / total) : null,
       topClasses: top.slice(0, 3).map(([c, v]) => ({ class: c, share: total > 0 ? r2(v / total) : null })),
       responsibleHeavyClass: heavyTop?.[0] ?? null, responsibleHolder: holderTop?.[0] ?? null,
-      workersLive: live.length ? { peak: Math.max(...live), mean: r2(live.reduce((a, b) => a + b, 0) / live.length), peakByKind } : null,
+      workersLive: live.length ? { peak: maxOf(live), mean: r2(live.reduce((a, b) => a + b, 0) / live.length), peakByKind } : null,
       workerStarts: inside.filter((e) => e.event === 'start').length, workerFinishes: inside.filter((e) => e.event === 'finish').length,
     };
   });
@@ -458,12 +466,13 @@ function dayFiles(dir, nowMs, days) {
  */
 export function readLaneLoadModel({ dir, nowMs, days = 7 }) {
   const list = dayFiles(dir, nowMs, days);
-  const events = [];
+  // one day at a time: a day's records are grouped into samples and dropped before the next day is read, so memory is one day's records plus the (much smaller) samples
+  const samples = [];
   for (const day of list) {
-    const raw = join(dir, `${day}.jsonl`); const gz = join(dir, `${day}.jsonl.gz`);
-    try { events.push(...parseTelemetryLines(existsSync(raw) ? readFileSync(raw, 'utf8') : gunzipSync(readFileSync(gz)).toString('utf8')).events); } catch { /* an unreadable day is skipped, not fatal */ }
+    const { events } = readEventsFile({ raw: join(dir, `${day}.jsonl`), gz: join(dir, `${day}.jsonl.gz`) }); // an unreadable day is skipped, not fatal
+    for (const s of groupSamples(events)) samples.push(s);
   }
-  const samples = groupSamples(events);
+  samples.sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0) || a.key.localeCompare(b.key));
   const withCap = new Set(samples.filter((s) => s.cap && s.atMs != null).map((s) => new Date(s.atMs).toISOString().slice(0, 10))); // utc-day-slice-ok: day-file key
   return { model: buildLaneLoadModel({ samples, days: Math.max(1, withCap.size) }), days: list };
 }
@@ -500,8 +509,8 @@ export function buildCapacityRollup(samples) {
     selfOverhead: {
       durationMs: dist(selfRows.map((s) => s.cap.self.durationMs)), cpuMsUpperBound: dist(selfRows.map((s) => s.cap.self.cpuMsUpperBound)),
       coreShare: span > 0 && selfRows.length ? r2(cpuSum / (span + (span / (capSamples.length - 1)))) : null,
-      heartbeatGapMaxS: selfRows.length ? Math.max(...selfRows.map((s) => s.cap.self.heartbeatGapS ?? 0)) : null,
-      heartbeatMissedTotal: selfRows.length ? Math.max(...selfRows.map((s) => s.cap.self.heartbeatMissedTotal ?? 0)) : 0,
+      heartbeatGapMaxS: selfRows.length ? maxOf(selfRows.map((s) => s.cap.self.heartbeatGapS ?? 0)) : null,
+      heartbeatMissedTotal: selfRows.length ? maxOf(selfRows.map((s) => s.cap.self.heartbeatMissedTotal ?? 0)) : 0,
     },
     hourly: hourly(capSamples),
     burstEpisodes: episodes(all),
