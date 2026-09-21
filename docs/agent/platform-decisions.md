@@ -2948,7 +2948,8 @@ graduate."* Four clauses:
    manual reconciliation and 15 hand-resolved conflicts when `origin/lane/mechanical-dispatcher` drifted 97
    commits behind `main` behind a silently-failing auto-sync loop; (d) drift is still actively reconciled per
    branch, never tolerated (`we:scripts/conveyor/branch-drift.mjs`) — a drifted branch still holds its own
-   items.
+   items, **except its graduation slices to the target** (amended 2026-09-21 by
+   [#poc-branch-mechanical-sync](#poc-branch-mechanical-sync), #3804).
 5. **A POC branch is not a pull-request target, so it gets no CI of its own and the drain never lands a
    pull request against one (#3805, ratified 2026-09-21).** Work lands inside a POC branch by direct push or
    `we:scripts/operations/poc-land.mjs`, gated by the item's own tests (clause 2); CI runs where it is
@@ -2973,6 +2974,49 @@ with [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the mechanism thi
 from, and the one graduation still uses undiluted) and
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (tests/build validation is the
 deterministic gate that survives; judgment is deferred, not skipped).
+
+---
+
+### A POC branch is kept current with `main` mechanically — prompt merges, a reconcile agent on a staging ref, an ops-branch alert, and slices graduate any time {#poc-branch-mechanical-sync}
+
+**Ratified 2026-09-21 (operator, in conversation; #3804).** Composes with
+[#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode) and amends its clause 4(d). The
+operator's merge-shape ruling (#3772) stands: `main` is merged into the POC branch by a MERGE COMMIT, never a
+rebase and never a force-push of the shared branch; a clean merge is pushed fast-forward-only; a conflict
+freezes the sync merge and alerts. Four points, ruled here:
+
+1. **Lag.** Whenever `main` has commits the branch lacks, the next sync pass merges them. The 40-commit
+   ceiling (`DEFAULT_MAX_BEHIND`) stays only as a backstop for the `branch-drift-blocked` hold; it is never
+   the trigger. A clean sync merge is pushed with no test gate, by design; the cover is a `check:standards`
+   run on each push to the branch (#3768 design point 6). What triggers a pass (the runner tick, for example) is a
+   build choice.
+2. **Conflicts.** A dispatched reconcile agent resolves on a throw-away **staging ref**
+   (`lane/mechanical-dispatcher-catchup` for the prototype) by merge commits only, never touching the shared
+   branch. The sync pass, not a person, then promotes it by a plain fast-forward push, only when the push is
+   a true fast-forward AND the branch's own tests are green at that exact commit as the pass itself sees
+   them (never the agent's report), under the same per-branch lock and `autoSync` gate as the clean-merge
+   push. At most one attempt is in flight, and the cap is one attempt per set of conflicting files. A
+   condition not met pushes nothing and alerts. Only the sync merge freezes; direct pushes to the branch
+   continue and the existing `branch-drift-blocked` hold on overlapping queued cards is unchanged. A
+   resolution the agent cannot make on merit, including one that changes a test's assertions, comes back as a
+   decision card. This amends #3556 (merge only; staging ref only; promotion by the pass).
+3. **Alert.** The operator is alerted only when they must act (the agent's one attempt failed, or the tests
+   on the resolved staging ref are red). It is a line in the every-turn turn digest plus a row in the wip
+   report, and it fails visible: an unreadable record is "status unknown", never "all clear". The record is
+   one small file per branch on an `ops/` branch on origin, committed on a state change only. The exact
+   wording is the spec under #3804 Fork 3. The build is `blockedBy` #3726; the desktop notice stays until
+   then.
+4. **Graduation.** A slice may graduate to `main` at any time, whatever the sync state, through the normal
+   lane and pull-request path (clause 3 of the delivery-mode statute is unchanged: the full review runs
+   there). **Graduation slices are exempt from the `branch-drift-blocked` hold** (the clause 4(d)
+   amendment). A ported file is applied as a diff onto `main`'s current file and never copied when `main`
+   has moved it since the merge base; a ported file in the open conflict set takes the staging ref's
+   resolution when one exists, else the port's version is recorded as the resolution the reconcile agent
+   must adopt. This overrides rule 1 of epic #3383's Priority order ("nothing may graduate before the health
+   chain") for slices; each slice's PR runs `check:standards`, `test` and `smoke` on `main`'s tree instead.
+
+**Lineage:** #3804 (ratified 2026-09-21, operator, in conversation; `bornAs: xki1xap`), the four points left
+open by #3772. Amends #3556's brief and clause 4(d) above.
 
 ---
 
