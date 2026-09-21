@@ -10,6 +10,7 @@ preparedDate: "2026-09-21"
 preparedAgainstSha: "7bdbe0c8a8fdd88b715e4094456b513823489179"
 relatedTo: ["3804", "3805", "3772", "3443", "3801", "3475"]
 relatedReport: reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md
+blockedBy: ["xuw7mmi"]
 tags: []
 ---
 

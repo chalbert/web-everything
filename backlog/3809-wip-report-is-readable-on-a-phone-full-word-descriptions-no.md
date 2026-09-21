@@ -8,6 +8,7 @@ scope: ["we:scripts/operations/wip-report.mjs", "we:scripts/operations/wip-repor
 dateOpened: "2026-09-21"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "afd7d5118eeee0afa4c4a2cac0f1259eb3fda9ae"
+blockedBy: ["xa1hqo9"]
 tags: []
 ---
 
