@@ -92,6 +92,8 @@ import { dispatchTaskOperation, DISPATCH_TASK_OP, finishTaskOutcome } from './di
 import { createTaskReader, createDispatchTaskSinks } from './dispatch-task-io.mjs';
 import { prioritySyncOperation, PRIORITY_SYNC_OP, finishPriorityOutcome } from './priority-sync.mjs';
 import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sync-io.mjs';
+import { trackerRefreshOperation, TRACKER_REFRESH_OP, finishRefreshOutcome } from './tracker-refresh.mjs';
+import { createTrackerRefreshReader, createTrackerRefreshSinks } from './tracker-refresh-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -305,6 +307,17 @@ export const OPERATIONS = Object.freeze({
     declaration: prioritySyncOperation({ readFacts: createPrioritySyncReader() }),
     sinks: createPrioritySyncSinks(),
     finish: finishPriorityOutcome,
+  }),
+  // #3383 — brings the Prototype Tracker page up to date mechanically, everything short of the `Artifact` call: fetch,
+  // `priority-sync --apply`, `check-priority --strict`, the compact `render` written under the operator's operations
+  // directory, a content hash (stamp ignored) against `tracker/artifact.json`, and, when the page changed, the brief
+  // for the tiny publish worker. A dry run by default; the orchestrator's queue check runs it with `--apply` on each
+  // fire. Its LAST stdout line is `publish: needed` or `publish: current`; the worker is dispatched (through
+  // `dispatch-task`) only when it is `needed` AND the last publish is older than PUBLISH_MIN_INTERVAL_MINUTES.
+  [TRACKER_REFRESH_OP]: () => ({
+    declaration: trackerRefreshOperation({ readFacts: createTrackerRefreshReader() }),
+    sinks: createTrackerRefreshSinks(),
+    finish: finishRefreshOutcome,
   }),
   [EXPLORE_OP]: () => ({
     declaration: exploreOperation(),

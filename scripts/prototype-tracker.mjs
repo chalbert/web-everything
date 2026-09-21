@@ -18,9 +18,14 @@
  *     [--body-file=<path>] [--date=YYYY-MM-DD]
  *     Body comes from --body-file, or stdin when that flag is omitted. Writes the tracker file in place.
  *
- *   node scripts/prototype-tracker.mjs render [--out=<path>] [--json]
- *     Renders the current tracker to an HTML fragment (stdout, or --out). --json prints the parsed struct
- *     instead (debugging / a caller that wants the data without the markup).
+ *   node scripts/prototype-tracker.mjs render [--full] [--out=<path>] [--json] [--ref=origin/main|none]
+ *     [--base-url=<url>] [--top=15]
+ *     Renders the current tracker to an HTML fragment (stdout, or --out, which writes the file). The DEFAULT is the
+ *     compact phone-first page (`lib/prototype-tracker-compact.mjs`, ~30 KB): NEEDS YOU, the top of the priority list
+ *     as a table, counts, the notes collapsed. `--full` is the old page (every note, with its body; ~300 KB),
+ *     byte for byte. `--ref` is where card titles are also read from (default origin/main; `none` = the checkout
+ *     only). `--base-url` makes card numbers link to <url>/backlog/<n>/; without it they are plain text.
+ *     --json prints the parsed struct instead (debugging / a caller that wants the data without the markup).
  *
  *   node scripts/prototype-tracker.mjs check-priority [--ref=origin/main] [--strict] [--strict-why] [--json]
  *     Checks the tracker's `## Priority order` section against the backlog (`we:scripts/lib/priority-order.mjs`):
@@ -33,14 +38,16 @@
  *     that only WARNS (printed, exit unchanged), and --strict-why turns those warnings into exit 1.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   readTracker, appendSessionUpdate, findTrackerPath,
 } from './lib/prototype-tracker-data.mjs';
 import { renderTrackerHtml } from './lib/prototype-tracker-render.mjs';
+import { renderCompactHtml, parsePriorityRows, UP_NEXT_COUNT } from './lib/prototype-tracker-compact.mjs';
+import { readCardFacts, readNeedsYou, readTip, DEFAULT_REF } from './lib/prototype-tracker-compact-io.mjs';
 import { checkPriorityOrder, readCardsFromDir, readCardsFromRef, mergeCards, defaultGit } from './lib/priority-order.mjs';
-import { localToday } from './lib/local-date.mjs';
+import { localToday, localDateString, backlogTimeZone } from './lib/local-date.mjs';
 
 function parseArgs(argv) {
   const flags = {};
@@ -80,6 +87,13 @@ function cmdAppendNote(flags, io) {
   return 0;
 }
 
+/** The render time for the compact page's stamp: the operator-local date and minute, with the zone's short name. */
+export function renderTime(now = new Date(), timeZone = backlogTimeZone()) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(now);
+  const part = (t) => parts.find((x) => x.type === t)?.value ?? '';
+  return `${localDateString(now, timeZone)} ${part('hour')}:${part('minute')} ${part('timeZoneName')}`.trim();
+}
+
 function cmdRender(flags, io) {
   const found = readTracker({ backlogDir: flags['backlog-dir'] });
   if (!found) {
@@ -90,14 +104,34 @@ function cmdRender(flags, io) {
     io.out(`${JSON.stringify(found.data, null, 2)}\n`);
     return 0;
   }
-  const html = renderTrackerHtml(found.data, {
-    generatedAt: `${localToday()} (mechanically rendered)`,
-    itemNumber: '3383',
-    sourcePath: found.path,
-  });
+  let html;
+  if (flags.full) {
+    // The old page, unchanged: the whole card's history, every note with its body.
+    html = renderTrackerHtml(found.data, {
+      generatedAt: `${(io.today ?? localToday)()} (mechanically rendered)`,
+      itemNumber: '3383',
+      sourcePath: found.path,
+    });
+  } else {
+    const priority = parsePriorityRows(io.read(found.path));
+    const ids = [...priority.ordered, ...priority.claimed, ...priority.offpath].map((r) => r.id);
+    const ref = typeof flags.ref === 'string' ? flags.ref : DEFAULT_REF;
+    const { titles, claimedIds } = (io.cardFacts ?? readCardFacts)(ids, { backlogDir: dirname(found.path), ref });
+    const queue = (io.needsYou ?? readNeedsYou)();
+    const top = Number(flags.top);
+    html = renderCompactHtml(found.data, {
+      priority, titles, claimedIds,
+      needsYou: queue.lines ?? null, needsYouError: queue.error ?? '',
+      tip: (io.tip ?? readTip)(),
+      generatedAt: (io.renderTime ?? renderTime)(),
+      baseUrl: typeof flags['base-url'] === 'string' ? flags['base-url'] : '',
+      topN: Number.isInteger(top) && top > 0 ? top : UP_NEXT_COUNT,
+      itemNumber: '3383',
+    });
+  }
   if (typeof flags.out === 'string') {
     io.write(flags.out, html);
-    io.out(`prototype-tracker: wrote ${flags.out} (${html.length} bytes) — publish it with the Artifact tool\n`);
+    io.out(`prototype-tracker: wrote ${flags.out} (${Buffer.byteLength(html)} bytes) — publish it with the Artifact tool\n`);
   } else {
     io.out(html);
   }
@@ -149,7 +183,7 @@ export function main(argv, io = defaultIo()) {
   io.err([
     'usage:',
     '  node scripts/prototype-tracker.mjs append-note --summary="<one line>" [--qualifier="continued"] [--body-file=<path>] [--date=YYYY-MM-DD]',
-    '  node scripts/prototype-tracker.mjs render [--out=<path>] [--json]',
+    '  node scripts/prototype-tracker.mjs render [--full] [--out=<path>] [--json] [--ref=origin/main|none] [--base-url=<url>] [--top=15]',
     '  node scripts/prototype-tracker.mjs check-priority [--ref=origin/main] [--strict] [--strict-why] [--json]',
     '',
   ].join('\n'));

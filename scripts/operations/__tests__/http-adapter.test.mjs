@@ -53,6 +53,7 @@ import { CLEAR_STUCK_SESSION_OP } from '../clear-stuck-session.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { DISPATCH_TASK_OP } from '../dispatch-task.mjs';
 import { PRIORITY_SYNC_OP } from '../priority-sync.mjs';
+import { TRACKER_REFRESH_OP } from '../tracker-refresh.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
@@ -384,6 +385,9 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // #3383 — `priority-sync`'s `apply` step is an effect (it rewrites the tracker card's section), so it is NOT
     // read-only; listed for map coverage. Its declaring module is itself a leaf (asserted in `priority-sync.test.mjs`).
     [PRIORITY_SYNC_OP]: 'priority-sync.mjs',
+    // #3383 — `tracker-refresh`'s `apply` step is an effect (it runs the sync, writes the page and the worker's brief), so it is
+    // NOT read-only; listed for map coverage. Its declaring module is itself a leaf (asserted in `tracker-refresh.test.mjs`).
+    [TRACKER_REFRESH_OP]: 'tracker-refresh.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
