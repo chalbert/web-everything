@@ -302,11 +302,19 @@ export function fillReviewBrief(template, values = {}) {
  * import path, silently re-running pre-fix behavior with no error. THE CHOICE THIS RECORDS (item #3439's #2):
  * the dispatched review's code keeps coming from the DISPATCHING checkout at spawn time — today's actual
  * behavior — rather than the lane it later acquires (that would need the agent to re-invoke itself from
- * inside its own freshly-acquired lane, a bigger change this item does not make). Made LOUD instead: refuse
- * outright whenever `origin/main` is ahead, diverged or not — no auto fast-forward here (unlike `we:scripts/
- * check-readiness.mjs`'s read-only ranker, this checkout may carry uncommitted work a caller does not expect
- * mutated) — so a stale checkout never silently dispatches. A fetch failure (offline) is fail-soft, matching
+ * inside its own freshly-acquired lane, a bigger change this item does not make). Made LOUD instead: a stale
+ * checkout never silently dispatches.
+ *
+ * #3474 — BUT LOUD DOES NOT MEAN "ALWAYS REFUSE". A checkout that is merely BEHIND (no local commits ahead) with a
+ * CLEAN working tree and `HEAD` on `base` can be fast-forwarded with zero conflict and zero judgment, so this
+ * guard now does it (`git merge --ff-only origin/<base>`, via `checkMainStaleness`'s `cleanOnly` mode) and lets
+ * dispatch proceed. It still refuses — and says which case it is — when the fast-forward is not mechanical:
+ * DIVERGED (local commits ahead), DIRTY-and-behind (the sync is NOT attempted over uncommitted work — deliberately
+ * not the read-only ranker's `pull --autostash`, which would stash and pop a tree this dispatcher does not own),
+ * on a branch other than `base`, or the merge itself failing. A fetch failure (offline) stays fail-soft, matching
  * `we:scripts/lib/main-staleness.mjs`'s own philosophy: we cannot tell if it's stale, so we do not block on it.
+ * The fix lives HERE, once: both callers (this file's `dispatchReview` and `we:scripts/conveyor/
+ * reconcile-fix-dispatch.mjs#runReconcileFixDispatch`) get it through this one function.
  *
  * #3637 — THE STALENESS TARGET IS NOW A PARAMETER, not the literal `main`. A checkout sitting on a POC
  * branch (`#3637`'s delivery mode) is behind `origin/main` BY CONSTRUCTION and would be refused here forever,
@@ -329,17 +337,43 @@ export function fillReviewBrief(template, values = {}) {
  */
 export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {}) {
   const check = checkStaleness ?? ((r) => checkMainStaleness({
-    base, autoFf: false, run: (args) => gitRun(args, { cwd: r }),
+    base, autoFf: true, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
   }));
   const st = check(root);
+  if (st && st.synced) {
+    process.stderr.write(`review-dispatch: fast-forwarded the dispatching checkout ${st.behind} commit(s) to origin/${base} (#3474) before dispatching.\n`);
+  }
   if (st && st.action === 'warn') {
     throw new Error(
       `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
-      + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). Sync '
-      + `(git pull --ff-only) or dispatch from a fresh clone of origin/${base} and retry.`,
+      + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). '
+      + staleRemedy(st, base),
     );
   }
   return st;
+}
+
+/** The reason-specific tail of the #3474 refusal: why the automatic fast-forward was NOT (or could not be) done,
+ *  and what to do about it. Falls back to today's generic remedy when the check gave no `reason` (a stub, or an
+ *  older checker). */
+function staleRemedy(st, base) {
+  const fresh = `or dispatch from a fresh clone of origin/${base} and retry.`;
+  switch (st.reason) {
+    case 'diverged':
+      return `It is also DIVERGED (${st.ahead} local commit(s) ahead of origin/${base}), so it cannot fast-forward — `
+        + `rebase or merge origin/${base} into it by hand, ${fresh}`;
+    case 'dirty':
+      return `It has uncommitted changes, so the automatic fast-forward was NOT attempted over them — commit or stash `
+        + `them, then sync (git pull --ff-only), ${fresh}`;
+    case 'not-on-base':
+      return `HEAD is not on ${base}, so the automatic fast-forward was not attempted — check out ${base} and sync `
+        + `(git pull --ff-only), ${fresh}`;
+    case 'ff-failed':
+      return `The automatic fast-forward (git merge --ff-only origin/${base}) failed${st.detail ? ` (${st.detail})` : ''} — `
+        + `sync by hand (git pull --ff-only), ${fresh}`;
+    default:
+      return `Sync (git pull --ff-only) ${fresh}`;
+  }
 }
 
 /**

@@ -96,3 +96,57 @@ describe('checkMainStaleness (fail-soft IO)', () => {
     expect(checkMainStaleness({ run }).action).toBe('warn');
   });
 });
+
+// #3474 — `cleanOnly`: the dispatch-safe gate (fast-forward a CLEAN, on-base, non-diverged tree; never autostash).
+describe('classifyStaleness — cleanOnly (#3474)', () => {
+  const base = { behind: 4, autoFf: true, cleanOnly: true };
+  it('behind + clean + on base + not diverged → auto-ff', () => {
+    expect(classifyStaleness({ ...base, ahead: 0, dirty: false }).action).toBe('auto-ff');
+  });
+  it('behind + dirty → warn (reason dirty), NOT auto-ff — the autostash carry is off in this mode', () => {
+    expect(classifyStaleness({ ...base, ahead: 0, dirty: true })).toMatchObject({ action: 'warn', reason: 'dirty' });
+  });
+  it('behind + diverged → warn (reason diverged)', () => {
+    expect(classifyStaleness({ ...base, ahead: 2, dirty: false })).toMatchObject({ action: 'warn', reason: 'diverged', ahead: 2 });
+  });
+  it('behind + HEAD not on base → warn (reason not-on-base)', () => {
+    expect(classifyStaleness({ ...base, ahead: 0, dirty: false, onBase: false })).toMatchObject({ action: 'warn', reason: 'not-on-base' });
+  });
+  it('the default (cleanOnly off) is unchanged: dirty still auto-ffs', () => {
+    expect(classifyStaleness({ behind: 4, ahead: 0, dirty: true, autoFf: true }).action).toBe('auto-ff');
+  });
+});
+
+describe('checkMainStaleness — cleanOnly (#3474)', () => {
+  const behind = (over = {}, calls = []) => scripted({
+    fetch: { status: 0 },
+    'rev-parse': (a) => ({ stdout: a[1] === 'main' ? 'l\n' : 'o\n' }),
+    'rev-list': (a) => ({ stdout: a[2].startsWith('main..') ? '2\n' : '0\n' }),
+    'symbolic-ref': { stdout: 'main\n' },
+    status: { stdout: '' },
+    merge: { status: 0 },
+    ...over,
+  }, calls);
+  it('clean + on main → `merge --ff-only origin/main`, never `pull`', () => {
+    const calls = [];
+    expect(checkMainStaleness({ cleanOnly: true, run: behind({}, calls) })).toEqual({ synced: true, behind: 2 });
+    expect(calls.find((a) => a[0] === 'merge')).toEqual(['merge', '--ff-only', 'origin/main']);
+    expect(calls.some((a) => a[0] === 'pull')).toBe(false);
+  });
+  it('dirty → warn with reason dirty, and neither merge nor pull is run', () => {
+    const calls = [];
+    const r = checkMainStaleness({ cleanOnly: true, run: behind({ status: { stdout: ' M a.txt\n' } }, calls) });
+    expect(r).toMatchObject({ action: 'warn', reason: 'dirty', behind: 2 });
+    expect(calls.some((a) => a[0] === 'merge' || a[0] === 'pull')).toBe(false);
+  });
+  it('HEAD on another branch (or detached) → warn with reason not-on-base, no merge', () => {
+    const calls = [];
+    expect(checkMainStaleness({ cleanOnly: true, run: behind({ 'symbolic-ref': { stdout: 'lane/x\n' } }, calls) })).toMatchObject({ reason: 'not-on-base' });
+    expect(checkMainStaleness({ cleanOnly: true, run: behind({ 'symbolic-ref': { status: 128 } }, calls) })).toMatchObject({ reason: 'not-on-base' });
+    expect(calls.some((a) => a[0] === 'merge')).toBe(false);
+  });
+  it('a failing merge → warn with reason ff-failed carrying git\'s own message', () => {
+    const r = checkMainStaleness({ cleanOnly: true, run: behind({ merge: { status: 128, stderr: 'fatal: Not possible to fast-forward\n' } }) });
+    expect(r).toMatchObject({ action: 'warn', reason: 'ff-failed', detail: 'fatal: Not possible to fast-forward' });
+  });
+});
