@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-21T14:38:26.350Z",
+  "generatedAt": "2026-09-21T17:49:08.289Z",
   "generatedFromRef": "origin/main",
   "targetCount": null,
   "counts": {
-    "open": 81,
-    "prepared": 45,
-    "inReview": 0
+    "open": 87,
+    "prepared": 48,
+    "inReview": 1
   },
   "items": [
     {
@@ -4304,6 +4304,509 @@
       "warnings": []
     },
     {
+      "num": "3801",
+      "title": "Decision: review the five choices the #3717 dispatch-routing build made (forks A to E)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Review the five choices the #3717 build made on the prototype branch (commit `0f1d0fb8f`, pushed to `lane/mechanical-dispatcher`, no pull request) where the card left a call open. The worker chose the smallest reading at each fork and recorded the alternatives; nothing here is ratified. One card, not five: all five sit in one small area (`we:scripts/lib/dispatch-contracts.mjs`, `we:scripts/lib/dispatch-task-type.mjs`, `we:scripts/operations/dispatch-lane-io.mjs`) and are ruled together. Relates #3717, #3690 (the router's graduation model, now ratified as `#delegation-trial-record-graduation`), #3443, #3730, #3784 and #3658.",
+        "*Prepared 2026-09-21 (session prepare-3801-and-3768).* Research topic: [/research/dispatch-routing-build-review/](/research/dispatch-routing-build-review/). Session report: `we:reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md`. Every citation below was re-read on the prototype tip `5ab89f87b` (read with `git show origin/lane/mechanical-dispatcher:<path>`; these files do not exist on `main`, so their `we:` cites resolve only on the branch). The forks keep their filed letters as Fork 1 (A) to Fork 5 (E)."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "(A) Is a single-worker code-change launch routed as the work-doer?",
+          "why": "*The contract this rules:* whether a `dispatch-lane` launch of `build`, `fix` or `ci-heal` is routed and recorded as the agent that does the work, so it can be delegated and its trial counts against its own `{provider, model, taskType}`. The stage argument (`stage: 'task'`) is how the build expresses it.\n\n*Fork-existence:* a `story`-stage route never calls `selectProvider` and forces Claude (`we:scripts/lib/dispatch-contracts.mjs:427-430`); a `task`-stage route runs the cascade (`:431-449`). One launch gets one stage, so the branches cannot coexist for the same kind.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**`task` for `build`, `fix` and `ci-heal` — recommended (the build's choice).** `decideDispatchRoute` passes `stage: 'task'` (`we:scripts/lib/dispatch-contracts.mjs:842`). A `dispatch-lane` launch starts ONE worker that writes the whole card; there is no task decomposition beneath it on this path. So the launched agent is the task agent, and routing it as one is the honest reading. One caveat, recorded rather than hidden: a Claude converge editor may also edit the lane after the agent (FOUND), so the trial row must say when it did. **Delegation trials:** trials accrue per `{provider, model, taskType}` exactly as `#delegation-trial-record-graduation` rule 3 measures them. **Supervision (#3784):** no route names a `supervisor`, so what satisfies a `full` route for a single-worker lane is delegated to #3784 (recorded there as a dated finding) and must be ruled before enforcement can go on."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**`story` for all three kinds.** The G1 contract lists `fix` and `ci-heal` beside `build` as story kinds (`STORY_KINDS`, `we:scripts/lib/dispatch-contracts.mjs:53`; `STORY_KIND_RUNGS`, `:89`). Rejected: the story stage forces Claude, so with `main`'s trials the codex `bugfix` and antigravity `conflict-resolution` routes found above disappear and no mechanical dispatch can ever be delegated. It also records no trial against a delegated triple."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**`story` for `build` only, `task` for `fix` and `ci-heal`.** The filed card's option (b). A `build` would go through `selectSupervisor` (`we:scripts/lib/dispatch-contracts.mjs:583`), which picks a *supervisor* from `role === 'supervise'` records. Rejected on merit: nobody supervises on this path; the launched agent writes the code, so the record would name a role nobody plays and route a writer on a supervisor's history. It becomes right only if a `dispatch-lane` build ever launches separate agents per task under it (the G2 dispatcher). That event is the trigger to file a new decision; nothing reopens this one."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Verified there is no task decomposition under a `dispatch-lane` build, but \"one worker writes the whole card\" was false: the Claude converge editor can also edit the lane. Now recorded on the trial row (FOUND, *Settled by statute*).",
+          "screen": "flagged(impl) → fixed. The first draft ruled the stage argument; the fork now rules the visible contract (the launch is routed and recorded as the work-doer), and the reopen condition names a concrete trigger.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "(B) The three task types no dispatch kind produces",
+          "why": "*Fork-existence:* a derivation either produces a type from evidence or produces it by default. Producing `other` by default is broken: it routes on \"we did not know\", which #3717 says must be unreachable.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**None is ever produced — recommended (the build's choice).** `self-fix` and `other` are unreachable; `conflict-resolution` comes only from a `fix` with the `conflict` cause (`TASK_TYPES_WITHOUT_PRODUCING_KIND`, `we:scripts/lib/dispatch-task-type.mjs:85-88`, asserted as a negative in its test). **Delegation trials:** `main` holds 10 `other` trials (6 codex, 3 antigravity, 1 claude-native) and 1 `self-fix`, and `codex|gpt-6-astra|other` is the one triple at `spot-check`. That history never informs a mechanical route. This card proposes no re-labelling of those rows. **Supervision:** none.\n- **Amendment folded in:** the two G1 defaults that still yield `other` (`:83`, `:392`, FOUND) are removed or made to refuse in the same child, so no path produces it."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Add a `self-fix` dispatch kind.** Rejected: it invents a kind nobody dispatches (`LAUNCH_KINDS` has none). Viable if a real self-repair dispatch appears."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Map `other` to a default type.** Rejected: it routes the catch-all on the trust `other` earned, which is trust earned on unlabelled work."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Classification: close to settled by #3717 step 1 (\"no default\"), kept as a fork only so the operator ratifies it. False claim fixed: two G1 defaults still produce `other` (`:83`, `:392`); the child removes them.",
+          "screen": "clear. Contract: a mechanical route never runs on trust earned on unlabelled work.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "(C) Role dispatches (`prepare`, `prepare-decision`, `investigate`, `review`) never call the router",
+          "why": "*Fork-existence:* the router needs a `taskType`, and a role dispatch has none. Either the router gains a role path or roles stay outside it; one dispatch cannot be both routed and not routed.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**A role dispatch records `outcome: 'role', routed: null` and keeps its Claude spawn — recommended (the build's choice).** The kind decides it, so it is still mechanical (`decideDispatchRoute`, `we:scripts/lib/dispatch-contracts.mjs:801-822`). Amendment: the role record carries the tier `STORY_KIND_RUNGS` already names for the kind (`:89`), a table lookup, instead of `tier: null`. This deviates from #3717 step 2, which named `review-dispatch` as a router caller; the deviation is ruled here. Moving the *review* seat off Claude is already governed elsewhere: `#reviewer-tool-surface-and-containment` (#3675) moves the mandatory seats only after a replay parity gate, and `#delegation-trial-record-graduation` rule 7 lets any provider fill the reviewer seat. **Delegation trials:** no role trial is recorded against a work triple, which keeps work and review evidence apart (`routeDispatch` already filters `role === 'supervise'` records out, `:424`)."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Map `prepare` and `review` onto `triage-research` or `architectural-decision`.** Rejected: a guess, and both types force Claude at the router anyway."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Give the router a role stage.** Rejected for `review`: a second gate over the reviewer seat that #3675's parity gate already owns. For `prepare`, `prepare-decision` and `investigate`, no delegation evidence exists at all, so a stage would route on nothing."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Citation scope: `#reviewer-tool-surface-and-containment` reaches `review` only, so (c)'s rejection is now split by kind. The role record carries the `STORY_KIND_RUNGS` tier, and the deviation from #3717 step 2 is named.",
+          "screen": "clear. Contract: role dispatches stay on Claude, are not routed, and never count as work trials.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 4,
+          "crux": "(D) An unsized card",
+          "why": "*Fork-existence:* one unsized card gets one estimated size, so reading a task as the largest band and reading it as a small band cannot coexist. What is ruled is where the number comes from; the value itself is a row in the auditable `SIZE_TO_ESTIMATED_LOC` table (`we:scripts/lib/dispatch-contracts.mjs:80`).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Keep 900 lines for every unsized card now; a `task` row is added later by an ordinary batched finding from measured task diffs — recommended (the build's choice, with the future path named).** `estimatedLocForSize` (`we:scripts/lib/dispatch-contracts.mjs:737-742`) returns the `13` band, outside every envelope in `PROVEN_TASK_ENVELOPES` (`we:scripts/lib/provider-routing.mjs:163-169`). The cost is real: no unsized task can be delegated, and an unsized dispatch runs on the Opus rung. But no source for a task's size exists yet, and the dispatch path still promotes to `spot-check` on placeholder thresholds (FOUND), so a small estimate now would hand tasks to a non-Claude provider with lighter checking than the ratified rules allow. This matches how `#delegation-trial-record-graduation` rule 3 sets N: a config value changed by a batched finding against real data, never by a decision ceremony. **Trigger:** once #3784's rule-3 and rule-6 fixes land, a finding may propose the task row from the measured diff sizes of landed tasks."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Refuse an unsized dispatch.** Rejected: it refuses every task."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Derive a size from the declared scope.** Rejected: a new heuristic on a path meant to have none, and 112 of 192 open tasks declare no scope."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**Read a `task` as 80 lines now.** Rejected: the only number offered, \"a task = 2\" (`we:docs/agent/backlog-workflow.md:811`), is the batch context-budget floor (\"tasks … aren't free\"), not a size estimate. With automatic promotion still live, the skeptic's run routed an 80-line `ci-heal` to codex at `spot-check`."
+            }
+          ],
+          "notes": [],
+          "skeptic": "REFUTED → flipped from (d) to (a). Citation scope: \"a task = 2\" is a batch-budget floor, not a size. \"Stays at `full` until the operator promotes\" was false today (placeholder thresholds promote automatically). 112 of 192 open tasks have no scope, and the reconcile path passes no size. Re-classified as a table row set by a batched finding, following rule 3's pattern for N.",
+          "screen": "clear. Contract: where an unsized card's estimate comes from, and who may change it.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 5,
+          "crux": "(E) Where the provider override lives",
+          "why": "*Fork-existence:* two override surfaces for one dispatch need a precedence rule and can disagree. So there is exactly one, and the options below are which one.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**`WE_DISPATCH_PROVIDER_OVERRIDE` plus `WE_DISPATCH_OVERRIDE_REASON` — the build's choice.** Read as default parameters at the IO edge (`we:scripts/operations/dispatch-lane-io.mjs:229-230`). Rejected on merit: a variable exported in the runner's environment applies to every dispatch that process launches, not one item, so a stale export silently re-routes the whole conveyor."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Two declared `dispatch-lane` inputs (`--provider-override`, `--override-reason`), the filed card's form.** Rejected on merit: `dispatch-lane` is called by the tick, which runs mechanically (its declared input is `bookkeepingFile`, `expectedWithinMinutes`, `num`, `we:scripts/operations/__tests__/dispatch-lane.test.mjs:211`), so a flag reaches only hand dispatches and never the conveyor's own. It would also sit beside the marker, giving two overrides that can disagree."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**The per-item `deliveryAgent:` marker, with a required reason, is the one override — recommended.** It is already ratified as \"a per-item choice of who delivers\" (`we:docs/agent/platform-decisions.md#agent-vendor-registry` rule 4), and it is honoured for `build`, `fix` and `ci-heal` (`we:scripts/operations/dispatch-providers/build.mjs:117-121` and its `fix` and `ci-heal` siblings). Three amendments from the skeptic pass: (1) a `deliveryAgentReason:` field is required beside it, and a marker without one is refused, because #3717 requires every override to carry its reason and git's who and when is not a why; (2) the other process-wide variable, `DELIVERY_AGENT_PROVIDER`, is retired with the #3717 pair, for the same reason as (a); (3) the marker's fields stay the rule-4 fields (`requestedVendor`, `executedVendor`, `reason`), and the routing record references them rather than copying them into `routed`, which stays the criteria's choice. **Limits, stated:** the marker's vocabulary is the registered vendors (`claude-restricted`, `codex` today), so Antigravity cannot be forced until it has a descriptor (#3658), and the reconcile conflict path does not read the marker. Neither can execute anything else today anyway. **Delegation trials:** a marker-driven run is a real trial of its own triple. **Supervision:** that triple starts at `full`."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**No override at all.** Rejected: #3717 requires an explicit, recorded override."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "# Fork 5 (c): the override, in the item's own frontmatter\ndeliveryAgent: codex\ndeliveryAgentReason: \"trial of codex on a scoped doc fix, operator 2026-09-22\""
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. \"The one override\" was false while `DELIVERY_AGENT_PROVIDER` exists (now retired too). The marker had no reason field (now required). Rule 4's fields stay the source rather than being copied into routing fields (statute overlap with `#agent-vendor-registry` reconciled). Vocabulary and reconcile-path limits are stated.",
+          "screen": "clear after two weak reasons were struck: (a)'s \"a record with no effect\" (a defect already fixed under *Settled by statute*) and (b)'s \"breaks a pinned test\" (evidence, not merit).",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*review-the-five-choices-the-3717-dispatch-routing*.md` lists this card (it fails until the operator has reviewed and a `## Ruling` section names the outcome for each of Forks 1 to 5).",
+        "2. A ruling that reverses a fork names the one-line change: Fork 1 is the stage argument at `we:scripts/lib/dispatch-contracts.mjs:842`; Fork 4 is a row in `SIZE_TO_ESTIMATED_LOC` (`:80`); Fork 5 (c) removes the environment pair at `we:scripts/operations/dispatch-lane-io.mjs:229-230` and reads the marker and its reason instead."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3802",
+      "title": "Decision: graduate the session-reaper planner first, graduate the reaper together, or keep it on the prototype (reaper-planner graduation)",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [],
+      "forks": [],
+      "gate": null,
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3803",
+      "title": "Decision: accept each of the five catch-up merge forks before the prototype branch is fast-forwarded",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [],
+      "forks": [],
+      "gate": null,
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3804",
+      "title": "Decision: how the prototype branch is kept up to date with main: cadence, conflict owner, alert path and when a slice may graduate",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule the four points of the prototype-sync policy that #3772 leaves open. **Already ruled by the operator, 2026-09-21 (not a fork):** keep `lane/mechanical-dispatcher` up to date with `main` mechanically, by a MERGE COMMIT (never a rebase or force-push), with a conflict resolved on a STAGING ref and the operator fast-forwarding the shared branch. Card 3797 is the loop that carries this out. Relates #3772, #3443, #3556 (ratified: a reconcile agent on escalation), #3607 and #3803 (the five judgment forks of the first catch-up merge).",
+        "*Prepared 2026-09-21 (session prepare-3804-and-3805).* Research topic: [/research/prototype-branch-sync-and-ci/](/research/prototype-branch-sync-and-ci/). Session report: `we:reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md`. Every number below was re-measured on 2026-09-21 at 11:53 EDT; main at `d6c7f6237`, the branch at `5ab89f87b`."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "How far behind main the branch may fall (the lag contract)",
+          "why": "*Fork-existence:* the policy must say how soon main's changes reach the branch; \"promptly\" and \"in batches\" cannot both be the rule. A batch-at-the-ceiling rule is broken for this job: it guarantees every merge is at least as large as the ceiling, which is the exact cost the policy exists to avoid. *What is ruled is the contract; the trigger mechanism (the runner tick today) is #3797's build choice.*",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Promptly — recommended.** Whenever main has commits the branch lacks, the next sync pass merges them, so the branch trails main by at most one pass. The 40-commit ceiling is a backstop, never the trigger. This is what `we:scripts/conveyor/poc-branch-sync.mjs` already does on each runner tick (step 2: nothing to do when main has nothing new). On 2026-09-14 it kept the branch within 5 commits of main, and the first conflict came at 3 commits behind: small, and attributable to one landing."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**In batches on a slower schedule** (for example hourly). Rejected on merit: each merge bundles more landings, so a conflict is larger and harder to attribute to the change that caused it, and the branch runs on a stale main for the whole interval."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Only when the main-only count passes the 40-commit ceiling.** Rejected: every merge is then at least 40 commits, the largest possible conflict each time. The ceiling stays as the backstop that raises `branch-drift-blocked`."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**Accepted cost of (a), named:** a clean sync merge is pushed with no test gate, by design (the \"NO TEST GATE, DELIBERATELY\" section of `we:scripts/conveyor/poc-branch-sync.mjs`'s header), so the runner can run a merged tree nobody tested. The cover is #3768 design point 6 (a `check:standards` run on each push to the branch), not this card."
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Classification attack: (a), (b) and (c) are values of one knob (minimum lag), and (a) is already built and switched on. Accepted in part: the fork is kept only because (c) is a broken value (it makes every merge the largest one), and it is now framed as the lag contract with the trigger left to #3797. Merit attack: the per-tick merge is untested; now named above as an accepted cost with its cover.",
+          "screen": "flagged(impl) → fixed. The first draft ruled the trigger mechanism (every tick vs hourly), which the operator never sees. Re-layered to the lag contract; the tick is a build choice.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "Who resolves a conflict, and what freezes while it is open",
+          "why": "*Fork-existence:* exactly one party must own a conflict, and the branches cannot coexist. If the agent and the operator both own it, the same conflict is resolved twice, possibly two ways. If nobody owns it, the branch drifts, which is what happened from 2026-09-14 to 2026-09-21.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**A dispatched reconcile agent on the staging ref, then the operator's fast-forward — recommended.** The agent resolves the conflict on the staging ref; the operator fast-forwards the shared branch. This **amends** #3556 rather than following it: #3556's ratified brief tells the agent to \"merge/rebase the base into the branch\" and \"push directly to the branch\" (`we:backlog/3556-auto-dispatch-a-reconciliation-agent-when-we-branch-sync-mjs.md`), and the operator's 2026-09-21 ruling forbids both. Kept from #3556: a dispatched agent, one attempt per distinct conflict. Changed: merge only, never rebase, and push to the staging ref only. #3607's brief must be updated to match before it is built. The agent merges the branch tip and then main into `lane/mechanical-dispatcher-catchup` (creating it from the branch tip if it does not exist), resolves, and runs the branch's own tests. Every step is a merge commit, so earlier resolution work on the staging ref is kept and nothing is force-pushed. It never writes to the shared branch. A resolution it cannot decide on merit comes back as a decision card, as the first catch-up did with #3803."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**The operator alone.** Today's de facto path. Rejected on merit: the operator is not in the loop every tick, so between turns a conflict only the operator may resolve has no owner, and it grows with every landing on main (3 commits behind on 2026-09-14, a 58-file conflict today)."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**The author of the conflicting change.** Rejected: the author is a finished session by the time the sync runs, and a conflict is between main's landing and the branch's change, so there is no single author to pick."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**The agent resolves and pushes to the shared branch.** Rejected: excluded by the operator's ruling, which puts a staging ref and the operator's fast-forward in between."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**Fork 2 sub-fork — what freezes while the conflict is open.**"
+            },
+            {
+              "kind": "text",
+              "text": "- **(a) Only the sync merge freezes — recommended.** No new freeze is added. The pass keeps probing but merges nothing. Direct pushes to the prototype continue. Dispatched work is already held: while the drift verdict is `blocked`, `we:scripts/readiness/dispatch-plan.mjs:424-432` holds every queued card whose scope overlaps the branch's registered scope (`we:scripts/conveyor/`, `we:skills-src/conveyor/`), which is most prototype work. That hold is unchanged. Graduation slices are the one exception (Fork 4). **To stop the agent chasing a moving target:** each agent attempt is pinned to one (branch tip, main tip) pair; the one-attempt cap is keyed on the set of conflicting file paths (`git merge-tree --name-only`), not on today's signature, which hashes the whole `merge-tree` output (`conflictSignature`, `we:scripts/conveyor/branch-sync.mjs:85-88`) and so changes with every landing on either side; and the branch's newer commits are merged into the staging ref once, at the end, just before the fast-forward (evidence: 15 new branch commits cost 1 conflict today).\n- **(b) Also freeze landings on the prototype until the fast-forward.** This would keep the staging ref a fast-forward without a refresh. Rejected on merit: it stops prototype delivery for as long as the conflict is open, although a landing whose files are not in the conflict is not endangered by it. The statute `we:docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode` exists so that POC delivery is not slowed by a gate that does not protect it.\n- **(c) Freeze all dispatch.** Rejected: a card outside the branch's scope is not endangered by the conflict, and the scoped hold already stops the ones that are."
+            },
+            {
+              "kind": "code",
+              "text": "# Fork 2 (a): the reconcile agent's steps, on the throw-away staging ref only\ngit fetch origin main lane/mechanical-dispatcher\ngit switch -C lane/mechanical-dispatcher-catchup origin/lane/mechanical-dispatcher-catchup  # or from the branch tip if absent\ngit merge origin/lane/mechanical-dispatcher   # take the branch's new commits (1 conflict today)\ngit merge origin/main              # resolve main's conflicts here, a merge commit\n<the branch's own tests>           # verify-lane on the staging ref\ngit push origin lane/mechanical-dispatcher-catchup   # the staging ref only; a plain push\n# operator, later:  git push origin origin/lane/mechanical-dispatcher-catchup:lane/mechanical-dispatcher\n#                   (a plain push; refused unless it is a fast-forward)"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Citation-scope attack: the draft called (a) \"#3556's ratified shape\", but #3556 ratified a rebase-or-merge and a direct push to the branch; (a) now says it amends #3556 and that #3607's brief must change. Sub-fork attack (close to refuted on its stated reason): the conflict signature re-arms after every landing, so \"one attempt per signature\" was unbounded; and \"prototype landings continue\" overclaimed, since dispatched conveyor-scope work is already held by `branch-drift-blocked`. Fixed by keying the cap on the conflicting file set, pinning each attempt to a tip pair, refreshing the staging ref once at the end, and stating the existing hold.",
+          "screen": "clear (Fork 2 and its sub-fork are policy the pipeline sees). Two cost-phrased rejection reasons, for (b) and for sub-fork (b), were restated on merit. The git block is an illustration, not part of the ruling.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "Where the alert goes",
+          "why": "*Fork-existence:* the alert must land where the operator reads each turn. A place the operator does not read is broken: the live alert file sat unread from 2026-09-14 to 2026-09-21.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**The alert file and a desktop notice only.** Today. Rejected: the file sits inside a checkout's git directory and the notice is transient. Nobody saw attempt 5."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**The alert contract — recommended.** A line on the surface the operator reads every turn, raised only when the operator must act, and failing visible. \"Must act\" means the agent's one attempt failed, or a resolved staging ref is waiting for the fast-forward. While the agent is working, nothing is raised for the operator. \"Failing visible\" means an unreadable alert record shows as a gap, never as \"all clear\". The alert file stays as the durable record the line is read from. **A read-only surface is not enough on its own:** the turn digest reaches a session only once #3726 (deliver the digest by hook at session start and prompt time; open, `blockedBy: 3724`) is built, and the wip report runs only when the operator asks. The live log holds 42 unseen escalation lines. So the build of (b) is `blockedBy` #3726, and until #3726 lands the desktop notice stays on as a push channel, with the #3383 Done-when 2 notification path as its replacement once that exists. *Build note, not ruled:* the natural home is a `needsOperator` row in the turn digest (`we:scripts/operations/turn-digest.mjs`, which already reports unreadable sources in `unavailable[]`) plus the wip report. `we:scripts/operations/operator-queue.mjs` is a poorer home, because its header makes it \"the SOLE authority on which human-gated PRs are worth the operator's time\" and it has no non-PR row."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**A GitHub issue.** Rejected on merit: an outward-facing record for an internal branch, and not where the operator reads each turn."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "// Fork 3 (b), illustration only (the build picks the shape): one line per frozen branch, read from the alert file\n{ kind: 'branch-sync', branch: 'lane/mechanical-dispatcher', state: 'awaiting-fast-forward',   // or 'agent-failed'\n  behind: 58, signature: '3e72ad5516ad', since: '2026-09-14T23:04:44Z',\n  line: 'lane/mechanical-dispatcher: staged merge ready on lane/mechanical-dispatcher-catchup, fast-forward it' }"
+            }
+          ],
+          "skeptic": "REFUTED as first written → rewritten. Attack: the digest is prototype-only and its delivery hook (#3726) is open and unbuilt, and the wip report runs only on request, so the first draft's alert waited to be read exactly like the file that failed (42 unseen escalations in the live log). Fixed: (b) is now `blockedBy` #3726 and keeps a push channel until the digest is delivered into every session.",
+          "screen": "flagged(impl) → fixed. The first draft ruled which module hosts the row (turn digest vs operator queue), which the operator never sees. Re-layered to the alert contract (every-turn surface, action-only, fails visible); the module choice is a build note.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 4,
+          "crux": "When a slice may graduate to main, and in what order",
+          "why": "*Fork-existence:* a slice either may land while the branch is behind main, or may not; one rule must hold. Copying a ported file byte for byte from a stale branch is broken: it silently reverts whatever main changed in that file since the merge base.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Any time, with a per-file freshness rule — recommended.** Whatever the sync state. A slice lands through the normal lane, `we:scripts/verify-lane.mjs` and pull request path to `main` (#3443 Done-when 3; statute clause 3). For each file it ports, if main has a commit to that file since the merge base, the port applies the branch's change onto main's current file; it never copies the branch's file. This is what #3443's hand-ports already do; the check makes it mechanical. **If a ported file is in the open conflict set**, the port takes the staging ref's resolution of that file when one exists; otherwise the port's version is recorded as the resolution the reconcile agent must adopt, so the same conflict is never resolved twice, two ways. Files the slice imports but does not port are covered by the graduation PR's CI on main's tree, not by the freshness check. **\"Any time\" needs one code change:** today a slice porting `we:scripts/conveyor/` files overlaps the drift scope and is held as `branch-drift-blocked` (`we:scripts/readiness/dispatch-plan.mjs:430`). The default exempts #3443 graduation slices (target `main`) from that hold. That amends statute clause 4(d) of `we:docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode` (\"a drifted branch still holds its own items\") to add \"except its graduation slices to the target\". The exemption is safe on merit: a slice that lands a branch file on main makes main's copy match the branch, which shrinks the conflict on that file rather than growing it. **Order:** #3443's dependency order (`blockedBy`, inert pieces first). A slice does not wait for the branch's own health: its PR runs `check:standards`, `test` and `smoke` on main's tree. Consequence for the operator: the Priority order's rule 1, \"nothing may graduate before the health chain\", would no longer hold for slices once this is ruled."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Only from a branch that is level with main.** The filing default. Rejected: it stops every slice while any sync is frozen. Today that means 58 conflicted files, most unrelated to the slice. It is against the operator's goal that graduation keep moving. It also fixes nothing (a) misses: the PR diff is taken against main either way."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Any time, copying files as they are.** Rejected: a silent revert of main's edits whenever main moved the file. #3443's log records exactly this risk."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**Only after the whole branch is frozen and reconciled.** Rejected: it serializes every slice behind the slowest conflict."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "# Fork 4 (a): the per-file freshness check, run in the graduation lane before the port\nbase=$(git merge-base origin/main origin/lane/mechanical-dispatcher)\nfor f in $SLICE_FILES; do\n  if [ -n \"$(git log --format=%h \"$base\"..origin/main -- \"$f\")\" ]; then\n    echo \"moved on main: $f -> apply 'git diff $base origin/lane/mechanical-dispatcher -- $f' onto main's file\"\n  fi\ndone"
+            }
+          ],
+          "skeptic": "REFUTED as first written → rewritten. Statute collision: clause 4(d) of `#poc-branch-declared-delivery-mode` says a drifted branch holds its own items, and `we:scripts/readiness/dispatch-plan.mjs:430` does hold graduation slices, so \"any time\" was false in the dispatcher today. Merit: a slice file in the open conflict set would be resolved twice, possibly two ways. Fixed: the default now exempts graduation slices from the hold and names the clause 4(d) amendment the codification must make, and conflict-set files take or set the staging resolution. Statute overlap reconciled: this is the only anchor collision found; `#repo-drain-check-contract` is untouched.",
+          "screen": "clear. Real policy; it overrides the Priority order's rule 1 for slices. The freshness script is an illustration; only \"never copy a file main has moved\" is ruled.",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*prototype-branch-is-kept-up-to-date*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the four forks).",
+        "2. The ruling's build work is carved into slices under #3383 or folded into 3797 and #3772; the loop's own acceptance, not this card, checks `git rev-list --left-right --count origin/main...origin/lane/mechanical-dispatcher` against the ruled cadence."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3805",
+      "title": "Decision: run CI on the prototype branch, change the drain's required check, or neither",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule whether the prototype branch `lane/mechanical-dispatcher` gets real CI, or whether the drain's hardcoded required check changes, or neither. Today the two cards that raised it (#3674 and #3653) each name one half of the fork and rule nothing. Relates #3674 (the drain stalls forever on a base with no `test` check; two candidate fixes, \"not deciding here\"), #3653 (allow CI for POC branches) and #3443 (graduation: each slice gets its own reviewed pull request to `main`).",
+        "*Prepared 2026-09-21 (session prepare-3804-and-3805).* Research topic: [/research/prototype-branch-sync-and-ci/](/research/prototype-branch-sync-and-ci/). Session report: `we:reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md`. Numbers re-measured on 2026-09-21; main at `d6c7f6237`, the branch at `5ab89f87b`."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Where the prototype's check comes from",
+          "why": "*Fork-existence:* (a) and (b) both put a CI gate on landings into the prototype; (c) keeps the prototype's only gate as the item's own tests, as statute clause 2 says. They cannot coexist: a CI gate inside the POC branch either exists or it does not.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**Run CI on pull requests against the prototype.** Widen both workflows' `pull_request.branches` to include the prototype, either as a static list or as `lane/**` plus a first job that reads the registry. Gives a real, visible `test` on any such pull request (#3653's acceptance). **Cost to graduation:** none saved; each slice still runs CI at its graduation pull request. **Health chain:** #3653 is built, and #3674 closes because `test` now reports. Rejected on merit: it adds a second gate inside the POC branch, which statute clause 2 rules out (the item's own tests are the only gate there, and it says \"A landing tax of any shape, however small, is exactly the latency the operator ruled out\"), and it would gate only the pull-request path while direct pushes, the actual path, stay ungated, so it certifies nothing about the branch. The card's earlier reason, \"15 errors, red on day one\", is now weak: the branch is at 1 error. Build note: a workflow filter cannot read the registry; a job skipped by `if:` reports \"skipped\", while a workflow skipped by a filter stays Pending."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Change the drain to read the base's real required checks, as `we:scripts/pr-land.mjs` does.** Zero required checks on a base then counts as passed (#3674 candidate b). **Cost to graduation:** none. **Health chain:** #3674 is built, #3653 closes. Rejected: it edits the gate of the only writer to `main` to serve a base that receives no pull requests. It also rewrites the drain's statute contract (`#repo-drain-check-contract`: one green check named `test`). A bug in \"zero checks counts as passed\", such as an API error read as zero, would let an unchecked pull request reach `main`. If chosen, it must fail closed on any API error and relax only for a base named in the POC registry, and the statute must be amended."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**Neither — recommended.** Pull requests are not the delivery path for the prototype. Prototype work lands by direct push or `poc-land`, verified by the item's own tests (statute clause 2). Each slice gets full CI at its graduation pull request against `main` (#3443; statute clause 3), the only place CI is load-bearing. #3653 is resolved as superseded by this ruling. #3674 is resolved by Fork 2 (a)'s build, because its real defect, the silent stall, is what Fork 2 fixes. **Cost to graduation:** none added. **Health chain:** #3653 closes without code and #3674 closes with a one-arm drain change, so graduation waits on #3768 and #3772 (through #3804) only. **What (c) leaves untested, named:** nothing runs a suite on the merged prototype tree; clean sync merges are ungated by design, and `poc-land --skip-verify` has been used (PR #2236's closing comment). The cover is #3768 design point 6 (a `check:standards` run on each push to the branch), which does not need GitHub CI; (c)'s build is ruled together with filing that as a card, so the gap has an owner."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "# Fork 1 (a), the rejected shape, for contrast: we:.github/workflows/ci.yml\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main, 'lane/**']   # static; a first `gate` job must then read poc-branches.json"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Citation scope: clause 2 of `#poc-branch-declared-delivery-mode` reaches this case directly, so it is authority for (c), not only context. Attacks: after (c) nothing tests the merged prototype tree, and #3674's defect is fixed by Fork 2's code, so it is not simply \"superseded\". Fixed: #3674 now resolves through Fork 2 (a)'s build, and the untested tree is named with #3768 point 6 as its owner. Statute overlap: none; `#repo-drain-check-contract` is untouched by (c).",
+          "screen": "flagged(prio) → fixed. The first draft rejected (a) mostly on cost (\"a path nobody uses\", \"two hand-kept lists\"). Restated on merit: (a) adds a second gate inside a POC branch, which clause 2 rules out, and it gates only the pull-request path while the real path, the direct push, stays ungated.",
+          "parseOk": false,
+          "warning": "Fork 1: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly."
+        },
+        {
+          "n": 2,
+          "crux": "A pull request opened against the prototype anyway",
+          "why": "*Fork-existence:* only matters under Fork 1 (c). The drain either says why it will not land such a pull request, or it does not. Silence is broken: it is the defect #3674 was filed for.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**The drain holds it with a named reason — recommended.** The reason reads `base is not main`, so it shows as held instead of waiting forever. The reason is one more arm in `classifyPr`'s existing skip chain. It compares the PR's base with the repo's default branch (or a registered POC branch's `target`), not a hardcoded `'main'`. No legitimate drain landing is lost: no drain-landed PR has ever had a non-main base (FOUND above), stacked couples share lane tips through manifest `base` shas, not PR bases (`we:scripts/merge-ai-prs.mjs:771-779`), and the PR-create path defaults to `main` (`we:scripts/pr-land.mjs:133`). A `--base=main` flag alone would hide such PRs silently, so the code arm is needed. The drain never lands it; a human who opened it on purpose merges it by hand or re-targets it."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Leave it as today.** Rejected: it stalls with no message."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Close it automatically.** Rejected: a human may have opened it on purpose."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "// Fork 2 (a): one more arm in classifyPr's skip chain (we:scripts/merge-ai-prs.mjs:616-629), ahead of the\n// required-check arm, so the named reason wins over \"required check \"test\" is not green\".\n// `baseRefName` is already in the drain's `gh pr list --json` field list (we:scripts/merge-ai-prs.mjs:3547).\n// `defaultBranch` is the repo's default branch, passed in by the caller (not a literal 'main').\nelse if (pr?.baseRefName && pr.baseRefName !== defaultBranch) { decision = 'skip'; reason = `base is not ${defaultBranch} (${pr.baseRefName}) — POC-branch PRs are not drained (#3805)`; }\nelse if (!testGreen) { decision = 'skip'; reason = `required check \"${requiredCheck}\" is not green`; }"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. History attack: does the drain legitimately land non-main-base PRs anywhere? Checked across web-everything, frontierui and plateau-app: no. Classification: a `--base=main` config flag alone would hide such PRs silently, so a code arm is justified. Amendment: compare with the repo's default branch or the POC registry target, not a literal `'main'`.",
+          "screen": "clear. The operator sees the named hold, so it is not an implementation detail; (c), auto-close, is rejected on merit. (b) is the status quo, kept for contrast.",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*run-ci-on-the-prototype-branch*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for both forks).",
+        "2. After the ruling, `gh pr list --base lane/mechanical-dispatcher --state open` shows no pull request waiting on a check that cannot run (under (c): the drain reports any such pull request as held with the named reason, #3674 is resolved by that build, and #3653 is resolved as superseded)."
+      ],
+      "parseOk": false,
+      "warnings": [
+        "Fork 1: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly."
+      ]
+    },
+    {
+      "num": "3806",
+      "title": "One weighted worker budget plus the heavy pool, or separate heavy and light worker counts?",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [],
+      "forks": [],
+      "gate": null,
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
       "num": "3735",
       "title": "May a review:human approval carry across a push that only merges main into the reviewed branch?",
       "prepared": true,
@@ -4312,7 +4815,14 @@
       "directUnblocks": 0,
       "transitiveUnblocks": 0,
       "unblocksToReady": 0,
-      "pr": null,
+      "pr": {
+        "number": 2388,
+        "state": "open",
+        "kind": "other",
+        "title": "#3735 ratified as prepared: codify the merge-only approval carry, resolve the card, file the build follow-ons",
+        "url": "https://github.com/chalbert/web-everything/pull/2388",
+        "repo": "chalbert/web-everything"
+      },
       "blockedBy": [],
       "dateOpened": "2026-09-20",
       "ageInDays": 2,
