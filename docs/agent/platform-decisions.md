@@ -4994,12 +4994,15 @@ a second approval (#2365, #2347). The rule:
    re-parks. A true rebase (rewritten history) is out of this rule's scope and stays with the digest tiers of
    `#3054`.
 3. **The replay is hermetic.** It runs with no rerere (`-c rerere.enabled=false`), no configured merge
-   drivers, the default strategy with no `-X` option, and attributes read from the empty tree
-   (`-c attr.tree=<empty tree>`). An author's custom driver, rerere or `-X` option can then only cause a
+   drivers, the default strategy with no `-X` option, rename detection pinned to git's default
+   (`-c merge.renames=true`, so the drain clone's own config cannot change the result), and attributes read
+   from the empty tree (`-c attr.tree=<empty tree>`). An author's custom driver, rerere or `-X` option can then only cause a
    missed carry, never a wrong one.
 4. **A clean merge that touches files main changed does not carry; it re-parks.** Carry only when the files
-   main's side brought in (`git diff --name-only <PR-side parent> <merge>`) share nothing with the files the
-   reviewed PR changed. Otherwise the PR re-parks.
+   main's side brought in (`git diff --name-only --no-renames <PR-side parent> <merge>`) share nothing with the
+   files the reviewed PR changed. Otherwise the PR re-parks. Both file sets are read with `--no-renames`, so a
+   rename counts as its old path plus its new path: a main-side rename of a PR-touched file A to a new path B
+   lists A and re-parks, instead of collapsing to B alone and slipping past the overlap test.
 5. **The drain's own merges obey the same rule.** A `rebaseDropContent` merge (content auto-resolution) on an
    accepted PR re-parks instead of re-stamping. A `rebaseDropManifest` merge (manifest only, no PR file
    touched) still re-stamps, but only when the lane tip it merged in is itself covered by the current
@@ -5014,8 +5017,10 @@ a second approval (#2365, #2347). The rule:
 8. **The stamp is bound to the proven head.** `we:scripts/review-set-label.mjs --to=restamp` takes
    `--expect-head=<full sha>`, **required** for a restamp: it refuses (non-zero exit, no comment, no label
    move) when the flag is missing or the live head differs from it. The carry passes the head its proof
-   reached; the drain's own rebase passes the commit it pushed. The carry comment records both the source
-   `reviewed-sha` it carries from and the destination head it stamps.
+   reached; the drain's own rebase passes the commit it pushed. The `reviewed-sha` marker the restamp writes
+   **is** the `--expect-head` value, never a re-read of the live head: comparing the head and then stamping a
+   second read would reopen the same race. The carry comment records both the source `reviewed-sha` it
+   carries from and the destination head it stamps.
 9. **Who verifies, and where it is recorded.** The drain decides, inside the one staleness authority
    `decideReviewGate` (`#2409`), and records through the existing re-stamp path (`--to=restamp`) with its own
    comment heading, stamped `--actor=drain` and naming the original clearer. The pusher never certifies its own
