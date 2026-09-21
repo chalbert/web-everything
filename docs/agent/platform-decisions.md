@@ -4883,6 +4883,44 @@ its sandbox), which would make clause 1's same-surface rule unhonourable for tha
 red-teamed on 2026-09-21 before ratification. Full reasoning:
 [#3675](/backlog/3675-give-codex-s-review-seat-container-scoped-write-access-to-a/).
 
+### A caller-supplied string that becomes a spawned CLI's argv is validated at its own seam in the argv builder — a whole-argv denylist records a trap, it is never the boundary {#argv-builder-validates-caller-strings-at-its-own-seam}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), the one fork approved as prepared, no amendment
+(`#3056`).** The situation: a helper builds an argv **array** for a spawned CLI (no shell), and one or more
+options are free strings the caller supplies. A value spelled like a flag lands in the array where the CLI's
+own parser may read it as a flag. The rule has four clauses:
+
+1. **Validate each free-string option where the argv is built, and refuse a value whose first character is
+   `-`.** No real value of such an option starts with `-` (a model name, a prose mandate), and every CLI flag
+   does, so the refusal loses nothing. An option with a closed value set (an enum, a number, a UUID, a plain
+   identifier) is checked against that set instead — the same per-field discipline, a stricter test. The check
+   runs at the source, so the helper never depends on how the third-party CLI parses a flag-shaped value.
+2. **A whole-argv denylist is a trap record, never the defense.** It can only name traps someone has already
+   found, so it is always one measured spawn behind the next flag-shaped value. It may stay layered underneath
+   the per-field checks as the named record of a specific trap; it must not be the only thing standing.
+3. **Do not build a position-aware allowlist over the assembled argv to do this job.** To be correct it must
+   know which tokens are value slots, which is a fact the builder already has when it writes them — rebuilding
+   it after assembly duplicates the builder's fixed-order shape and couples the guard to it.
+4. **The recurring cost is paid by a test, not by memory.** Every future free-string option must add its own
+   check, and nothing structural notices a forgotten one — so the builder carries a test that walks its options
+   and fails on an unguarded free-string one. An outer layer that also refuses such a value must call the same
+   predicate, never a second rule for the same field.
+
+**Scope, so the rule is not stretched.** It governs option *values* that reach flag positions. It does not
+decide which executable is spawned, or the child's working directory or environment — none of those is parsed
+by the CLI's flag grammar, so they are a different question and get their own ruling when a caller-influenced
+value for one exists. Cited as **supporting precedent, not binding authority**:
+[#guard-unresolvable-reexecution-denies](#guard-unresolvable-reexecution-denies) rules that an enumeration
+cannot be completed from inside the thing being enumerated; that anchor's scope is unbounded shell text, whereas
+a CLI's flag names are a finite documented set, so it does not by itself rule out an allowlist here — this rule
+is decided on the merits above, and the shared lesson is only that an enumerate-and-extend defense is the wrong
+shape for a boundary.
+
+**Lineage:** ratified via `#3056` (2026-09-21), under the operation-engine epic `#3029`, grounded in
+`we:reports/2026-08-16-3056-judge-spawn-argv-guard-prep.md`; the prepared grounding was re-checked against the
+tree at ratification and the ruling did not change. Full reasoning and the rejected options:
+[#3056](/backlog/3056-the-judge-spawn-argv-guard-is-a-one-token-denylist-a-flag-sh/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
