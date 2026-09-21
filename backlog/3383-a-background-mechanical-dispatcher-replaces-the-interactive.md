@@ -4320,3 +4320,19 @@ On the operator's instruction of 2026-09-21 ("I want to prioritise the delegatio
 **Not verified here:** #3704 and #3630 "mostly landed" is from reading code and cards, not from running their flows; the section's order was not compared with a fresh `suggest-next` run.
 
 Owed: the operator picks the G2 versus #3717 fold; no card exists yet for an Antigravity delivery provider, for graduating the Codex delivery provider to main, or for validating Codex delivery on real work.
+
+## Session update (2026-09-21) — #3730 dispatch-task built on the prototype branch: brief-file workers launch through the run store, with the #3752 launch prompt and a subscribe line (code commit 6869cdc0f)
+
+Card #3730 (with the prompt template from the first point of #3752) is built on this branch: `dispatch-task` launches a worker from a brief file through the same run store and the same spawn as `dispatch-lane` (code commit 6869cdc0f; no PR, per the prototype rule).
+
+**What exists:** `we:scripts/operations/dispatch-task.mjs` (declaration, the one launch prompt `buildBriefLaunchPrompt`, the job-file projection `projectJobs`, the `subscribe:` trailer), `we:scripts/operations/dispatch-task-io.mjs` (reader, sink, job view and a `jobs` command), registered in `we:scripts/operations/run.mjs`. `--permissionMode` defaults to `auto` and can be overridden. `--allowedTools=<list>` is an optional pass-through, unset by default, sent as one token because the CLI option is variadic and would swallow the prompt.
+
+**Behaviour:** a launch writes a run record with the session, the brief path and the launch time; a second call with the same session slug is refused as already in flight and spawns nothing; the job view (`kind, item, session, agentId, launchedAt, brief, result, state, note`) is derived from run records and completion records, with a new completion kind `task` so the worker's own `completion-cli report` works. The operation prints `subscribe: <name> session=<id>` as its last line (and `subscribe` in `--json`) because the idle-notice subscription is a harness tool a script cannot call.
+
+**Guards:** it inherits `assertNotALaneCheckout` and adds `assertMainNotStale` (which `dispatch-lane` does not call), with a `--base` so a prototype-tip checkout measures against its own branch.
+
+**Chosen from the card, open to review:** one effect type with `dispatch-lane` so `runner-activity` sees the worker (its `launchKind` prints as `unknown`); a worker model is set only through `WE_DISPATCH_AGENT_ARGS`, because a `model` input collides with the adapter's control flag.
+
+**Not verified here:** a live worker (owed as the orchestrator's first dispatch through the operation); that the real `claude` CLI accepts `--permission-mode` and the single-token `--allowedTools=` spelling (the fake CLI accepts them, commander 10 parses them as intended); `runner-activity` itself (it is not on this branch).
+
+Checks: 53 new tests; `scripts/operations/__tests__` plus `scripts/conveyor/__tests__` 177 files and 5156 tests before, 178 files and 5209 after; `check:standards` 0 errors; `check-priority --strict` OK.
