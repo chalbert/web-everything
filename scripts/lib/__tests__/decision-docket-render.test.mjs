@@ -79,6 +79,44 @@ describe('renderDocketHtml', () => {
     expect(html).toContain('class="dcard"');
   });
 
+  describe('validation-gate item', () => {
+    const gateItem = (gate) => ({
+      num: '3699', title: 'A gate', prepared: true, preparedDate: '2026-09-18',
+      leverageScore: 1, directUnblocks: 0, transitiveUnblocks: 0, unblocksToReady: 0, ageInDays: 3,
+      digest: ['**Verdict: not yet.**'], forks: [], doneWhen: ['1. Filed.'], parseOk: gate.parseOk, warnings: gate.warning ? [gate.warning] : [],
+      gate,
+    });
+    const okGate = {
+      deciding: 'Whether to build X now.', priorArt: '| A | B |\n|---|---|\n| c | d |',
+      recommendation: '**Not yet.**\n\n**Un-gate trigger:** the next real failure.',
+      skeptic: 'SURVIVES — beat the attack.', screen: 'clear.', parseOk: true, warning: null,
+    };
+
+    it('renders a full card — what is decided, prior-art, the recommended verdict and the Skeptic line — not a parse warning', () => {
+      const html = renderDocketHtml({ items: [gateItem(okGate)] }, TEMPLATE, { now: new Date('2026-09-13') });
+      expect(html).toContain('class="dcard"');
+      expect(html).toContain('GATE');
+      expect(html).toContain('Whether to build X now.');
+      expect(html).toContain('Prior-art delta.');
+      expect(html).toContain('Recommended verdict');
+      expect(html).toContain('the next real failure.');
+      expect(html).toContain('SURVIVES — beat the attack.');
+      expect(html).not.toContain('Parse incomplete');
+    });
+
+    it('shows only the heading + a referral for a parse-incomplete gate', () => {
+      const bad = { ...okGate, skeptic: null, parseOk: false, warning: 'Gate: no "Skeptic:" verdict line found under "## Recommendation".' };
+      const html = renderDocketHtml({ items: [gateItem(bad)] }, TEMPLATE, { now: new Date('2026-09-13') });
+      expect(html).toContain('Parse incomplete:');
+      expect(html).not.toContain('Whether to build X now.');
+    });
+
+    it('classes a REFUTED skeptic verdict as refuted', () => {
+      const html = renderDocketHtml({ items: [gateItem({ ...okGate, skeptic: 'REFUTED — flipped to go.' })] }, TEMPLATE, { now: new Date('2026-09-13') });
+      expect(html).toContain('class="attack refuted"');
+    });
+  });
+
   it('lists an un-prepared item only in the upstream table, never as a fake .dcard', () => {
     const data = sampleData();
     data.items.push({

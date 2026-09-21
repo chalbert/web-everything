@@ -126,6 +126,51 @@ function renderVerdicts(fork, attackClass) {
     : `<div><b>${p.label}:</b> ${p.html}</div>`)).join('')}</div>`;
 }
 
+/**
+ * The verdict CLASS of a fork's or gate's `{ skeptic, screen }` pair, read off the START of the Skeptic/Screen
+ * text (the actual vocabulary — REFUTED / SURVIVES[-WITH-AMENDMENT] for Skeptic, clear / flagged(impl|prio) for
+ * Screen — docs/agent/backlog-workflow.md's "two-confusion screen"), never a substring search: the prose ITSELF
+ * routinely uses the word "flagged" in an unrelated sense ("the attack also flagged X as under-specified"),
+ * which a substring match would misread as the verdict.
+ */
+function attackClassFor({ skeptic, screen }) {
+  if (/^flagged/i.test((screen || '').trim())) return 'flagged';
+  if (/^REFUTED/i.test((skeptic || '').trim())) return 'refuted';
+  return 'clear';
+}
+
+/**
+ * A prepared validation-gate decision (a one-sided go / no / not-yet call — no `## Fork N`, so no options to
+ * list): what is being decided, the prior-art delta when the item carries one, then the recommended verdict +
+ * un-gate trigger as the single default card, closed by the same Skeptic/Screen line a fork gets. A gate whose
+ * body didn't parse shows only its heading and a referral, exactly as a parse-incomplete fork does.
+ */
+function renderGate(gate) {
+  const head = '<div class="forkhd"><span class="forktag">GATE</span> A one-sided go / no-go call — no rival branch to weigh</div>';
+  if (!gate.parseOk) {
+    return `
+        ${head}
+        <p class="attack flagged"><b>Parse incomplete:</b> ${renderWarning(gate.warning || 'this gate did not match the documented validation-gate shape.')} Read this gate directly in the item's own file — the extracted text is not shown here rather than risk a garbled or misleading render.</p>`;
+  }
+  const deciding = gate.deciding ? mdContainer(gate.deciding, 'forkwhy') : '';
+  const priorArt = gate.priorArt ? `<div class="forkwhy"><p><b>Prior-art delta.</b></p>${renderMarkdownBlocks(gate.priorArt).trim()}</div>` : '';
+  const verdictCard = gate.recommendation
+    ? `<div class="opts one">
+          <div class="opt oc">
+            <div class="opt-lbl">✓ Recommended verdict</div>
+            <div class="opt-bd">${renderMarkdown(gate.recommendation).html}</div>
+          </div>
+        </div>`
+    : '';
+  const skepticScreen = (gate.skeptic || gate.screen) ? renderVerdicts(gate, attackClassFor(gate)) : '';
+  return `
+        ${head}
+        ${deciding}
+        ${priorArt}
+        ${verdictCard}
+        ${skepticScreen}`;
+}
+
 function renderFork(fork) {
   // A fork whose body doesn't match the documented prepared-fork shape (docs/agent/backlog-workflow.md
   // #decision-docket) most often predates that convention — it uses a different, more free-form markdown
@@ -149,10 +194,7 @@ function renderFork(fork) {
   // workflow.md's "two-confusion screen"), never a substring search: the prose ITSELF routinely uses the word
   // "flagged" in an unrelated sense ("the attack also flagged X as under-specified"), which a substring match
   // would misread as the verdict.
-  const screenText = (fork.screen || '').trim();
-  const skepticText = (fork.skeptic || '').trim();
-  const attackClass = /^flagged/i.test(screenText) ? 'flagged' : /^REFUTED/i.test(skepticText) ? 'refuted' : 'clear';
-  const skepticScreen = (fork.skeptic || fork.screen) ? renderVerdicts(fork, attackClass) : '';
+  const skepticScreen = (fork.skeptic || fork.screen) ? renderVerdicts(fork, attackClassFor(fork)) : '';
   return `
         <div class="forkhd"><span class="forktag">FORK ${fork.n}</span> ${mdInline(fork.crux || '')}</div>
         ${fork.why ? mdContainer(fork.why, 'forkwhy') : ''}
@@ -175,7 +217,7 @@ function anchorId(item) {
 }
 
 function renderCard(item) {
-  const forksHtml = item.forks.map(renderFork).join('\n');
+  const forksHtml = item.gate ? renderGate(item.gate) : item.forks.map(renderFork).join('\n');
   const digestHtml = item.digest.length
     ? item.digest.map((p) => renderMarkdownBlocks(p).trim()).join('\n        ')
     : '<p><em>No digest paragraph could be extracted from this item\'s body.</em></p>';

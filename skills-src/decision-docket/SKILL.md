@@ -56,6 +56,13 @@ by one row instead of a card. If a docket build genuinely can't afford full deta
 prepared item it would otherwise list, the fix is to **list fewer items**, never to thin the detail
 on the ones that stay.
 
+A prepared **validation-gate** item (a one-sided go / no / not-yet call — no `## Fork N` by design, see
+*The prepared validation-gate shape* in `docs/agent/backlog-workflow.md`) gets the same full card with a
+`GATE` heading in place of the forks: what is being decided, the prior-art delta, the recommended verdict
+and un-gate trigger as the one default card, and its `Skeptic:` line. The generator reads it from the
+item's `## What you're deciding`, `## Context & prior-art delta` and `## Recommendation` sections; a gate
+whose `## Recommendation` carries no `Skeptic:` line comes back `parseOk: false` like any other item.
+
 An item that is **not yet prepared** (no `## Fork N` sections, no bold default) does not get a
 `.dcard` — it belongs in an "upstream / not yet prepared" table instead, so the page never dresses
 up cold research as a ready ratification.
