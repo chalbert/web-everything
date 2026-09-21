@@ -5,6 +5,8 @@ parent: "3054"
 status: open
 scope: ["we:scripts/review-set-label.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-20"
+preparedDate: "2026-09-21"
+preparedAgainstSha: "565e49cab664b0057ec7b69e8e367d095868f8ea"
 tags: [review, drain, review-escalation, acceptance, merge-commit, decision-prep]
 relatedTo: ["2409", "2884", "3021", "3024", "3184", "3692"]
 relatedReport: reports/2026-09-21-merge-only-approval-carry-grounding.md
@@ -63,7 +65,7 @@ Main read at `9002a5f1e`.
   the code does not do that check. The drain's content fallback, `rebaseDropContent`, auto-resolves
   non-overlapping content conflicts and is re-stamped the same way (`:3763-3793`). Both put **main as the first
   parent** and the lane tip as the second (we:scripts/lib/rebase-drop-content.mjs:368). The id-collision heal
-  `healNnnCollision` also moves the head (a single-parent commit, we:scripts/nnn-collision-heal.mjs:303) and
+  `healNnnCollision` also moves the head (a single-parent commit, we:scripts/lib/nnn-collision-heal.mjs:303) and
   never re-stamps.
 - **`review:human` has no approval of its own.** `--to=clear-human` turns it into `review:accepted`
   (we:scripts/review-set-label.mjs:213-231) and stamps `cleared-human` beside `reviewed-sha`. After that,
