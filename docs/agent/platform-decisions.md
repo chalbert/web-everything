@@ -4732,7 +4732,7 @@ seat, and composes with [#calibration-veto-clearing](#calibration-veto-clearing)
    --container` wherever one is available.
 3. **Evidence — the mandatory Claude seats (correctness, security) do not move onto the new surface until a
    replay parity gate passes, then a non-blocking shadow run.** Replay the recorded review corpus
-   (`we:scripts/review-corpus/mine-review-corpus.mjs`) through the operations surface and today's surface;
+   (`we:scripts/review-corpus/mine-review-corpus.mjs`) through the operations surface and the raw-tool surface the jurors use now;
    the new surface must not miss a confirmed label the old one caught. The replay includes PR #2107 and a
    constructed severity-ambiguous case. Codex's advisory seat moves first because it blocks nothing.
    Moving every seat on ratification is rejected as an unmeasured reduction on the land gate.
