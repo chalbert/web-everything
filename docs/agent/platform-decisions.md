@@ -4975,6 +4975,70 @@ shape for a boundary.
 tree at ratification and the ruling did not change. Full reasoning and the rejected options:
 [#3056](/backlog/3056-the-judge-spawn-argv-guard-is-a-one-token-denylist-a-flag-sh/).
 
+### An approval carries across a push only when the drain replays the merge of main itself and gets the pushed tree; a conflict, a non-merge commit, or main touching the PR's files re-parks {#merge-only-push-approval-carry}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), all four forks approved as prepared, with the
+prepared guardrails, no amendment (`#3735`).** The situation: a PR holds a `review:accepted` acceptance
+(including one turned from `review:human` by `--to=clear-human`), and its head then moves because someone
+merged `main` into it. Without a proof, a head move the content digests cannot cover re-parks the PR and costs
+a second approval (#2365, #2347). The rule:
+
+1. **What proves a push only merged main — replay each merge.** Resolve the acceptance's `reviewed-sha` to a
+   full SHA and walk from the live head back to it. Every commit on that path must be a merge with exactly two
+   parents: one parent is (or descends from) the reviewed SHA — the PR side, **found by ancestry, never by
+   parent position** — and the other is an ancestor of `origin/main`. Each link's PR-side parent must be the
+   next commit on the path (a disconnected chain does not carry), and the path must end at `reviewed-sha`. For
+   each merge, `git merge-tree --write-tree <parent 1> <parent 2>` must exit 0 (no conflict) and print a tree
+   **equal** to the merge's own tree. A commit message, a commit's shape or its pusher proves nothing.
+2. **A non-merge commit anywhere on the path means no carry.** An author commit followed by a merge of main
+   re-parks. A true rebase (rewritten history) is out of this rule's scope and stays with the digest tiers of
+   `#3054`.
+3. **The replay is hermetic.** It runs with no rerere (`-c rerere.enabled=false`), no configured merge
+   drivers, the default strategy with no `-X` option, and attributes read from the empty tree
+   (`-c attr.tree=<empty tree>`). An author's custom driver, rerere or `-X` option can then only cause a
+   missed carry, never a wrong one.
+4. **A clean merge that touches files main changed does not carry; it re-parks.** Carry only when the files
+   main's side brought in (`git diff --name-only <PR-side parent> <merge>`) share nothing with the files the
+   reviewed PR changed. Otherwise the PR re-parks.
+5. **The drain's own merges obey the same rule.** A `rebaseDropContent` merge (content auto-resolution) on an
+   accepted PR re-parks instead of re-stamping. A `rebaseDropManifest` merge (manifest only, no PR file
+   touched) still re-stamps, but only when the lane tip it merged in is itself covered by the current
+   acceptance (the same SHA or digest test `acceptanceCoversHead` applies); otherwise it re-parks.
+6. **`review:human` and `review:accepted` follow the same rule.** A carry of a human clearance never copies
+   the `cleared-human` marker; its comment may name its origin with a distinct `carried-human-from: <sha>`
+   marker, which no gate parses. The carry reaches the anti-test-tampering gate only through the local,
+   CLI-written ledger of `#3179`; until that ledger exists, a carried human clearance **does not** suppress the
+   anti-test-tampering re-park.
+7. **Fail closed when the proof cannot run.** A failed git read, a reviewed commit that cannot be resolved, or
+   any error means **no carry**, and the gate judges the head as if no carry route existed.
+8. **The stamp is bound to the proven head.** `we:scripts/review-set-label.mjs --to=restamp` takes
+   `--expect-head=<full sha>`, **required** for a restamp: it refuses (non-zero exit, no comment, no label
+   move) when the flag is missing or the live head differs from it. The carry passes the head its proof
+   reached; the drain's own rebase passes the commit it pushed. The carry comment records both the source
+   `reviewed-sha` it carries from and the destination head it stamps.
+9. **Who verifies, and where it is recorded.** The drain decides, inside the one staleness authority
+   `decideReviewGate` (`#2409`), and records through the existing re-stamp path (`--to=restamp`) with its own
+   comment heading, stamped `--actor=drain` and naming the original clearer. The pusher never certifies its own
+   push. A carry never creates an acceptance: `restamp` still refuses with no `review:accepted`, with
+   `review:human` present, or with `review:changes`.
+
+**What still re-parks, unchanged.** A conflicted merge gets full re-clearance through the `review:changes`
+bounce of [#parked-pr-conflict-dispatched-not-scripted](#parked-pr-conflict-dispatched-not-scripted). The
+statute and gate-self tiers are re-derived on the live net diff every pass; the required `test` check runs on
+the new head. The `reviewed-diff` / `reviewed-contribution` digest routes stay beside this one. A carry is not
+the `clear-human` act, so
+[#clear-human-requires-current-head-advisory-review](#clear-human-requires-current-head-advisory-review) does
+not reach it. The rule does not bless outside merges of queued PRs (`#3350`); it decides only what an approval
+survives when one happens anyway.
+
+**What this ruling does not do.** It builds nothing (no carry code, no `--expect-head` flag) and changes no
+gate by itself; the build is separately-scoped work tracked on the backlog.
+
+**Lineage:** ratified via `#3735` (2026-09-21), under the acceptance-coverage epic `#3054`, grounded in
+`/research/merge-only-approval-carry/` and `we:reports/2026-09-21-merge-only-approval-carry-grounding.md`,
+extending `#2409` (the SHA binding). Full reasoning and the rejected options:
+[#3735](/backlog/3735-may-a-review-human-approval-carry-across-a-push-that-only-me/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
