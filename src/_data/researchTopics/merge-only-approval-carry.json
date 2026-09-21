@@ -1,0 +1,21 @@
+{
+  "id": "merge-only-approval-carry",
+  "title": "When may a code-review approval survive a push that only merges the target branch? Gerrit, GitLab, GitHub and Phabricator, grounded against the web-everything drain",
+  "status": "open",
+  "summary": "Grounds decision #3735: may a review:human or review:accepted approval carry across a push that only merges main into the reviewed PR branch? PRIOR ART: every system that keeps an approval across an update proves the change is the same, and none trusts the claim that a push was only a merge. Gerrit copies a vote on TRIVIAL_REBASE or MERGE_FIRST_PARENT_UPDATE only when an in-memory three-way merge of the old patch set onto the new parent succeeds and its tree equals the new patch set's tree; any conflict is REWORK and the vote is dropped. Chromium's Code-Review label uses exactly that condition. GitLab compares the git patch-id of the merge request diff before and after a rebase or a merge of the target. GitHub records the diff at approval time and dismisses the approval when that diff changes, naming the Update branch button, and since June 2023 also whenever the merge base changes. Phabricator's sticky accept carries across every update with no check. git patch-id ignores whitespace and line numbers; git range-diff is documented as not machine-readable. GROUNDING: the web-everything drain decides staleness in one place, acceptanceCoversHead, by SHA identity or equality of two text digests (reviewed-diff, reviewed-contribution); it has no tree or merge replay. Two live incidents: PR #2365's clean merge of main (git merge-tree reproduces the pushed tree exactly, files disjoint) was still re-parked because its acceptance carried no digest markers, and PR #2347's merge had real conflicts in three files and was correctly re-parked. The drain's own manifest-dropping merge is re-stamped with no comparison against the previous acceptance. Reshapes the card into four forks: the proof for an outside push (replay each merge with git merge-tree and compare trees, finding the PR side by ancestry), whether a clean merge that touched the PR's own files carries, whether the drain's own content-resolving merges obey the same rule, and whether review:human differs from review:accepted. Settled rather than forks: fail closed when the proof cannot run, a bug fix so the drain re-stamps only when the lane tip it merged was covered, the drain as the single verifier recording through the existing re-stamp path, and full re-clearance after a conflicted merge (governed by the parked-PR-conflict anchor).",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "review",
+    "drain",
+    "code-review",
+    "approval",
+    "merge-commit",
+    "gerrit",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}

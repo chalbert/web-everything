@@ -1,0 +1,88 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3735-may-a-review-human-approval-carry-across-a-push-that-only-me/">#3735</a> asks
+whether an approval on a pull request may survive a push that only merges <code>main</code> into the
+reviewed branch. This page surveys how other review systems answer that, then tests the answer against two
+real incidents. The full working is in
+<a href="/reports/2026-09-21-merge-only-approval-carry-grounding.md">the session report</a>.</p>
+
+<h2>Prior art</h2>
+
+<table>
+<thead><tr><th>System</th><th>Rule</th><th>How "unchanged" is proven</th><th>A resolved conflict</th></tr></thead>
+<tbody>
+<tr><td>Gerrit (<code>copyCondition</code>)</td>
+<td><code>changekind:TRIVIAL_REBASE</code>: same diff, "rebased onto a different parent and that rebase did
+not require git to perform any conflict resolution". <code>MERGE_FIRST_PARENT_UPDATE</code>: a merge commit
+that differs only in its first parent.</td>
+<td>Re-does the three-way merge in memory and requires the result tree to equal the new patch set's tree
+(<code>ChangeKindCacheImpl</code>).</td>
+<td><code>REWORK</code>: the vote is not copied.</td></tr>
+<tr><td>Chromium (on Gerrit)</td>
+<td>Code-Review copies on <code>NO_CHANGE OR NO_CODE_CHANGE OR TRIVIAL_REBASE</code> (plus unchanged files
+uploaded by a committer). Commit-Queue copies only on <code>NO_CHANGE</code>.</td>
+<td>Gerrit's tree test.</td><td>Dropped.</td></tr>
+<tr><td>GitLab</td>
+<td>"Remove all approvals when commits are added to the source branch", but "GitLab uses
+<code>git patch-id</code> … to make better reset decisions when you perform commands like
+<code>git rebase</code> or <code>git merge &lt;target&gt;</code>".</td>
+<td>Patch-id of the MR diff, before and after.</td><td>The patch-id changes, so approvals reset.</td></tr>
+<tr><td>GitHub</td>
+<td>"Dismiss stale pull request approvals": "If the diff changes from this state (for example, because a
+contributor … clicks <strong>Update branch</strong> …), the approving review is dismissed as stale." Since
+2023 also "whenever a merge base changes".</td>
+<td>Not published.</td><td>Dismissed.</td></tr>
+<tr><td>Phabricator</td>
+<td><code>differential.sticky-accept</code> (default on): "Accepts persist across updates."</td>
+<td>No check at all.</td><td>Carried.</td></tr>
+</tbody>
+</table>
+
+<p>Tools: <code>git patch-id --stable</code> is "reasonably stable" but ignores whitespace and line numbers.
+<code>git range-diff</code> says its output "is not intended to be machine-readable". So the strongest
+mechanical proof available is Gerrit's: replay the merge and compare trees.</p>
+
+<p>Sources: <a href="https://gerrit-review.googlesource.com/Documentation/config-labels.html">Gerrit labels</a>,
+<a href="https://docs.gitlab.com/user/project/merge_requests/approvals/settings/">GitLab approval settings</a>,
+<a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches">GitHub protected branches</a>,
+<a href="https://github.blog/changelog/2023-06-06-security-enhancements-to-required-approvals-on-pull-requests/">GitHub changelog 2023-06-06</a>,
+<a href="https://git-scm.com/docs/git-patch-id">git patch-id</a>,
+<a href="https://git-scm.com/docs/git-range-diff">git range-diff</a>.</p>
+
+<h2>What this repo does today</h2>
+
+<ul>
+<li>One function decides whether an approval still covers the head: <code>acceptanceCoversHead</code> in
+<code>scripts/lib/review-escalation.mjs</code>. It compares the SHA, then two text digests
+(<code>reviewed-diff</code>, <code>reviewed-contribution</code>). It never replays a merge or compares
+trees.</li>
+<li>The digests exist only when the accept could read the net diff. When it could not, the record carries
+only the SHA, and any head move is "stale".</li>
+<li>The drain's own "rebase" is a merge of main built with <code>git merge-tree</code> and
+<code>commit-tree</code>. It re-stamps the approval afterwards without comparing anything to the previous
+approval.</li>
+</ul>
+
+<h2>Two incidents</h2>
+
+<ul>
+<li><strong>PR #2365</strong> (2026-09-21): merge commit <code>b889a718a</code>.
+<code>git merge-tree --write-tree 0ed03ddce a79476ce8</code> gives tree <code>0490ef4a…</code>, exactly the
+pushed tree, with no conflict, and main changed none of the PR's five files. It was still re-parked,
+because its approval carried no digest. A replay test would have carried it.</li>
+<li><strong>PR #2347</strong> (2026-09-20): merge commit <code>efa134d33</code>. The replay reports conflicts
+in three files, and the resolution changed 8 of the PR's own lines. Re-parking was right. A replay test
+refuses it too.</li>
+</ul>
+
+<h2>What this reshapes</h2>
+
+<p>The card's four options become four forks: what proves an outside push is merge-only (replay each merge
+and compare trees, finding the PR side by ancestry, because the drain's own merges put main first); whether
+a clean merge that touched the PR's own files carries; whether the drain's own content-resolving merges obey
+that rule; and whether <code>review:human</code> differs from <code>review:accepted</code>. Settled rather
+than forked: fail closed when the proof cannot run; re-stamp only when the lane tip the drain merged was
+covered (a bug fix the grounding found); the drain as the single verifier; and full re-clearance after a
+conflicted merge.</p>
+{% endraw %}
