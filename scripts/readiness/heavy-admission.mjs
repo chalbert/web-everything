@@ -78,11 +78,27 @@
  * (`container-exec.mjs#DEFAULT_NODE_MODULES_VOLUME`), because `test:unit`'s own closure (vitest→esbuild/rollup)
  * carries native `darwin-arm64` bindings the plain `check:standards`-shaped mount cannot resolve. See
  * `container-exec.mjs`'s module header ("test:unit slice") for the full mechanism and measured evidence.
+ *
+ * EVERY HEAVY COMMAND GOES THROUGH THIS POOL (xaipsbs, 2026-09-21). Until then only `verify-lane.mjs` was
+ * admitted; `npm run test:unit` / `check:standards` typed directly, and the scripts that shell them, ran
+ * outside it. Now `package.json`'s `test:unit`, `test:coverage`, `check:standards` and the vitest step of
+ * `verify` are `heavy-admission.mjs run -- <cmd>`, and the scripts that spawn vitest or check-standards
+ * themselves route through {@link admittedArgv} / {@link admittedShellCommand}. Three rules keep the wrapper
+ * safe to put everywhere:
+ *   • it is a PASS-THROUGH under `CI=true`, `WE_HEAVY_ADMISSION=off`, or when the lane-pool root does not
+ *     exist ({@link admissionBypassReason});
+ *   • it is RE-ENTRANT: whatever it runs gets `WE_HEAVY_ADMISSION_HELD=1`, and a nested wrapper that sees it
+ *     never asks for a second slot ({@link ADMISSION_HELD_ENV}); `verify-lane.mjs` sets it around its gate;
+ *   • each `run` is its own owner (`<repo>#<pid>`), so two commands from one checkout take two slots.
+ * Stale `waiting` markers (owner gone, older than {@link WAITING_TTL_MINUTES}) are reaped by the next
+ * admission attempt; `reap` previews them and `reap --apply` removes them.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { hostname } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
 import { reserve, releaseLockDir, readLockEntry } from './file-locks.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -107,8 +123,28 @@ export const DEFAULT_TIMEOUT_MS = 20 * 60_000;
  *  via the PID-liveness fast path in {@link tryAcquireSlot}, not by waiting out this TTL. */
 export const ADMISSION_LEASE_MINUTES = 60;
 
+/** How old a `waiting` marker must be before the reap may remove it (xaipsbs). A live waiter clears its own
+ *  marker in `acquireSlotBlocking`'s `finally`, and the default wait gives up after 20 minutes, so a marker
+ *  past 30 minutes whose owner is also provably gone is debris from a killed process, never a real waiter.
+ *  Age alone is never enough: the owner must be gone too (see {@link classifyWaiter}). */
+export const WAITING_TTL_MINUTES = 30;
+
+/** RE-ENTRANCY (xaipsbs). Set to `1` in the environment of every command this module runs while it holds a
+ *  slot (the `run` wrapper, and `verify-lane.mjs` around its gate). A nested wrapper that sees it is a plain
+ *  pass-through: `verify-lane` → `npm run test:unit` → `heavy-admission.mjs run -- vitest run` must not ask
+ *  for a SECOND slot for the same work, and with cap 1 it would wait on itself until the timeout. It is also
+ *  set when the outer run proceeded unslotted after a timeout, so the inner run does not queue a second time. */
+export const ADMISSION_HELD_ENV = 'WE_HEAVY_ADMISSION_HELD';
+
+/** The off switch: `WE_HEAVY_ADMISSION=off` (or `0`/`false`) makes the wrapper a pass-through. */
+export const ADMISSION_SWITCH_ENV = 'WE_HEAVY_ADMISSION';
+
+/** Absolute path of this CLI, for callers that route a synchronous child command through `run`. */
+export const HEAVY_ADMISSION_CLI = fileURLToPath(import.meta.url);
+
 const SUBDIR = join('.admission', 'heavy');
 const WAITING_SUBDIR = 'waiting';
+const REAP_LOG = 'reaped.jsonl';
 
 /** Resolve the admission cap from env, clamped to a sane minimum of 1 (a cap of 0 would wedge every caller
  *  forever, which is a config bug, not a valid "admit nothing" policy). */
@@ -222,10 +258,13 @@ function lockIdSafe(owner) {
 }
 
 /** Mark `owner` as waiting for a slot. Best-effort — a write failure never blocks the caller's retry loop. */
-export function markWaiting({ lockRoot, owner, lane = null, num = null, nowIso }) {
+export function markWaiting({ lockRoot, owner, lane = null, num = null, nowIso, pid = null, repo = null }) {
   try {
     mkdirSync(waitingDir(lockRoot), { recursive: true });
-    writeFileSync(waitingFile(lockRoot, owner), JSON.stringify({ owner: String(owner), lane, num, requestedAt: nowIso }, null, 2) + '\n', 'utf8');
+    // `pid` + `host` + `repo` (xaipsbs) are what the stale-waiter reap reads to prove the owner is gone.
+    // Markers written before they existed carry none of them; the reap falls back to the lane lease for those.
+    const body = { owner: String(owner), lane, num, requestedAt: nowIso, pid: Number.isInteger(pid) ? pid : null, host: hostname(), repo };
+    writeFileSync(waitingFile(lockRoot, owner), JSON.stringify(body, null, 2) + '\n', 'utf8');
   } catch { /* best-effort — the wait itself must never fail on a marker write */ }
 }
 
@@ -250,6 +289,99 @@ export function listWaiting(lockRoot) {
   return out;
 }
 
+// ── stale-waiter reap (xaipsbs) ─────────────────────────────────────────────────────────────────────────
+// A waiter killed hard (SIGKILL, a closed terminal, a crashed host) never reaches the `finally` that clears
+// its marker, so the marker sits in `waiting/` forever and `tick-core.mjs` keeps reporting a phantom
+// `waiting-for-capacity` note. Four such markers (2026-09-04 and 2026-09-14) were found in the live pool on
+// 2026-09-21. The next admission attempt removes them; `status` counts them; `reap` previews and `--apply`s.
+
+/** Every marker file with its parsed body. Corrupt files are returned with `marker: null`. */
+function listWaitingFiles(lockRoot) {
+  let names;
+  try { names = readdirSync(waitingDir(lockRoot)); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const file = join(waitingDir(lockRoot), name);
+    let marker = null;
+    try { marker = JSON.parse(readFileSync(file, 'utf8')); } catch { /* corrupt — reported as such */ }
+    out.push({ file, marker });
+  }
+  return out;
+}
+
+/** The checkout a marker belongs to: its `repo` field, else its owner with any `#<pid>` suffix removed. */
+export function waiterRepo(marker) {
+  if (marker && typeof marker.repo === 'string' && marker.repo) return marker.repo;
+  return String((marker && marker.owner) || '').replace(/#\d+$/, '');
+}
+
+/** Read a lane clone's lease marker, or null when there is none (or it is unreadable). */
+export function readLaneLease(repo) {
+  try { return JSON.parse(readFileSync(join(repo, '.git', LEASE_FILENAME), 'utf8')); } catch { return null; }
+}
+
+/**
+ * Should this waiting marker be reaped? Pure over its seams. Reap needs BOTH: older than `ttlMs`, AND the
+ * owner provably gone. "Gone" is read from the best evidence the marker has, in this order:
+ *   1. a `pid` recorded on THIS host: dead → gone; alive → kept (it may be a long custom wait).
+ *   2. the owner is a lane clone (`…/lane-N`): no live lease → gone; a live lease acquired AFTER the marker
+ *      was written → gone (the lane has been handed to someone else since, so this waiter is not its holder);
+ *      a live lease older than the marker → kept.
+ *   3. no pid and not a lane (an old primary-checkout marker) → kept: nothing proves the owner is gone.
+ * @returns {{ reap:boolean, reason:string }}
+ */
+export function classifyWaiter(marker, { nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000, host = hostname(), pidLiveness = (pid) => probeSlotHolderLiveness(pid, process.pid), readLease = readLaneLease } = {}) {
+  if (!marker || typeof marker !== 'object') return { reap: true, reason: 'corrupt' };
+  const at = Date.parse(marker.requestedAt);
+  const ageMs = Number.isNaN(at) ? Infinity : nowMs - at;
+  if (ageMs < ttlMs) return { reap: false, reason: 'fresh' };
+  if (Number.isInteger(marker.pid) && (!marker.host || marker.host === host)) {
+    const live = pidLiveness(marker.pid);
+    if (live === 'dead') return { reap: true, reason: 'pid-dead' };
+    if (live === 'alive') return { reap: false, reason: 'pid-alive' };
+  }
+  const repo = waiterRepo(marker);
+  if (/^lane-\d+$/.test(basename(repo))) {
+    const lease = readLease(repo);
+    if (!lease || isLeaseStale(lease, nowMs)) return { reap: true, reason: 'no-lease' };
+    const leasedAt = Date.parse(lease.acquiredAt);
+    if (!Number.isNaN(at) && !Number.isNaN(leasedAt) && leasedAt > at) return { reap: true, reason: 'lease-newer' };
+    return { reap: false, reason: 'lease-live' };
+  }
+  return { reap: false, reason: 'owner-unknown' };
+}
+
+/**
+ * Find (and with `apply`, remove) every stale waiting marker. Each removal is appended to `reaped.jsonl`
+ * beside the slots so `status` can report how many were reaped. Never throws.
+ * @returns {{ reaped:Array<object>, kept:Array<object> }}
+ */
+export function reapStaleWaiters({ lockRoot, nowMs = Date.now(), ttlMs = WAITING_TTL_MINUTES * 60_000, apply = false, ...seams }) {
+  const reaped = [];
+  const kept = [];
+  for (const { file, marker } of listWaitingFiles(lockRoot)) {
+    const verdict = classifyWaiter(marker, { nowMs, ttlMs, ...seams });
+    const row = { owner: marker && marker.owner, lane: marker && marker.lane, requestedAt: marker && marker.requestedAt, reason: verdict.reason };
+    if (!verdict.reap) { kept.push(row); continue; }
+    if (apply) {
+      try { unlinkSync(file); } catch { continue; /* raced with its own clear, or unwritable — not reaped */ }
+      try { appendFileSync(join(lockRoot, REAP_LOG), JSON.stringify({ ...row, reapedAt: new Date(nowMs).toISOString() }) + '\n', 'utf8'); } catch { /* best-effort */ }
+    }
+    reaped.push(row);
+  }
+  return { reaped, kept };
+}
+
+/** How many markers the reap has removed so far, and the most recent one. */
+export function reapHistory(lockRoot) {
+  let lines = [];
+  try { lines = readFileSync(join(lockRoot, REAP_LOG), 'utf8').split('\n').filter(Boolean); } catch { /* none yet */ }
+  let last = null;
+  try { last = lines.length ? JSON.parse(lines[lines.length - 1]) : null; } catch { /* corrupt tail */ }
+  return { count: lines.length, last };
+}
+
 // ── the blocking wait primitive a heavy-command call site uses ─────────────────────────────────────────
 
 /**
@@ -271,15 +403,17 @@ export function listWaiting(lockRoot) {
  * @returns {Promise<{ ok:boolean, slot:number|null, timedOut:boolean, waitedMs:number }>}
  */
 export async function acquireSlotBlocking({
-  lockRoot, cap, owner, lane = null, num = null,
+  lockRoot, cap, owner, lane = null, num = null, repo = null,
   pollMs = DEFAULT_POLL_MS, timeoutMs = DEFAULT_TIMEOUT_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
   pid = process.pid, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
   const startedAt = now();
+  // xaipsbs — every admission attempt first clears stale waiters, so debris never outlives the next caller.
+  reapStaleWaiters({ lockRoot, nowMs: startedAt, apply: true });
   const first = tryAcquireSlot({ lockRoot, cap, owner, nowMs: startedAt, nowIso: new Date(startedAt).toISOString(), pid, leaseMinutes });
   if (first.ok) return { ok: true, slot: first.slot, timedOut: false, waitedMs: 0 };
 
-  markWaiting({ lockRoot, owner, lane, num, nowIso: new Date(startedAt).toISOString() });
+  markWaiting({ lockRoot, owner, lane, num, pid, repo, nowIso: new Date(startedAt).toISOString() });
   try {
     for (;;) {
       const nowMs = now();
@@ -296,10 +430,33 @@ export async function acquireSlotBlocking({
 
 // ── status — what `tick-core.mjs` reads for the `waiting-for-capacity` note ────────────────────────────
 
-export function admissionStatus({ lockRoot, cap }) {
+export function admissionStatus({ lockRoot, cap, nowMs = Date.now(), ...reapSeams }) {
   const held = heldSlots({ lockRoot, cap });
   const waiting = listWaiting(lockRoot);
-  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting };
+  // xaipsbs — `reaped` is what the reap has removed so far; `staleWaiting` is what it WOULD remove right now.
+  const staleWaiting = reapStaleWaiters({ lockRoot, nowMs, apply: false, ...reapSeams }).reaped.length;
+  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting, staleWaiting, reaped: reapHistory(lockRoot) };
+}
+
+/**
+ * Why the wrapper should NOT queue this command, or null to queue it (xaipsbs). Pure over `env` + `poolExists`.
+ *   • `held` — an outer wrapper (or `verify-lane.mjs`) already holds a slot for this work;
+ *   • `ci`   — `CI=true`/`1`: a CI runner is its own machine and has no host pool;
+ *   • `off`  — `WE_HEAVY_ADMISSION=off|0|false`, the explicit switch;
+ *   • `no-pool` — the lane-pool root does not exist (a fresh clone, a VM with no pool), so there is nothing
+ *     to share and nothing to create.
+ */
+export function admissionBypassReason({ env = process.env, poolExists = true } = {}) {
+  if (env[ADMISSION_HELD_ENV] === '1') return 'held';
+  if (/^(?:true|1)$/i.test(String(env.CI || ''))) return 'ci';
+  if (/^(?:off|0|false|no)$/i.test(String(env[ADMISSION_SWITCH_ENV] || ''))) return 'off';
+  if (!poolExists) return 'no-pool';
+  return null;
+}
+
+/** The pool root a lock root lives under (`<pool>/.admission/heavy` → `<pool>`). */
+export function poolRootOf(lockRoot) {
+  return dirname(dirname(lockRoot));
 }
 
 // ── run-under-admission — general-purpose wrapper, WITH the #3621 container hook built in ─────────────────
@@ -339,12 +496,21 @@ export function admissionStatus({ lockRoot, cap }) {
  * @returns {Promise<{ exitCode:number, admission:object }>}
  */
 export async function runUnderAdmission({
-  lockRoot, cap, owner, lane = null, num = null, timeoutMs = DEFAULT_TIMEOUT_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
+  lockRoot, cap, owner, lane = null, num = null, repo = null, timeoutMs = DEFAULT_TIMEOUT_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
   command, cwd = process.cwd(), exec = (cmd, o) => execSync(cmd, o), log = (m) => process.stderr.write(m),
   now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  bypass = null, env = process.env,
 }) {
+  // The child always runs with the re-entrancy flag, so anything it runs that is itself wrapped passes through.
+  const childEnv = { ...env, [ADMISSION_HELD_ENV]: '1' };
+  if (bypass) {
+    let exitCode = 0;
+    try { exec(command, { cwd, stdio: 'inherit', env: bypass === 'held' ? env : childEnv }); }
+    catch (e) { exitCode = Number.isFinite(e && e.status) ? e.status : 1; }
+    return { exitCode, admission: { ok: false, slot: null, timedOut: false, waitedMs: 0, bypassed: bypass } };
+  }
   mkdirSync(lockRoot, { recursive: true });
-  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, timeoutMs, leaseMinutes, now, sleep });
+  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, repo, timeoutMs, leaseMinutes, now, sleep });
   if (admission.timedOut) {
     log(`⚠ heavy-command admission: timed out after ${admission.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted.\n`);
   } else if (admission.waitedMs > 0) {
@@ -352,13 +518,30 @@ export async function runUnderAdmission({
   }
   let exitCode = 0;
   try {
-    exec(command, { cwd, stdio: 'inherit' });
+    exec(command, { cwd, stdio: 'inherit', env: childEnv });
   } catch (e) {
     exitCode = Number.isFinite(e && e.status) ? e.status : 1;
   } finally {
     if (admission.ok) releaseOwnedSlot({ lockRoot, cap, owner });
   }
   return { exitCode, admission };
+}
+
+/**
+ * The argv that runs `file args…` through the `run` wrapper, for SYNCHRONOUS callers (`execFileSync` /
+ * `spawnSync`) that cannot await {@link runUnderAdmission} (xaipsbs). The wrapper is a child process whose
+ * stdio, exit code and output are the wrapped command's own, so a caller that captures output or reads
+ * `e.status` keeps working unchanged. Pass it as `execFileSync(r.file, r.args, opts)`.
+ * @returns {{ file:string, args:string[] }}
+ */
+export function admittedArgv(file, args = []) {
+  return { file: process.execPath, args: [HEAVY_ADMISSION_CLI, 'run', '--', file, ...args] };
+}
+
+/** The shell command line that runs a shell command string through the `run` wrapper (as `sh -c <cmd>`, so
+ *  `&&`/`||` in it keep their meaning and the whole chain holds ONE slot). For `execSync(string)` callers. */
+export function admittedShellCommand(command) {
+  return [process.execPath, HEAVY_ADMISSION_CLI, 'run', '--', 'sh', '-c', command].map(shellQuoteWord).join(' ');
 }
 
 /** Re-quote a single already-split argv word for a shell command line — a no-op for a plain word,
@@ -392,7 +575,10 @@ async function main(argv) {
   const repo = resolve(typeof flags.repo === 'string' ? flags.repo : process.cwd());
   const cap = flags.cap != null ? Number(flags.cap) : resolveCap(process.env);
   const lockRoot = admissionLockRoot(repo, process.env);
-  const owner = typeof flags.owner === 'string' ? flags.owner : repo;
+  // `run` gets a PER-PROCESS owner (xaipsbs): two wrapped commands typed in the same checkout must be two
+  // owners, or the second would "re-acquire" the first one's slot (own-slot refresh) and break the cap —
+  // and the first to finish would release the slot the other is still using.
+  const owner = typeof flags.owner === 'string' ? flags.owner : (positionals[0] === 'run' ? `${repo}#${process.pid}` : repo);
   const lane = typeof flags.lane === 'string' ? flags.lane : null;
   const num = typeof flags.num === 'string' ? flags.num : null;
   const asJson = !!flags.json;
@@ -400,8 +586,19 @@ async function main(argv) {
   const mode = positionals[0] || 'status';
 
   if (mode === 'status') {
-    if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [] }); return; }
+    if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [], staleWaiting: 0, reaped: { count: 0, last: null } }); return; }
     emit(admissionStatus({ lockRoot, cap }));
+    return;
+  }
+  if (mode === 'reap') {
+    // Preview by default; `--apply` removes. `--ttl-minutes=` overrides WAITING_TTL_MINUTES.
+    const ttlMin = flags['ttl-minutes'] != null ? Number(flags['ttl-minutes']) : WAITING_TTL_MINUTES;
+    const r = reapStaleWaiters({ lockRoot, ttlMs: ttlMin * 60_000, apply: !!flags.apply });
+    if (asJson) { emit({ applied: !!flags.apply, ...r }); return; }
+    const verb = flags.apply ? 'reaped' : 'would reap';
+    for (const w of r.reaped) process.stdout.write(`${verb}: ${w.owner} (waiting since ${w.requestedAt}; ${w.reason})\n`);
+    for (const w of r.kept) process.stdout.write(`kept:  ${w.owner} (${w.reason})\n`);
+    process.stdout.write(`${r.reaped.length} ${verb}, ${r.kept.length} kept${flags.apply ? '' : ' — pass --apply to remove'}\n`);
     return;
   }
   if (mode === 'release') {
@@ -458,12 +655,13 @@ async function main(argv) {
       process.stderr.write(`✗ --container-node-modules requires --container (it shadows a mount --container itself creates).\n`);
       process.exit(1);
     }
-    const runOpts = { lockRoot, cap, owner, lane, num, timeoutMs, command, cwd: repo };
+    const bypass = admissionBypassReason({ env: process.env, poolExists: existsSync(poolRootOf(lockRoot)) });
+    const runOpts = { lockRoot, cap, owner, lane: lane ?? (/lane-(\d+)/.exec(repo) || [])[1] ?? null, num, repo, timeoutMs, command, cwd: repo, bypass };
     if (useContainer) runOpts.exec = (cmd, o) => execContainerized(cmd, { ...o, nodeModulesVolume: useNodeModulesVolume });
     const { exitCode } = await runUnderAdmission(runOpts);
     process.exit(exitCode);
   }
-  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run> [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--timeout-ms=] [-- <command…>]\n`);
+  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--timeout-ms=] [-- <command…>]\n`);
   process.exit(3);
 }
 

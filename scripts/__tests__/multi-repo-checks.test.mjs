@@ -19,7 +19,8 @@ it('keeps every scanned source repo-explicit or specifically allowlisted', () =>
 });
 
 it('is included in test:unit without adding a standards gate', () => {
-  expect(JSON.parse(read('package.json')).scripts['test:unit']).toBe('vitest run');
+  // xaipsbs — test:unit runs through the heavy-admission wrapper; the command it wraps is still plain `vitest run`.
+  expect(JSON.parse(read('package.json')).scripts['test:unit']).toBe('node scripts/readiness/heavy-admission.mjs run -- vitest run');
   expect(read('vitest.config.ts')).toContain("'scripts/**/__tests__/**/*.test.mjs'");
   expect(fileURLToPath(import.meta.url)).toMatch(/scripts\/__tests__\/multi-repo-checks\.test\.mjs$/);
 });

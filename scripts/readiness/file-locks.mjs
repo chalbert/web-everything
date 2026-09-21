@@ -37,7 +37,7 @@
  * own the `mkdir`/`O_EXCL` boundary and are deliberately tiny so the testable logic stays pure.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -226,6 +226,15 @@ export function releaseLockDir(lockRoot, path) {
   rmSync(lockDirFor(lockRoot, path), { recursive: true, force: true });
 }
 
+/** How long a lock dir may exist without its `lock.json` before it counts as a crashed half-acquire (xaipsbs).
+ *  The gap between `mkdir` and the entry write is microseconds; 10s is generous and still recovers a crash. */
+export const ENTRYLESS_LOCK_DIR_GRACE_MS = 10_000;
+
+/** Wall-clock age of a lock dir, or null when it does not exist. */
+function lockDirAgeMs(lockRoot, path) {
+  try { return Date.now() - statSync(lockDirFor(lockRoot, path)).mtimeMs; } catch { return null; }
+}
+
 /**
  * Acquire-or-reclaim `path` for `owner` in ONE impure call, applying the pure decision: atomically try
  * to win the dir; if it already exists, read the entry + the caller-probed `pidLiveness`, and reclaim
@@ -238,6 +247,20 @@ export function reserve(lockRoot, path, owner, nowMs, nowIso, pid = null, pidLiv
   const entry = makeLockEntry(owner, path, nowIso, pid, meta);
   if (acquireLockDir(lockRoot, path, entry)) return { ok: true, reason: 'free', heldBy: owner };
   const current = readLockEntry(lockRoot, path);
+  // xaipsbs — THE MKDIR/WRITE GAP. `acquireLockDir` wins with `mkdir` and only then writes `lock.json`, so a
+  // loser can read the winner's dir in between and find no entry. Reading that as "free" made the loser
+  // DELETE the winner's dir and take it too: two holders of one lock (seen live, two heavy-admission runs
+  // started together with cap 1, both ran). A dir with no entry is a winner still writing, unless it is old
+  // enough to be a crash between the two calls; only then is it reclaimable. Wall clock, not `nowMs`: the
+  // dir's mtime is wall clock too.
+  if (!current) {
+    const age = lockDirAgeMs(lockRoot, path);
+    if (age === null) {                                   // the dir vanished meanwhile: just try again once
+      if (acquireLockDir(lockRoot, path, entry)) return { ok: true, reason: 'free', heldBy: owner };
+      return { ok: false, reason: 'held', heldBy: null };
+    }
+    if (age < ENTRYLESS_LOCK_DIR_GRACE_MS) return { ok: false, reason: 'initializing', heldBy: null };
+  }
   const d = reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes);
   if (!d.acquirable) return { ok: false, reason: d.reason, heldBy: d.heldBy };
   if (d.reason === 'own') { heartbeat(lockRoot, path, owner, nowIso, pid, meta); return { ok: true, reason: 'own', heldBy: owner }; }

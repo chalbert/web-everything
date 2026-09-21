@@ -52,6 +52,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { admittedShellCommand } from './readiness/heavy-admission.mjs';
 // Root-cause fix for the 2026-09-08 #3623/#3624 stranding incident — see this module's own header for the
 // full story. Split out (PURE-ish/injectable, no top-level side effects) so it stays independently testable
 // without importing this CLI file itself (which runs a real gate + `process.exit()` at top-level import).
@@ -118,7 +119,8 @@ let gate = 'assumed-green';
 if (!ASSUME_GREEN) {
   try {
     // Scoped JSON callers parse stdout as one result; send gate chatter to stderr in this mode.
-    execSync(GATE, { cwd: REPO, stdio: HAS_SHA && AS_JSON ? ['inherit', 2, 2] : 'inherit' });
+    // xaipsbs — the whole gate chain holds ONE slot in the host admission pool (its wrapped npm scripts pass through).
+    execSync(admittedShellCommand(GATE), { cwd: REPO, stdio: HAS_SHA && AS_JSON ? ['inherit', 2, 2] : 'inherit' });
     gate = 'green';
   } catch {
     emit(

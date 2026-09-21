@@ -57,7 +57,7 @@ import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-le
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { resolveDefaultGate } from './lib/verify-lane-gate.mjs';
-import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot } from './readiness/heavy-admission.mjs';
+import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
 const flags = {};
@@ -257,7 +257,9 @@ if (admission.timedOut) {
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
 try {
-  execSync(GATE, { cwd: REPO, stdio: 'inherit' });
+  // xaipsbs — the gate's own `npm run test:unit` / `check:standards` are wrapped in `heavy-admission.mjs run`;
+  // this flag makes those nested wrappers pass through instead of asking for a second slot for the same work.
+  execSync(GATE, { cwd: REPO, stdio: 'inherit', env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
 } catch (e) {
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
 } finally {
