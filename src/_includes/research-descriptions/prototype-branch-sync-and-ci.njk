@@ -1,0 +1,84 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>Two open decisions ask how the prototype branch <code>lane/mechanical-dispatcher</code> lives next to
+<code>main</code>. <a href="/backlog/3804-decision-how-the-prototype-branch-is-kept-up-to-date-with-ma/">#3804</a>
+asks how it is kept up to date: how often it merges, who resolves a conflict, where the alert goes, and when a
+slice may graduate. <a href="/backlog/3805-decision-run-ci-on-the-prototype-branch-change-the-drain-s-r/">#3805</a>
+asks whether it gets CI of its own, whether the drain's required check changes, or neither. The operator already
+ruled the merge shape on 2026-09-21: a merge commit, never a rebase or a force-push, conflicts resolved on a
+staging ref, and the operator fast-forwards the shared branch. The full working is in
+<a href="/reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md">the session report</a>.</p>
+
+<h2>Measured on 2026-09-21</h2>
+
+<ul>
+  <li>485 commits only on <code>main</code>, 256 only on the branch. Merge base <code>ca7e68b71</code>,
+    2026-09-14.</li>
+  <li>Merging <code>main</code> into the branch conflicts in 58 files.</li>
+  <li>The staging ref <code>lane/mechanical-dispatcher-catchup</code> is no longer a fast-forward: 15 branch
+    commits are missing from it. Merging the branch tip into it conflicts in only 1 file, and merging today's
+    <code>main</code> into it conflicts in 4.</li>
+  <li>No duplicate backlog ids remain on the branch.</li>
+  <li><code>check:standards</code> on the branch tip reports 1 error, not the 15 recorded on 2026-09-20.</li>
+  <li>No pull request has been opened against the prototype since 2026-09-15.</li>
+</ul>
+
+<h2>Finding 1: the sync already ran, and failed in a specific way</h2>
+
+<p>The prototype's own pass, <code>scripts/conveyor/poc-branch-sync.mjs</code>, runs on every runner tick. On
+2026-09-14 it pushed two clean merge commits to the shared branch (<code>f507994d7</code>,
+<code>3d5d47b59</code>). An hour later, only 3 commits behind <code>main</code>, it hit a conflict. After 5
+attempts it wrote an alert file inside a git directory and kept polling. Nobody read that file for a week, and the
+gap grew to 485 commits.</p>
+
+<p>So the cadence worked. What was missing was someone to own the conflict, and an alert the operator would see.</p>
+
+<h2>Finding 2: graduation does not need the whole branch to be level</h2>
+
+<p>A graduation slice is ported onto a lane cut from <code>origin/main</code>. Its pull request diff is taken
+against <code>main</code>, not against the branch. The real danger is narrower: a ported file can overwrite edits
+that <code>main</code> made to the same file after the branch last synced. That is a silent revert. A per-file
+freshness check catches it. Requiring the whole branch to be level with <code>main</code> would stop every slice
+whenever any unrelated file is in conflict, which is against the operator's goal that graduation keep moving.</p>
+
+<h2>Finding 3: nothing runs on pull requests to the prototype, and nothing needs to</h2>
+
+<p>Both workflows trigger only for <code>main</code>. The branch has no protection rule and no check runs.
+Prototype work lands by direct push, as the statute
+<code>#poc-branch-declared-delivery-mode</code> allows: the item's own tests are the only gate inside the branch,
+and the full review and CI run at the graduation pull request to <code>main</code>. The drain's contract with a
+repo is one green check named <code>test</code> (<code>#repo-drain-check-contract</code>). Loosening it for one
+unused base would weaken the gate of the only writer to <code>main</code>.</p>
+
+<h2>Prior art</h2>
+
+<ul>
+  <li><strong>Martin Fowler, branching patterns:</strong> "Smaller integrations mean less work, since there's
+    less code changes that might hold up conflicts."</li>
+  <li><strong>gitworkflows(7):</strong> merge upwards, periodically. Never rebase a topic that was merged
+    elsewhere. Test on "throw-away integration branches" such as git.git's <code>seen</code>, and "never base any
+    work on such a branch". The staging ref is exactly this.</li>
+  <li><strong>Trunk-based development:</strong> long-lived branches bring "the painful merges that often occur
+    when you need to reconcile long lived branches". Changes flow one way, from trunk to the branch.</li>
+  <li><strong>GitHub merge queue:</strong> tests each change on a temporary branch against the latest base.</li>
+  <li><strong>GitHub Actions:</strong> <code>branches:</code> filters are static glob patterns. A workflow skipped
+    by a filter leaves its checks Pending, which blocks a pull request that requires them.</li>
+  <li><strong>linux-next</strong> (from knowledge): rebuilt daily by merging every subsystem tree, with each
+    conflict mailed to the tree's owner.</li>
+</ul>
+
+<h2>How the decisions were reshaped</h2>
+
+<p><strong>#3804.</strong> The branch merges <code>main</code> promptly; the 40-commit ceiling is only a backstop.
+A conflict freezes only the sync. A dispatched reconcile agent resolves it on the staging ref (merge only, which
+amends the earlier ruling #3556), and the operator fast-forwards the branch. The alert goes to a surface the
+operator reads every turn, which depends on the digest-delivery card #3726; until then the desktop notice stays.
+The whole-branch-level graduation rule is replaced by a per-file rule, and graduation slices are exempted from the
+drift hold, which amends clause 4(d) of the POC-branch statute.</p>
+
+<p><strong>#3805.</strong> The default stays <em>neither</em>. CI runs at the graduation pull request. #3653 closes
+as superseded and #3674 closes through a one-arm drain change: a pull request opened against the prototype is held
+with a named reason instead of stalling silently. That removes two links from the health chain that graduation
+waits on.</p>
+{% endraw %}

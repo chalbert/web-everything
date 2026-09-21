@@ -1,0 +1,21 @@
+{
+  "id": "prototype-branch-sync-and-ci",
+  "title": "Keeping a long-lived prototype branch current with main, and whether it needs its own CI: merge cadence, conflict owner, alert path, graduation order, grounded against lane/mechanical-dispatcher",
+  "status": "open",
+  "summary": "Grounds decisions #3804 (how the prototype branch lane/mechanical-dispatcher is kept up to date with main: cadence, conflict owner, alert path, when a slice may graduate) and #3805 (run CI on the prototype, change the drain's required check, or neither). Measured 2026-09-21: 485 commits only on main and 256 only on the branch; a dry-run merge of main into the branch conflicts in 58 files; the staging ref lane/mechanical-dispatcher-catchup is 15 branch commits stale but merging the branch tip into it conflicts in only 1 file. THE LOAD-BEARING FINDING: the prototype's own sync pass (poc-branch-sync.mjs, called every runner tick) already ran live. It pushed two clean merge commits on 2026-09-14, then hit a conflict at only 3 commits behind main, escalated after 5 attempts into an alert file in a git directory, and nobody read it for a week while the gap grew to 485. So the cadence worked and the conflict owner and alert path did not. Other findings: no duplicate backlog ids remain on the branch; the branch tip's check:standards is at 1 error, not the 15 the health card #3768 recorded; no pull request has been opened against the prototype since 2026-09-15; the operator queue is PR-only, so a sync alert needs a new surface. PRIOR ART: Fowler's branching patterns and trunk-based development both say integrate from mainline often and in small pieces; gitworkflows(7) says merge upwards and never rebase published work, and keeps throw-away integration branches (seen) exactly like the staging ref; GitHub's merge queue tests on temporary branches against the latest base; GitHub Actions branch filters are static YAML and a workflow skipped by a filter leaves its checks Pending. RESHAPES (after a skeptic pass): #3804 rules a lag contract (merge promptly, the 40-commit ceiling only a backstop), puts the conflict on a dispatched reconcile agent working on the staging ref with merges only (amending #3556, which allowed a rebase and a direct push), with the operator's fast-forward, routes the alert to a surface the operator reads every turn (blocked by the digest-delivery card #3726, keeping the desktop notice until then), and replaces the card's whole-branch-level graduation rule with a per-file rule plus an exemption of graduation slices from the drift hold, which amends clause 4(d) of the POC-branch statute. #3805 keeps the default neither: CI runs at the graduation pull request to main, #3653 closes as superseded and #3674 closes through a one-arm drain change that holds a pull request against the prototype with a named reason, which shortens the health chain by two links.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "conveyor",
+    "prototype-branch",
+    "branch-sync",
+    "graduation",
+    "ci",
+    "merge-policy",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
