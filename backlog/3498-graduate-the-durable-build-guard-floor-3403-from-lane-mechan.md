@@ -1,12 +1,14 @@
 ---
 bornAs: xlr11s0
 kind: task
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/tick-core.mjs"]
 relatedTo: ["3383", "3403"]
 scaffoldedBy: "investigate-15-stuck-prs"
 dateScaffolded: "2026-09-05"
 dateOpened: "2026-09-05"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: [conveyor, dispatch, duplication]
 ---
 

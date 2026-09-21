@@ -3,9 +3,11 @@ bornAs: x2u8e5d
 kind: story
 size: 2
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-01"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: []
 scope:
   - we:skills-src/prepare-decision-item/

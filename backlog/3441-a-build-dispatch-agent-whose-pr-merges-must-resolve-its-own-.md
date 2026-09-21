@@ -2,9 +2,11 @@
 bornAs: xg5ml6o
 kind: task
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-01"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: []
 scope:
   - we:skills-src/conveyor/delivery-agent-brief.md
