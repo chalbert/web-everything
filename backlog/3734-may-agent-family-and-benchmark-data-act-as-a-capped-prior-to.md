@@ -5,6 +5,8 @@ parent: "3383"
 status: open
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/model-capability-ratings.mjs", "we:scripts/conveyor/run-scorecards.json"]
 dateOpened: "2026-09-20"
+preparedDate: "2026-09-21"
+preparedAgainstSha: "10aafdb030ce0eb124af23142add3b3b96844bec"
 relatedTo: ["3654", "3673", "3690"]
 relatedReport: reports/2026-09-21-supervision-prior-grounding.md
 tags: []
