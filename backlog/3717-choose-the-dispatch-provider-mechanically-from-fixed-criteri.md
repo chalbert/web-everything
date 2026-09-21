@@ -1,11 +1,10 @@
 ---
 bornAs: x1ojdxq
-kind: story
-size: 5
+kind: epic
 priority: high
 parent: "3718"
 status: open
-relatedTo: ["3690", "3695", "3696", "3443", "3658", "3720", "3730"]
+relatedTo: ["3690", "3695", "3696", "3443", "3658", "3720", "3730", "3801", "3784"]
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs"]
 dateOpened: "2026-09-19"
 tags: []
@@ -69,8 +68,29 @@ The builder's result also records a sixth item, F (the route is computed in the 
 
 Built on the prototype branch (`0f1d0fb8f`, contained in `origin/lane/mechanical-dispatcher`), not on `main`. The build stopped at five forks and chose the smallest reading of each; they are decision card 3801 for the operator's review: (A) a code-change launch routes at the `task` stage, not `story`; (B) the task types no dispatch kind produces are never produced; (C) role dispatches never call the router; (D) an unsized card reads as 900 lines; (E) the override is two environment variables, not a flag. Separately noted by the build and not a fork: every route resolves to Claude today because the 18 scorecard records carry no task type and no outcome.
 
+## Sliced 2026-09-21 after the #3801 ruling (now an umbrella epic)
+
+#3801 was ruled on 2026-09-21. Forks 1 and 2 keep the build; Forks 3, 4 and 5 and the *Settled by statute* points change it. This card is now the umbrella for that work and carries no size (its children do). The five forks listed above are ruled; read #3801's `## Ruling`, not the list above, for what holds. Every child is built on the prototype branch `lane/mechanical-dispatcher` (commit straight to it, no PR, one tracker note per push) and reaches `main` through #3443. The children, in the ruling's order (`blockedBy` edges on the cards):
+
+- **Fork 5 and the statute's override points** — the `deliveryAgent:` marker with a required `deliveryAgentReason:` is the one override; both process-wide variables retired; `routed` never overwritten; an override gets its own triple's supervision (`x07d2yq`).
+- **Statute: `executed` is the vendor actually spawned**, and the record says when a Claude converge editor also edited the lane (`xxabopb`, `blockedBy` `x07d2yq`).
+- **Fork 2** — no path produces `other` or `self-fix`; the two G1 defaults removed (`x004wgy`).
+- **Fork 3, core** — the subject axis (work task type, role kind, review lens); the authoring roles stay on Claude and record their tier (`xm3i597`).
+- **Fork 3, review** — `review-dispatch` becomes a router caller (`x2vf12v`, `blockedBy` `xm3i597`).
+- **Fork 4, policy** — `unsizedCardPolicy`, `defaultSize` and `fixSizeSource` as one setting (`xlq2jh7`).
+- **Fork 4, fix path** — `fix` and `ci-heal` take the `fixSizeSource` chain (`xbz4sn2`, `blockedBy` `xlq2jh7`).
+- **Fork 4, field** — a task's estimate field, distinct from points (`x00f4mm`).
+- **Fork 4, prepare** — prepare authors the size or estimate (`xi8dngi`, `blockedBy` `x00f4mm`).
+- **Fork 4, admission** — an unsized card is held and sent to prepare unless `default-size` is set (`xxvinxv`, `blockedBy` `xlq2jh7`, `x00f4mm`, `xi8dngi`).
+
+**Order with the sibling cards (#3801).** #3784 (turning supervision enforcement on) is `blockedBy` the statute and Fork 2, 3 and 5 children above and by the decision card on what satisfies a `full` route for a single-worker lane (`xyn92zm`). #3798 (the router header) stays independent.
+
+**Not sliced here:** the subject key and positive control for `prepare`, `prepare-decision` and `investigate` (#3801 follow-up 4); until they are prepared those three stay on Claude. Follow-ups 1 to 3 of #3801 (the planner build, the configurable graduation policy, a stamp-required gate) are not this card's.
+
 ## Done when
 
-1. **Executable** — `npx vitest run we:scripts/lib/__tests__/dispatch-task-type.test.mjs` passes; its cases fail before: each dispatch kind and cause in the table maps to the stated `taskType`; a `build` with all-docs scope maps to `doc-fix`; a conflict-caused `fix` maps to `conflict-resolution`; a `review` or `prepare` dispatch maps to no `taskType` and takes the role path; an unmappable dispatch is refused with a named reason; the generated routing table equals the checked-in one.
-2. **Executable** — a dispatch test shows `routed` and `executed` both land in the run record, a mismatch is preserved, and an override appears with its reason.
-3. **Probed live** — one real `dispatch-lane` call records a routing decision and reasons in its run record, and the checked-in table matches `node` output for today's scorecards.
+What remains of the original Done-when after the ruling. Items 1 and 2 as first written are met by the build (`0f1d0fb8f`), except where the ruling reverses it: a `review` dispatch now routes (Fork 3), and the override is the marker, not the two variables (Fork 5). Those parts moved to the children.
+
+1. **Executable** — every child listed above is `status: resolved`: `grep -L '^status: resolved' $(grep -l '^parent: "3717"' we:backlog/*.md)` prints nothing.
+2. **Executable** — on the branch, `npx vitest run we:scripts/lib/__tests__/dispatch-task-type.test.mjs we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` passes, and the generated routing table equals the one in `we:docs/agent/dispatcher-runbook.md`.
+3. **Probed live** — one real `dispatch-lane` call records a routing decision and reasons in its run record, with `routed` and `executed` as the ruling defines them, and the checked-in table matches `node` output for that day's scorecards.

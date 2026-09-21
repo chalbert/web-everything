@@ -4,9 +4,10 @@ kind: story
 size: 5
 parent: "3383"
 status: open
+blockedBy: ["xyn92zm", "x07d2yq", "xxabopb", "x004wgy", "xm3i597", "x2vf12v"]
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/conveyor/log-delegation-trial.mjs"]
 dateOpened: "2026-09-21"
-relatedTo: ["3690", "3717", "3783"]
+relatedTo: ["3690", "3717", "3783", "3801"]
 tags: [dispatch, delegation, supervision, graduation, design-first]
 ---
 
@@ -72,7 +73,7 @@ The two message strings are user-visible, so a test may assert them; reword them
 ## Finding (2026-09-21, from the #3801 prep): enforcement as built would hold every code-change dispatch
 
 - `supervisionHold` (we:scripts/lib/dispatch-contracts.mjs on `origin/lane/mechanical-dispatcher`, lines 714 to 721) holds a `full` route that names no `supervisor`, and `decideDispatchRoute` never sets a `supervisor` field. Every code-change route is `full` today. So with `WE_DISPATCH_SUPERVISION_ENFORCE=1` every `build`, `fix` and `ci-heal` dispatch is held; the #3801 prep reproduced it on a size-2 `build`.
-- So this card's design must also settle what satisfies a `full` route for a single-worker lane (for example, rule 7's independent pass at the pull request), before the default flips. #3801 delegates that question here.
+- So this card's design must also settle what satisfies a `full` route for a single-worker lane (for example, rule 7's independent pass at the pull request), before the default flips. #3801 delegates that question here. *(2026-09-21: that question is now its own prepared decision card, `xyn92zm`, and this card is `blockedBy` it. It is also `blockedBy` the #3717 children that the #3801 ruling orders before this card: the override and `executed` fixes, Fork 2 and both Fork 3 slices.)*
 - Once the branch catches up with `main` (#3804), `main`'s 26 delegation trials arrive, and the dispatch path then records `spot-check` for `codex|gpt-6-astra|bugfix` and `antigravity|gemini-3.8-flash-low|conflict-resolution`. Those `spot-check` values come from the dispatch path's placeholder risk thresholds, not the router's defaults: `thresholdsForRisk` (we:scripts/lib/dispatch-thresholds.mjs on the branch, lines 9 to 13) gives a low-risk dispatch a streak of 2 and no positive control, against rule 3's bar (the router's own defaults return `full` for both triples). That is the rule-3 and rule-6 gap becoming visible in real records, so this card should land before or with that catch-up, and should settle whether the per-risk table survives at all.
 
 ## Done when
