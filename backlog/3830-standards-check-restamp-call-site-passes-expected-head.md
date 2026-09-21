@@ -1,10 +1,11 @@
 ---
+bornAs: xw8cc2j
 kind: task
 parent: "3054"
 status: open
 scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-21"
-blockedBy: ["xm88lki"]
+blockedBy: ["3828"]
 relatedTo: ["3735"]
 tags: [review, restamp, check-standards, design-first]
 ---
@@ -22,7 +23,7 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
   `--to=restamp` (or future carry) call site that does not pass an expected head."
 - Today the only in-repo spawner of `--to=restamp` outside tests is `restampAcceptance` in
   we:scripts/merge-ai-prs.mjs. The flag itself is filed as
-  [xm88lki](/backlog/xm88lki-bind-restamp-to-the-proven-head-expect-head/); the runtime refusal there is the
+  [3828](/backlog/3828-bind-restamp-to-the-proven-head-expect-head/); the runtime refusal there is the
   real guard, this rule only catches a call site written without it.
 - Precedent for a call-site rule of this kind: #2990 (every `hasUnclearedReviewLabel` call site must pass
   explicit options).

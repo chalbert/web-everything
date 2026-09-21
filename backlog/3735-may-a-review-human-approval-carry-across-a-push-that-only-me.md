@@ -497,12 +497,12 @@ written in *Supported by default* and in Fork 4's build note, and no amendment. 
 - It builds nothing: no `mergeOnlyCarry`, no probe, no carry comment, no `--expect-head` flag. It changes no
   gate; until the build lands, every head move is judged exactly as before.
 - The build is filed as design-first, uncleared follow-ons under `#3054`:
-  [xp3usow](/backlog/xp3usow-build-merge-only-approval-carry-per-3735/) (build the carry, with this card's
+  [3829](/backlog/3829-build-merge-only-approval-carry-per-3735/) (build the carry, with this card's
   Definition of done as its acceptance),
-  [xm88lki](/backlog/xm88lki-bind-restamp-to-the-proven-head-expect-head/) (the `--expect-head` binding on
+  [3828](/backlog/3828-bind-restamp-to-the-proven-head-expect-head/) (the `--expect-head` binding on
   `we:scripts/review-set-label.mjs --to=restamp` and in `restampAcceptance` of `we:scripts/merge-ai-prs.mjs`,
   its own card because the re-stamp race is a bug under any ruling), and
-  [xw8cc2j](/backlog/xw8cc2j-standards-check-restamp-call-site-passes-expected-head/) (the stated follow-up
+  [3830](/backlog/3830-standards-check-restamp-call-site-passes-expected-head/) (the stated follow-up
   standards check that every restamp or carry call site passes an expected head).
 
 ## Done when
@@ -511,5 +511,5 @@ written in *Supported by default* and in Fork 4's build note, and no amendment. 
 2. The ruling is recorded on this card, and codified as a platform-decisions anchor (none today covers review binding to a commit). The review-ceremony guidance in `we:docs/agent/delivery-loop.md` is updated only if the ruling changes behaviour.
 3. **Ratified (2026-09-21).** The operator ratified every fork as prepared; the ruling is recorded above,
    codified at `we:docs/agent/platform-decisions.md#merge-only-push-approval-carry` (`codifiedIn`), and the card
-   is resolved through the `resolve` operation. Item 1 moves to the build story xp3usow; the ruling changes no
+   is resolved through the `resolve` operation. Item 1 moves to the build story 3829; the ruling changes no
    behaviour yet, so `we:docs/agent/delivery-loop.md` is unchanged.

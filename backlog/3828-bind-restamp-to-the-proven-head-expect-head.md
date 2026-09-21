@@ -1,4 +1,5 @@
 ---
+bornAs: xm88lki
 kind: task
 parent: "3054"
 status: open
@@ -25,7 +26,7 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
   The window is seconds, but the result is an unreviewed tree honoured silently. This holds today, on the
   drain's own rebase re-stamp, with or without the #3735 carry.
 - The ruling that makes the flag required is we:docs/agent/platform-decisions.md#merge-only-push-approval-carry
-  rule 8. The carry build [xp3usow](/backlog/xp3usow-build-merge-only-approval-carry-per-3735/) depends on this.
+  rule 8. The carry build [3829](/backlog/3829-build-merge-only-approval-carry-per-3735/) depends on this.
 
 ## DESIGN TO SETTLE
 

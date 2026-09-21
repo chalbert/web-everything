@@ -1,11 +1,12 @@
 ---
+bornAs: xp3usow
 kind: story
 size: 8
 parent: "3054"
 status: open
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/review-set-label.mjs"]
 dateOpened: "2026-09-21"
-blockedBy: ["xm88lki"]
+blockedBy: ["3828"]
 relatedTo: ["3735", "3179", "2409", "3021", "3024"]
 tags: [review, drain, review-escalation, acceptance, merge-commit, design-first]
 ---
@@ -30,9 +31,9 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
   was covered by the acceptance. `rebaseDropContent` merges are re-stamped the same way; the ruling (rule 5)
   makes them re-park.
 - **The head binding is its own card.** `--expect-head` on `--to=restamp` and in `restampAcceptance` is filed
-  separately as [xm88lki](/backlog/xm88lki-bind-restamp-to-the-proven-head-expect-head/) (a bug under any
+  separately as [3828](/backlog/3828-bind-restamp-to-the-proven-head-expect-head/) (a bug under any
   ruling); this story depends on it. The standards check that every restamp or carry call site passes an
-  expected head is [xw8cc2j](/backlog/xw8cc2j-standards-check-restamp-call-site-passes-expected-head/).
+  expected head is [3830](/backlog/3830-standards-check-restamp-call-site-passes-expected-head/).
 - **Fork 4's gate path waits on #3179.** Until the #3179 ledger exists, a carried human clearance does not
   suppress the anti-test-tampering re-park, and no gate parses `carried-human-from`.
 
