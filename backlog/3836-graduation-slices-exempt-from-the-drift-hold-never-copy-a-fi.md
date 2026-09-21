@@ -25,4 +25,4 @@ Carved from the ratified decision #3804 (Fork 4; statute `we:docs/agent/platform
 ## Done when
 
 1. **Executable** — `we:scripts/readiness/__tests__/dispatch-plan.test.mjs` passes under `npx vitest run` with a new case: a queued graduation slice whose scope overlaps a drifted branch is NOT held as `branch-drift-blocked`, while a non-graduation card with the same scope still is.
-2. `grep -n "graduation slices" backlog/3443-*.md backlog/3383-*.md` shows the freshness rule in #3443's slice procedure and the amended rule 1 in #3383's Priority order.
+2. `grep -n "graduation slices" backlog/3443-*.md backlog/3383-*.md` shows the freshness rule in #3443's slice procedure and the amended rule 1 in #3383's Priority order, and `grep -n "open conflict set" backlog/3443-*.md` shows the conflict-set clause (a ported file in the open conflict set takes the staging ref's resolution, else the port's version is recorded for the reconcile agent to adopt) in the same procedure.
