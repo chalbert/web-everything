@@ -2,9 +2,13 @@
 bornAs: xmn1we6
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:backlog/"]
 dateOpened: "2026-09-14"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#reviewer-tool-surface-and-containment"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "18798aec3835377c24a82133b5d87711dcfdb3e2"
 relatedTo: ["3621", "3654", "3673", "3611", "3001", "3371", "3405", "3581", "3630"]
@@ -15,6 +19,15 @@ tags: [codex, review, container, isolation, tool-parity, calibration, operations
 # Give Codex's review seat container-scoped write access to a full lane checkout
 
 No design exists yet for what tools a non-Claude review seat may hold, so this card is grounded in a [research topic](/research/codex-review-seat-tool-surface-and-isolation/) plus live probes on `codex-cli 0.155.1` and `claude 2.1.278`. An operator ruling (relayed 2026-09-19) makes the tool surface **the same for every reviewer**, so the central call is one surface for Claude and Codex alike. The recommended shape is narrower than the filing: **declared operations only**, reached as MCP tools, with four missing read/run operations named. Four forks, each with a bold default. Three premises in the filing are stale (probe 9, the seat's lens, #3673).
+
+## Ratified ruling — 2026-09-21
+
+Ratified by the operator ("I ratify 3675") as the card stands: all four forks at their bold defaults, no amendments. Codified at [#reviewer-tool-surface-and-containment](/docs/agent/platform-decisions.md#reviewer-tool-surface-and-containment).
+
+1. **Fork 1, surface:** declared operations only, as typed MCP tools, for every reviewer; raw tools stay the escalation, only inside the container.
+2. **Fork 2, containment:** every tool-bearing seat runs in a container over a history-stripped throwaway clone, as a backend-neutral isolation provider (does not pre-empt #3621).
+3. **Fork 3, evidence:** replay parity gate, then shadow, before the mandatory Claude seats move; Codex's advisory seat moves first.
+4. **Fork 4, veto:** the tool-bearing Codex seat inherits the #2107 calibration veto.
 
 ## Settled before the forks — operator steers, 2026-09-19
 
