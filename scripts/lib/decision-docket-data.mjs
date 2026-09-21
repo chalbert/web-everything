@@ -239,6 +239,38 @@ function stripVerdictLabel(text, labelRe) {
   return rest.trim();
 }
 
+// Bold ("**Skeptic:**") is the canonical current form. Older items wrote the plain label with no emphasis,
+// wrapped it in a single backtick ("`Skeptic:`") or italics ("*Skeptic:*"/"_Skeptic:_"), or padded it with a
+// parenthetical aside before the colon ("*Skeptic (dedicated fresh sub-agent, four axes…):*") — accept all
+// of these rather than mis-flagging real content as missing: `[^:]*` absorbs any such aside, and matches zero
+// characters for the plain "Skeptic:" case, so this stays backward-compatible. Shared by the fork parser and
+// the validation-gate parser — a gate's `## Recommendation` closes with the same two verdict lines.
+// `[^:]*` (not `[^:\n]*`): these run over the paragraph's own multi-line text (it is no longer pre-flattened
+// onto one line), and a parenthetical aside is free to wrap across lines.
+const EMPH = '(?:\\*\\*|\\*|_|`)?';
+const skepticRe = new RegExp(`^${EMPH}Skeptic\\b[^:]*:${EMPH}\\s*`, 'i');
+const screenRe = new RegExp(`^${EMPH}Screen\\b[^:]*:${EMPH}\\s*`, 'i');
+const screenInlineRe = new RegExp(`${EMPH}Screen\\b[^:]*:${EMPH}\\s*`, 'i'); // unanchored — find/split Screen: WITHIN a paragraph
+
+/**
+ * Split a paragraph's text into its `Skeptic:` / `Screen:` verdicts. The two are often written as adjacent lines
+ * (one paragraph to `splitParagraphs`), so a Skeptic paragraph is split at an inline `Screen:` label.
+ * @param {string} text - one tidied paragraph.
+ * @returns {{ skeptic: string|null, screen: string|null }} both null when the paragraph carries neither verdict.
+ */
+function extractVerdicts(text) {
+  if (skepticRe.test(text)) {
+    const screenIdx = text.search(screenInlineRe);
+    if (screenIdx === -1) return { skeptic: stripVerdictLabel(text, skepticRe), screen: null };
+    return {
+      skeptic: stripVerdictLabel(text.slice(0, screenIdx), skepticRe),
+      screen: stripVerdictLabel(text.slice(screenIdx), screenRe),
+    };
+  }
+  if (screenRe.test(text)) return { skeptic: null, screen: stripVerdictLabel(text, screenRe) };
+  return { skeptic: null, screen: null };
+}
+
 /**
  * Parse ONE `## Fork N` section body into its structured shape: the fork-existence justification, the lettered
  * options (default / rejected / open), any leftover context paragraphs (code samples, scope narrowing — real
@@ -327,17 +359,6 @@ export function parseForkSection(n, headingRest, sectionText) {
     if (opt && opt.kind !== OPTION_KINDS.REJECTED) opt.kind = OPTION_KINDS.DEFAULT;
   }
 
-  // Bold ("**Skeptic:**") is the canonical current form. Older items wrote the plain label with no emphasis,
-  // wrapped it in a single backtick ("`Skeptic:`") or italics ("*Skeptic:*"/"_Skeptic:_"), or padded it with a
-  // parenthetical aside before the colon ("*Skeptic (dedicated fresh sub-agent, four axes…):*") — accept all
-  // of these rather than mis-flagging real content as missing: `[^:\n]*` absorbs any such aside, and matches
-  // zero characters for the plain "Skeptic:" case, so this stays backward-compatible.
-  const EMPH = '(?:\\*\\*|\\*|_|`)?';
-  // `[^:]*` (not `[^:\\n]*`): these run over the paragraph's own multi-line text now (it is no longer pre-flattened
-  // onto one line), and a parenthetical aside is free to wrap across lines.
-  const skepticRe = new RegExp(`^${EMPH}Skeptic\\b[^:]*:${EMPH}\\s*`, 'i');
-  const screenRe = new RegExp(`^${EMPH}Screen\\b[^:]*:${EMPH}\\s*`, 'i');
-  const screenInlineRe = new RegExp(`${EMPH}Screen\\b[^:]*:${EMPH}\\s*`, 'i'); // unanchored — find/split Screen: WITHIN a paragraph
   let skeptic = null;
   let screen = null;
   const notes = [];
@@ -350,20 +371,12 @@ export function parseForkSection(n, headingRest, sectionText) {
     if (fenceMatch) { notes.push({ kind: 'code', text: fenceMatch[2] }); continue; }
 
     const flat = tidy(p);
-    if (skepticRe.test(flat)) {
-      // The Skeptic and Screen verdicts are often written as two lines separated by a single newline (not a
-      // blank line), so `splitParagraphs` sees them as ONE paragraph — split them back apart here rather than
-      // losing the Screen verdict inside the Skeptic text.
-      const screenIdx = flat.search(screenInlineRe);
-      if (screenIdx === -1) {
-        skeptic = stripVerdictLabel(flat, skepticRe);
-      } else {
-        skeptic = stripVerdictLabel(flat.slice(0, screenIdx), skepticRe);
-        screen = stripVerdictLabel(flat.slice(screenIdx), screenRe);
-      }
+    const verdicts = extractVerdicts(flat);
+    if (verdicts.skeptic !== null || verdicts.screen !== null) {
+      if (verdicts.skeptic !== null) skeptic = verdicts.skeptic;
+      if (verdicts.screen !== null) screen = verdicts.screen;
       continue;
     }
-    if (screenRe.test(flat)) { screen = stripVerdictLabel(flat, screenRe); continue; }
     notes.push({ kind: 'text', text: flat });
   }
 
@@ -400,13 +413,58 @@ export function parseForkSection(n, headingRest, sectionText) {
   };
 }
 
+/** A section's text as tidied markdown paragraphs joined by blank lines (block structure kept for the renderer). */
+function sectionMarkdown(section) {
+  return splitParagraphs(section?.text ?? '').map(tidy).join('\n\n');
+}
+
+/**
+ * Parse a prepared VALIDATION-GATE decision's sections (docs/agent/backlog-workflow.md → "The prepared
+ * validation-gate shape") into the docket's gate record. A gate is a one-sided go / no / not-yet call with no
+ * rival branch, so it carries no `## Fork N`; its Definition of Ready is instead the digest's verdict, `## What
+ * you're deciding`, an optional `## Context & prior-art delta`, and a `## Recommendation` that states the verdict
+ * + a concrete un-gate trigger and closes with a `Skeptic:` line. Never throws — a gate with no
+ * `## Recommendation`, or one with no `Skeptic:` verdict, comes back `parseOk: false` with a `warning` rather
+ * than a fabricated stand-in.
+ * @param {Array<{ heading: string|null, text: string }>} sections - every `## ` section of the item body.
+ * @returns {{ deciding: string|null, priorArt: string|null, recommendation: string, skeptic: string|null,
+ *   screen: string|null, parseOk: boolean, warning: string|null }|null} null when there is no `## Recommendation`.
+ */
+export function parseGateSections(sections) {
+  const find = (re) => sections.find((s) => s.heading && re.test(s.heading));
+  const recSection = find(/^Recommendation\b/i);
+  if (!recSection) return null;
+
+  const deciding = sectionMarkdown(find(/^What you(?:'|’| a)?re deciding|^What you are deciding/i)) || null;
+  const priorArt = sectionMarkdown(find(/prior[- ]art/i)) || null;
+
+  // The verdict lines are pulled out of the recommendation; every other paragraph (the verdict itself, the
+  // un-gate trigger, any list or table) stays verbatim as markdown.
+  let skeptic = null;
+  let screen = null;
+  const kept = [];
+  for (const p of splitParagraphs(recSection.text)) {
+    const verdicts = extractVerdicts(tidy(p));
+    if (verdicts.skeptic !== null || verdicts.screen !== null) {
+      if (verdicts.skeptic !== null) skeptic = verdicts.skeptic;
+      if (verdicts.screen !== null) screen = verdicts.screen;
+      continue;
+    }
+    kept.push(tidy(p));
+  }
+
+  const warning = skeptic ? null : 'Gate: no "Skeptic:" verdict line found under "## Recommendation".';
+  return { deciding, priorArt, recommendation: kept.join('\n\n'), skeptic, screen, parseOk: !warning, warning };
+}
+
 /**
  * Parse a decision item's full markdown body (everything after the frontmatter) into the docket's clean data
- * shape: the digest paragraphs (before the first `##`), every `## Fork N` in source order, and the `## Done
- * when` bullets (used to derive "what happens once ratified" — never invented, always the item's own stated
+ * shape: the digest paragraphs (before the first `##`, or a `## Digest` section when the item leads with one),
+ * every `## Fork N` in source order — or, for an item with no forks, its validation-gate record — and the `##
+ * Done when` bullets (used to derive "what happens once ratified" — never invented, always the item's own stated
  * done-when). PURE. Never throws.
  * @param {string} rawBody - the file content AFTER the `---` frontmatter fence, including the `# Title` line.
- * @returns {{ digest: string[], forks: object[], doneWhen: string[], parseOk: boolean, warnings: string[] }}
+ * @returns {{ digest: string[], forks: object[], gate: object|null, doneWhen: string[], parseOk: boolean, warnings: string[] }}
  */
 export function parseDecisionBody(rawBody) {
   // Strip leading blank lines first — a caller-stripped frontmatter fence often leaves one behind, and an
@@ -416,8 +474,14 @@ export function parseDecisionBody(rawBody) {
   const afterTitle = titleMatch ? text.slice(titleMatch[0].length) : text;
   const sections = splitSections(afterTitle);
 
-  // sections[0] (heading: null) is everything before the first "## " — the digest.
-  const digest = splitParagraphs(sections[0]?.text ?? '').map(tidy);
+  // sections[0] (heading: null) is everything before the first "## " — the digest. A validation-gate item leads
+  // with an explicit `## Digest` section instead (its shape's first heading), so fall back to that when the
+  // pre-heading text is empty.
+  let digest = splitParagraphs(sections[0]?.text ?? '').map(tidy);
+  if (!digest.length) {
+    const digestSection = sections.find((s) => s.heading && /^Digest\b/i.test(s.heading));
+    if (digestSection) digest = splitParagraphs(digestSection.text).map(tidy);
+  }
 
   const forkSections = sections.filter((s) => s.heading && /^Fork\s+\d+/i.test(s.heading));
   const warnings = [];
@@ -433,9 +497,15 @@ export function parseDecisionBody(rawBody) {
   const doneSection = sections.find((s) => s.heading && /^Done when/i.test(s.heading));
   const doneWhen = doneSection ? splitNumberedList(doneSection.text) : [];
 
-  if (!forks.length) warnings.push('No "## Fork N" sections found in the body.');
+  // No forks: the item may be a validation gate (a one-sided go / no / not-yet call — no `## Fork N` by design).
+  const gate = forks.length ? null : parseGateSections(sections);
+  if (gate) {
+    if (gate.warning) warnings.push(gate.warning);
+  } else if (!forks.length) {
+    warnings.push('No "## Fork N" sections found in the body.');
+  }
 
-  return { digest, forks, doneWhen, parseOk: warnings.length === 0, warnings };
+  return { digest, forks, gate, doneWhen, parseOk: warnings.length === 0, warnings };
 }
 
 /**
@@ -475,7 +545,7 @@ export function buildDecisionRecord(rankedEntry, fileText, now = new Date()) {
 
   if (!fileText) {
     return {
-      ...base, dateOpened: null, ageInDays: 0, digest: [], forks: [], doneWhen: [],
+      ...base, dateOpened: null, ageInDays: 0, digest: [], forks: [], gate: null, doneWhen: [],
       parseOk: false, warnings: ['Source file not found for this item — rendered from ranking data only.'],
     };
   }
@@ -488,7 +558,7 @@ export function buildDecisionRecord(rankedEntry, fileText, now = new Date()) {
 
   const parsed = base.prepared
     ? parseDecisionBody(body)
-    : { digest: [], forks: [], doneWhen: [], parseOk: true, warnings: [] };
+    : { digest: [], forks: [], gate: null, doneWhen: [], parseOk: true, warnings: [] };
 
   return {
     ...base,
@@ -496,6 +566,7 @@ export function buildDecisionRecord(rankedEntry, fileText, now = new Date()) {
     ageInDays: dateOpened ? ageDays(dateOpened, now) : 0,
     digest: parsed.digest,
     forks: parsed.forks,
+    gate: parsed.gate,
     doneWhen: parsed.doneWhen,
     parseOk: parsed.parseOk,
     warnings: parsed.warnings,

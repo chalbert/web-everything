@@ -272,8 +272,79 @@ Some grounding text, not a fork.
   it('reports no forks found rather than fabricating one', () => {
     const parsed = parseDecisionBody('# Title\n\nJust a digest, no forks, no Done-when.');
     expect(parsed.forks).toHaveLength(0);
+    expect(parsed.gate).toBeNull();
     expect(parsed.parseOk).toBe(false);
     expect(parsed.warnings.join(' ')).toMatch(/No "## Fork N" sections/);
+  });
+
+  describe('validation-gate shape (no ## Fork N, closes with ## Recommendation)', () => {
+    const gateBody = `# A gate
+
+## Digest
+
+**Verdict: not yet.** Wait for the trigger.
+
+## What you're deciding
+
+Whether to build X now.
+
+## Why this isn't a classic fork (and is still a decision)
+
+One-sided gate.
+
+## Context & prior-art delta
+
+| Incumbent | Delta |
+|---|---|
+| A | B |
+
+## Recommendation
+
+**Not yet.** Hold until the trigger.
+
+**Un-gate trigger:** the next real failure.
+
+**Skeptic:** SURVIVES — beat the attack.
+**Screen:** clear.
+
+## Done when
+
+1. Filed.
+2. Reopened on the trigger.
+`;
+
+    it('parses a gate: digest from ## Digest, deciding, prior-art, recommendation, and both verdict lines', () => {
+      const parsed = parseDecisionBody(gateBody);
+      expect(parsed.forks).toHaveLength(0);
+      expect(parsed.parseOk).toBe(true);
+      expect(parsed.warnings).toEqual([]);
+      expect(parsed.digest).toEqual(['**Verdict: not yet.** Wait for the trigger.']);
+      expect(parsed.gate.deciding).toBe('Whether to build X now.');
+      expect(parsed.gate.priorArt).toMatch(/^\| Incumbent \| Delta \|/);
+      expect(parsed.gate.recommendation).toContain('**Not yet.** Hold until the trigger.');
+      expect(parsed.gate.recommendation).toContain('**Un-gate trigger:** the next real failure.');
+      expect(parsed.gate.skeptic).toBe('SURVIVES — beat the attack.');
+      expect(parsed.gate.screen).toBe('clear.');
+      expect(parsed.doneWhen).toHaveLength(2);
+    });
+
+    it('keeps the verdict lines out of the displayed recommendation', () => {
+      const { gate } = parseDecisionBody(gateBody);
+      expect(gate.recommendation).not.toMatch(/Skeptic|Screen/);
+    });
+
+    it('flags (never fabricates) a gate whose recommendation has no Skeptic verdict', () => {
+      const parsed = parseDecisionBody(gateBody.replace(/\*\*Skeptic:\*\*[^\n]*\n\*\*Screen:\*\*[^\n]*\n/, ''));
+      expect(parsed.parseOk).toBe(false);
+      expect(parsed.gate.skeptic).toBeNull();
+      expect(parsed.warnings.join(' ')).toMatch(/no "Skeptic:" verdict line/);
+    });
+
+    it('still prefers forks: an item with a ## Fork N is never read as a gate, even if it has a Recommendation section', () => {
+      const parsed = parseDecisionBody('# T\n\nDigest.\n\n## Fork 1 — q\n\n- **(a)** A. **Rejected**: no.\n- **(b)** **B** ← **RECOMMENDED**.\n\n**Skeptic:** SURVIVES.\n\n## Recommendation\n\nGo with B.\n');
+      expect(parsed.forks).toHaveLength(1);
+      expect(parsed.gate).toBeNull();
+    });
   });
 });
 
