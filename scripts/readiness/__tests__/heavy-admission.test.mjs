@@ -6,8 +6,8 @@
  *   discipline of proving the atomic fs layer for real, not just its pure decision logic).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -16,6 +16,8 @@ import {
   markWaiting, clearWaiting, listWaiting,
   acquireSlotBlocking, admissionStatus,
   runUnderAdmission, shellQuoteWord,
+  WAITING_TTL_MINUTES, ADMISSION_HELD_ENV, classifyWaiter, reapStaleWaiters, reapHistory, waiterRepo,
+  admissionBypassReason, poolRootOf, admittedArgv, admittedShellCommand, HEAVY_ADMISSION_CLI,
 } from '../heavy-admission.mjs';
 import { readLockEntry } from '../file-locks.mjs';
 
@@ -281,5 +283,176 @@ describe('runUnderAdmission — acquire → exec → release, the #3621 containe
     });
     expect(r.admission.timedOut).toBe(true);
     expect(calls).toEqual(['echo hi']); // ran anyway
+  });
+});
+
+// ── xaipsbs: every heavy command through the pool ─────────────────────────────────────────────────────────
+
+/** A clean env for a real CLI child: no CI / off switch / held flag leaking in from the runner's own env. */
+function cliEnv(poolRoot, extra = {}) {
+  const env = { ...process.env, LANE_POOL_ROOT: poolRoot, ...extra };
+  delete env.CI; delete env.WE_HEAVY_ADMISSION; delete env[ADMISSION_HELD_ENV];
+  return env;
+}
+const CLI = resolve('scripts/readiness/heavy-admission.mjs');
+
+describe('admissionBypassReason — when the wrapper is a pass-through', () => {
+  it('queues by default', () => expect(admissionBypassReason({ env: {}, poolExists: true })).toBeNull());
+  it('passes through when an outer wrapper holds the slot', () => expect(admissionBypassReason({ env: { [ADMISSION_HELD_ENV]: '1' } })).toBe('held'));
+  it('passes through in CI', () => {
+    expect(admissionBypassReason({ env: { CI: 'true' } })).toBe('ci');
+    expect(admissionBypassReason({ env: { CI: '1' } })).toBe('ci');
+    expect(admissionBypassReason({ env: { CI: 'false' }, poolExists: true })).toBeNull();
+  });
+  it('passes through with WE_HEAVY_ADMISSION=off', () => expect(admissionBypassReason({ env: { WE_HEAVY_ADMISSION: 'off' } })).toBe('off'));
+  it('passes through when there is no pool directory', () => expect(admissionBypassReason({ env: {}, poolExists: false })).toBe('no-pool'));
+  it('poolRootOf strips .admission/heavy', () => expect(poolRootOf('/w/.lanes/.admission/heavy')).toBe('/w/.lanes'));
+});
+
+describe('runUnderAdmission — re-entrancy flag and bypass', () => {
+  it('runs the child with WE_HEAVY_ADMISSION_HELD=1 so a nested wrapper passes through', async () => {
+    const seen = [];
+    await runUnderAdmission({ lockRoot, cap: 1, owner: 'A', command: 'x', env: { FOO: 'bar' }, exec: (c, o) => seen.push(o.env), now: () => T0, sleep: async () => {} });
+    expect(seen[0]).toMatchObject({ FOO: 'bar', [ADMISSION_HELD_ENV]: '1' });
+  });
+  it('a bypassed run takes no slot, creates no lock root, and keeps the exit code', async () => {
+    const root = join(lockRoot, 'never');
+    const r = await runUnderAdmission({ lockRoot: root, cap: 1, owner: 'A', command: 'x', bypass: 'no-pool', exec: () => { throw Object.assign(new Error('x'), { status: 4 }); } });
+    expect(r.exitCode).toBe(4);
+    expect(r.admission.bypassed).toBe('no-pool');
+    expect(existsSync(root)).toBe(false);
+  });
+});
+
+describe('the run wrapper as a real process (xaipsbs)', () => {
+  it('a NESTED wrapper neither deadlocks nor takes a second slot (cap 1)', () => {
+    const pool = join(lockRoot, '.lanes');
+    mkdirSync(pool, { recursive: true });
+    // outer run → inner run → status. With cap 1, a second acquire would wait on the outer's slot forever
+    // (well, until the timeout, which is set far past the test's own limit).
+    const out = execFileSync(process.execPath, [CLI, 'run', '--cap=1', '--', process.execPath, CLI, 'run', '--cap=1', '--', process.execPath, CLI, 'status', '--cap=1'], {
+      cwd: lockRoot, env: cliEnv(pool, { WE_HEAVY_ADMISSION_TIMEOUT_MS: '600000' }), encoding: 'utf8', timeout: 30_000,
+    });
+    const status = JSON.parse(out.trim().split('\n').pop());
+    expect(status.heldCount).toBe(1);             // only the OUTER wrapper holds a slot
+    expect(status.held[0].owner).toMatch(/#\d+$/); // a per-process owner
+    expect(heldSlots({ lockRoot: join(pool, '.admission', 'heavy'), cap: 1 })).toHaveLength(0); // released after
+  });
+
+  it('two wrappers from the SAME checkout are two owners: with cap 1 the second waits for the first', async () => {
+    const pool = join(lockRoot, '.lanes');
+    mkdirSync(pool, { recursive: true });
+    const log = join(lockRoot, 'log.txt');
+    writeFileSync(log, '');
+    const body = `const fs=require('fs');fs.appendFileSync(${JSON.stringify(log)},'start '+Date.now()+'\\n');setTimeout(()=>fs.appendFileSync(${JSON.stringify(log)},'end '+Date.now()+'\\n'),1500)`;
+    const runOne = () => new Promise((res) => {
+      const c = spawn(process.execPath, [CLI, 'run', '--cap=1', '--', process.execPath, '-e', body], { cwd: lockRoot, env: cliEnv(pool), stdio: 'ignore' });
+      c.on('exit', (code) => res(code));
+    });
+    const codes = await Promise.all([runOne(), runOne()]);
+    expect(codes).toEqual([0, 0]);
+    const ev = readFileSync(log, 'utf8').trim().split('\n').map((l) => l.split(' '));
+    // never two `start`s without an `end` between them — the runs did not overlap
+    expect(ev.map((e) => e[0])).toEqual(['start', 'end', 'start', 'end']);
+  }, 30_000);
+
+  it('CI=true: a pass-through that creates nothing', () => {
+    const pool = join(lockRoot, 'no-such-pool');
+    const out = execFileSync(process.execPath, [CLI, 'run', '--', 'echo', 'ran'], { cwd: lockRoot, env: { ...cliEnv(pool), CI: 'true' }, encoding: 'utf8' });
+    expect(out.trim()).toBe('ran');
+    expect(existsSync(pool)).toBe(false);
+  });
+
+  it('admittedArgv keeps the wrapped command\'s stdout and exit code (what the sync callers rely on)', () => {
+    const pool = join(lockRoot, '.lanes');
+    mkdirSync(pool, { recursive: true });
+    const ok = admittedArgv(process.execPath, ['-e', 'process.stdout.write("hello")']);
+    expect(ok.args.slice(0, 3)).toEqual([HEAVY_ADMISSION_CLI, 'run', '--']);
+    expect(execFileSync(ok.file, ok.args, { cwd: lockRoot, env: cliEnv(pool), encoding: 'utf8' })).toBe('hello');
+    const bad = admittedArgv(process.execPath, ['-e', 'process.exit(5)']);
+    let status = null;
+    try { execFileSync(bad.file, bad.args, { cwd: lockRoot, env: cliEnv(pool), stdio: 'ignore' }); } catch (e) { status = e.status; }
+    expect(status).toBe(5);
+  });
+
+  it('admittedShellCommand keeps && semantics inside one slot', () => {
+    const pool = join(lockRoot, '.lanes');
+    mkdirSync(pool, { recursive: true });
+    const out = execSync(admittedShellCommand('echo a && echo b'), { cwd: lockRoot, env: cliEnv(pool), encoding: 'utf8' });
+    expect(out.trim().split('\n')).toEqual(['a', 'b']);
+  });
+});
+
+describe('stale-waiter reap (xaipsbs)', () => {
+  const TTL = WAITING_TTL_MINUTES * 60_000;
+  const old = iso(T0 - TTL - 60_000);
+  const opts = (over = {}) => ({ nowMs: T0, host: 'h', pidLiveness: () => 'unknown', readLease: () => null, ...over });
+
+  it('never reaps a marker younger than the TTL, whatever the evidence', () => {
+    expect(classifyWaiter({ owner: '/p/lane-1', requestedAt: iso(T0 - 1000), pid: 1, host: 'h' }, opts({ pidLiveness: () => 'dead' }))).toEqual({ reap: false, reason: 'fresh' });
+  });
+  it('reaps an old marker whose pid on this host is dead; keeps one whose pid is alive', () => {
+    expect(classifyWaiter({ owner: 'x', requestedAt: old, pid: 7, host: 'h' }, opts({ pidLiveness: () => 'dead' })).reason).toBe('pid-dead');
+    expect(classifyWaiter({ owner: 'x', requestedAt: old, pid: 7, host: 'h' }, opts({ pidLiveness: () => 'alive' })).reap).toBe(false);
+  });
+  it('ignores a pid recorded on another host and falls back to the lane lease', () => {
+    expect(classifyWaiter({ owner: '/p/lane-2', requestedAt: old, pid: 7, host: 'other' }, opts({ pidLiveness: () => 'alive' })).reason).toBe('no-lease');
+  });
+  it('a legacy lane marker (no pid): no lease → reap; a lease taken after the wait began → reap; an older live lease → keep', () => {
+    const m = { owner: '/p/lane-27', requestedAt: old };
+    expect(classifyWaiter(m, opts()).reason).toBe('no-lease');
+    expect(classifyWaiter(m, opts({ readLease: () => ({ acquiredAt: iso(T0 - 1000), ttlMinutes: 240 }) })).reason).toBe('lease-newer');
+    expect(classifyWaiter(m, opts({ readLease: () => ({ acquiredAt: iso(T0 - TTL - 120_000), ttlMinutes: 240 }) }))).toEqual({ reap: false, reason: 'lease-live' });
+    expect(classifyWaiter(m, opts({ readLease: () => ({ acquiredAt: iso(T0 - 10 * 3600_000), ttlMinutes: 240 }) })).reason).toBe('no-lease'); // stale lease
+  });
+  it('keeps an old non-lane marker with no pid — nothing proves its owner is gone', () => {
+    expect(classifyWaiter({ owner: '/Users/x/webeverything', requestedAt: old }, opts())).toEqual({ reap: false, reason: 'owner-unknown' });
+  });
+  it('waiterRepo strips the per-process #pid suffix', () => {
+    expect(waiterRepo({ owner: '/p/lane-3#123' })).toBe('/p/lane-3');
+    expect(waiterRepo({ owner: 'x', repo: '/r' })).toBe('/r');
+  });
+
+  it('reapStaleWaiters previews without touching, --apply removes and logs, status reports both counts', () => {
+    markWaiting({ lockRoot, owner: '/gone/lane-9', lane: '9', nowIso: old });
+    markWaiting({ lockRoot, owner: 'fresh', nowIso: iso(T0) });
+    const preview = reapStaleWaiters({ lockRoot, nowMs: T0, readLease: () => null });
+    expect(preview.reaped.map((r) => r.owner)).toEqual(['/gone/lane-9']);
+    expect(listWaiting(lockRoot)).toHaveLength(2);
+    expect(admissionStatus({ lockRoot, cap: 1, nowMs: T0, readLease: () => null })).toMatchObject({ staleWaiting: 1, reaped: { count: 0 } });
+    reapStaleWaiters({ lockRoot, nowMs: T0, readLease: () => null, apply: true });
+    expect(listWaiting(lockRoot).map((w) => w.owner)).toEqual(['fresh']);
+    expect(reapHistory(lockRoot)).toMatchObject({ count: 1, last: { owner: '/gone/lane-9', reason: 'no-lease' } });
+    expect(admissionStatus({ lockRoot, cap: 1, nowMs: T0 })).toMatchObject({ staleWaiting: 0, reaped: { count: 1 } });
+  });
+
+  it('the next admission attempt reaps (real lease read: a lane path with no lease marker)', async () => {
+    markWaiting({ lockRoot, owner: join(lockRoot, 'pool', 'lane-5'), lane: '5', nowIso: old });
+    const r = await acquireSlotBlocking({ lockRoot, cap: 1, owner: 'B', now: () => T0, sleep: async () => {} });
+    expect(r.ok).toBe(true);
+    expect(listWaiting(lockRoot)).toHaveLength(0);
+    expect(reapHistory(lockRoot).count).toBe(1);
+  });
+
+  it('a new waiting marker records pid, host and repo — the evidence the reap reads', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let seen = null;
+    await acquireSlotBlocking({ lockRoot, cap: 1, owner: 'W', repo: '/r', pollMs: 1000, timeoutMs: 2000, now: (() => { let c = T0; return () => (c += 500); })(), sleep: async () => { seen = listWaiting(lockRoot)[0]; } });
+    expect(seen).toMatchObject({ owner: 'W', repo: '/r', pid: process.pid });
+    expect(typeof seen.host).toBe('string');
+  });
+
+  it('the reap CLI previews by default and removes with --apply', () => {
+    const pool = join(lockRoot, '.lanes');
+    const root = join(pool, '.admission', 'heavy');
+    mkdirSync(root, { recursive: true });
+    markWaiting({ lockRoot: root, owner: join(pool, 'wp', 'lane-8'), lane: '8', nowIso: '2026-09-04T15:04:58.681Z' });
+    const preview = execFileSync(process.execPath, [CLI, 'reap'], { cwd: lockRoot, env: cliEnv(pool), encoding: 'utf8' });
+    expect(preview).toMatch(/would reap: .*lane-8/);
+    expect(listWaiting(root)).toHaveLength(1);
+    execFileSync(process.execPath, [CLI, 'reap', '--apply'], { cwd: lockRoot, env: cliEnv(pool), encoding: 'utf8' });
+    expect(listWaiting(root)).toHaveLength(0);
+    const status = JSON.parse(execFileSync(process.execPath, [CLI, 'status'], { cwd: lockRoot, env: cliEnv(pool), encoding: 'utf8' }));
+    expect(status.reaped.count).toBe(1);
   });
 });

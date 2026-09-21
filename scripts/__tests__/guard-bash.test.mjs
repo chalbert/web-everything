@@ -12,6 +12,7 @@ import {
   siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
+  isHeavyRawRun, isAdmittedWrapperRun,
   isDirectTaskInvocation, backgroundedDirectTaskReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
@@ -106,6 +107,68 @@ describe('guard-bash — backgrounded verification is denied (#2833 finding 3)',
     expect(decide('node scripts/verify-lane.mjs --gate="npm run test:unit" &')).toMatch(/never backgrounded/);
     expect(decide('npm run check:standards', { runInBackground: false })).toBeNull();
     expect(decide('npm run check:standards')).toBeNull();
+  });
+});
+
+describe('guard-bash — the raw heavy spellings join the verification set (xaipsbs)', () => {
+  const RAW = [
+    'npx vitest run',
+    'npx vitest run scripts/__tests__/guard-bash.test.mjs',
+    'npx vitest related scripts/guard-bash.mjs --run',
+    'npx --yes vitest run',
+    './node_modules/.bin/vitest run',
+    'npm run verify',
+    'node scripts/check-standards.mjs',
+    'node scripts/check-standards.mjs --json',
+    'npx playwright test',
+    'npx playwright test tests/a11y',
+    'cd /x/.lanes/web-everything/lane-3 && npx vitest run a.test.mjs',
+  ];
+  const NOT = [
+    'npx vitest --version',
+    'npx vitest',                                    // watch mode, not a one-shot run
+    'git commit -m "npx vitest run"',
+    'grep -rn "npx vitest run" scripts',
+    'grep -rn "node scripts/check-standards.mjs" docs',
+    'echo npx playwright test',
+    'npm run verify-lane',
+    'npx playwright install',
+    'cat <<EOF\nnpx vitest run\nEOF',
+  ];
+  it.each(RAW)('matches the raw run %j', (c) => {
+    expect(isHeavyRawRun(c)).toBe(true);
+    expect(isVerificationRun(c)).toBe(true);
+  });
+  it.each(NOT)('does not match the mention / non-run %j', (c) => {
+    expect(isHeavyRawRun(c)).toBe(false);
+    expect(isVerificationRun(c)).toBe(false);
+  });
+  it('a dispatched agent is denied each raw spelling, and the message names the admitted wrapper and verify-lane', () => {
+    for (const c of RAW) {
+      const r = dispatchedAgentVerificationReason(c, 'build');
+      expect(r).toMatch(/mechanically-dispatched build agent/);
+      expect(r).toContain('node scripts/readiness/heavy-admission.mjs run -- <cmd>');
+      expect(r).toContain('node scripts/verify-lane.mjs request');
+    }
+  });
+  it('the admitted wrapper form of a targeted vitest run is NOT denied to a dispatched agent', () => {
+    const c = 'node scripts/readiness/heavy-admission.mjs run -- npx vitest run a.test.mjs';
+    expect(isAdmittedWrapperRun(c)).toBe(true);
+    expect(isHeavyRawRun(c)).toBe(false);
+    expect(dispatchedAgentVerificationReason(c, 'build')).toBeNull();
+  });
+  it('an interactive session is never denied a foreground raw run, but may not background it (raw or wrapped)', () => {
+    for (const c of RAW) {
+      expect(decide(c)).toBeNull();
+      expect(dispatchedAgentVerificationReason(c, null)).toBeNull();
+      expect(backgroundedVerificationReason(c, true)).toMatch(/never backgrounded/);
+      expect(backgroundedVerificationReason(`${c} &`)).toMatch(/never backgrounded/);
+    }
+    expect(backgroundedVerificationReason('node scripts/readiness/heavy-admission.mjs run -- npx vitest run', true)).toMatch(/never backgrounded/);
+    expect(decide('node scripts/readiness/heavy-admission.mjs run -- npx vitest run')).toBeNull();
+  });
+  it('a mention is still allowed when backgrounded — it is not a run', () => {
+    for (const c of NOT) expect(backgroundedVerificationReason(c, true)).toBeNull();
   });
 });
 

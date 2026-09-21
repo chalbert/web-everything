@@ -27,6 +27,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { MUTATION_PROBE_EFFECT } from './mutation-check.mjs';
+import { admittedArgv } from '../readiness/heavy-admission.mjs';
 
 /**
  * Run one suite and say whether it went green — and, separately, whether it RAN AT ALL.
@@ -52,7 +53,9 @@ export function runSuite({ cwd, suite, run }) {
   let out = '';
   let ok = false;
   try {
-    out = String(run('npx', ['vitest', 'run', suite, '--reporter=basic'], { cwd, encoding: 'utf8' }) ?? '');
+    // xaipsbs — through the host admission pool; the wrapper's stdout/stderr/exit code are vitest's own.
+    const admitted = admittedArgv('npx', ['vitest', 'run', suite, '--reporter=basic']);
+    out = String(run(admitted.file, admitted.args, { cwd, encoding: 'utf8' }) ?? '');
     ok = true;
   } catch (e) {
     // Non-zero exit is the NORMAL path for a red suite — the output is on the error, and it is the output

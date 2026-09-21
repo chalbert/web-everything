@@ -319,7 +319,7 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
  * Optionally run this repo's own gate on the result — NEVER commits. `mode`:
  *   - `'none'` (default): does nothing.
  *   - `'standards'`: `npm run check:standards` only — fast, catches convention breaks.
- *   - `'full'`: `check:standards` + `npx vitest run` (the WHOLE suite — this script does not attempt to
+ *   - `'full'`: `check:standards` + `npm run test:unit` (the WHOLE suite — this script does not attempt to
  *     compute which tests are "relevant to what changed"; that scoping is a real gap, called out in this
  *     script's own `--help` text and in the landing report rather than silently claimed).
  * @param {object} opts
@@ -331,7 +331,8 @@ export function captureDiff({ dir, startSha, execFn = defaultExecFn }) {
 export function runGate({ dir, mode, execFn = defaultExecFn }) {
   if (mode === 'none' || !mode) return { ran: false, mode: 'none', steps: [], pass: true };
   const plan = mode === 'full'
-    ? [['npm', ['run', 'check:standards']], ['npx', ['vitest', 'run']]]
+    // xaipsbs — both are the package scripts, which run through the host admission pool.
+    ? [['npm', ['run', 'check:standards']], ['npm', ['run', 'test:unit']]]
     : [['npm', ['run', 'check:standards']]];
   const steps = [];
   for (const [bin, args] of plan) {

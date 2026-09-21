@@ -4251,6 +4251,35 @@ call-visibility telemetry this ruling's Fork 3 deliberately does not reuse) and 
 shape, for lane leases rather than heavy-command capacity). Full reasoning, prior-art survey and skeptic
 passes: [#3456](/backlog/3456-cap-concurrent-heavy-commands-across-dispatched-lanes-a-capa/).
 
+**Every heavy command goes through the pool (2026-09-21, operator: "Yes to routing heavy cmd").** Until then
+only `we:scripts/verify-lane.mjs` was admitted. Now `package.json`'s `test:unit`, `test:coverage`,
+`check:standards` and the vitest step of `verify` run as `node scripts/readiness/heavy-admission.mjs run --
+<cmd>`, and every script that spawns vitest, check-standards or the regression Playwright suite itself goes
+through the same wrapper (`admittedArgv` / `admittedShellCommand` in `we:scripts/readiness/heavy-admission.mjs`).
+The wrapper is a **pass-through** when `CI=true`, when `WE_HEAVY_ADMISSION=off` (the switch for a machine or a
+one-off run), or when there is no lane-pool directory. It is **re-entrant**: it gives its child
+`WE_HEAVY_ADMISSION_HELD=1`, and a nested wrapper that sees the flag never asks for a second slot (so
+`verify-lane` → `npm run test:unit` takes one slot, not two). `we:scripts/guard-bash.mjs` denies the raw
+spellings (`npx vitest run|related`, `npm run verify`, `node scripts/check-standards.mjs`, `npx playwright
+test`) to dispatched agents and blocks backgrounding them for everyone; the deliberate exception stays
+`lane-pool.mjs acquire`'s `npm ci` (clause 2). A `waiting` marker whose owner is gone and that is older than
+30 minutes is reaped by the next admission attempt (`heavy-admission.mjs reap [--apply]` previews/applies it).
+Card: #xaipsbs.
+
+**Core budget (PROVISIONAL — to be re-evaluated from telemetry, not a ratified constant).** On the 12-core
+workstation: about **2 cores reserved** for the system and VS Code; the **heavy pool** is cap 2 × 4 vitest
+threads (the #3650 thread cap) = **8 cores**; lanes themselves are light and share what is left; the worker
+dispatch cap is **3**. Evidence it rests on (host sampler, 18.6 h, 2026-09-20/21): the pool held 0/1/2 slots in
+89 / 9.5 / 1.2 % of samples; a worker process uses about 0.4 % of a core; a running vitest lifts load1 p50 from
+4.8 to 10.3. The telemetry that re-evaluates these numbers is the host sampler (`we:scripts/operations/host-sampler.mjs`,
+samples under `.operations/host-sampler/`, read by `we:scripts/operations/load-report-cli.mjs` and
+`load-review.mjs`) — on the `lane/mechanical-dispatcher` prototype branch today — under the review cadence of
+[#3737](/backlog/3737-set-concurrency-limits-from-host-sampler-data-dated-checkpoi/) and the staged project
+[#3611](/backlog/3611-hardware-usage-aware-heavy-command-capacity-control-a-staged/). **No load-average gate:**
+the operator rejected point-in-time load gating; a smoothed brake built on the sampler's `pressure` command is a
+separate, later slice on the prototype branch, not part of this rule. The lane ceiling
+([#3612](/backlog/3612-cap-concurrent-dispatched-lanes-with-a-max-concurrent-lanes/)) is also separate.
+
 ---
 
 ### Automated transcript-based introspection at session close/reap runs detached, covers every session, and reuses the existing learnings pool with a reinstated privacy scrub {#automated-session-introspection}

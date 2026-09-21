@@ -328,11 +328,44 @@ const VERIFICATION_OPERATION = OPERATIONS_OVER_VERIFICATION.length
   ? new RegExp(`\\bnode\\s+\\S*\\brun\\.mjs\\s+(?:${OPERATIONS_OVER_VERIFICATION.join('|')})\\b`)
   : null;
 
-/** Does this command INVOKE a member of the verification set (verify-lane / check:standards / test:unit)? Pure.
- *  Matches BOTH spellings: the raw home, and the declared operation that shells it. */
+// xaipsbs (2026-09-21) — the RAW spellings of the same heavy work, which the regex above never saw: vitest
+// run/related through npx (or its bin), `npm run verify`, `node scripts/check-standards.mjs` and
+// `npx playwright test`. Matched on each segment's CANONICAL head (the program actually run, wrappers peeled),
+// never on the raw string, so a mention is not a run: `git commit -m "npx vitest run"`, `grep "npx vitest run"`,
+// and `npx vitest --version` all stay unmatched. The admitted form (`node …heavy-admission.mjs run -- <cmd>`)
+// has `node heavy-admission.mjs` as its head, so it is NOT a raw run — it is the sanctioned spelling.
+const HEAVY_RAW_HEADS = [
+  /^(?:npx|pnpx|bunx)\s+(?:-{1,2}\S+\s+)*vitest\s+(?:run|related)\b/,
+  /^vitest\s+(?:run|related)\b/,
+  /^(?:npm\s+run|pnpm(?:\s+run)?|yarn(?:\s+run)?)\s+verify(?=\s|$)/,
+  /^node\s+(?:\S*\/)?check-standards\.mjs\b/,
+  /^(?:npx|pnpx|bunx)\s+(?:-{1,2}\S+\s+)*playwright\s+test\b/,
+  /^playwright\s+test\b/,
+];
+const ADMISSION_WRAPPER_HEAD = /^node\s+(?:\S*\/)?heavy-admission\.mjs\s+run\b/;
+
+/** Run `test` over each segment's canonical head. Heredoc bodies are data, never commands. */
+function someSegmentHead(command, test) {
+  return parseSegments(heredocScan(String(command || '')).text).segments.some((seg) => test(canonicalCommand(seg)));
+}
+
+/** Does this command run a raw heavy command the regex above does not cover (vitest, `npm run verify`,
+ *  check-standards.mjs, playwright test)? Pure. */
+export function isHeavyRawRun(command) {
+  return someSegmentHead(command, (head) => HEAVY_RAW_HEADS.some((re) => re.test(head)));
+}
+
+/** Does this command run something through the admission wrapper (`heavy-admission.mjs run -- …`)? Pure. */
+export function isAdmittedWrapperRun(command) {
+  return someSegmentHead(command, (head) => ADMISSION_WRAPPER_HEAD.test(head));
+}
+
+/** Does this command INVOKE a member of the verification set (verify-lane / check:standards / test:unit, and
+ *  since xaipsbs the raw heavy spellings above)? Pure. Matches the raw home, the declared operation that shells
+ *  it, and the raw heavy commands. */
 export function isVerificationRun(command) {
   const c = String(command || '');
-  return VERIFICATION_RUN.test(c) || (VERIFICATION_OPERATION !== null && VERIFICATION_OPERATION.test(c));
+  return VERIFICATION_RUN.test(c) || (VERIFICATION_OPERATION !== null && VERIFICATION_OPERATION.test(c)) || isHeavyRawRun(c);
 }
 
 /** Recognize the actual Node script operand, never an echoed/commented filename or a substring. Pure. */
@@ -426,8 +459,9 @@ export function isBackgrounded(command, runInBackground = false) {
  * (backgrounding is a property of the whole command / the tool param, which the per-segment split would lose).
  */
 export function backgroundedVerificationReason(command, runInBackground = false) {
-  if (!isVerificationRun(command) || !isBackgrounded(command, runInBackground)) return null;
-  return 'the verification set (verify-lane / check:standards / test:unit) must run SYNCHRONOUSLY in the FOREGROUND — never backgrounded (run_in_background, a trailing `&`, nohup/setsid/disown). Backgrounding the suite run and then yielding is the EXACT #2833 subagent stall: the lane sits mid-flight, produces nothing, and never errors, so nothing reclaims it. Re-run it in the foreground and WAIT for it to exit before landing (`node scripts/verify-lane.mjs …`, blocking). There is no override — a synchronous run is the whole point.';
+  // xaipsbs — the admitted wrapper form is still the suite run, so backgrounding it is the same stall.
+  if (!(isVerificationRun(command) || isAdmittedWrapperRun(command)) || !isBackgrounded(command, runInBackground)) return null;
+  return 'the verification set (verify-lane / check:standards / test:unit / vitest / playwright test, raw or through heavy-admission.mjs run) must run SYNCHRONOUSLY in the FOREGROUND — never backgrounded (run_in_background, a trailing `&`, nohup/setsid/disown). Backgrounding the suite run and then yielding is the EXACT #2833 subagent stall: the lane sits mid-flight, produces nothing, and never errors, so nothing reclaims it. Re-run it in the foreground and WAIT for it to exit before landing (`node scripts/verify-lane.mjs …`, blocking). There is no override — a synchronous run is the whole point.';
 }
 
 /**
@@ -450,7 +484,7 @@ const SANCTIONED_VERIFY_LANE_QUERY = /\bnode\s+\S*\bverify-lane\.mjs\b\s+(?:requ
 export function dispatchedAgentVerificationReason(command, dispatchKind) {
   if (!dispatchKind || !isVerificationRun(command)) return null;
   if (SANCTIONED_VERIFY_LANE_QUERY.test(String(command || ''))) return null;
-  return `a mechanically-dispatched ${dispatchKind} agent may not run the verification set (verify-lane / check:standards / test:unit) directly — the gate legitimately takes 150–350s, well past this tool's ~120s foreground window, so a direct run gets silently auto-backgrounded and the agent stalls with no error (#3105). Request it instead and poll for the result: \`node scripts/verify-lane.mjs request\` then \`node scripts/verify-lane.mjs check\` across your own turns — the runner's own process (unbound by this window) actually runs the gate. There is no override.`;
+  return `a mechanically-dispatched ${dispatchKind} agent may not run the verification set (verify-lane / check:standards / test:unit / vitest / npm run verify / playwright test) directly — the gate legitimately takes 150–350s, well past this tool's ~120s foreground window, so a direct run gets silently auto-backgrounded and the agent stalls with no error (#3105), and a raw run also skips the host's heavy-command admission pool (xaipsbs). For the full gate, request it and poll for the result: \`node scripts/verify-lane.mjs request\` then \`node scripts/verify-lane.mjs check\` across your own turns — the runner's own process (unbound by this window) actually runs the gate. For one short, targeted run, use the admitted form: \`node scripts/readiness/heavy-admission.mjs run -- <cmd>\` (e.g. \`… run -- npx vitest run <one test file>\`). There is no override.`;
 }
 
 /**

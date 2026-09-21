@@ -18,6 +18,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { admittedArgv } from '../readiness/heavy-admission.mjs';
 
 const noE2e = process.argv.includes('--no-e2e');
 
@@ -34,7 +35,9 @@ const results = [];
 for (const lane of LANES) {
   writeAllSync(1, `\n\x1b[36m▶ ${lane.label}\x1b[0m\n`);
   const started = Date.now();
-  const r = spawnSync(lane.cmd[0], lane.cmd[1], { stdio: 'inherit', encoding: 'utf8' });
+  // xaipsbs — every lane here is a heavy command, so each one waits for a slot in the host admission pool.
+  const admitted = admittedArgv(lane.cmd[0], lane.cmd[1]);
+  const r = spawnSync(admitted.file, admitted.args, { stdio: 'inherit', encoding: 'utf8' });
   results.push({ label: lane.label, ok: r.status === 0, ms: Date.now() - started });
 }
 

@@ -106,6 +106,7 @@ import { currentActorId, buildAuthorActorMarker, readAuthorActorStamps } from '.
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
 import { join } from 'node:path';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { admittedArgv } from './readiness/heavy-admission.mjs'; // xaipsbs — the heal's check:standards waits for a heavy-command slot
 import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
@@ -1203,7 +1204,8 @@ function runCli() {
     const tag = renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ');
     // A collision was healed on disk — full-gate the healed tree before committing (never push a red heal).
     try {
-      execFileSync('npm', ['run', 'check:standards'], {
+      const admitted = admittedArgv('npm', ['run', 'check:standards']);
+      execFileSync(admitted.file, admitted.args, {
         cwd: REPO, stdio: 'ignore',
         // #2548 — this self-check runs on an unpushed, freshly-renumbered tree (checkout --detach at
         // origin/main + the heal's own uncommitted writes) that the hand-numbered-item gate cannot tell

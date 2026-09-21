@@ -201,3 +201,28 @@ describe('atomic fs primitives — real temp lock root', () => {
     expect(wasReclaimed(current, 'B')).toBe(false); // B legitimately holds it
   });
 });
+
+// xaipsbs — the mkdir/write gap: a loser that finds the winner's dir without its lock.json yet must NOT read
+// it as free (it used to delete the winner's dir and take the lock too: two holders).
+describe('reserve — a lock dir with no entry yet is a winner still writing, not a free lock', () => {
+  it('refuses a fresh entryless dir, and reclaims one older than the grace period', async () => {
+    const { mkdtempSync, mkdirSync, rmSync, utimesSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { reserve, lockDirFor, readLockEntry, ENTRYLESS_LOCK_DIR_GRACE_MS } = await import('../file-locks.mjs');
+    const root = mkdtempSync(join(tmpdir(), 'file-locks-gap-'));
+    try {
+      const dir = lockDirFor(root, 'slot-0');
+      mkdirSync(dir, { recursive: true });                     // the winner's mkdir, before its entry write
+      const now = Date.now();
+      const r = reserve(root, 'slot-0', 'LOSER', now, new Date(now).toISOString());
+      expect(r).toEqual({ ok: false, reason: 'initializing', heldBy: null });
+      expect(readLockEntry(root, 'slot-0')).toBeNull();        // the winner's dir was left alone
+      const old = (Date.now() - ENTRYLESS_LOCK_DIR_GRACE_MS - 5_000) / 1000;
+      utimesSync(dir, old, old);                               // …a crash between mkdir and the write
+      const r2 = reserve(root, 'slot-0', 'LATE', now, new Date(now).toISOString());
+      expect(r2.ok).toBe(true);
+      expect(readLockEntry(root, 'slot-0').owner).toBe('LATE');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});

@@ -260,6 +260,9 @@ describe('verify-dispatch CLI — real admission-queue contention does not trip 
   it('a lane queued behind real admission contention, then a fast gate, is NOT killed by the gate-only ceiling', async () => {
     const cli = resolve(process.cwd(), 'scripts/readiness/heavy-admission.mjs');
     const admissionEnv = { ...process.env, LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION_CAP: '1' };
+    // xaipsbs — the `run` wrapper is a pass-through under CI, the off switch, or an outer wrapper's held flag
+    // (this suite itself runs inside `npm run test:unit`, which sets it). The holder must really hold a slot.
+    delete admissionEnv.CI; delete admissionEnv.WE_HEAVY_ADMISSION; delete admissionEnv.WE_HEAVY_ADMISSION_HELD;
     const holder = spawnProcess('node', [cli, 'run', '--owner=test-holder', `--repo=${poolRoot}`, '--', 'sleep', '2'], {
       env: admissionEnv,
       stdio: 'ignore',

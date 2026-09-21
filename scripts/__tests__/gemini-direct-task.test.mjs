@@ -248,7 +248,7 @@ describe('runGate — none/standards/full, never commits', () => {
   it('mode "full" runs check:standards then the full vitest suite', () => {
     const execFn = vi.fn(() => 'ok');
     const r = runGate({ dir: '/d', mode: 'full', execFn });
-    expect(r.steps.map((s) => s.cmd)).toEqual(['npm run check:standards', 'npx vitest run']);
+    expect(r.steps.map((s) => s.cmd)).toEqual(['npm run check:standards', 'npm run test:unit']);
   });
 
   it('a failing step is caught and reported, not thrown — and marks the gate failed', () => {

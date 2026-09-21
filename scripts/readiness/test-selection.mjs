@@ -58,6 +58,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { isBlastRadiusPath, isStatutePath, isGateSelfPath } from '../lib/review-escalation.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { admittedArgv } from './heavy-admission.mjs';
 
 // ── the flag (NOT defaulted — DoD) ───────────────────────────────────────────────────────────────────────────
 
@@ -410,8 +411,9 @@ function vitestRelatedSelectedFiles(changedFiles) {
   try {
     mkdirSync(dirname(out), { recursive: true });
     // `vitest related` maps changed SOURCE files → the test files that import them (the module-graph walk).
-    execFileSync('npx', ['vitest', 'related', ...changedFiles, '--run', '--reporter=json', `--outputFile=${out}`],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'ignore', 'ignore'] });
+    // xaipsbs — a real vitest run, so it waits for a slot in the host admission pool.
+    const admitted = admittedArgv('npx', ['vitest', 'related', ...changedFiles, '--run', '--reporter=json', `--outputFile=${out}`]);
+    execFileSync(admitted.file, admitted.args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'ignore', 'ignore'] });
   } catch { /* a non-zero exit (e.g. a related test failed) still writes the report — read it below */ }
   const report = readJsonFile(out, null);
   try { rmSync(out, { force: true }); } catch { /* best-effort cleanup */ }
