@@ -46,10 +46,10 @@ The operator ratified the card as prepared: all four bold defaults, no amendment
   (they were read in the prep, at `13affbab1`); the builds re-verify them on the branch.
 - **Codified** as [agent-vendor-registry](../../docs/agent/platform-decisions.md#agent-vendor-registry).
   **Builds** (both `parent: 3383`, both land on `lane/mechanical-dispatcher` and reach main through #3443):
-  [xceuk6m](/backlog/xceuk6m-build-the-agent-vendor-registry-one-descriptor-module-per-ve/) (size 8, the registry and
+  [3787](/backlog/3787-build-the-agent-vendor-registry-one-descriptor-module-per-ve/) (size 8, the registry and
   descriptors) and
-  [xirxlz4](/backlog/xirxlz4-refuse-or-repair-around-a-marked-vendor-that-cannot-run-the/) (size 5, the Fork 4
-  refuse/fallback and the run-record fields; `blockedBy` xceuk6m). Neither is cleared for the conveyor: their
+  [3788](/backlog/3788-refuse-or-repair-around-a-marked-vendor-that-cannot-run-the/) (size 5, the Fork 4
+  refuse/fallback and the run-record fields; `blockedBy` 3787). Neither is cleared for the conveyor: their
   files exist only on the prototype branch.
 
 ## Why this is on the critical path

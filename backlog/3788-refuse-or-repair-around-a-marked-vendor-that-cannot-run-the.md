@@ -1,9 +1,10 @@
 ---
+bornAs: xirxlz4
 kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["xceuk6m"]
+blockedBy: ["3787"]
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/agent-provider-registry.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/fix-run.mjs", "we:scripts/operations/ci-heal-run.mjs"]
 dateOpened: "2026-09-21"
 tags: []
