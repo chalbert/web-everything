@@ -2,9 +2,12 @@
 bornAs: xa1hqo9
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/wip-report.mjs", "we:scripts/operations/wip-report-io.mjs", "we:scripts/operations/wip-report-cli.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: one-off
 preparedDate: "2026-09-21"
 preparedAgainstSha: "12dd24e0e934a05a442335426480f6ef7e8e880b"
 relatedTo: ["3809", "3736", "3804", "3443", "3717", "3767"]
@@ -192,6 +195,23 @@ planned: build, review, land
 ## Not in this decision
 
 The requirements themselves (operator rule 4 and its 2026-09-21 amendment), the build, and #3809's executable Done-when stay on #3809. #3767 (the deployed /wip command is hand-edited) is separate.
+
+## Ruling — 2026-09-21 (ratified, operator, in conversation: "I ratify 3819"; all eight forks approved as prepared, no amendments)
+
+1. **Fork 1 → (g) a fixed, deterministic fallback chain.** Card: its Priority-order why (the `Clears:` / `Removes:` lead kept), else its full title. PR row: the card the PR names, else the PR title. Session: the card its run record names (`input.item`), else the card its name names, else the PR it binds to, else its brief's TASK line up to the first full stop. Last resort `no description: <why>`. The chain's source is shown nowhere; the test pins it per row kind.
+2. **Fork 2 → (c) the best source present, in a fixed order.** Supervisor: the supervision tree's, else the dispatch record (`executed`, plus `(routed <provider>)` when they differ), else the session's model, shortened. Tasks: the tree's tasks, else one line per delegation found, else `none (works alone)` on a complete transcript scan and `not known` on an incomplete one.
+3. **Fork 3 → (c) the two mechanical queues the runner acts on.** Land-advance owed dispatches first, then the conveyor sidecar's cleared items in Priority-order line order. Approving a NEXT row is `node we:scripts/conveyor/queue.mjs add <N>`. The report reads the runner's sidecar file, not its own checkout's.
+4. **Fork 4 → (c) the fixed step list of the dispatch outcome.** Build → `build, review, land`; unshaped → `prepare, build, review, land`; decision → `prepare forks, you rule`; epic → `slice first`; owed PR row → `review`, `fix` or `ci-heal`; with no card data `no plan yet`.
+5. **Fork 5 → (d) mechanical checks plus `blockedBy` as the one gate record; the first 5 rows** (`--full` shows 10), each with its line number and why. Decision gates become `blockedBy` entries on the gated card, filed as a separate backlog change (below).
+6. **Fork 6 → (c) one summary line instead of each hidden block.** The default view ends with `Since HH:MM: N PRs landed, M sessions finished (--full lists them)`; a not-live runner adds one QUEUE line; `--full` prints everything the report prints today.
+7. **Fork 7 → (b) build on `lane/mechanical-dispatcher`, no PR, one tracker note.** Currency note: #3804 was ruled after this card was prepared (statute `#poc-branch-mechanical-sync`: the branch is kept current mechanically and slices graduate to `main` any time). That lowers the cost of the later graduation and does not change the choice; graduation stays with #3443.
+8. **Fork 8 → (b) one short block per row, fields on their own lines.** Bold ID line, description wrapped at 42 columns, then `supervisor:` and `tasks:` (RUNNING), `tasks:` (QUEUE), `planned:` and `line N` (NEXT).
+
+**Also ruled (proposed edit to #3809's Done-when 2):** each NEEDS YOU line equals the operator-queue line with no prefix added (the recommended option).
+
+**Codified:** `codifiedIn: one-off`. This is a call about one report's shape, with no reusable rule beyond the existing "`blockedBy` is the one gate record" (*backlog-workflow.md → Keep the blocker DAG honest*).
+**Applied:** #3809's `## Done when`, scope and design section are rewritten to match, and its `blockedBy` on this card is cleared, in the same change.
+**Follow-up:** one task adds the `blockedBy` gate edge #3717 → #3801. The other two edges the card named are moot: #3653 and #3804 are resolved, and #3486 already carries `blockedBy` #3482 and #3483.
 
 ## Done when
 
