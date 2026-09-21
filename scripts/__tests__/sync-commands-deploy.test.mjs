@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { buildCommandsPlan, deployRoot } from '../sync-commands-deploy.mjs';
 import { applyPlan } from '../sync-skills-deploy.mjs';
 
@@ -83,5 +85,45 @@ describe('deploying', () => {
     fs.writeFileSync(path.join(tmp, 'my-own.md'), 'mine');
     applyPlan(buildCommandsPlan({ destRoot: tmp, all: true, prune: true }));
     expect(fs.existsSync(path.join(tmp, 'my-own.md'))).toBe(false);
+  });
+});
+
+// #3767 — the REAL mechanism: run the CLI itself (not the plan builder) against a scratch deploy dir through
+// the WE_COMMANDS_DEPLOY_DIR override, exactly as `npm run bootstrap` and the operator's `--check` do. This is
+// the check that catches a hand-edited deployed command BEFORE a deploy would overwrite it.
+describe('--check on the real CLI against a scratch deploy dir (#3767)', () => {
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'sync-commands-deploy.mjs');
+  const run = (...args) => spawnSync(process.execPath, [cli, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, WE_COMMANDS_DEPLOY_DIR: tmp },
+    timeout: 20_000,
+  });
+
+  it('exits 0 and reports nothing once the deploy target equals the source', () => {
+    expect(run('--all').status).toBe(0);
+    const r = run('--check');
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toMatch(/DRIFT|STALE/);
+  });
+
+  it('exits 1 and names the hand-edited command; --check itself writes nothing', () => {
+    run('--all');
+    const victim = fs.readdirSync(tmp)[0];
+    const file = path.join(tmp, victim);
+    fs.appendFileSync(file, '\nhand edit\n');
+    const edited = fs.readFileSync(file, 'utf8');
+    const r = run('--check');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/DRIFT/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(edited);
+  });
+
+  it('exits 1 with a STALE line for a deployed command the source does not track, and deletes nothing', () => {
+    run('--all');
+    fs.writeFileSync(path.join(tmp, 'untracked.md'), 'mine');
+    const r = run('--check');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/STALE commands: 1 file\(s\).*untracked\.md/);
+    expect(fs.existsSync(path.join(tmp, 'untracked.md'))).toBe(true);
   });
 });
