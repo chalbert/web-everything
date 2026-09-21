@@ -60,6 +60,24 @@ function makeRecord({
   };
 }
 
+describe('provider-routing — header states the router\'s reach (#3798)', () => {
+  // The ratified "Reach" rule (platform-decisions.md#delegation-trial-record-graduation): mechanical
+  // provider routing binds the mechanical dispatch path only; an interactive loop keeps its own verdict.
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../provider-routing.mjs'), 'utf8');
+  const header = source.slice(0, source.indexOf('*/'));
+  // Comment prose wraps across lines: collapse the ` * ` gutters and whitespace before matching.
+  const prose = header.replace(/^\s*\*\s?/gm, ' ').replace(/\s+/g, ' ');
+
+  it('#3798 — the header comment says the reach is "the mechanical dispatch path only" and no longer claims to serve interactive sessions', () => {
+    expect(source.trimStart().startsWith('/**')).toBe(true);
+    expect(prose).toContain('the mechanical dispatch path only');
+    expect(prose).not.toContain('both interactive Claude Code sessions');
+    expect(prose).not.toMatch(/pre-dispatch check before picking a subagent/);
+    // An interactive loop keeps its own verdict; the router may inform it, never replace it.
+    expect(prose).toContain('the router may inform that verdict, never replace it');
+  });
+});
+
 describe('provider-routing — constants and helpers', () => {
   it('freezes enum objects', () => {
     expect(Object.isFrozen(RECOMMENDATIONS)).toBe(true);
