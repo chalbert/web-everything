@@ -80,7 +80,7 @@ import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
-import { driftDefaults } from '../lib/poc-branches.mjs';
+import { driftDefaults, findPocBranch, readRegistry } from '../lib/poc-branches.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -136,7 +136,10 @@ import { driftDefaults } from '../lib/poc-branches.mjs';
  *  dispatch, and the branch's own out-of-band one) piling MORE changes onto the same hot files while nothing
  *  reconciles them, until the eventual merge becomes unresolvable. HOLDS — it never auto-reconciles the branch;
  *  it only pauses NEW same-scope dispatch until a fresh sweep clears it. The operator gloss is
- *  {@link BRANCH_DRIFT_BLOCKED_HINT}.
+ *  {@link BRANCH_DRIFT_BLOCKED_HINT}. A GRADUATION SLICE is exempt (#3836, statute
+ *  `we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync` point 4): an item whose `parent` is the
+ *  drifting branch's registered `graduationItem` (`we:scripts/lib/poc-branches.json`) lands on `main` in its own
+ *  PR, porting files as diffs onto `main`'s current tree, so it never piles onto the unreconciled branch.
  *
  *  `dispatch-paused` (#3609): a MANUAL/EMERGENCY kill-switch, distinct from every reason above — those are all
  *  properties of the ITEM (its own readiness, scope, or a scope conflict); this is a deliberate OPERATOR
@@ -271,10 +274,11 @@ function hasOpenBlockers(item) {
  * The DETERMINISTIC dispatch plan — the pure keystone. Same (queue, leases, freeLanes) → same plan, always.
  *
  * @param {{
- *   queue: Array<{num:(string|number), kind?:string, scope?:string[], openBlockers?:(string[]|number), alreadyDonePr?:(object|null)}>,
+ *   queue: Array<{num:(string|number), kind?:string, parent?:(string|number), scope?:string[], openBlockers?:(string[]|number), alreadyDonePr?:(object|null)}>,
  *   leases: Array<{lane:(string|number), scope:string[]}>,
  *   freeLanes: Array<string|number>,
  *   driftBlockedScope?: string[]|null,
+ *   driftGraduationItem?: string|null,
  *   maxConcurrentLanes?: number,
  *   dispatchPaused?: boolean,
  * }} input
@@ -300,6 +304,10 @@ function hasOpenBlockers(item) {
  *                   IO shell's drift check itself fails). A scoped item overlapping this holds
  *                   `branch-drift-blocked`, checked ahead of the lease/rival overlap gates — see
  *                   {@link BRANCH_DRIFT_BLOCKED_HINT}.
+ *   • `driftGraduationItem` — (#3836) the drifting branch's registered `graduationItem` (e.g. `"3443"`), or
+ *                   `null`/absent when none is registered. A queued item whose `parent` equals it is a
+ *                   GRADUATION SLICE and is exempt from the `branch-drift-blocked` hold (statute
+ *                   `#poc-branch-mechanical-sync` point 4); absent, nothing is exempt.
  *   • `maxConcurrentLanes` — (#xupukxa) the global lane-dispatch concurrency ceiling; `freeLanes` is trimmed
  *                   against `leases.length` via {@link ../lib/lane-concurrency.mjs capToConcurrency} before any
  *                   assignment. Defaults to `Infinity` (unlimited — today's pre-#xupukxa behavior) when
@@ -316,7 +324,7 @@ function hasOpenBlockers(item) {
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, trace = false } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes = Infinity, dispatchPaused = false, trace = false } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
@@ -329,6 +337,7 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
   const free = [...admitted]; // consumed front-to-back, rank order
   const capacityLimited = overflow.length > 0;
   const driftScope = normScope(driftBlockedScope); // [] when absent/null — scopesOverlap against [] is always false
+  const graduationItem = String(driftGraduationItem ?? '').trim(); // '' → no item is a graduation slice
 
   const launch = [];
   const held = [];
@@ -425,8 +434,10 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     //    branch is carrying unreconciled changes over these paths; piling MORE independently-scoped work onto
     //    them is exactly what turned #3464's own incident into an unresolvable conflict. Hold until a fresh
     //    `branch-drift.mjs sweep` clears it. Checked before the lease/rival gates — same "blanket hold, not a
-    //    lane-scheduling concern" precedence as the checks above.
-    if (blocked('branch-drift', driftScope.length > 0 && scopesOverlap(scope, driftScope), { scope, driftScope })) {
+    //    lane-scheduling concern" precedence as the checks above. A GRADUATION SLICE (a child of the branch's
+    //    registered `graduationItem`) is exempt (#3836): it lands on `main` in its own PR, not on the branch.
+    const graduationSlice = graduationItem !== '' && String(item.parent ?? '').trim() === graduationItem;
+    if (blocked('branch-drift', driftScope.length > 0 && !graduationSlice && scopesOverlap(scope, driftScope), { scope, driftScope, graduationSlice })) {
       held.push({ num, reason: 'branch-drift-blocked' });
       continue;
     }
@@ -610,6 +621,9 @@ async function main(argv) {
       // failed to load (the catch above) — then it reads as non-epic and falls through to the scope gate, a SAFE
       // degradation (an unscoped epic still holds `unshaped-no-scope` rather than launching to build).
       kind: it?.kind,
+      // `parent` marks a graduation slice (#3836): a child of the drifting branch's `graduationItem` is exempt
+      // from the `branch-drift-blocked` hold.
+      parent: it?.parent,
       scope: Array.isArray(it?.scope) ? toRepoRelative(it.scope) : undefined,
       openBlockers: Array.isArray(it?.openBlockers) ? it.openBlockers : [],
     };
@@ -678,6 +692,7 @@ async function main(argv) {
   //     — an absent/unreadable drift signal must never itself hold dispatch; only an explicit `blocked` verdict
   //     does. Skippable via `--no-drift-check` (mirrors `--no-ground-truth`).
   let driftBlockedScope = null;
+  let driftGraduationItem = null;
   if (!flags['no-drift-check']) {
     try {
       const { execFileSync: execSync } = await import('node:child_process');
@@ -691,7 +706,12 @@ async function main(argv) {
       if (!branch) throw new Error('no POC branch registered and no --drift-branch given — nothing to check');
       const out = execSync('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       const verdict = JSON.parse(out);
-      if (verdict?.status === 'blocked') driftBlockedScope = scope;
+      if (verdict?.status === 'blocked') {
+        driftBlockedScope = scope;
+        // #3836 — the blocked branch's registered graduation item; its children are graduation slices, exempt
+        // from the hold. An unregistered `--drift-branch=` has none, so nothing is exempt.
+        driftGraduationItem = findPocBranch(readRegistry(), branch)?.graduationItem ?? null;
+      }
     } catch (e) {
       log(`  ⚠ branch-drift check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
     }
@@ -713,7 +733,7 @@ async function main(argv) {
 
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, trace: true });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes, dispatchPaused, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the

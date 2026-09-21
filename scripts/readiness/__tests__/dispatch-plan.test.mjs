@@ -118,6 +118,36 @@ describe('dispatchPlan — branch-drift ceiling (#3464): a currently-blocked dis
       expect(plan.held).toEqual([]);
     }
   });
+
+  // #3836 (#3804 Fork 4, statute `#poc-branch-mechanical-sync` point 4) — a graduation slice (a child of the
+  // drifting branch's registered `graduationItem`, which lands on `main`) is exempt from the drift hold.
+  it('a queued graduation slice overlapping the drifted branch is NOT held branch-drift-blocked; a non-graduation card with the same scope still is', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, parent: '3443', scope: ['we:scripts/conveyor/tick-core.mjs'] }, // graduation slice → launches
+        { num: 2, parent: '3383', scope: ['we:scripts/conveyor/tick-core.mjs'] }, // same scope, not a slice → held
+      ],
+      leases: [],
+      freeLanes: [7, 8],
+      driftBlockedScope: ['we:scripts/conveyor/'],
+      driftGraduationItem: '3443',
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 7 }]);
+    expect(plan.held).toEqual([{ num: 2, reason: 'branch-drift-blocked' }]);
+  });
+
+  it('no registered graduation item exempts nothing (a card parented under any epic still holds)', () => {
+    for (const driftGraduationItem of [undefined, null, '']) {
+      const plan = dispatchPlan({
+        queue: [{ num: 1, parent: '3443', scope: ['we:scripts/conveyor/'] }],
+        leases: [],
+        freeLanes: [2],
+        driftBlockedScope: ['we:scripts/conveyor/'],
+        driftGraduationItem,
+      });
+      expect(plan.held).toEqual([{ num: 1, reason: 'branch-drift-blocked' }]);
+    }
+  });
 });
 
 describe('dispatchPlan — rival pair: two queued items overlap, neither running → higher rank launches', () => {

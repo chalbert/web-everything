@@ -30,6 +30,26 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
 2. The reconcile-pass runner wiring that dispatches `review`/`fix` continuously on a tick loop (`origin/lane/mechanical-dispatcher`'s `186801a0` and anything layered on it) is not cherry-picked to `main` until `git log main -- we:scripts/conveyor/reconcile-core.mjs` shows the `#3437` name-based-bind fix (or `backlog/3437-*.md` is `status: resolved`) — landing the continuous loop before that fix would reproduce `#3437`'s live double-dispatch bug on `main`'s own runner.
 3. Each landed increment is its own small PR through the normal lane → `we:scripts/verify-lane.mjs` → `we:scripts/operations/run.mjs open-pr --mode=land` pipeline — never a bulk merge of the branch, and never a direct push to `main`.
 
+## Slice procedure
+
+How each slice (a child of this item) graduates, per the statute
+`we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync` point 4 (#3804 Fork 4, built in #3836):
+
+1. **Any time, whatever the sync state.** Graduation slices may land on `main` whether or not the branch is
+   current with `main`. They are exempt from the `branch-drift-blocked` hold: the dispatch plan
+   (`we:scripts/readiness/dispatch-plan.mjs`) treats a card whose `parent` is this item (the branch's
+   registered `graduationItem` in `we:scripts/lib/poc-branches.json`) as a graduation slice.
+2. **Order follows this item's dependencies.** Land slices in their `blockedBy` order (see the slice list under
+   Progress); a slice waits for the slices it depends on.
+3. **Freshness rule: graduation slices never copy a file `main` has moved.** For each file a slice ports, check whether `main` has
+   a commit to it since the merge base (`git log $(git merge-base origin/main origin/lane/mechanical-dispatcher)..origin/main -- <file>`).
+   If it has, apply the branch's change onto `main`'s current file as a diff; never copy the branch's version
+   over it. A ported file that is in the open conflict set takes the staging ref's resolution
+   (`lane/mechanical-dispatcher-catchup`) when one exists; otherwise the port's version is recorded as the
+   resolution the reconcile agent must adopt.
+4. **Full gate on `main`'s tree.** Each slice is its own small PR (Done-when 3) and runs `check:standards`,
+   `test` and `smoke` on `main`'s tree. This replaces rule 1 of #3383's Priority order for graduation slices.
+
 ## Progress
 
 - 2026-09-03: Landed `computeFreeSlots` dirty-lane exclusion (`origin/lane/mechanical-dispatcher`'s `c7316eb40`,
