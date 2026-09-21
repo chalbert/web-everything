@@ -178,16 +178,16 @@ Which dispatch kind becomes which router `taskType`, and what the router then de
 `we:scripts/lib/provider-routing.mjs`). Edit the code, not this block;
 `scripts/__tests__/dispatch-routing-table.test.mjs` fails when the two disagree.
 
-Computed against `we:scripts/conveyor/run-scorecards.json` (version 1, 18 record(s)) at size 3.
+Computed against `we:scripts/conveyor/run-scorecards.json` (version 1, 44 record(s)) at size 3.
 
 | dispatch | derived `taskType` | routed | executed | supervision | why |
 |---|---|---|---|---|---|
 | `build` (any non-doc path in scope) | `build-new-feature` | `claude` | `claude` | `full` | build-new-feature: a `build` dispatch over at least one non-documentation path |
 | `build` (every scope path is documentation) | `doc-fix` | `claude` | `claude` | `full` | doc-fix: every declared scope path is documentation (1 path(s)) — derived from the item's scope, not its kind |
 | `build` (no declared scope) | — | — | — | `full` | REFUSED — a `build` dispatch with no declared scope cannot be told apart from a documentation build — `doc-fix` is derived from the scope, so an empty scope has no derivable taskType |
-| `fix` caused by a merge conflict | `conflict-resolution` | `claude` | `claude` | `full` | conflict-resolution: a `fix` dispatched because a bounce was conflict-caused — the CAUSE, not the kind, produces this taskType |
-| `fix` (reviewer finding) | `bugfix` | `claude` | `claude` | `full` | bugfix: `fix` repairs code an earlier build already wrote |
-| `ci-heal` | `bugfix` | `claude` | `claude` | `full` | bugfix: `ci-heal` repairs code an earlier build already wrote |
+| `fix` caused by a merge conflict | `conflict-resolution` | `antigravity` | `claude` | `spot-check` | conflict-resolution: a `fix` dispatched because a bounce was conflict-caused — the CAUSE, not the kind, produces this taskType |
+| `fix` (reviewer finding) | `bugfix` | `codex` | `claude` | `spot-check` | bugfix: `fix` repairs code an earlier build already wrote |
+| `ci-heal` | `bugfix` | `codex` | `claude` | `spot-check` | bugfix: `ci-heal` repairs code an earlier build already wrote |
 | `prepare` | — | — | — | `full` | role path — the provider cascade is never consulted |
 | `prepare-decision` | — | — | — | `full` | role path — the provider cascade is never consulted |
 | `investigate` | — | — | — | `full` | role path — the provider cascade is never consulted |
