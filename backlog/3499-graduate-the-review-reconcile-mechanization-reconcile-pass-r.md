@@ -1,12 +1,14 @@
 ---
 bornAs: x5v8yy9
 kind: task
-status: active
+status: resolved
 scope: ["we:skills-src/conveyor/runner.mjs"]
 relatedTo: ["3383"]
 scaffoldedBy: "investigate-15-stuck-prs"
 dateScaffolded: "2026-09-05"
 dateOpened: "2026-09-05"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: [conveyor, review, dispatch]
 ---
 

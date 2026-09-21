@@ -41,7 +41,7 @@ corrected id back into the sidecar.
   (coverage gaps, second unsynchronized writer). No overlap with an existing statute; the rule composes with
   `#state-lives-where-its-nature-dictates`.
 - **Codified** as a rider on
-  [state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates).
+  [state-lives-where-its-nature-dictates](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates).
   **Build:** [3786](/backlog/3786-translate-birth-hash-ids-to-current-numbers-when-the-conveyo/) (size 5,
   `parent: 3383`).
 

@@ -32,3 +32,14 @@ ADDED 2026-09-20 (deployed session commands name state that goes stale; folded h
 4. **Executable** — a test with a scratch deploy directory (the `WE_COMMANDS_DEPLOY_DIR` override in `we:scripts/sync-commands-deploy.mjs`) shows that a hand-edited deployed command is reported as drift, and, if the design chooses a warning, that the warning comes before the deploy overwrites it.
 5. **Human verify** — typing `/wip` in a session prints the report, from a checkout that is not the personal clone the hand-edited command uses today.
 6. **Executable** — a test scans the tracked continue and handoff command files in source and fails on a hard-coded pull request number (`#` followed by digits used as a state claim) or a lane number (`lane-` followed by digits). Before (2026-09-20): the deployed /continue names #1853 and lane-54, and /handoff names lane-54.
+
+## Finding 2026-09-21 — source tracking landed (PR #2360), the card stays open for the rest
+
+PR #2360 (merge commit 2866bdfcc, 2026-09-21) delivered the source-tracking half. Checked against origin/main on 2026-09-21:
+
+- Done-when 1, 2, 3 hold. `node we:scripts/sync-commands-deploy.mjs --check` exits 0 with "in sync — 1 command(s) checked, no drift" and no `STALE` line. `cmp` of we:.claude/commands/wip.md, we:.claude/commands/continue.md and we:.claude/commands/handoff.md against the deployed files exits 0 for all three. `npm run bootstrap:check` prints "ok commands ✓ in sync — 1 command(s) checked, no drift" (its exit 1 that day is the unrelated `gitdir` grant line).
+- Done-when 4 holds for the drift half: we:scripts/__tests__/sync-commands-deploy.test.mjs runs the real CLI against a scratch `WE_COMMANDS_DEPLOY_DIR` (13 tests pass) and proves a hand edit exits 1 with `DRIFT` and an untracked command exits 1 with `STALE`. The optional warning before a deploy overwrites a hand edit was not built (the PR body: the deploy cannot tell a hand edit from an older source without a stamp of the last deploy).
+- Done-when 5 was verified by the operator on 2026-09-21: typing `/wip` prints the report from a checkout that is not the personal clone (reported to the closeout session in its task brief; the operator's own words are not quoted here).
+- Done-when 6 is NOT met. The tracked we:.claude/commands/continue.md still says "Prototype PR = #1853" and "PR #2334 has merged" and names `lane-54`; the tracked we:.claude/commands/handoff.md still names `lane-54`; no test scans them. Those two files were tracked byte for byte, as deployed, with the text unchanged.
+
+Remaining before this card can resolve: the state-naming cleanup and its scan test (Done-when 6), and the choice on the pre-overwrite warning (design point 4). The hard-coded personal clone in we:.claude/commands/wip.md goes away when the report CLI graduates to main (#3443, PR #2360 "Owed").

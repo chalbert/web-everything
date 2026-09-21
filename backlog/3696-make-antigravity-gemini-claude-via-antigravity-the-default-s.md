@@ -2,9 +2,11 @@
 bornAs: xlp48ig
 kind: story
 size: 5
-status: open
+status: resolved
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs"]
 dateOpened: "2026-09-15"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: []
 ---
 
