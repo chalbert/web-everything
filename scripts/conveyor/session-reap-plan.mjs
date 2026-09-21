@@ -225,10 +225,10 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor) {
  * Without `evidenceFor` this is byte-identical to {@link classifySessionReapWithGroundTruth}.
  *
  * @param {object|null} session - carrying `pidAlive`, as resolved by the IO shell.
- * @param {{groundTruthFor?:Function|null, evidenceFor?:((session:object)=>object)|null, now?:number, stallMinutes?:number}} [opts]
+ * @param {{groundTruthFor?:Function|null, evidenceFor?:((session:object)=>object)|null, now?:number, stallMinutes?:number, graceMinutes?:number}} [opts]
  * @returns {{reap:boolean, reason:string, verdict?:string, action?:string, why?:string}}
  */
-export function classifySessionReapWithVerdict(session, { groundTruthFor = null, evidenceFor = null, now, stallMinutes = DEFAULT_STALL_MINUTES } = {}) {
+export function classifySessionReapWithVerdict(session, { groundTruthFor = null, evidenceFor = null, now, stallMinutes = DEFAULT_STALL_MINUTES, graceMinutes = stallMinutes } = {}) {
   if (typeof evidenceFor !== 'function') return classifySessionReapWithGroundTruth(session, groundTruthFor);
   const base = classifySessionReap(session);
   if (base.reap || base.reason !== 'not-terminal') return base;
@@ -236,7 +236,7 @@ export function classifySessionReapWithVerdict(session, { groundTruthFor = null,
   const truth = target ? groundTruthFor(target, session) : null;
   let gathered;
   try { gathered = evidenceFor(session) ?? {}; } catch { gathered = {}; } // unreadable evidence = unknown, never a reap
-  const result = classifySession(session, { ...gathered, pidAlive: session.pidAlive, targetMovedOn: truth }, { now, stallMinutes });
+  const result = classifySession(session, { ...gathered, pidAlive: session.pidAlive, targetMovedOn: truth }, { now, stallMinutes, graceMinutes });
   const fields = { verdict: result.verdict, action: result.action, why: result.why };
   if (result.action !== 'reap') return { ...base, ...fields };
   const reason = result.verdict === 'target-moved-on'
@@ -250,15 +250,15 @@ export function classifySessionReapWithVerdict(session, { groundTruthFor = null,
  * and no `evidenceFor` (the default) makes this byte-identical to mapping {@link classifySessionReap} alone —
  * every existing caller/test is unaffected.
  * @param {unknown[]} sessions
- * @param {{groundTruthFor?: Function|null, evidenceFor?: Function|null, now?: number, stallMinutes?: number}} [opts]
+ * @param {{groundTruthFor?: Function|null, evidenceFor?: Function|null, now?: number, stallMinutes?: number, graceMinutes?: number}} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason` (and, when the verdict
  *   axis ran, `verdict`/`action`/`why`).
  */
-export function sessionReapPlan(sessions, { groundTruthFor = null, evidenceFor = null, now, stallMinutes } = {}) {
+export function sessionReapPlan(sessions, { groundTruthFor = null, evidenceFor = null, now, stallMinutes, graceMinutes } = {}) {
   const reap = [];
   const keep = [];
   for (const session of Array.isArray(sessions) ? sessions : []) {
-    const { reap: doReap, reason, verdict, action, why } = classifySessionReapWithVerdict(session, { groundTruthFor, evidenceFor, now, stallMinutes });
+    const { reap: doReap, reason, verdict, action, why } = classifySessionReapWithVerdict(session, { groundTruthFor, evidenceFor, now, stallMinutes, graceMinutes });
     const row = { session, reason, ...(verdict ? { verdict, action, why } : {}) };
     (doReap ? reap : keep).push(row);
   }

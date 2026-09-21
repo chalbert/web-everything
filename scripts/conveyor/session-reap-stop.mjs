@@ -20,6 +20,15 @@
  * and gets NO stop call ({@link partitionAlreadyTerminal}) — re-stopping ~570 finished sessions every run made the
  * stopped count meaningless and the run one subprocess per row.
  *
+ * A TERMINAL ROW WITH A LIVE PROCESS IS NOT ALREADY-TERMINAL (#3721). The registry saying `done` is a word about the
+ * session; the process behind it can still be running (live 2026-09-21: `slice-3717-after-ruling`, `followup-3804`,
+ * `review-2418`, each `state: done` with a live pid holding ~340 MB). #3744's "never re-stop a terminal row" was written for
+ * the ~570 rows with NO process, and it also stopped the reaper from ever stopping these. The rule is now: a terminal
+ * row is skipped only when `pidAlive` is not `true` (the CLI resolves it for every background row, same probe as the
+ * `pid-dead` axis), and a stop of such a row is CONFIRMED only when the re-read row is gone or its process is dead
+ * (`isAlive`, injected) — a `done` row that still answers `kill(pid, 0)` after the stop is UNCONFIRMED, never counted
+ * as stopped on the strength of its state alone.
+ *
  * THE #77683 REPAIR — WHEN `claude stop`/`claude rm` GENUINELY FAIL, NOT MERELY REPORT UNRELIABLY. A DIFFERENT
  * known upstream bug (GitHub #77683) leaves a session listed forever, its job directory never cleaned up, and
  * `claude stop`/`rm` refuse it outright rather than the merely-unconfirmed-success case just above. `we:scripts/
@@ -132,17 +141,24 @@ export function isTerminalRow(row) {
   return TERMINAL_ROW_STATES.has(row?.state);
 }
 
+/** Is this row terminal AND known to have no live process (#3721)? Only an explicit `pidAlive: true` (resolved by the CLI
+ *  from the row's pid) keeps a terminal row out of this: unknown liveness is treated as no process — the #3744 behaviour. */
+export function isTerminalAndGone(row) {
+  return isTerminalRow(row) && row?.pidAlive !== true;
+}
+
 /**
  * Split the planner's `reap` list into rows that need a stop call (`live`) and rows already terminal before the pass
  * (`alreadyTerminal`, no call — #3744). PURE. The planner still reaps a `done`/`failed` row (its terminal axis is
- * unchanged); this is where that stops costing a subprocess per row.
+ * unchanged); this is where that stops costing a subprocess per row. A terminal row whose process is still alive
+ * (`pidAlive: true`) is `live`, not `alreadyTerminal` (#3721): it holds memory and only a stop releases it.
  * @param {Array<{session: object}>} reap
  * @returns {{live: object[], alreadyTerminal: object[]}}
  */
 export function partitionAlreadyTerminal(reap) {
   const live = [];
   const alreadyTerminal = [];
-  for (const r of Array.isArray(reap) ? reap : []) (isTerminalRow(r?.session) ? alreadyTerminal : live).push(r);
+  for (const r of Array.isArray(reap) ? reap : []) (isTerminalAndGone(r?.session) ? alreadyTerminal : live).push(r);
   return { live, alreadyTerminal };
 }
 
@@ -180,12 +196,15 @@ function findRow(listing, session) {
  * @param {Array<{session: object, reason: string}>} o.candidates - live rows only (see {@link partitionAlreadyTerminal}).
  * @param {(c: {session: object, reason: string}) => {alreadyGone?: boolean}} o.stopOne - throws on a failed stop.
  * @param {() => object[]} o.listAgents - the registry reader (`claude agents --json --all`).
+ * @param {(row: object) => boolean} [o.isAlive] - is the process behind a re-read registry row still running? Default `false`
+ *   (state alone decides, the #3744 behaviour). The CLI passes a `kill(pid, 0)` probe so a `done` row whose process survived
+ *   the stop is unconfirmed (#3721).
  * @param {(ms: number) => void} [o.sleep]
  * @param {number} [o.confirmWaitMs]
  * @param {number} [o.maxRetries]
  * @returns {{stopped: Array<{candidate: object, res: object}>, failed: Array<{candidate: object, error: unknown}>, confirmed: object[], unconfirmed: object[], retried: number, readError: (string|null)}}
  */
-export function runStopPass({ candidates, stopOne, listAgents, sleep = sleepSyncMs, confirmWaitMs = STOP_CONFIRM_WAIT_MS, maxRetries = STOP_MAX_RETRIES } = {}) {
+export function runStopPass({ candidates, stopOne, listAgents, isAlive = () => false, sleep = sleepSyncMs, confirmWaitMs = STOP_CONFIRM_WAIT_MS, maxRetries = STOP_MAX_RETRIES } = {}) {
   const stopped = [];
   const failed = [];
   for (const candidate of candidates ?? []) {
@@ -213,7 +232,7 @@ export function runStopPass({ candidates, stopOne, listAgents, sleep = sleepSync
     const stillListed = [];
     for (const c of pending) {
       const row = findRow(listing, c.session);
-      if (!row || isTerminalRow(row)) confirmed.push(c);
+      if (!row || (isTerminalRow(row) && !isAlive(row))) confirmed.push(c);
       else stillListed.push(c);
     }
     pending = stillListed;

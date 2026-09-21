@@ -133,7 +133,7 @@ describe('the compact report, section by section', () => {
   it('Attention (runner not live): only what still waits for a person is a table row: finding, since, remedy', () => {
     const t = renderReport(report(stalled(DOWN))), rows = t.split('## Work items')[0].split('\n').filter((l) => l.startsWith('|'));
     expect(rows).toEqual(['|finding|since|remedy|', '|-|-|-|', '|conflict we#2344|44m|auto:down|', '|changes we#2170|16h|auto:down|', '|changes we#2344|44m|auto:down|',
-      '|stale tag pa#148|2h|auto:down|', '|stale tag we#2344|44m|auto:down|', '|unreaped x10|13h|run reaper|', '|runner down|?|/conveyor|']);
+      '|stale tag pa#148|2h|auto:down|', '|stale tag we#2344|44m|auto:down|', '|unreaped x8|2h|run reaper|', '|runner down|?|/conveyor|']);
     expect(t.replace(/\n {2,}/g, ' ')).toContain('- 4 gaps queued (ci-failed-no-fixer:we#2349, session-stalled:review-148, session-stalled:fix-2347, pre-today-pr-open)');
   });
   it('Attention (runner live): every finding left the table, `queued` rows appear under Work items, and one gaps line names the plan', () => {
@@ -143,7 +143,7 @@ describe('the compact report, section by section', () => {
     expect(attention.replace(/\n {2,}/g, ' ')).toContain('- 4 gaps queued (ci-failed-no-fixer:we#2349, session-stalled:review-148, session-stalled:fix-2347, pre-today-pr-open)');
     expect(work).toContain('|we#2344|conflict fix+revi…|queued|');
     expect(work).toContain('|we#2170|review fix|queued|');
-    expect(work).toContain('|unreaped x10|reap|queued|');
+    expect(work).toContain('|unreaped x8|reap|queued|');
     expect(work.split('\n').filter((l) => l.startsWith('|') && l.endsWith('|queued|'))).toHaveLength(r.queue.handledRows.length);
   });
   it('Attention (runner live): an overdue finding gets ONE line naming its key, and a fresh one gets none', () => {
@@ -210,10 +210,10 @@ describe('the compact report, section by section', () => {
 });
 
 describe('the stacked-bullets fallback is unchanged (--bullets)', () => {
-  it('reproduces today\'s bullets output for the fixed fixture, byte for byte (the snapshot was captured before this change)', () => {
+  it('reproduces today\'s bullets output for the fixed fixture, byte for byte (the snapshot was re-captured for #3721: two sessions quiet under the grace period, `proto-note` and `session-verdicts`, are live rows, not "finished")', () => {
     expect(renderReport(report(stalled(DOWN)), { style: 'bullets' }) + '\n').toBe(SNAPSHOT);
     expect(renderBullets(report(stalled(DOWN))) + '\n').toBe(SNAPSHOT);
-    expect(SNAPSHOT.split('\n').length).toBe(171 + 1 - 0);
+    expect(SNAPSHOT.split('\n').length).toBe(177 + 1 - 0);
   });
   it('the default is compact, and an unknown style is compact', () => {
     const r = report(stalled(DOWN));

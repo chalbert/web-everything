@@ -15,9 +15,10 @@
  * model in it — a table lookup over ground truth:
  *
  *   progressing          live pid, transcript fresh (or state not idle)            → none
- *   finished-unreaped    live pid, registry `done` OR (blocked/idle, no waitingFor,
- *                        and a result file / completion record / new PR verdict
- *                        newer than the session's start)                           → reap
+ *   finished-unreaped    live pid, registry `done` OR (`status: idle`, no waitingFor,
+ *                        a result file / completion record / new PR verdict newer
+ *                        than the session's start, AND quiet for the grace period —
+ *                        #3721)                                                    → reap
  *   waiting-permission   `status: waiting` + `waitingFor` names a permission prompt → stop-and-redispatch-once, then escalate
  *   stalled              live pid, quiet longer than `stallMinutes`, no result,
  *                        not waiting                                               → redispatch-once, then escalate
@@ -130,11 +131,13 @@ function stuckAction(agent, evidence, firstRung) {
  *   updatedAt}`), `prSignal` (`{reviewSignalAtMs, what}`: newest `review:*` label / verdict comment on the PR),
  *   `targetMovedOn` (`{resolved, evidence}`: the reaper's ground-truth resolver answer), `redispatchAttempts`
  *   (from the follow-up ledger entry).
- * @param {{now:number, stallMinutes?:number}} opts
+ * @param {{now:number, stallMinutes?:number, graceMinutes?:number}} opts `graceMinutes` (default `stallMinutes`: ONE quiet
+ *   threshold, two outcomes — quiet with a finished proof is `finished-unreaped`, quiet without one is `stalled`) is how
+ *   long a session with a finished proof must have been quiet (transcript mtime) before it is reaped (#3721).
  * @returns {{verdict:string, action:string, why:string, allowedTools?:string}} `allowedTools` (a `--allowedTools=…`
  *   argv atom, scoped to the dispatch kind) is present only on `stop-and-redispatch-once`.
  */
-export function classifySession(agent, evidence = {}, { now, stallMinutes = DEFAULT_STALL_MINUTES } = {}) {
+export function classifySession(agent, evidence = {}, { now, stallMinutes = DEFAULT_STALL_MINUTES, graceMinutes = stallMinutes } = {}) {
   const name = agent?.name ?? 'unnamed';
   if (!agent || typeof agent !== 'object' || agent.kind !== 'background') {
     return { verdict: 'progressing', action: 'none', why: `${name}: not a background session — never acted on` };
@@ -164,11 +167,21 @@ export function classifySession(agent, evidence = {}, { now, stallMinutes = DEFA
     // Waiting on something that is not a permission prompt: not ours to classify, never guess.
     return { verdict: 'progressing', action: 'none', why: `${name}: waiting on "${agent.waitingFor}" (not a permission prompt)` };
   }
-  const quiet = String(agent.status ?? '').toLowerCase() === 'idle' || state === 'blocked' || state === 'idle';
+  const status = String(agent.status ?? '').toLowerCase();
+  const quiet = status === 'idle' || state === 'blocked' || state === 'idle';
   if (quiet) {
-    const proof = finishedEvidence(agent, evidence);
-    if (proof) return { verdict: 'finished-unreaped', action: 'reap', why: `${name}: ${state || 'idle'} at its prompt, ${proof}` };
     const idleMs = finite(evidence?.transcriptMtimeMs) && finite(now) ? Math.max(0, now - evidence.transcriptMtimeMs) : null;
+    const proof = finishedEvidence(agent, evidence);
+    if (proof) {
+      // #3721 — a result file or completion record says the work is finished, but only a session AT ITS PROMPT (`status:
+      // idle`) and QUIET past the grace period is reaped. A file is a fact about the past: it does not say the session has
+      // stopped talking. `status: busy` is mid-turn (a resumed session, or the operator typing into it); an unknown status,
+      // or a transcript with no mtime, is unknown, and unknown keeps. This reaps on the same fact as before, only later.
+      if (status !== 'idle') return { verdict: 'progressing', action: 'none', why: `${name}: ${proof}, but status is ${status || 'unknown'}, not idle — kept (not at its prompt)` };
+      if (idleMs == null) return { verdict: 'progressing', action: 'none', why: `${name}: ${proof}, but idle time unknown — kept` };
+      if (idleMs < graceMinutes * 60000) return { verdict: 'progressing', action: 'none', why: `${name}: ${proof}, quiet ${Math.floor(idleMs / 60000)} min, inside the ${graceMinutes} min grace — kept` };
+      return { verdict: 'finished-unreaped', action: 'reap', why: `${name}: ${state || 'idle'} at its prompt, ${proof}, quiet ${Math.floor(idleMs / 60000)} min` };
+    }
     if (idleMs != null && idleMs >= stallMinutes * 60000) {
       const step = stuckAction(agent, evidence, 'redispatch-once');
       return { verdict: 'stalled', action: step.action,

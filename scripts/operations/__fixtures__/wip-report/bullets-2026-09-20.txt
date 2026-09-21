@@ -46,12 +46,12 @@
   - no activity for 46m and no result file
   - since 10:11 (46m)
   - remedy: no handler
-- **10 sessions**
+- **8 sessions**
   - finished but the process is still
-    running: proto-note, unstick-2072,
-    fold-2220, fix-2347, wip-no-done,
-    graduation-1 +4 more
-  - since 09-19 21:34 (13h 22m)
+    running: unstick-2072, fold-2220,
+    fix-2347, wip-no-done, graduation-1,
+    fix-2344 +2 more
+  - since 07:59 (2h 57m)
   - remedy: run: session-reaper
 - **3 PRs**
   - opened before today and still open;
@@ -103,6 +103,9 @@ nothing to act on.
   - graduate #3443: clear-stuck-session…
   - since 10:22 (35m)
   - next: escalation packet for triage
+- **session proto-note** idle
+  - runs on claude-sonnet-5
+  - since 09-19 21:34 (13h 22m)
 - **session shared-tick-1** working
   - runs on claude-sonnet-5; delegated to
     Codex gpt-6-astra (cli 0.155.1)
@@ -111,6 +114,9 @@ nothing to act on.
   - runs on claude-sonnet-5
   - since 10:03 (54m)
   - next: PR #2347 is not open
+- **session session-verdicts** working
+  - runs on claude-sonnet-5
+  - since 10:26 (31m)
 - **session wip-report** working
   - runs on claude-sonnet-5
   - since 10:48 (9m)

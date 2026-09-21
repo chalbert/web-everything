@@ -62,7 +62,7 @@ import { sessionReapPlan, attentionRows, REDISPATCH_ACTIONS } from './session-re
 import { makeGroundTruthResolver } from './session-reap-evidence.mjs';
 import {
   stopSessionWithRetry, attemptClearStuckSession, STOP_RETRY_ATTEMPTS, STOP_MAX_RETRIES,
-  partitionAlreadyTerminal, isTerminalRow, parseConfirmWaitMs, runStopPass,
+  partitionAlreadyTerminal, isTerminalAndGone, parseConfirmWaitMs, runStopPass,
 } from './session-reap-stop.mjs';
 
 // Re-export every name this file exported before the split, so `skills-src/conveyor/runner.mjs`, `wip-agents.test`,
@@ -163,7 +163,11 @@ async function main(argv) {
   if (useVerdicts) {
     evidenceFor = makeEvidenceResolver({ followUps, prSignalFor: flags['no-ground-truth'] ? null : (pr, slug) => prSignalFromGh(pr, slug) });
   }
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, evidenceFor, now: Date.now() });
+  // #3721 — `--grace-minutes=N`: how long a session with a finished proof (result file / completion record) must have been quiet
+  // before it is reaped. Default is the classifier's own quiet threshold; a non-positive or non-numeric value falls back to it.
+  const graceFlag = Number(flags['grace-minutes']);
+  const graceMinutes = Number.isFinite(graceFlag) && graceFlag > 0 ? graceFlag : undefined;
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, evidenceFor, now: Date.now(), graceMinutes });
   // Live rows the verdict axis found stuck but does NOT stop here (stalled / waiting-permission): reported so
   // land-advance can redispatch or escalate them. This reaper only stops sessions whose work is done.
   const attention = attentionRows(keep);
@@ -175,7 +179,7 @@ async function main(argv) {
   const { live, alreadyTerminal: reapedTerminal } = partitionAlreadyTerminal(reap);
   // A `stopped` row is never planned for reap (it is `keep`, reason `already-stopped`) but is just as terminal: count it with the
   // already-terminal rows, not with the live ones this reaper is leaving alone.
-  const keptTerminal = keep.filter((r) => isTerminalRow(r.session)).length;
+  const keptTerminal = keep.filter((r) => isTerminalAndGone(r.session)).length;
   const alreadyTerminalCount = reapedTerminal.length + keptTerminal;
   const keptCount = keep.length - keptTerminal;
   const confirmWaitMs = parseConfirmWaitMs(flags['confirm-wait-ms']);
@@ -216,6 +220,8 @@ async function main(argv) {
       candidates,
       stopOne: (c) => stopSessionWithRetry({ handle: c.handle, exec: execFileSync }),
       listAgents: () => defaultListAgents({ exec: execFileSync, all: true }),
+      // #3721 — a `done` row whose process survived the stop is unconfirmed: liveness read fresh from the re-read row's own pid.
+      isAlive: (row) => { const pid = Number(row?.pid); return Number.isInteger(pid) && pid > 0 && defaultIsPidAlive(pid); },
       confirmWaitMs,
     });
     const record = (c, res, extra = {}) => done.push({ id: c.handle, sessionId: normalizeHandle(c.session.sessionId) || null, name: c.session.name ?? null, reason: c.reason, alreadyGone: res?.alreadyGone === true, ...extra });
