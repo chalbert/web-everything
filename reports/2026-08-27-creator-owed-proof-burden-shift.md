@@ -40,4 +40,4 @@ Four of six areas (1, 2, 3's Dijkstra half, 4) give solid, quotable, honestly-sc
 | `we:reports/2026-08-27-creator-owed-proof-burden-shift.md` | created (this file) |
 | `we:src/_data/researchTopics/creator-owed-proof-not-reviewer-rederivation.json` | created |
 | `we:src/_includes/research-descriptions/creator-owed-proof-not-reviewer-rederivation.njk` | created |
-| `we:backlog/xsuqas6-a-reviewer-may-answer-unverifiable-as-submitted-a-creator-pr.md` | authored (decision item) |
+| `we:backlog/3375-a-reviewer-may-answer-unverifiable-as-submitted-a-creator-pr.md` | authored (decision item) |

@@ -3006,6 +3006,60 @@ by `we:reports/2026-07-10-ai-code-review-best-practices.md`; the build lands und
 
 ---
 
+### A reviewer may answer "unverifiable as submitted" for a load-bearing claim the creator left unproven — a gated disposition that earns a round and is counted apart from a blocker {#creator-owed-proof-not-reviewer-rederivation}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert) (#3375, under [#3318](/backlog/3318/)).** Sibling of
+[`#agent-convergence-independent-validation`](#agent-convergence-independent-validation), which guards the CI
+gate against test-gaming; this rule governs a different subject — what a reviewer may demand *before* it
+re-derives a claim about the creator's own code. Composes with
+[`#claim-accuracy-advisory-blocks-on-impact`](#claim-accuracy-advisory-blocks-on-impact) (a typed `impactIfUnfixed`,
+never a bare assertion, is what makes a finding load-bearing). Grounded by
+[/research/creator-owed-proof-not-reviewer-rederivation/](/research/creator-owed-proof-not-reviewer-rederivation/).
+
+**The burden of proof for a claim about code sits with whoever wrote the code.** A reviewer cannot answer
+"is this a blocker?" about a claim it cannot verify at all; asking it to guess is the failure. So the review
+vocabulary carries a fourth per-finding disposition — **unverifiable as submitted** — distinct from
+accept/changes, alongside `blocker`/`carve-out`/`nit`.
+
+1. **It is a per-finding disposition, gated in front of the existing routing.** A precondition question ("can
+   this be verified as submitted?") is asked *before* the three direction questions (introduced / worse than base
+   / parallelizable), which presuppose the reviewer already knows the claim is real. `unverifiable` short-circuits
+   them; anything else falls through to the existing routing unchanged. There is **no new panel-level verdict**: the
+   disposition composes with the verdict reduction as it stands, and the render layer surfaces the distinction in
+   prose from the findings list.
+2. **The gate is conjunctive — all three, or it is not a refusal.** (a) **Load-bearing**: the finding's typed
+   `impactIfUnfixed` is at or above a named bar for this gate (a constant *distinct* from the prevention bar, so
+   the two can diverge); a cosmetic or degraded claim stays plain advisory assertion. (b) **Cost-asymmetric**:
+   re-deriving the claim would cost the reviewer materially more than the creator including the proof would have
+   cost — a judgment answer, not a numeric threshold. (c) **Attempted and stated**: the reviewer names what it
+   tried and why that was not enough. A refusal missing (c) is incomplete, reads as undecided, and fails closed as
+   an ordinary blocking finding, so silence costs a round rather than saving one. Cost-asymmetry alone is rejected
+   as the test (it has no floor: "I would have to read three files" clears it), and so is a category allowlist
+   (a maintenance surface that duplicates the narrower mechanism-claim and completeness-claim rules).
+3. **The refusal is friction, not enforcement, and says so.** All three legs are self-declared; a pure function
+   can check that an attempt was *stated*, never that it was *reasonable*. This matches every other
+   self-declared judgment field in the review vocabulary: fail closed on absence, never machine-verify honesty.
+   The backstop is architectural: a refusal earns a round, so a gamed one does not ship silently, and a reviewer
+   that over-refuses is itself a recurring pattern the harvest pipeline can surface.
+4. **It earns a round like a blocker, and is counted separately.** A load-bearing, unproven claim must not land
+   silently, so an outstanding `unverifiable` finding earns a round. It is never folded into the `blocker` count:
+   "a reviewer found a bug" and "a creator skipped proof" have different root causes and different fixes, and
+   the review-efficacy metrics are per finding category.
+5. **A demonstrated red-before/green-after test outranks a citation as creator-proof evidence.** The evidence
+   ladder gains one top rung above a quoted citation, fed as **caller-supplied ground truth** (a mutation-check
+   `killed` outcome), never a juror's own word. The ladder's existing cap was a *reviewer-budget* constraint that
+   does not bind a creator. The rung extends the **shared** evidence enum, never a parallel boolean field: one
+   ladder, one floor mechanism, one totality assertion.
+6. **Its durable signal reuses two existing pipelines, with no new mechanism.** Every finding's disposition is
+   already recorded in the jury ledger. A recurring *gate-shaped* pattern is mined by the review-corpus pipeline;
+   a recurring *convention-shaped* gap routes through the learnings pool as an existing `kind` with an `area`
+   naming the creator-facing artifact. No new pool `kind` and no new schema field.
+
+Scope: agent-machinery governance for this repo's own review surfaces. No consumer-visible contract, so hard
+rule 6 (WE holds zero implementation) does not apply.
+
+---
+
 ### Blast-radius is advisory care-level, not a park-gate; the trust-chain gate fires on a *spec* change, not any path touch; the high-blast backstop is a diversity-selection AI panel + an active point-level human check {#blast-radius-advisory-care-not-a-gate}
 
 **Ratified 2026-07-18 (#2563).** Composes with — does not alter — [`#agent-convergence-independent-validation`](#agent-convergence-independent-validation): a *care* signal routes **into** that convergence bar; this rule governs *which* signals gate a human vs run advisorily, and *how* the human check is delivered. Cite both together.
