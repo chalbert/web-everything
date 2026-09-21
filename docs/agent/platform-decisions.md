@@ -5007,8 +5007,15 @@ a second approval (#2365, #2347). The rule:
 3. **The replay is hermetic.** It runs with no rerere (`-c rerere.enabled=false`), no configured merge
    drivers, the default strategy with no `-X` option, rename detection pinned to git's default
    (`-c merge.renames=true`, so the drain clone's own config cannot change the result), and attributes read
-   from the empty tree (`-c attr.tree=<empty tree>`). An author's custom driver, rerere or `-X` option can then only cause a
-   missed carry, never a wrong one.
+   from the empty tree (`-c attr.tree=<empty tree>`). `attr.tree` hides only the in-tree `.gitattributes`: a
+   driver (or git's built-in `union`, which needs no driver config) can still be selected through
+   `$GIT_DIR/info/attributes`, `core.attributesFile` (default `$XDG_CONFIG_HOME/git/attributes`), the system
+   attributes file, or local, global, system or environment config. So "no configured merge drivers" also
+   needs `-c core.attributesFile=/dev/null`, `GIT_ATTR_NOSYSTEM=1`, `GIT_CONFIG_NOSYSTEM=1`,
+   `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS` unset, and a replay run
+   outside the drain clone's `$GIT_DIR` (a scratch repository that borrows its objects through
+   `objects/info/alternates`), so the clone's own config and `info/attributes` do not apply. With every route
+   closed, an author's custom driver, rerere or `-X` option can only cause a missed carry, never a wrong one.
 4. **A clean merge that touches files main changed does not carry; it re-parks.** Carry only when the files
    main's side brought in (`git diff --name-only --no-renames <PR-side parent> <merge>`) share nothing with the
    files the reviewed PR changed. Otherwise the PR re-parks. Both file sets are read with `--no-renames`, so a
