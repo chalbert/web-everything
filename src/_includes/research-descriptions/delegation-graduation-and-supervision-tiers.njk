@@ -1,0 +1,307 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/">#3690</a> asks when a
+session-initiated delegation to a non-Claude model (Codex, Gemini via Antigravity) has earned recognition as a
+trusted capability rather than an improvised one-off, and on what evidence.
+<a href="/backlog/3717-choose-the-dispatch-provider-mechanically-from-fixed-criteri/">#3717</a> makes the
+question urgent: wiring <code>scripts/lib/provider-routing.mjs</code> into the dispatch path turns #3690's
+un-ratified graduation model into a dispatch gate, so it asks the operator to ratify #3690 first.</p>
+
+<p>This survey grounds the decision in two places at once — the live code and store in this repo, and the
+published prior art on progressive autonomy, trial bars and trust revocation. Everything marked
+<strong>verified</strong> was run against <code>origin/main</code> at <code>e7206136d</code> on 2026-09-20.
+The full working is in <a href="/reports/2026-09-20-delegation-graduation-model-grounding.md">the session
+report</a>.</p>
+
+<h2>Finding 1 — the model is not hypothetical; it has already moved a dial</h2>
+
+<p><code>scripts/lib/provider-routing.mjs</code> is 779 lines, pure (no filesystem or <code>process</code>
+reads) and has <strong>zero callers</strong>. It exposes two functions:</p>
+
+<ul>
+<li><code>selectProvider(task, context)</code> — <em>which</em> provider runs the work
+(<code>gemini</code> / <code>codex</code> / <code>both</code> / <code>claude</code>). The operator's
+2026-09-19 acceptance test ("no model judgment anywhere between the dispatch kind and the chosen provider")
+names this one.</li>
+<li><code>selectSupervisionLevel(provider, model, taskType, scorecards, thresholds)</code> — <em>how much
+checking</em> the result gets (<code>full</code> / <code>spot-check</code>). This is what #3690's body is
+about.</li>
+</ul>
+
+<h2>Finding 1b — those two functions are not independent dials, and this is the survey's load-bearing result</h2>
+
+<p>It is tempting to read them as separate concerns — routing versus graduation — and #3690's first draft
+did. <strong>Verified</strong> against the module, that reading is wrong. The two functions share one store
+and both of the decision's predicates:</p>
+
+<ul>
+<li><code>isCleanRecord</code> (<code>:246</code>) is read by <code>evaluateProviderFitness</code> at
+<code>:339</code> and <code>:347</code>: <strong>one</strong> clean verified trial plus a clean most-recent
+row makes a provider <em>fit to be handed the work</em>.</li>
+<li><code>isInformativeRecord</code> (<code>:252</code>) is read <strong>inside
+<code>selectProvider</code></strong> at <code>:506</code> and <code>:512</code>, to decide the
+<code>both</code> dual-dispatch branch — as well as by <code>selectSupervisionLevel</code> at
+<code>:725</code>.</li>
+</ul>
+
+<p>So accumulating clean rows already buys something other than lighter checking: it buys <strong>being
+selected to do the work at all</strong>, at <strong>N = 1</strong>, with no operator act. Any ruling that
+changes either predicate changes <code>selectProvider</code>'s output too.</p>
+
+<p><strong>Verified</strong>, running <code>selectSupervisionLevel</code> over every triple present in the
+26 <code>session-delegation</code> records in <code>scripts/conveyor/run-scorecards.json</code>:</p>
+
+<table>
+<thead><tr><th>Triple</th><th>Level today</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>codex · gpt-6-astra · other</code></td><td><strong>spot-check</strong></td><td>streak 5, informative trial exists</td></tr>
+<tr><td><code>antigravity · gemini-3.8-flash-low · conflict-resolution</code></td><td>full</td><td>streak <strong>5</strong>, but <strong>no</strong> informative trial</td></tr>
+<tr><td><code>codex · gpt-6-astra · bugfix</code></td><td>full</td><td>streak 3</td></tr>
+<tr><td><code>codex · gpt-6-astra · doc-fix</code></td><td>full</td><td>streak 2</td></tr>
+<tr><td><code>antigravity · claude-sonnet-4-6 · other</code></td><td>full</td><td>calibration veto fired</td></tr>
+<tr><td>five further triples</td><td>full</td><td>streak 0–1</td></tr>
+</tbody>
+</table>
+
+<p>One triple has already graduated, and it is the one whose <code>taskType</code> is the catch-all
+<code>other</code> — which #3717's own analysis describes as the task type that cannot be derived from any
+dispatch kind (10 of the 26 rows).</p>
+
+<h2>Finding 2 — the card's prose and the shipped code define "informative trial" differently</h2>
+
+<p>#3690's <em>Progressive backdown plan</em> says a trial is informative when it "surfaced a real finding
+from independent review (<code>findings</code> non-null on some past row) that was then fixed and landed
+clean." The code (<code>isInformativeRecord</code>) requires
+<code>outcome ∈ {rejected, reworked}</code> <strong>and</strong> non-empty <code>findings</code>. A
+<code>landed</code> row carrying findings text does not count.</p>
+
+<p><strong>Verified</strong> over the 26 rows: <strong>14</strong> are <code>landed</code> <em>with</em>
+findings text; 4 are <code>rejected</code>/<code>reworked</code> with findings; 8 are <code>landed</code>
+with none. At least two of the 14 record the <em>opposite</em> of a finding, verbatim — "Independent review
+accepted <strong>with no blocking findings</strong>" (PR #2299 and PR #2300). So the prose rule would let a
+triple clear the bar on rows that state nothing was found.</p>
+
+<p>The code errs the other way on one row: PR #2301 is <code>landed</code> with findings "Round 1 review
+requested changes (blast-radius concern); fix was re-armed…" — genuinely informative, missed because the row
+was labelled <code>landed</code> rather than <code>reworked</code>. The enum
+<code>log-delegation-trial.mjs</code> validates already contains <code>reworked</code> for exactly this case,
+so that is a data-entry divergence rather than a model flaw.</p>
+
+<h2>Finding 3 — N = 5 clean trials is not a statistical bar. The exact number is 45%</h2>
+
+<p>Computed directly, not quoted. For zero failures in <code>N</code> independent trials the one-sided 95%
+Clopper–Pearson upper bound on the true failure rate is <code>p = 1 − 0.05^(1/N)</code>:</p>
+
+<table>
+<thead><tr><th>N clean trials</th><th>95% upper bound on failure rate</th><th>To rule out…</th><th>needs N</th></tr></thead>
+<tbody>
+<tr><td><strong>5</strong></td><td><strong>45.07 %</strong></td><td>20 % failure</td><td>14</td></tr>
+<tr><td>10</td><td>25.89 %</td><td>10 % failure</td><td>29</td></tr>
+<tr><td>14</td><td>19.26 %</td><td>5 % failure</td><td>59</td></tr>
+</tbody>
+</table>
+
+<p>Read the other way: an agent that truly fails <strong>1 run in 5</strong> still produces five clean runs
+<strong>32.8 %</strong> of the time; at a 10 % failure rate, <strong>59.0 %</strong> of the time.</p>
+
+<p>The familiar "rule of three" (<code>3/N</code>) does <strong>not</strong> apply at this size — it
+approximates <code>ln(1−p) ≈ −p</code>, valid only for small <code>p</code>;
+<a href="https://en.wikipedia.org/wiki/Rule_of_three_(statistics)">the standard statement</a> is that it is a
+good approximation when <code>n &gt; 30</code>. At N = 5 it gives 60 % against an exact 45.07 %. And trials
+are not independent draws from one population: five <code>conflict-resolution</code> trials of the same shape
+carry effectively N ≈ 1–2 of evidence about a different shape.</p>
+
+<p>Real progressive-delivery systems do not count clean runs.
+<a href="https://spinnaker.io/docs/guides/user/canary/judge/">Spinnaker's Kayenta</a> runs a Mann–Whitney
+nonparametric test per metric against a <em>concurrent baseline</em>; Argo Rollouts wraps it as an
+<code>AnalysisTemplate</code> per promotion step.
+<a href="https://sre.google/workbook/alerting-on-slos/">Google SRE's multiwindow multi-burn-rate alerting</a>
+frames the question as a continuous error budget optimised on four named properties — precision, recall,
+detection time and <strong>reset time</strong> — requiring a short <em>and</em> a long window to cross.
+<a href="https://docs.statsig.com/experiments/advanced-setup/sprt">Wald's SPRT</a> is the principled
+early-stopping version of "count clean runs", and it will not stop at five either.</p>
+
+<p><strong>Implication:</strong> N = 5 is a smoke test, not evidence. It is defensible only if what it
+unlocks is correspondingly small.</p>
+
+<h2>Finding 4 — the informative-trial requirement already has a name: <em>positive control</em></h2>
+
+<p>A <a href="https://www.rockland.com/resources/positive-and-negative-controls/">positive control</a> is a
+sample known to produce a positive result. It exists to confirm the assay is <em>capable of detecting</em>
+and to assess its <strong>sensitivity</strong>, and a run whose positive control does not fire is
+<strong>invalid, not passing</strong>. That is precisely the argument
+<code>docs/agent/platform-decisions.md#model-probation-graduation-criteria</code> clause 1 makes, in the
+vocabulary of a field that has used it for a century. The same idea carries four other established names:</p>
+
+<ul>
+<li><strong>Mutation testing</strong> — inject a fault, check the suite actually reddens; the failure mode is
+called a <em>vacuous pass</em> or an <em>assertion-free test</em>.</li>
+<li><strong>IEC 61508 "dangerous undetected (DU) failure"</strong> and proof-test coverage — a low-demand
+safety system may sit dormant for years, and only an offline proof test reveals a DU failure; the standard
+explicitly assumes 100 % proof-test coverage is unachievable.</li>
+<li><strong>Latent condition</strong> (Reason's Swiss-cheese model) — the
+<a href="https://www.osti.gov/etdeweb/biblio/22703991">OECD/NEA CSNI survey</a> of undetected safety-system
+failures found some latent since initial start-up. "Never triggered" and "works" are different states, and
+redundancy actively hides the difference.</li>
+<li><strong>Chaos-engineering game days</strong> — the stated purpose includes validating that monitoring and
+alerting actually fire.</li>
+</ul>
+
+<h2>Finding 5 — the industry pins authority in the transport, not in the score</h2>
+
+<p><a href="https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent">GitHub's Copilot
+coding agent</a> is structurally pinned at one authority level regardless of track record: it pushes only to
+a <code>copilot/*</code> branch or the existing PR branch, never the default branch; it cannot merge; its PRs
+need the repository's own checks plus a human reviewer; Actions triggered by its PRs need write-access
+approval to run at all. No score changes any of this.</p>
+
+<p><a href="https://developers.openai.com/codex/agent-approvals-security">Codex CLI</a> separates the dials
+explicitly — <code>approval_policy ∈ {untrusted, on-request, never}</code> <strong>×</strong>
+<code>sandbox_mode ∈ {read-only, workspace-write, danger-full-access}</code> — and
+<a href="https://platform.claude.com/docs/en/agent-sdk/permissions">Claude Code's permission modes</a> are the
+same shape (<code>plan</code> → default → <code>acceptEdits</code> → <code>bypassPermissions</code>, plus a
+per-tool <code>allowedTools</code> allowlist).</p>
+
+<p><strong>This repo is NOT already in that state</strong>, which is the finding that matters.
+<strong>Verified</strong> on <code>origin/main</code>: <code>scripts/codex-direct-task.mjs</code> and
+<code>scripts/gemini-direct-task.mjs</code> both declare never committing or pushing as their one hard
+constraint, and both hand back a <code>git diff</code>. Neither <em>enforces</em> it — each agent has a real
+shell and could commit anyway, which <code>captureDiff</code> detects and reports rather than prevents. And
+the transport works <em>against</em> the constraint: <code>setupScratchClone</code>
+(<code>:558-563</code>) deliberately rewrites the scratch clone's <code>origin</code> from the local
+<code>repoRoot</code> path to the <strong>real remote</strong>, commented "so a human who likes the diff can
+push straight from the scratch clone if they choose to". Codex runs there under
+<code>-s workspace-write</code>, and the entire draft-only rule is one English sentence in
+<code>buildCodexPrompt</code> (<code>:292-301</code>). <code>--dir</code> also lets a caller point a run at
+any existing checkout. <em>(Not tested: whether ambient credentials would let such a push
+authenticate.)</em></p>
+
+<p>The write-capable Codex port <code>scripts/operations/codex-delivery-provider.mjs</code> lives only on
+<code>lane/mechanical-dispatcher</code>, and its own header records live evidence that its
+<code>:workspace</code> permission profile has no network at all, so <em>that</em> one cannot push.</p>
+
+<p>So the right home for authority here is not the transport at all. This repo already ratified one:
+<code>docs/agent/platform-decisions.md#agent-mutations-through-typed-operations</code>, whose own text says
+"<strong>Sandboxing is not a substitute</strong>… A sandbox bounds <em>damage</em>; the operation catalog
+bounds authority."</p>
+
+<p>Two further limits worth stating plainly. <code>codex-direct-task.mjs</code> <strong>exits 0</strong> on a
+timeout, on a gate FAIL, and when Codex commits despite instruction — <code>main()</code> sets a non-zero
+exit code only for a missing task argument or a thrown error, so a caller checking the exit status alone
+learns nothing. And <code>gemini-direct-task.mjs</code>'s own header states there is no real confinement:
+"<code>--add-dir</code> is bookkeeping only, not a sandbox. <code>--sandbox</code> confines the shell only;
+agy's own in-process native file tools BYPASS it."</p>
+
+<h2>Finding 6 — graduated autonomy is a published scheme, with a 10× larger evidence window</h2>
+
+<p><a href="https://aws.amazon.com/blogs/architecture/closing-the-ai-agent-trust-gap-with-graduated-autonomy/">AWS's
+graduated autonomy</a> is the closest published match: four tiers scored 0–100 (Probation, read/list only →
+Supervised → Trusted → Autonomous, post-hoc audit only). Three mechanics are worth borrowing:</p>
+
+<ul>
+<li>Promotion requires the score held above threshold across a <strong>rolling 50-action window</strong>, and
+entry requires <strong>5 points above the tier floor</strong> — an explicit hysteresis gap, so a subject
+cannot oscillate across the boundary.</li>
+<li><strong>Demotion is immediate</strong> at the floor. The asymmetry is deliberate.</li>
+<li>"<strong>Trust is non-transitive</strong>" — a delegated action's effective tier is the <em>minimum</em>
+across the whole delegation chain.</li>
+</ul>
+
+<p>The academic framing does not model earning at all: the Knight First Amendment Institute's
+<a href="https://knightcolumbia.org/content/levels-of-autonomy-for-ai-agents-1">Levels of Autonomy for AI
+Agents</a> defines five levels by the <em>human's</em> role (Operator, Collaborator, Consultant, Approver,
+Observer) and proposes third-party "autonomy certificates" rather than track-record progression. Neither
+Devin nor Cursor publishes a numbered ladder.</p>
+
+<h2>Finding 7 — promotion and demotion are split asymmetrically everywhere, and permanent hard resets are rare</h2>
+
+<table>
+<thead><tr><th>System</th><th>Up</th><th>Down</th><th>Back</th></tr></thead>
+<tbody>
+<tr><td>AWS graduated autonomy</td><td>rolling 50-action window + 5-pt hysteresis gap</td><td>immediate at floor</td><td>window re-clears</td></tr>
+<tr><td><a href="https://spec.torproject.org/dir-spec/assigning-flags-vote.html">Tor consensus flags</a></td><td>decayed continuous statistics (<code>guard-wfu</code>, <code>stable-mtbf</code>) crossing a threshold</td><td>score falls</td><td>score recovers</td></tr>
+<tr><td><a href="https://wiki.debian.org/DebianMaintainer">Debian maintainer ladder</a></td><td>≥ 6 months plus a named sponsor who reviews each upload</td><td>—</td><td>—</td></tr>
+<tr><td>Stack Overflow suspension</td><td>—</td><td>time-boxed 1–365 days, scaled to severity</td><td>reputation recalculated at the end</td></tr>
+<tr><td><a href="https://www.censys.com/blog/google-entrust-internet/">Chrome CA distrust</a></td><td>—</td><td>on a <strong>pattern</strong> of repeated compliance failures, not one miss; the SCT-not-after cutoff grandfathers existing certs</td><td>—</td></tr>
+<tr><td>CT log removal</td><td>—</td><td><strong>binary, on a single failed audit</strong></td><td>—</td></tr>
+</tbody>
+</table>
+
+<p>The <a href="https://arxiv.org/pdf/1710.10061">Beta Reputation System</a> documents why a pure decayed
+score is the weak choice for <em>this</em> threat model: its forgetting factor fails against an actor that
+behaves well and then abruptly switches — exactly an agent that is fine on five easy tasks and wrong on a
+hard one. That argues for keeping the hard demotion trigger rather than softening it into a rolling average.</p>
+
+<p>One lever appears repeatedly in the prior art and is absent from #3690: a <strong>cooldown</strong>.
+<a href="https://docs.renovatebot.com/key-concepts/minimum-release-age/">Renovate's
+<code>minimumReleaseAge</code></a> quarantines each individual version by wall-clock age regardless of the
+publisher's reputation, and
+<a href="https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments">GitHub
+environment protection rules</a> make a wait timer of 1–43,200 minutes a first-class protection rule
+alongside required reviewers.</p>
+
+<h2>Finding 8 — the <code>{provider, model, taskType}</code> trust unit has no industry name; each axis does</h2>
+
+<ul>
+<li><strong><code>{provider, model}</code> — conventional.</strong>
+<a href="https://docs.npmjs.com/generating-provenance-statements/">npm provenance attestations</a> bind to
+package name + version + tarball digest, and trusted publishing binds to a specific CI workflow, not a human
+author. <a href="https://docs.cloud.google.com/binary-authorization/docs/attestations">Google Binary
+Authorization</a> attests image digests. Package ecosystems abandoned author-scoped trust years ago.
+<a href="https://slsa.dev/spec/v1.1/levels">SLSA Build levels</a> are instructive for a different reason: its
+rungs are defined by <em>what class of attack each rules out</em>, never by how many clean builds happened.</li>
+<li><strong><code>taskType</code> — the established name is
+<a href="https://en.wikipedia.org/wiki/Operational_design_domain">operational design domain (ODD)</a>.</strong>
+An autonomous vehicle's safety case is scoped to the conditions it was designed for, and the ODD definition is
+what constrains the scope of safety cases and testing. Dependabot auto-merge policies are the software
+version: auto-merge scoped to semver patch/minor, majors manual — graduation by the change's declared risk
+class, not the producer's reputation.</li>
+<li><strong>The full triple has no standard name.</strong> "Task-scoped trust" appears in vendor security
+glossaries with no standards body behind it. The eval literature acknowledges the gap rather than closing it:
+<a href="https://arxiv.org/html/2606.09809v1">Evaluation Cards</a> reports that "versioning is ad hoc or
+entirely absent, causing transparency to degrade over time."</li>
+</ul>
+
+<h2>Finding 9 — three further ratified anchors govern this turf, and one of them forecloses the filing's own plan</h2>
+
+<ul>
+<li><strong><code>#every-pr-gets-a-look-advisory-floor</code></strong> (#3313, ratified 2026-08-26): "the
+economizing axis is <strong>depth</strong>, never <strong>coverage</strong>… the capacity floor is never
+zero… The residue that reaches no reviewer is not a safe class, it is an <em>unmeasured</em> one." #3690's
+2026-09-15 backdown plan proposed dropping the separate independent pass <em>entirely</em> at
+<code>spot-check</code> — economizing on coverage, with a trust score as the sampling key, over exactly the
+population whose reliability the score is estimating. The anchor forecloses it, and specifies the floor's own
+shape: one tool-free juror, one round, the diff and the item card, a capped finding count, non-blocking, plus
+two non-optional obligations (a finding files a follow-up item; the floor's cost and yield are measured and
+reported).</li>
+<li><strong><code>#agent-mutations-through-typed-operations</code></strong> (ratified 2026-09-04): mutations
+route only through a strictly-typed, fail-closed operation catalog, and "a sandbox bounds <em>damage</em>;
+the operation catalog bounds authority". This is the anchor that already owns <em>what a delegated agent may
+do</em>.</li>
+<li><strong><code>#agent-convergence-independent-validation</code></strong> (#2398), reached through
+<code>#model-probation-graduation-criteria</code>'s own lineage paragraph, which says the two compose:
+"staged auto-fix autonomy is a sibling axis <strong>keyed by repo, not by provider/model trust</strong>."
+#3690 keys staged autonomy by <code>{provider, model, taskType}</code>, so the two axes must be reconciled as
+orthogonal and composing, with the repo axis dominant.</li>
+</ul>
+
+<p><strong>And a routing collision.</strong> <code>#model-routing</code> row <em>Inline (3)</em> ratifies
+that choosing what to spawn "produces the brief and <strong>the tier verdict</strong>, so it is
+orchestration, not delegated work", and <code>#effort-routing</code> (#3106) adds "Route on the SHAPE of the
+work, <strong>not a lookup table</strong>… never on a field alone". <code>selectProvider</code> routes on
+<code>taskType</code> — a field — plus fixed LOC and file-count ceilings
+(<code>PROVEN_TASK_ENVELOPES</code>, <code>:163</code>). <strong>Scope check:</strong> that table's column
+heading is "Why it can't leave the loop" and Inline (3) concerns an orchestrating loop choosing a subagent
+and writing its brief, so it does not reach a mechanical dispatcher with no loop, no claim and no brief. It
+<em>does</em> reach an interactive session — and the router's own header claims exactly that reach ("across
+both interactive Claude Code sessions… and autonomous conveyor/runner dispatch machinery"). That claim is
+where the collision lives.</p>
+
+<h2>What this survey does not settle</h2>
+
+<p>Nothing here rules. The five open calls — what the trial record governs, the evidence bar, who may move a
+level, how far mechanical routing reaches, and what verification stays with the orchestrator — are authored
+as forks with recommended defaults on
+<a href="/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/">#3690</a> itself.</p>
+{% endraw %}

@@ -1,0 +1,24 @@
+{
+  "id": "delegation-graduation-and-supervision-tiers",
+  "title": "When has a delegated non-Claude agent earned lighter supervision? Trust tiers, trial bars and the positive-control requirement, grounded against the live router",
+  "status": "open",
+  "summary": "Grounds decision #3690, which #3717 asks the operator to ratify before wiring scripts/lib/provider-routing.mjs into the dispatch path. The router is already built, pure and callerless, and selectSupervisionLevel already moves a dial: over the 26 session-delegation records in scripts/conveyor/run-scorecards.json, codex/gpt-6-astra/other sits at spot-check today, while antigravity/gemini-3.8-flash-low/conflict-resolution has a clean streak of 5 and stays full for want of an informative trial. THE STRUCTURAL FINDING: selectProvider and selectSupervisionLevel are not independent dials. They read one store through the same two predicates -- isCleanRecord drives evaluateProviderFitness (one clean verified trial makes a provider fit to be handed the work, at N=1) and isInformativeRecord is read inside selectProvider to decide the dual-dispatch branch -- so accumulating clean rows already buys being selected at all, with no operator act. Two arithmetic findings. N=5 is not a statistical bar: the exact one-sided 95% Clopper-Pearson upper bound on the failure rate is 45.07%, not the rule-of-three 60% (that approximation needs n>30); an agent failing 1 run in 5 still produces 5 clean runs 32.8% of the time; ruling out 20% needs 14, which on the observed rate is about 8 days away, not months. And the informative-trial requirement has a standard name -- positive control: a run whose positive control does not fire is invalid, not passing, the same idea as mutation testing vacuous passes, IEC 61508 dangerous-undetected failures and Reason latent conditions. Three shaping findings from the prior art. GitHub Copilot coding agent pins authority in the transport (it cannot reach the default branch whatever its record) rather than in a score -- but this repo does NOT have that property: codex-direct-task.mjs setupScratchClone deliberately rewrites the scratch clone origin to the real remote so a human can push from it, and the whole draft-only rule is one sentence of prompt text over a push-capable checkout. AWS published graduated-autonomy scheme uses a rolling 50-action window with a 5-point hysteresis gap up, immediate demotion down, and states trust is non-transitive. And across AWS, Tor, Debian, Stack Overflow and the Chrome CA program, promotion and demotion are split asymmetrically, with a permanent hard reset on one miss appearing essentially nowhere outside CT log removal. Also finds a divergence between #3690 prose (informative = findings present on any past row) and the shipped code (outcome rejected/reworked AND findings): 14 of the 26 rows are landed-with-findings, two of which record verbatim that review found nothing -- but the outcome-based rule is not the fix either, because outcome is read in opposite directions by the two predicates, so a clean performer can only reach a positive control by logging a failure. A further ratified anchor governs what graduation may drop: #every-pr-gets-a-look-advisory-floor rules that the independent look has a non-zero floor and that the economizing axis is depth, never coverage. Cooldown (Renovate minimumReleaseAge, GitHub wait timers) surfaces as a lever #3690 does not have. No industry term exists for the {provider, model, taskType} triple; operational design domain is the established name for the taskType axis.",
+  "dateOpened": "2026-09-20",
+  "lastReviewed": "2026-09-20",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "codex",
+    "antigravity",
+    "delegation",
+    "graduation",
+    "supervision",
+    "model-routing",
+    "scorecard",
+    "calibration",
+    "operations",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
