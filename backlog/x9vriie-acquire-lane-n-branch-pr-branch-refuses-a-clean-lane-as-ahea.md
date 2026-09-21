@@ -1,0 +1,30 @@
+---
+kind: task
+parent: "3383"
+status: open
+scope: ["we:scripts/lane-pool.mjs", "we:scripts/__tests__/lane-pool-acquire-adopt-behind-main.test.mjs"]
+dateOpened: "2026-09-21"
+tags: []
+---
+
+# acquire --lane=N --branch=<pr-branch> refuses a clean lane as "ahead" when the adopted branch is behind main
+
+FOUND 2026-09-21, reproduced the same day in a temp repo. The explicit-lane dirty/ahead guard in we:scripts/lane-pool.mjs counts commits ahead of origin/<--branch> without asking whether those commits are already on a pushed branch, so a clean lane sitting on origin/main reads as N commits ahead of an older PR branch and acquire refuses. The auto-pick path and the post-fetch re-check already ask (aheadIsProvablyPushed); the explicit-lane guard does not. This is a small, well-specified fix: ready for an agent, no design choice.
+
+## Evidence
+
+- Live refusal, 2026-09-21: the `acquire` verb of we:scripts/lane-pool.mjs with `--lane=38 --adopt --branch=lane/3779-handoff-location` refused with "lane-38 has 0 uncommitted change(s) and is 9 commit(s) ahead of origin/lane/3779-handoff-location — acquire would destroy that work via its reset-to-origin step", while lane-38 was clean and equal to origin/main. Main's own merged PRs read as "ahead" of the older PR branch.
+- Reproduced the same day by the first filing worker in a temp repo on main `68737d592`: a bare origin whose integration branch was 3 commits past `lane/old`, a clean provisioned lane, `acquire --lane=1 --adopt --branch=lane/old`. Result: "lane-1 has 0 uncommitted change(s) and is 3 commit(s) ahead of origin/lane/old". This session could not re-run the temp repro: the repo's push hook blocked the scratch-repo setup (it treats a push of the scratch repo's integration branch as a push to main), so the reproduction above is the first worker's, not re-run here. The code below was re-read and its lines re-found today.
+- Cause, re-found on main `a4ff83ea6`. `--branch` replaces `repo.branch` (we:scripts/lane-pool.mjs:209). The explicit-lane guard (#3390) calls `laneDirtyOrAhead(dir, repo.branch)` (we:scripts/lane-pool.mjs:1133; the helper is at :628) and refuses when `dirty || ahead > 0` (:1134-1138) with no proof that the ahead commits are already pushed. The auto-pick path (:1062-1068) and the post-fetch re-check (:1218-1219) already call `aheadIsProvablyPushed` (:668); the explicit-lane guard is the one path that does not.
+- Related open cards, distinct: #2919 (`aheadIsProvablyPushed` cannot prove containment when the remote tip object is absent locally) and #2918 (`list --acquirable` lacks the same relaxation). Fixing this card does not fix either, and it must not wait for them.
+- Side effect to leave alone here: the refusal leaves the lease behind (#3407, see also the lease card filed with this one). This card's tests must not assert lease state after a refusal.
+
+## The fix
+
+At we:scripts/lane-pool.mjs:1133, apply the same relaxation the auto-pick path applies: an ahead count above zero is not at risk when HEAD is provably on a live remote tip or is an ancestor of one (origin's integration branch counts, so a clean lane on it is safe to reset onto an older branch). Use the live `ls-remote` snapshot (`liveRemoteShas`, we:scripts/lane-pool.mjs:680), not local remote-tracking refs: no fetch has happened at this point, and the header of `aheadIsProvablyPushed` (we:scripts/lane-pool.mjs:641-667) explains why a stale local ref is unsound. Keep `--force` exactly as it is. Keep refusing a dirty tree and genuinely unpushed commits. The post-fetch re-check at :1218 stays as the second proof.
+
+## Done when
+
+1. **Executable** — `npx vitest run lane-pool-acquire-adopt-behind-main` passes. The new suite is we:scripts/__tests__/lane-pool-acquire-adopt-behind-main.test.mjs and follows the harness of we:scripts/__tests__/lane-pool-acquire-reverify-containment.test.mjs (temp bare origin, `--origin`, `--reference`, `--name`, `--no-install`, an integration branch that is not named `main`). Three cases: (a) a clean lane sitting on the integration tip acquires with `--adopt --branch=<an older pushed branch>` and exits 0; (b) a lane with one commit that exists on no remote is still refused with the "ahead of origin" message; (c) a lane with an uncommitted change is still refused. Case (a) fails today with the "commit(s) ahead" refusal; (b) and (c) pass before and after, so they pin the safety the fix must keep.
+2. **Executable** — `npx vitest run lane-pool` stays green (the existing #2452, #2924 and #3390 suites are unchanged).
+3. **Executable** — `npm run check:standards` reports 0 errors.
