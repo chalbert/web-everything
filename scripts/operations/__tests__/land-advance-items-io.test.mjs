@@ -1,5 +1,7 @@
 import { it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { withBareOrigin, withNarrowClone } from './helpers/real-repo.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createItemReader, queueItemInto, TRACKER_REF, TRACKER_PATH } from '../land-advance-items-io.mjs';
@@ -45,4 +47,25 @@ it('applies items by queueing them into the canonical conveyor sidecar, idempote
   expect((await apply(plan, { prs: false, items: true })).queued).toEqual(['3653']);
   await apply(plan, { prs: false, items: true });
   expect(readQueueFile(queuePath(root)).map((e) => e.num)).toEqual(['3653']);
+});
+// THE REAL MECHANISM (#2949 fidelity): the tracker is read with a real `git show <ref>:<path>` in a real clone, and the
+// in-flight read and the queue sink use a real sidecar file. Only the two node children are answered by the wrapper.
+const realRun = (clone) => (program, args) => program === 'git' ? String(execFileSync('git', args, { cwd: clone, encoding: 'utf8', stdio: 'pipe' }))
+  : args[0].endsWith('conveyor-state.mjs') ? '{"lanes":[],"prs":[]}' : JSON.stringify({ launch: [], held: [] });
+it('real clone: reads the Priority order off the cached tracker ref, and a queued item reads as in flight', async () => {
+  await withBareOrigin(async ({ clone, seedOriginBranch, git }) => {
+    seedOriginBranch('lane/mechanical-dispatcher', { [TRACKER_PATH]: TRACKER });
+    git(['fetch', '--quiet', 'origin']);
+    queueItemInto(root, '3674', () => 0);
+    const out = createItemReader({ run: realRun(clone), root })();
+    expect(out.queue.map((q) => q.num)).toEqual(['3653', '3486']);
+    expect(out.skipped).toEqual([{ num: '3674', rank: 2, reason: 'in-flight' }]);
+  });
+});
+it('real narrow clone: the tracker ref is missing, so the read throws instead of planning an empty queue', async () => {
+  await withNarrowClone(async ({ clone, seedOriginBranch, git }) => {
+    seedOriginBranch('lane/mechanical-dispatcher', { [TRACKER_PATH]: TRACKER });
+    git(['fetch', '--quiet', 'origin']);
+    expect(() => createItemReader({ run: realRun(clone), root })()).toThrow(/invalid object name|does not exist|unknown revision|bad revision/i);
+  });
 });

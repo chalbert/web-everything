@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { planLandAdvance, capacityFor, followUpVerdict, OWED_ACTIONS, repoKeyFromSlug, sessionMatch, renderTable, decideMode } from '../land-advance.mjs';
-import { priorityQueue } from '../land-advance-items.mjs';
+import { priorityQueue, reconcileHolds } from '../land-advance-items-io.mjs';
 import { dispatchPlan } from '../../readiness/dispatch-plan.mjs';
 import { CONSTELLATION_REPOS } from '../../lib/constellation-repos.mjs';
 const today = JSON.parse(readFileSync('scripts/operations/__fixtures__/land-advance/today.json'));
@@ -188,7 +188,7 @@ describe('#3720 item-pull, budget and mode (the card\'s Done-when cases)', () =>
 describe('#3720 owed PR work honours reconcile-pass refusals', () => {
   it('a live-process refusal holds a review; no-findings holds a fix but not a review', () => {
     const p = plan({ prs: [pr(2419), pr(2421), pr(2170, { labels: ['review:changes'] })], fixPlans: { 'we#2170': { planned: { pr: 2170 } } },
-      reconcileRefusals: { 'we#2419': { kind: 'live-process', why: 'a bound session has a LIVE pid' }, 'we#2421': { kind: 'no-findings', why: 'none' }, 'we#2170': { kind: 'no-findings', why: 'none' } } });
+      reconcileRefusals: reconcileHolds([{ prNumber: 2419, kind: 'live-process', why: 'a bound session has a LIVE pid' }, { prNumber: 2421, kind: 'no-findings', why: 'none' }, { prNumber: 2170, kind: 'no-findings', why: 'none' }, { prNumber: 9, kind: 'invented', why: 'x' }]) });
     const row = (n) => p.rows.find((r) => r.pr === n);
     expect(row(2419)).toMatchObject({ owedAction: 'dispatch-review', dispatchable: false, refusal: { kind: 'live-process' } });
     expect(row(2421)).toMatchObject({ owedAction: 'dispatch-review', dispatchable: true });

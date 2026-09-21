@@ -32,7 +32,7 @@ import { allowedToolsArg, ALLOWED_TOOLS_BY_KIND } from './land-advance-tools.mjs
 import { classifySession } from '../conveyor/session-verdicts.mjs';
 import { makeEvidenceResolver } from '../conveyor/session-verdicts-io.mjs';
 import { listEscalations, buildEscalationPacket, writeEscalationPacket } from './land-advance-escalations.mjs';
-import { createItemReader, queueItemInto } from './land-advance-items-io.mjs';
+import { createItemReader, queueItemInto, reconcileHolds } from './land-advance-items-io.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runDefault = (program, args) => String(execFileSync(program, args, { cwd: ROOT, encoding: 'utf8', timeout: 30000, stdio: 'pipe' }));
 const missing = (fn, fallback) => { try { return fn(); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } };
@@ -185,7 +185,7 @@ export function createLandAdvanceReader(ports = {}) {
     }, { ...entry, evidence: { ambiguous: true } }));
     const load = get('load', machineLoad, null);
     const items = readItems ? get('items', readItems, null) : undefined;
-    const reconcileRefusals = readReconcile ? get('reconcile', () => Object.fromEntries((readReconcile().refusals ?? []).map((r) => [`we#${r.prNumber}`, { kind: r.kind, why: r.why }])), {}) : {};
+    const reconcileRefusals = readReconcile ? get('reconcile', () => reconcileHolds(readReconcile().refusals ?? []), {}) : {};
     return { now: capturedAt, prs, sessions, history: history.entries, historyCapped: history.capped, alerts, trials, results, prototype,
       fixPlans, repairEvidence, detached, followUps, escalationsDir, jobsDir, escalations: get('escalations', () => listEscalations({ dir: escalationsDir, fs: io }), []),
       freeLanes: errors.some((e) => e.source === 'sessions') ? 'unknown' : lanes?.length ?? 'unknown', cap, load, loadThreshold, errors, reconcileRefusals, ...(items ? { items } : {}) };

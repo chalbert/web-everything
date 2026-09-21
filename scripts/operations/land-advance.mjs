@@ -19,10 +19,6 @@ import { capToConcurrency } from '../lib/lane-concurrency.mjs';
 import { extractManifestFromBody } from '../readiness/lane-manifest.mjs';
 import { repairOwed, queueFirstHold, orderForHold, deferralReason, REPAIR_RETRY_CAP } from './land-advance-repair.mjs';
 import { planItems, DEFAULT_MAX_ITEMS_PER_CALL } from './land-advance-items.mjs';
-import { REFUSAL_KINDS } from '../conveyor/reconcile-core.mjs';
-/** reconcile-pass refusals that hold a review or fix dispatch (#3720: "a refusal is reported, never overridden").
- *  `no-findings` holds only a fix: it is reconcile's reason a PR is owed a review rather than a fixer. */
-const RECONCILE_HOLDS = REFUSAL_KINDS.filter((k) => k !== 'no-findings');
 export const LAND_ADVANCE_OP = 'land-advance';
 export const OWED_ACTIONS = Object.freeze(['dispatch-review', 'dispatch-fix', 'dispatch-ci-heal', 'dispatch-conflict-fix', 'fold-into-prototype', 'wait-on-drain', 'stale-label', 'needs-operator', 'escalate', 'none', 'graduation-owed', 'reap-owed', 'delegation-trial-owed']);
 export const FOLLOW_UP_VERDICTS = Object.freeze(['progressing', 'finished', 'stalled', 'dead', 'waiting-permission', 'target-moved-on', 'ambiguous']);
@@ -134,8 +130,9 @@ export function planLandAdvance(inputs) {
     }
     if (action.startsWith('dispatch-') && worker(action === 'dispatch-review' ? 'review' : 'fix').includes('ambiguous')) extra.refusal = { kind: 'ambiguous', why: 'name-only session matches multiple repositories' };
     if (action.startsWith('dispatch-') && followUps.some((e) => e.target === subject && followUpVerdict(e, e.evidence, now) === 'ambiguous')) extra.refusal = { kind: 'ambiguous', why: 'prior dispatch identity or outcome is unresolved' };
+    // #3720: reconcile-pass's refusals (`reconcileHolds` in land-advance-items-io.mjs) hold a review or fix row.
     const rc = inputs.reconcileRefusals?.[subject];
-    if (['dispatch-review', 'dispatch-fix'].includes(action) && rc && (RECONCILE_HOLDS.includes(rc.kind) || (rc.kind === 'no-findings' && action === 'dispatch-fix'))) extra.refusal = { kind: rc.kind, why: `reconcile-pass refuses: ${rc.why}` };
+    if (rc?.holds?.includes({ 'dispatch-review': 'review', 'dispatch-fix': 'fix' }[action])) extra.refusal = { kind: rc.kind, why: `reconcile-pass refuses: ${rc.why}` };
     if (extra.refusal) evidence.push(extra.refusal.why);
     add(subject, action, evidence, since, { repo: p.repo, pr: p.number, slug: p.slug, dispatchable: action.startsWith('dispatch-') && !extra.refusal && !p.isDraft, ...extra });
   }
