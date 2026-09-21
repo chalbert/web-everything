@@ -61,6 +61,7 @@ import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
 import { WIP_AGENTS_OP } from '../wip-agents.mjs';
 import { LAND_ADVANCE_OP } from '../land-advance.mjs';
 import { PR_STATUS_OP } from '../pr-status.mjs';
+import { TURN_DIGEST_OP } from '../turn-digest.mjs';
 import { ROUTE_PR_OUTCOME_OP } from '../route-pr-outcome.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import { GAP_SWEEP_STATUS_OP } from '../gap-sweep-status.mjs';
@@ -388,6 +389,9 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // #3383 — `tracker-refresh`'s `apply` step is an effect (it runs the sync, writes the page and the worker's brief), so it is
     // NOT read-only; listed for map coverage. Its declaring module is itself a leaf (asserted in `tracker-refresh.test.mjs`).
     [TRACKER_REFRESH_OP]: 'tracker-refresh.mjs',
+    // #3724 — `turn-digest` is READ-ONLY (both steps are `compute`); its snapshot is written by the command line's `finish`
+    // hook, never through the engine. Its declaring module imports only `registry.mjs` and `step-kinds.mjs`.
+    [TURN_DIGEST_OP]: 'turn-digest.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
@@ -397,7 +401,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([LAND_ADVANCE_OP, WIP_AGENTS_OP, GATE_HEALTH_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([LAND_ADVANCE_OP, WIP_AGENTS_OP, GATE_HEALTH_OP, PR_STATUS_OP, ROUTE_PR_OUTCOME_OP, SUGGEST_NEXT_OP, TURN_DIGEST_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)

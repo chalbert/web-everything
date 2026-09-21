@@ -94,6 +94,8 @@ import { prioritySyncOperation, PRIORITY_SYNC_OP, finishPriorityOutcome } from '
 import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sync-io.mjs';
 import { trackerRefreshOperation, TRACKER_REFRESH_OP, finishRefreshOutcome } from './tracker-refresh.mjs';
 import { createTrackerRefreshReader, createTrackerRefreshSinks } from './tracker-refresh-io.mjs';
+import { turnDigestOperation, TURN_DIGEST_OP } from './turn-digest.mjs';
+import { createTurnDigestReader, createTurnDigestFinish } from './turn-digest-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -318,6 +320,16 @@ export const OPERATIONS = Object.freeze({
     declaration: trackerRefreshOperation({ readFacts: createTrackerRefreshReader() }),
     sinks: createTrackerRefreshSinks(),
     finish: finishRefreshOutcome,
+  }),
+  // #3724 (epic #3383 prototype line) — ONE derived, read-only picture of the turn: what landed on `origin/main` since a
+  // cursor (first-parent `Merge pull request #N`, a pure git read), what is owed (the reconcile plan), what needs the
+  // operator (the operator queue), stale `merge-status:conflicting` labels, what is live, and the runner. EVERY step
+  // is `compute`, so no effect exists for a sink to apply. The snapshot (`latest.json`, and a consumer's cursor on
+  // `--advance`) is written by `finish` AFTER the run settles, under the operations state root and never the repo.
+  [TURN_DIGEST_OP]: () => ({
+    declaration: turnDigestOperation({ readFacts: createTurnDigestReader() }),
+    sinks: {},
+    finish: createTurnDigestFinish(),
   }),
   [EXPLORE_OP]: () => ({
     declaration: exploreOperation(),
