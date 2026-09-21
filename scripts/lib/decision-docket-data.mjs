@@ -29,22 +29,70 @@
 /** One rendered fork option's disposition. */
 export const OPTION_KINDS = Object.freeze({ DEFAULT: 'default', REJECTED: 'rejected', OPEN: 'open' });
 
+/** A fenced-code opener/closer line: any indent, then 3+ backticks or tildes (the CommonMark fence). */
+const FENCE_LINE_RE = /^\s*(`{3,}|~{3,})/;
+
 /**
- * Split a markdown body into top-level paragraphs (blank-line separated), trimming each. Internal single
- * newlines (soft-wrapped prose) are preserved here; callers that want one flowing line call `joinSoft`.
+ * Track fenced-code state across a line-by-line walk: feed each line, get back whether that line is INSIDE a
+ * fence (the opener and closer lines count as inside). A blank line or a `## ` line inside a fence is code, not
+ * a paragraph break or a section heading — splitting there would tear a code block (an `<svg>` sketch, a JSON
+ * sample) into fragments that then render as flat prose.
+ * @returns {(line: string) => boolean}
+ */
+function fenceTracker() {
+  let open = null;
+  return (line) => {
+    const m = FENCE_LINE_RE.exec(line);
+    if (open) {
+      if (m && m[1][0] === open[0] && m[1].length >= open.length && /^\s*[`~]+\s*$/.test(line)) open = null;
+      return true;
+    }
+    if (m) { open = m[1]; return true; }
+    return false;
+  };
+}
+
+/**
+ * Split a markdown body into top-level paragraphs (blank-line separated, but never inside a fenced code block),
+ * trimming each. Each paragraph keeps its own line structure (see `tidy`) so the renderer can see lists,
+ * blockquotes and code; callers that only want a one-line string for DETECTION call `joinSoft`.
  * @param {string} text
  * @returns {string[]}
  */
 function splitParagraphs(text) {
-  return String(text ?? '')
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean);
+  const paras = [];
+  let cur = [];
+  const inFence = fenceTracker();
+  for (const line of String(text ?? '').split('\n')) {
+    if (!inFence(line) && !line.trim()) {
+      if (cur.length) paras.push(cur.join('\n'));
+      cur = [];
+    } else {
+      cur.push(line);
+    }
+  }
+  if (cur.length) paras.push(cur.join('\n'));
+  return paras.map((p) => p.trim()).filter(Boolean);
 }
 
-/** Join a paragraph's soft-wrapped lines into one flowing line (markdown line-wraps are not line breaks). */
+/**
+ * Join a paragraph's soft-wrapped lines into one flowing line. DETECTION ONLY (marker/verdict regexes, the
+ * `Default: (x)` cross-reference): the displayed text keeps its newlines via `tidy`, because flattening it is
+ * what destroyed every block construct (`> ` quotes, `- ` lists, ``` fences, `#` headings) before the renderer
+ * ever saw them.
+ */
 function joinSoft(paragraph) {
   return paragraph.split('\n').map((l) => l.trim()).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Keep a paragraph's text as markdown for the renderer: strip trailing whitespace per line and trim the whole,
+ * but PRESERVE newlines and indentation (a soft wrap is still just a space to a markdown renderer; a list,
+ * quote or fence is not). Never inside a fence: a fence's own lines pass through untouched.
+ */
+function tidy(paragraph) {
+  const inFence = fenceTracker();
+  return paragraph.split('\n').map((l) => (inFence(l) ? l : l.replace(/\s+$/, ''))).join('\n').trim();
 }
 
 /**
@@ -59,18 +107,27 @@ function splitNumberedList(text) {
   const itemStartRe = /^\d+[.)]\s*/;
   const items = [];
   let current = null;
+  const inFence = fenceTracker();
   for (const rawLine of String(text ?? '').split('\n')) {
     const line = rawLine.trim();
+    if (inFence(rawLine)) {
+      // Inside a fenced code block every line is code — blank lines included, and a line that merely begins
+      // with "1. " is not a new item.
+      if (current !== null) current += `\n${rawLine.replace(/^ {1,3}/, '')}`;
+      continue;
+    }
     if (!line) continue;
     if (itemStartRe.test(line)) {
       if (current !== null) items.push(current);
       current = line;
     } else if (current !== null) {
-      current += ` ${line}`;
+      // Keep the continuation on its own line (indent stripped by the item marker's own width) so a nested
+      // bullet or code fence inside a done-when item survives as markdown instead of running on as prose.
+      current += `\n${rawLine.replace(/^ {1,3}/, '').replace(/\s+$/, '')}`;
     }
   }
   if (current !== null) items.push(current);
-  return items.map((l) => l.replace(/\s+/g, ' ').trim());
+  return items.map((l) => l.trim());
 }
 
 /**
@@ -82,8 +139,10 @@ function splitSections(bodyAfterTitle) {
   const lines = String(bodyAfterTitle ?? '').split('\n');
   const sections = [];
   let current = { heading: null, text: [] };
+  const inFence = fenceTracker();
   for (const line of lines) {
-    const m = /^##\s+(.*)$/.exec(line);
+    // A `## ` line inside a fenced code block is code (a markdown sample), not a new section.
+    const m = inFence(line) ? null : /^##\s+(.*)$/.exec(line);
     if (m) {
       sections.push(current);
       current = { heading: m[1].trim(), text: [] };
@@ -154,6 +213,33 @@ function buildOption(label, flatText) {
 }
 
 /**
+ * Remove a leading "Skeptic:"/"Screen:" label from a verdict paragraph and return the verdict text. A label's
+ * emphasis is not always closed at the label: "**Skeptic: SURVIVES.** …" and "`Skeptic: … text`" open a span
+ * at the label that only closes further in. Stripping just the label would leave that closer orphaned (a raw
+ * `**` or backtick in the rendered page), so an opener the label consumed without closing takes its first
+ * matching closer with it. A closer is only removed when the remainder has an unpaired one (odd count), so a
+ * balanced span the verdict itself carries is never touched.
+ * @param {string} text
+ * @param {RegExp} labelRe - anchored label regex (matches through the colon and any closing emphasis).
+ * @returns {string}
+ */
+function stripVerdictLabel(text, labelRe) {
+  const m = labelRe.exec(text);
+  if (!m) return text.trim();
+  const label = m[0].trimEnd();
+  let rest = text.slice(m[0].length);
+  const opener = /^(\*\*|\*|_|`)/.exec(label)?.[1];
+  if (opener && !label.endsWith(opener)) {
+    const re = { '**': /\*\*/g, '*': /(?<!\*)\*(?!\*)/g, _: /(?<![\w_])_(?![\w_])/g, '`': /`/g }[opener];
+    const hits = [...rest.matchAll(re)];
+    if (hits.length % 2 === 1) {
+      rest = rest.slice(0, hits[0].index) + rest.slice(hits[0].index + opener.length);
+    }
+  }
+  return rest.trim();
+}
+
+/**
  * Parse ONE `## Fork N` section body into its structured shape: the fork-existence justification, the lettered
  * options (default / rejected / open), any leftover context paragraphs (code samples, scope narrowing — real
  * item content, never invented), and the closing `Skeptic:`/`Screen:` verdict lines. Never throws — a fork whose
@@ -183,14 +269,14 @@ export function parseForkSection(n, headingRest, sectionText) {
 
   if (optionsStart === -1) {
     return {
-      n, crux, why: paras.length ? joinSoft(paras[0]) : null, options: [], notes: [], skeptic: null, screen: null,
+      n, crux, why: paras.length ? tidy(paras[0]) : null, options: [], notes: [], skeptic: null, screen: null,
       parseOk: false, warning: `Fork ${n}: no lettered options ("- **(a)** …") found — cannot render a fork breakdown for this fork.`,
     };
   }
 
   // Everything before the first option bullet is the fork-existence justification (+ any extra framing paras).
   const beforeParas = paras.slice(0, optionsStart);
-  const why = beforeParas.length ? beforeParas.map(joinSoft).join(' ') : null;
+  const why = beforeParas.length ? beforeParas.map(tidy).join('\n\n') : null;
 
   // Options block: one or more consecutive paragraphs, each itself potentially containing several "- **(x)**"
   // bullets when the author separated bullets with single (not blank) newlines.
@@ -201,7 +287,7 @@ export function parseForkSection(n, headingRest, sectionText) {
     let currentLabel = null;
     let currentBuf = [];
     const flush = () => {
-      if (currentLabel) options.push(buildOption(currentLabel, joinSoft(currentBuf.join('\n'))));
+      if (currentLabel) options.push(buildOption(currentLabel, tidy(currentBuf.join('\n'))));
     };
     for (const line of bulletLines) {
       const m = optionLineRe.exec(line);
@@ -214,7 +300,10 @@ export function parseForkSection(n, headingRest, sectionText) {
         // correctly instead of reading as one stray, unmatched delimiter (see buildOption's bold-count check).
         currentBuf = [(m[2] ? '' : '**') + m[3]];
       } else {
-        currentBuf.push(line);
+        // A continuation line belongs to the option's own content, which starts two columns in (after "- "):
+        // strip up to that much indent so a nested bullet ("  - sub") is read by the renderer as a nested list,
+        // not as an over-indented line of the option's first paragraph.
+        currentBuf.push(line.replace(/^ {1,2}/, ''));
       }
     }
     flush();
@@ -232,7 +321,7 @@ export function parseForkSection(n, headingRest, sectionText) {
   // carries real supporting reasoning, not just the letter.
   const defaultDeclRe = /\*{0,2}Default:\*{0,2}\s*\(([a-z])\)/i;
   for (const p of rest) {
-    const dm = defaultDeclRe.exec(joinSoft(p));
+    const dm = defaultDeclRe.exec(joinSoft(p));  // detection only — one flowing line
     if (!dm) continue;
     const opt = options.find((o) => o.label === `(${dm[1].toLowerCase()})`);
     if (opt && opt.kind !== OPTION_KINDS.REJECTED) opt.kind = OPTION_KINDS.DEFAULT;
@@ -244,35 +333,37 @@ export function parseForkSection(n, headingRest, sectionText) {
   // of these rather than mis-flagging real content as missing: `[^:\n]*` absorbs any such aside, and matches
   // zero characters for the plain "Skeptic:" case, so this stays backward-compatible.
   const EMPH = '(?:\\*\\*|\\*|_|`)?';
-  const skepticRe = new RegExp(`^${EMPH}Skeptic\\b[^:\\n]*:${EMPH}\\s*`, 'i');
-  const screenRe = new RegExp(`^${EMPH}Screen\\b[^:\\n]*:${EMPH}\\s*`, 'i');
-  const screenInlineRe = new RegExp(`${EMPH}Screen\\b[^:\\n]*:${EMPH}\\s*`, 'i'); // unanchored — find/split Screen: WITHIN a joined paragraph
+  // `[^:]*` (not `[^:\\n]*`): these run over the paragraph's own multi-line text now (it is no longer pre-flattened
+  // onto one line), and a parenthetical aside is free to wrap across lines.
+  const skepticRe = new RegExp(`^${EMPH}Skeptic\\b[^:]*:${EMPH}\\s*`, 'i');
+  const screenRe = new RegExp(`^${EMPH}Screen\\b[^:]*:${EMPH}\\s*`, 'i');
+  const screenInlineRe = new RegExp(`${EMPH}Screen\\b[^:]*:${EMPH}\\s*`, 'i'); // unanchored — find/split Screen: WITHIN a paragraph
   let skeptic = null;
   let screen = null;
   const notes = [];
   const fenceRe = /^```(\S*)\n([\s\S]*?)\n?```$/;
   for (const p of rest) {
-    // A fenced code block (a Fork 2-style "illustrative shape only" sketch) must NOT be flattened through
-    // `joinSoft` — that would destroy its line breaks and indentation. Keep it as its own `{ kind: 'code' }`
-    // note with the original multi-line text preserved; everything else is flattened prose as before.
+    // A paragraph that IS one fenced code block (a Fork 2-style "illustrative shape only" sketch) is kept as its
+    // own `{ kind: 'code' }` note with the original multi-line text preserved. Every other note keeps its line
+    // structure (`tidy`) and is rendered as markdown, so a fence with prose around it still renders as code.
     const fenceMatch = fenceRe.exec(p.trim());
     if (fenceMatch) { notes.push({ kind: 'code', text: fenceMatch[2] }); continue; }
 
-    const flat = joinSoft(p);
+    const flat = tidy(p);
     if (skepticRe.test(flat)) {
       // The Skeptic and Screen verdicts are often written as two lines separated by a single newline (not a
       // blank line), so `splitParagraphs` sees them as ONE paragraph — split them back apart here rather than
       // losing the Screen verdict inside the Skeptic text.
       const screenIdx = flat.search(screenInlineRe);
       if (screenIdx === -1) {
-        skeptic = flat.replace(skepticRe, '').trim();
+        skeptic = stripVerdictLabel(flat, skepticRe);
       } else {
-        skeptic = flat.slice(0, screenIdx).replace(skepticRe, '').trim();
-        screen = flat.slice(screenIdx).replace(screenRe, '').trim();
+        skeptic = stripVerdictLabel(flat.slice(0, screenIdx), skepticRe);
+        screen = stripVerdictLabel(flat.slice(screenIdx), screenRe);
       }
       continue;
     }
-    if (screenRe.test(flat)) { screen = flat.replace(screenRe, '').trim(); continue; }
+    if (screenRe.test(flat)) { screen = stripVerdictLabel(flat, screenRe); continue; }
     notes.push({ kind: 'text', text: flat });
   }
 
@@ -295,7 +386,7 @@ export function parseForkSection(n, headingRest, sectionText) {
   if (!skeptic) warnings.push(`Fork ${n}: no "Skeptic:" verdict line found.`);
   // An odd count of "**" inside an option's own text means a bold span never closed within that option — the
   // classic tell of a legacy item whose sub-bullets (nested lists INSIDE one option's body, each with its own
-  // bold markers) got flattened by `joinSoft` into one run-on line. Rendering that through mdInline produces
+  // bold markers) got flattened into one run-on line by the source's own soft wrapping. Rendering that produces
   // stray literal asterisks and mismatched emphasis — worse than showing nothing. Flag it structurally rather
   // than let a malformed render reach the page.
   if (options.some((o) => (o.body.match(/\*\*/g) || []).length % 2 !== 0)) {
@@ -326,7 +417,7 @@ export function parseDecisionBody(rawBody) {
   const sections = splitSections(afterTitle);
 
   // sections[0] (heading: null) is everything before the first "## " — the digest.
-  const digest = splitParagraphs(sections[0]?.text ?? '').map(joinSoft);
+  const digest = splitParagraphs(sections[0]?.text ?? '').map(tidy);
 
   const forkSections = sections.filter((s) => s.heading && /^Fork\s+\d+/i.test(s.heading));
   const warnings = [];

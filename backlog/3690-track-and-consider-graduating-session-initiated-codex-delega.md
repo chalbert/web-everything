@@ -1,8 +1,11 @@
 ---
 bornAs: xwzihdg
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-09-14"
+dateResolved: "2026-09-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#delegation-trial-record-graduation"
 preparedDate: "2026-09-20"
 preparedAgainstSha: "df3a05856013a8ce4de58f53a865e1823c173bfc"
 relatedTo: ["3654", "3673", "3635", "3581", "3717", "3696", "3443", "3369"]
@@ -19,8 +22,11 @@ Tonight (2026-09-14), for the first time, an interactive orchestrating Claude Co
 >
 > **Prepared 2026-09-20.** Five forks, each with a bold default, grounded in
 > [a research topic](/research/delegation-graduation-and-supervision-tiers/) and
-> [a session report](/reports/2026-09-20-delegation-graduation-model-grounding.md). The graduation call itself
-> is still open and unratified.
+> [a session report](/reports/2026-09-20-delegation-graduation-model-grounding.md).
+>
+> **Ratified 2026-09-21 by the operator, as prepared** — every fork's bold default. See
+> `## Ratified (all five forks, as prepared) — 2026-09-21` below; the rule is codified at
+> [#delegation-trial-record-graduation](../docs/agent/platform-decisions.md#delegation-trial-record-graduation).
 
 ## Why this is on the critical path
 
@@ -822,6 +828,48 @@ from `we:scripts/conveyor/run-scorecards.json` (filter `dispatchKind: "session-d
 card. Since 2026-09-19 that computation is also available directly as `selectSupervisionLevel` in
 `we:scripts/lib/provider-routing.mjs`.
 
+## Ratified (all five forks, as prepared) — 2026-09-21
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), as prepared.** The operator's words, typed in the
+orchestrating session: "I ratify 3690". That takes the bold default of every fork and sub-fork below, with no
+amendment. Codified at
+[#delegation-trial-record-graduation](../docs/agent/platform-decisions.md#delegation-trial-record-graduation).
+
+- **Fork 1 — (a) one record, two consumers.** Binds: "The ruling binds the store, not one function.
+  Authority is the catalog's, not a streak's."
+- **Fork 2 — (a) ratify the shape only.** Binds: "graduation requires a **trailing clean streak** *and* a
+  **positive control** *and* a clean most-recent verified trial; a confirmed miss is a hard veto", with "the
+  value of `minCleanStreak`, which stays a `backdownThresholds` config default for a follow-on batched finding
+  to propose against real data".
+- **Fork 2 sub-fork A — (a) a separate recorded field.** Binds: "Add an explicit `informative` field …
+  *independent review found a real problem on this trial that was then fixed*. `isInformativeRecord` reads
+  that field."
+- **Fork 2 sub-fork B — (a) root-cause precondition plus an explicit hysteresis gap.** Binds: "post-miss
+  trials count toward restoration only once a **root-cause note is on record in its own field**", and "The
+  post-miss bar is **strictly higher** than the cold-start bar (`minCleanStreak + k`…)".
+- **Fork 3 — (a) mechanical demotion, operator-gated promotion.** Binds: "Demotion is computed from the data
+  and takes effect immediately. Promotion to a lighter level requires an **explicit ratified act** naming the
+  triples being promoted."
+- **Fork 4 — (a) mechanical routing binds the mechanical dispatch path only.** Binds: "An **interactive**
+  orchestrating loop keeps its inline routing verdict under `#model-routing` Inline (3) and
+  `#effort-routing`; the router may inform that verdict but does not replace it."
+- **Fork 5 — (a) shallower, never absent, stated provider-neutrally.** Binds: "Layer 2 keeps **full
+  coverage** and moves only in **depth**: at `full`, a full independent review before landing; at
+  `spot-check`, #3313's own floor shape."
+
+**What this ratification does NOT do.**
+
+- It does **not** turn supervision enforcement on. `WE_DISPATCH_SUPERVISION_ENFORCE` stays off; the routing
+  build [#3717](/backlog/3717-choose-the-dispatch-provider-mechanically-from-fixed-criteri/) keeps the gate
+  behind that switch. Turning it on is filed as its own design-first story,
+  [3784](/backlog/3784-turn-dispatch-supervision-enforcement-on-now-that-3690-is-rat/).
+- It does **not** change any threshold value. `DEFAULT_BACKDOWN_THRESHOLDS` in
+  we:scripts/lib/provider-routing.mjs is untouched; N and `k` stay for an ordinary batched finding.
+- It builds none of the code the forks imply (the `informative` field, the root-cause field and post-miss
+  bar, the ratified promotion list, the corrected router header). Those are open questions on 3784's
+  design section. The two items the prepare pass already filed are unchanged: `3782` (the scratch clone's
+  real-remote `origin`) and `3783` (the concurrent-baseline harness).
+
 ## Done when
 
 1. **Executable** — `node we:scripts/conveyor/log-delegation-trial.mjs --help` exits 0 (failed before this
@@ -834,3 +882,6 @@ card. Since 2026-09-19 that computation is also available directly as `selectSup
 3. **Prepared, not ruled (2026-09-20).** Five forks are authored to the prepared-fork shape with bold
    defaults, a research topic is published, and `preparedDate` is set — so readiness tags this
    `✓ ready to ratify`. The call remains the operator's.
+4. **Ratified (2026-09-21).** The operator ratified every fork as prepared; the ruling is recorded above,
+   codified at `we:docs/agent/platform-decisions.md#delegation-trial-record-graduation` (`codifiedIn`), and
+   the card is resolved through the `resolve` operation. Item 2 above is superseded by this.

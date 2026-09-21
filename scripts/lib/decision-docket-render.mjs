@@ -15,30 +15,48 @@
  * failure `skills-src/decision-docket/SKILL.md` documents happened to the last two hand-built revisions.
  */
 
+import { renderMarkdown, renderMarkdownBlocks, renderMarkdownInline } from './decision-docket-markdown.mjs';
+
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
 
 /**
- * Minimal, deterministic inline-markdown → HTML for the prose fragments extracted out of a backlog item's own
- * body (option text, skeptic/screen verdicts, digest paragraphs). Escapes first, then converts ``code``,
- * **bold**, *italic*. A markdown link `[text](url)` renders as its visible TEXT only (this is a standalone
- * published page, not a place the source repo's relative backlog paths resolve) — dropping the href is a
- * deliberate, deterministic choice, not a parsing failure.
+ * Inline markdown → HTML for one-line fields (titles, fork cruxes, the footer's own strings). Thin alias over
+ * the shared renderer — see `decision-docket-markdown.mjs` for the rules (real markdown-it grammar, HTML in the
+ * source escaped, relative links reduced to their visible text). Kept as a named export for existing callers.
  * @param {string} s
  * @returns {string}
  */
 export function mdInline(s) {
-  let t = escapeHtml(s);
-  t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
-  t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Non-greedy `.+?` (not `[^*]+`) — a **bold** span routinely contains a nested *italic* word (single
-  // asterisks), and requiring "no asterisk at all" inside the bold match would refuse to match those spans at
-  // all, leaving the raw `**` markers in the rendered output.
-  t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>');
-  return t;
+  return renderMarkdownInline(s);
+}
+
+/**
+ * A text field that may hold block markdown, placed in its own styled container: a lone plain paragraph keeps
+ * the container as `<p class="…">` (byte-for-byte the old markup); anything with a list, blockquote, code fence,
+ * heading, table or several paragraphs becomes `<div class="…">` — block HTML is never nested inside a `<p>`.
+ * @param {string} src
+ * @param {string} cls
+ * @returns {string}
+ */
+function mdContainer(src, cls) {
+  const { html, flow } = renderMarkdown(src);
+  if (!html.trim()) return '';
+  return flow ? `<div class="${cls}">${html}</div>` : `<p class="${cls}">${html}</p>`;
+}
+
+/**
+ * A generator-authored warning message, as HTML. It is plain text, not markdown — but it quotes markdown
+ * SYNTAX as literal samples ("- **(a)** …", "## Fork N"). Those double-quoted spans are shown as code, so the
+ * markers read as a sample of the syntax being described rather than as broken formatting; everything else is
+ * escaped verbatim.
+ * @param {string} text
+ * @returns {string}
+ */
+function renderWarning(text) {
+  return escapeHtml(text).replace(/&quot;([^&]*?)&quot;/g, '<code>$1</code>');
 }
 
 /** Age → the docket's three-way bucket + row class, mirroring the past docket's own convention. */
@@ -76,7 +94,7 @@ function renderOption(opt) {
   const mark = opt.kind === 'default' ? '✓ Default' : opt.kind === 'rejected' ? '✕ Rejected' : '○ Option';
   return `<div class="opt ${cls}">
             <div class="opt-lbl">${mark} — ${escapeHtml(opt.label)}</div>
-            <div class="opt-bd">${mdInline(opt.body)}</div>
+            <div class="opt-bd">${renderMarkdown(opt.body).html}</div>
           </div>`;
 }
 
@@ -88,7 +106,24 @@ function optsWidthClass(count) {
 
 function renderNote(note) {
   if (note.kind === 'code') return `<pre><code>${escapeHtml(note.text)}</code></pre>`;
-  return `<p>${mdInline(note.text)}</p>`;
+  return renderMarkdownBlocks(note.text).trim();
+}
+
+/**
+ * The closing Skeptic/Screen verdict line. Both parts are usually one plain paragraph each (kept as the single
+ * mono `<p class="attack …">` line); if either holds block markdown (a list, a code fence) the line becomes a
+ * `<div>` with each verdict in its own block instead.
+ */
+function renderVerdicts(fork, attackClass) {
+  const parts = [];
+  if (fork.skeptic) parts.push({ label: 'Skeptic', ...renderMarkdown(fork.skeptic) });
+  if (fork.screen) parts.push({ label: 'Screen', ...renderMarkdown(fork.screen) });
+  if (!parts.some((p) => p.flow)) {
+    return `<p class="attack ${attackClass}">${parts.map((p) => `<b>${p.label}:</b> ${p.html}`).join(' &nbsp;·&nbsp; ')}</p>`;
+  }
+  return `<div class="attack ${attackClass}">${parts.map((p) => (p.flow
+    ? `<div><b>${p.label}:</b></div>${p.html}`
+    : `<div><b>${p.label}:</b> ${p.html}</div>`)).join('')}</div>`;
 }
 
 function renderFork(fork) {
@@ -104,7 +139,7 @@ function renderFork(fork) {
   if (!fork.parseOk) {
     return `
         <div class="forkhd"><span class="forktag">FORK ${fork.n}</span> ${mdInline(fork.crux || '')}</div>
-        <p class="attack flagged"><b>Parse incomplete:</b> ${escapeHtml(fork.warning || 'this fork did not match the documented prepared-fork shape.')} Read this fork directly in the item's own file — the extracted text is not shown here rather than risk a garbled or misleading render.</p>`;
+        <p class="attack flagged"><b>Parse incomplete:</b> ${renderWarning(fork.warning || 'this fork did not match the documented prepared-fork shape.')} Read this fork directly in the item's own file — the extracted text is not shown here rather than risk a garbled or misleading render.</p>`;
   }
 
   const optsHtml = fork.options.map(renderOption).join('\n          ');
@@ -117,12 +152,10 @@ function renderFork(fork) {
   const screenText = (fork.screen || '').trim();
   const skepticText = (fork.skeptic || '').trim();
   const attackClass = /^flagged/i.test(screenText) ? 'flagged' : /^REFUTED/i.test(skepticText) ? 'refuted' : 'clear';
-  const skepticScreen = (fork.skeptic || fork.screen)
-    ? `<p class="attack ${attackClass}">${fork.skeptic ? `<b>Skeptic:</b> ${mdInline(fork.skeptic)}` : ''}${fork.skeptic && fork.screen ? ' &nbsp;·&nbsp; ' : ''}${fork.screen ? `<b>Screen:</b> ${mdInline(fork.screen)}` : ''}</p>`
-    : '';
+  const skepticScreen = (fork.skeptic || fork.screen) ? renderVerdicts(fork, attackClass) : '';
   return `
         <div class="forkhd"><span class="forktag">FORK ${fork.n}</span> ${mdInline(fork.crux || '')}</div>
-        ${fork.why ? `<p class="forkwhy">${mdInline(fork.why)}</p>` : ''}
+        ${fork.why ? mdContainer(fork.why, 'forkwhy') : ''}
         <div class="opts${optsWidthClass(fork.options.length)}">
           ${optsHtml}
         </div>
@@ -132,7 +165,7 @@ function renderFork(fork) {
 
 function renderDoneWhen(doneWhen) {
   if (!doneWhen.length) return 'See the item\'s own <code>## Done when</code> section.';
-  return mdInline(doneWhen[0]);
+  return renderMarkdownBlocks(doneWhen[0]).trim();
 }
 
 /** The item's id, safe to use as an HTML `id`/fragment target (`#item-<num>`) — nums are plain digits today,
@@ -144,11 +177,11 @@ function anchorId(item) {
 function renderCard(item) {
   const forksHtml = item.forks.map(renderFork).join('\n');
   const digestHtml = item.digest.length
-    ? item.digest.map((p) => `<p>${mdInline(p)}</p>`).join('\n        ')
+    ? item.digest.map((p) => renderMarkdownBlocks(p).trim()).join('\n        ')
     : '<p><em>No digest paragraph could be extracted from this item\'s body.</em></p>';
   const topWarning = item.parseOk
     ? ''
-    : `<p><strong>Parse incomplete</strong> — ${escapeHtml((item.warnings || []).join(' ') || 'this item\'s forks did not match the documented prepared-fork shape.')} Ratify from <code>backlog/${escapeHtml(item.num)}-*.md</code> directly until this is fixed.</p>`;
+    : `<p><strong>Parse incomplete</strong> — ${renderWarning((item.warnings || []).join(' ') || 'this item\'s forks did not match the documented prepared-fork shape.')} Ratify from <code>backlog/${escapeHtml(item.num)}-*.md</code> directly until this is fixed.</p>`;
   // Every card here IS a prepared item with full fork detail by construction (only `prepared` items reach
   // `renderCard` at all — see renderDocketHtml below), so `data-status`/`data-detail` are fixed; only the age
   // bucket varies per item. These mirror the summary table's own filter attributes so the SAME toolbar filters
