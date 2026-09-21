@@ -33,6 +33,10 @@ Only 1-2 of about 70 lanes read acquirable on 2026-09-19. Two defects, both conf
 
 Lane capacity is step 1 of the landing trigger (#3720): its budget is "free acquirable lanes". A dispatcher that under-counts lanes throttles itself, and a maintenance command that dies on one lane leaves the pool stale, which is what marked the lanes busy in the first place.
 
+## Finding (2026-09-21): a lane count is not capacity
+
+This card makes `list --acquirable` count lanes correctly. That number feeds the dispatch plan as `freeLanes`, but the ceiling it is compared against (#3612) should be a weighted budget by dispatch kind (review 0.25, light task 0.5, prepare 1.0, build 1.5, calibration exclusive; provisional, set from the sampler's per-kind rollup; see the finding on #3612). Keep the two numbers separate: lanes available (this card) and budget remaining (#3612). A planner that reads only `freeLanes` would admit a full house of builds into lanes that happen to be free. Re-evaluation of the weights is tracked on card xukmbh0.
+
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/lib/__tests__/lane-lease.test.mjs` (plus a `we:scripts/lane-pool.mjs` CLI test if the existing suite has a harness for it) has cases that fail before and pass after: a lane whose HEAD is provably on origin but ahead of a stale local ref counts as acquirable in `list --acquirable`; an unreachable remote keeps such a lane not-acquirable; `refresh --lane=3` touches only lane 3; a fetch failure on one lane still refreshes the others and ends with a non-zero exit.

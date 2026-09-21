@@ -26,6 +26,10 @@ The reconcile path dispatches one review per owed PR with no admission check. Re
 - A caller-supplied budget wins when smaller: `land-advance` (#3720) computes one budget up front and passes it down.
 - Do not add a load-average gate here; that lives in `land-advance` (#3720) as its one new rule. If the operator wants load-awareness for every caller, it belongs inside `we:scripts/lib/lane-concurrency.mjs` and is a separate call, not folded in silently.
 
+## Finding (2026-09-21): reviews and fixes should weigh less than builds under the shared ceiling
+
+When review and fix dispatch join the shared ceiling, they should not count as one lane each. The operator's ruling (2026-09-21) is a different cap per type of lane: a review that launches no heavy commands takes very little capacity compared with a build lane that runs tests repeatedly. The provisional weights are review 0.25, light task 0.5, prepare 1.0, build 1.5 (fix runs tests repeatedly, so it weighs as a build), calibration exclusive, against a budget of 6 units; they are to be set from the sampler's per-kind rollup (see the finding on #3612). Counted as whole lanes, a burst of re-armed reviews would be throttled as hard as a burst of builds, which is the opposite of the intent. `review-dispatch` and `reconcile-fix-dispatch` should therefore read the remaining budget in units and pass their kind's weight, not a count. Tracked for re-evaluation on card xukmbh0.
+
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-dispatch.test.mjs we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs` carry cases that fail before and pass after: with the ceiling at 3 and 2 live sessions, ten owed reviews dispatch exactly one and report nine deferred; at the ceiling, none dispatch and none error; a smaller caller budget is honoured.
