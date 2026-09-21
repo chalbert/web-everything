@@ -4277,3 +4277,21 @@ Proposals A, B and D of card #3768 are applied on this branch as commits 5b18277
 **Not verified here:** graduation of the renamed cards was not run, and the merge of main into the branch was not tried (card #3772 owns that policy; B had to land first, and it has).
 
 Owed: the operator decides the merge-or-rebase policy for main (#3772) now that the branch gate is at 0; the recurrence guard from #3768 (design item 6) is still open, and so are the authorship note (215 commits under the machine's `test` git name) and #3475's three line-range warnings.
+
+## Session update (2026-09-20) — six more design-first stories filed and one folded (PR #2361 merged 2026-09-21T00:22Z, uncleared): #3776 to #3781, state pass, clone sync, ordered list, handoff generation, reply format, dead session rows
+
+PR #2361 (merged 2026-09-21T00:22Z) filed six uncleared design-first stories under this epic and edited two existing cards. Facts were checked in code or live; the cards say where they were not. The drain gave the cards their numbers at land, and the `## Priority order` section now carries them (prototype commit 645be0fe8).
+
+**Filed (number, size):** #3778 start-of-session state pass (5); #3781 read-only operations and the clone they read from (3); #3777 epic-scoped ordered list (3); #3779 handoff generation (5); #3780 session reply and report format (3); #3776 dead session rows never removed (3). Hash ids were xbff6in, xwhog5t, x9ysq9r, xde32mt, xglfuua and x9e1zpy in that order.
+
+**Folded:** the deployed session-command drift is folded into #3767 (design point 5 and acceptance item 6) instead of a sibling card.
+
+**Overlaps named in the cards:** #3778 with #3775 (leans toward extending it, so it is ordered after it); #3781 with #3474, #3752 and #3748; #3777 with #3213, #3736 and #3740; #3779 with #3759; #3776 with #3744 and #3756.
+
+**Also:** #3742 gained a dated second sighting with its cause (the operation reports complete on a verify-red refusal, and cannot express the no-require-verified opt-out).
+
+**Two facts from landing it:**
+- PR #2360 (the `/wip` command tracked in source, card #3767) is OPEN with `review:pending`; the drain lands it.
+- `open-pr` and `we:scripts/pr-land.mjs` with `--no-require-verified` were needed because local verification is red only on the known `container-exec` test (`we:scripts/lib/__tests__/container-exec.test.mjs`). It needs the image `we-heavy-admission:poc`, a local proof-of-concept image that is in no registry, and the test does not skip itself when the image is absent.
+
+**Not verified here:** that `claude rm` removes the row or the transcript (help text only, not run); that the 13 scoped rows hidden by the 50-row cap of the ranker include #3768 to #3771, #3775 and #3756.
