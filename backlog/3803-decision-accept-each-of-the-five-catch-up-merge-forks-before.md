@@ -1,8 +1,9 @@
 ---
+bornAs: xdqy6xk
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["3772", "3443", "xki1xap", "x9wdxlh"]
+relatedTo: ["3772", "3443", "3804", "3802"]
 scope: ["we:skills-src/conveyor/runner.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-21"
 tags: []

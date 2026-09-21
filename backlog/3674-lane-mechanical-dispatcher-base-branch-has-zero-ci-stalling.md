@@ -21,7 +21,7 @@ This is not a one-off: it will stall every future PR targeting this base branch 
 
 ## Finding (2026-09-21): the fork is now a decision card
 
-The two candidate fixes above, plus a third (neither: no pull requests against the prototype), are filed as decision card xxpu8tm, `relatedTo` this card and #3653. Re-verified today: the branch is still unprotected (404), its tip has 0 check-runs, `we:scripts/merge-ai-prs.mjs` still defaults `requiredCheck = 'test'`, and no pull request has been opened against the base since 2026-09-15 (the operator's ruling made the direct push the delivery path). Do not build either fix before that card is ruled.
+The two candidate fixes above, plus a third (neither: no pull requests against the prototype), are filed as decision card 3805, `relatedTo` this card and #3653. Re-verified today: the branch is still unprotected (404), its tip has 0 check-runs, `we:scripts/merge-ai-prs.mjs` still defaults `requiredCheck = 'test'`, and no pull request has been opened against the base since 2026-09-15 (the operator's ruling made the direct push the delivery path). Do not build either fix before that card is ruled.
 
 ## Done when
 

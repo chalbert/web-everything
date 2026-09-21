@@ -138,7 +138,7 @@ Each has one coherent branch or is settled by precedent.
   The drain knows its own recipe, so it checks its *input*, not a replay of its output.
 - **Who verifies and where it is recorded (settled by precedent).** The drain decides, inside the one
   staleness authority `decideReviewGate` (#2409), and records through the existing re-stamp path
-  `we:scripts/review-set-label.mjs --to=restamp` (#x5e2ldj). The pusher never certifies its own push. The carry
+  `we:scripts/review-set-label.mjs --to=restamp` (#3200). The pusher never certifies its own push. The carry
   writes its own durable comment with its own heading, so it never reads as a fresh review. Because a carry
   always runs over a live acceptance, `writeOrder` (we:scripts/lib/review-label-provider.mjs:165-167) is
   swap-first there; the "swap" adds nothing (the label is already on), so the comment is the whole record.

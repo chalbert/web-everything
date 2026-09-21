@@ -15,7 +15,7 @@ FOUND 2026-09-20. The reaper reports stopped for dead-process sessions but 28 ol
 
 ## Finding (2026-09-21): built on the prototype; graduation is a decision card
 
-The fix is built and pushed on the prototype branch only (`e0165b4e9`: one registry re-read after a 5 second wait, confirmed, unconfirmed and already-terminal counted apart, terminal sessions never re-stopped; the reaper test set went from 221 to 249 passing). It lives in the split stop module (`we:scripts/conveyor/session-reap-stop.mjs`), which `main` does not have, so this card stays open until the reaper reaches `main`. How it graduates (the pure planner first, the whole reaper together, or never) is decision card x9wdxlh, `relatedTo` this card and #3443.
+The fix is built and pushed on the prototype branch only (`e0165b4e9`: one registry re-read after a 5 second wait, confirmed, unconfirmed and already-terminal counted apart, terminal sessions never re-stopped; the reaper test set went from 221 to 249 passing). It lives in the split stop module (`we:scripts/conveyor/session-reap-stop.mjs`), which `main` does not have, so this card stays open until the reaper reaches `main`. How it graduates (the pure planner first, the whole reaper together, or never) is decision card 3802, `relatedTo` this card and #3443.
 
 ## Done when
 

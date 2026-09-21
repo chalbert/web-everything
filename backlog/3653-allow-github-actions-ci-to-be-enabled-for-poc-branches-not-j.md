@@ -29,7 +29,7 @@ real, automated CI gate on their own PRs.
 
 ## Finding (2026-09-21): whether to do this at all is now a decision card
 
-Whether the prototype gets CI on its pull requests, or the drain's required check changes instead, or neither (no pull requests against the prototype), is decision card xxpu8tm, `relatedTo` this card and #3674. Both workflow files still trigger on `main` only, and no pull request has been opened against the prototype since 2026-09-15; hold this card until that ruling.
+Whether the prototype gets CI on its pull requests, or the drain's required check changes instead, or neither (no pull requests against the prototype), is decision card 3805, `relatedTo` this card and #3674. Both workflow files still trigger on `main` only, and no pull request has been opened against the prototype since 2026-09-15; hold this card until that ruling.
 
 ## Done when
 
