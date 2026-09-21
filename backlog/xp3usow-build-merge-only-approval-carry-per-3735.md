@@ -86,6 +86,35 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
      `--to=restamp --expect-head=H1` refuses, nothing is stamped, and the next pass judges H2 from scratch. A
      restamp with no `--expect-head` also refuses.
    - The carry comment records both the source `reviewed-sha` and the destination head.
+   - The carry comment is written by `--to=restamp` with `--actor=drain`, under its own heading, never under the
+     PR author's or the pusher's actor (rule 9).
+   - The carry comment names the original clearer: the actor of the acceptance it carries from (rule 9).
+   - The pusher is the PR author: the author merges main and pushes; the carry comment's actor is `drain`, and
+     no comment written for the carry names the author as the one who certified it (rule 9, "the pusher never
+     certifies its own push").
+   - The carry's restamp call gets `--expect-head=<the head the walk started from>`, the head the proof
+     reached (rule 8).
+   - The carry is decided inside `decideReviewGate`: a test through `decideReviewGate` (not `mergeOnlyCarry`
+     alone) on the #2365 replay returns the carry route (rule 9).
+   - A single-parent commit whose message reads "Merge branch 'main'" and whose tree equals a clean merge of
+     main: no carry (rule 1, "a commit message, a commit's shape or its pusher proves nothing").
+   - Two successive clean merges of main with no file overlap: carries (rule 1, the walk crosses a chain).
+     Same chain, but only the second merge's main side touches a PR file: re-parks (rule 4, checked per merge).
+   - A clean merge of main followed by an author commit on top (the non-merge commit is the live head): re-parks
+     (rule 2, "anywhere on the path").
+   - A `rebaseDropManifest` merge whose merged lane tip is covered by the acceptance: still re-stamps (rule 5,
+     the positive side of "only when").
+   - The same merge-only push on a PR cleared by `--to=clear-human` and on one accepted by `--to=accepted`:
+     both carry (rule 6, "follow the same rule").
+   - A `reviewed-sha` that cannot be resolved in the drain's clone (unknown object): no carry, and the gate's
+     decision equals its decision with the carry route removed (rule 7).
+   - Hermetic replay: the replay's git argv carries `-c rerere.enabled=false`, `-c merge.renames=true` and
+     `-c attr.tree=<empty tree>`, and no `-X` or `-s` option (rule 3).
+   - Hermetic replay: the drain's clone has a custom merge driver configured (`merge.<name>.driver` in its git
+     config, selected by its `info/attributes`) that would make a conflicting same-file edit merge cleanly: the
+     replay still conflicts, so the PR re-parks (rule 3, "no configured merge drivers").
+   - Hermetic replay: the drain's clone sets `merge.renames=false`; the replay's result equals the result with
+     git's default (rule 3, rename detection pinned).
    - Hermetic replay: a PR adding `.gitattributes` with `merge=union` on a file, plus a same-file main edit
      merged by the author with the union driver: re-parks — once with the file test on, and once with it
      bypassed, proving the replay (`attr.tree` = empty tree) conflicts on its own.
@@ -95,5 +124,7 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
      carry comment contains `cleared-human`. A comment with `carried-human-from` alone never suppresses the
      anti-test-tampering re-park.
    - A read failure: no carry, no revocation, retried next pass.
-   - Missing acceptance, a review hold, or `review:changes`: the carry refuses.
+   - Missing acceptance, a review hold, or `review:changes`: the carry refuses. One case per condition: no
+     `review:accepted`; `review:human` present; `review:changes` present (rule 9, "a carry never creates an
+     acceptance").
 2. **Executable** — `npm run check:standards` reports 0 errors.

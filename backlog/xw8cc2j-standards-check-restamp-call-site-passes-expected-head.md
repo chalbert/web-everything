@@ -38,5 +38,6 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
 ## Done when
 
 1. **Executable** — a check-standards rule test asserts a fixture spawning `--to=restamp` without
-   `--expect-head` is reported, and one with it is not.
+   `--expect-head` is reported, and one with it is not. A fixture passing a literal empty value
+   (`'--expect-head='`) is also reported (rule 8, "required").
 2. **Executable** — `npm run check:standards` reports 0 errors on the tree.

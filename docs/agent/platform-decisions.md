@@ -5016,11 +5016,13 @@ a second approval (#2365, #2347). The rule:
    any error means **no carry**, and the gate judges the head as if no carry route existed.
 8. **The stamp is bound to the proven head.** `we:scripts/review-set-label.mjs --to=restamp` takes
    `--expect-head=<full sha>`, **required** for a restamp: it refuses (non-zero exit, no comment, no label
-   move) when the flag is missing or the live head differs from it. The carry passes the head its proof
-   reached; the drain's own rebase passes the commit it pushed. The `reviewed-sha` marker the restamp writes
-   **is** the `--expect-head` value, never a re-read of the live head: comparing the head and then stamping a
-   second read would reopen the same race. The carry comment records both the source `reviewed-sha` it
-   carries from and the destination head it stamps.
+   move) when the flag is missing, is not a full 40-hex SHA (a prefix refuses), or the live head differs from
+   it. The carry passes the head its proof reached; the drain's own rebase passes the commit it pushed. The
+   `reviewed-sha` marker the restamp writes **is** the `--expect-head` value, never a re-read of the live head:
+   comparing the head and then stamping a second read would reopen the same race. The same holds for every
+   other head-derived marker it writes: `reviewed-diff` and `reviewed-contribution` are computed from the
+   `--expect-head` commit, never from a live fetch of the branch, or the restamp refuses. The carry comment
+   records both the source `reviewed-sha` it carries from and the destination head it stamps.
 9. **Who verifies, and where it is recorded.** The drain decides, inside the one staleness authority
    `decideReviewGate` (`#2409`), and records through the existing re-stamp path (`--to=restamp`) with its own
    comment heading, stamped `--actor=drain` and naming the original clearer. The pusher never certifies its own
