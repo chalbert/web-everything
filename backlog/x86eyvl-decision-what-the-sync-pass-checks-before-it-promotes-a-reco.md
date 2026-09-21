@@ -40,6 +40,9 @@ This card does NOT reopen #3804. The ratified promotion (point 2 of `#poc-branch
 - **(a) Add this fourth line to the Fork 3 spec — recommended.** It is raised only when the operator must act, like the other two, and it names the files.
 - **(b) Reuse the `gate-red` line.** Rejected: its next step, "fix the tests", is wrong when the tests pass, and it hides that the pass refused a green run.
 
+**Skeptic:** SURVIVES-WITH-AMENDMENT → applied. Merit attack on (c): it does not stop the exact case the advisory review leads with, an assertion weakened inside a conflicting test file. Accepted: now named as (c)'s residual risk, with the brief rule and the graduation review as its cover; (b) is the option that closes it, at the cost stated in its rejection. Classification attack: this is a build detail of #3607. Refuted: each option changes what reaches the shared branch without a person and whether the operator gets a new alert, which the operator sees. *Inline, this session's own attacks; no independent `judgePanel` run.*
+**Screen:** clear. Policy the pipeline and the operator see; the file lists are examples, the exact globs are the build's.
+
 ## Done when
 
 1. **Executable** — `grep -l '^## Ruling' backlog/*what-the-sync-pass-checks-before-it-promotes*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for Fork 1 and, if (b) or (c), its sub-fork).
