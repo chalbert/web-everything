@@ -1,0 +1,19 @@
+{
+  "id": "dispatch-routing-build-review",
+  "title": "Reviewing the five choices the #3717 dispatch-routing build made: routing stage, unproduced task types, role dispatches, unsized cards and the provider override, grounded against lane/mechanical-dispatcher",
+  "status": "open",
+  "summary": "Grounds decision #3801, the review of the five open choices the #3717 build made when it wired the provider router into the prototype branch's dispatch path. Re-verified 2026-09-21 on the branch tip 5ab89f87b. THE LOAD-BEARING FINDINGS: (1) the build's 'every route resolves to Claude' is a drift artifact: the 26 session-delegation trials exist only on main, and fed main's file the branch's own decideDispatchRoute routes a small fix to codex and a conflict fix to antigravity, both at a spot-check produced by the dispatch path's placeholder risk thresholds (a streak of 2, no positive control), against the ratified bar and promotion rules; (2) the override inherits the router's supervision level across providers, and executed is a constant claude even when the per-item deliveryAgent marker makes Codex deliver; (3) tasks are unsized by the backlog's own rule, so the build's 'unknown size reads as 900 lines' reads every task as the largest band; (4) supervision enforcement as built would hold every code-change dispatch, because no route names a supervisor. PRIOR ART: Kubernetes LimitRange applies an owner-set default only when a container declares nothing; Twelve-Factor keeps per-deploy config in the environment, which is why a per-item routing override does not belong there; GitHub Actions workflow_dispatch binds declared, typed inputs to one run. RESHAPES: keep the build's choice on the routing stage, the unproduced task types and role dispatches; keep the 900-line read for now and make a task's estimate a table row set later from measured task diffs (a skeptic pass refuted reading a task as 80 lines); make the ratified deliveryAgent marker, with a required reason, the one override and retire both process-wide variables; and three fixes settled by statute (supervision per executing triple, executed from the spawned vendor, routed never overwritten).",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "conveyor",
+    "dispatch",
+    "provider-routing",
+    "delegation",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}

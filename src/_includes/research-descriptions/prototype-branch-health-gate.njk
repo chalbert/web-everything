@@ -1,0 +1,70 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3768-prototype-branch-health-check-standards-fails-with-15-errors/">#3768</a> is line 1 of
+epic #3383's Priority order: nothing graduates from the prototype branch <code>lane/mechanical-dispatcher</code>
+to <code>main</code> until <code>check:standards</code> is clean on its tip. It asks where errors are fixed, who
+owns them, how a recurrence is stopped, and how that is ordered with the catch-up merge from <code>main</code>
+(#3804). The full working is in
+<a href="/reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md">the session report</a>.</p>
+
+<h2>Measured on 2026-09-21, branch tip 5ab89f87b</h2>
+
+<ul>
+  <li><code>check:standards</code>: 1 error, 1814 warnings. The card was filed at 15 errors on 2026-09-20.</li>
+  <li>The 15 were fixed on the branch on 2026-09-20, on the operator's approval. 11 came from drift (both drains
+    numbered cards on their own after the merge base); 4 were branch-only.</li>
+  <li>The one new error is a branch-only tracker note: the Artifact URL's 22-character id trips the secret
+    detector. It is not a credential.</li>
+  <li>The branch's only landing gate is <code>verify-lane</code> (through <code>poc-land</code>). Its
+    <code>check:standards</code> half is scoped, but on a branch lane it falls back to the whole tree, because the
+    diff always contains <code>backlog/</code> files. So one error anywhere fails every landing, and work then reaches the
+    branch by direct push with no gate.</li>
+  <li>497 commits only on <code>main</code>, 256 only on the branch, 59 conflicting files. A local trial merge
+    that takes the branch's side of every conflict leaves two modules broken, so the error count after a
+    catch-up cannot be predicted.</li>
+</ul>
+
+<h2>Prior art</h2>
+
+<ul>
+  <li><strong>Keep the shared line always passing, mechanically.</strong> Graydon Hoare's "not rocket science
+    rule": "automatically maintain a repository of code that always passes all the tests". (The original post
+    returned 403 on 2026-09-21; the line is quoted from a secondary citation.)</li>
+  <li><strong>A named owner keeps the tree green.</strong> Chromium's tree sheriffs: "A sheriff's responsibility
+    is to keep the Chromium main and branches green (tests are passing on all platforms) and open (changes can
+    land)" (chromium.org, Tree Sheriffs).</li>
+  <li><strong>Refuse at push time.</strong> git's pre-push hook "can be used to prevent a push from taking place";
+    "If this hook exits with a non-zero status, git push will abort without pushing anything" (git-scm.com,
+    githooks).</li>
+  <li><strong>A ratchet lets only new violations fail.</strong> Betterer "makes it easier to make incremental
+    improvements to your codebase" (Betterer README). A ratchet suits a large legacy backlog of errors; here the
+    backlog is one error, so a ratchet would only hide the next one.</li>
+</ul>
+
+<h2>How the research reshaped the forks</h2>
+
+<ul>
+  <li>The card's filed design points 1 to 4 are already done; authorship is settled by the no-rewrite rule.</li>
+  <li><strong>Fork 1:</strong> fix on the branch and keep the tip at 0, because the tip's health is the branch's
+    only landing gate.</li>
+  <li><strong>Fork 2:</strong> ownership is split by cause. <code>check:standards</code> reads <code>main</code>, so
+    <code>main</code> moving creates errors with no push. A push owns errors in its own files; drift reconciliation
+    owns the rest. (A skeptic pass refuted the first draft, which put every error on the pusher.)</li>
+  <li><strong>Fork 3:</strong> a pre-push guard refuses what a push adds, and a runner-tick probe finds the rest,
+    because the hook can be skipped.</li>
+  <li><strong>Fork 4:</strong> today's error is fixed by rewording the note, not by exempting Artifact URLs from
+    the secret detector.</li>
+  <li><strong>Order with the catch-up (#3804):</strong> not a fork. Today's error is branch-only, so fixing it now
+    is never redone; the catch-up merge's own done-bar includes 0 errors.</li>
+</ul>
+
+<h2>Sources</h2>
+
+<ul>
+  <li>chromium.org/developers/tree-sheriffs/ (fetched 2026-09-21)</li>
+  <li>git-scm.com/docs/githooks (fetched 2026-09-21)</li>
+  <li>github.com/phenomnomnominal/betterer (fetched 2026-09-21)</li>
+  <li>graydon2.dreamwidth.org/1597.html (not fetched: 403; quoted from a secondary citation)</li>
+</ul>
+{% endraw %}
