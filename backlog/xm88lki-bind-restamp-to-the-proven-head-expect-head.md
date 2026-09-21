@@ -41,6 +41,10 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
 1. **Executable** — a test in the review-set-label suite asserts that `--to=restamp` with no `--expect-head`
    exits non-zero and writes no comment and moves no label, and that `--to=restamp --expect-head=H1` against a
    live head H2 refuses the same way (fails today: the flag does not exist and the restamp succeeds).
-2. **Executable** — a test in the merge-ai-prs suite asserts `restampAcceptance` passes
+2. **Executable** — a test in the review-set-label suite asserts that a successful `--to=restamp
+   --expect-head=H1` writes `reviewed-sha: H1`, even when the mocked live-head read returns H1 on the first
+   call and a different head H2 on any later call: the marker is the `--expect-head` value, never a re-read of
+   the live head (rule 8 of we:docs/agent/platform-decisions.md#merge-only-push-approval-carry).
+3. **Executable** — a test in the merge-ai-prs suite asserts `restampAcceptance` passes
    `--expect-head=<newHead>` to the child.
-3. **Executable** — `npm run check:standards` reports 0 errors.
+4. **Executable** — `npm run check:standards` reports 0 errors.
