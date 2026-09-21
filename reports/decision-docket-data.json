@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-21T17:49:08.289Z",
+  "generatedAt": "2026-09-21T20:53:10.700Z",
   "generatedFromRef": "origin/main",
   "targetCount": null,
   "counts": {
-    "open": 87,
-    "prepared": 48,
-    "inReview": 1
+    "open": 93,
+    "prepared": 54,
+    "inReview": 3
   },
   "items": [
     {
@@ -1268,6 +1268,728 @@
       "forks": [],
       "gate": null,
       "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3817",
+      "title": "Decision: how leased and dirty lanes are recovered, and the live-lease invariant (#3815)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 1001,
+      "directUnblocks": 1,
+      "transitiveUnblocks": 1,
+      "unblocksToReady": 1,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule how the lane pool recovers from leases that outlive their work and from lanes left dirty by abandoned work. Story #3815 (filed as `3815`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3815 stays the build card and is blocked by this one. **The options and the proposed default are copied from #3815; nothing was re-researched and the default was not changed.** #3815 also asks three open questions with no default; each is a fork below, with the least invasive option marked and the reason given."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "What this card builds",
+          "why": "*Fork-existence:* four fixes are possible and two are already filed elsewhere; the card must say which one it builds, so the same fix is not built twice and the one nothing else builds is not dropped.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**Release the lease on a refused acquire.** This is #3407. Small and local. Rejected as this card's build: it is #3407's fix, and it does nothing for the ~40 dirty lanes."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Reap a lease whose holder session has finished**, in the session reaper or in `list --acquirable`. This is #3669, extended to purpose-named sessions. Needs a liveness signal for a session that has no item number: the `claude agents` listing, or a heartbeat. Rejected as this card's build: it is #3669's fix, and it does nothing for dirty lanes."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Worker briefs end with a release.** Cheapest, but it depends on the model remembering, and the failure above happened exactly when a worker was stopped or refused mid-task. Rejected as the fix; belt and braces only."
+            },
+            {
+              "label": "(d)",
+              "kind": "default",
+              "body": "**A janitor operation for the two safe dirty classes — recommended** (#3815's proposed default). Run standing or on demand (Fork 4): salvage first (the same patch-plus-directory format the salvage folder uses), then clean and release. Refuses any lane with real uncommitted work, and any lane whose lease is live and not stale (the invariant). This is the piece nothing else builds. #3815's default in full: (a) and (b) ship as the fixes of #3407 and #3669, not here; this card builds (d), with (c) added to worker briefs as belt and braces."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT (from the PR #2400 review, recorded on #3815). The janitor's claim-flip class matches a live worker's lane; the amendment is the invariant above, now a named Done-when case on #3815.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "What \"live and not stale\" means",
+          "why": "*Fork-existence:* #3815 asks it: is \"live and not stale\" exactly `isLeaseStale` (we:scripts/lib/lane-lease.mjs) returning false, or does the janitor need a stricter signal for a purpose-named session that has no item number? #3815 states no default.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Exactly `isLeaseStale` returning false — recommended** (the least invasive: one definition, already used by the pool reaper). A lease younger than the stale window (default 240 minutes) blocks every destructive operation, whatever its session's name."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**A stricter signal for purpose-named sessions** (the `claude agents` listing, or a heartbeat). Rejected as the default: the signal does not exist yet (it is part of #3669's fix), and (a) already errs on the safe side: a live lease blocks the janitor for at most the stale window."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass; #3815 raises the question without a verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "Is each safe dirty class a closed list kept in one place",
+          "why": "*Fork-existence:* #3815 asks it: are \"one-line claim flip\" and \"known scratch file\" a closed list kept in one place? The janitor deletes work, so what counts as safe must be decided before it runs. #3815 states no default.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**A closed list in one module — recommended** (the least invasive in what it can destroy): the claim-flip shape (one `status:` line changed in one backlog card) and the scratch-file names are listed once, and anything else makes the lane \"real work\", left untouched and named in the output."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**A heuristic** (for example \"small diff, only under `backlog/` or a temp folder\"). Rejected: a heuristic widens what the janitor may delete, and a live worker's early lane can match it; salvage-first limits the loss but does not remove it."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass; #3815 raises the question without a verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 4,
+          "crux": "When the janitor runs",
+          "why": "*Fork-existence:* #3815 asks it: does the janitor run standing (a tick) or only when `list --acquirable` comes back thin? #3815 states no default.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**On demand, when `list --acquirable` comes back thin — recommended** (the least invasive: it runs only when the pool needs lanes, so the fewest destructive passes)."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Standing, on every runner tick.** Rejected as the default: it recovers lanes before anyone needs them, but runs a destructive pass many more times than needed; it can be switched on later if thin pools recur."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass; #3815 raises the question without a verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*how-leased-and-dirty-lanes-are-recovered*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the four forks).",
+        "2. #3815's `## Done when` is rewritten if the ruling picks other than Fork 1 (d), and #3815's `blockedBy` entry on this card is cleared when the ruling lands."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3819",
+      "title": "Decision: the /wip report on a phone: description source, agents, queue, planned tasks, NEXT, --full, build home, row layout (#3809)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 1001,
+      "directUnblocks": 1,
+      "transitiveUnblocks": 1,
+      "unblocksToReady": 1,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule the design forks that story #3809 prepared (PR #2398, its section \"## Design (prepared 2026-09-21)\", session `prepare-3809-design`) for making the /wip report readable on a phone. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the forks move here; #3809 stays the build card and is blocked by this one. **The forks, options and bold defaults below are copied verbatim from #3809; nothing was re-researched and no default was changed.**",
+        "**Numbering.** #3809 has seven forks, and its Fork 3 holds two sub-questions (3a, what QUEUE holds; 3b, planned tasks), each with its own options and its own default. The docket reads one default per fork, so here 3a is **Fork 3** and 3b is **Fork 4**, and #3809's Forks 4 to 7 are **Forks 5 to 8**. The content is unchanged.",
+        "Code references are to the prototype branch `lane/mechanical-dispatcher` at `5ab89f87b` (the report exists only there); backlog references are to `main` at `afd7d5118`. No `/research/` topic: the method's prior-art survey is for greenfield design, and this card changes an internal report whose shape the operator already specified (rule 4), so the grounding is the live data below, not a web survey. The requirements (four parts NEEDS YOU, RUNNING, QUEUE, NEXT; no ellipsis; `--full`) are the operator's and are on #3809; they are not forks."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Where a row's plain-words description comes from",
+          "why": "*Fork-existence:* every row needs one description, and the candidate sources disagree on wording, coverage and cost; the report must pick one order.\n\nMeasured on `main` (3785 cards): no card has a `digest` or `description` field (0 of 3785); 15 have `shortTitle`, which the lint bounds to 42 characters, 3 to 5 words (we:scripts/check-standards.mjs:1082-1091); card titles are long and technical (#3720's is 157 characters, #3725's names `list --acquirable` and `--lane`). The Priority order's rule 5 gives every #3383 line a plain-words why (`N. #card · size · band · why`, \"On-path lines say the manual step removed or the blocker cleared\", #3383 card, branch, line 36), for example line 23: \"#3725 · 3 · A · Clears: lane availability is miscounted, so dispatch launches too few or too many.\" Brief-file workers carry `input.item` and `input.brief` in their run record (the `dispatch-task` run records under the operator's coordination runs folder; 51 records, e.g. `build-3736` with `item: \"3736\"`), and 124 of 125 briefs start with a `TASK:` line. A review worker such as `review-2389` binds to a PR (we:scripts/conveyor/session-verdicts.mjs:66-73) whose title the report already holds (we:scripts/operations/wip-report.mjs:268).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "The card title, in full, wrapped. Rejected as the first choice: titles are written as specs, with code names and flags, and run 3 to 4 phone lines; kept as the fallback."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "`shortTitle`. Rejected: 15 of 3785 cards have one, and 3 to 5 words is a label, not a description."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "A new `digest` / `description` field. Rejected for now: it does not exist on any card, so it needs a filing rule and a backfill before it shows anything."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "The first sentence of the body. Rejected: bodies open with provenance, not a description (#3809 opens \"Operator (2026-09-21, from a phone; recorded as rule 4 …)\")."
+            },
+            {
+              "label": "(e)",
+              "kind": "rejected",
+              "body": "The dispatch brief's TASK line. Rejected as a primary source: only brief-file workers have one, and it is an instruction paragraph, not a description; used only to find the item."
+            },
+            {
+              "label": "(f)",
+              "kind": "rejected",
+              "body": "A model-written summary cached per item. Rejected: a model call per new item is a real cost, a cached summary goes stale when the card is re-scoped, and the module states \"Nothing here is composed by a model\" (:12)."
+            },
+            {
+              "label": "(g)",
+              "kind": "default",
+              "body": "**A fixed fallback chain, all deterministic — recommended.** For a card: its Priority-order why (with the `Clears:` / `Removes:` lead kept), else its full title. For a PR row: the card the PR names (`#NNNN` in its title or branch), else the PR title. For a session: the card its run record names (`input.item`), else the card its name names (`build-3724`, `prepare-3809-design`), else the PR it binds to, else its brief's TASK line up to the first full stop. Last resort: `no description: <why>` naming the missing source, so a row is never blank. The chain's source is shown nowhere; the test pins it per row kind."
+            }
+          ],
+          "notes": [],
+          "skeptic": "the why goes stale when priority-sync lags (\"new lines wait for a worker to write their why\", #3383 card, branch, line 24). Answer: a line with no why falls through to the title, which is never stale. The why also exists only for #3383 cards; the title covers the rest.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "What \"supervisor agent\" and \"the agent on each task\" mean in today's data",
+          "why": "*Fork-existence:* the RUNNING columns name data that is only partly real today; the report must either show what exists, or wait for data that does not exist yet.\n\nWhat exists. `pickSupervisor` takes a dispatch record's `supervisorModel`, else the transcript's last assistant model (we:scripts/operations/wip-agents.mjs:115-121). `pickExecutor` takes the dispatch record's `executor`, else a transcript scan for `codex-direct-task` / `gemini-direct-task` calls (:122-126, :75-110). Measured: 0 of the 51 dispatch records in the run store carry `supervisorModel`, 0 carry the #3717 `routedProvider`, and `executor` is always written `null` (we:scripts/operations/dispatch-lane-io.mjs:1283-1310). So \"Supervisor\" is today the session's own model, and \"Executor\" is `none` unless the session itself called Codex or Gemini. The supervision tree, which has exactly this shape (a supervisor plus tasks each with an agent), is a pure contract with no runtime caller (we:scripts/lib/dispatch-supervision-tree.mjs:62, :100, marked \"no runtime caller in slice G1\"); wiring it is the owed \"Graduation G2\" line of the #3383 Priority order (\"Owed, no card yet\").",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "Wait for the supervision tree (G2) and leave the columns out until then. Rejected: the card requires the columns now, and G2 has no card."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "Use only the #3717 routing record (`routed` / `executed`). Rejected as the only source: 0 of 51 records have it, so every row would read unknown."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**Show the best source present, in a fixed order — recommended.** Supervisor: the supervision tree's supervisor when a plan exists; else the dispatch record (`executed`, plus `(routed <provider>)` when the two differ); else the session's model from `pickSupervisor`, shortened (`opus-5`). Tasks: the tree's tasks, each with its agent, when a plan exists; else one line per delegation found (`codex <model>`); else `none (works alone)` when the transcript scan was complete, and `not known` when it was not (the existing `source: 'unknown'` vs `'transcript'` split, :125). Today every row will read `<model>` and `none (works alone)`, which is true."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "Show the session name as the supervisor. Rejected: the name is already the row's handle; it says nothing about which agent works."
+            }
+          ],
+          "notes": [],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "What QUEUE holds (#3809 Fork 3a)",
+          "why": "*Fork-existence:* the card names a QUEUE but no single queue record exists, so the report must pick which record it reads.\n\nMeasured: the clear-for-build frontmatter `buildQueued: true` is on 8 cards, all resolved, and `node we:scripts/backlog.mjs build-queue --next` prints \"build queue empty\"; the conveyor sidecar (`node we:scripts/conveyor/queue.mjs list`, the one the dispatch plan pulls from, we:scripts/readiness/dispatch-plan.mjs:501-531) is empty; the owed PR dispatches of land-advance (the report's present `## Next`, we:scripts/operations/wip-report.mjs:340-342) are real and mechanical; and the orchestrator's actual \"Queued next\" list lives as prose in the operator's handoff file (the operator ruled on 2026-09-21 that the queue source is the Priority order, not `suggest-next`).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "Parse the handoff prose. Rejected: free text, not a record; it would break on the next rewording."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "`buildQueued: true` frontmatter. Rejected: each approval would need a card edit landed by PR to `main`."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**The two mechanical queues the runner already acts on — recommended.** First the land-advance owed dispatches (review / fix / ci-heal a PR), then the items cleared in the conveyor sidecar, in Priority-order line order. Approving a NEXT row means `node we:scripts/conveyor/queue.mjs add <N>`, a command that exists. Today QUEUE will read \"empty\" — true, and it shows that the orchestrator still queues by hand (#3720, #3777). *Build note:* the sidecar path is per checkout (`resolveQueuePath`, `CONVEYOR_QUEUE_FILE` override, we:scripts/conveyor/queue-store.mjs:142-145); the report must read the runner's file, not its own checkout's."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "A new queue file written by an \"approve\" command. Rejected: a third queue beside the two the runner reads."
+            }
+          ],
+          "notes": [],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 4,
+          "crux": "Where a row's planned tasks come from, for an item not yet started (#3809 Fork 3b)",
+          "why": "*Fork-existence:* an item not yet started has no task list, so something must stand in for one.\n\nMeasured: no supervision plan records exist (Fork 2's G2 point); the delivery-agent brief's steps are the same for every item; the dispatch plan already maps each item to one outcome by card kind, scope and blockers (build, needs-slice, needs-decision, unshaped → auto-prepare, investigate; we:scripts/readiness/dispatch-plan.mjs:24-40); and the card-kind to task-type map is fixed (we:scripts/lib/dispatch-contracts.mjs:83).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "The brief's steps. Rejected: identical on every row, so they carry no information."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "The routing table's task type and provider. Rejected for QUEUE and NEXT: it names an agent, and QUEUE has no agent column by the operator's rule."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**The fixed step list of the dispatch outcome — recommended.** Build → `build, review, land`; unshaped → `prepare, build, review, land`; decision → `prepare forks, you rule`; epic → `slice first`; owed PR row → `review`, `fix` or `ci-heal`. When a supervision plan exists (after G2), its task titles replace the list. With no card data at all: `no plan yet`."
+            }
+          ],
+          "notes": [],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 5,
+          "crux": "What \"dispatchable\" means for NEXT, and how many rows (#3809 Fork 4)",
+          "why": "*Fork-existence:* the card lists skip reasons (claimed, blocked, operator decision, in flight, queued) but some of them are recorded nowhere mechanical; the report must either guess from prose or get a marker.\n\nMeasured by parsing all 135 numbered lines of the Priority order (#3383 card, branch, lines 22-210) against card status on `main` and the branch: a filter on status, claimed, band A, not an epic or decision, and open `blockedBy` leaves 49 \"dispatchable\" lines, and 4 of its first 5 are wrong. #3717 (line 6) is built on the branch (`0f1d0fb8f`) and its choices wait on decision #3801; #3656 (line 15) is built (`5ab89f87b`); #3486 (line 12) waits on #3804 per the operator's handoff; #3653 (line 2) is named by decision #3805. None of these gates is in the build card's `blockedBy`: #3801 and #3805 point back only through their own `relatedTo`. A branch commit whose subject starts `#NNNN ` marks a card as built and waiting to graduate (#3717, #3656, #3724, #3730, #3736 all have one).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "Frontmatter only. Rejected: 4 of the first 5 rows wrong today."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "Parse the why text (\"blocked on\", \"waits for\", \"follows\"). Kept as one signal, rejected as the rule: it catches #3487, #3726, #3397, #3398, #3562 but none of the decision gates."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "A report-only marker on the Priority-order line (`· held: #3801`). Rejected: a second copy of the dependency that the ranker and the dispatch plan (`openBlockers`, we:scripts/readiness/dispatch-plan.mjs:26) never read, so the two drift."
+            },
+            {
+              "label": "(d)",
+              "kind": "default",
+              "body": "**Mechanical checks plus `blockedBy` as the one gate record — recommended.** Skip a line when: the card is resolved or claimed (on `main` or the branch); its band is not A; it is an epic or decision; a `blockedBy` entry is open; a branch commit subject starts with its number (built, graduation owed); a live session or open PR binds to it; it is already in QUEUE; or its why says \"blocked on\" / \"waits for\". Decision gates become `blockedBy` entries on the gated card (#3717 → #3801, #3486 → #3804, #3653 → #3805), filed as a separate backlog change, not by this build. **Rows: the first 5**, each with its line number and why; `--full` shows 10."
+            }
+          ],
+          "notes": [],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 6,
+          "crux": "What the default view drops, and what `--full` keeps (#3809 Fork 5)",
+          "why": "*Fork-existence:* the operator asked for no long Done-since table and no internal findings; but `/wip` stamps the Done-since cursor on every run (the deployed command runs `--stamp`; we:scripts/operations/wip-report-cli.mjs:31), so a table hidden by default would silently lose what landed between two reads.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "Drop Done-since and Attention from the default view, nothing else. Rejected: with `--stamp`, landings between two default reads are never seen."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "Stamp only on `--full`. Rejected: the Done window would then grow without end on a phone-only day."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**One summary line instead of each block — recommended.** Default view, in order: the time line; NEEDS YOU; RUNNING; QUEUE; NEXT; then one line `Since 11:04: 11 PRs landed, 17 sessions finished (--full lists them)` (the 13:54 live counts); then source errors, if any. When the runner is not live, QUEUE gets one line \"the queue does not move: the runner is not live\", because that changes what the operator expects. `--full` prints everything the report prints today: the header (load, workers, runner, old PRs, queue count), Attention with its queued / gap / overdue notes, Done-since in full, the land-advance Next lines, and the docket count line. Nothing the operator relied on is removed; it moves behind `--full`."
+            }
+          ],
+          "notes": [],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 7,
+          "crux": "Where the build runs, and what graduating it would cost (#3809 Fork 6)",
+          "why": "*Fork-existence:* the card says prototype, but the report is the operator's daily view and the branch is far behind `main`; building on `main` instead is a real alternative.\n\nMeasured (`git cat-file` on `origin/main`, 2026-09-21): none of we:scripts/operations/wip-report.mjs, we:scripts/operations/wip-report-io.mjs, we:scripts/operations/wip-report-cli.mjs, we:scripts/operations/wip-report-queue.mjs, we:scripts/operations/wip-agents.mjs, we:scripts/operations/land-advance.mjs, we:scripts/conveyor/session-verdicts.mjs or we:scripts/lib/dispatch-contracts.mjs exists on `main`; we:scripts/operations/operator-queue.mjs exists only on `main` (the report reaches it through `findRoot`, we:scripts/operations/wip-report-io.mjs:40-44). The branch is 256 commits ahead of `main` and 504 behind. Decision #3804 (how the branch keeps up with `main`, and its Fork 4, when a slice may graduate) is prepared 2026-09-21 and not ruled (no `## Ruling`); graduation itself is epic #3443 (claimed).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "Build on `main`. Rejected: the report's whole import graph (eight modules) would have to graduate first, which waits on #3804."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**Build on `lane/mechanical-dispatcher`, no PR, one tracker note — recommended**, as the card already says. Graduation is not part of this card: it rides #3443 with the rest of the report after #3804 is ruled, at the cost of the eight modules above and their tests."
+            }
+          ],
+          "notes": [],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 8,
+          "crux": "How a row is laid out on a phone (#3809 Fork 7, added by its preparation)",
+          "why": "*Fork-existence:* a markdown table keeps each row on one source line, so a full, never-cut description makes the table wide; \"compact table\" and \"wrap, never ellipsis\" cannot both hold for a table row. The compact tables of #3736 stay narrow only because they cut cells to 35 characters a row (`ROW_MAX`, we:scripts/operations/wip-report.mjs:471). How the operator's phone renders a wide markdown table was **not verified** here.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "Markdown tables with full cells. Rejected: the width then depends on the viewer; if it scrolls sideways, the description is off screen, which is the complaint."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**One short block per row, fields on their own lines — recommended.** A bold ID line, the description wrapped at 42 columns, then `supervisor:` and `tasks:` lines (RUNNING), `tasks:` (QUEUE), `planned:` and `line N` (NEXT). The test checks the field labels per part instead of table columns. The sample built from the 13:54 live data follows the options."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "A narrow table (ID, tasks) with the description as a `- ` note under it. Rejected: the description, the part the operator asked for, becomes a footnote."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "## Running\n**#3809** prepare-3809-design\n/wip report is readable on a phone:\nfull-word descriptions, no truncation,\nNeeds you first, Next from the Priority\norder\nsupervisor: opus-5\ntasks: none (works alone)\n\n## Queue\nEmpty.\nThe queue does not move: the runner is\nnot live.\n\n## Next (approve: add it to the queue)\n**#3657** line 16\nClears: lane acquire prints npm output\ninto the lane path, so a fresh lane can\nbe unusable.\nplanned: build, review, land"
+            }
+          ],
+          "skeptic": "none recorded. The #3809 preparation wrote a skeptic line for its Fork 1 only; this card copies the fork as prepared and adds no new verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*wip-report-on-a-phone-description-source*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the eight forks).",
+        "2. #3809's `## Done when` is rewritten to match the ruling (the proposed edits above, as ruled), and #3809's `blockedBy` entry on this card is cleared when the ruling lands."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3820",
+      "title": "Decision: how the drain stops resolving a multi-slice card when one slice lands (#3816)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 1001,
+      "directUnblocks": 1,
+      "transitiveUnblocks": 1,
+      "unblocksToReady": 1,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule how the drain avoids setting `status: resolved` on a whole card when a PR for only one of its slices lands. Story #3816 (filed as `3816`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3816 stays the build card and is blocked by this one. **The options, the evidence and the proposed default are copied from #3816; nothing was re-researched and the default was not changed.**"
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "How the drain knows a card is not fully built",
+          "why": "*Fork-existence:* today the drain credits any `lane/<NNN>-…` ref with item NNN and resolves it. The fix must read one signal that says \"not done yet\": a marker on the PR, a marker on the card, the card's Done-when, or more PR-text guards. They put the truth in different places and fail differently.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**(A) Explicit marker.** A slice PR says `Refs #N` and only `Resolves #N` resolves. Needs the brief, `/pr` and `open-pr` to emit the marker. Old PRs would not carry it, so the stranded-item sweep has to catch them. Rejected as the first fix (kept as a later backstop): it needs a convention change in three emitters, and until then every PR without the marker is unprotected."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**(B) Card-side refusal — recommended** (#3816's proposed default). A card that holds a `## Slice <label>` section (or another declared marker) is never auto-resolved by the drain. The drain reports `deferred: multi-slice card` and the card is resolved deliberately. Reads the one thing that knows whether the card is fully built. Weak spot: it only works if the marker exists. In #3779's case the marker was written BY the slice PR itself (commit `b50927b78` added `## Slice A: location`), so this rule would have caught it, but a first slice PR that does not add the heading is not protected. #3816's reason: it needs no convention change, it reads the card, and it fails in the safe direction: a false skip strands an item that the stranded sweep finds, while a false resolve silently closes unbuilt work. (A) is added later as an additive backstop."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**(C) Run the card's Done-when at land time.** Rejected: not feasible today: the items are prose, not runnable commands, and are not checkbox-marked, so \"unchecked Done-when\" has no machine-readable form."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**(D) More lexical guards on the PR title and body** (`slice A`, \"stays open\"). Rejected: eight rounds of this already went into #3441 and #3473 and each catches the last miss only. Fragile."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass on #3816. The weak spot of (B) is stated by #3816 itself (a first slice PR that adds no heading is not protected); Fork 2 is the question it raises.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "The marker under (B)",
+          "why": "*Fork-existence:* #3816's open sub-question under (B): is the `## Slice ` heading the only marker, or does the card also need a frontmatter field so a slice PR cannot forget it? #3816 states no default.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**The `## Slice ` heading only — recommended** (the least invasive: it exists today on three cards and on #3779, and needs no schema change). A first slice PR that adds no heading stays unprotected; (A), the later backstop, covers that case."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Also a frontmatter field** (for example a declared slice list). Rejected as the default: a second marker must be kept in step with the headings, and it needs a schema change and a check before it protects anything."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass; #3816 raises the question without a verdict.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*how-the-drain-stops-resolving-a-multi-slice*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the two forks).",
+        "2. #3816's `## Done when` is rewritten if the ruling picks other than (B), and #3816's `blockedBy` entry on this card is cleared when the ruling lands."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3821",
+      "title": "Decision: adopt the review-lens rules from the PR #2392 and PR #2400 reviews (#3813)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 1001,
+      "directUnblocks": 1,
+      "transitiveUnblocks": 1,
+      "unblocksToReady": 1,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule whether to add three review rules, and in what form. Story #3813 (filed as `3813`) proposes them and says it needs the operator's OK before any build. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3813 stays the build card and is blocked by this one. **The options and the proposed default are copied from #3813; nothing was re-researched and the default was not changed.** One option, Fork 1 (b), was not in #3813's list; it was added when this card was filed and is marked as such.",
+        "**The three rules.**",
+        "1. **Header claim.** Any \"never\" or \"still refused\" claim in a file header needs a named test for that exact line. (From the PR #2392 review: the `assertReady` race guard in `we:scripts/operations/handoff-home.mjs` could be emptied, or its `throw diverged` line deleted, with all 14 and then all 24 tests still green.)\n2. **State matrix.** A state-matrix check needs one test per cell. (Same review: the refusal to recreate `ops/handoff` when the branch is gone from origin but the working copy has history could be replaced by `if (false) {` with all 24 tests green; the \"never pulled\" test covers only the opposite cell.)\n3. **Card sentences** (from #3813's \"Further evidence\", the PR #2400 review). Every \"must not\", \"must use X rather than Y\" and \"never\" sentence in a card's fix section or Done-when needs a Done-when case, named and with its exact fixture, that fails under Y (the wrong choice the sentence rules out). The card should also say that the case fails under Y, so a reviewer can check the claim by reading. Found on #3814 (a stale-tracking-ref check with no failing case) and #3815 (the janitor's \"never removes a lane whose lease is live\" guard was prose with no test). Both cards were amended afterwards."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Adopt the rules, and in what form",
+          "why": "*Fork-existence:* the rules are either given to the reviewer (a prompt), given to the card author (a checklist), turned into a deterministic check, or not adopted. Each puts the rule in a different place, with a different enforcer.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**A review-lens hunt brief — recommended** (#3813's proposed default, its option (1)). A `LENS_HUNT_BRIEF` entry in `we:scripts/lib/review-core.mjs`, the mechanism `claim-accuracy` already uses. The juror must ground each \"never\" / \"still refused\" header claim by naming the test that reddens when that line is removed, by mutation probe; must expect one test per cell of a state matrix; and, per the Further evidence, must check that each card \"must not / rather than / never\" sentence has a Done-when case that fails under the wrong choice. Cheap; changes a review prompt. #3813's reason: (c) has no grammar to gate on, and (d) leaves the gap the review found open."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**A card-authoring checklist only** (added at filing; not in #3813's list). The three rules go into the filing guidance (`we:skills-src/file-item/SKILL.md`, `we:docs/agent/backlog-workflow.md`) for the author, and no review prompt changes. Rejected: every finding behind these rules was caught by a reviewer, not by the author, and a checklist binds the author once, at filing, with nothing checking it later; rules 1 and 2 are about source-file headers and tests, which a card checklist does not reach."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**A deterministic `check:standards` rule** linking a header claim to a named test (#3813's option (2)). Rejected: blocked, because a header \"never\" claim has no machine-readable form today, so the rule needs a header-claim grammar first; the PR #2400 review says the same for card sentences."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**Do not adopt** (#3813's option (3)). Rejected: it costs nothing, but the gaps were found only because one reviewer ran the mutation probe, so the next such gap is found only by luck."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass on #3813. The one adversarial input on record is the PR #2400 review's note that a deterministic gate is not feasible for card sentences; it removes (c) and supports (a).",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "Which lens carries the rules",
+          "why": "*Fork-existence:* #3813 asks it as a sub-question: its default puts the rules in the correctness brief, but the security lens's juror raised two of the three PR #2392 findings and both PR #2400 findings.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**The correctness lens only — recommended** (#3813's proposed default). The correctness lens already owns the bar \"no test is missing, weakened, or gamed\" (`LENS_EXPECTATIONS`, we:scripts/lib/review-core.mjs:1886); the rules are the method for that bar."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Correctness and security each carry a copy.** Rejected (reason added at filing; #3813 asks the question but gives no reason): the rules are about test coverage, which is the correctness lens's bar, and two copies of one prompt must be kept equal by hand. The security juror still finds such gaps under its own charter, as it did here."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass on #3813.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "Built as its own edit, or folded into #3280",
+          "why": "*Fork-existence:* #3813's default says \"folded with #3280 if the operator prefers one edit\". #3280 edits the same file (`LENS_EXPECTATIONS`, not the hunt brief). One edit or two is the operator's preference, so it is asked here.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Its own edit — recommended** (the least invasive: #3813 names folding only as an option \"if the operator prefers\"). This card's build does not wait on #3280, which is a different rule in a different table."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Folded with #3280, one edit to the correctness lens.** Rejected as the default, not on merit: one edit is tidier, but it ties this build's timing to #3280's. Pick it if one review of the correctness lens is preferred."
+            }
+          ],
+          "notes": [],
+          "skeptic": "not run as a separate pass on #3813.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*adopt-the-review-lens-rules-from-the-pr-2392*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the three forks).",
+        "2. #3813's `## Done when` is updated to match the ruling (rule 3 added to its case 1 if Fork 1 (a) is ruled), and #3813's `blockedBy` entry on this card is cleared when the ruling lands; if the ruling is (d), #3813 is closed instead."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3822",
+      "title": "Decision: prototype-branch check:standards errors: where fixed, who owns them, the recurrence guard, today's fix (#3768)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 1001,
+      "directUnblocks": 1,
+      "transitiveUnblocks": 1,
+      "unblocksToReady": 1,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule the four forks that story #3768 prepared (in PR #2395) for keeping `npm run check:standards` clean on the tip of `lane/mechanical-dispatcher`. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the forks move here; #3768 stays the build card and is blocked by this one. **The forks, options and bold defaults below are copied from #3768 as prepared; nothing was re-researched and no default was changed.** Research topic: [/research/prototype-branch-health-gate/](/research/prototype-branch-health-gate/). Session report: `we:reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md`.",
+        "**The count is 1 error, not 15.** #3768's title and file name record 15 errors (measured on `95aae605b`, 2026-09-20). Those 15 were fixed on the branch on 2026-09-20. On the branch tip `5ab89f87b` (2026-09-21) the real count is `1 error(s), 1814 warning(s)`: the Prototype Tracker Artifact's 22-character id in three `claude.ai/artifact/<id>` URLs in a tracker note on the #3383 card trips the opaque-token detector. It is not a credential. Fork 4 is about that one error. The full FOUND section (the reproduction, the gate path through `we:scripts/lib/verify-lane-gate.mjs:73-76`, drift numbers) stays on #3768."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Where the branch's `check:standards` errors are fixed",
+          "why": "*Fork-existence:* the branch's gate is either held at 0 on the branch, or relaxed there, or left red until graduation. The branch's one `verify-lane` gate cannot be both red and passing, so the three cannot coexist.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**On the branch, as soon as they appear; the tip stays at 0 — recommended.** Keeps statute clause 2's only gate alive: `poc-land` can pass again, and work stops needing direct pushes. This does not collide with `#gate-on-merged-tree-lane-fast-fail` (a lane gate is not the authority): for a POC branch the tip IS the merged tree that landings enter, so a clean tip is the merged-tree check for that branch. **Graduation cost:** each graduation pull request to `main` starts from a tree that already passes the same check `main`'s CI runs (`we:.github/workflows/ci.yml` runs `check:standards`), so a slice never carries someone else's error. The steady cost is small: today it is one note and three cites."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Relax or scope the check for the branch** (a baseline where only new errors fail, or skip registered POC branches). Rejected: a baseline hides exactly the growth this card was filed for (12 to 14 to 15 in one day), and skipping the branch removes its only gate, which clause 2 forbids in spirit: the item's own validation is the gate, not nothing. It also moves the cost to graduation, where every slice meets the accumulated errors."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Fix them at graduation, in each slice's pull request to `main`.** Rejected: `main`'s CI would catch only the errors in files a slice ports, so errors in shared files (the tracker card itself) never graduate and never get fixed, and until then every `poc-land` fails. **Graduation cost:** each slice pays for unrelated errors, and two slices touching the same shared file fix the same error twice."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. The mechanism cite was a usage comment; the real gate is diff-scoped and runs the whole tree on a branch lane only because of its `backlog/` files (now cited). Statute overlap with `#gate-on-merged-tree-lane-fast-fail` reconciled: the POC tip is the branch's merged tree.",
+          "screen": "clear. (b) and (c) are rejected on merit (hidden growth, a removed gate, shared files never fixed).",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "Who owns a new error",
+          "why": "*Fork-existence:* one error needs one owner; with two, each waits for the other (the week-long unread alert #3804 found is this failure).",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Split by cause — recommended.** A push owns the errors in the files it changed, and it is refused until they are fixed (Fork 3). Every other error, the ones `main` moving creates (FOUND) and the ones a catch-up merge brings, belongs to drift reconciliation: `#poc-branch-declared-delivery-mode` clause 4(d) already makes drift a per-branch reconciliation job (`we:scripts/conveyor/branch-drift.mjs`), and #3804's prepared default puts it on a dispatched reconcile agent. The #3804 catch-up's done-bar includes 0 errors on the merged tip."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**The push that lands next owns every error.** Rejected on merit: an error `main` created lands on whoever pushes next, who did not cause it and has no context for it, and every landing blocks until someone else's problem is fixed."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**The operator owns it.** Rejected: the check is mechanical and so is most of the fix; a person in the loop only adds waiting, against the operator's goal that graduation keep moving."
+            }
+          ],
+          "notes": [],
+          "skeptic": "REFUTED → flipped. \"Errors with no push come only from a merge\" was false: `check:standards` reads `origin/main`, so `main` moving creates errors (B and D were this kind). The default is now split by cause, with drift owned by clause 4(d)'s reconciliation.",
+          "screen": "clear. The rejections are about who is blocked and who has context, not effort.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "The recurrence guard (design point 6)",
+          "why": "*The contract this rules:* a push that would add an error in its own files is refused before it reaches the shared branch, and every other error on the tip is found within one runner tick and routed to its Fork 2 owner. Where each half runs is the build's detail. *Fork-existence:* the refusal can only see what a push changed, and a probe only finds errors after they land. So the question is whether refusal is part of the guard at all, or the guard is detection only.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Both halves: refuse at push for the pushed files, probe the tip for the rest — recommended.** The refusing half is one more guard in `we:.githooks/pre-push`, beside the tracker guard, for branches in the POC registry (`we:scripts/lib/poc-branches.mjs`). It checks the files in `remoteSha..localSha` at `localSha` (the tracker guard already reads `git show <localSha>`), refuses when the working tree is dirty or `HEAD` is not `localSha`, and counts errors only, never warnings. It stays inside `#gate-on-merged-tree-lane-fast-fail`'s scoped shape. Git documents that a non-zero pre-push exit aborts the push. **Known gaps**, which the second half covers: `--no-verify` skips the hook (`we:.githooks/pre-push:6`), and a clone without the `prepare` npm script never wires it. The probing half runs the whole-tree check on the branch tip each runner tick and raises the alert to the drift owner. **Graduation cost:** none added; it keeps Fork 1 (a) true without anyone watching."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**The probe alone.** Rejected: every error is found only after the gate is already red for every landing, including the ones a pusher could have been stopped for with full context."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**GitHub CI on pushes to the branch.** Rejected on merit: a push-triggered run starts after the push has landed, so it finds rather than refuses, like (b)."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "# Fork 3 (a), refusing half: one line in we:.githooks/pre-push, after the tracker guard.\n# For each pushed ref in the POC registry: run check:standards scoped to the files in\n# remoteSha..localSha, at localSha; exit 1 naming the errors when there are any.\nprintf '%s' \"$payload\" | node scripts/guard-poc-branch-health.mjs \"$@\" || exit $?"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. The hook is bypassable and not always wired, so the probe is part of the default, not optional. The refusing half checks the pushed commit's own files, not the working tree, which also keeps it inside `#gate-on-merged-tree-lane-fast-fail`.",
+          "screen": "flagged(impl) → fixed. The fork now rules the contract (refuse what a push adds, find the rest within a tick); the hook is named as the build's home. (c)'s rejection now rests on merit, not on #3805's unratified default.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 4,
+          "crux": "How today's error is fixed: the note, or the detector",
+          "why": "*Fork-existence:* either the card stops carrying the Artifact id, or the secret detector learns that a `claude.ai/artifact/<id>` segment is not a secret. Both make the check pass; they cannot both be the fix, because the second changes what every card may carry.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Reword the note — recommended.** Name \"the Prototype Tracker Artifact\" in the card and keep its URL where `we:scripts/operations/tracker-refresh-state.mjs` already records it (its `record --url=` writes the url and id to a state file beside the page), not in the card. A card should not need an Artifact's id to be read. The tracker runbook text that told a worker to paste the URL into the note changes in the same fix, or the error comes back on the next refresh."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Teach the detector a `claude.ai/artifact/` exemption.** Rejected on merit: an exemption shaped like a URL is a hole shaped like a URL; any 22-character key pasted after that prefix would pass the check that exists to catch published credentials (#3015). The detector also has two implementations to keep equal (`we:scripts/lib/secret-scrub.mjs` and its Rust twin under `we:scripts/rust-scan/`)."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Verified: one error, and `#main` anchors resolve on both sides for the 3475 cites. Amended: the tracker runbook must stop pasting the URL, or the error returns; the detector's Rust twin is named.",
+          "screen": "flagged(prio) → fixed. The first draft's \"order with the catch-up\" fork was sequencing only; it is now two requirements (*Required, not forks*), and the one merit question inside it, note versus detector, became this fork.",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*prototype-branch-check-standards-errors-where-fixed*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the four forks).",
+        "2. #3768's `## Done when` is updated to match the ruling (item 5 is kept or dropped per Fork 3), and #3768's `blockedBy` entry on this card is cleared when the ruling lands."
+      ],
       "parseOk": true,
       "warnings": []
     },
@@ -4096,74 +4818,6 @@
       "warnings": []
     },
     {
-      "num": "3699",
-      "title": "Shift from polling to event-driven GitHub state push — decision point on rate-limit recurrence",
-      "prepared": true,
-      "preparedDate": "2026-09-18",
-      "leverageScore": 0,
-      "directUnblocks": 0,
-      "transitiveUnblocks": 0,
-      "unblocksToReady": 0,
-      "pr": null,
-      "blockedBy": [],
-      "dateOpened": "2026-09-18",
-      "ageInDays": 4,
-      "digest": [
-        "GitHub's secondary (burst) throttle has tripped on this account (2026-09-08 per #3621; the original filing reports another on 2026-09-18) and will recur: every watcher and agent draws on one shared budget, and watchers grow with the lane cap. Finishing the throttle (#3670) stops bursts and is not a decision. How PR and CI state reaches local agents is: one merit fork, grounded in a repo audit, GitHub's rate-limit docs and query costs measured on 2026-09-21. The recommended default is in **bold**."
-      ],
-      "forks": [
-        {
-          "n": 1,
-          "crux": "Where should PR and CI state be read from: each process polls for itself, or one shared source reads once and fans out?",
-          "why": "**Why this is a fork:** the branches cannot both be the primary path. With per-process polling every watcher owns a GitHub read, so cost and concurrency scale with watchers; with a shared source one reader owns the read, so cost is flat and reads are serial by construction, at the price of a component that can be down or stale. The difference is scaling, consistency and failure behavior, not effort or timing.",
-          "options": [
-            {
-              "label": "(a)",
-              "kind": "rejected",
-              "body": "**Keep per-process polling, with #3670, a per-minute budget and idle backoff.** *Rejected as the primary path:* it bounds bursts and trims steady volume, but cost and concurrency still scale with watchers, and N independent pollers stay free to fire together. The wrapper today (`we:scripts/lib/gh-throttle.mjs`) is a cap-6 semaphore that fails open after 2 minutes and has no per-minute budget, so it is not serial and does not bound steady volume. Those pieces are worth doing under any answer, so they are prerequisites below, not the rival."
-            },
-            {
-              "label": "(b)",
-              "kind": "default",
-              "body": "**One local poller, fanning out over the drain daemon's existing push channel.** **RECOMMENDED.** The drain daemon (`plateau:tools/drain-daemon/`) is resident under launchd and serves a local SSE stream on `127.0.0.1:4599` (#2605). It would poll open PRs once per repo that has a watched PR (4 points per list), keep a snapshot, diff it and broadcast changes; `pr-watch` and `wait-green` would read that instead of calling GitHub. Watchers are armed for WE only, so that is about 12 points per minute at a 20s interval against about 24 for 8 watchers (2x), or against about 56 with `wait-green` (nearly 5x), and it stays flat as watchers grow. Both can back off when idle, so the comparison holds at any interval: at 60s it is about 4 against 8. GitHub sees one serial reader, and every consumer sees the same snapshot instead of N slightly different ones. It uses no GitHub-side infrastructure. It has to be paired with (a)'s prerequisites, because it does nothing for bursts from agents' own calls. What it has to change in the daemon: poll on its own loop, independent of the drain lease and pause gates (`plateau:tools/drain-daemon/daemon.mjs:312-333`); key events and the replay map by repo as well as PR number (`plateau:tools/drain-daemon/lib.mjs:1219`); serve the snapshot (checks, review decision) and follow up with a per-PR view for merged and closed, which an open-PR list cannot show; filter live events per PR instead of broadcasting to every client (`plateau:tools/drain-daemon/lib.mjs:1265`). Failure behavior: every snapshot carries the time it was fetched, and a watcher whose snapshot is older than two poll intervals (or whose daemon is down) falls back to polling for itself, with random jitter so the fallbacks do not all start at once. The daemon is hosted provisionally in plateau-app (pending #2446), so `pr-watch` gains a cross-repo dependency."
-            },
-            {
-              "label": "(c)",
-              "kind": "rejected",
-              "body": "**A GitHub Actions workflow pushes state to a git ref; agents fetch it.** *Rejected:* it moves the reads onto `GITHUB_TOKEN` (1,000 requests per hour per repository) but does not remove them, and the local side still fetches. GitHub's docs do not say whether `git fetch` counts against the API limits. `workflow_run` fires only for workflow files on the default branch, and Actions minutes are billed on private repos. It adds a second copy of PR state in git, with workflow start-up latency that has not been measured. The existing `we:scripts/operations/stage-pr-view.mjs` flow is request-driven, not event-driven, so it is a weaker precedent than it looks."
-            },
-            {
-              "label": "(d)",
-              "kind": "rejected",
-              "body": "**Swap `pr-watch` onto the daemon's existing merged/parked events, as #2605 planned.** *Rejected as sufficient:* the events cover only `ready-to-merge` PRs and only merged or parked, while `pr-watch` fetches and classifies on checks and review decision (`we:scripts/conveyor/pr-watch.mjs:396-398`) and has a closed exit, none of which those events carry. No in-tree caller uses the stream (its only consumer is the `watch` command at `plateau:tools/drain-daemon/cli.mjs:507`). It is a piece of (b), not an alternative to it."
-            },
-            {
-              "label": "(e)",
-              "kind": "rejected",
-              "body": "**`pr-watch` reads the conveyor's existing per-tick PR snapshot.** *Rejected:* the snapshot is a temp file that lives one 120s tick, so state would be up to six times staler than today's 20s watch, and it serves only runner-launched consumers. It is (b)'s degenerate form with a slower refresh and no push."
-            },
-            {
-              "label": "(f)",
-              "kind": "rejected",
-              "body": "**Forward GitHub webhooks to the daemon** (`gh webhook forward`, or a tunnel). *Rejected:* this is the one route that truly costs no API points, but GitHub documents `gh webhook forward` as testing-only and allows one forwarder per repository at a time, and a tunnel means exposing a public endpoint from the operator's machine. Neither is a sound base for the always-on path."
-            }
-          ],
-          "notes": [],
-          "skeptic": "SURVIVES-WITH-AMENDMENT — three fresh-context attacks. The first and the third demanded a flip to (a), because at the 8-lane cap the saving is about 2x and the 2026-09-08 trip was a burst that (b) does not touch; the second found the load arithmetic mixed calls with points and corrected it. Not flipped: the comparison has to hold the interval equal (backoff helps (b) too, about 4 points per minute against 8 at 60s), and (b) is paired with (a)'s burst fixes, never offered instead of them. Amended: a freshness contract and jittered fallback added, webhook forwarding added as (f), the per-tick snapshot added as (e), cited lines and the worst-case wording corrected, and confidence lowered to med-low, because the saving is real but modest at today's cap and the dissent stands.",
-          "screen": "clear — a fresh-context screen found this is agent-machinery governance, decidable in-repo with no WE standard boundary at stake, and that scaling, consistency, serial reads and failure behavior are real merit differences with no \"wait\" language in the default. An earlier screen, run on a draft whose default was (a), flagged it as prioritization and said it would choose (b) if the branches were free.",
-          "parseOk": true,
-          "warning": null
-        }
-      ],
-      "gate": null,
-      "doneWhen": [
-        "1. **Observable** — Fork 1 is ruled, and #3670 carries the per-minute budget, the `merge-ai-prs` sites and the call-volume recording.",
-        "2. **Follow-on** — on ratifying (b), the daemon-poller story (plateau-app) and the `pr-watch` / `wait-green` adoption story are filed, the latter `blockedBy` #3670 where they share files. Their ordering is a backlog call, not part of this ruling."
-      ],
-      "parseOk": true,
-      "warnings": []
-    },
-    {
       "num": "3701",
       "title": "Recurring merge conflicts on three hot shared files — operations registration, test pinning, and scorecard append",
       "prepared": false,
@@ -4694,99 +5348,6 @@
       "warnings": []
     },
     {
-      "num": "3805",
-      "title": "Decision: run CI on the prototype branch, change the drain's required check, or neither",
-      "prepared": true,
-      "preparedDate": "2026-09-21",
-      "leverageScore": 0,
-      "directUnblocks": 0,
-      "transitiveUnblocks": 0,
-      "unblocksToReady": 0,
-      "pr": null,
-      "blockedBy": [],
-      "dateOpened": "2026-09-21",
-      "ageInDays": 1,
-      "digest": [
-        "Rule whether the prototype branch `lane/mechanical-dispatcher` gets real CI, or whether the drain's hardcoded required check changes, or neither. Today the two cards that raised it (#3674 and #3653) each name one half of the fork and rule nothing. Relates #3674 (the drain stalls forever on a base with no `test` check; two candidate fixes, \"not deciding here\"), #3653 (allow CI for POC branches) and #3443 (graduation: each slice gets its own reviewed pull request to `main`).",
-        "*Prepared 2026-09-21 (session prepare-3804-and-3805).* Research topic: [/research/prototype-branch-sync-and-ci/](/research/prototype-branch-sync-and-ci/). Session report: `we:reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md`. Numbers re-measured on 2026-09-21; main at `d6c7f6237`, the branch at `5ab89f87b`."
-      ],
-      "forks": [
-        {
-          "n": 1,
-          "crux": "Where the prototype's check comes from",
-          "why": "*Fork-existence:* (a) and (b) both put a CI gate on landings into the prototype; (c) keeps the prototype's only gate as the item's own tests, as statute clause 2 says. They cannot coexist: a CI gate inside the POC branch either exists or it does not.",
-          "options": [
-            {
-              "label": "(a)",
-              "kind": "rejected",
-              "body": "**Run CI on pull requests against the prototype.** Widen both workflows' `pull_request.branches` to include the prototype, either as a static list or as `lane/**` plus a first job that reads the registry. Gives a real, visible `test` on any such pull request (#3653's acceptance). **Cost to graduation:** none saved; each slice still runs CI at its graduation pull request. **Health chain:** #3653 is built, and #3674 closes because `test` now reports. Rejected on merit: it adds a second gate inside the POC branch, which statute clause 2 rules out (the item's own tests are the only gate there, and it says \"A landing tax of any shape, however small, is exactly the latency the operator ruled out\"), and it would gate only the pull-request path while direct pushes, the actual path, stay ungated, so it certifies nothing about the branch. The card's earlier reason, \"15 errors, red on day one\", is now weak: the branch is at 1 error. Build note: a workflow filter cannot read the registry; a job skipped by `if:` reports \"skipped\", while a workflow skipped by a filter stays Pending."
-            },
-            {
-              "label": "(b)",
-              "kind": "rejected",
-              "body": "**Change the drain to read the base's real required checks, as `we:scripts/pr-land.mjs` does.** Zero required checks on a base then counts as passed (#3674 candidate b). **Cost to graduation:** none. **Health chain:** #3674 is built, #3653 closes. Rejected: it edits the gate of the only writer to `main` to serve a base that receives no pull requests. It also rewrites the drain's statute contract (`#repo-drain-check-contract`: one green check named `test`). A bug in \"zero checks counts as passed\", such as an API error read as zero, would let an unchecked pull request reach `main`. If chosen, it must fail closed on any API error and relax only for a base named in the POC registry, and the statute must be amended."
-            },
-            {
-              "label": "(c)",
-              "kind": "default",
-              "body": "**Neither — recommended.** Pull requests are not the delivery path for the prototype. Prototype work lands by direct push or `poc-land`, verified by the item's own tests (statute clause 2). Each slice gets full CI at its graduation pull request against `main` (#3443; statute clause 3), the only place CI is load-bearing. #3653 is resolved as superseded by this ruling. #3674 is resolved by Fork 2 (a)'s build, because its real defect, the silent stall, is what Fork 2 fixes. **Cost to graduation:** none added. **Health chain:** #3653 closes without code and #3674 closes with a one-arm drain change, so graduation waits on #3768 and #3772 (through #3804) only. **What (c) leaves untested, named:** nothing runs a suite on the merged prototype tree; clean sync merges are ungated by design, and `poc-land --skip-verify` has been used (PR #2236's closing comment). The cover is #3768 design point 6 (a `check:standards` run on each push to the branch), which does not need GitHub CI; (c)'s build is ruled together with filing that as a card, so the gap has an owner."
-            }
-          ],
-          "notes": [
-            {
-              "kind": "code",
-              "text": "# Fork 1 (a), the rejected shape, for contrast: we:.github/workflows/ci.yml\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main, 'lane/**']   # static; a first `gate` job must then read poc-branches.json"
-            }
-          ],
-          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Citation scope: clause 2 of `#poc-branch-declared-delivery-mode` reaches this case directly, so it is authority for (c), not only context. Attacks: after (c) nothing tests the merged prototype tree, and #3674's defect is fixed by Fork 2's code, so it is not simply \"superseded\". Fixed: #3674 now resolves through Fork 2 (a)'s build, and the untested tree is named with #3768 point 6 as its owner. Statute overlap: none; `#repo-drain-check-contract` is untouched by (c).",
-          "screen": "flagged(prio) → fixed. The first draft rejected (a) mostly on cost (\"a path nobody uses\", \"two hand-kept lists\"). Restated on merit: (a) adds a second gate inside a POC branch, which clause 2 rules out, and it gates only the pull-request path while the real path, the direct push, stays ungated.",
-          "parseOk": false,
-          "warning": "Fork 1: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly."
-        },
-        {
-          "n": 2,
-          "crux": "A pull request opened against the prototype anyway",
-          "why": "*Fork-existence:* only matters under Fork 1 (c). The drain either says why it will not land such a pull request, or it does not. Silence is broken: it is the defect #3674 was filed for.",
-          "options": [
-            {
-              "label": "(a)",
-              "kind": "default",
-              "body": "**The drain holds it with a named reason — recommended.** The reason reads `base is not main`, so it shows as held instead of waiting forever. The reason is one more arm in `classifyPr`'s existing skip chain. It compares the PR's base with the repo's default branch (or a registered POC branch's `target`), not a hardcoded `'main'`. No legitimate drain landing is lost: no drain-landed PR has ever had a non-main base (FOUND above), stacked couples share lane tips through manifest `base` shas, not PR bases (`we:scripts/merge-ai-prs.mjs:771-779`), and the PR-create path defaults to `main` (`we:scripts/pr-land.mjs:133`). A `--base=main` flag alone would hide such PRs silently, so the code arm is needed. The drain never lands it; a human who opened it on purpose merges it by hand or re-targets it."
-            },
-            {
-              "label": "(b)",
-              "kind": "rejected",
-              "body": "**Leave it as today.** Rejected: it stalls with no message."
-            },
-            {
-              "label": "(c)",
-              "kind": "rejected",
-              "body": "**Close it automatically.** Rejected: a human may have opened it on purpose."
-            }
-          ],
-          "notes": [
-            {
-              "kind": "code",
-              "text": "// Fork 2 (a): one more arm in classifyPr's skip chain (we:scripts/merge-ai-prs.mjs:616-629), ahead of the\n// required-check arm, so the named reason wins over \"required check \"test\" is not green\".\n// `baseRefName` is already in the drain's `gh pr list --json` field list (we:scripts/merge-ai-prs.mjs:3547).\n// `defaultBranch` is the repo's default branch, passed in by the caller (not a literal 'main').\nelse if (pr?.baseRefName && pr.baseRefName !== defaultBranch) { decision = 'skip'; reason = `base is not ${defaultBranch} (${pr.baseRefName}) — POC-branch PRs are not drained (#3805)`; }\nelse if (!testGreen) { decision = 'skip'; reason = `required check \"${requiredCheck}\" is not green`; }"
-            }
-          ],
-          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. History attack: does the drain legitimately land non-main-base PRs anywhere? Checked across web-everything, frontierui and plateau-app: no. Classification: a `--base=main` config flag alone would hide such PRs silently, so a code arm is justified. Amendment: compare with the repo's default branch or the POC registry target, not a literal `'main'`.",
-          "screen": "clear. The operator sees the named hold, so it is not an implementation detail; (c), auto-close, is rejected on merit. (b) is the status quo, kept for contrast.",
-          "parseOk": true,
-          "warning": null
-        }
-      ],
-      "gate": null,
-      "doneWhen": [
-        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*run-ci-on-the-prototype-branch*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for both forks).",
-        "2. After the ruling, `gh pr list --base lane/mechanical-dispatcher --state open` shows no pull request waiting on a check that cannot run (under (c): the drain reports any such pull request as held with the named reason, #3674 is resolved by that build, and #3653 is resolved as superseded)."
-      ],
-      "parseOk": false,
-      "warnings": [
-        "Fork 1: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly."
-      ]
-    },
-    {
       "num": "3806",
       "title": "One weighted worker budget plus the heavy pool, or separate heavy and light worker counts?",
       "prepared": false,
@@ -4807,6 +5368,183 @@
       "warnings": []
     },
     {
+      "num": "3818",
+      "title": "Decision: how the /wip page's action links resist a leaked publish token (plateau-app PR #161 review)",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule how the phone /wip page (plateau-app) stops a leaked publish token from putting a phishing link on its \"Open PR\" button, and whether a standing check follows. The finding comes from the accepted review of chalbert/plateau-app PR #161 (\"wip relay: PR #160 review follow-ups\", merged as `9b7a08d54`, reviewed sha `17f9f3350`, verdict recorded 2026-09-21T20:18:03Z). The reviewer marked it `PLAUSIBLE`, impact \"degraded\", and its prevention line \"OWED — file it\". This card is that filing. Code references are to plateau-app `main` at `9b7a08d54`, read from a read-only clone on 2026-09-21. No mutation was run, by the reviewer or here."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "How the \"Open PR\" link is kept safe",
+          "why": "*Fork-existence:* the snapshot either carries a URL that the relay polices, or carries no URL and the page builds it. With a URL field, some check must decide which URLs are safe; without one, there is nothing to police. They cannot both be the design.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**Pin URLs to an allowlist of hosts** (`https://github.com/chalbert/` and the deploy's own origin), checked in the relay (`plateau-app:wip-relay.js:70`) and in the page's `safeUrl` (`plateau-app:src/wip/wip-view.ts:55`). Rejected: it works, but it keeps a free-text URL field whose safety depends on two validators kept equal by hand, and a prefix check must parse the URL to be safe (`https://github.com/chalbert.evil.example/` passes a careless prefix test). The deploy's own origin is never emitted today, so allowing it widens the set for nothing."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**Drop `action.url` from the snapshot and build the link in the page from the PR number — recommended.** A link action carries `{ kind: 'link', label, pr: <number> }`; the relay checks the number with the existing `int` (`plateau-app:wip-relay.js:88`); the page builds `https://github.com/<repo>/pull/<number>`, with the repo a page constant or a closed vocabulary checked with `oneOf`, never free text. Drop the unrendered `pr.url` too. Reasons: a number cannot carry a host, so the phishing button becomes impossible rather than filtered; the publisher already emits only this shape (FOUND), so nothing is lost, as the reviewer noted; and it removes checks instead of adding one. **Cost:** a snapshot schema change in the publisher, relay, page and their tests, and a page that must know the repo; a second repo later means adding it to the closed list."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Keep the shape check only.** Rejected: it leaves the review's finding open. A leaked token can still put any `https://` link on the button the operator taps."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES. Attack: (b) moves trust to the repo slug; if the slug were a free snapshot string, a leaked token could point it at `attacker/repo` on github.com. Answer: (b) requires the slug to be a page constant or a closed `oneOf` list, so the snapshot cannot name another repo. Attack: the leaked token can still lie about which PR needs attention. Answer: true, but that sends the operator to a real PR on the owner's repo, not off-site; the token's integrity is a separate concern.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "The copy command",
+          "why": "*Fork-existence:* the same finding names the command: `COMMAND_SHAPE` accepts any lowercase slash-command name. The command is either pinned to what the publisher emits or left as a shape.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Pin it to `/resolve <id>` — recommended.** The only command the publisher emits (`plateau-app:src/wip/wip-model.ts:191`); the relay checks the name against a closed list (today one entry) and the argument with the existing `isEpic`. Nothing is lost, and a new command is one list entry."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Keep `COMMAND_SHAPE`.** Rejected: `/logout`, `/schedule abc def` or any other slash command can sit next to the Copy button, and the hint tells the operator to run it on their laptop. The risk is smaller than the link (it must be pasted and run), but the fix costs one list."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES. Attack: a command is copied, not run, so pinning is not needed. Answer: the page asks the operator to run it, so a hostile command is one paste away; pinning is cheap and loses nothing.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "The follow-on standing check (the reviewer's prevention line)",
+          "why": "*Fork-existence:* the reviewer asked for a check that every rendered string field has a format check, with an allowlist or pinned host for URL-typed fields. It can live in web-everything's gate, in plateau-app's own tests, or nowhere.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**A web-everything `check:standards` rule**, as the reviewer worded it. Rejected: `check:standards` does not read plateau-app's source (FOUND), so it would need a cross-repo scan built first, and plateau-app has no `check:standards` of its own."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**A contract test in plateau-app's relay suite — recommended.** One test in `plateau-app:scripts/wip-relay.test.mjs` walks every field of the `WipSnapshot` schema that the page renders into markup or an attribute (`href`, `data-cmd`) and fails when one has no named format check: a closed vocabulary, a bounded id or number, or, for a URL-typed field, a pinned host. Under Fork 1 (b) no URL field remains, so the test keeps it that way. Reasons: it runs where the code is, on every `vitest run`, and it states the reviewer's rule as a test that fails on a new unchecked field."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**No standing check.** Rejected: the fix closes today's two fields, but the next rendered field added to the snapshot would repeat the gap, and PR #161 already carried this rule as a candidate that nobody filed."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Attack: \"every rendered field\" is judged by hand in the test's field list, so a new field can be forgotten there too. Amendment: the test derives the field list from the relay's own validator (every field `validateSnapshot` accepts) and fails when a field has no entry, so a new field cannot be added silently.",
+          "screen": null,
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*wip-page-s-action-links-resist-a-leaked*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for each of the three forks).",
+        "2. The ruling's build is filed as a plateau-app story whose Done-when includes a test that a snapshot with a link to `https://phish.example/x` is refused, and that fails under Fork 1 (c) (the shape check alone accepts it)."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3699",
+      "title": "Shift from polling to event-driven GitHub state push — decision point on rate-limit recurrence",
+      "prepared": true,
+      "preparedDate": "2026-09-18",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": {
+        "number": 2405,
+        "state": "open",
+        "kind": "ratification",
+        "title": "Ratify #3699 Fork 1: standalone PR state feed; file spin-offs, amend #3670",
+        "url": "https://github.com/chalbert/web-everything/pull/2405",
+        "repo": "chalbert/web-everything"
+      },
+      "blockedBy": [],
+      "dateOpened": "2026-09-18",
+      "ageInDays": 4,
+      "digest": [
+        "GitHub's secondary (burst) throttle has tripped on this account (2026-09-08 per #3621; the original filing reports another on 2026-09-18) and will recur: every watcher and agent draws on one shared budget, and watchers grow with the lane cap. Finishing the throttle (#3670) stops bursts and is not a decision. How PR and CI state reaches local agents is: one merit fork, grounded in a repo audit, GitHub's rate-limit docs and query costs measured on 2026-09-21. The recommended default is in **bold**."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Where should PR and CI state be read from: each process polls for itself, or one shared source reads once and fans out?",
+          "why": "**Why this is a fork:** the branches cannot both be the primary path. With per-process polling every watcher owns a GitHub read, so cost and concurrency scale with watchers; with a shared source one reader owns the read, so cost is flat and reads are serial by construction, at the price of a component that can be down or stale. The difference is scaling, consistency and failure behavior, not effort or timing.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**Keep per-process polling, with #3670, a per-minute budget and idle backoff.** *Rejected as the primary path:* it bounds bursts and trims steady volume, but cost and concurrency still scale with watchers, and N independent pollers stay free to fire together. The wrapper today (`we:scripts/lib/gh-throttle.mjs`) is a cap-6 semaphore that fails open after 2 minutes and has no per-minute budget, so it is not serial and does not bound steady volume. Those pieces are worth doing under any answer, so they are prerequisites below, not the rival."
+            },
+            {
+              "label": "(b)",
+              "kind": "default",
+              "body": "**One local poller, fanning out over the drain daemon's existing push channel.** **RECOMMENDED.** The drain daemon (`plateau:tools/drain-daemon/`) is resident under launchd and serves a local SSE stream on `127.0.0.1:4599` (#2605). It would poll open PRs once per repo that has a watched PR (4 points per list), keep a snapshot, diff it and broadcast changes; `pr-watch` and `wait-green` would read that instead of calling GitHub. Watchers are armed for WE only, so that is about 12 points per minute at a 20s interval against about 24 for 8 watchers (2x), or against about 56 with `wait-green` (nearly 5x), and it stays flat as watchers grow. Both can back off when idle, so the comparison holds at any interval: at 60s it is about 4 against 8. GitHub sees one serial reader, and every consumer sees the same snapshot instead of N slightly different ones. It uses no GitHub-side infrastructure. It has to be paired with (a)'s prerequisites, because it does nothing for bursts from agents' own calls. What it has to change in the daemon: poll on its own loop, independent of the drain lease and pause gates (`plateau:tools/drain-daemon/daemon.mjs:312-333`); key events and the replay map by repo as well as PR number (`plateau:tools/drain-daemon/lib.mjs:1219`); serve the snapshot (checks, review decision) and follow up with a per-PR view for merged and closed, which an open-PR list cannot show; filter live events per PR instead of broadcasting to every client (`plateau:tools/drain-daemon/lib.mjs:1265`). Failure behavior: every snapshot carries the time it was fetched, and a watcher whose snapshot is older than two poll intervals (or whose daemon is down) falls back to polling for itself, with random jitter so the fallbacks do not all start at once. The daemon is hosted provisionally in plateau-app (pending #2446), so `pr-watch` gains a cross-repo dependency."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**A GitHub Actions workflow pushes state to a git ref; agents fetch it.** *Rejected:* it moves the reads onto `GITHUB_TOKEN` (1,000 requests per hour per repository) but does not remove them, and the local side still fetches. GitHub's docs do not say whether `git fetch` counts against the API limits. `workflow_run` fires only for workflow files on the default branch, and Actions minutes are billed on private repos. It adds a second copy of PR state in git, with workflow start-up latency that has not been measured. The existing `we:scripts/operations/stage-pr-view.mjs` flow is request-driven, not event-driven, so it is a weaker precedent than it looks."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**Swap `pr-watch` onto the daemon's existing merged/parked events, as #2605 planned.** *Rejected as sufficient:* the events cover only `ready-to-merge` PRs and only merged or parked, while `pr-watch` fetches and classifies on checks and review decision (`we:scripts/conveyor/pr-watch.mjs:396-398`) and has a closed exit, none of which those events carry. No in-tree caller uses the stream (its only consumer is the `watch` command at `plateau:tools/drain-daemon/cli.mjs:507`). It is a piece of (b), not an alternative to it."
+            },
+            {
+              "label": "(e)",
+              "kind": "rejected",
+              "body": "**`pr-watch` reads the conveyor's existing per-tick PR snapshot.** *Rejected:* the snapshot is a temp file that lives one 120s tick, so state would be up to six times staler than today's 20s watch, and it serves only runner-launched consumers. It is (b)'s degenerate form with a slower refresh and no push."
+            },
+            {
+              "label": "(f)",
+              "kind": "rejected",
+              "body": "**Forward GitHub webhooks to the daemon** (`gh webhook forward`, or a tunnel). *Rejected:* this is the one route that truly costs no API points, but GitHub documents `gh webhook forward` as testing-only and allows one forwarder per repository at a time, and a tunnel means exposing a public endpoint from the operator's machine. Neither is a sound base for the always-on path."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT — three fresh-context attacks. The first and the third demanded a flip to (a), because at the 8-lane cap the saving is about 2x and the 2026-09-08 trip was a burst that (b) does not touch; the second found the load arithmetic mixed calls with points and corrected it. Not flipped: the comparison has to hold the interval equal (backoff helps (b) too, about 4 points per minute against 8 at 60s), and (b) is paired with (a)'s burst fixes, never offered instead of them. Amended: a freshness contract and jittered fallback added, webhook forwarding added as (f), the per-tick snapshot added as (e), cited lines and the worst-case wording corrected, and confidence lowered to med-low, because the saving is real but modest at today's cap and the dissent stands.",
+          "screen": "clear — a fresh-context screen found this is agent-machinery governance, decidable in-repo with no WE standard boundary at stake, and that scaling, consistency, serial reads and failure behavior are real merit differences with no \"wait\" language in the default. An earlier screen, run on a draft whose default was (a), flagged it as prioritization and said it would choose (b) if the branches were free.",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Observable** — Fork 1 is ruled, and #3670 carries the per-minute budget, the `merge-ai-prs` sites and the call-volume recording.",
+        "2. **Follow-on** — on ratifying (b), the daemon-poller story (plateau-app) and the `pr-watch` / `wait-green` adoption story are filed, the latter `blockedBy` #3670 where they share files. Their ordering is a backlog call, not part of this ruling."
+      ],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
       "num": "3735",
       "title": "May a review:human approval carry across a push that only merges main into the reviewed branch?",
       "prepared": true,
@@ -4816,11 +5554,11 @@
       "transitiveUnblocks": 0,
       "unblocksToReady": 0,
       "pr": {
-        "number": 2388,
+        "number": 2407,
         "state": "open",
         "kind": "other",
-        "title": "#3735 ratified as prepared: codify the merge-only approval carry, resolve the card, file the build follow-ons",
-        "url": "https://github.com/chalbert/web-everything/pull/2388",
+        "title": "#3735 ratified as prepared: codify the merge-only approval carry (advisory fixes, round 2)",
+        "url": "https://github.com/chalbert/web-everything/pull/2407",
         "repo": "chalbert/web-everything"
       },
       "blockedBy": [],
@@ -4979,6 +5717,106 @@
       "parseOk": false,
       "warnings": [
         "Fork 4: no option marked RECOMMENDED — default could not be identified."
+      ]
+    },
+    {
+      "num": "3805",
+      "title": "Decision: run CI on the prototype branch, change the drain's required check, or neither",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": {
+        "number": 2404,
+        "state": "open",
+        "kind": "ratification",
+        "title": "ratify #3805: no CI on the prototype branch; drain holds non-default-base PRs (statute clause 5)",
+        "url": "https://github.com/chalbert/web-everything/pull/2404",
+        "repo": "chalbert/web-everything"
+      },
+      "blockedBy": [],
+      "dateOpened": "2026-09-21",
+      "ageInDays": 1,
+      "digest": [
+        "Rule whether the prototype branch `lane/mechanical-dispatcher` gets real CI, or whether the drain's hardcoded required check changes, or neither. Today the two cards that raised it (#3674 and #3653) each name one half of the fork and rule nothing. Relates #3674 (the drain stalls forever on a base with no `test` check; two candidate fixes, \"not deciding here\"), #3653 (allow CI for POC branches) and #3443 (graduation: each slice gets its own reviewed pull request to `main`).",
+        "*Prepared 2026-09-21 (session prepare-3804-and-3805).* Research topic: [/research/prototype-branch-sync-and-ci/](/research/prototype-branch-sync-and-ci/). Session report: `we:reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md`. Numbers re-measured on 2026-09-21; main at `d6c7f6237`, the branch at `5ab89f87b`."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Where the prototype's check comes from",
+          "why": "*Fork-existence:* (a) and (b) both put a CI gate on landings into the prototype; (c) keeps the prototype's only gate as the item's own tests, as statute clause 2 says. They cannot coexist: a CI gate inside the POC branch either exists or it does not.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "rejected",
+              "body": "**Run CI on pull requests against the prototype.** Widen both workflows' `pull_request.branches` to include the prototype, either as a static list or as `lane/**` plus a first job that reads the registry. Gives a real, visible `test` on any such pull request (#3653's acceptance). **Cost to graduation:** none saved; each slice still runs CI at its graduation pull request. **Health chain:** #3653 is built, and #3674 closes because `test` now reports. Rejected on merit: it adds a second gate inside the POC branch, which statute clause 2 rules out (the item's own tests are the only gate there, and it says \"A landing tax of any shape, however small, is exactly the latency the operator ruled out\"), and it would gate only the pull-request path while direct pushes, the actual path, stay ungated, so it certifies nothing about the branch. The card's earlier reason, \"15 errors, red on day one\", is now weak: the branch is at 1 error. Build note: a workflow filter cannot read the registry; a job skipped by `if:` reports \"skipped\", while a workflow skipped by a filter stays Pending."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Change the drain to read the base's real required checks, as `we:scripts/pr-land.mjs` does.** Zero required checks on a base then counts as passed (#3674 candidate b). **Cost to graduation:** none. **Health chain:** #3674 is built, #3653 closes. Rejected: it edits the gate of the only writer to `main` to serve a base that receives no pull requests. It also rewrites the drain's statute contract (`#repo-drain-check-contract`: one green check named `test`). A bug in \"zero checks counts as passed\", such as an API error read as zero, would let an unchecked pull request reach `main`. If chosen, it must fail closed on any API error and relax only for a base named in the POC registry, and the statute must be amended."
+            },
+            {
+              "label": "(c)",
+              "kind": "default",
+              "body": "**Neither — recommended.** Pull requests are not the delivery path for the prototype. Prototype work lands by direct push or `poc-land`, verified by the item's own tests (statute clause 2). Each slice gets full CI at its graduation pull request against `main` (#3443; statute clause 3), the only place CI is load-bearing. #3653 is resolved as superseded by this ruling. #3674 is resolved by Fork 2 (a)'s build, because its real defect, the silent stall, is what Fork 2 fixes. **Cost to graduation:** none added. **Health chain:** #3653 closes without code and #3674 closes with a one-arm drain change, so graduation waits on #3768 and #3772 (through #3804) only. **What (c) leaves untested, named:** nothing runs a suite on the merged prototype tree; clean sync merges are ungated by design, and `poc-land --skip-verify` has been used (PR #2236's closing comment). The cover is #3768 design point 6 (a `check:standards` run on each push to the branch), which does not need GitHub CI; (c)'s build is ruled together with filing that as a card, so the gap has an owner."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "# Fork 1 (a), the rejected shape, for contrast: we:.github/workflows/ci.yml\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main, 'lane/**']   # static; a first `gate` job must then read poc-branches.json"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. Citation scope: clause 2 of `#poc-branch-declared-delivery-mode` reaches this case directly, so it is authority for (c), not only context. Attacks: after (c) nothing tests the merged prototype tree, and #3674's defect is fixed by Fork 2's code, so it is not simply \"superseded\". Fixed: #3674 now resolves through Fork 2 (a)'s build, and the untested tree is named with #3768 point 6 as its owner. Statute overlap: none; `#repo-drain-check-contract` is untouched by (c).",
+          "screen": "flagged(prio) → fixed. The first draft rejected (a) mostly on cost (\"a path nobody uses\", \"two hand-kept lists\"). Restated on merit: (a) adds a second gate inside a POC branch, which clause 2 rules out, and it gates only the pull-request path while the real path, the direct push, stays ungated.",
+          "parseOk": false,
+          "warning": "Fork 1: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly."
+        },
+        {
+          "n": 2,
+          "crux": "A pull request opened against the prototype anyway",
+          "why": "*Fork-existence:* only matters under Fork 1 (c). The drain either says why it will not land such a pull request, or it does not. Silence is broken: it is the defect #3674 was filed for.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**The drain holds it with a named reason — recommended.** The reason reads `base is not main`, so it shows as held instead of waiting forever. The reason is one more arm in `classifyPr`'s existing skip chain. It compares the PR's base with the repo's default branch (or a registered POC branch's `target`), not a hardcoded `'main'`. No legitimate drain landing is lost: no drain-landed PR has ever had a non-main base (FOUND above), stacked couples share lane tips through manifest `base` shas, not PR bases (`we:scripts/merge-ai-prs.mjs:771-779`), and the PR-create path defaults to `main` (`we:scripts/pr-land.mjs:133`). A `--base=main` flag alone would hide such PRs silently, so the code arm is needed. The drain never lands it; a human who opened it on purpose merges it by hand or re-targets it."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Leave it as today.** Rejected: it stalls with no message."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**Close it automatically.** Rejected: a human may have opened it on purpose."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "code",
+              "text": "// Fork 2 (a): one more arm in classifyPr's skip chain (we:scripts/merge-ai-prs.mjs:616-629), ahead of the\n// required-check arm, so the named reason wins over \"required check \"test\" is not green\".\n// `baseRefName` is already in the drain's `gh pr list --json` field list (we:scripts/merge-ai-prs.mjs:3547).\n// `defaultBranch` is the repo's default branch, passed in by the caller (not a literal 'main').\nelse if (pr?.baseRefName && pr.baseRefName !== defaultBranch) { decision = 'skip'; reason = `base is not ${defaultBranch} (${pr.baseRefName}) — POC-branch PRs are not drained (#3805)`; }\nelse if (!testGreen) { decision = 'skip'; reason = `required check \"${requiredCheck}\" is not green`; }"
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT → applied. History attack: does the drain legitimately land non-main-base PRs anywhere? Checked across web-everything, frontierui and plateau-app: no. Classification: a `--base=main` config flag alone would hide such PRs silently, so a code arm is justified. Amendment: compare with the repo's default branch or the POC registry target, not a literal `'main'`.",
+          "screen": "clear. The operator sees the named hold, so it is not an implementation detail; (c), auto-close, is rejected on merit. (b) is the status quo, kept for contrast.",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — `grep -l '^## Ruling' we:backlog/*run-ci-on-the-prototype-branch*.md` lists this card (it fails until the operator has ruled and a `## Ruling` section names the chosen option for both forks).",
+        "2. After the ruling, `gh pr list --base lane/mechanical-dispatcher --state open` shows no pull request waiting on a check that cannot run (under (c): the drain reports any such pull request as held with the named reason, #3674 is resolved by that build, and #3653 is resolved as superseded)."
+      ],
+      "parseOk": false,
+      "warnings": [
+        "Fork 1: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly."
       ]
     }
   ]
