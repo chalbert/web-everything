@@ -19,6 +19,10 @@ Confirmed hit twice on 2026-09-14: PR #2198 (telemetry fixes) stalled for hours 
 
 This is not a one-off: it will stall every future PR targeting this base branch until fixed. Two candidate fixes to weigh (not deciding here): (a) wire real CI to run against `lane/mechanical-dispatcher` too, mirroring main's workflow triggers in we:.github/workflows/ci.yml and we:.github/workflows/review-gate.yml; or (b) fix we:scripts/merge-ai-prs.mjs's hardcoded `requiredCheck='test'` to match we:scripts/pr-land.mjs's correct behavior, read the branch's actual required-check contexts and treat zero-required-checks as passed, rather than assuming a `test` check always exists.
 
+## Finding (2026-09-21): the fork is now a decision card
+
+The two candidate fixes above, plus a third (neither: no pull requests against the prototype), are filed as decision card xxpu8tm, `relatedTo` this card and #3653. Re-verified today: the branch is still unprotected (404), its tip has 0 check-runs, `we:scripts/merge-ai-prs.mjs` still defaults `requiredCheck = 'test'`, and no pull request has been opened against the base since 2026-09-15 (the operator's ruling made the direct push the delivery path). Do not build either fix before that card is ruled.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.

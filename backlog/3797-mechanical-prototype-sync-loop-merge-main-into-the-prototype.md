@@ -33,6 +33,10 @@ The prototype branch `lane/mechanical-dispatcher` must be kept up to date with `
 7. **Duplicate backlog ids** on the merge (#3772 point 3) and what a slice's graduation needs from a fresh merge (#3772 point 4).
 8. **The stuck process.** Retire pid 81962 and the scratch-clone loop, or repoint it, as part of landing this.
 
+## Finding (2026-09-21): the open policy calls are decision card xki1xap; one FOUND line above is incomplete
+
+Design points 6 (cadence) and 5 (conflict handling), plus the alert path and when a slice may graduate, are filed as decision card xki1xap (uncleared, not yet prepared); settle it before or with this loop. One correction to the FOUND list: `we:scripts/conveyor/branch-sync.mjs` never pushes, but on the prototype branch only, `we:scripts/conveyor/poc-branch-sync.mjs` already builds the merge commit with git plumbing and pushes it plainly (never forced) under `withPocLandLock`, gated on the registry's `autoSync` flag, and the runner calls it each tick. So the resolver of design points 2 to 4 is largely written there and is not on `main`; whether it has ever pushed a real merge live is not verified. Also: the staging ref `origin/lane/mechanical-dispatcher-catchup` is no longer a fast-forward of the branch (12 commits landed after it was cut), and the five judgment forks of that merge are decision card xdqy6xk.
+
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/branch-sync.test.mjs` passes, with new cases on real throwaway git fixtures that fail today: a clean merge is pushed fast-forward only and the remote tip equals the merge commit; a moved remote tip is refused and retried from a fresh fetch, never forced; a conflicting merge pushes nothing, freezes the loop and writes the alert; a branch with `autoSync: false` (or `WE_POC_BRANCH_SYNC=0`) is not touched; and the merge holds `withPocLandLock` so a concurrent fast-land waits.
