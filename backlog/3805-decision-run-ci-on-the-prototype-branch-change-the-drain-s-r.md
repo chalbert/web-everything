@@ -2,10 +2,14 @@
 bornAs: xxpu8tm
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 relatedTo: ["3674", "3653", "3443", "3768", "3804"]
 scope: ["we:.github/workflows/ci.yml", "we:.github/workflows/review-gate.yml", "we:scripts/merge-ai-prs.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: "docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode"
+graduatedTo: none
 preparedDate: "2026-09-21"
 preparedAgainstSha: "4cd769f889f977d7f7ac67288e585c46c46e4b5b"
 relatedReport: reports/2026-09-21-prototype-branch-sync-and-ci-grounding.md
@@ -116,6 +120,14 @@ Care level: `high` (the default's only code change is an arm in the drain, which
 first two and resolves #3674; resolving #3653 as superseded takes its card. Under Fork 1 (a) the touch-set is
 instead `we:.github/workflows/ci.yml` + `we:.github/workflows/review-gate.yml` + `we:scripts/lib/poc-branches.mjs`
 (#3653's build); under (b) it is `we:scripts/merge-ai-prs.mjs` + `we:docs/agent/platform-decisions.md`.
+
+## Ruling — 2026-09-21 (ratified, operator, in conversation)
+
+1. **Fork 1 → (c) neither.** No CI on the prototype branch and no change to the drain's required check. Prototype work lands by direct push or `poc-land` (statute clause 2); full CI runs at each graduation pull request to `main` (clause 3). The untested-merged-tree gap is owned by #3768's Fork 3 (the recurrence guard, design point 6), which needs no GitHub CI, so no new card is filed for it. #3653 is resolved as superseded, with no code.
+2. **Fork 2 → (a) the drain holds it with a named reason.** One more arm in `classifyPr`'s skip chain: a pull request whose base is not the repo's default branch is skipped with `base is not <default> (<base>)`, ahead of the required-check arm. The comparison uses the repo's default branch (passed in by the caller), never a literal `'main'`. #3674 is the build card for this arm and resolves on its landing.
+
+**Codified:** `we:docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode`, new clause 5.
+**Follow-ups:** #3674 (build, rescoped to the drain arm and its test); #3653 (resolved, superseded).
 
 ## Done when
 

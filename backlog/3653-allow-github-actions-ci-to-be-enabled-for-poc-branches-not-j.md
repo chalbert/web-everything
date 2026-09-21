@@ -3,9 +3,11 @@ bornAs: xj0174p
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:.github/workflows/ci.yml", "we:.github/workflows/review-gate.yml"]
 dateOpened: "2026-09-13"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: [ci, poc-branch]
 ---
 
@@ -30,6 +32,10 @@ real, automated CI gate on their own PRs.
 ## Finding (2026-09-21): whether to do this at all is now a decision card
 
 Whether the prototype gets CI on its pull requests, or the drain's required check changes instead, or neither (no pull requests against the prototype), is decision card 3805, `relatedTo` this card and #3674. Both workflow files still trigger on `main` only, and no pull request has been opened against the prototype since 2026-09-15; hold this card until that ruling.
+
+## Resolved as superseded (2026-09-21, #3805)
+
+#3805 ruled Fork 1 (c): the prototype branch gets no CI of its own. Pull requests are not its delivery path (direct push and `poc-land`, gated by the item's own tests); CI runs at each graduation pull request to `main`. Nothing here is built. The silent-stall side is #3674, rescoped to a drain hold.
 
 ## Done when
 
