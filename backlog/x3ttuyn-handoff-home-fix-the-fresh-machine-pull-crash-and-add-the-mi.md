@@ -1,0 +1,45 @@
+---
+kind: story
+size: 5
+parent: "3779"
+status: open
+scope: ["we:scripts/operations/handoff-home.mjs", "we:scripts/operations/__tests__/handoff-home.test.mjs"]
+dateOpened: "2026-09-21"
+tags: []
+---
+
+# handoff-home: fix the fresh-machine pull crash and add the missing guard tests and symlink refusal (owed by the #2392 review)
+
+The independent review of PR #2392 (#3779 slice A, we:scripts/operations/handoff-home.mjs) accepted it with five prevention items OWED. Four are code or test work and are this card's Done-when: a pull into a missing directory crashes, the race guard and the branch-gone refusal have no test that reddens when removed, and push/pull follow symlinks and accept extra tracked paths. The fifth (two wider review-lens rules) is a proposal only.
+
+SOURCE. The last comment on PR #2392, section "Findings (5)" (the review was recorded as `accept` and the PR merged with these owed). Each finding was reproduced or mutation-probed by the reviewer in a throwaway clone. Line numbers below are the reviewer's, against we:scripts/operations/handoff-home.mjs as merged.
+
+**THE FIRST REAL PUSH TO `ops/handoff` MUST WAIT FOR ITEMS 2, 3 AND 4.** They are the guards against silently overwriting another writer's handoff (item 2), silently replacing the whole branch with a one-commit orphan (item 3), and pushing a symlink target's content to the branch (item 4). Until they have tests that redden when the guard is removed, do not run the module's `push` verb against the real remote. Item 1 blocks bootstrapping a second machine (`pull`) but loses nothing.
+
+SEPARATE OPEN QUESTION, NOT THIS CARD'S: whether the handoff may be published on a PUBLIC repository at all is with the operator. Nothing here settles it; the publish gate in `publishRefusals` is unchanged.
+
+## The five owed items
+
+1. **`pull` into a missing directory crashes** (line 118, `ensureWorkingCopy`). On a fresh machine `~/workspace/.operations/handoff/` does not exist and `path` never creates it. With `ops/handoff` on origin, `pull` reaches `ensureWorkingCopy` and runs `git init` with a `cwd` that is missing, and dies with `spawnSync git ENOENT`. Fix: `mkdirSync(dir, { recursive: true })` inside `ensureWorkingCopy`, and only once the remote branch is known to exist, so `pull` on a repo with no `ops/handoff` still leaves the disk untouched (the existing test "reports a missing branch and leaves the directory alone" keeps guarding that).
+2. **The `assertReady` race guard has no test that reddens** (lines 196 and 226, two lenses named the same gap). Mutation probe by the reviewer: body replaced by `void 0`, and also the whole `throw diverged` line deleted; all tests still passed, because the `diverged` test is caught earlier by the `fetchTip` vs `HEAD` pre-check. Test: a `run` wrapper that, when the transport's `worktree add` is seen, first pushes a competing commit to the bare origin. Assert `pushHandoff` returns `refused` with a reason containing `moved on origin during this push`, and that the remote tip is still the competitor's commit. Plus the created-branch variant: the competitor creates `ops/handoff` between the script's `fetchTip` and the transport's `ls-remote`; assert the same refusal and that the remote holds only the competitor's commit.
+3. **The refusal to recreate a deleted `ops/handoff` has no test** (line 210, `if (!tip && head)`). Mutation probe: `if (false)`. The existing "never pulled" test covers only the opposite case (`tip && !head`). Test: push, delete the branch on the bare origin, push again; assert `refused` with `is gone from origin`, and that the origin still has no `ops/handoff`.
+4. **`push` and `pull` follow symlinks and accept extra tracked paths** (line 192, `readFileSync`; and the adopt path near line 166, `git reset tip; git checkout -- .`). Anyone with push access to `ops/handoff` could commit the snapshot file (the first entry of `HANDOFF_FILES`) as a symlink to a sensitive file; `pull` checks it out, the next `/handoff` writes through the link, and `push` reads through it and publishes the target's content. Separately, the adopt path overwrites a local file that matches any path tracked on the remote, because only the two `HANDOFF_FILES` are compared. Fix, in three parts: (a) `push` calls `lstatSync` on each `HANDOFF_FILES` entry and refuses a non-regular file (a symlink) before reading it; (b) `pull`, after `fetchTip` and BEFORE the adopt or the fast-forward checks anything out, runs `git ls-tree -r <tip>` and refuses unless it lists exactly the two `HANDOFF_FILES`, each as mode `100644` blob; (c) the adopt path also refuses when a local `HANDOFF_FILES` entry is not a regular file. With (b) in place the "adopt overwrites a matching local file" case cannot occur for any path other than the two files already compared byte-for-byte, so no further adopt change is needed; the test below proves it rather than assuming it.
+
+## Proposal, NOT in the Done-when (item 5): two wider review-lens rules
+
+Owed by the same review, filed here as a proposal for the operator; **this card does not edit any lens definition**.
+- **Rule A:** any "still refused" or "never" claim in a file header or comment needs a named test that exercises that exact line (a mutation of the line reddens it).
+- **Rule B:** a state-matrix check (a guard that branches over combinations such as `tip`/`head`/`created`) needs one test per cell of the matrix.
+- **Where they would live.** The lens definitions are in we:scripts/lib/review-core.mjs: `LENS_EXPECTATIONS` (the bar per lens; `correctness` already says "every changed branch is exercised") and `LENS_HUNT_BRIEF` (the method per lens; today only `claim-accuracy` has an entry, a numbered list of shapes to hunt). The lens names are single-sourced in `MANDATE_LENSES` in we:scripts/lib/jury-core.mjs, and `REVIEW_LENS_CHARTER` in we:scripts/lib/jury-ledger.mjs holds the one-line charters. Recommendation: put Rule A and Rule B into a new `LENS_HUNT_BRIEF[MANDATE_LENSES.CORRECTNESS]` entry, because `correctness` is mandatory and always seated, while `claim-accuracy` is advisory and was not seated on #2392 (only correctness and security ran). Rule A also fits as a seventh shape in the `claim-accuracy` brief ("a header promises a refusal, no test names it"). The `standards-conformance` lens is the wrong home: its bar is repo conventions, not test adequacy. Any such edit changes a review prompt, so it should be its own card with the operator's OK.
+
+## Done when
+
+Tests live in we:scripts/operations/__tests__/handoff-home.test.mjs; run that file with `node --test`. Every named test below must FAIL on `main` at the merge of #2392 and PASS after; the "mutation check" lines are the probes the reviewer ran.
+
+1. **Executable** — item 1. Test `pull › creates a missing working-copy directory, parent included, once the remote branch exists` pulls into `<tmp>/no/such/parent/dir` with `ops/handoff` on a bare origin and asserts `updated` with both files checked out; before the fix it throws `spawnSync git ENOENT`. Test `pull › creates nothing when the remote has no ops/handoff` asserts `no-remote-branch` and that neither the directory nor its parent exists afterwards.
+2. **Executable** — item 2. Tests `push › refuses when a competing push lands after the tip check and before the transport's fetch (existing branch)` and `… (created-branch variant)` inject the `run` wrapper described above and assert `refused` with `moved on origin during this push` and the competitor's commit as the remote tip (the other writer's files unchanged). Mutation check, stated in the test's comment and run once by the author: replacing the `assertReady` body with `void 0` makes both tests fail.
+3. **Executable** — item 3. Test `push › refuses to recreate ops/handoff when the working copy has history but the branch is gone from origin` asserts `refused`, a reason containing `is gone from origin`, and `git ls-remote --heads origin ops/handoff` empty afterwards. Mutation check: changing `if (!tip && head) {` to `if (false) {` makes it fail.
+4. **Executable** — item 4. Tests: `push › refuses a symlinked handoff file without reading through it` (a symlink to a file holding a secret-shaped string; assert `refused` and that the origin never receives that content); `pull › refuses a remote tree holding a symlink` and `pull › refuses a remote tree holding an extra tracked file` (each seeded by pushing directly to the bare origin; assert an error naming the offending path, HEAD and the working files unchanged); `pull › adopt leaves a local file at an extra tracked path untouched` (the remote also tracks `notes.txt`, the local `notes.txt` differs: assert the pull refuses and `notes.txt` is byte-identical). All four fail on `main` at the merge of #2392.
+5. **Executable** — the lane is green: the `verify-lane` script (we:scripts/verify-lane.mjs) passes and `npm run check:standards` reports 0 errors.
+
+Not in the Done-when: item 5 above (proposal only), and the PUBLIC-repository question (operator's).
