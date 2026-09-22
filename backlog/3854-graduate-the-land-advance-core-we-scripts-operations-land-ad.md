@@ -1,9 +1,10 @@
 ---
+bornAs: xxdbkpr
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["xsdy9fr"]
+blockedBy: ["3853"]
 scope: ["we:scripts/operations/land-advance.mjs", "we:scripts/operations/land-advance-repair.mjs", "we:scripts/operations/land-advance-escalations.mjs", "we:scripts/operations/__tests__/land-advance.test.mjs", "we:scripts/operations/__tests__/land-advance-repair.test.mjs", "we:scripts/operations/__fixtures__/land-advance/today.json"]
 dateOpened: "2026-09-21"
 tags: []

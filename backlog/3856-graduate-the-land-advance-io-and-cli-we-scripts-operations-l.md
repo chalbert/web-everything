@@ -1,9 +1,10 @@
 ---
+bornAs: xfzk99d
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["xsdy9fr", "xxdbkpr", "x3pkdii", "x90765m", "x76ggt5"]
+blockedBy: ["3853", "3854", "3851", "3852", "3855"]
 scope: ["we:scripts/operations/land-advance-io.mjs", "we:scripts/operations/land-advance-cli.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__tests__/land-advance-io.test.mjs", "we:scripts/operations/__tests__/land-advance-io-real.test.mjs", "we:scripts/operations/__tests__/land-advance-cli.test.mjs", "we:scripts/operations/__tests__/land-advance-repair-io.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
