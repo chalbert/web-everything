@@ -4094,6 +4094,59 @@ the same lane it was filed from), numbered on land.
 
 ---
 
+### A proven self-authored `review:pending` PR clears through `clear-operator` — `clear-human`'s twin one tier down, gated to a proven self-clear {#clear-operator-proven-self-clear-only}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), Fork 1(a) approved as prepared, no amendment
+(`#3048`).** An operator's verbal approval of a PR whose author actor is the approving session itself had **no
+recording route**: `--to=accepted` refuses as a self-clear (#2439/#2398), and `--to=clear-human` refuses
+because the PR carries `review:pending`, not `review:human` — the human-ceremony exemption exists only one
+tier up. Two ways to close the gap were forked; only one is ratified.
+
+1. **Mint `clear-operator`.** `REVIEW_LABEL_TARGETS` (`we:scripts/review-set-label.mjs`) gains a
+   `'clear-operator'` member. `decideSetLabel` grows a branch parallel to the existing `clear-human` one, keyed
+   on `REVIEW_LABELS.pending` instead of `REVIEW_LABELS.human`: label-shape only, refused when the PR does not
+   carry `review:pending`, otherwise clearing it to `review:accepted` (never touching `review:human` —
+   INVARIANT 2 stays untouched).
+2. **Gated to a PROVEN self-clear, never a general bypass.** `review:pending` is the default parked state
+   nearly every PR passes through, unlike the rare `review:human` label `clear-human` guards — so
+   `clear-operator` reuses the same `decideClearerIndependence` call `--to=accepted` already makes, but
+   **inverts** the requirement: `clear-operator` is refused **unless** independence reads `SELF_CLEAR`. This
+   keeps its blast radius scoped to exactly the reported gap; it can never be used on a PR someone else
+   authored.
+3. **Inherits the existing honesty tax, unchanged.** `--actor=<name>` and a quoted `--reason=<...>` stay
+   mandatory and are posted verbatim, exactly as `clear-human` already requires. The durable comment gains a
+   **third** phrasing alongside "a human ceremony cleared it" / "an established-independent agent cleared it":
+   *"an operator ceremony cleared it (review:pending tier, proven self-authored)"*.
+4. **The residual is pre-existing, not new.** The unforgeable-actor-signal gap `#2895` already deferred to
+   `#2946` applies here unchanged — `clear-operator` grants no capability an unforged `--to=accepted` call
+   didn't already grant, so no new residual is introduced at this tier.
+
+**Rejected — (b) auto-escalate self-authorship into `review:human`.** Adding self-authorship as a third
+`humanRequired` trigger in `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) would re-litigate
+[#review-human-declarative-leash-only](#review-human-declarative-leash-only) (#2771), which closed the
+`review:human` trigger set at exactly three members and explicitly rejected "an agent might be policing its
+own leash" — the same structural case as an actor clearing its own PR. Widening that closed set, or amending
+the ratified statute outright, is a larger decision this item has no authority to make on its own; (a) never
+touches that boundary.
+
+**What this ruling does not do.** It builds nothing (no `clear-operator` branch, no independence-inversion
+check, no new comment phrasing) and changes no gate by itself; the build is separately-scoped follow-on work
+tracked on the backlog.
+
+**Lineage:** ratified via `#3048` (2026-09-21), grounded in the item's own prior-art check against
+`we:scripts/lib/gate-config.mjs`'s `TRUST_CHAIN` and `we:scripts/lib/review-policy.contract.json`; re-validated
+for currency at ratification (statutes #3434/#3589 ratified since prep compose without conflict; the item's
+`file:line` citations had drifted from unrelated commits but the underlying mechanism they describe was
+unchanged) and re-attacked by a fresh independent skeptic pass, which found nothing that survived. Composes
+with — does not alter — [#review-human-declarative-leash-only](#review-human-declarative-leash-only) (#2771,
+the trigger set (b) would have widened) and
+[#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (#3434, the
+sibling mechanical-accept path for a genuinely independent verdict — orthogonal, since this rule's gate fires
+only on `SELF_CLEAR`, never on independent review). Full reasoning and the rejected option:
+[#3048](/backlog/3048-an-operator-approval-has-no-recording-route-on-a-self-author.md).
+
+---
+
 ### A learning is admitted to agent memory by verified grounding; recurrence diagnoses and ranks, never admits {#memory-admission-verified-grounding}
 
 **Ratified 2026-08-08 by the operator (Nicolas Gilbert) (#2978).** The learnings pipeline **consolidates and prioritizes**; it is not an authentication checkpoint and no human stands in its path. Four rules, ruled together because each makes the next affordable. **(1) Admission is verified grounding, plus the red-team.** A note reaches agent memory only if it carries the **quoted grounding turn** plus a **transcript pointer**, and the harvest confirms the quote is really in that file — a check against a file the *harness* writes, not one the emitter controls. Grounding proves the **moment**, never the **merit**, so admission reads *grounded **and** survives the red-team*; a note that cannot be tied to a real moment routes to `we:backlog/`, never to memory. A **recurrence count may never gate admission**: `session` and `ts` are emitter-written, so counting authenticates nothing (four hand-written lines manufacture "2 sessions across 2 days"), and a recurrence bar structurally excludes the **one-off user directive** — the source that produced essentially the entire existing `feedback_*` corpus. **(2) Recurrence is a diagnostic signal first, a ranking key second.** N similar notes are evidence of **one cause with N symptoms**, so a cluster's output is a design-level **story naming that cause**, not N patches on a faulty design — and the cluster reaches synthesis with all its members, never an elected "representative" (which elects the best-described *symptom*). A single grounded note becomes a memory rule; a cluster becomes a backlog story. Those are different destinations. No admission floor: a one-session cluster is a real signal that merely sorts lower. **(3) While single-tenant, the pool entry carries the full evidence, uncapped** — storing the real context beats storing a digest and hoping it reconstructs, and cause-synthesis is impossible from a count alone. The secret/entropy scrub therefore **relocates rather than dies**: it moves from the *append* seam to the **publish seam**, because the pool is untracked machine-local state but harvest *output* is committed and pushed. Size limits belong on **what the harvest sends per cluster** (a model-context budget) — never on what is stored. **(4) The harvest fires on a cadence, with the manual command retained**, the two sharing one lock so a tick and a manual run cannot double-file; and a harvest **may defer** a cluster whose cause is not yet clear, re-emitting it to the pool with a reason and a deferral count rather than draining everything. A repeatedly-deferred cluster is itself a finding.
