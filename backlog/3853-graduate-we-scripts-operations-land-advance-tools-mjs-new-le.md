@@ -3,9 +3,10 @@ bornAs: xsdy9fr
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/operations/land-advance-tools.mjs", "we:scripts/operations/__tests__/land-advance-tools.test.mjs"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-21"
 tags: []
 ---
 
