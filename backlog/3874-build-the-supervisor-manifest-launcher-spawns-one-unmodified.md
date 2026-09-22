@@ -63,13 +63,25 @@ we:skills-src/conveyor/supervisor.mjs's own single-child shutdown, generalized t
 the live child was confirmed alive by PID, then confirmed genuinely gone (not orphaned) after signalling it
 and stopping the loop.
 
+**Third correction, found in review (PR #2472, review:changes):** two tests hardcoded "the real DAEMON_MANIFEST
+is empty" as a literal expected value -- true when this file was written (correction 2, above), but #3873
+landed 15 real entries onto that SAME shared, mutable export before this PR merged, reddening both hardcoded
+literals against current main (confirmed by the reviewer's own direct execution: 16 passed / 2 failed, not
+the 18/18 this card and the PR both claimed). Fixed per the reviewer's own prescribed remedy: both tests now
+assert against `Object.keys(DAEMON_MANIFEST)`'s own CURRENT state rather than a value pinned at write time,
+so neither test can ever again go stale the instant a sibling PR populates that same shared export. Added one
+further test that resolves every REAL currently-registered name (guarded to skip, not assert either shape, if
+the manifest is ever empty again) -- proving the launcher genuinely handles today's real 15-entry manifest,
+not only a fixture. 19/19 now.
+
 ## Done when
 
 1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/supervisor-launcher.test.mjs` passes
-   (18/18): the pure `planLaunchTargets`/`defaultLaunchNames` resolve every valid manifest name and isolate an
+   (19/19): the pure `planLaunchTargets`/`defaultLaunchNames` resolve every valid manifest name and isolate an
    unresolvable one without aborting the rest; `launchEntry`/`launchAll` wire the resolved `script`/`args` into
    we:skills-src/conveyor/supervisor.mjs's own (injected, never real-in-tests) `runSupervisorLoop`/
-   `makeRealSpawnChild`/`makeJsonlLog` correctly, one call per manifest entry, with per-entry log isolation.
-   This proves the launcher's own resolution + wiring logic; it does not spawn a real subprocess (that path is
-   exercised by we:skills-src/conveyor/__tests__/supervisor.test.mjs's own real-subprocess suite, reused here
-   unmodified).
+   `makeRealSpawnChild`/`makeJsonlLog` correctly, one call per manifest entry, with per-entry log isolation;
+   every case touching the real, shared `DAEMON_MANIFEST` asserts against its own current state, never a
+   value hardcoded at write time. This proves the launcher's own resolution + wiring logic; it does not spawn
+   a real subprocess (that path is exercised by we:skills-src/conveyor/__tests__/supervisor.test.mjs's own
+   real-subprocess suite, reused here unmodified).

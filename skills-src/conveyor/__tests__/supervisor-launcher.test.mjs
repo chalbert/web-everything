@@ -1,15 +1,19 @@
 /**
  * @file skills-src/conveyor/__tests__/supervisor-launcher.test.mjs
  * @description Unit proof of #3874's manifest-driven launcher. Every test supplies its OWN fixture manifest
- *   and fake effects — never the real (empty by design, see daemon-manifest.mjs's own header) DAEMON_MANIFEST
- *   and never a real subprocess (see supervisor.mjs's own __tests__ for the real-spawn proof this launcher
- *   reuses unmodified).
+ *   and fake effects, never a real subprocess (see supervisor.mjs's own __tests__ for the real-spawn proof
+ *   this launcher reuses unmodified). The handful of tests that DO exercise the real, shared DAEMON_MANIFEST
+ *   (proving the "no injection needed" default path) assert against its own CURRENT state
+ *   (`Object.keys(DAEMON_MANIFEST)`), never a value hardcoded at write time — that manifest is a live,
+ *   mutable export another PR (#3873) populates independently of this one, and a hardcoded literal here
+ *   reddened the moment #3873 landed (live-caught in review, PR #2472).
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
   planLaunchTargets, defaultLaunchNames, resolveScriptPath, entryLogPath, launchEntry, launchAll,
   DEFAULT_LOG_ROOT,
 } from '../supervisor-launcher.mjs';
+import { DAEMON_MANIFEST } from '../daemon-manifest.mjs';
 
 const fixtureManifest = {
   'branch-drift': { script: 'scripts/conveyor/branch-drift.mjs', args: ['sweep'], intervalMs: 120_000 },
@@ -53,10 +57,23 @@ describe('planLaunchTargets — pure resolution over an injected manifest', () =
     expect(planLaunchTargets(undefined, { manifest: fixtureManifest, resolveEntry: fakeResolveEntry })).toEqual({ targets: [], failures: [] });
   });
 
-  it('defaults resolveEntry/manifest to the real ones when not injected — the real (empty) manifest refuses every name', () => {
-    const { targets, failures } = planLaunchTargets(['anything']);
+  // Live-caught in review (PR #2472): this used to hardcode "the real DAEMON_MANIFEST is empty" — true when
+  // this file was first written, but #3873 landed 15 real entries onto that SAME shared, mutable export
+  // before this PR merged, which reddened the hardcoded literal. Fixed to assert against the manifest's own
+  // CURRENT real state (`Object.keys(DAEMON_MANIFEST)`) rather than a value pinned at write time — the fix
+  // the review itself prescribed for this whole class of cross-file shared-default test.
+  it('defaults resolveEntry/manifest to the real ones when not injected — a name that is not for real registered still refuses', () => {
+    const { targets, failures } = planLaunchTargets(['totally-not-a-real-entry-name']);
     expect(targets).toEqual([]);
-    expect(failures).toEqual([{ name: 'anything', error: expect.stringMatching(/No entries are registered yet/) }]);
+    expect(failures).toEqual([{ name: 'totally-not-a-real-entry-name', error: expect.stringMatching(/is not in the daemon manifest/) }]);
+  });
+
+  it('every REAL currently-registered manifest name resolves with no defaults injected', () => {
+    const realNames = Object.keys(DAEMON_MANIFEST);
+    if (realNames.length === 0) return; // still true only before #3873 lands; skip rather than assert either shape
+    const { targets, failures } = planLaunchTargets(realNames);
+    expect(failures).toEqual([]);
+    expect(targets.map((t) => t.name).sort()).toEqual([...realNames].sort());
   });
 });
 
@@ -69,8 +86,10 @@ describe('defaultLaunchNames — every currently-registered name, sorted', () =>
     expect(defaultLaunchNames({})).toEqual([]);
   });
 
-  it('defaults to the real DAEMON_MANIFEST when none is supplied — today that is empty (see that file\'s own header)', () => {
-    expect(defaultLaunchNames()).toEqual([]);
+  // Live-caught in review (PR #2472): same class of fix as planLaunchTargets' own test above — assert
+  // against DAEMON_MANIFEST's own current real keys, never a value hardcoded at write time.
+  it('defaults to the real DAEMON_MANIFEST when none is supplied', () => {
+    expect(defaultLaunchNames()).toEqual(Object.keys(DAEMON_MANIFEST).sort());
   });
 });
 
