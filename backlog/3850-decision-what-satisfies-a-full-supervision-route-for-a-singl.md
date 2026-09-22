@@ -2,10 +2,12 @@
 bornAs: xyn92zm
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/fix-dispatch-wrapper.mjs", "we:scripts/operations/ci-heal-dispatch-wrapper.mjs", "we:scripts/review-set-label.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 relatedTo: ["3784", "3801", "3690", "3717", "3313"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-22"
+codifiedIn: one-off
 preparedDate: "2026-09-21"
 preparedAgainstSha: "4c8240bc83e58d1cc9c030fb1923fcc2f7c8999c"
 tags: []
@@ -66,6 +68,13 @@ Rule the one point #3801 Fork 1 carried into #3784: a dispatch-lane launch of bu
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT → applied (independent skeptic pass). Attack: "rule 6 says every triple stays at `full`, so Claude must be held too". Answer: the statute "applies … to the delegation-trial record" and its trust unit is a delegated triple, so reading it as scoped to delegated work is fair; binding native work would extend it past its own scope. False claim fixed: the first draft said `executed` names the vendor that actually ran; today it is a constant `claude`, so a Codex build would have escaped the hold. Now the binding reads the spawned provider (or `routed`) until `3848` lands. Also settled: the dispatch-time hold passes Claude-executed routes, and an Antigravity-hosted Claude model counts as delegated.
 **Screen:** clear. Contract: which PRs the `full` hold applies to.
+
+## Ruling
+
+Ratified 2026-09-22 by the operator. The operator's own words, quoted: "I ratify 3850". No fork-by-fork overrides were given, so this ratifies the card's own stated bold defaults for both forks unchanged.
+
+- **Fork 1 — RATIFIED, (a).** The review panel on the lane's own PR, as a merge hold: the dispatch records the supervisor as that PR review, and the PR of a `full` route opens parked `review:pending` and cannot land until the panel records `review:accepted`; for a `fix`/`ci-heal`, the hold is enforced at the land seam (head-SHA re-park), never by the wrapper writing a label.
+- **Fork 2 — RATIFIED, (a).** Every route whose executed vendor is not Claude (a delegated run); the dispatch-time hold passes a Claude-executed route through, the land seam does the rest.
 
 ## Not in this decision
 
