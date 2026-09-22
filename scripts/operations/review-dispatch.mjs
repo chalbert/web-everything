@@ -141,7 +141,12 @@ import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 export const REVIEW_DISPATCH_SYSTEM_PROMPT_FILE = join(
   dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'review', 'review-agent-system-prompt.md',
 );
-import { checkMainStaleness, gitRun } from '../lib/main-staleness.mjs';
+import { assertMainNotStale } from '../lib/main-staleness.mjs';
+// #3875 — re-exported so this file's own two existing importers (this module's own `dispatchReview` below,
+// and we:scripts/conveyor/reconcile-fix-dispatch.mjs) need no import change: the implementation moved to
+// we:scripts/lib/main-staleness.mjs (a pure lib, importable by a future daemon with no dependency on this
+// whole review-dispatch module), byte-identical default behavior (same wording, same `label`).
+export { assertMainNotStale } from '../lib/main-staleness.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
 
@@ -296,85 +301,11 @@ export function fillReviewBrief(template, values = {}) {
   return { prompt, unknownTokens: [...unknown].sort() };
 }
 
-/**
- * ASSERT the dispatching checkout is not behind `origin/main` — #3439: a stale dispatching checkout spawns the
- * review agent with THIS checkout's own stale `we:scripts/lib/review-loop-policy.mjs` on its `cwd`-relative
- * import path, silently re-running pre-fix behavior with no error. THE CHOICE THIS RECORDS (item #3439's #2):
- * the dispatched review's code keeps coming from the DISPATCHING checkout at spawn time — today's actual
- * behavior — rather than the lane it later acquires (that would need the agent to re-invoke itself from
- * inside its own freshly-acquired lane, a bigger change this item does not make). Made LOUD instead: a stale
- * checkout never silently dispatches.
- *
- * #3474 — BUT LOUD DOES NOT MEAN "ALWAYS REFUSE". A checkout that is merely BEHIND (no local commits ahead) with a
- * CLEAN working tree and `HEAD` on `base` can be fast-forwarded with zero conflict and zero judgment, so this
- * guard now does it (`git merge --ff-only origin/<base>`, via `checkMainStaleness`'s `cleanOnly` mode) and lets
- * dispatch proceed. It still refuses — and says which case it is — when the fast-forward is not mechanical:
- * DIVERGED (local commits ahead), DIRTY-and-behind (the sync is NOT attempted over uncommitted work — deliberately
- * not the read-only ranker's `pull --autostash`, which would stash and pop a tree this dispatcher does not own),
- * on a branch other than `base`, or the merge itself failing. A fetch failure (offline) stays fail-soft, matching
- * `we:scripts/lib/main-staleness.mjs`'s own philosophy: we cannot tell if it's stale, so we do not block on it.
- * The fix lives HERE, once: both callers (this file's `dispatchReview` and `we:scripts/conveyor/
- * reconcile-fix-dispatch.mjs#runReconcileFixDispatch`) get it through this one function.
- *
- * #3637 — THE STALENESS TARGET IS NOW A PARAMETER, not the literal `main`. A checkout sitting on a POC
- * branch (`#3637`'s delivery mode) is behind `origin/main` BY CONSTRUCTION and would be refused here forever,
- * which that card's survey named as "the single most likely thing to silently block the bootstrap on day
- * one". The question this guard actually wants to ask is "is this checkout behind ITS OWN delivery target",
- * and `checkMainStaleness` already accepts a `base` — it was only ever this wrapper that hardcoded the
- * default. `base` defaults to `'main'`, so every existing caller behaves byte-identically.
- *
- * (For the record, and checked rather than assumed: NEITHER of this guard's two callers — this file's
- * `dispatchReview` and `we:scripts/conveyor/reconcile-fix-dispatch.mjs` — is on the POC landing path.
- * `we:scripts/operations/poc-land.mjs` opens no PR and dispatches no review, and
- * `we:scripts/operations/dispatch-lane.mjs` does not call this at all. The parameter exists so a FUTURE
- * dispatcher running from a POC-branch checkout has the right question available, not because today's lander
- * trips it.)
- *
- * @param {string} root
- * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
- *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
- * @param {{base?: string}} [o] - `base` is the delivery target to measure staleness against (default `main`).
- */
-export function assertMainNotStale(root, checkStaleness, { base = 'main' } = {}) {
-  const check = checkStaleness ?? ((r) => checkMainStaleness({
-    base, autoFf: true, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
-  }));
-  const st = check(root);
-  if (st && st.synced) {
-    process.stderr.write(`review-dispatch: fast-forwarded the dispatching checkout ${st.behind} commit(s) to origin/${base} (#3474) before dispatching.\n`);
-  }
-  if (st && st.action === 'warn') {
-    throw new Error(
-      `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
-      + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). '
-      + staleRemedy(st, base),
-    );
-  }
-  return st;
-}
-
-/** The reason-specific tail of the #3474 refusal: why the automatic fast-forward was NOT (or could not be) done,
- *  and what to do about it. Falls back to today's generic remedy when the check gave no `reason` (a stub, or an
- *  older checker). */
-function staleRemedy(st, base) {
-  const fresh = `or dispatch from a fresh clone of origin/${base} and retry.`;
-  switch (st.reason) {
-    case 'diverged':
-      return `It is also DIVERGED (${st.ahead} local commit(s) ahead of origin/${base}), so it cannot fast-forward — `
-        + `rebase or merge origin/${base} into it by hand, ${fresh}`;
-    case 'dirty':
-      return `It has uncommitted changes, so the automatic fast-forward was NOT attempted over them — commit or stash `
-        + `them, then sync (git pull --ff-only), ${fresh}`;
-    case 'not-on-base':
-      return `HEAD is not on ${base}, so the automatic fast-forward was not attempted — check out ${base} and sync `
-        + `(git pull --ff-only), ${fresh}`;
-    case 'ff-failed':
-      return `The automatic fast-forward (git merge --ff-only origin/${base}) failed${st.detail ? ` (${st.detail})` : ''} — `
-        + `sync by hand (git pull --ff-only), ${fresh}`;
-    default:
-      return `Sync (git pull --ff-only) ${fresh}`;
-  }
-}
+// #3875 — `assertMainNotStale` (the #3439/#3474/#3637 dispatch-chokepoint staleness guard) and its
+// `staleRemedy` tail MOVED to we:scripts/lib/main-staleness.mjs — a pure lib a future daemon can import
+// with no dependency on this whole review-dispatch module — and are re-exported above, byte-identical
+// default behavior. Read the guard's full history/design there, not here. Both of this guard's callers
+// (this file's `dispatchReview` below, and we:scripts/conveyor/reconcile-fix-dispatch.mjs) are unchanged.
 
 /**
  * Shape one dispatch request and verify the selected checkout before filling or spawning.

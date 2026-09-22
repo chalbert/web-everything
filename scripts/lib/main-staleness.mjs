@@ -91,3 +91,67 @@ export function checkMainStaleness({ base = 'main', autoFf = true, cleanOnly = f
   }
   return cls;
 }
+
+// ── #3875 — the throwing dispatch-chokepoint guard, extracted from we:scripts/operations/review-dispatch.mjs
+//    (#3439/#3474/#3637) so a caller that is NOT review-dispatch (a future daemon split out of
+//    we:skills-src/conveyor/runner.mjs — epic #3383, see #3860) can self-check its own checkout's freshness
+//    without importing the whole review-dispatch module just for this one guard. `review-dispatch.mjs` keeps
+//    re-exporting `assertMainNotStale` from here — its own two existing callers (`dispatchReview` and
+//    we:scripts/conveyor/reconcile-fix-dispatch.mjs) are UNCHANGED, byte-identical default behavior (same
+//    `label`, same thrown wording), verified against their own existing tests.
+
+/** The reason-specific tail of the #3474 refusal: why the automatic fast-forward was NOT (or could not be) done,
+ *  and what to do about it. Falls back to today's generic remedy when the check gave no `reason` (a stub, or an
+ *  older checker). */
+export function staleRemedy(st, base) {
+  const fresh = `or retry from a fresh clone of origin/${base}.`;
+  switch (st.reason) {
+    case 'diverged':
+      return `It is also DIVERGED (${st.ahead} local commit(s) ahead of origin/${base}), so it cannot fast-forward — `
+        + `rebase or merge origin/${base} into it by hand, ${fresh}`;
+    case 'dirty':
+      return `It has uncommitted changes, so the automatic fast-forward was NOT attempted over them — commit or stash `
+        + `them, then sync (git pull --ff-only), ${fresh}`;
+    case 'not-on-base':
+      return `HEAD is not on ${base}, so the automatic fast-forward was not attempted — check out ${base} and sync `
+        + `(git pull --ff-only), ${fresh}`;
+    case 'ff-failed':
+      return `The automatic fast-forward (git merge --ff-only origin/${base}) failed${st.detail ? ` (${st.detail})` : ''} — `
+        + `sync by hand (git pull --ff-only), ${fresh}`;
+    default:
+      return `Sync (git pull --ff-only) ${fresh}`;
+  }
+}
+
+/**
+ * ASSERT the calling checkout is not behind `origin/<base>` — refuse LOUDLY rather than silently act on stale
+ * code from this checkout's own import path (#3439). A checkout that is merely BEHIND (no local commits ahead)
+ * with a CLEAN working tree and `HEAD` on `base` is fast-forwarded with zero conflict and zero judgment
+ * (`git merge --ff-only origin/<base>`, via {@link checkMainStaleness}'s `cleanOnly` mode) and the caller
+ * proceeds; every other behind case (DIVERGED, DIRTY-and-behind, off-`base`, or the merge itself failing)
+ * throws, naming which case it is. A fetch failure (offline) stays fail-soft — we cannot tell if it's stale,
+ * so we do not block on it (matches this file's own philosophy throughout).
+ * @param {string} root
+ * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
+ *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
+ * @param {{base?: string, label?: string}} [o] - `base` is the delivery target to measure staleness against
+ *   (default `main`); `label` prefixes the thrown/logged message so each caller reads as itself (default
+ *   `review-dispatch`, this function's original and still most common caller).
+ */
+export function assertMainNotStale(root, checkStaleness, { base = 'main', label = 'review-dispatch' } = {}) {
+  const check = checkStaleness ?? ((r) => checkMainStaleness({
+    base, autoFf: true, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
+  }));
+  const st = check(root);
+  if (st && st.synced) {
+    process.stderr.write(`${label}: fast-forwarded the dispatching checkout ${st.behind} commit(s) to origin/${base} (#3474) before dispatching.\n`);
+  }
+  if (st && st.action === 'warn') {
+    throw new Error(
+      `${label}: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
+      + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). '
+      + staleRemedy(st, base),
+    );
+  }
+  return st;
+}
