@@ -1,22 +1,25 @@
 ---
 bornAs: x784irf
 kind: story
-size: 5
+size: 8
 parent: "3383"
 status: open
-blockedBy: ["3850", "3840", "3848", "3838", "3845", "3846"]
-scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/conveyor/log-delegation-trial.mjs"]
+blockedBy: ["3850", "3840", "3848", "3838", "3845", "3846", "xlbgizn", "x9fa1uo", "xd6uqr9"]
+scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-supervision-promotions.json", "we:scripts/conveyor/log-delegation-trial.mjs"]
 dateOpened: "2026-09-21"
-relatedTo: ["3690", "3717", "3783", "3801"]
-tags: [dispatch, delegation, supervision, graduation, design-first]
+relatedTo: ["3690", "3717", "3783", "3801", "3843", "3850"]
+tags: [dispatch, delegation, supervision, graduation]
 ---
 
 # Turn dispatch supervision enforcement on now that #3690 is ratified
 
 #3690 is ratified (we:docs/agent/platform-decisions.md#delegation-trial-record-graduation), and the dispatch supervision gate built by #3717 still sits behind WE_DISPATCH_SUPERVISION_ENFORCE, off by default, so the computed supervision level is recorded but never enforced. Design-first: settle what the gate must check under the ratified rules (operator-gated promotion, the informative field, the post-miss bar, the never-absent independent pass) before the default flips, then flip it.
 
-**Design-first and deliberately not cleared for the conveyor.** Settle the design section below on this card
-first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
+**Design settled 2026-09-22 — see `## Design settled (2026-09-22)` below.** This card now also carries rule 6
+(the ratified promotion record) plus the flip itself; rules 4, 5 and 7 are three children under #3383 that this
+card is `blockedBy`. Still deliberately **not cleared for the conveyor**: it is `blockedBy` nine items and the
+flip is the last step of the whole family, so a human or session clears it (the `add` command of
+we:scripts/conveyor/queue.mjs) once those land.
 
 ## FOUND (2026-09-21)
 
@@ -47,7 +50,110 @@ first; only then clear it (the `add` command of we:scripts/conveyor/queue.mjs).
   promotion only by an explicit ratified act naming the triples (the code promotes automatically); rule 7,
   an independent pass at every level, only shallower at `spot-check`.
 
+## Design settled (2026-09-22)
+
+All four questions below are settled; the section is kept as filed so the reasoning can be read against what
+was asked. Questions 1 and 4 were answered by the operator directly; questions 2 and 3 were settled in an
+Opus design session on 2026-09-22 against the code on `origin/lane/mechanical-dispatcher`. **This card is no
+longer design-first** — the `design-first` tag is dropped and the work below is buildable once the
+`blockedBy` children land.
+
+### 1. Order — build rules 4 to 7 first, THEN flip the default
+
+Operator, 2026-09-22, on whether to build the rules first or flip first: *"seems we should implement them all
+right"*. Settled: build. Flipping first is fail-safe in the narrow sense that it holds more and never less,
+but its `spot-check` answer would still come from automatic promotion, which rule 6 forbids — so the flip
+would put a forbidden behaviour into force in order to enforce a ratified one. The flip is the last step.
+
+### 2. Promotion record — a ratified decision card is the ACT, a checked-in JSON file is its machine-readable transcript
+
+**The act is a decision card ratified into we:docs/agent/platform-decisions.md.** That is what "ratified"
+means in this repo (the statute layer), and it is the form every act in this family already took: #3690,
+#3801 and #3850 are all decision cards with a `## Ruling`, two of the three codified at an anchor. Rule 6's
+"done in batches against accumulated data" is exactly a decision card's grain: one act names many triples.
+
+**The lookup is a new checked-in file, `we:scripts/lib/dispatch-supervision-promotions.json`**, built to the
+shape #3843 and `decideDispatchRoute` already use for the size policy, so this adds a second instance of an
+existing pattern rather than a new one:
+
+- read at the io edge by a `defaultReadPromotions` sitting beside `defaultReadSizePolicy`
+  (we:scripts/operations/dispatch-lane-io.mjs:429), handed across as data — the pure library never reads a
+  file;
+- validated by a pure `validatePromotions` beside `validateSizePolicy` (we:scripts/lib/dispatch-contracts.mjs:784);
+- injected as a `promotions` dep on `decideDispatchRoute` (we:scripts/lib/dispatch-contracts.mjs:985),
+  alongside `scorecards` and `sizePolicy`.
+
+**Each row carries the citation to its own act**, so the record is auditable rather than merely trusted:
+`{provider, model, taskType, level, ratifiedOn, ratifiedBy: "#NNNN", anchor: "we:docs/agent/platform-decisions.md#…"}`.
+A row whose `anchor` does not resolve to a real heading, or whose `ratifiedBy` card is not `status: resolved`,
+is invalid. That check is script-decidable, so it belongs in `check:standards`, not in a reviewer's head.
+
+**It fails CLOSED, and this is the one deliberate departure from the size-policy precedent**, which fails open
+to its defaults (we:scripts/operations/dispatch-lane-io.mjs:422-424). A missing, unparseable or invalid
+promotions file promotes nothing, so every triple stays `full`. That is rule 6's own stated default — "With no
+such act, a triple stays at `full`" — and it is the safe direction: a broken read that silently promoted would
+be the exact failure the record exists to prevent.
+
+**The gate stays a pure function plus a lookup, and `selectSupervisionLevel` is NOT touched.** It keeps
+computing the evidence verdict from the trial record alone, because rule 1 binds both consumers of that record
+to the same predicates and a promotion is not a predicate on the record — it is an authorization. So the clamp
+lives one layer up, in `decideDispatchRoute`: a computed `spot-check` survives only when the triple is named in
+the promotion record, and otherwise records `full` with a reason naming the missing act. A computed `full` is
+never lifted by anything. Demotion therefore stays automatic and immediate (the data demotes) while promotion
+never happens without a named, cited row (the operator promotes) — rule 6 in one expression.
+
+**Rejected — a field on the scorecards store.** we:scripts/conveyor/log-delegation-trial.mjs writes those rows
+mechanically at the end of every trial, so a promotion living there would be written by the same path it
+authorizes. Rule 2 is explicit that authority is never earned by the record, and #agent-vendor-registry rule 3
+names the same shape (self-certification) as the reason a descriptor may not declare its own supervision level.
+
+**Rejected — a decision card per triple with no machine-readable index.** Not because a decision card is too
+heavy (#3690 was one), but because the gate cannot read prose, and "done in batches" makes per-triple cards the
+wrong grain. The decision card survives as the act; the JSON is its transcript, and the `ratifiedBy` + `anchor`
+fields are what keep the transcript honest.
+
+### 3. Scope — rules 4, 5 and 7 are carved into three children under #3383; rule 6 stays on this card
+
+Split, following how the #3801 ruling carved its children: onto the family's umbrella epic with `blockedBy`
+edges back, not onto the ruling card itself. The three new children are `parent: "3383"` and this card is
+`blockedBy` all three.
+
+- **Rule 4** — a trial is informative only by its own recorded field (`xlbgizn`). Touches the row schema in
+  we:scripts/conveyor/log-delegation-trial.mjs and the predicate `isInformativeRecord`
+  (we:scripts/lib/provider-routing.mjs:256), which today infers it from `outcome ∈ {rejected, reworked}` plus a
+  non-empty `findings`.
+- **Rule 5** — a `rootCause` field, then a post-miss bar of `minCleanStreak + k` (`x9fa1uo`, `blockedBy`
+  `xlbgizn`).
+- **Rule 7 at `spot-check`** — the independent pass gets shallower, never absent (`xd6uqr9`). #3850 (ratified
+  2026-09-22) already settled the `full` half: the supervisor is the review panel on the lane's own PR, held at
+  the land seam. Only the `spot-check` depth is left, and it lands in the review/jury files, not in dispatch.
+
+**The decisive reason to split rather than fold: rule 5 contradicts this card's own acceptance criterion.**
+Done-when 3 below requires `DEFAULT_BACKDOWN_THRESHOLDS` (we:scripts/lib/provider-routing.mjs:144) to be
+unchanged by this card's diff; rule 5 requires adding `k` to exactly that object. Folded in, this card could not
+pass its own test. Rules 4 and 7 are then split on the ordinary grounds — different files, independently
+deliverable, and rule 7 is not even in the dispatch path.
+
+**Rule 6 is NOT carved out, and that is a deliberate exception to the split.** This card *is* the gate card:
+its Done-when 1 already asserts rule 6's behaviour verbatim ("a triple whose computed level is `spot-check` but
+which is not named in the ratified promotion record is gated as `full`"), and #3843's card already names "#3784's
+rule-3 and rule-6 fixes" as what removes its `defaultSize < 13` refusal. A rule-6 card separate from the flip
+would be inert on its own — nothing reads the promotion record until the gate is on — and the opposite order is
+forbidden, so the split would buy no schedule and cost one more seam. This card grows from size 5 to 8 to carry it.
+
+**Build order** (a file dependency, not three independent cards): `xlbgizn` (rule 4) → `x9fa1uo` (rule 5);
+`xd6uqr9` (rule 7) in parallel with either; then this card — promotion record, then the flip, then the wording
+fix below.
+
+### 4. Which branch — `lane/mechanical-dispatcher` first
+
+Operator, 2026-09-22: *"lane/mechanical-dispatcher first"*. Matches every sibling in this family. The code home
+is the prototype branch — commit straight to it, no PR, one tracker note on #3383 per push; it reaches `main`
+through #3443. (This card's own file lives on `main` and is edited there by the normal lane-clone PR route.)
+
 ## DESIGN TO SETTLE
+
+*(Settled 2026-09-22 — see the section above. Kept as filed.)*
 
 1. **Order.** Flip the default only after rules 4–6 are built, or flip it now with the gate still holding
    only unsupervised `full` routes? Flipping now holds more, never less, so it is fail-safe; but its
@@ -85,3 +191,22 @@ The two message strings are user-visible, so a test may assert them; reword them
    `not ratified` / `unratified` next to `#3690` returns nothing.
 3. **Observable** — `DEFAULT_BACKDOWN_THRESHOLDS` in we:scripts/lib/provider-routing.mjs is unchanged by
    this item's diff.
+4. **Executable (rule 6, the promotion record)** — on the branch, `test -f we:scripts/lib/dispatch-supervision-promotions.json`
+   succeeds and the file parses as JSON (it does not exist today), and
+   `npx vitest run we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs` passes with new cases that fail
+   before: (a) a missing, unparseable or invalid promotions file promotes nothing and every route records
+   `full` — it fails CLOSED, unlike the size policy; (b) a computed `spot-check` for a triple named in a valid
+   row records `spot-check`; (c) the same computed `spot-check` for a triple NOT named records `full`, with a
+   reason naming the missing ratified act; (d) a computed `full` for a triple that IS named still records
+   `full` — a promotion never lifts a demotion; (e) a row missing `ratifiedBy` or `anchor` is refused by name.
+5. **Executable (rule 6, the citation is checked, not trusted)** — `npm run check:standards` fails on a
+   promotions row whose `anchor` names no heading in we:docs/agent/platform-decisions.md or whose `ratifiedBy`
+   card is not `status: resolved`, and passes on the checked-in file.
+6. **Observable (rule 6, purity)** — `selectSupervisionLevel` in we:scripts/lib/provider-routing.mjs is
+   unchanged by this item's diff: the promotion clamp lives in `decideDispatchRoute`, and the file read lives in
+   we:scripts/operations/dispatch-lane-io.mjs.
+7. **Observable** — the checked-in promotions file ships **empty** (`{"promotions": []}`). No triple is promoted
+   by this card; every route is `full` on the day the switch flips, and the first real promotion is a separate
+   ratified act.
+8. **Executable (#3843's carried constraint)** — the `defaultSize < 13` refusal that #3843's loader raises with
+   a reason naming this card is removed, and a test that asserted it is updated in the same diff.
