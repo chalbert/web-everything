@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
-  runDaemonLoop, runReviewTick, buildCliDaemonEffects, REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS,
+  runDaemonLoop, runReviewTick, buildCliDaemonEffects, realSleep, REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 
@@ -146,5 +146,24 @@ describe('buildCliDaemonEffects — the real-effect factory (heartbeat wiring on
     expect(typeof effects.heartbeat).toBe('function');
     expect(typeof effects.onTick).toBe('function');
     expect(typeof effects.onTickError).toBe('function');
+  });
+});
+
+describe('realSleep — regression, live-caught on THIS daemon\'s own first launchd-managed run', () => {
+  // The actual incident that surfaced this whole bug class: this daemon, deployed to a dedicated
+  // launchd-managed clone, exited right after its first tick instead of looping. `.unref()`-ing the sleep
+  // timer told Node it was fine to exit before it fired, and nothing else kept the event loop alive between
+  // ticks. The SAME pattern was copied into #3870's and #3871's own daemons and fixed there too.
+  it('realSleep\'s own timer is REF\'d — a resident daemon must not let Node exit before it fires', () => {
+    const real = global.setTimeout;
+    let captured;
+    global.setTimeout = (fn, ms) => { captured = real(fn, ms); return captured; };
+    try {
+      realSleep(60_000); // never awaited — only the timer's own ref state is asserted, then cleared
+      expect(captured.hasRef()).toBe(true); // FAILS if realSleep re-adds `.unref()`
+    } finally {
+      clearTimeout(captured);
+      global.setTimeout = real;
+    }
   });
 });
