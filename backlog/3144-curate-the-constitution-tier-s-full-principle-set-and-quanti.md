@@ -2,8 +2,10 @@
 bornAs: xgcpi2v
 kind: decision
 tier: pinned
-status: open
+status: resolved
 dateOpened: "2026-08-16"
+dateResolved: "2026-09-21"
+codifiedIn: "docs/agent/platform-decisions.md#spec-is-schema-human-gates-spec"
 preparedDate: "2026-08-17"
 relatedReport: reports/2026-08-17-constitutional-amendment-gate-quantification.md
 tags: [constitution, spec, governance, reconciliation]
