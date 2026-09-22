@@ -144,6 +144,13 @@ export const SUPERVISION_LEVELS = Object.freeze({
 export const DEFAULT_BACKDOWN_THRESHOLDS = Object.freeze({
   minCleanStreak: 5,
   requireInformativeTrial: true,
+  // Post-miss bar (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889): once a
+  // confirmed miss is on record for a triple, the clean-streak bar to reach spot-check becomes
+  // minCleanStreak + k, strictly higher than the cold-start bar. `k`, like `minCleanStreak`, is a config
+  // default proposed only by a future ordinary batched finding against real trial-count data — this is a
+  // structural addition (a new config field), not a recalibration; the placeholder value below is
+  // explicitly out of scope for #3889 to justify.
+  k: 3,
 });
 
 /**
@@ -263,6 +270,16 @@ function isInformativeRecord(record) {
   const isVerified = record.verifiedBy === 'claude-subagent' || record.verifiedBy === 'independent-claude';
   if (!isVerified) return false;
   return record.informative === true;
+}
+
+/**
+ * Check if a scorecard record carries a root-cause note in its own recorded field — never inferred
+ * from `findings` or any other free-text field (platform-decisions.md#delegation-trial-record-graduation,
+ * rule 5; #3889). Pure.
+ */
+function hasRootCauseNote(record) {
+  if (!record || typeof record !== 'object') return false;
+  return typeof record.rootCause === 'string' && record.rootCause.trim() !== '';
 }
 
 /**
@@ -660,7 +677,15 @@ export function selectProvider(task, context) {
  *     'reworked' with confirmed findings (a 'landed' record's findings text alone never counts).
  *   - Hard veto: any unclean/unresolved record as the MOST RECENT verified trial immediately
  *     forces 'full' supervision, resetting the streak.
- *   - Returns 'spot-check' iff cleanStreak >= minCleanStreak AND (requireInformativeTrial === false
+ *   - Post-miss bar (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889): once ANY
+ *     verified record for the triple was ever unclean (a confirmed miss, anywhere in its recorded
+ *     history — not only as the current most-recent trial), post-miss trials count toward restoration
+ *     only once a `rootCause` note is on record in its own field for that triple (never inferred from a
+ *     later row's `findings`); the clean-streak bar to clear then becomes `minCleanStreak + k`, strictly
+ *     higher than the cold-start bar. A cold-start triple with no miss ever recorded is unaffected and
+ *     still graduates at exactly `minCleanStreak`.
+ *   - Returns 'spot-check' iff cleanStreak >= the applicable bar (cold-start `minCleanStreak`, or
+ *     post-miss `minCleanStreak + k` once a rootCause is on record) AND (requireInformativeTrial === false
  *     OR hasInformativeTrial === true).
  *
  * PURE: No filesystem or process reads. Deterministic over its arguments.
@@ -669,7 +694,7 @@ export function selectProvider(task, context) {
  * @param {string} model
  * @param {string} taskType - the caller's subject: a work task type, a role kind, or a review lens.
  * @param {Array<object>} scorecards
- * @param {{ minCleanStreak?: number, requireInformativeTrial?: boolean }} [backdownThresholds={}]
+ * @param {{ minCleanStreak?: number, requireInformativeTrial?: boolean, k?: number }} [backdownThresholds={}]
  * @param {string} [subjectClass='work-agent'] - which subject class `taskType` belongs to; only records with
  *   the same `subjectClass` count toward this triple (#3801 Fork 3).
  * @returns {SupervisionRecommendation}
@@ -682,6 +707,9 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
   const requireInformativeTrial = typeof backdownThresholds?.requireInformativeTrial === 'boolean'
     ? backdownThresholds.requireInformativeTrial
     : DEFAULT_BACKDOWN_THRESHOLDS.requireInformativeTrial;
+  const k = typeof backdownThresholds?.k === 'number'
+    ? backdownThresholds.k
+    : DEFAULT_BACKDOWN_THRESHOLDS.k;
 
   const records = Array.isArray(scorecards)
     ? scorecards
@@ -738,6 +766,20 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
   // Check if at least one record EVER for this triple was informative (confirmed finding from independent review)
   const hasInformativeTrial = sorted.some(isInformativeRecord);
 
+  // Post-miss bar (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889).
+  // A confirmed miss is any verified record for this triple that was NOT clean, anywhere in its recorded
+  // history — not only as the current most-recent trial (that narrower case is the hard veto above; this
+  // is broader, since a triple can have re-accumulated a clean trailing streak since an earlier miss).
+  // Fail-closed, matching the hard veto's own `!isCleanRecord` test: a missing/undefined outcome counts
+  // as a miss here too.
+  const hasConfirmedMiss = sorted.some((r) =>
+    (r.verifiedBy === 'claude-subagent' || r.verifiedBy === 'independent-claude') && !isCleanRecord(r)
+  );
+  // A root-cause note in its own recorded field — never inferred from `findings` or any other row.
+  const hasRootCause = sorted.some(hasRootCauseNote);
+  // Once a miss is on record, the bar to clear is strictly higher than the cold-start bar.
+  const requiredCleanStreak = hasConfirmedMiss ? minCleanStreak + k : minCleanStreak;
+
   // Decision logic
   let level;
   let summaryReason;
@@ -745,15 +787,20 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
   if (mostRecentHasFinding) {
     level = SUPERVISION_LEVELS.FULL;
     summaryReason = `Calibration-miss hard veto: the most recent verified trial for {"${provider}", "${model}", "${taskType}"} (${mostRecentVerified.scoredAt}) had an unresolved finding. Streak counter reset to 0.`;
-  } else if (cleanStreak < minCleanStreak) {
+  } else if (hasConfirmedMiss && !hasRootCause) {
     level = SUPERVISION_LEVELS.FULL;
-    summaryReason = `Trailing clean streak of ${cleanStreak} is below required threshold ${minCleanStreak} for {"${provider}", "${model}", "${taskType}"}.`;
+    summaryReason = `A confirmed miss is on record for {"${provider}", "${model}", "${taskType}"}, but no root-cause note has been recorded in its own field — no number of post-miss clean trials counts toward restoration until one is.`;
+  } else if (cleanStreak < requiredCleanStreak) {
+    level = SUPERVISION_LEVELS.FULL;
+    summaryReason = hasConfirmedMiss
+      ? `Trailing clean streak of ${cleanStreak} is below the post-miss threshold ${requiredCleanStreak} (minCleanStreak ${minCleanStreak} + k ${k}) for {"${provider}", "${model}", "${taskType}"}.`
+      : `Trailing clean streak of ${cleanStreak} is below required threshold ${requiredCleanStreak} for {"${provider}", "${model}", "${taskType}"}.`;
   } else if (requireInformativeTrial && !hasInformativeTrial) {
     level = SUPERVISION_LEVELS.FULL;
-    summaryReason = `Trailing clean streak of ${cleanStreak} reaches ${minCleanStreak}, but no informative trial with confirmed findings has ever been recorded for {"${provider}", "${model}", "${taskType}"}.`;
+    summaryReason = `Trailing clean streak of ${cleanStreak} reaches ${requiredCleanStreak}, but no informative trial with confirmed findings has ever been recorded for {"${provider}", "${model}", "${taskType}"}.`;
   } else {
     level = SUPERVISION_LEVELS.SPOT_CHECK;
-    summaryReason = `Spot-check supervision approved: trailing clean streak of ${cleanStreak} meets threshold ${minCleanStreak}, informative trial requirement is satisfied, and the most recent trial was clean.`;
+    summaryReason = `Spot-check supervision approved: trailing clean streak of ${cleanStreak} meets threshold ${requiredCleanStreak}${hasConfirmedMiss ? ' (post-miss bar, root-cause note on record)' : ''}, informative trial requirement is satisfied, and the most recent trial was clean.`;
   }
 
   const recordsSummary = consulted.length > 0
@@ -770,10 +817,29 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
         : 'Most recent verified trial has no unresolved findings.',
     },
     {
+      // States which bar applied (cold-start vs post-miss) and why, per rule 5 (#3889).
+      criterion: 'post-miss-bar-selection',
+      result: hasConfirmedMiss ? 'post-miss' : 'cold-start',
+      dataConsulted: `hasConfirmedMiss=${hasConfirmedMiss}, requiredCleanStreak=${requiredCleanStreak} (minCleanStreak=${minCleanStreak}${hasConfirmedMiss ? ` + k=${k}` : ''})`,
+      reasoning: hasConfirmedMiss
+        ? `A confirmed miss is on record for {"${provider}", "${model}", "${taskType}"}; the post-miss bar (minCleanStreak ${minCleanStreak} + k ${k} = ${requiredCleanStreak}) applies instead of the cold-start bar.`
+        : `No confirmed miss is on record for {"${provider}", "${model}", "${taskType}"}; the cold-start bar (minCleanStreak = ${minCleanStreak}) applies.`,
+    },
+    {
+      criterion: 'post-miss-root-cause-requirement',
+      result: (!hasConfirmedMiss || hasRootCause) ? 'pass' : 'fail',
+      dataConsulted: `hasConfirmedMiss=${hasConfirmedMiss}, hasRootCause=${hasRootCause}`,
+      reasoning: !hasConfirmedMiss
+        ? 'No confirmed miss is on record for this triple, so no root-cause note is required.'
+        : (hasRootCause
+          ? 'A root-cause note is on record in its own field for this triple.'
+          : 'No root-cause note has been recorded in its own field for this triple — findings text alone never counts.'),
+    },
+    {
       criterion: 'trailing-clean-streak',
-      result: cleanStreak >= minCleanStreak ? 'pass' : 'fail',
-      dataConsulted: `streak=${cleanStreak}, threshold=${minCleanStreak}, consulted=[${recordsSummary}]`,
-      reasoning: `Computed trailing consecutive clean streak is ${cleanStreak} (required: ${minCleanStreak}).`,
+      result: cleanStreak >= requiredCleanStreak ? 'pass' : 'fail',
+      dataConsulted: `streak=${cleanStreak}, threshold=${requiredCleanStreak}, consulted=[${recordsSummary}]`,
+      reasoning: `Computed trailing consecutive clean streak is ${cleanStreak} (required: ${requiredCleanStreak}).`,
     },
     {
       criterion: 'informative-trial-requirement',

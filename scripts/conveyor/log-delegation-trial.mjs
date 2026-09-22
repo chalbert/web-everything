@@ -33,6 +33,14 @@ export function logDelegationTrial(row, io = {}) {
   if (row.findings !== undefined && row.findings !== null && !isNonEmptyString(row.findings)) {
     throw new Error('log-delegation-trial: findings must be a non-empty string or null');
   }
+  // `rootCause` is its own recorded field, distinct from `findings` (platform-decisions.md
+  // #delegation-trial-record-graduation, rule 5; #3889): a diagnosis of WHY a confirmed miss happened,
+  // required before any post-miss trial counts toward restoration. Neither field is derived from the
+  // other — a root-cause note left in `findings` instead of this field does not count (enforced in
+  // provider-routing.mjs, which reads only this field).
+  if (row.rootCause !== undefined && row.rootCause !== null && !isNonEmptyString(row.rootCause)) {
+    throw new Error('log-delegation-trial: rootCause must be a non-empty string or null');
+  }
   // Free-text fields must pass a secret scrub before landing in this COMMITTED, append-only store — a
   // live independent review of this file (PR #2267, round 1) confirmed a secret-shaped `findings` value
   // reached the store unfiltered before this check existed. `scrubPublish`, not the wider `scrubReasons`
@@ -46,7 +54,7 @@ export function logDelegationTrial(row, io = {}) {
   // caught) without false-positiving on a bare filename mention. `provider`/`model` are scrubbed too
   // (round 2's second, non-blocking finding: they were free-text with no scrub at all) — denying, never
   // redacting, matches run-scorecard-store.mjs's own "deny on a hit" discipline.
-  for (const field of ['provider', 'model', 'taskDescription', 'findings']) {
+  for (const field of ['provider', 'model', 'taskDescription', 'findings', 'rootCause']) {
     const value = row[field];
     if (isNonEmptyString(value) && scrubPublish(value).length > 0) {
       throw new Error(`log-delegation-trial: ${field} failed the secret scrub — denying, never redacting`);
@@ -88,6 +96,7 @@ export function logDelegationTrial(row, io = {}) {
       findings: row.findings ?? null,
       retroactive: row.retroactive ?? false,
       informative: row.informative ?? false,
+      rootCause: row.rootCause ?? null,
       ...(row.scoredAt ? { scoredAt: row.scoredAt } : {}),
     }, io);
   } catch {
@@ -102,11 +111,13 @@ const usage = `Usage: node scripts/conveyor/log-delegation-trial.mjs
   --outcome=landed|rejected|reworked
   --verified-by=claude-subagent|independent-claude|other
   [--findings=TEXT] [--item=NUMBER] [--pr=NUMBER] [--scored-at=TIMESTAMP]
-  [--informative=true|false] [--retroactive] [--help]
+  [--informative=true|false] [--root-cause=TEXT] [--retroactive] [--help]
 
 Quote values containing spaces. --retroactive marks reconstructed historical trials.
 --informative marks whether independent review found a real problem that was then fixed
-(platform-decisions.md#delegation-trial-record-graduation, rule 4); omitted, it is written false.`;
+(platform-decisions.md#delegation-trial-record-graduation, rule 4); omitted, it is written false.
+--root-cause records, in its OWN field (never derived from --findings), why a confirmed miss happened;
+required before any post-miss trial counts toward restoration (rule 5; #3889). Omitted, it is null.`;
 
 /** CLI seam accepts the store's injectable IO so tests never write the real store. */
 export function main(argv, io = {}) {
@@ -117,7 +128,7 @@ export function main(argv, io = {}) {
   const fields = {
     provider: 'provider', model: 'model', task: 'taskDescription', 'task-type': 'taskType',
     outcome: 'outcome', 'verified-by': 'verifiedBy', findings: 'findings', item: 'item',
-    pr: 'pr', 'scored-at': 'scoredAt', informative: 'informative',
+    pr: 'pr', 'scored-at': 'scoredAt', informative: 'informative', 'root-cause': 'rootCause',
   };
   try {
     const row = {};

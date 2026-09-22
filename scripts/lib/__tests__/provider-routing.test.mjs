@@ -44,6 +44,7 @@ function makeRecord({
   handle = null,
   subjectClass = 'work-agent',
   informative = false,
+  rootCause = null,
 } = {}) {
   return {
     v: 1,
@@ -59,6 +60,7 @@ function makeRecord({
     handle,
     subjectClass,
     informative,
+    rootCause,
     dispatchKind: 'session-delegation',
   };
 }
@@ -598,15 +600,19 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
 });
 
 describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
-  it('counts explanatory landed accepts toward the clean streak without a hard veto', () => {
+  it('counts explanatory landed accepts toward the clean streak without a hard veto (#3889, rule 5: post-miss bar + rootCause on record)', () => {
     const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
     const records = [
-      makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true }),
-      ...[1, 2, 3].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+      makeRecord({
+        ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked',
+        findings: 'Independent review caught a dropped merge-parent change', informative: true,
+        rootCause: 'Merge-base cache in the adapter went stale after a rebase; diagnosis recorded before any post-miss trial counted.',
+      }),
+      ...[1, 2, 3, 4, 5, 6].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
       ...[2291, 2292].map((pr, index) => makeRecord({
         ...triple,
         pr,
-        scoredAt: `2026-09-15T0${index + 4}:00:00.000Z`,
+        scoredAt: `2026-09-15T0${index + 7}:00:00.000Z`,
         outcome: 'landed',
         verifiedBy: 'independent-claude',
         findings: 'Independent claude -p process verified via 3-way diff against both merge parents plus two real vitest runs (34/34 targeted, 1822/1822 broader operations suite) before any push. Verdict ACCEPT; pushed to origin/lane/op-runner-activity.',
@@ -615,11 +621,14 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
     const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
 
+    // 8 clean trials = minCleanStreak(5) + default k(3) — the post-miss bar, not the cold-start bar.
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
     expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('clean');
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-bar-selection')?.result).toBe('post-miss');
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')?.result).toBe('pass');
     expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
       result: 'pass',
-      dataConsulted: expect.stringContaining('streak=5, threshold=5'),
+      dataConsulted: expect.stringContaining('streak=8, threshold=8'),
     });
   });
 
@@ -632,10 +641,13 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
     const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
 
+    // The undefined-outcome record is itself an unclean verified record, so it is also a confirmed miss
+    // (#3889, rule 5): the post-miss bar (minCleanStreak 5 + default k 3 = 8) applies to the displayed
+    // threshold, on top of the pre-existing hard veto that already forces 'full' here.
     expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
     expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
       result: 'fail',
-      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+      dataConsulted: expect.stringContaining('streak=0, threshold=8'),
     });
   });
 
@@ -707,17 +719,22 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     });
   });
 
-  it('returns full supervision with the "no informative trial" reason when every row is explicitly informative:false, even with rejected/reworked findings (#3888, rule 4)', () => {
+  it('returns full supervision with the "no informative trial" reason when every row is explicitly informative:false, even with rejected/reworked findings (#3888, rule 4; rootCause added #3889, rule 5)', () => {
     const records = [
       // Precede the trailing clean streak so they don't reset it, but would have counted as the
-      // positive control under the old outcome+findings inference this rule replaces.
-      makeRecord({ scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'caught bug', informative: false }),
+      // positive control under the old outcome+findings inference this rule replaces. A rootCause note is
+      // recorded on the miss so the post-miss bar (rule 5) is clearable, isolating the assertion to the
+      // informative-trial requirement this test targets.
+      makeRecord({ scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'caught bug', informative: false, rootCause: 'Diagnosed: a race in the worker pool caused the dropped update.' }),
       makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'rejected', findings: 'caught another bug', informative: false }),
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null, informative: false }),
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null, informative: false }),
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null, informative: false }),
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null, informative: false }),
       makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', findings: null, informative: false }),
     ];
 
     const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, {
@@ -743,11 +760,13 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
     const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
 
+    // The veto-firing record is itself the (only) confirmed miss on record, so the displayed threshold is
+    // also the post-miss bar (minCleanStreak 5 + default k 3 = 8; #3889, rule 5).
     expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
     expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('veto-fired');
     expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
       result: 'fail',
-      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+      dataConsulted: expect.stringContaining('streak=0, threshold=8'),
     });
   });
 
@@ -762,8 +781,9 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
   });
 
   it('streak-not-yet-met case -> returns full supervision', () => {
+    // Cold-start triple (no miss ever recorded): the bar stays minCleanStreak, unaffected by the
+    // post-miss elevation (#3889, rule 5) — see Done-when #3's dedicated cold-start regression test below.
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', outcome: 'reworked', findings: 'caught bug' }), // informative
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null }), // clean 3
@@ -793,14 +813,21 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')?.result).toBe('fail');
   });
 
-  it('streak-met-and-informative case -> returns spot-check supervision', () => {
+  it('streak-met-and-informative case -> returns spot-check supervision (#3889, rule 5: post-miss bar + rootCause on record)', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'Independent review caught quoting bug', informative: true }), // informative
+      makeRecord({
+        scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked',
+        findings: 'Independent review caught quoting bug', informative: true,
+        rootCause: 'Shell-quoting for embedded newlines was never escaped for this adapter; fixed and diagnosed.',
+      }), // informative + confirmed miss, root-caused
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 3
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null }), // clean 4
       makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', findings: null }), // clean 5
+      makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', findings: null }), // clean 6
+      makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', findings: null }), // clean 7
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', findings: null }), // clean 8 (minCleanStreak 5 + default k 3)
     ];
 
     const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, {
@@ -809,7 +836,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
     expect(res.reasoning).toContain('Spot-check supervision approved');
-    expect(res.auditTrail.every((a) => a.result === 'clean' || a.result === 'pass')).toBe(true);
+    expect(res.auditTrail.every((a) => a.result === 'clean' || a.result === 'pass' || a.result === 'post-miss')).toBe(true);
   });
 
   it('most-recent-record-is-reworked case -> returns full supervision (hard veto) even with long prior streak', () => {
@@ -831,9 +858,12 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('veto-fired');
   });
 
-  it('an other-verified record in the middle of a streak neither breaks nor extends it', () => {
+  it('an other-verified record in the middle of a streak neither breaks nor extends it (#3889, rule 5: post-miss bar + rootCause on record)', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding', informative: true }), // informative
+      makeRecord({
+        scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding', informative: true,
+        rootCause: 'Prior finding root-caused: a stale cache key collided across two unrelated task runs.',
+      }), // informative + confirmed miss, root-caused
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 2
       // 'other'-verified trial in the middle (e.g. smoke test)
@@ -841,12 +871,102 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', verifiedBy: 'independent-claude', findings: null }), // clean 3
       makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', verifiedBy: 'independent-claude', findings: null }), // clean 4
       makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 5
+      makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 6
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', verifiedBy: 'independent-claude', findings: null }), // clean 7
+      makeRecord({ scoredAt: '2026-09-15T09:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 8 (minCleanStreak 5 + default k 3)
     ];
 
     const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, { minCleanStreak: 5 });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
     const streakEntry = res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak');
-    expect(streakEntry?.dataConsulted).toContain('streak=5');
+    expect(streakEntry?.dataConsulted).toContain('streak=8');
+  });
+
+  describe('post-miss re-graduation (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+
+    it('(2a) after a confirmed miss with NO rootCause on record, no number of later clean trials reaches spot-check — the reason names the missing note', () => {
+      // 20 trailing clean trials — far more than any plausible minCleanStreak + k — still never clears
+      // without a rootCause note in its own field.
+      const records = [
+        makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true }),
+        ...Array.from({ length: 20 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T${String(i).padStart(2, '0')}:00:00.000Z` })),
+      ];
+
+      const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+      expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+      expect(res.reasoning).toContain('no root-cause note');
+      expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')).toMatchObject({
+        result: 'fail',
+        dataConsulted: 'hasConfirmedMiss=true, hasRootCause=false',
+      });
+      expect(res.auditTrail.find((a) => a.criterion === 'post-miss-bar-selection')?.result).toBe('post-miss');
+    });
+
+    it('(2b) with a rootCause on record, minCleanStreak clean trials still return full and minCleanStreak + k return spot-check', () => {
+      const missRow = { ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true, rootCause: 'Root cause: merge-base cache used a stale ref after a force-push.' };
+      const thresholds = { minCleanStreak: 5, k: 3 };
+
+      const atMinCleanStreak = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, [
+        makeRecord(missRow),
+        ...Array.from({ length: 5 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T0${i}:00:00.000Z` })),
+      ], thresholds);
+      expect(atMinCleanStreak.level).toBe(SUPERVISION_LEVELS.FULL);
+      expect(atMinCleanStreak.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+        result: 'fail',
+        dataConsulted: expect.stringContaining('streak=5, threshold=8'),
+      });
+
+      const atPostMissBar = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, [
+        makeRecord(missRow),
+        ...Array.from({ length: 8 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T0${i}:00:00.000Z` })),
+      ], thresholds);
+      expect(atPostMissBar.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+      expect(atPostMissBar.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+        result: 'pass',
+        dataConsulted: expect.stringContaining('streak=8, threshold=8'),
+      });
+    });
+
+    it('(2c) a rootCause written into a later row\'s findings instead of the field does not clear the miss', () => {
+      const records = [
+        makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true }),
+        // The diagnosis text lands in `findings`, never in `rootCause` — this must NOT count.
+        makeRecord({ ...triple, scoredAt: '2026-09-15T01:00:00.000Z', findings: 'Root cause: merge-base cache used a stale ref after a force-push.' }),
+        ...Array.from({ length: 8 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T0${i}:00:00.000Z` })),
+      ];
+
+      const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+      expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+      expect(res.reasoning).toContain('no root-cause note');
+      expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')).toMatchObject({
+        result: 'fail',
+        dataConsulted: 'hasConfirmedMiss=true, hasRootCause=false',
+      });
+    });
+  });
+
+  it('(3) cold-start triple with no miss ever recorded is completely unaffected — still graduates at exactly minCleanStreak, no rootCause required (#3889, rule 5)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'doc-fix' };
+    const records = Array.from({ length: 5 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${i}:00:00.000Z`, taskType: 'doc-fix', informative: true }));
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, 'doc-fix', records, { minCleanStreak: 5 });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-bar-selection')).toMatchObject({
+      result: 'cold-start',
+      dataConsulted: expect.stringContaining('requiredCleanStreak=5 (minCleanStreak=5)'),
+    });
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')).toMatchObject({
+      result: 'pass',
+      dataConsulted: 'hasConfirmedMiss=false, hasRootCause=false',
+    });
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+      result: 'pass',
+      dataConsulted: expect.stringContaining('streak=5, threshold=5'),
+    });
   });
 
   it('handles empty scorecards gracefully, defaulting to full supervision', () => {
