@@ -37,6 +37,13 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    frontmatter pointing at it. The decision item keeps the lineage; this file carries the rule.
 3. Rules are **reversible** (see [backlog-workflow.md](backlog-workflow.md) → reversibility). A
    reversal supersedes the rule here *with lineage* ("supersedes #NNN because …") — never erase it.
+4. **Exception — the constitution tier is exempt from ordinary supersede-with-lineage.** A rule anchored
+   inside the constitution tier ([#spec-is-schema-human-gates-spec](#spec-is-schema-human-gates-spec))
+   cannot be superseded the way any other statute rule can; amending it instead goes through the
+   entrenched ceremony that same anchor's clauses define — a conferring `POLICY_SPEC` (example) leash surface, a
+   forge-stamped cooling clock, a committed record (docs/agent/backlog-workflow.md →
+   *Constitutional-amendment ceremony*). Bullet 3's ordinary reversibility still governs every other
+   anchor.
 
 ## Promotion discipline (enforced)
 
@@ -3245,6 +3252,53 @@ came from the expressibility audit during ratification discussion. Composes with
 [#agent-convergence-independent-validation](#agent-convergence-independent-validation),
 [#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate),
 [#intent-conformance-is-block-compliance](#intent-conformance-is-block-compliance), and #911.
+
+**Extended 2026-09-21 (operator; #3144)** — the constitutional-amendment gate quantified. Reconciles
+#2564 Fork 5's three entrenchment clauses with #2561 F4's rejection of a standalone constitution artifact
+(form/membership delegated to #2568) and grounds the gate in the 2026-07-28→08-02 governance cluster —
+[#review-human-declarative-leash-only](#review-human-declarative-leash-only),
+[#human-is-principle-surface-not-path](#human-is-principle-surface-not-path),
+[#principle-and-impl-two-pr](#principle-and-impl-two-pr), and
+[#human-required-is-judgment-only](#human-required-is-judgment-only) — none of which #2564, #2561 or #2568
+cited. Three clauses:
+
+1. **The conferring surface is a class, not a file: a `POLICY_SPEC` (example) leash member.** The entrenchment
+   declaration — the exempt-anchor list, the cooling interval, the record requirement — is DATA on a
+   surface registered in the leash roster (`we:scripts/lib/gate-config.mjs`'s `POLICY_SPEC_BASENAMES` /
+   `we:scripts/lib/review-policy.contract.json`), human-only and whole-file pinned by
+   [#human-is-principle-surface-not-path](#human-is-principle-surface-not-path) trigger 3. The derivation
+   code (`we:scripts/lib/review-escalation.mjs`) only *reads* the declaration, as a predicate feeding
+   `isPrincipleSurface` — it never defines the exemption, matching its own ratified agent-clearable status
+   ([#review-human-declarative-leash-only](#review-human-declarative-leash-only) clause 1). An unregistered
+   surface (a new index file, or a statute block that only asserts its own protection) is agent-clearable
+   by construction and confers no entrenchment, whatever it claims about itself.
+2. **The cooling clock reads the forge-side PR-merge timestamp, never an emitter-written date.** A
+   substantive change to the proposed amendment text **cancels** the period — a new record starts a new
+   clock, it does not resume. The floor is ruled, not configured: the interval must exceed one continuous
+   working stretch. An un-ripe amendment **parks** with its ripe-at date stated, on the existing
+   `review:human` hold, never a hard refusal
+   ([#blast-radius-advisory-care-not-a-gate](#blast-radius-advisory-care-not-a-gate)'s route-to-a-human
+   clause applied). The interval's *value* is a platform-default flavor, not a ratified pick
+   ([#config-extends-platform-default](#config-extends-platform-default)): `P10D`, declared alongside the
+   clauses above.
+3. **A project joins the constitution tier only by platform-scope listing, never by self-declaration.** A
+   subordinate project constitution (this anchor's federated tiers, above) enters or leaves the
+   constitution tier through the same leash-registered surface as clause 1 — an entry in its `projects`
+   map — never through the project's own `we:src/_data/projects/<id>.json`. The map starts empty:
+   constitution-tier project scope is defined but unpopulated, and stays that way until a project asserts
+   a principle beyond the platform's.
+
+**Lineage:** #3144 (ratified 2026-09-21, operator; reconciles #2564 Fork 5 with #2561 F4 / #2568; report
+`we:reports/2026-08-17-constitutional-amendment-gate-quantification.md`; research
+`/research/constitutional-amendment-gate-quantification/`). Composes with — does not re-declare —
+[#review-human-declarative-leash-only](#review-human-declarative-leash-only),
+[#human-is-principle-surface-not-path](#human-is-principle-surface-not-path),
+[#principle-and-impl-two-pr](#principle-and-impl-two-pr), and
+[#human-required-is-judgment-only](#human-required-is-judgment-only). #2568 owns which leash file and the
+anchor list; this clause governs the *class* of surface, not the file choice. Building clause 1 (the leash
+declaration) and clause 1's derivation-code read are separate follow-on PRs per
+[#principle-and-impl-two-pr](#principle-and-impl-two-pr), carved as their own backlog items rather than
+built here.
 
 ---
 

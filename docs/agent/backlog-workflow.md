@@ -507,6 +507,29 @@ This cuts **both ways**, and holding both is the point:
 
 **Correct flawed archive decisions lazily, on citation — the statute layer is the proactive audit surface (#2091).** When a *class* of authoring flaw is discovered across the resolved-decision archive (e.g. the two-confusion class above), do **not** mass-rewrite history: the archive is lineage, and the standing rule already says the statute — not the decision chain — is what gets cited. Audit **proactively** only where flaws leak forward: the `platform-decisions.md` anchors (one bounded pass per flaw class) and the **currently-prepared, un-ratified stock** (the items about to land on the human's desk). A flawed *resolved* decision is corrected **when something cites it** — the normal reversal mechanics above — never as a bulk sweep.
 
+### Constitutional-amendment ceremony — the entrenched process on top of ordinary ratification {#constitution-amendment-ceremony}
+
+Amending a constitution-tier anchor
+([platform-decisions.md#spec-is-schema-human-gates-spec](platform-decisions.md#spec-is-schema-human-gates-spec))
+is the ordinary decision-ratification flow above, **plus** the entrenched ceremony that anchor's clauses
+require — never a lighter process, and never a heavier one invented ad hoc:
+
+1. **File the amendment as an ordinary `kind: decision`**, carrying the proposed diff to the anchor plus a
+   committed `we:reports/YYYY-MM-DD-constitution-amendment-<slug>.md` transcript (`relatedReport`) — the
+   record clause. No PR comment and no gitignored jury ledger substitutes for it.
+2. **The PR that lands the record starts the cooling clock**, read from that PR's forge-side merge
+   timestamp — never a date written into the record itself. A substantive edit to the proposed text after
+   that PR lands **cancels** the period; re-record to restart it.
+3. **The amendment PR is `review:human`, and parks there until the clock ripens** — the ripe-at date is
+   surfaced, never hard-refused.
+4. **Ratifying it is exactly the ordinary gate above** — an explicit ratification utterance, the
+   *Red-team the default* pass, `resolve --codifiedTo=…`. The ceremony only adds *when* you may resolve
+   and *what* record must exist; it never replaces the ratification discipline.
+
+The substantive rule this ceremony enforces — which surface may confer the exemption, what the clock may
+read, how a project joins the tier — is codified at the anchor above; this section is process, not a
+restated rule.
+
 ### Red-team the default — attack the recommended branch before resolving (#766)
 
 The fork-readiness pass and the `✓ ready to ratify` stamp are a **completeness skim** ("options stated, fork legible, stamp truthful"); neither is an **attack**. That gap is real: `✓ ready to ratify` is the strongest-*sounding* signal but the weakest-*verified* one — it is just `preparedDate` being set, a self-assertion by whoever prepped — and the same session that authored the bold default then ratifies against it, with the same blind spot in both seats. #730's C1 default carried the stamp, a `relatedReport`, and concrete `file:line` refs and **still** shipped a default that put a running handler in the standards repo; every mechanical gate passed and a human caught it. So **before you flip a `decision` `active → resolved`** (the *ratification gate* above), run one adversarial pass on the branch you're about to ratify:
