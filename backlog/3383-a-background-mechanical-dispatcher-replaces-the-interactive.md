@@ -4687,39 +4687,39 @@ Live probe (plan, read-only, run records to a scratch dir): items identical to `
 
 ## Session update (2026-09-22) — #3842 (Fork 4 "prepare" of #3801): the prepare-scope wrapper now checks a story's Fibonacci size: or a task's estimatedLoc: before commit, and the v2 brief asks the agent to author it (code commit 136519577)
 
-Worker `build-3842-fork4-prepare` (code commit 136519577) built the "prepare" slice of #3801 Fork 4 on this branch: `#3839`'s task-only `estimatedLoc:` field (Fork 4 field, already on the branch) is now also something the `prepare-scope` dispatch itself authors and checks, not just something `check-standards-rules.mjs` validates repo-wide at the CI gate.
+Worker `build-3842-fork4-prepare` (code commit 136519577) built the "prepare" slice of #3801 Fork 4 on this branch: `#3839`'s task-only `estimatedLoc:` field (Fork 4 field, already on the branch) is now also something the `prepare-scope` dispatch itself authors and checks, not just something `we:check-standards-rules.mjs` validates repo-wide at the CI gate.
 
-- **`we:scripts/operations/prepare-scope-wrapper.mjs`** — new `assertScopeSizeValid`, called right after the existing `assertOnlyItemSpecTouched` one-file guardrail and before the commit: reads the item spec back (`gray-matter`), and refuses a non-Fibonacci `size:`, a `size:` on a `task`, an `estimatedLoc:` on anything but a `task`, or a non-positive/non-integer `estimatedLoc:`. Neither field is required — an item with neither is untouched. Deliberately restates (does not import) `check-standards-rules.mjs`'s own two Agile-sizing rules, importing only its context-free `FIB` set, so the wrapper's own touch-set (this card's `scope:`) stays exactly the three files the card names.
+- **`we:scripts/operations/prepare-scope-wrapper.mjs`** — new `assertScopeSizeValid`, called right after the existing `assertOnlyItemSpecTouched` one-file guardrail and before the commit: reads the item spec back (`gray-matter`), and refuses a non-Fibonacci `size:`, a `size:` on a `task`, an `estimatedLoc:` on anything but a `task`, or a non-positive/non-integer `estimatedLoc:`. Neither field is required — an item with neither is untouched. Deliberately restates (does not import) `we:check-standards-rules.mjs`'s own two Agile-sizing rules, importing only its context-free `FIB` set, so the wrapper's own touch-set (this card's `scope:`) stays exactly the three files the card names.
 - **`we:skills-src/conveyor/prepare-scope-agent-brief-v2.md`** — a new step 4 and a fifth load-bearing rule telling the agent to write Fibonacci `size:` (story/unstoried epic) or `estimatedLoc:` (task) next to `scope:`, in the same file, or leave it out if unsure.
-- **Tests** — 9 new cases in `prepare-scope-wrapper.test.mjs` (direct `assertScopeSizeValid` unit tests for all four refusal shapes plus the neither-field pass-through, and end-to-end `prepareScope` acceptance/refusal cases). Confirmed failing against the pre-change wrapper (stashed the production file, reran, all 9 red) before committing.
+- **Tests** — 9 new cases in `we:prepare-scope-wrapper.test.mjs` (direct `assertScopeSizeValid` unit tests for all four refusal shapes plus the neither-field pass-through, and end-to-end `prepareScope` acceptance/refusal cases). Confirmed failing against the pre-change wrapper (stashed the production file, reran, all 9 red) before committing.
 
-`verify-lane.mjs` run in the foreground: 590/592 suites green; the 2 reds (`host-sampler-capacity.test.mjs`, `host-sampler-large-file.test.mjs`) are unrelated real-CPU/RSS timing flakes, confirmed pre-existing by re-running them against the pre-change tree. `check:standards`: 2 pre-existing errors (a stranded-hash decision card, an opaque-token flag on this very tracker file) — both untouched by this diff.
+`we:verify-lane.mjs` run in the foreground: 590/592 suites green; the 2 reds (`we:host-sampler-capacity.test.mjs`, `we:host-sampler-large-file.test.mjs`) are unrelated real-CPU/RSS timing flakes, confirmed pre-existing by re-running them against the pre-change tree. `check:standards`: 2 pre-existing errors (a stranded-hash decision card, an opaque-token flag on this very tracker file) — both untouched by this diff.
 
 No graduation yet — this stays on the prototype branch; #3443 lands it on `main`.
 
 ## Session update (2026-09-22) — #3848 (Settled by #3801 statute) built: executed follows the #3840 override, convergeEditedLane added
 
-#3848 (Settled by #3801 statute) built on the branch, commit f6659a06b + merge 0c0ff2b7e. `dispatch-contracts.mjs`'s `decideDispatchRoute` now writes `executed` as the #3840 `deliveryAgent:` override's own `executedVendor` when one is present, else plain `claude` (the `EXECUTABLE_PROVIDER` constant is removed — `grep -n 'EXECUTABLE_PROVIDER' scripts/lib/dispatch-contracts.mjs` prints nothing). `dispatch-lane-io.mjs`'s durable dispatch record now reads that same `executed` answer straight off the routing decision instead of re-deriving it. `gen-dispatch-routing-table.mjs`'s generated runbook prose updated to match; regenerated `docs/agent/dispatcher-runbook.md`. Also built the #3801 Fork 1 carry-over: `runConverge`'s returned verdict now carries `convergeEditedLane` (true when any round of the converge loop actually committed a real edit, accumulated across the whole loop; false when converge changed nothing). Tests: dispatch-contracts-route 22, dispatch-lane-routing-record 29 (+8 new), deliver-item-wrapper 149 (+3 new), dispatch-routing-table 6 — all pass. Broad suite (scripts/lib+operations+conveyor+__tests__): 592 files, 16372 passed, 1 pre-existing unrelated failure (host-sampler-large-file, same as #3840's own result). verify-lane: same one pre-existing red, not caused by this change. check:standards: 2 pre-existing errors (a stranded non-numeric backlog id, and the #3383 tracker's own opaque-token flag from a prior push), neither in a file this change touches. Graduation to main is owed (via #3443); card #3848 is not resolved.
+#3848 (Settled by #3801 statute) built on the branch, commit f6659a06b + merge 0c0ff2b7e. `we:dispatch-contracts.mjs`'s `decideDispatchRoute` now writes `executed` as the #3840 `deliveryAgent:` override's own `executedVendor` when one is present, else plain `claude` (the `EXECUTABLE_PROVIDER` constant is removed — `grep -n 'EXECUTABLE_PROVIDER' we:scripts/lib/dispatch-contracts.mjs` prints nothing). `we:dispatch-lane-io.mjs`'s durable dispatch record now reads that same `executed` answer straight off the routing decision instead of re-deriving it. `we:gen-dispatch-routing-table.mjs`'s generated runbook prose updated to match; regenerated `we:docs/agent/dispatcher-runbook.md`. Also built the #3801 Fork 1 carry-over: `runConverge`'s returned verdict now carries `convergeEditedLane` (true when any round of the converge loop actually committed a real edit, accumulated across the whole loop; false when converge changed nothing). Tests: dispatch-contracts-route 22, dispatch-lane-routing-record 29 (+8 new), deliver-item-wrapper 149 (+3 new), dispatch-routing-table 6 — all pass. Broad suite (scripts/lib+operations+conveyor+__tests__): 592 files, 16372 passed, 1 pre-existing unrelated failure (host-sampler-large-file, same as #3840's own result). verify-lane: same one pre-existing red, not caused by this change. check:standards: 2 pre-existing errors (a stranded non-numeric backlog id, and the #3383 tracker's own opaque-token flag from a prior push), neither in a file this change touches. Graduation to main is owed (via #3443); card #3848 is not resolved.
 ## Session update (2026-09-22) — #3844 fork-4 fix path landed at a4960b51b
 
 #3844 (Fork 4 "fix path" of #3801) landed on the prototype branch at a4960b51b. `decideDispatchRoute`
-(`dispatch-contracts.mjs`) now walks the checked-in `fixSizeSource` chain (`card-size` -> `measured-diff` ->
+(`we:dispatch-contracts.mjs`) now walks the checked-in `fixSizeSource` chain (`card-size` -> `measured-diff` ->
 `assumed`) for the two repair kinds, `fix` and `ci-heal`, instead of falling straight to the generic
 `unsizedCardPolicy` fallback #3843 built for every other kind — the ruling's own reasoning: `block` alone
 would silently stop every conflict-caused fix, since the reconcile fix path passes no size today.
-`reconcile-fix-dispatch.mjs`'s `dispatchFix` carries `planned.size` through from `planFixesFromReconcile`'s
+`we:reconcile-fix-dispatch.mjs`'s `dispatchFix` carries `planned.size` through from `planFixesFromReconcile`'s
 existing `findItemFn` lookup (no second read), and pays for a `measured-diff` `gh pr view` read
 (`fetchPrDiffLoc`, a new sibling to `fetchPrDiffScope`) only when that lookup found none. A new
-`ci-heal-dispatch-routing.test.mjs` asserts the same chain for `ci-heal` directly against
+`we:ci-heal-dispatch-routing.test.mjs` asserts the same chain for `ci-heal` directly against
 `decideDispatchRoute`, since that kind has no PR-bounce dispatch path of its own to exercise it through — its
 own routing decision is made upstream wherever `decideDispatchRoute({kind:'ci-heal', ...})` is actually
 called (out of this card's scope). No runtime effect yet, per the ruling: the reconcile fix spawn is Claude
 either way, so the route only records what would have been chosen (`routed` against `executed`).
 
-Touched tests: reconcile-fix-routing.test.mjs 9/9 (5 pre-existing + 4 new), ci-heal-dispatch-routing.test.mjs
-4/4 (new file), dispatch-contracts.test.mjs 82/82, dispatch-contracts-route.test.mjs 22/22, reconcile-fix-
-dispatch.test.mjs 52/52. Full scripts/lib + scripts/operations + scripts/conveyor sweep: 9188/9189 (1
-pre-existing, unrelated host-sampler-large-file.test.mjs date-fixture failure, confirmed by #3843). verify-lane
+Touched tests: we:reconcile-fix-routing.test.mjs 9/9 (5 pre-existing + 4 new), we:ci-heal-dispatch-routing.test.mjs
+4/4 (new file), we:dispatch-contracts.test.mjs 82/82, we:dispatch-contracts-route.test.mjs 22/22, reconcile-fix-
+we:dispatch.test.mjs 52/52. Full scripts/lib + scripts/operations + scripts/conveyor sweep: 9188/9189 (1
+pre-existing, unrelated we:host-sampler-large-file.test.mjs date-fixture failure, confirmed by #3843). verify-lane
 --json recorded red for 00992fba (pre-commit HEAD) on 2 pre-existing, unrelated flakes: host-sampler-capacity
 (timing) and host-sampler-large-file (the same date bug) — neither touches any file this card changed.
 check:standards: 2 pre-existing errors, both on unrelated backlog cards (xohvzus stranded id; #3383's own
@@ -4729,7 +4729,7 @@ opaque-token flag), not introduced by this diff. Not resolved (orchestrator reso
 ## Session update (2026-09-22) — #3846 fork 3 of #3801, review: review-dispatch becomes a router caller
 
 **#3846** (fork 3 of #3801, review): built on lane/mechanical-dispatcher (commits 15d003432,
-merged/pushed at b0699b967). review-dispatch.mjs is now a router caller: dispatchReview computes
+merged/pushed at b0699b967). we:review-dispatch.mjs is now a router caller: dispatchReview computes
 and records a route per mandatory review seat lens (correctness, security) via a new
 reviewSeatRoutes function, running the SAME provider cascade a work dispatch uses (selectProvider)
 per lens, with decideDispatchRoute called once to confirm the review dispatch kind itself still
@@ -4737,38 +4737,77 @@ takes the role path (#3717). Capability is the entry gate: a provider seats a to
 mandatory seat only if it is not tool-free-only (TOOL_FREE_JUDGE_PROVIDER_NAMES); the existing
 Codex refusal (CODEX_JUDGE_PROVIDER_REFUSAL, #3581) is reused verbatim as that first rule, with a
 generalised reason for any other non-claude recommendation. Scorecards are read at the io edge
-(dispatch-lane-io.mjs's own defaultReadScorecards, scoped to root) exactly like a work dispatch.
-With no graduated review-lens trial on record (confirmed against the real run-scorecards.json, 18
+(we:dispatch-lane-io.mjs's own defaultReadScorecards, scoped to root) exactly like a work dispatch.
+With no graduated review-lens trial on record (confirmed against the real we:run-scorecards.json, 18
 records, 0 with taskType correctness/security) every seat still resolves to claude, so behaviour is
 unchanged. The explicit --judge-provider flag is untouched and recorded beside the route, never
 overridden by it. reviewDispatchRoute() (the old dispatch-kind-level role record) is kept, marked
-test-only-export-ok, because scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs still
+test-only-export-ok, because we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs still
 asserts the dispatch-kind role path through it as the sibling half of its own fix/
 conflict-resolution cause-routing proof.
 
-Tests: scripts/operations/__tests__/review-dispatch.test.mjs 55 -> 59 (+4: empty-scorecards
+Tests: we:scripts/operations/__tests__/review-dispatch.test.mjs 55 -> 59 (+4: empty-scorecards
 per-seat routing, a graduated-codex-on-a-lens capability-gate proof, the plain dispatchReview
 per-seat routing shape, and a --judge-provider run recording both the route and the flag). All
 adjacent suites (dispatch-contracts-route, provider-routing, dispatch-task-type, land-advance-io,
-reconcile-fix-routing) pass unchanged. Full-repo verify-lane.mjs (foreground, JSON): 591/592 files,
-16358/16371 tests passed, 1 pre-existing failure (host-sampler-large-file.test.mjs, the same flake
+reconcile-fix-routing) pass unchanged. Full-repo we:verify-lane.mjs (foreground, JSON): 591/592 files,
+16358/16371 tests passed, 1 pre-existing failure (we:host-sampler-large-file.test.mjs, the same flake
 #3845 already documented as unrelated). check:standards: 1 pre-existing error (the #3383 tracker
 card's own opaque-token block, decision #3822 unruled — not touched by this work); 0 errors in
 files this slice touched.
 
 Not resolved — the orchestrator resolves after graduation to main via #3443.
 
-## Session update (2026-09-22) — #3849 (Fork 4 "admission" of #3801, LAST of #3717's 10 slices): dispatch-plan.mjs now gates on declared size, not just scope
+## Session update (2026-09-22) — #3849 (Fork 4 "admission" of #3801, LAST of #3717's 10 slices): we:dispatch-plan.mjs now gates on declared size, not just scope
 
 Worker `build-3849-fork4-admission` built the "admission" slice of #3801 Fork 4 (b) — the LAST of #3717's 10 sliced children — on this branch: the dispatch gate now checks a build card's declared SIZE, not just its scope. All three `blockedBy` deps (`#3843` policy setting, `#3839` task `estimatedLoc:` field, `#3842` prepare-scope size guardrail) were already on the branch.
 
-- **`scripts/readiness/dispatch-plan.mjs`** — the pure core gains a `sizePolicy` input (default `null` — OFF unless the IO shell opts in, so every existing direct caller/test keeps its pre-#3849 behavior unchanged). Under `unsizedCardPolicy: 'block'`, a scoped `build` item with no declared size (a story's `size:` absent) or no valid estimate (a task's `estimatedLoc:` absent/non-positive/non-integer) holds `no-size`, checked right after the scope gate and before the drift/lease/rival/pause scheduling gates — same precedence class as `unshaped-no-scope`. `fix`/`ci-heal` are exempt (they take the separate `fixSizeSource` chain in `decideDispatchRoute`, #3843 — and structurally can never reach this queue anyway). Under `default-size` the item is admitted normally and its `launch` entry carries `sized: <boolean>` (added only when `sizePolicy` is supplied, so the `{num, lane}` shape is untouched for every caller that never opts in). A `deliveryAgent:` marker is not read by this gate at all, so it cannot bypass the hold (#3801 Fork 5). The IO shell reads + validates the checked-in `dispatch-size-policy.json` via #3843's own `defaultReadSizePolicy`/`validateSizePolicy`, dynamically imported (never at module scope, to keep the pure core `node:fs`-free) — fail-open to `sizePolicy: null` on any read/validate error, skippable via `--no-size-check`.
-- **`scripts/conveyor/tick-core.mjs`** — a held `no-size` item is folded into the SAME prepare-scope spawn candidate set as an `unshaped-no-scope` item (not a new spawn kind, no new guard `kind`), since #3842's prepare-scope agent already authors a missing size/estimate in the same turn it authors a missing `scope:`. `no-size` joins `HELD_NOTE_EXCLUDED_REASONS` (it gets the `auto-preparing-scope` note, not a generic `held` note).
-- **`scripts/readiness/queue-report.mjs`** (NOT in the card's declared `scope:`, but a real regression this diff would otherwise introduce) — `classifyHeld` throws on an unrecognized `HELD_REASONS` token by design; `no-size` is added to `NOT_READY_REASONS` (same bucket as `unshaped-no-scope`). Caught by `verify-lane.mjs`'s full suite, not by the touched-tests run alone.
-- **`scripts/operations/dispatch-lane.mjs`** (in the card's `scope:`) — needed NO code change: admission is fully decided upstream in `dispatch-plan.mjs` before this module is ever invoked for a held num; confirmed no references to size/admission there.
+- **`we:scripts/readiness/dispatch-plan.mjs`** — the pure core gains a `sizePolicy` input (default `null` — OFF unless the IO shell opts in, so every existing direct caller/test keeps its pre-#3849 behavior unchanged). Under `unsizedCardPolicy: 'block'`, a scoped `build` item with no declared size (a story's `size:` absent) or no valid estimate (a task's `estimatedLoc:` absent/non-positive/non-integer) holds `no-size`, checked right after the scope gate and before the drift/lease/rival/pause scheduling gates — same precedence class as `unshaped-no-scope`. `fix`/`ci-heal` are exempt (they take the separate `fixSizeSource` chain in `decideDispatchRoute`, #3843 — and structurally can never reach this queue anyway). Under `default-size` the item is admitted normally and its `launch` entry carries `sized: <boolean>` (added only when `sizePolicy` is supplied, so the `{num, lane}` shape is untouched for every caller that never opts in). A `deliveryAgent:` marker is not read by this gate at all, so it cannot bypass the hold (#3801 Fork 5). The IO shell reads + validates the checked-in `we:dispatch-size-policy.json` via #3843's own `defaultReadSizePolicy`/`validateSizePolicy`, dynamically imported (never at module scope, to keep the pure core `node:fs`-free) — fail-open to `sizePolicy: null` on any read/validate error, skippable via `--no-size-check`.
+- **`we:scripts/conveyor/tick-core.mjs`** — a held `no-size` item is folded into the SAME prepare-scope spawn candidate set as an `unshaped-no-scope` item (not a new spawn kind, no new guard `kind`), since #3842's prepare-scope agent already authors a missing size/estimate in the same turn it authors a missing `scope:`. `no-size` joins `HELD_NOTE_EXCLUDED_REASONS` (it gets the `auto-preparing-scope` note, not a generic `held` note).
+- **`we:scripts/readiness/queue-report.mjs`** (NOT in the card's declared `scope:`, but a real regression this diff would otherwise introduce) — `classifyHeld` throws on an unrecognized `HELD_REASONS` token by design; `no-size` is added to `NOT_READY_REASONS` (same bucket as `unshaped-no-scope`). Caught by `we:verify-lane.mjs`'s full suite, not by the touched-tests run alone.
+- **`we:scripts/operations/dispatch-lane.mjs`** (in the card's `scope:`) — needed NO code change: admission is fully decided upstream in `we:dispatch-plan.mjs` before this module is ever invoked for a held num; confirmed no references to size/admission there.
 
-Tests: 12 new cases in `dispatch-plan.test.mjs` (85 → 97, all pass), 7 new + 2 updated existing cases in `tick-core.test.mjs` (157 → 164, all pass) — confirmed the new dispatch-plan.mjs cases fail without the diff (the `sizePolicy` param and `no-size` branch did not exist). `queue-report.test.mjs` 13/13 after the `classifyHeld` fix.
+Tests: 12 new cases in `we:dispatch-plan.test.mjs` (85 → 97, all pass), 7 new + 2 updated existing cases in `we:tick-core.test.mjs` (157 → 164, all pass) — confirmed the new we:dispatch-plan.mjs cases fail without the diff (the `sizePolicy` param and `no-size` branch did not exist). `we:queue-report.test.mjs` 13/13 after the `classifyHeld` fix.
 
-`verify-lane.mjs` run in the foreground, twice (before and after the `queue-report.mjs` fix): 593 suites, first run 2 red (`queue-report.test.mjs` — my own regression, fixed; `host-sampler-large-file.test.mjs` — pre-existing, unrelated), second run 592/593 green with only the pre-existing `host-sampler-large-file` flake left (same signature multiple prior #3383 sessions already confirmed pre-existing tonight: `expected +0 to be 13.89`). `check:standards`: 4 pre-existing errors (2 stranded-hash cards, 2 on the #3383 tracker card itself — opaque-token + locus-prefix), none on any file this diff touches; no new warning on `dispatch-plan.mjs`/`tick-core.mjs`/`queue-report.mjs` either.
+`we:verify-lane.mjs` run in the foreground, twice (before and after the `we:queue-report.mjs` fix): 593 suites, first run 2 red (`we:queue-report.test.mjs` — my own regression, fixed; `we:host-sampler-large-file.test.mjs` — pre-existing, unrelated), second run 592/593 green with only the pre-existing `host-sampler-large-file` flake left (same signature multiple prior #3383 sessions already confirmed pre-existing tonight: `expected +0 to be 13.89`). `check:standards`: 4 pre-existing errors (2 stranded-hash cards, 2 on the #3383 tracker card itself — opaque-token + locus-prefix), none on any file this diff touches; no new warning on `we:dispatch-plan.mjs`/`we:tick-core.mjs`/`we:queue-report.mjs` either.
 
 No graduation yet — this stays on the prototype branch; #3443 lands it on `main`. Not resolved (orchestrator resolves after graduation).
+
+## Session update (2026-09-22) — #3888 (Rule 4 of #3690): a trial is informative only by its own recorded field, never inferred
+
+Built the FIRST of #3784's three rule children (Rule 4 of #3690, `#3888`) on this branch, commit
+`8d986d1c8`: a trial is informative only by its own recorded field, never inferred from `outcome`
+or `findings`.
+
+- **`we:scripts/lib/provider-routing.mjs`** — `isInformativeRecord` previously returned true for any
+  verified row whose `outcome` was `rejected`/`reworked` plus a non-empty `findings` string. It now
+  reads ONLY `verifiedBy` (must be `claude-subagent` or `independent-claude`) AND the explicit
+  `informative === true` field — `outcome`/`findings` are no longer consulted for this purpose at
+  all (`grep -n "outcome !== 'rejected'"` on this file now prints nothing). `DEFAULT_BACKDOWN_THRESHOLDS`
+  is byte-identical; only what satisfies `requireInformativeTrial` moved.
+- **`we:scripts/conveyor/log-delegation-trial.mjs`** — gained an `informative` CLI flag/field on the
+  validated row shape. `--informative=true|false` is accepted and written explicitly; a row that
+  omits it is written with an explicit `false` (never left absent, so no reader has to guess); a
+  non-boolean value is refused by name, not silently coerced.
+- **Backfill** — `we:scripts/conveyor/run-scorecards.json` on this branch currently holds ZERO rows
+  with `dispatchKind: "session-delegation"` (18 rows total: 2 `fix`, 16 `advisory-review`), so
+  there was nothing to backfill. No row was set to `informative: false` because none of that kind
+  exist yet on this branch's copy of the file. Recorded here so a future session doesn't assume a
+  backfill pass already ran.
+- **Tests** — `we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs` 17 → 24 (new: explicit
+  true/false accepted, omitted defaults to an explicit false, non-boolean refused by name, both as
+  direct calls and via the CLI). `we:scripts/lib/__tests__/provider-routing.test.mjs` 73 → 79 (new: a
+  verified `rejected` record with real findings but `informative: false` does NOT satisfy
+  `requireInformativeTrial`; a verified `landed` record with `informative: true` DOES; every row
+  `informative: false` still yields the existing "no informative trial" full-supervision reason
+  even with `rejected`/`reworked` findings present). 5 pre-existing fixtures elsewhere in that file
+  relied on the old `outcome`+`findings` inference to mean "informative" (three `selectProvider`
+  thin-history/agy-alternate cases, two `selectSupervisionLevel` streak cases) — each now sets
+  `informative: true` explicitly so its original intent survives the non-inferred check.
+
+`npm run check:standards -- --scope=<session>`: 3 pre-existing errors, all unrelated to this diff
+(2 on `backlog/3383`'s own tracker card — opaque-token + locus-prefix; 1 stranded-hash card on
+`main`) — 0 new errors on any file this item touched.
+
+Not resolved — `#3888` itself is closed out together with its two sibling rule-cards (rule 5, rule
+6) by the orchestrating session, not per-card here. This session did not touch `backlog/3888-*.md`.
