@@ -13,7 +13,8 @@ import { isReadOnlyDeclaration } from '../http-adapter.mjs';
 import { importGraph } from './import-graph.mjs';
 import {
   bandOf, classifyFollowUp, stratifyBySize, compareProportions, compareGroups,
-  assessCriteria, censor, clusterEffectiveN, requiredNPerGroup, zForAlpha, SIZE_BANDS,
+  assessCriteria, censor, clusterEffectiveN, requiredNPerGroup, expectedValidityFloorNPerGroup,
+  zForAlpha, SIZE_BANDS,
 } from '../../lib/gate-health.mjs';
 import { joinHistory, hotFileCut, HOT_FILE_MIN, createHistoryReader } from '../gate-health-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_REPOS, GATE_HEALTH_OP, clampLimit, shapeHistoryFinding } from '../gate-health.mjs';
@@ -606,6 +607,53 @@ describe('the verdict names blockers rather than producing a number it cannot su
     // `observability.observed` was the working array — 300 records of payload to say "23% were observable".
     const out = assessCriteria({ records: [pr(1, 10, true, null, 60)], nowSec: NOW });
     expect(typeof out.observability.observed).toBe('number');
+  });
+});
+
+// #3143 (ratified). A SEPARATE named export, not a fold into `requiredNPerGroup` — Fork 1 rejected folding
+// the floor into the power formula (no prior art, doesn't deliver its own guarantee, breaks `sizeableMdd`
+// at p=0 — see that function's docstring). This is the expected-cell-5 validity floor Fork 2 decided the
+// module should publish instead of leaving to a docstring formula.
+describe('expectedValidityFloorNPerGroup — the validity floor, published as its own question', () => {
+  // Pinned against the decision's own measured divergence table (backlog #3143), not against the function's
+  // own output — the same discipline `requiredNPerGroup` is held to above.
+  it('matches the measured divergence table', () => {
+    expect(expectedValidityFloorNPerGroup(0.94, 0.05)).toBe(500);
+    expect(expectedValidityFloorNPerGroup(0.93, 0.05)).toBe(251);
+    expect(expectedValidityFloorNPerGroup(0.90, 0.05)).toBe(101);
+    expect(expectedValidityFloorNPerGroup(0.044, 0.20)).toBe(114);
+    expect(expectedValidityFloorNPerGroup(0.021, 0.10)).toBe(239);
+    expect(expectedValidityFloorNPerGroup(0.021, 0.20)).toBe(239);
+    expect(expectedValidityFloorNPerGroup(0.50, 0.05)).toBe(12);
+  });
+
+  // THE FORCED INVARIANT (backlog #3143): `p = 0` is not a corner case here — it is this module's own
+  // `sizeableMdd` probe input (`requiredNPerGroup(0, mdd)`) and the ordinary clean-arm rate of a band with
+  // no recorded defects. `5 / min(...)` is `5/0 = Infinity` there; the floor must refuse, not return it.
+  it('refuses at p = 0 rather than returning Infinity', () => {
+    expect(expectedValidityFloorNPerGroup(0, 0.05)).toBeNull();
+    // And at the mirrored zero-width cell: p + d === 1.
+    expect(expectedValidityFloorNPerGroup(0.95, 0.05)).toBeNull();
+  });
+
+  // Same domain guards as `requiredNPerGroup`, since both read the same four-cell shape.
+  it('refuses non-numbers, non-finite results, and out-of-domain inputs, exactly like requiredNPerGroup', () => {
+    expect(expectedValidityFloorNPerGroup(NaN, 0.05)).toBeNull();
+    expect(expectedValidityFloorNPerGroup(0.5, NaN)).toBeNull();
+    expect(expectedValidityFloorNPerGroup(0.5, 0)).toBeNull();
+    expect(expectedValidityFloorNPerGroup(0.5, -0.05)).toBeNull();
+    expect(expectedValidityFloorNPerGroup(-0.5, 0.05)).toBeNull();
+    expect(expectedValidityFloorNPerGroup(1.5, 0.05)).toBeNull();
+    expect(expectedValidityFloorNPerGroup(0.9999999, 1e-6)).toBeNull(); // sums past 1
+  });
+
+  it('is published beside the power number in assessCriteria, as a separately-labelled field', () => {
+    const records = Array.from({ length: 40 }, (_, i) => pr(i, 100, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `s${i}`));
+    const out = assessCriteria({ records, nowSec: NOW });
+    const band = out.power.perBand.find((b) => b.band === 's');
+    expect(band.requiredNForExpectedValidity).toBe(expectedValidityFloorNPerGroup(band.baseRate, 0.05));
+    // Two different questions, two different numbers — not fused into one.
+    expect(band.requiredNForExpectedValidity).not.toBe(band.requiredNPerGroup);
   });
 });
 

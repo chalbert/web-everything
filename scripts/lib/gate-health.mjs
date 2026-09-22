@@ -233,12 +233,15 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  *     is the POWER requirement and nothing else; the textbook formula carries no validity floor, and at
  *     high base rates the two diverge. `requiredNPerGroup(0.94, 0.05)` is 212, but an arm at 0.99 expects
  *     only 2.12 failures at n=212, so `compareProportions` still refuses there. A caller that needs both
- *     must apply `n >= 5 / min(p, 1 - p, p + d, 1 - (p + d))` itself. Folding that floor in here would
- *     change shipped constants (`requiredNPerGroup(0.044, 0.2)` 49 → 114) and is a modelling call, not a
- *     bug fix — filed on the card rather than decided in a review round. WHICH OF THE TWO BINDS DEPENDS ON
- *     `mdd`, and `minDetectableDiff` is a caller input, so no unconditional claim is made about it: at
- *     `p = 0.021` the power term is 276 at `mdd = 0.05` (the floor, 239, does not bind) but 104 at 0.10 and
- *     42 at 0.20, where it does.
+ *     calls `expectedValidityFloorNPerGroup(baseRate, mdd)` (below) rather than re-deriving its formula —
+ *     that export states plainly that it is an EXPECTED-count planning estimate, met roughly 56% of the
+ *     time at exactly that n, not a guarantee. Folding it into this function was considered and rejected
+ *     (backlog #3143): no reference implementation (R, statsmodels, SAS, Stata, PASS, G*Power) floors the
+ *     power formula this way, doing so would not reliably clear the floor it targets, and it breaks this
+ *     module's own `assessCriteria` at `baseRate = 0`. WHICH OF THE TWO BINDS DEPENDS ON `mdd`, and
+ *     `minDetectableDiff` is a caller input, so no unconditional claim is made about it: at `p = 0.021` the
+ *     power term is 276 at `mdd = 0.05` (the floor, 239, does not bind) but 104 at 0.10 and 42 at 0.20,
+ *     where it does.
  *
  * @returns {number|null} observations per group, or null in the four cases above.
  */
@@ -256,6 +259,39 @@ export function requiredNPerGroup(baseRate, mdd = 0.05) {
   // has no JSON representation, so it serialises to `null` and an HTTP caller sees an empty field with
   // nothing anywhere saying why. Guarding the RESULT rather than re-clamping the input keeps the promise
   // above — the arguments are judged as passed — while still refusing to return a non-number.
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Observations per group at which EVERY cell is EXPECTED to reach 5 — the normal-approximation validity
+ * floor `compareProportions` gates on (see its `usable` check above), sized forward for planning.
+ *
+ * IT IS A PLANNING ESTIMATE, NOT A GUARANTEE, and `expected` is in the NAME rather than only in this
+ * comment because a JSON consumer (`power.perBand[].requiredNForExpectedValidity`) reads field names, not
+ * JSDoc. `compareProportions` gates on OBSERVED counts; at exactly this n the binding cell is a count with
+ * mean 5, which reaches 5 only about 56% of the time (Poisson(5): P(X >= 5) ≈ 0.56). Sized to an expected
+ * 5 because that is the shape the rule is stated in everywhere it has prior art (Cochran/Fisher; R's
+ * `chisq.test` warns on expected cells) and the only shape a function with no observations yet can compute
+ * — a coverage-quantile floor was considered and rejected (backlog #3143) for having no prior art and
+ * importing a distributional assumption this module makes nowhere else.
+ *
+ * REFUSES AT `p = 0` (and at every zero-width cell) rather than returning `Infinity`: `min(...)` is 0
+ * there, and `p = 0` is both this module's own `sizeableMdd` probe input (`requiredNPerGroup(0, mdd)`,
+ * below) and the ordinary clean-arm rate whenever a band has recorded no defects.
+ *
+ * @returns {number|null} observations per group at which every cell's expectation reaches 5, or null if
+ *   either argument is not a finite number, `mdd <= 0`, `baseRate` is outside `[0, 1]`, `baseRate + mdd
+ *   >= 1`, or the smallest of the four cell proportions is 0.
+ */
+export function expectedValidityFloorNPerGroup(baseRate, mdd = 0.05) {
+  const p = typeof baseRate === 'number' ? baseRate : NaN;
+  const d = typeof mdd === 'number' ? mdd : NaN;
+  if (!Number.isFinite(p) || !Number.isFinite(d)) return null;
+  if (d <= 0 || p < 0 || p > 1) return null;
+  if (p + d >= 1) return null;
+  const smallestCell = Math.min(p, 1 - p, p + d, 1 - (p + d));
+  if (!(smallestCell > 0)) return null; // the forced invariant — refuse, never Infinity
+  const n = Math.ceil(5 / smallestCell);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -362,6 +398,10 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
       // guessed from this field. No `sizeableMdd` test here on purpose: the estimator already refuses every
       // unsizeable `mdd`, and a redundant condition is one no mutation can redden.
       requiredNPerGroup: rate === null ? null : requiredNPerGroup(rate, mdd),
+      // VALIDITY, planned (expected) — a DIFFERENT question from `requiredNPerGroup` above (power) and from
+      // `testable`/`shortBy` below (validity, observed). See `expectedValidityFloorNPerGroup`'s docstring
+      // for why it is named `expected` rather than folded into the power number (backlog #3143).
+      requiredNForExpectedValidity: rate === null ? null : expectedValidityFloorNPerGroup(rate, mdd),
       // THE VALIDITY QUESTION, in counts. `testable` mirrors `compareProportions`'s own rule exactly: the
       // MINIMUM of the four cells at 5 or more, which is the same as no cell being short.
       testable: short.length === 0,
