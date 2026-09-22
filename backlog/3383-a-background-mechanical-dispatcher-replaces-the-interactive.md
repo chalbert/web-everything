@@ -4700,3 +4700,28 @@ No graduation yet — this stays on the prototype branch; #3443 lands it on `mai
 ## Session update (2026-09-22) — #3848 (Settled by #3801 statute) built: executed follows the #3840 override, convergeEditedLane added
 
 #3848 (Settled by #3801 statute) built on the branch, commit f6659a06b + merge 0c0ff2b7e. `dispatch-contracts.mjs`'s `decideDispatchRoute` now writes `executed` as the #3840 `deliveryAgent:` override's own `executedVendor` when one is present, else plain `claude` (the `EXECUTABLE_PROVIDER` constant is removed — `grep -n 'EXECUTABLE_PROVIDER' scripts/lib/dispatch-contracts.mjs` prints nothing). `dispatch-lane-io.mjs`'s durable dispatch record now reads that same `executed` answer straight off the routing decision instead of re-deriving it. `gen-dispatch-routing-table.mjs`'s generated runbook prose updated to match; regenerated `docs/agent/dispatcher-runbook.md`. Also built the #3801 Fork 1 carry-over: `runConverge`'s returned verdict now carries `convergeEditedLane` (true when any round of the converge loop actually committed a real edit, accumulated across the whole loop; false when converge changed nothing). Tests: dispatch-contracts-route 22, dispatch-lane-routing-record 29 (+8 new), deliver-item-wrapper 149 (+3 new), dispatch-routing-table 6 — all pass. Broad suite (scripts/lib+operations+conveyor+__tests__): 592 files, 16372 passed, 1 pre-existing unrelated failure (host-sampler-large-file, same as #3840's own result). verify-lane: same one pre-existing red, not caused by this change. check:standards: 2 pre-existing errors (a stranded non-numeric backlog id, and the #3383 tracker's own opaque-token flag from a prior push), neither in a file this change touches. Graduation to main is owed (via #3443); card #3848 is not resolved.
+## Session update (2026-09-22) — #3844 fork-4 fix path landed at a4960b51b
+
+#3844 (Fork 4 "fix path" of #3801) landed on the prototype branch at a4960b51b. `decideDispatchRoute`
+(`dispatch-contracts.mjs`) now walks the checked-in `fixSizeSource` chain (`card-size` -> `measured-diff` ->
+`assumed`) for the two repair kinds, `fix` and `ci-heal`, instead of falling straight to the generic
+`unsizedCardPolicy` fallback #3843 built for every other kind — the ruling's own reasoning: `block` alone
+would silently stop every conflict-caused fix, since the reconcile fix path passes no size today.
+`reconcile-fix-dispatch.mjs`'s `dispatchFix` carries `planned.size` through from `planFixesFromReconcile`'s
+existing `findItemFn` lookup (no second read), and pays for a `measured-diff` `gh pr view` read
+(`fetchPrDiffLoc`, a new sibling to `fetchPrDiffScope`) only when that lookup found none. A new
+`ci-heal-dispatch-routing.test.mjs` asserts the same chain for `ci-heal` directly against
+`decideDispatchRoute`, since that kind has no PR-bounce dispatch path of its own to exercise it through — its
+own routing decision is made upstream wherever `decideDispatchRoute({kind:'ci-heal', ...})` is actually
+called (out of this card's scope). No runtime effect yet, per the ruling: the reconcile fix spawn is Claude
+either way, so the route only records what would have been chosen (`routed` against `executed`).
+
+Touched tests: reconcile-fix-routing.test.mjs 9/9 (5 pre-existing + 4 new), ci-heal-dispatch-routing.test.mjs
+4/4 (new file), dispatch-contracts.test.mjs 82/82, dispatch-contracts-route.test.mjs 22/22, reconcile-fix-
+dispatch.test.mjs 52/52. Full scripts/lib + scripts/operations + scripts/conveyor sweep: 9188/9189 (1
+pre-existing, unrelated host-sampler-large-file.test.mjs date-fixture failure, confirmed by #3843). verify-lane
+--json recorded red for 00992fba (pre-commit HEAD) on 2 pre-existing, unrelated flakes: host-sampler-capacity
+(timing) and host-sampler-large-file (the same date bug) — neither touches any file this card changed.
+check:standards: 2 pre-existing errors, both on unrelated backlog cards (xohvzus stranded id; #3383's own
+opaque-token flag), not introduced by this diff. Not resolved (orchestrator resolves after graduation via
+#3443).
