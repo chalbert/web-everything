@@ -232,3 +232,11 @@ How each slice (a child of this item) graduates, per the statute
   3863 waits on 3901; 3865 no longer waits on decision 3864 (ratified; it resolves when 3865+3856 land);
   3862 waits on 3906 and 3907. `we:scripts/operations/run.mjs` and the http-adapter pin are shared: each slice appends only
   its own lines.
+
+- **2026-09-22 (merge notes + #3487 split; build still ON HOLD).** Read-only trial merges were run for every file that both main and the branch changed. Their results are now on the cards as merge notes: #3890, #3894, #3897, #3903, #3906, #3907, #3908 and #3487.
+  - **#3487 split.** It now keeps only the runner core, as the last slice. Three new slices land before it: x9ytnq8 (test setup and heavy-command admission), xa9fkfz (dispatch gate and tick-core) and x8v2xw9 (land path, gh-throttle and lease-reaper).
+  - **Order fix.** #3906 now lands before #3903. The wrapper needs a function from dispatch-lane-io, so the marker module moved into #3906 to break the cycle.
+  - **#3894 resolved with no code change.** Main already has everything the branch has there.
+  - **New critical path:** #3897 → #3902 → #3906 → #3903 → #3904 → #3908 → #3487.
+  - **Landing rule.** Between #3908 and #3487, the conveyor runner must not run continuously on main.
+  - **Behaviour change to expect.** #3907 turns the advisory Codex and Antigravity judge seats on by default for main reviews, whenever the model-probation registry marks them as probation or trusted.
