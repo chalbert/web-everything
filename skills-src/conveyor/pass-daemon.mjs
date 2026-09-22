@@ -89,7 +89,14 @@ export async function runPassDaemonLoop({
 
 // ── IO SHELL (runs only as a CLI — owns the real child process + the real independent heartbeat) ────────────
 
-function realSleep(ms) { return new Promise((resolve) => { const t = setTimeout(resolve, ms); t.unref?.(); }); }
+// Live-caught bug (#3870/#3876, both built on this same pattern): `.unref()`-ing this timer told Node it
+// was fine to exit before it fired. Between pass runs, nothing else keeps the event loop alive (a completed
+// child's stdio no longer holds a reference), so the daemon would exit right after its first run instead of
+// waiting out `intervalMs` and looping. A REF'd timer (Node's default — no `.unref()`) is exactly what a
+// resident daemon needs here: the sleep IS the reason it stays alive between runs. (The heartbeat
+// `setInterval` below is correctly left `.unref()`'d — it is not meant to be a standalone keep-alive; this
+// timer already guarantees survival once fixed.)
+export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
 
 /** Spawn one real run of the manifest-resolved script to completion, async (never blocking the event loop
  *  the independent heartbeat relies on — mirrors why `runner.mjs`'s own `runQuietHeartbeating` uses `spawn`,
