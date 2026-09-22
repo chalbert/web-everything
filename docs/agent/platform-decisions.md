@@ -3794,6 +3794,37 @@ a deferred `classifyPr` "no-check vs red" reporting split, and authoring the mis
 
 ---
 
+### The drain never auto-resolves a card carrying a `## Slice ` heading — an explicit TEMPORARY fix, not the final delivery-strategy design {#drain-multi-slice-card-interim-hold}
+
+**Ratified 2026-09-21 (operator, in conversation; #3820, decision card; explicitly ratified as a temporary
+fix).** The resolve-on-land extractor credits any `lane/<NNN>[a-z]?-<slug>` ref with item NNN
+([`we:scripts/lib/open-pr-items.mjs`](../../scripts/lib/open-pr-items.mjs)) and nothing on the card side checks
+whether the card is fully built before `we:scripts/lane-drain.mjs`'s `resolveLandedItem` sets
+`status: resolved`. That silently closed #3779 on its first slice landing (PR #2392, 2026-09-21) while all four
+of its Done-when items and four of its five design points were unbuilt.
+
+1. **The rule.** A backlog card that holds a `## Slice <label>` heading is never auto-resolved by the drain on
+   a PR land; the drain reports `deferred: multi-slice card` instead and the card is resolved deliberately.
+2. **The marker is the heading alone.** No new frontmatter field is added to declare a card's slices.
+3. **Weak spot, accepted.** This protects only a card whose `## Slice ` heading already exists when a slice PR
+   lands (#3779's own slice-A PR added the heading itself, so this rule would have caught it) — a first slice
+   PR that adds no heading is not protected. An explicit `Resolves #N` / `Refs #N` PR marker is a later,
+   additive backstop, not built here.
+4. **Why this is explicitly temporary.** It answers only "how does the drain know a card isn't finished," not
+   the broader question of how a split card is delivered and which event counts as "finished" (child cards vs.
+   a feature flag vs. an integration branch vs. stacked PRs, operator-configurable, agent-chosen at slicing
+   time). That broader question is Fork 5 on `#3575` (open, unprepared) and is deliberately out of scope here.
+   Once Fork 5 is researched and ruled, re-examine whether this narrow hold is still needed as a fallback or
+   can be retired.
+
+**Lineage:** `#3820` (ratified 2026-09-21, operator, in conversation; `bornAs: xggecwt`), copying #3816's own
+proposed default without re-researching it. Build tracked on `#3816`. Composes with
+[#repo-drain-check-contract](#repo-drain-check-contract) (a different axis of the same drain: what makes a
+check land-worthy, not what makes a card resolve-worthy) and with `#3575` Fork 5 (the durable replacement this
+rule defers to).
+
+---
+
 ### Drain-daemon self-hosting boundary — its own source runs from a dedicated clone, reloads via clean-exit + KeepAlive, and self-updates through the same graduated review as any change, only with independent (never self-) approval {#drain-daemon-self-hosting-boundary}
 
 **Ratified 2026-07-27 (operator; #2501, bornAs 2501).** How the resident drain daemon may safely
