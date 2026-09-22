@@ -12,8 +12,8 @@
  *
  * WHY A TABLE AT ALL. The card's own reason: it is what makes a WRONG route debuggable. A human reading the
  * runbook can see that a `build` over docs routes differently from a `build` over code, and can see the
- * routed-vs-executed gap (a non-Claude route that a Claude session still executes, because no Codex or Gemini
- * provider port exists yet — #3443, #3658).
+ * routed-vs-executed gap (an unmarked non-Claude route that a Claude session still executes, because no Codex
+ * or Gemini port is reachable without an item's own `deliveryAgent:` marker — #3443, #3658, #3840, #3848).
  *
  * HOW IT PUBLISHES — the repo's existing convention, not a new mechanism: a `gen-*.mjs` script behind an
  * `npm run gen:*` script, writing DERIVED, deterministic content (see `gen-reference-index.mjs`'s own header:
@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import {
   CODE_CHANGE_DISPATCH_KINDS, ROLE_DISPATCH_KINDS, TASK_TYPES_WITHOUT_PRODUCING_KIND, taskTypeFor,
 } from './lib/dispatch-task-type.mjs';
-import { EXECUTABLE_PROVIDER, decideDispatchRoute } from './lib/dispatch-contracts.mjs';
+import { decideDispatchRoute } from './lib/dispatch-contracts.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** The doc the generated block lives in. */
@@ -127,10 +127,12 @@ export function renderRoutingTable(scorecards) {
   lines.push(`**Code-change kinds:** ${CODE_CHANGE_DISPATCH_KINDS.map((k) => `\`${k}\``).join(', ')}. `
     + `**Role kinds:** ${ROLE_DISPATCH_KINDS.map((k) => `\`${k}\``).join(', ')}.`);
   lines.push('');
-  lines.push(`**The gap.** \`executed\` is \`${EXECUTABLE_PROVIDER}\` on every row because that is the only provider `
-    + 'port that exists (`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider`, #3579). A row whose '
-    + '`routed` is not `claude` is a delegation the machinery decided and could not carry out; both halves are '
-    + 'written into the run record so the gap is measurable rather than invisible (#3443, #3658).');
+  lines.push('**The gap.** `executed` is `claude` on every row above because none of these example rows carries an '
+    + 'item\'s own `deliveryAgent:` marker (#3840) — the one override that makes `executed` follow `routed` for a '
+    + '`build`/`fix`/`ci-heal` dispatch. With no marker, execution has exactly one port '
+    + '(`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider`, #3579), so a row whose `routed` is not '
+    + '`claude` is a delegation the machinery decided and could not carry out unmarked; both halves are written '
+    + 'into the run record so the gap is measurable rather than invisible (#3443, #3658, #3848).');
   lines.push('');
   lines.push(END);
   return lines.join('\n');

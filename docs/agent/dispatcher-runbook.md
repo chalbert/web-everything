@@ -155,6 +155,6 @@ Computed against `we:scripts/conveyor/run-scorecards.json` (version 1, 18 record
 
 **Code-change kinds:** `build`, `fix`, `ci-heal`. **Role kinds:** `prepare`, `prepare-decision`, `investigate`, `review`.
 
-**The gap.** `executed` is `claude` on every row because that is the only provider port that exists (`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider`, #3579). A row whose `routed` is not `claude` is a delegation the machinery decided and could not carry out; both halves are written into the run record so the gap is measurable rather than invisible (#3443, #3658).
+**The gap.** `executed` is `claude` on every row above because none of these example rows carries an item's own `deliveryAgent:` marker (#3840) — the one override that makes `executed` follow `routed` for a `build`/`fix`/`ci-heal` dispatch. With no marker, execution has exactly one port (`we:scripts/operations/dispatch-lane-io.mjs#defaultClaudeProvider`, #3579), so a row whose `routed` is not `claude` is a delegation the machinery decided and could not carry out unmarked; both halves are written into the run record so the gap is measurable rather than invisible (#3443, #3658, #3848).
 
 <!-- END GENERATED: dispatch routing table -->

@@ -914,17 +914,25 @@ export const DELIVERY_VENDOR_PROVIDERS = Object.freeze({ 'claude-restricted': 'c
 const MARKER_KINDS = Object.freeze(['build', 'fix', 'ci-heal']);
 
 /**
- * THE PROVIDER ACTUALLY AVAILABLE TO EXECUTE A DISPATCH TODAY.
+ * WHICH VENDOR ACTUALLY EXECUTES A DISPATCH, given what the criteria `routed` and what #3840's `deliveryAgent:`
+ * override (if any) says.
  *
  * `we:scripts/operations/dispatch-lane-io.mjs`'s `provider` port (#3579) has exactly one implementation that
- * starts a worker — `defaultClaudeProvider` — and every mechanical per-kind provider in
- * `dispatch-provider-registry.mjs` wraps that same spawn. No Codex or Gemini provider port exists (#3443,
- * #3658 are unlanded). So a non-Claude ROUTE is recorded as `routed: <p>, executed: claude` rather than
- * quietly becoming a Claude decision — which is what makes the delegation gap MEASURABLE instead of invisible
- * (#3717 step 6).
+ * starts a worker with no override — `defaultClaudeProvider`, Claude — and every mechanical per-kind provider
+ * in `dispatch-provider-registry.mjs` wraps that same spawn UNLESS the item's own `deliveryAgent:` marker
+ * names a different registered vendor (#3840), in which case `we:scripts/operations/dispatch-providers/
+ * build.mjs` (and its `fix`/`ci-heal` siblings) pass `--provider=<vendor>` and the delivery wrapper actually
+ * spawns it. So `executed` is the override's `executedVendor` when there is one, else plain `claude` — never
+ * the ROUTED vendor, which is the criteria's recommendation, not a fact about what ran. A routed non-Claude
+ * pick with no override still lands as `routed: <p>, executed: claude` rather than quietly becoming a Claude
+ * decision — the delegation gap stays MEASURABLE instead of invisible (#3717 step 6, #3848).
+ *
+ * @param {{value: {executedVendor: string}|null}} override — {@link normalizeOverride}'s return.
+ * @returns {string}
  */
-// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
-export const EXECUTABLE_PROVIDER = 'claude';
+function executedVendorFor(override) {
+  return override.value ? override.value.executedVendor : 'claude';
+}
 
 /**
  * DECIDE A DISPATCH'S ROUTE — the one call a dispatch path makes before a spawn.
@@ -1092,9 +1100,9 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       role: out.role,
       taskType: derivation.taskType,
       routed,
-      // WHAT ACTUALLY RUNS IT. One provider port exists; see {@link EXECUTABLE_PROVIDER}. `routed !== executed`
-      // is the delegation gap, recorded rather than silently collapsed.
-      executed: EXECUTABLE_PROVIDER,
+      // WHAT ACTUALLY RUNS IT (#3848) — see {@link executedVendorFor}. `routed !== executed` is the delegation
+      // gap, recorded rather than silently collapsed; an override closes the gap for THIS dispatch only.
+      executed: executedVendorFor(override),
       model: out.model,
       tier: out.tier,
       supervision,
