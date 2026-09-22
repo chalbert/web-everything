@@ -5,6 +5,7 @@ parent: "3383"
 status: open
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js", "we:skills-src/split-backlog-item/SKILL.md", "we:scripts/operations/explore.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-07"
+relatedTo: ["3820", "3816", "3779"]
 tags: [parallel, dispatch, split, workflow, conveyor]
 ---
 
@@ -37,6 +38,7 @@ threshold a shared branch is worth its own proven cost** — not about designing
 | Fork 2 — splittability gate: file-disjointness alone, or file+interface? | **(b) file-disjointness is necessary but not sufficient — require an interface-stability check before fan-out** | (a) file-disjointness (touch-set) alone | high |
 | Fork 3 — who runs the pre-build splittability analysis, and when | **(b) fold it into `we:skills-src/split-backlog-item/SKILL.md`'s existing investigation pass as a THIRD verdict (`could-not-split` / `could-split-into-cards` / `could-split-into-sub-briefs`), reserving the `explore` committee for genuinely ambiguous large items only** | (a) always convene an `explore` committee per item; (c) no gate — always attempt or never attempt | medium |
 | Fork 4 — overlapping-scope coordination: work committee vs. serial hold | **(c) keep serial hold as the default; add a narrow, explicitly-gated shared-branch escalation only when overlap persists past N held ticks AND touches ≤1 file** | (a) work-committee/shared-branch as a general alternative to serial holds; (b) never build it | medium |
+| Fork 5 — delivery strategy: how a split card is delivered, and the event that counts as "finished" (added 2026-09-21 from #3820; **provisional, research owed**) | **(a) each card declares a delivery strategy; the default is slice-to-`main` as child cards; the drain resolves a card only at its declared strategy's completion event** | (b) one hard-wired strategy (integration branch only); (c) no declared strategy, infer from branch names (today's bug, #3816) | low (not yet researched) |
 
 ## Fork 1 — what is the split unit, and how do the pieces integrate back into one deliverable
 
@@ -302,6 +304,55 @@ alone caused a delivery failure, only cases where it cost latency. Not rejected 
 foreclosing an option the operator explicitly wants investigated rather than dismissed; recorded here as the
 correct fallback if the escalation's real-world tick-threshold tuning (once (c) has live data) never
 clears a bar that justifies its added complexity.
+
+## Fork 5 — how a split card is delivered, and what event counts as "finished" (added 2026-09-21 from the #3820 review)
+
+*Why this is a fork:* Forks 1-4 decide how a build is split and how its pieces integrate **inside one
+delivery** (one card, sub-briefs, one assembled PR). They do not say what happens when a card is split into
+several separately-landing pieces. Today the drain answers that by guessing from the branch name: a
+`lane/<NNN>-…` ref credits item NNN as fully delivered, so PR #2392 (slice A of #3779) resolved a card whose
+Done-when was mostly unbuilt (#3816). #3820 rules the narrow drain fix; this fork owns the general question it
+raised, because the operator's framing there was that several delivery approaches exist, that a preference
+should be configurable, and that an agent should choose among them by best practice.
+
+**The idea.** A card declares a **delivery strategy**. Each strategy defines three things: (1) where its
+pieces land, (2) what the drain does when one piece lands (never resolve the card), and (3) the **completion
+event** that does resolve it. The drain reads the declared strategy instead of inferring from a branch name.
+
+| Strategy | Pieces land in | Card resolves when |
+| --- | --- | --- |
+| Child cards / vertical slices (industry default, trunk-based) | `main`, each piece complete on its own | the last child card is resolved (the #658 open-children guard already refuses an early close) |
+| Feature flag / dark launch | `main`, behind a flag | the flag is switched on (or removed) |
+| Sub-briefs inside one card (Fork 1's model) | one integration worktree | its single assembled PR merges |
+| Stacked PRs | `main`, in dependency order | the top PR of the stack merges |
+| Integration branch (last resort; the declared "POC branch" mode, `#poc-branch-declared-delivery-mode`) | a declared branch via `deliveryTarget` | the branch merges to `main` |
+
+**Configurable preference, agent chooses.** A repo policy file holds the preference order and each strategy's
+eligibility rule (for example: prefer child cards; use a flag when the change is runtime-visible and a flag
+system exists; allow an integration branch only when a half-delivered state must not reach `main`). The agent
+picks at slicing time and records the choice on the card so it is auditable and the operator can override it.
+
+**Provisional default — (a) declared strategy, default child cards, drain resolves at the completion event.**
+It matches trunk-based practice (small slices to `main`, flags for unfinished work, long-lived branches as an
+exception), and it reuses two things that already exist: the #658 open-children guard and the drain's
+non-default-base hold (#3674). Confidence **low**: nothing below has been researched yet.
+
+**Rejected alternative — (b) one hard-wired strategy (integration branch only).** Slices would stay off `main`
+until the end, so other lanes cannot build on slice A, and it carries the POC-branch ceremony (registry entry,
+drift sync, no CI on non-default bases). Right for a change that cannot ship half-done; wrong as the only mode.
+
+**Rejected alternative — (c) infer from branch names.** This is the current behaviour and the #3816 bug.
+
+**Research owed before this fork can be ruled** (do not rule it cold):
+- Does the repo have a feature-flag mechanism? If not, that strategy waits until one exists.
+- Prior art: trunk-based development / DORA, branch by abstraction and expand/contract, stacked-PR tooling,
+  how GitHub-style closing keywords (`Closes` vs `Refs`) model "finished".
+- Where the preference config lives, and how it interacts with `deliveryTarget`.
+- How the agent's choice is recorded, and whether the drain refuses a card with no declared strategy.
+- The measured share of cards that are sliced, and how many `## Slice ` headings exist without child cards.
+
+**Interim safety net.** Until this fork is built, #3820's narrow rule stands: the drain never auto-resolves a
+card that has a `## Slice ` heading.
 
 ## What was checked and found NOT to already exist
 
