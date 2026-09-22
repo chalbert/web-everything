@@ -39,7 +39,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildDecisionRecord } from './lib/decision-docket-data.mjs';
 import { renderDocketHtml } from './lib/decision-docket-render.mjs';
@@ -107,7 +107,7 @@ function buildData({ ref, limit, allowStale } = {}) {
 
 function cmdData(flags) {
   const data = buildData({ ref: flags.ref, limit: flags.limit ? Number.parseInt(flags.limit, 10) : null, allowStale: !!flags['allow-stale'] });
-  const outPath = flags.out ? join(ROOT, flags.out) : DEFAULT_DATA_PATH;
+  const outPath = flags.out ? resolve(ROOT, flags.out) : DEFAULT_DATA_PATH;
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(data, null, 2)}\n`);
   const preparedCount = data.items.filter((i) => i.prepared).length;
@@ -117,8 +117,8 @@ function cmdData(flags) {
 }
 
 function cmdRender(flags) {
-  const dataPath = flags.data ? join(ROOT, flags.data) : DEFAULT_DATA_PATH;
-  const outPath = flags.out ? join(ROOT, flags.out) : DEFAULT_HTML_PATH;
+  const dataPath = flags.data ? resolve(ROOT, flags.data) : DEFAULT_DATA_PATH;
+  const outPath = flags.out ? resolve(ROOT, flags.out) : DEFAULT_HTML_PATH;
   const data = JSON.parse(readFileSync(dataPath, 'utf8'));
   const templateHtml = readFileSync(TEMPLATE_PATH, 'utf8');
   const html = renderDocketHtml(data, templateHtml);

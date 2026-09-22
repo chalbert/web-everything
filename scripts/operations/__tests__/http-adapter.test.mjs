@@ -54,6 +54,7 @@ import { EXPLORE_OP } from '../explore.mjs';
 import { DISPATCH_TASK_OP } from '../dispatch-task.mjs';
 import { PRIORITY_SYNC_OP } from '../priority-sync.mjs';
 import { TRACKER_REFRESH_OP } from '../tracker-refresh.mjs';
+import { DOCKET_REFRESH_OP } from '../docket-refresh.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
@@ -389,6 +390,9 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // #3383 — `tracker-refresh`'s `apply` step is an effect (it runs the sync, writes the page and the worker's brief), so it is
     // NOT read-only; listed for map coverage. Its declaring module is itself a leaf (asserted in `tracker-refresh.test.mjs`).
     [TRACKER_REFRESH_OP]: 'tracker-refresh.mjs',
+    // #3723 — `docket-refresh`'s `apply` step is an effect (it runs the generator and writes under the state root), so it is
+    // NOT read-only; listed for map coverage. Its declaring module is itself a leaf (asserted in `docket-refresh.test.mjs`).
+    [DOCKET_REFRESH_OP]: 'docket-refresh.mjs',
     // #3724 — `turn-digest` is READ-ONLY (both steps are `compute`); its snapshot is written by the command line's `finish`
     // hook, never through the engine. Its declaring module imports only `registry.mjs` and `step-kinds.mjs`.
     [TURN_DIGEST_OP]: 'turn-digest.mjs',

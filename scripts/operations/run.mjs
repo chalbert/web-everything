@@ -95,6 +95,8 @@ import { prioritySyncOperation, PRIORITY_SYNC_OP, finishPriorityOutcome } from '
 import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sync-io.mjs';
 import { trackerRefreshOperation, TRACKER_REFRESH_OP, finishRefreshOutcome } from './tracker-refresh.mjs';
 import { createTrackerRefreshReader, createTrackerRefreshSinks } from './tracker-refresh-io.mjs';
+import { docketRefreshOperation, DOCKET_REFRESH_OP, finishDocketOutcome } from './docket-refresh.mjs';
+import { createDocketRefreshReader, createDocketRefreshSinks } from './docket-refresh-io.mjs';
 import { turnDigestOperation, TURN_DIGEST_OP } from './turn-digest.mjs';
 import { createTurnDigestReader, createTurnDigestFinish } from './turn-digest-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -322,6 +324,15 @@ export const OPERATIONS = Object.freeze({
     declaration: trackerRefreshOperation({ readFacts: createTrackerRefreshReader() }),
     sinks: createTrackerRefreshSinks(),
     finish: finishRefreshOutcome,
+  }),
+  // #3723 — refreshes the Decision Docket's data when work lands: fetch, refuse a primary checkout or one whose HEAD is not
+  // the ref, run THAT checkout's generator with outputs under `<coordination root>/docket/`, and hash the data (clock fields
+  // removed). Only a changed hash renders the page and writes ONE `publish-owed.json` hand-off; the publish itself is a
+  // session's `Artifact` call (#3277 once built, a hand-dispatched worker until then). Last stdout line `publish: owed|none`.
+  [DOCKET_REFRESH_OP]: () => ({
+    declaration: docketRefreshOperation({ readFacts: createDocketRefreshReader() }),
+    sinks: createDocketRefreshSinks(),
+    finish: finishDocketOutcome,
   }),
   // #3724 (epic #3383 prototype line) — ONE derived, read-only picture of the turn: what landed on `origin/main` since a
   // cursor (first-parent `Merge pull request #N`, a pure git read), what is owed (the reconcile plan), what needs the
