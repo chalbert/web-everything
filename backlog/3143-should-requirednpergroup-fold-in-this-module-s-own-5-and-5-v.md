@@ -1,8 +1,10 @@
 ---
 bornAs: xadzx6f
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-08-16"
+dateResolved: "2026-09-21"
+codifiedIn: one-off
 preparedDate: "2026-08-17"
 relatedReport: reports/2026-08-17-power-estimator-validity-floor.md
 relatedTo: ["3090", "3083"]
