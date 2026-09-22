@@ -4,16 +4,25 @@
  * @description #3876 (epic #3383) — the standalone Review daemon: reconcile-pass.mjs (discovery) +
  *   review-dispatch.mjs (dispatch) + review-round-tag.mjs / review-status-tag.mjs (cosmetic labels),
  *   grouped into ONE daemon per #3860's split analysis — one sequential pass over the same PR, not four
- *   things worth separating. WE-only, matching #3870's own Fix-dispatch daemon scoping.
+ *   things worth separating.
  *
  * WHAT THIS REPLACES. we:skills-src/conveyor/runner.mjs's own `makeCliMechanicalPasses` ran this exact
  * sequence (reconcile-pass → review-dispatch per review-kind entry → review-round-tag → review-status-tag)
  * as ONE STEP of its own per-tick pass list, with a shared `--prs-file` fetched once and passed to both
  * reconcile-fix-dispatch AND reconcile-pass in the same tick. This daemon does NOT replicate that sharing —
  * it does its own `gh pr list` each tick, an accepted, honest tradeoff of running independently (the same
- * tradeoff #3870's Fix-dispatch daemon already made). Cross-repo iteration (frontierui, plateau-app) is
- * ALSO out of scope here — the legacy runner's multi-repo loop is not replicated; this daemon is WE-only,
- * matching #3870.
+ * tradeoff #3870's Fix-dispatch daemon already made).
+ *
+ * CROSS-REPO (#xvyuwtg, 2026-09-22). This daemon was originally built WE-only, matching #3870's own scoping
+ * at the time — deliberate, not an oversight, per this file's own original header. That turned out wrong in
+ * practice: plateau-app PR #167 sat `review:pending` with nothing watching it, because this daemon's tick
+ * never asked any repo but WE. Every downstream step was ALREADY fully repo-generic (`reconcile-pass.mjs`
+ * accepts `--repo` end to end; `review-dispatch.mjs` dispatches any constellation repo's review correctly —
+ * proven live by hand for plateau-app#167 — as long as the DISPATCHING process itself, not the target repo's
+ * own checkout, is a clean, fresh, non-lane WE checkout; this daemon's own dedicated clone already is one).
+ * The only real gap was discovery, so {@link runReviewTickAllRepos} now ticks {@link REVIEW_DAEMON_REPOS} —
+ * today the three constellation repos, kept as data so a future per-user configurable repo list (plateau as
+ * a product letting an operator choose which repos to integrate) is a source swap, not a redesign.
  *
  * DOUBLE-DISPATCH, STATED HONESTLY. Unlike we:scripts/conveyor/reconcile-fix-dispatch.mjs (which fences
  * through we:scripts/operations/action-store.mjs's durable ledger), `review-dispatch.mjs`'s `dispatchReview`
@@ -98,7 +107,11 @@ export function runReviewTick({
   statusCandidates = selectStatusCandidates,
   repo = WE_SLUG,
 } = {}) {
-  const plan = reconcile({});
+  // `repo` used to reach dispatch/tagRound/tagStatus but never `reconcile` itself (live-caught 2026-09-22,
+  // #xvyuwtg): `reconcile({})` always discovered WE's own PRs regardless of the `repo` this tick was called
+  // for, which is exactly why plugging in a non-WE repo here silently kept reconciling WE. `reconcile-pass.mjs`'s
+  // own `runReconcilePass` already accepts `{repo}` end to end — this was the one call site that dropped it.
+  const plan = reconcile({ repo });
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
   const dispatched = [];
   const failed = [];
@@ -120,6 +133,48 @@ export function runReviewTick({
   return { reviewsOwed: reviews.length, dispatched, failed, refusals: (plan.refusals ?? []).length };
 }
 
+/** The repos this daemon watches each tick. Today: the three constellation repos (WE-only was the ratified
+ *  scope at build time — see the file header — but plateau-app PR #167 sat `review:pending` with nothing
+ *  watching it, live-caught 2026-09-22, #xvyuwtg). Kept as a plain exported list, not inlined into the loop
+ *  below, so a future per-user configurable repo list (plateau as a product letting an operator choose which
+ *  repos to integrate) is a source swap here, not a redesign of {@link runReviewTickAllRepos}. */
+export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) => r.slug);
+
+/**
+ * Run {@link runReviewTick} once per watched repo, isolating one repo's failure from the rest — a plateau-app
+ * `gh` outage (or a rate limit, or a repo with zero open PRs) must never stop WE's own reviews from being
+ * dispatched, the same "one bad entry never aborts the rest" discipline `runReviewTick` already applies
+ * per-PR, one level up. Every downstream step this daemon already calls (`reconcile-pass.mjs`,
+ * `review-dispatch.mjs`, both tag scripts) was already fully repo-generic before this — the daemon's own tick
+ * was the only WE-hardcoded link (see `runReviewTick`'s own `repo` fix above, filed the same day this was).
+ * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to `runReviewTick`); every
+ *   other option is forwarded to it for EVERY repo except `repo` itself, which this loop supplies per-iteration.
+ * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, reviewsOwed:number,
+ *   dispatched:Array<object>, failed:Array<object>, refusals:number}}
+ */
+export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, ...tickOpts } = {}) {
+  const perRepo = [];
+  const dispatched = [];
+  const failed = [];
+  let reviewsOwed = 0;
+  let refusals = 0;
+  for (const repo of repos) {
+    try {
+      const result = tick({ ...tickOpts, repo });
+      perRepo.push({ repo, result });
+      reviewsOwed += result.reviewsOwed;
+      refusals += result.refusals;
+      for (const d of result.dispatched) dispatched.push({ ...d, repo });
+      for (const f of result.failed) failed.push({ ...f, repo });
+    } catch (e) {
+      const error = String((e && e.message) || e).split('\n')[0];
+      perRepo.push({ repo, error });
+      failed.push({ prNumber: null, repo, error });
+    }
+  }
+  return { repos: perRepo, reviewsOwed, dispatched, failed, refusals };
+}
+
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
 
 // Live-caught bug (this daemon's own first launchd-managed run, and the sibling #3870/pass-daemon.mjs
@@ -133,12 +188,13 @@ export function realSleep(ms) { return new Promise((resolve) => { setTimeout(res
 export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
   return {
     intervalMs,
-    tickOnce: () => runReviewTick(),
+    tickOnce: () => runReviewTickAllRepos(),
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
     onTick: (result) => {
-      log.error(`review-daemon: tick — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}`);
-      for (const f of result.failed) log.error(`review-daemon: PR #${f.prNumber} dispatch failed (non-fatal): ${f.error}`);
+      log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}`);
+      for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);
+      for (const r of result.repos) if (r.error) log.error(`review-daemon: ${r.repo} reconcile failed (non-fatal, other repos unaffected): ${r.error}`);
     },
     onTickError: (error) => {
       log.error(`review-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);
