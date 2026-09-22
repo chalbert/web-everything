@@ -4811,3 +4811,50 @@ or `findings`.
 
 Not resolved — `#3888` itself is closed out together with its two sibling rule-cards (rule 5, rule
 6) by the orchestrating session, not per-card here. This session did not touch `backlog/3888-*.md`.
+
+## Session update (2026-09-22) — #3887 (Rule 7 of #3690): spot-check resolves the #3313 advisory floor, never zero seats
+
+**#3887 — Rule 7 of #3690 at `spot-check`, built.**
+
+Wired the independent-review pass to the computed supervision level, per `#delegation-trial-record-graduation`
+rule 7: full coverage at every level, moving only in depth. `full` keeps the existing mandatory panel
+unchanged (#3850, already ratified and built — regression-tested, unchanged). `spot-check` now resolves the
+`#every-pr-gets-a-look-advisory-floor` (#3313) shape instead of nothing: one tool-free juror, one round,
+capped findings, structurally non-blocking (no `review:*` label, not a `REVIEW_HOLD_LABELS` member — confirmed
+by grep and by test).
+
+Both of #3313's standing obligations are wired for real, not just documented: a finding from the floor pass
+files its own follow-up backlog item through the declared `file-item` operation
+(`fileFloorFindingFollowUp`/`runFloorPass` in `we:scripts/operations/review-dispatch.mjs`, referencing the PR
+and the finding text), and the floor's own verdict + cost (juror count, rounds, tokens, wall-time) are
+recorded in a field a report can read later (`we:scripts/lib/jury-core.mjs#recordFloorRun`,
+`FLOOR_MAX_FINDINGS`). The supervision-to-depth mapping itself is a new pure contract,
+`we:scripts/lib/dispatch-contracts.mjs#independentReviewDepthFor`, which fails loud on any value outside
+`full`/`spot-check` — so no route can silently resolve to zero independent seats, the exact failure rule 7
+forbids.
+
+`we:docs/agent/dispatcher-runbook.md` gets one new table row per supervision level naming its independent pass
+and what enforces it, matching #3717's existing table style, placed outside that table's generated block so
+`npm run gen:dispatch-routing-table` and its drift test are untouched.
+
+Tests: `we:scripts/operations/__tests__/review-dispatch.test.mjs` 59→68 (new: spot-check resolves the floor seat;
+full still resolves the #3850 panel unchanged; no route resolves zero seats; an unrecognised supervision
+level fails loud; a floor finding actually triggers a file-item filing; a clean pass files nothing).
+`we:scripts/lib/__tests__/jury-core.test.mjs` 208→212 (new: `recordFloorRun`'s verdict+cost shape, the findings
+cap with a reported truncation count, frozen output). `we:scripts/lib/__tests__/dispatch-contracts.test.mjs`
+unchanged test count; its two closed-annotation gates were extended with a third accepted tag
+(`@wired-by-3887`) for the new export's real runtime caller (`we:scripts/operations/review-dispatch.mjs`), since the gate enforces
+an exact, exhaustive literal set. All new cases fail on the pre-change code. `npm run check:standards` shows
+no new warnings or errors against any of the seven touched files (confirmed by grep against the full run
+output); the pre-existing stray errors it reports (two stranded non-numeric backlog ids, one opaque-token
+warning on this very tracker file) are unrelated and pre-date this change.
+
+Committed straight to `lane/mechanical-dispatcher` (no PR, per epic doctrine) as `d9ebfff1f`, base `f9fed205f`
+(the tip after #3888/rule 4 landed) — the branch had not moved between acquire and push, so no rebase was
+needed; the push went through cleanly on the first try.
+
+**Deliberately out of scope, untouched:** the `full`-route supervisor itself (already ruled and built by
+#3850 — only regression-tested here, never modified) and whether a vendor could ever graduate past
+`spot-check` to a lighter or absent check (#3867, a separate, deliberately parked decision card the operator
+must revisit by hand). `backlog/3887-*.md` itself was not touched — closeout is handled separately once all
+three rule cards (#3887, #3888, #3889) are built.
