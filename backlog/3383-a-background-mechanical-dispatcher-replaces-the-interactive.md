@@ -4684,3 +4684,29 @@ Worker `build-3720-remainder` (code commits 3c49eb938, then two follow-ups) buil
 - **Decision `xs340b6`** filed and prepared (4 forks, docket `parseOk: true`): canonical checkout, items per call, opt-in home, what item dispatch means. Its Priority-order line is NOT added: every Edit to this card is refused by the backlog guard's #3015 false positive on an Artifact URL id already in the card (line ~4558), and `priority-sync --apply` would also add 34 other unwritten lines. The next priority-sync adds it.
 
 Live probe (plan, read-only, run records to a scratch dir): items identical to `dispatch-plan --json --queue-file=<same queue>` (60 of 60 rows); budget 0 (5 live sessions, cap 3), so nothing proposed. PR refusals agree with `reconcile-pass --json` for #2419 to #2421 (`live-process`); #2422 differed (a reviewer session went live between the two reads). The `Stop`-hook probe waits on the operator installing the hook.
+
+## Session update (2026-09-22) — #3844 fork-4 fix path landed at a4960b51b
+
+#3844 (Fork 4 "fix path" of #3801) landed on the prototype branch at a4960b51b. `decideDispatchRoute`
+(`dispatch-contracts.mjs`) now walks the checked-in `fixSizeSource` chain (`card-size` -> `measured-diff` ->
+`assumed`) for the two repair kinds, `fix` and `ci-heal`, instead of falling straight to the generic
+`unsizedCardPolicy` fallback #3843 built for every other kind — the ruling's own reasoning: `block` alone
+would silently stop every conflict-caused fix, since the reconcile fix path passes no size today.
+`reconcile-fix-dispatch.mjs`'s `dispatchFix` carries `planned.size` through from `planFixesFromReconcile`'s
+existing `findItemFn` lookup (no second read), and pays for a `measured-diff` `gh pr view` read
+(`fetchPrDiffLoc`, a new sibling to `fetchPrDiffScope`) only when that lookup found none. A new
+`ci-heal-dispatch-routing.test.mjs` asserts the same chain for `ci-heal` directly against
+`decideDispatchRoute`, since that kind has no PR-bounce dispatch path of its own to exercise it through — its
+own routing decision is made upstream wherever `decideDispatchRoute({kind:'ci-heal', ...})` is actually
+called (out of this card's scope). No runtime effect yet, per the ruling: the reconcile fix spawn is Claude
+either way, so the route only records what would have been chosen (`routed` against `executed`).
+
+Touched tests: reconcile-fix-routing.test.mjs 9/9 (5 pre-existing + 4 new), ci-heal-dispatch-routing.test.mjs
+4/4 (new file), dispatch-contracts.test.mjs 82/82, dispatch-contracts-route.test.mjs 22/22, reconcile-fix-
+dispatch.test.mjs 52/52. Full scripts/lib + scripts/operations + scripts/conveyor sweep: 9188/9189 (1
+pre-existing, unrelated host-sampler-large-file.test.mjs date-fixture failure, confirmed by #3843). verify-lane
+--json recorded red for 00992fba (pre-commit HEAD) on 2 pre-existing, unrelated flakes: host-sampler-capacity
+(timing) and host-sampler-large-file (the same date bug) — neither touches any file this card changed.
+check:standards: 2 pre-existing errors, both on unrelated backlog cards (xohvzus stranded id; #3383's own
+opaque-token flag), not introduced by this diff. Not resolved (orchestrator resolves after graduation via
+#3443).
