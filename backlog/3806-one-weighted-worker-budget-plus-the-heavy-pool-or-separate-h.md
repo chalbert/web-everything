@@ -6,6 +6,8 @@ status: open
 relatedTo: ["3800","3612","3807","3808","3456","3737","3727"]
 scope: ["we:scripts/lib/lane-concurrency.mjs", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/readiness/dispatch-plan.mjs"]
 dateOpened: "2026-09-21"
+preparedDate: "2026-09-21"
+preparedAgainstSha: "1fb90c9e870d6d551e11208b9495ee7c262b1a31"
 tags: [conveyor, capacity, concurrency, admission-control, dispatch-budget]
 relatedReport: reports/2026-09-21-weighted-worker-budget-vs-split-counts.md
 ---
