@@ -10,6 +10,10 @@
  * The sibling half, `review`, is asserted in `we:scripts/operations/__tests__/review-dispatch.test.mjs`'s own
  * suite through `reviewDispatchRoute`; a review is a judging role, so the provider cascade is never consulted
  * for it and there is no provider decision to assert beyond that.
+ *
+ * #3844 (Fork 4 "fix path" of #3801) extends this file with the `fixSizeSource` size chain — the SAME `dispatchFix`,
+ * two more injected seams (`measureDiffLoc`, and `readSizePolicy` defaulted the same fail-closed way `readScorecards`
+ * already is).
  */
 import { describe, it, expect } from 'vitest';
 
@@ -73,5 +77,34 @@ describe('a review dispatch takes the role path and chooses no provider at all',
     const route = reviewDispatchRoute();
     expect(route).toMatchObject({ outcome: 'role', role: 'review', taskType: null, routed: null, executed: null });
     expect(route.reason).toContain('judging role');
+  });
+});
+
+// #3844 (Fork 4 "fix path" of #3801) — the reconcile fix path passes NO size to `decideDispatchRoute` (see
+// `dispatchFix`'s own call site), so under the checked-in `unsizedCardPolicy: block` default that would
+// silently stop every conflict-caused fix. `fixSizeSource` gives it two real numbers to try first: the
+// item's own `size:` (already looked up by `planFixesFromReconcile`'s `findItemFn` call, carried onto
+// `planned.size`), then the PR's own measured diff — both new seams on `dispatchFix`, injected below exactly
+// like `readScorecards` already is.
+describe('a fix dispatch takes its size from the fixSizeSource chain', () => {
+  it('records `card-size` and the size table\'s own estimate when the item declares a size', () => {
+    const result = dispatch(planned({ size: 2 }), { measureDiffLoc: () => { throw new Error('must not be called — card-size already answered it'); } });
+    expect(result.routing).toMatchObject({ sized: true, sizeSource: 'card-size', estimatedLoc: 80 });
+  });
+
+  it('falls to `measured-diff` — the PR\'s own changed-line count — when the item declares no size', () => {
+    const result = dispatch(planned(), { measureDiffLoc: () => 120 });
+    expect(result.routing).toMatchObject({ sized: true, sizeSource: 'measured-diff', estimatedLoc: 120 });
+  });
+
+  it('falls all the way to `assumed` (the 13 band) with neither, and still dispatches under `unsizedCardPolicy: block`', () => {
+    const result = dispatch(planned(), { measureDiffLoc: () => null });
+    expect(result.routing).toMatchObject({ outcome: 'routed', sized: false, sizeSource: 'assumed', estimatedLoc: 900 });
+  });
+
+  it('never pays for the measured-diff `gh` read when the item already has a size', () => {
+    let called = false;
+    dispatch(planned({ size: 3 }), { measureDiffLoc: () => { called = true; return 999; } });
+    expect(called).toBe(false);
   });
 });

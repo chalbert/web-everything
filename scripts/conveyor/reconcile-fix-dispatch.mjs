@@ -66,7 +66,7 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
   defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
-  resumeSucceeded, REPO_ROOT, defaultReadScorecards,
+  resumeSucceeded, REPO_ROOT, defaultReadScorecards, defaultReadSizePolicy,
 } from '../operations/dispatch-lane-io.mjs';
 // #3717 — THE ONE DISPATCH PATH THAT KNOWS A BOUNCE WAS CONFLICT-CAUSED. `planFixesFromReconcile` already
 // reads the `merge-status:conflicting` label into `isConflict`, and #3717's table says `conflict-resolution`
@@ -127,7 +127,7 @@ export function defaultConfirmWait(ms) {
  * @param {(pr:number, itemNum:string|null)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
  *   caller with nothing better to offer refuses `no-scope`); the real binding is
  *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default.
- * @returns {{planned:Array<{itemNum:string|null,attributionKind:('WE'|'PR'),attributionNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
+ * @returns {{planned:Array<{itemNum:string|null,attributionKind:('WE'|'PR'),attributionNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null,size?:unknown}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
 export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => []) {
   const planned = [];
@@ -165,6 +165,10 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       attributionKind: itemNum ? 'WE' : 'PR', attributionNum: itemNum ?? String(pr),
       itemNum, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       ...(entry.repo || entry.slug ? { repo: entry.slug ?? entry.repo } : {}),
+      // #3844 — the ITEM'S own `size:`, carried through from the SAME `findItemFn` lookup above rather than a
+      // second read: `dispatchFix`'s `fixSizeSource` chain wants this as its first, cheapest step (`card-size`)
+      // before it ever pays for a `measured-diff` read. Absent exactly when `item` is null or declares none.
+      ...(item && item.size != null ? { size: item.size } : {}),
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
@@ -196,6 +200,30 @@ export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT } =
       .map((p) => `we:${p}`);
   } catch {
     return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchPrDiffLoc — #3844's `measured-diff` reader: ONE
+ * `gh pr view <pr> --json additions,deletions` call, the GitHub-computed changed-line total for the PR being
+ * repaired (the `fixSizeSource` chain's second step, tried only when the planned entry carries no `size` —
+ * see {@link dispatchFix}'s own call site). Best-effort, mirroring {@link fetchPrDiffScope}: any `gh` failure
+ * degrades to `null`, and the chain falls through to its `assumed`/`policy` step exactly as an unsized card
+ * always has, never throwing the dispatch over one bad read.
+ * @param {number} pr
+ * @param {{exec?:Function, root?:string}} [o]
+ * @returns {number|null}
+ */
+export function fetchPrDiffLoc(pr, { exec = execFileSync, root = REPO_ROOT } = {}) {
+  try {
+    const out = exec('gh', ['pr', 'view', String(pr), '--json', 'additions,deletions'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
+    });
+    const parsed = JSON.parse(String(out || '{}'));
+    const total = Number(parsed?.additions ?? 0) + Number(parsed?.deletions ?? 0);
+    return Number.isFinite(total) && total > 0 ? total : null;
+  } catch {
+    return null;
   }
 }
 
@@ -471,10 +499,12 @@ export function tryResumeFix(planned, {
  * remedy had never been wired into. The delivery-side file is the right one here (not the review twin): a fix
  * agent IS a `dispatch-lane`-shaped delivery agent — it acquires a lane, works an item, pushes to a PR.
  *
- * @param {{itemNum:string|null, attributionKind?:('WE'|'PR'), attributionNum?:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
+ * @param {{itemNum:string|null, attributionKind?:('WE'|'PR'), attributionNum?:string, pr:number, laneRef:string, scope:string[], lane:number, size?:unknown}} planned
  * @param {object} [o]
  * @param {object|null} [o.resumeAttempt] - carried forward from a prior {@link tryResumeFix} call for this same
  *   entry, purely for reporting on the returned result (this function never attempts a resume itself).
+ * @param {Function} [o.measureDiffLoc] - #3844's `measured-diff` seam, injected for the same reason every other
+ *   io seam here is; defaults to the real {@link fetchPrDiffLoc}, called only when `planned.size` is absent.
  * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string|null, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object}}
  */
 export function dispatchFix(planned, {
@@ -488,6 +518,11 @@ export function dispatchFix(planned, {
   // #3717 — the router's trial history, injected for the same reason every other io seam here is: the real
   // read is a file, and a test must be able to hand in the trials it is asserting about.
   readScorecards = () => defaultReadScorecards({ root }),
+  // #3843 — the checked-in `unsizedCardPolicy`/`fixSizeSource` setting, read the same way.
+  readSizePolicy = () => defaultReadSizePolicy({ root }),
+  // #3844 — the `measured-diff` step's own io seam: ONE `gh pr view` call, tried only when `planned` carries
+  // no `size` (see the call site below) so a sized repair never pays for it.
+  measureDiffLoc = (pr) => fetchPrDiffLoc(pr, { root }),
 } = {}) {
   assertNotALaneCheckout(root);
 
@@ -518,12 +553,20 @@ export function dispatchFix(planned, {
   // (`conflict` when this bounce carried `merge-status:conflicting`, else none) and the declared scope. A
   // refusal is recorded, not fatal, and never widens into a guess: this path's provider is the Claude spawn
   // below either way, and `routed !== executed` is exactly the gap #3717 exists to measure.
+  //
+  // #3844 (Fork 4 "fix path") — THE SIZE, walked through `fixSizeSource` inside `decideDispatchRoute` itself
+  // (`REPAIR_KINDS` covers `fix`): `planned.size` (`card-size`, already looked up by `planFixesFromReconcile`'s
+  // own `findItemFn` call, no second read) first; only when that came back empty is the `measured-diff` `gh`
+  // call below paid for at all — a sized repair (the common case) never reaches it.
+  const measuredDiffLoc = planned.size == null ? measureDiffLoc(planned.pr) : null;
   const routing = decideDispatchRoute({
     kind: 'fix',
     cause: planned.isConflict ? 'conflict' : null,
     scopePaths: Array.isArray(planned.scope) ? planned.scope : [],
+    size: planned.size ?? null,
+    measuredDiffLoc,
     taskKey: { storyRef: String(planned.itemNum ?? planned.pr), round: 1, taskId: 'fix' },
-  }, { scorecards: readScorecards() });
+  }, { scorecards: readScorecards(), sizePolicy: readSizePolicy() });
   const guarded = guardedDispatch({ resource: actionResource(repo, { type: 'pr', id: planned.pr }),
     kind: 'fix', owner, actions, now, evidence: { sessionSlug, num: planned.itemNum },
     effect: () => ({ handle: parseBackgroundedId(String(spawnAgent(argv, { cwd: root }) ?? '')) }) });

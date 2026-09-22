@@ -752,10 +752,9 @@ export function supervisionHold(routing, { enforce = false } = {}) {
 export const UNSIZED_CARD_POLICIES = Object.freeze(['block', 'default-size']);
 
 /**
- * #3801 Fork 4 (b) — the `fixSizeSource` chain vocabulary for `fix`/`ci-heal` dispatches (the chain's own
- * execution — reading a measured diff — is a sibling slice; this is only the settable, validated value).
- * `policy` defers to `unsizedCardPolicy` and is valid only when that policy is `default-size`: under `block`
- * it would silently stop a conflict fix.
+ * #3801 Fork 4 (b) — the `fixSizeSource` chain vocabulary for `fix`/`ci-heal` dispatches, executed by
+ * {@link resolveFixSize} (#3844, Fork 4 "fix path" of #3801). `policy` defers to `unsizedCardPolicy` and is
+ * valid only when that policy is `default-size`: under `block` it would silently stop a conflict fix.
  */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
 export const FIX_SIZE_SOURCES = Object.freeze(['card-size', 'measured-diff', 'assumed', 'policy']);
@@ -854,6 +853,51 @@ export function estimatedLocForSize(size) {
 }
 
 /**
+ * #3844 (Fork 4 "fix path" of #3801) — THE REPAIR KINDS: the only two whose size, absent a card size, walks
+ * {@link FIX_SIZE_SOURCES} instead of falling straight to the generic `unsizedCardPolicy` fallback every other
+ * kind (`build` included) uses. The card's own reasoning: `we:scripts/conveyor/reconcile-fix-dispatch.mjs`
+ * passes no size for a bounced PR's repair, so `block` alone — the checked-in default — would silently stop
+ * every conflict-caused fix. The chain gives it two real numbers to try FIRST.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const REPAIR_KINDS = Object.freeze(['fix', 'ci-heal']);
+
+/**
+ * #3844 — WALK {@link FIX_SIZE_SOURCES} for one `fix`/`ci-heal` dispatch, in the order `sizePolicy.fixSizeSource`
+ * names. Pure: `measuredDiffLoc` (the changed-line count of the PR being repaired) arrives as data, read at the
+ * io edge exactly like `scorecards`/`sizePolicy` themselves — this function never touches `gh`/`git`. Stops at
+ * the first step that resolves a number; `assumed` always does, so the chain never falls through unanswered.
+ *
+ * @param {{size?: unknown, estimatedLoc?: number, measuredDiffLoc?: number}} dispatch
+ * @param {{unsizedCardPolicy: string, defaultSize: number, fixSizeSource: string[]}} sizePolicy - already
+ *   validated by {@link validateSizePolicy}.
+ * @returns {{estimatedLoc: number, sized: boolean, sizeSource: string}}
+ */
+function resolveFixSize(dispatch, sizePolicy) {
+  for (const step of sizePolicy.fixSizeSource) {
+    if (step === 'card-size') {
+      if (dispatch?.estimatedLoc != null) return { estimatedLoc: dispatch.estimatedLoc, sized: true, sizeSource: 'card-size' };
+      const bySize = estimatedLocForSize(dispatch?.size);
+      if (bySize.sized) return { estimatedLoc: bySize.estimatedLoc, sized: true, sizeSource: 'card-size' };
+    } else if (step === 'measured-diff') {
+      const measured = dispatch?.measuredDiffLoc;
+      if (typeof measured === 'number' && Number.isFinite(measured) && measured > 0) {
+        return { estimatedLoc: measured, sized: true, sizeSource: 'measured-diff' };
+      }
+    } else if (step === 'assumed') {
+      return { estimatedLoc: SIZE_TO_ESTIMATED_LOC[sizePolicy.defaultSize], sized: false, sizeSource: 'assumed' };
+    } else if (step === 'policy') {
+      // `validateSizePolicy` only allows `policy` here when `unsizedCardPolicy` is `default-size` — under
+      // `block` it would silently stop a conflict fix, exactly the failure #3844 exists to prevent.
+      return { estimatedLoc: SIZE_TO_ESTIMATED_LOC[sizePolicy.defaultSize], sized: false, sizeSource: `defaultSize=${sizePolicy.defaultSize}` };
+    }
+  }
+  // Unreachable while `fixSizeSource` validates non-empty and every member above is handled; kept fail-closed
+  // rather than returning `undefined` if a future vocabulary entry is added without a handler here.
+  return { estimatedLoc: SIZE_TO_ESTIMATED_LOC[MIN_DEFAULT_SIZE], sized: false, sizeSource: 'assumed' };
+}
+
+/**
  * THE MARKER'S VOCABULARY (#3840, Fork 5 of #3801): the registered delivery vendors an item's `deliveryAgent:`
  * marker may name, each with the routing provider (a member of {@link PROVIDERS}) whose trial history its runs
  * accrue to. Antigravity is absent until #3658 gives it a descriptor. It is a copy of
@@ -923,6 +967,10 @@ export const EXECUTABLE_PROVIDER = 'claude';
  *     at the io edge and handed across as data exactly like `scorecards`. Defaults to
  *     {@link DEFAULT_SIZE_POLICY} and is validated by {@link validateSizePolicy}; an invalid policy refuses the
  *     whole route rather than routing on a setting nobody checked.
+ *   - `dispatch.measuredDiffLoc` (#3844) — the changed-line count of the PR being repaired, read at the io edge
+ *     (e.g. `reconcile-fix-dispatch.mjs`'s own `gh` read) and handed in as data; consulted only for a
+ *     {@link REPAIR_KINDS} dispatch, and only when `card-size` (the dispatch's own `size`/`estimatedLoc`)
+ *     did not already answer it.
  * @returns {object} the routing record — see the file's own test for the exact shape.
  */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
@@ -973,8 +1021,14 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
     // decides the FALLBACK NUMBER: `default-size` reads `sizePolicy.defaultSize` (the setting's name and
     // value ARE the source); `block` does not gate admission here (that is the sibling slice), so the number
     // stays the pre-#3843 largest-band answer, unchanged.
+    //
+    // #3844 (Fork 4 "fix path") — a {@link REPAIR_KINDS} dispatch (`fix`/`ci-heal`) never reaches this generic
+    // fallback: it walks {@link resolveFixSize}'s `fixSizeSource` chain instead, because `block` alone would
+    // silently stop a conflict-caused fix (this card's own reasoning, on the checked-in default policy).
     let estimatedLoc; let sized; let sizeSource;
-    if (dispatch?.estimatedLoc != null) {
+    if (REPAIR_KINDS.includes(kind)) {
+      ({ estimatedLoc, sized, sizeSource } = resolveFixSize(dispatch, sizePolicy));
+    } else if (dispatch?.estimatedLoc != null) {
       estimatedLoc = dispatch.estimatedLoc; sized = true; sizeSource = 'card';
     } else {
       const bySize = estimatedLocForSize(dispatch?.size);
