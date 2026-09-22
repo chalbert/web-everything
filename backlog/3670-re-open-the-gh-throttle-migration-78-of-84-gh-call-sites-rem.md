@@ -3,9 +3,10 @@ bornAs: xgzjypy
 kind: story
 size: 8
 parent: "3621"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/tick-core.mjs", "we:scripts/conveyor/pr-watch.mjs", "we:scripts/wait-green.mjs", "we:scripts/lib/pr-merge-gate.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-13"
+dateResolved: "2026-09-21"
 tags: []
 ---
 
