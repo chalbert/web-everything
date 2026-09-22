@@ -143,9 +143,11 @@ import { resolvePausedKinds, isScopedPause } from '../readiness/dispatch-pause.m
 
 /** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
  *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
- *  `state.decisions`, `unshaped-no-scope` from the prepare-spawn notes (`auto-preparing-scope` / `prepare-no-lane`).
- *  The held-reason note loop below skips these so an item is never double-reported under two note kinds. */
-export const HELD_NOTE_EXCLUDED_REASONS = Object.freeze(['needs-slice', 'needs-decision', 'needs-investigation', 'unshaped-no-scope']);
+ *  `state.decisions`, `unshaped-no-scope` AND `no-size` (#3849) from the SAME prepare-spawn notes
+ *  (`auto-preparing-scope` / `prepare-no-lane` — one prepare-scope agent authors both `scope:` and a missing
+ *  size/estimate, #3842). The held-reason note loop below skips these so an item is never double-reported under
+ *  two note kinds. */
+export const HELD_NOTE_EXCLUDED_REASONS = Object.freeze(['needs-slice', 'needs-decision', 'needs-investigation', 'unshaped-no-scope', 'no-size']);
 
 /**
  * SELF-DIAGNOSED STALL DETECTION (2026-09-14, live incident: #3521 held `overlaps lane-2` for 85+ minutes across
@@ -1116,12 +1118,27 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     .filter((h) => h && h.num != null)
     .map((h) => ({ num: h.num }));
 
+  // #3849 — the `no-size` holds, read straight off THIS TICK's dispatch plan, same pattern as
+  // `needs-investigation` just above (#3567): a no-size item has no separate `state` derivation step either.
+  // UNLIKE investigation, it is NOT a distinct spawn kind — it is folded into the SAME `prepare` candidate set
+  // as `unshaped` (not a new sink, no new guard `kind`), because #3842's prepare-scope agent already authors a
+  // missing size/estimate in the same turn it authors a missing `scope:` — one prepare agent serves both holds.
+  // A num held BOTH `unshaped-no-scope` and `no-size` is deduped (dispatch-plan.mjs never emits both for the
+  // same item today — `no-size` is checked strictly after the scope gate — but a single spawn per num either way).
+  const noSizeHeld = (Array.isArray(plan.held) ? plan.held : [])
+    .filter((h) => h && h.reason === 'no-size' && h.num != null)
+    .map((h) => ({ num: h.num }));
+  const scopeOrSizeNeeded = noSizeHeld.length === 0 ? unshaped : [
+    ...(Array.isArray(unshaped) ? unshaped : []),
+    ...noSizeHeld.filter((n) => !(Array.isArray(unshaped) ? unshaped : []).some((u) => normNum(u.num) === normNum(n.num))),
+  ];
+
   // 1. RETIRE stale guards FIRST — a launch is then filtered against only still-live guards.
   const build = retireBuildGuards(bookkeeping.buildGuards, {
     lanes, queue, tick, now, ttlTicks: cfg.buildTtlTicks, returnedBuildNums: signals.returnedBuildNums,
   });
   const prepare = retirePrepareGuards(bookkeeping.prepareGuards, {
-    unshaped, decisions, investigations: investigationsGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
+    unshaped: scopeOrSizeNeeded, decisions, investigations: investigationsGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
   });
   const fix = retireFixGuards(bookkeeping.fixGuards, { prs, lanes, tick, now, ttlTicks: cfg.fixTtlTicks });
   // #3454 — bump fixAttempts HERE, once per guard, exactly when retireFixGuards confirms a REAL attempt (its
@@ -1233,8 +1250,9 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 4. PREPARE spawns (scope + decision + investigation) — union re-dispatch gate, lane exclusion; consume
   //    lanes. #3609 — a manual dispatch-pause holds these too, not just `plan.launch` (which dispatch-plan.mjs
   //    already empties to `dispatch-paused` holds when paused): these spawns are computed straight off
-  //    `state.unshaped` / `state.decisions` / `state.investigations` / `state.prs`, never off `plan.launch`, so
-  //    this tick's OWN `dispatchPaused` input — not a re-read of `plan.held` — is what gates them.
+  //    `state.unshaped` (unioned with this tick's own `no-size` holds, #3849) / `state.decisions` /
+  //    `state.investigations` / `state.prs`, never off `plan.launch`, so this tick's OWN `dispatchPaused` input
+  //    — not a re-read of `plan.held` — is what gates them.
   //    Already-live guards are untouched either way.
   //    KIND-SCOPED (epic #3383): the three prepare-family kinds are held INDEPENDENTLY, by emptying the
   //    candidate list each one is computed from rather than by stubbing out the whole call. That keeps the
@@ -1242,7 +1260,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //    it would have had — and it degrades to the exact former stub when all three are held (empty inputs
   //    produce empty spawns, empty guards, empty consumed lanes and no notes).
   const prep = planPrepareSpawns({
-    unshaped: kindPaused('prepare') ? [] : unshaped,
+    unshaped: kindPaused('prepare') ? [] : scopeOrSizeNeeded,
     decisions: kindPaused('prepare-decision') ? [] : decisions,
     investigations: kindPaused('investigate') ? [] : investigations,
     prs,

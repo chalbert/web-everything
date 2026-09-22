@@ -152,13 +152,20 @@ import { driftDefaults } from '../lib/poc-branches.mjs';
  *  touches an already-running lane — this pure core has no lease/lane-release knowledge at all. The operator
  *  gloss is {@link DISPATCH_PAUSED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
+  'already-done', 'blocked', 'unshaped-no-scope', 'no-size', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
  *  conveyor skill so a held unshaped item always tells the operator WHAT to do: author the item's predicted
  *  `scope:` (the /conveyor skill auto-prepares it) so the dispatcher can BUILD and parallelize it. */
 export const UNSHAPED_HINT = 'no predicted scope — author it to parallelize';
+
+/** The operator-facing gloss for a `no-size` hold (#3801 Fork 4 (b), #3849 admission) — surfaced beside the
+ *  token so a held item always tells the operator WHAT to do: author the item's size (a story's Fibonacci
+ *  `size:`) or estimate (a task's `estimatedLoc:`); the /conveyor skill auto-prepares it, the SAME prepare-scope
+ *  agent that authors `scope:` (`we:scripts/operations/prepare-scope-wrapper.mjs`, #3842). Only surfaced under
+ *  `unsizedCardPolicy: 'block'` — see {@link HELD_REASONS} and `dispatchPlan`'s own `sizePolicy` input. */
+export const NO_SIZE_HINT = 'no declared size/estimate — prepare will author one';
 
 /** The operator-facing gloss for a `needs-slice` hold — surfaced beside the token so a held epic always tells the
  *  operator WHAT to do: decompose it (`/slice <num>`) into buildable child stories, which the conveyor then
@@ -337,12 +344,31 @@ function hasOpenBlockers(item) {
  *                   as before. A NON-EMPTY scope holds builds only when it names `build`: a pause scoped to
  *                   `fix`/`ci-heal` alone leaves this core's launches untouched, since `build` is the ONLY
  *                   kind it plans (the other five are `tick-core.mjs#planTick`'s spawns).
- * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
+ *   • `sizePolicy` — (#3801 Fork 4 (b), #3849 admission) the checked-in `we:scripts/lib/dispatch-size-policy.json`
+ *                   setting, ALREADY VALIDATED by the IO shell (`validateSizePolicy` in
+ *                   `we:scripts/lib/dispatch-contracts.mjs` — kept OUT of this pure core's own imports, since it
+ *                   transitively reaches `node:fs` via `provider-routing.mjs`). `null`/absent (the default) skips
+ *                   the size gate ENTIRELY — today's pre-#3849 behavior, unlimited/unrestricted, so every existing
+ *                   direct caller of the pure core (tests included) keeps dispatching an unsized item exactly as
+ *                   before unless it opts in — same "off unless supplied" default as `maxConcurrentLanes`/
+ *                   `dispatchPaused`. When supplied with `unsizedCardPolicy: 'block'`, a scoped `build` item (any
+ *                   `kind` other than `fix`/`ci-heal`, which take the separate `fixSizeSource` chain and are never
+ *                   held here) with no declared size — a story's `size:` absent, or a task's `estimatedLoc:`
+ *                   absent/invalid — holds `no-size` instead of launching, checked right after the scope gate (a
+ *                   READINESS gate, not a lane-scheduling concern, same precedence class as `unshaped-no-scope`).
+ *                   Any OTHER `unsizedCardPolicy` (`default-size`) never holds on this axis — the item is admitted
+ *                   normally and its `launch` entry carries `sized: <boolean>` (only ever added when `sizePolicy`
+ *                   is supplied) so an assumed-size launch is never indistinguishable from a declared one. A
+ *                   `deliveryAgent:` marker never bypasses this hold (#3801 Fork 5) — this core reads no such
+ *                   field, so there is nothing to bypass.
+ * @returns {{ launch: Array<{num, lane, sized?:boolean}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
- *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
+ *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare). `sized` is
+ *              present only when `sizePolicy` was supplied — `true` when the item declared its own size/estimate,
+ *              `false` when it launched on the `default-size` fallback.
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, sizePolicy = null } = {}) {
   // The pause is per-KIND now, and this core only ever decides ONE kind: `build`. Resolving the marker's
   // declared scope through the shared predicate (rather than reading the raw boolean) is what makes an
   // old-format `{paused:true}` — and every caller that still passes only the boolean — keep holding builds,
@@ -445,6 +471,27 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
       continue;
     }
 
+    // 4.4. NO DECLARED SIZE, under `unsizedCardPolicy: 'block'` (#3801 Fork 4 (b), #3849 admission) — HOLD
+    //    `no-size`. Checked right after the scope gate (a scope-held item keeps that more specific reason) and
+    //    BEFORE the drift/lease/rival/pause scheduling gates below: like `unshaped-no-scope`, this is a
+    //    READINESS gate (is the item buildable at all), not a lane-scheduling concern — it holds regardless of
+    //    what lane/overlap state exists. `sizePolicy` is `null` by default (this axis is OFF unless the IO shell
+    //    supplies a validated policy — see this function's own docblock), so every direct caller that does not
+    //    opt in dispatches an unsized item exactly as before #3849. `fix`/`ci-heal` are EXEMPT (defense-in-depth
+    //    — neither `kind` can actually reach this queue via the production build-queue shell, which only ever
+    //    carries backlog `kind`s; they take the separate `fixSizeSource` chain in `decideDispatchRoute`, never
+    //    this admission gate). A `task` is sized by its own `estimatedLoc:` (points would double-count the
+    //    burndown, #3839); every other kind (a story, or an unrecognized/missing `kind`) is sized by `size:`.
+    //    A `deliveryAgent:` marker never bypasses this — nothing here reads it (#3801 Fork 5).
+    const sizeExempt = item.kind === 'fix' || item.kind === 'ci-heal';
+    const hasDeclaredSize = item.kind === 'task'
+      ? Number.isInteger(item.estimatedLoc) && item.estimatedLoc > 0
+      : item.size !== undefined && item.size !== null;
+    if (sizePolicy && !sizeExempt && !hasDeclaredSize && sizePolicy.unsizedCardPolicy === 'block') {
+      held.push({ num, reason: 'no-size' });
+      continue;
+    }
+
     // 4.5. Overlaps a currently-BLOCKED long-lived dispatched-work branch's own drifting scope (#3464) — that
     //    branch is carrying unreconciled changes over these paths; piling MORE independently-scoped work onto
     //    them is exactly what turned #3464's own incident into an unresolvable conflict. Hold until a fresh
@@ -490,7 +537,11 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
       continue;
     }
     const lane = free.shift();
-    launch.push({ num, lane });
+    // `sized` is added only when `sizePolicy` was supplied AND the item is subject to this admission gate at
+    // all (see the gate above and this function's own docblock) — an untouched `{num, lane}` shape for every
+    // direct caller that never opted in, and for an exempt `fix`/`ci-heal` (its size comes from the separate
+    // `fixSizeSource` chain in `decideDispatchRoute`, never this gate's `hasDeclaredSize` read).
+    launch.push(sizePolicy && !sizeExempt ? { num, lane, sized: hasDeclaredSize } : { num, lane });
     launched.push({ num, lane, scope });
   }
 
@@ -656,6 +707,11 @@ async function main(argv) {
       kind: it?.kind,
       scope: Array.isArray(it?.scope) ? toRepoRelative(it.scope) : undefined,
       openBlockers: Array.isArray(it?.openBlockers) ? it.openBlockers : [],
+      // #3849 — the size-gate's own inputs: a story's Fibonacci `size:`, a task's `estimatedLoc:` (#3839).
+      // Absent when the loader failed to load (safe degradation — reads as unsized under `block`, held
+      // `no-size` rather than launching blind on an unmeasured number).
+      size: it?.size,
+      estimatedLoc: it?.estimatedLoc,
     };
   });
 
@@ -760,9 +816,31 @@ async function main(argv) {
     }
   }
 
+  // 3.7 THE SIZE POLICY (#3801 Fork 4 (b), #3849 admission) — read + VALIDATE the checked-in
+  //     `we:scripts/lib/dispatch-size-policy.json` setting via the SAME reader/validator #3843 wired into
+  //     `decideDispatchRoute` (`defaultReadSizePolicy` / `validateSizePolicy`), dynamically imported here (never
+  //     at module scope — that would pull `node:fs` transitively into this pure core's import graph via
+  //     `dispatch-contracts.mjs` → `dispatch-thresholds.mjs` → `provider-routing.mjs`). FAIL-OPEN on any read/
+  //     validate error, mirroring `--no-drift-check` / `--no-pause-check` above: an absent/unreadable/invalid
+  //     policy must never itself hold dispatch, so `sizePolicy` stays `null` (the pure core's own "gate off"
+  //     default) rather than risk stalling every build on a malformed setting file. Skippable via
+  //     `--no-size-check`.
+  let sizePolicy = null;
+  if (!flags['no-size-check']) {
+    try {
+      const { defaultReadSizePolicy } = await import('../operations/dispatch-lane-io.mjs');
+      const { validateSizePolicy } = await import('../lib/dispatch-contracts.mjs');
+      const result = validateSizePolicy(defaultReadSizePolicy());
+      if (result.ok) sizePolicy = result.policy;
+      else log(`  ⚠ size-policy check skipped (${result.errors.join('; ')}) — dispatch proceeds unheld on this axis`);
+    } catch (e) {
+      log(`  ⚠ size-policy check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
+    }
+  }
+
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, sizePolicy });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -792,6 +870,7 @@ async function main(argv) {
       // for `unshaped-no-scope` (#2613), `/slice` for a held `needs-slice` epic (#2645), prepare/present a
       // held `needs-decision` (#2647), or check + resolve/re-clear an `already-done` hold (#3457/#3460).
       const hint = h.reason === 'unshaped-no-scope' ? ` (${UNSHAPED_HINT})`
+        : h.reason === 'no-size' ? ` (${NO_SIZE_HINT})`
         : h.reason === 'needs-slice' ? ` (${NEEDS_SLICE_HINT})`
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`

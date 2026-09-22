@@ -576,6 +576,143 @@ describe('dispatchPlan — the UNSCOPED AUTO-PREPARE hold (#2613, ruled 2026-07-
   });
 });
 
+describe('dispatchPlan — the NO-SIZE admission hold (#3801 Fork 4 (b), #3849 admission)', () => {
+  const BLOCK = { unsizedCardPolicy: 'block', defaultSize: 13 };
+  const DEFAULT_SIZE = { unsizedCardPolicy: 'default-size', defaultSize: 13 };
+
+  it('`sizePolicy` omitted (the default) — an unsized scoped item launches exactly as before #3849', () => {
+    const plan = dispatchPlan({ queue: [{ num: 1, scope: ['src/a/'] }], leases: [], freeLanes: [2] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]); // no `sized` key — untouched shape
+    expect(plan.held).toEqual([]);
+  });
+
+  it('under `block`, a scoped story with no `size:` is HELD "no-size" and never launches', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'no-size' }]);
+  });
+
+  it('under `block`, a scoped task with no `estimatedLoc:` is HELD "no-size" too (its own reason, distinct field)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'task', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'no-size' }]);
+  });
+
+  it('under `block`, a task with a non-positive/non-integer `estimatedLoc:` is still HELD "no-size" (invalid reads as absent)', () => {
+    const invalid = [0, -3, 1.5];
+    for (const estimatedLoc of invalid) {
+      const plan = dispatchPlan({
+        queue: [{ num: 1, kind: 'task', scope: ['src/a/'], estimatedLoc }],
+        leases: [], freeLanes: [2],
+        sizePolicy: BLOCK,
+      });
+      expect(plan.held).toEqual([{ num: 1, reason: 'no-size' }]);
+    }
+  });
+
+  it('under `block`, a story with a declared `size:` launches normally, `sized: true` on its launch entry', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story', scope: ['src/a/'], size: 3 }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2, sized: true }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('under `block`, a task with a valid `estimatedLoc:` launches normally, `sized: true`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'task', scope: ['src/a/'], estimatedLoc: 80 }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2, sized: true }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('a `deliveryAgent:` marker never bypasses the "no-size" hold (#3801 Fork 5 — admission is decided before routing)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story', scope: ['src/a/'], deliveryAgent: 'codex', deliveryAgentReason: 'trial' }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'no-size' }]);
+  });
+
+  it('under `default-size`, an unsized story is ADMITTED (launched), route records `sized: false`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      sizePolicy: DEFAULT_SIZE,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2, sized: false }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('under `default-size`, an unsized task is ADMITTED too, `sized: false`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'task', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      sizePolicy: DEFAULT_SIZE,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2, sized: false }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('a `fix` dispatch is NEVER held for size, even unsized, under `block` (fix/ci-heal take the fixSizeSource chain instead)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'fix', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    // no `sized` key — exempt, its size comes from `fixSizeSource` in `decideDispatchRoute`, not this gate.
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('a `ci-heal` dispatch is NEVER held for size, even unsized, under `block`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'ci-heal', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('unscoped keeps "unshaped-no-scope" — the no-size gate never relabels a more specific hold', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story' }], // no scope at all
+      leases: [], freeLanes: [2],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'unshaped-no-scope' }]);
+  });
+
+  it('a scoped+sized story and a scoped+unsized story in the same tick: the sized one launches, the unsized one holds', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'story', scope: ['src/a/'] }, // unsized, higher rank
+        { num: 2, kind: 'story', scope: ['src/b/'], size: 5 },
+      ],
+      leases: [], freeLanes: [3, 4],
+      sizePolicy: BLOCK,
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 3, sized: true }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'no-size' }]);
+  });
+});
+
 describe('dispatchPlan — mixed tick pins the full precedence + ordering', () => {
   it('resolves blocked / unscoped / lease-overlap / rival / launch / no-free-lane together', () => {
     const plan = dispatchPlan({
