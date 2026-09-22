@@ -387,8 +387,16 @@ export function deriveDispatchProfile(card, options = {}) {
       if (!filesTouched.includes(path)) filesTouched.push(path);
     }
     if (!scopeOK || !filesTouched.length) missing.push('scope');
+    // `estimatedLoc` (#3839, Fork 4 field of #3801) is the task-only dispatch estimate — estimated changed
+    // lines, distinct from `size` points. Only a `task` card may declare it; when it validly does, it
+    // stands in for `size` (a task carries no `size:` — the no-double-count rule). Declaring it on any
+    // other kind is refused, never silently accepted alongside a `size`.
+    const hasEstimatedLoc = owns(card, 'estimatedLoc');
+    const validTaskEstimate = card.kind === 'task' && hasEstimatedLoc && Number.isInteger(card.estimatedLoc) && card.estimatedLoc > 0;
+    if (hasEstimatedLoc && card.kind !== 'task') missing.push('estimatedLoc:task-only');
+    else if (hasEstimatedLoc && !validTaskEstimate) missing.push('estimatedLoc:invalid');
     const size = typeof card.size === 'string' && /^\d+$/.test(card.size) ? Number(card.size) : card.size;
-    if (typeof size !== 'number' || !owns(SIZE_TO_ESTIMATED_LOC, size)) missing.push('size');
+    if (!validTaskEstimate && (typeof size !== 'number' || !owns(SIZE_TO_ESTIMATED_LOC, size))) missing.push('size');
     if (owns(card, 'taskType') && !isTaskType(card.taskType)) missing.push('taskType:invalid');
     if (owns(card, 'risk') && !RISKS.includes(card.risk)) missing.push('risk:invalid');
     if (owns(card, 'acceptanceTestable') && typeof card.acceptanceTestable !== 'boolean') missing.push('acceptanceTestable:invalid');
@@ -398,10 +406,14 @@ export function deriveDispatchProfile(card, options = {}) {
     if (missing.length) return { ready: false, missing };
     const blocked = Array.isArray(card.blockedBy) ? card.blockedBy : [card.blockedBy];
     const dependsOn = [...new Set(blocked.filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).trim()).filter(Boolean))];
-    const input = { taskType: card.taskType ?? TASK_TYPE_BY_CARD_KIND[card.kind], estimatedLoc: SIZE_TO_ESTIMATED_LOC[size], filesTouched, acceptanceTestable: card.acceptanceTestable ?? true, dependsOn };
+    const estimatedLoc = validTaskEstimate ? card.estimatedLoc : SIZE_TO_ESTIMATED_LOC[size];
+    const input = { taskType: card.taskType ?? TASK_TYPE_BY_CARD_KIND[card.kind], estimatedLoc, filesTouched, acceptanceTestable: card.acceptanceTestable ?? true, dependsOn };
     if (owns(card, 'risk')) input.risk = card.risk;
     const built = buildDispatchProfile(input, options);
-    return built.ok ? { ready: true, profile: built.profile } : { ready: false, missing: built.errors };
+    // `sized` is always true here: unlike `estimatedLocForSize`'s dispatch-time fallback (the largest band
+    // for a card with no declared size), this function fails closed on `missing` above rather than assuming
+    // one — a ready profile's estimate always came from the card itself, `estimatedLoc` or `size` alike.
+    return built.ok ? { ready: true, profile: built.profile, sized: true } : { ready: false, missing: built.errors };
   } catch { return { ready: false, missing: ['unreadable card'] }; }
 }
 

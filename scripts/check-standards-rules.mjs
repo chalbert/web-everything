@@ -380,6 +380,12 @@ export function validateBacklogItem(item, ctx) {
     err(`Backlog item "${item.id}" is a story but has no size — every story must carry Fibonacci points`);
   if (item.kind === 'task' && item.size !== undefined)
     err(`Backlog item "${item.id}" is a task but has a size — tasks are never sized (they roll up under a story/epic)`);
+  // `estimatedLoc` (#3839, Fork 4 field of #3801) is the task-only dispatch estimate — estimated changed
+  // lines, distinct from `size` points, that the burndown never sums (docs/agent/backlog-workflow.md#agile-sizing).
+  if (item.estimatedLoc !== undefined && item.kind !== 'task')
+    err(`Backlog item "${item.id}" declares estimatedLoc but is not a task — estimatedLoc is task-only (a story/epic/decision/feature carries size instead)`);
+  if (item.estimatedLoc !== undefined && !(Number.isInteger(item.estimatedLoc) && item.estimatedLoc > 0))
+    err(`Backlog item "${item.id}" has a non-numeric or non-positive estimatedLoc "${item.estimatedLoc}" (expected a positive integer of estimated changed lines)`);
   if (item.parent !== undefined && !knownNums.has(String(item.parent)))
     err(`Backlog item "${item.id}" parent "#${item.parent}" does not resolve to an existing item`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'parent', String(item.parent), 'backlog/'));
