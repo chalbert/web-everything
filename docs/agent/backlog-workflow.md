@@ -170,6 +170,8 @@ Every item carries a `kind` (the one merged nature+hierarchy axis — #466/#487)
 
 **The no-double-count rule, mechanically:** the burndown sums every item's `size`. A `task` has none; a *storied* epic has none; a `story` and an *unstoried* epic each have exactly one. So each unit of scope is counted once. The validator **errors** if: a story lacks a size, a task has one, a size isn't Fibonacci, a `parent` doesn't resolve, or an **unstoried (sized) epic has a sized child** (that would count its scope twice — make it storied or re-parent the child).
 
+**`estimatedLoc` — the task-only dispatch estimate (#3839, Fork 4 field of #3801).** A `task` carries no `size:`, but the mechanical dispatcher still needs a changed-lines estimate to route it. A task may declare `estimatedLoc: 80` — a positive integer of **estimated changed lines**, the same unit `SIZE_TO_ESTIMATED_LOC` (`scripts/lib/dispatch-contracts.mjs`) converts a story's `size` into. It is **task-only**: the validator errors if a story/epic/decision/feature declares it, or if the value isn't a positive integer. The `/backlog/` **Burndown never sums it** — it feeds only `deriveDispatchProfile`'s dispatch-time estimate, exactly like the no-double-count rule above keeps `size` off tasks.
+
 > **Strict rule — an epic is in exactly one of two states, never both:**
 > - **Unsliced** — *no children*. It carries a **`size`** standing in for work not yet broken out (a build bucket, or a triage/planning artifact whose points score the analysis effort — e.g. an as-yet-unsliced strategy matrix).
 > - **Sliced** — *has ≥1 child*. It carries **no `size`** and is a pure umbrella; **all** scope lives on the child cards (story children carry burndown points; task children carry none).
