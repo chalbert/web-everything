@@ -78,9 +78,16 @@ export const M_COMPLEXITY_MAX_FILES = 8;
  */
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
 export const SIZE_TO_ESTIMATED_LOC = Object.freeze({ 1: 30, 2: 80, 3: 150, 5: 300, 8: 500, 13: 900 });
-/** Prepared-card kind defaults; explicit invalid values never default. */
+/**
+ * Prepared-card kind defaults; explicit invalid values never default. No row yields `other` or `self-fix`: nothing
+ * produces those two task types (#3801 Fork 2), so a kind with no row here has NO default and the card must declare
+ * its own `taskType` — see {@link CARD_KINDS_WITHOUT_TASK_TYPE}.
+ */
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
-export const TASK_TYPE_BY_CARD_KIND = Object.freeze({ story: 'build-new-feature', feature: 'build-new-feature', task: 'other', epic: 'other', investigation: 'triage-research', decision: 'architectural-decision' });
+export const TASK_TYPE_BY_CARD_KIND = Object.freeze({ story: 'build-new-feature', feature: 'build-new-feature', investigation: 'triage-research', decision: 'architectural-decision' });
+/** Real card kinds that map to no task type: `deriveDispatchProfile` refuses them (`taskType:underivable`) unless the card declares a `taskType`. */
+// @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
+export const CARD_KINDS_WITHOUT_TASK_TYPE = Object.freeze(['task', 'epic']);
 /**
  * docs/agent/backlog-workflow.md “Model routing”: Sonnet executes decided specs;
  * Opus handles judgment and ambiguous investigation. No per-kind code table preceded G1.
@@ -385,11 +392,13 @@ export function deriveDispatchProfile(card, options = {}) {
     if (owns(card, 'taskType') && !isTaskType(card.taskType)) missing.push('taskType:invalid');
     if (owns(card, 'risk') && !RISKS.includes(card.risk)) missing.push('risk:invalid');
     if (owns(card, 'acceptanceTestable') && typeof card.acceptanceTestable !== 'boolean') missing.push('acceptanceTestable:invalid');
-    if (owns(card, 'kind') && (typeof card.kind !== 'string' || !owns(TASK_TYPE_BY_CARD_KIND, card.kind))) missing.push('kind:invalid');
+    if (owns(card, 'kind') && (typeof card.kind !== 'string' || !(owns(TASK_TYPE_BY_CARD_KIND, card.kind) || CARD_KINDS_WITHOUT_TASK_TYPE.includes(card.kind)))) missing.push('kind:invalid');
+    // No default task type: a card with neither a declared `taskType` nor a kind that maps to one is refused, never labelled `other`.
+    if (!missing.some((m) => m === 'taskType:invalid' || m === 'kind:invalid') && !(owns(card, 'taskType') ? card.taskType : owns(card, 'kind') && owns(TASK_TYPE_BY_CARD_KIND, card.kind))) missing.push('taskType:underivable');
     if (missing.length) return { ready: false, missing };
     const blocked = Array.isArray(card.blockedBy) ? card.blockedBy : [card.blockedBy];
     const dependsOn = [...new Set(blocked.filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).trim()).filter(Boolean))];
-    const input = { taskType: card.taskType ?? TASK_TYPE_BY_CARD_KIND[card.kind] ?? 'other', estimatedLoc: SIZE_TO_ESTIMATED_LOC[size], filesTouched, acceptanceTestable: card.acceptanceTestable ?? true, dependsOn };
+    const input = { taskType: card.taskType ?? TASK_TYPE_BY_CARD_KIND[card.kind], estimatedLoc: SIZE_TO_ESTIMATED_LOC[size], filesTouched, acceptanceTestable: card.acceptanceTestable ?? true, dependsOn };
     if (owns(card, 'risk')) input.risk = card.risk;
     const built = buildDispatchProfile(input, options);
     return built.ok ? { ready: true, profile: built.profile } : { ready: false, missing: built.errors };

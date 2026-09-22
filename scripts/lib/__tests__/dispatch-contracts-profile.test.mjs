@@ -59,11 +59,30 @@ describe('prepared-card readiness', () => {
   });
   it('uses kind mappings, explicit types and acceptance defaults', () => {
     for (const [kind, taskType] of Object.entries(c.TASK_TYPE_BY_CARD_KIND)) expect(c.deriveDispatchProfile(card({ kind })).profile.taskType).toBe(taskType);
-    const input = card(); delete input.kind;
-    expect(c.deriveDispatchProfile(input).profile.taskType).toBe('other');
+    expect(c.deriveDispatchProfile(card({ kind: 'task', taskType: 'bugfix' })).profile.taskType).toBe('bugfix');
     expect(c.deriveDispatchProfile(card({ taskType: 'doc-fix' })).profile.taskType).toBe('doc-fix');
     expect(c.deriveDispatchProfile(card()).profile.acceptanceTestable).toBe(true);
     expect(c.deriveDispatchProfile(card({ acceptanceTestable: false })).profile.risk).toBe('medium');
+  });
+  it('has no default task type: nothing produces `other` or `self-fix` (#3801 Fork 2)', () => {
+    expect(Object.values(c.TASK_TYPE_BY_CARD_KIND)).not.toContain('other');
+    expect(Object.values(c.TASK_TYPE_BY_CARD_KIND)).not.toContain('self-fix');
+    expect(Object.keys(c.TASK_TYPE_BY_CARD_KIND)).not.toContain('task');
+    expect(Object.keys(c.TASK_TYPE_BY_CARD_KIND)).not.toContain('epic');
+  });
+  it.each(['task', 'epic'])('refuses a `%s` card that declares no taskType, by name, instead of labelling it `other`', (kind) => {
+    expect(c.deriveDispatchProfile(card({ kind }))).toEqual({ ready: false, missing: ['taskType:underivable'] });
+  });
+  it('refuses a card with no kind and no taskType, by name, instead of labelling it `other`', () => {
+    const input = card(); delete input.kind;
+    expect(c.deriveDispatchProfile(input)).toEqual({ ready: false, missing: ['taskType:underivable'] });
+  });
+  it('accepts a kind with no default when the card declares its own valid taskType, and never reports underivable beside an invalid one', () => {
+    for (const kind of ['task', 'epic']) expect(c.deriveDispatchProfile(card({ kind, taskType: 'doc-fix' })).ready).toBe(true);
+    const input = card({ taskType: 'doc-fix' }); delete input.kind;
+    expect(c.deriveDispatchProfile(input).profile.taskType).toBe('doc-fix');
+    expect(c.deriveDispatchProfile(card({ kind: 'task', taskType: 'unknown' }))).toEqual({ ready: false, missing: ['taskType:invalid'] });
+    expect(c.deriveDispatchProfile(card({ kind: 'unknown' }))).toEqual({ ready: false, missing: ['kind:invalid'] });
   });
   it('never lets a card lower derived risk', () => {
     expect(c.deriveDispatchProfile(card({ scope: ['docs/agent/a'], risk: 'low' })).profile.risk).toBe('high');
