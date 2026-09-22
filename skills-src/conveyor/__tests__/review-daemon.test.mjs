@@ -5,9 +5,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
-  runDaemonLoop, runReviewTick, buildCliDaemonEffects, realSleep, REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS,
+  runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
+  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
+import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 
 describe('runDaemonLoop — the pure control flow', () => {
   it('requires a tickOnce effect', async () => {
@@ -107,6 +109,17 @@ describe('runReviewTick — the per-tick sequence', () => {
   });
 });
 
+describe('runReviewTick — repo reaches reconcile too (regression, #xvyuwtg live-caught 2026-09-22)', () => {
+  // plateau-app PR #167 sat `review:pending` with nothing watching it: `repo` reached `dispatch`/`tagRound`/
+  // `tagStatus` but `reconcile` was always called as `reconcile({})`, so a tick "for" plateau-app still
+  // discovered WE's own PRs. Fixed by passing `{repo}` into `reconcile` too.
+  it('reconcile is called with the SAME repo this tick was given, not unconditionally omitted', () => {
+    const reconcile = vi.fn(() => ({ dispatch: [], refusals: [] }));
+    runReviewTick({ reconcile, dispatch: () => ({}), tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [], repo: 'chalbert/plateau-app' });
+    expect(reconcile).toHaveBeenCalledWith({ repo: 'chalbert/plateau-app' });
+  });
+});
+
 describe('runReviewTick — real dispatchReview contract (regression, #3876 live-caught)', () => {
   // Live-caught 2026-09-22: `dispatch({ pr, repo: null })` passed the mock's own tests (which mocked
   // `dispatch` entirely) but broke the FIRST real run — `planReviewDispatch` does `String(repo ?? '').trim()`
@@ -122,6 +135,63 @@ describe('runReviewTick — real dispatchReview contract (regression, #3876 live
       dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [],
     });
     expect(() => planReviewDispatch({ pr: 10, repo: capturedRepo })).not.toThrow();
+  });
+});
+
+describe('REVIEW_DAEMON_REPOS', () => {
+  it('is every constellation repo\'s real slug, not just WE (live-caught 2026-09-22, #xvyuwtg: plateau-app PR #167 sat unwatched)', () => {
+    expect(REVIEW_DAEMON_REPOS.sort()).toEqual(Object.values(CONSTELLATION_REPOS).map((r) => r.slug).sort());
+    expect(REVIEW_DAEMON_REPOS).toContain('chalbert/plateau-app');
+    expect(REVIEW_DAEMON_REPOS).toContain('chalbert/frontierui');
+    expect(REVIEW_DAEMON_REPOS).toContain('chalbert/web-everything');
+  });
+});
+
+describe('runReviewTickAllRepos — one runReviewTick call per watched repo', () => {
+  it('ticks every repo in the list, tagging each dispatched/failed entry with its own repo', () => {
+    const tick = vi.fn(({ repo }) => (repo === 'repo-a'
+      ? { reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'a10' }], failed: [], refusals: 0 }
+      : { reviewsOwed: 1, dispatched: [], failed: [{ prNumber: 20, error: 'boom' }], refusals: 1 }));
+    const out = runReviewTickAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(tick).toHaveBeenCalledTimes(2);
+    expect(tick).toHaveBeenCalledWith(expect.objectContaining({ repo: 'repo-a' }));
+    expect(tick).toHaveBeenCalledWith(expect.objectContaining({ repo: 'repo-b' }));
+    expect(out.reviewsOwed).toBe(2);
+    expect(out.refusals).toBe(1);
+    expect(out.dispatched).toEqual([{ prNumber: 10, agentId: 'a10', repo: 'repo-a' }]);
+    expect(out.failed).toEqual([{ prNumber: 20, error: 'boom', repo: 'repo-b' }]);
+    expect(out.repos).toEqual([
+      { repo: 'repo-a', result: expect.any(Object) },
+      { repo: 'repo-b', result: expect.any(Object) },
+    ]);
+  });
+
+  it('one repo throwing (a gh outage, a rate limit) never stops the others — isolated the same way a bad PR is isolated one level down', () => {
+    const tick = vi.fn(({ repo }) => {
+      if (repo === 'repo-bad') throw new Error('gh: rate limited');
+      return { reviewsOwed: 1, dispatched: [{ prNumber: 1, agentId: 'a1' }], failed: [], refusals: 0 };
+    });
+    const out = runReviewTickAllRepos({ repos: ['repo-bad', 'repo-good'], tick });
+    expect(out.dispatched).toEqual([{ prNumber: 1, agentId: 'a1', repo: 'repo-good' }]);
+    expect(out.failed).toEqual([{ prNumber: null, repo: 'repo-bad', error: 'gh: rate limited' }]);
+    expect(out.repos[0]).toEqual({ repo: 'repo-bad', error: 'gh: rate limited' });
+  });
+
+  it('every non-`repo` option is forwarded to every repo\'s own tick call', () => {
+    const tick = vi.fn(() => ({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 0 }));
+    const dispatch = () => ({});
+    runReviewTickAllRepos({ repos: ['repo-a'], tick, dispatch });
+    expect(tick).toHaveBeenCalledWith({ dispatch, repo: 'repo-a' });
+  });
+
+  it('defaults to REVIEW_DAEMON_REPOS and to the real runReviewTick when nothing is injected', () => {
+    // No network call happens here: reconcile-pass.mjs's OWN default readers are what would hit `gh`, and this
+    // test injects neither `repos` nor `tick`'s inner effects — it only proves the DEFAULTS are wired, via a
+    // spy on `tick` itself so the real runReviewTick's own IO defaults are never reached.
+    const tick = vi.fn(() => ({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 0 }));
+    const out = runReviewTickAllRepos({ tick });
+    expect(tick).toHaveBeenCalledTimes(REVIEW_DAEMON_REPOS.length);
+    expect(out.repos.map((r) => r.repo)).toEqual(REVIEW_DAEMON_REPOS);
   });
 });
 

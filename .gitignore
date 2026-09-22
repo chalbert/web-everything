@@ -51,6 +51,13 @@ commitment-policy/**/*.d.ts
 # append generalized-lesson entries during a session; the /closing-session sweep consumes it at close. Never
 # committed — it holds pre-vetting, pre-dedup entries that the sweep + red-team curate before anything lands.
 .conveyor/learnings/
+# A resident daemon's own stdout/stderr log (e.g. review-daemon.mjs, pass-daemon.mjs, launchd's
+# StandardOutPath/StandardErrorPath target) — machine-local operational output, never committed. Live-caught
+# 2026-09-22, #xvyuwtg: an ungitignored `.conveyor/review-daemon.log` made a dedicated daemon clone look
+# permanently DIRTY to git, which blocks that checkout's own staleness auto-fast-forward
+# (scripts/lib/main-staleness.mjs's `cleanOnly` auto-ff requires a clean tree) — the daemon's own routine
+# operation was silently defeating its own recovery path.
+.conveyor/*.log
 # Session-local conveyor CLEAR-FOR-BUILD queue (#2613) — the operator's "clear this item for the conveyor
 # to pull" gesture. Session-local operator INTENT, not committed repo state (distinct from committed
 # `buildQueued` frontmatter), so it rides a gitignored sidecar the lane guard does not police — that is what
