@@ -41,6 +41,12 @@ Checked live 2026-09-21 against GitHub's current REST and GraphQL rate-limit doc
 **Skeptic:** Attacked (a)'s premise that "a GitHub App" alone means a separate bucket — the docs' own worked example shows a GitHub App authorized *on a user's behalf* shares that user's bucket instead, which would have silently defeated this decision if unnoticed. Fixed by naming the app-to-server / installation-token requirement explicitly in (a)'s own body, not left implicit. Also attacked whether (c) is really inadequate now that #3670 ships a 300-points/minute budget: confirmed #3699's own worst-case load (~4,500/hour) still fits under 5,000/hour alone, but that headroom is shared with the operator's own manual use, which is exactly what was refused on 2026-09-22 — the throttle governs how fast the fleet spends, never from whose account. Holds.
 **Screen:** Infra-credential governance (which GitHub identity the fleet's automation authenticates as) — decidable in-repo, no WE platform-standard boundary at stake. The differences named (separate vs. shared bucket, scaling ceiling, secret blast-radius, one-time setup cost) are real functional merit differences, not a timing or prioritization call in fork costume. Clear.
 
+## Ruling
+
+Ratified 2026-09-22 by the operator. The operator's own words, quoted: "I ratify 3866".
+
+- **Fork 1 — RATIFIED, (a):** a GitHub App installation, authenticated app-to-server via its installation access token; never the user-to-server "authorize as me" flow.
+
 ## Not in this decision
 
 Whether or when to actually register the App / create the bot account is not ruled here — this card states the fork, the options, and the default; provisioning any credential is follow-on build work, carved off once ratified. #3699's Lever 2 (event-driven state push) and its already-filed spin-offs (`3823`/`3824`/`3825`) are a separate, already-ratified lever for call VOLUME, not credential separation, and are unaffected by whichever way this fork is ruled.
