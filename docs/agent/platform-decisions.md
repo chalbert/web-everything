@@ -3746,8 +3746,8 @@ a deferred `classifyPr` "no-check vs red" reporting split, and authoring the mis
 fix).** The resolve-on-land extractor credits any `lane/<NNN>[a-z]?-<slug>` ref with item NNN
 ([`we:scripts/lib/open-pr-items.mjs`](../../scripts/lib/open-pr-items.mjs)) and nothing on the card side checks
 whether the card is fully built before `we:scripts/lane-drain.mjs`'s `resolveLandedItem` sets
-`status: resolved`. That silently closed #3779 on its first slice landing (PR #2392, 2026-09-21) while three of
-its four Done-when items and three of its five design points were unbuilt.
+`status: resolved`. That silently closed #3779 on its first slice landing (PR #2392, 2026-09-21) while all four
+of its Done-when items and four of its five design points were unbuilt.
 
 1. **The rule.** A backlog card that holds a `## Slice <label>` heading is never auto-resolved by the drain on
    a PR land; the drain reports `deferred: multi-slice card` instead and the card is resolved deliberately.
