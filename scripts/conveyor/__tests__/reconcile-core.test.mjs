@@ -384,6 +384,17 @@ describe('case 5 — refusal 4: liveness from a live PROCESS, and the listing is
     expect(plan.dispatch.map((d) => d.kind)).toEqual(['fix']);
   });
 
+  it('a FINISHED session is not a blocker even with a live pid — a completed agent\'s pid can be recycled into a warm bg-spare pool rather than exit (live-caught #3876, PR #2461, 2026-09-22)', () => {
+    // `claude agents --json` reported `{state:'done', status:'idle'}` for review-2461 while its OS pid (probed by
+    // `process.kill(pid,0)`) was STILL alive — reused for a wholly unrelated later task. `pidAlive===true` alone
+    // used to be read as "something is still working this PR" regardless of the agent's own reported state,
+    // which meant a PR whose reviewer session had already finished stayed refused as `live-process` forever: the
+    // pid never goes on to probe dead, since it is a real live process, just not this PR's anymore.
+    const agents = [{ sessionId: 's-done', cwd: '/lanes/lane-40', pid: 16562, pidAlive: true, laneHeadOid: SHA, status: 'idle', state: 'done' }];
+    const plan = planReconcile({ prs: [pr1563({ transcriptMtimeMs: STALE_MTIME })], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch.map((d) => d.kind)).toEqual(['fix']);
+  });
+
   it('the binding needs BOTH shas — two unknowns are not a match', () => {
     expect(bindAgents({ headRefOid: '' }, [{ cwd: '/x', laneHeadOid: '' }])).toEqual([]);
     expect(bindAgents({ headRefOid: SHA }, [{ cwd: '/x' }])).toEqual([]);

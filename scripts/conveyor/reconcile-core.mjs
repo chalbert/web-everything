@@ -340,11 +340,19 @@ export function isAwaitingPermission(agent) {
  * `transcriptMtimeMs` is not consulted anywhere in this function, ON PURPOSE. A transcript stops being written
  * when an agent finishes exactly as when it dies, so freshness cannot grant liveness and staleness cannot
  * withdraw it. It rides along as evidence only.
+ *
+ * A session reporting `state: 'done'` is filtered out BEFORE any of the four ranks above, regardless of
+ * `pidAlive` (live-caught #xq7g45m, PR #2461, 2026-09-22): in this environment a finished background agent's OS
+ * process is recycled into a warm bg-spare pool rather than exiting, so `pidAlive` stays `true` forever after
+ * the actual work on this PR is long done — the pid didn't die, it was just handed to unrelated later work. A
+ * raw pid probe is only a stand-in for a session that has NOT reported its own terminal state; once an agent
+ * says `done`, that is authoritative and a live pid proves nothing about THIS PR anymore.
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
-  const list = Array.isArray(bound) ? bound : [];
+  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done';
+  const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
     kind,
     pid: Number.isInteger(b.agent?.pid) ? b.agent.pid : null,
