@@ -5,7 +5,7 @@
  *   with fakes exactly like runner.mjs's own `runLoop` is.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runDaemonLoop, buildCliDaemonEffects, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS } from '../reconcile-fix-dispatch-daemon.mjs';
+import { runDaemonLoop, buildCliDaemonEffects, realSleep, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS } from '../reconcile-fix-dispatch-daemon.mjs';
 
 describe('runDaemonLoop — the pure control flow', () => {
   it('requires a tickOnce effect', async () => {
@@ -71,5 +71,32 @@ describe('buildCliDaemonEffects — the real-effect factory (heartbeat wiring on
     expect(typeof effects.heartbeat).toBe('function');
     expect(typeof effects.onTick).toBe('function');
     expect(typeof effects.onTickError).toBe('function');
+  });
+});
+
+describe('realSleep — regression, live-caught 2026-09-22', () => {
+  // The daemon's FIRST real run (launchd-managed, real gh/claude calls) exited right after tick 1 instead of
+  // looping: `.unref()`-ing this timer told Node it was fine to exit before it fired, and nothing else in the
+  // process keeps the event loop alive between ticks (the spawned agent's stdio is `ignore`d — no other ref'd
+  // handle exists). A unit test that only checked `realSleep`'s PROMISE resolved (as this file's earlier tests
+  // effectively did, via fakes) could never catch this — the bug is specifically about whether the underlying
+  // Node `Timeout` object is ref'd, which only a real, unmocked `setTimeout` reveals.
+  it('realSleep\'s own timer is REF\'d — a resident daemon must not let Node exit before it fires', () => {
+    const real = global.setTimeout;
+    let captured;
+    global.setTimeout = (fn, ms) => { captured = real(fn, ms); return captured; };
+    try {
+      realSleep(60_000); // never awaited — only the timer's own ref state is asserted, then cleared
+      expect(captured.hasRef()).toBe(true); // FAILS if realSleep re-adds `.unref()`
+    } finally {
+      clearTimeout(captured);
+      global.setTimeout = real;
+    }
+  });
+
+  it('realSleep resolves after the real delay and leaves no unref\'d timer behind (smoke test, short delay)', async () => {
+    const start = Date.now();
+    await realSleep(20);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(15); // loose bound — real timers, not fake ones
   });
 });

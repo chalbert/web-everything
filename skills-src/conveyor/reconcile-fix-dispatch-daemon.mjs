@@ -90,7 +90,12 @@ export async function runDaemonLoop({
 
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real dispatch pass) ─────────────────────────────
 
-function realSleep(ms) { return new Promise((resolve) => { const t = setTimeout(resolve, ms); t.unref?.(); }); }
+// #3870 LIVE-CAUGHT BUG: `.unref()`-ing this timer told Node it was fine to exit before it fired — with
+// nothing else keeping the event loop alive between ticks (the spawned agent's own stdio is `ignore`d, no
+// other ref'd handle exists), the daemon exited right after its FIRST tick instead of waiting and looping.
+// A REF'd timer (Node's default — no `.unref()`) is exactly what a resident daemon needs: the sleep IS the
+// reason this process stays alive between ticks, not incidental background bookkeeping safe to drop on exit.
+export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
 
 /** Build the real effects for {@link runDaemonLoop}: a real tick of `runReconcileFixDispatch`, a real
  *  interval sleep, and a real keyed lease heartbeat. Kept as its own factory (mirroring
