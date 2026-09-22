@@ -21,7 +21,9 @@ function row(i, unclean = false, provider = 'codex', model = 'gpt-6-astra') {
 
 describe('risk thresholds and sampling', () => {
   it('returns fresh frozen thresholds, with medium matching router policy', () => {
-    expect(t.GRADUATION_THRESHOLDS_BY_RISK).toEqual({ low: { minCleanStreak: 2, requireInformativeTrial: false }, medium: { minCleanStreak: 5, requireInformativeTrial: true }, high: { minCleanStreak: 8, requireInformativeTrial: true } });
+    // medium is a spread of DEFAULT_BACKDOWN_THRESHOLDS, which gained `k` under #3889 (Rule 5 of #3690);
+    // low/high are their own literals and stay without it.
+    expect(t.GRADUATION_THRESHOLDS_BY_RISK).toEqual({ low: { minCleanStreak: 2, requireInformativeTrial: false }, medium: { minCleanStreak: 5, requireInformativeTrial: true, k: 3 }, high: { minCleanStreak: 8, requireInformativeTrial: true } });
     expect(t.thresholdsForRisk('medium')).toEqual(DEFAULT_BACKDOWN_THRESHOLDS);
     for (const risk of ['low', 'medium', 'high', 'constructor', null, {}]) {
       const threshold = t.thresholdsForRisk(risk);
@@ -71,8 +73,17 @@ describe('risk thresholds and sampling', () => {
 
 describe('real ground-truth trials through risk-based routing', () => {
   it.each(['low', 'medium', 'high'])('uses the %s streak and resets on calibration misses', risk => {
-    const { minCleanStreak, requireInformativeTrial } = t.thresholdsForRisk(risk);
-    const rows = [...(requireInformativeTrial ? [row(0, true)] : []), ...Array.from({ length: minCleanStreak }, (_, i) => row(i + 1))];
+    const { minCleanStreak, requireInformativeTrial, k } = t.thresholdsForRisk(risk);
+    // #3889 (Rule 5 of #3690): once a miss is on record, restoration needs a rootCause note in its own
+    // field AND the post-miss bar (minCleanStreak + k), not just minCleanStreak — same rootCause+extend
+    // pattern already applied in provider-routing.test.mjs. `informative: true` is likewise the row's own
+    // recorded field (#3888, rule 4) rather than inferred from outcome/findings.
+    const postMissBar = minCleanStreak + (typeof k === 'number' ? k : DEFAULT_BACKDOWN_THRESHOLDS.k);
+    const missRow = requireInformativeTrial
+      ? { ...row(0, true), informative: true, rootCause: 'Diagnosed: assertion ordering flaked under load; fixed and root-caused.' }
+      : null;
+    const cleanCount = requireInformativeTrial ? postMissBar : minCleanStreak;
+    const rows = [...(missRow ? [missRow] : []), ...Array.from({ length: cleanCount }, (_, i) => row(i + 1))];
     expect(selectSupervisionLevel('codex', 'gpt-6-astra', 'doc-fix', rows.slice(0, -1), t.thresholdsForRisk(risk)).level).toBe('full');
     expect(selectSupervisionLevel('codex', 'gpt-6-astra', 'doc-fix', rows, t.thresholdsForRisk(risk)).level).toBe('spot-check');
     const p = profile({ risk });
@@ -85,13 +96,17 @@ describe('real ground-truth trials through risk-based routing', () => {
     if (requireInformativeTrial) expect(selectSupervisionLevel('codex', 'gpt-6-astra', 'doc-fix', rows.slice(1), t.thresholdsForRisk(risk)).level).toBe('full');
   });
   it('never spot-checks high-risk, statute, gate-self or irreversible tasks after 20 cleans', () => {
-    const rows = [row(0, true), ...Array.from({ length: 20 }, (_, i) => row(i + 1))];
+    // #3889 (Rule 5): the miss needs a rootCause note + informative:true (rule 4) so this triple otherwise
+    // WOULD graduate to spot-check on 20 clean trials — the point of the test is that the never-spot-check
+    // override still forces 'full' even then; 20 clean trials clears any plausible post-miss bar.
+    const rootCause = 'Diagnosed: assertion ordering flaked under load; fixed and root-caused.';
+    const rows = [{ ...row(0, true), informative: true, rootCause }, ...Array.from({ length: 20 }, (_, i) => row(i + 1))];
     for (const p of [profile({ risk: 'high' }), ...['docs/agent/a.md', 'scripts/check-standards.mjs', '.github/workflows/deploy.yml'].map(path => profile({ filesTouched: [path] }))]) {
       const out = c.routeDispatch(p, { stage: 'task', scorecards: rows });
       expect(out.supervision).toBe('full'); expect(out.spotCheck).toBeNull();
     }
     // Exercise statute forcing on a graduated native story rung as well.
-    const native = [row(0, true, 'claude', 'claude-opus-5'), ...Array.from({ length: 20 }, (_, i) => row(i + 1, false, 'claude', 'claude-opus-5'))];
+    const native = [{ ...row(0, true, 'claude', 'claude-opus-5'), informative: true, rootCause }, ...Array.from({ length: 20 }, (_, i) => row(i + 1, false, 'claude', 'claude-opus-5'))];
     const out = c.routeDispatch(profile({ filesTouched: ['docs/agent/a.md'] }), { stage: 'story', kind: 'prepare', scorecards: native });
     expect(out.supervision).toBe('full'); expect(out.auditTrail.some(a => a.criterion === 'never-spot-check')).toBe(true);
   });

@@ -53,11 +53,13 @@ const BG_STDOUT = 'backgrounded · 1ae0905c · conveyor-3717\n';
 /** A root that is not lane-shaped — `assertNotALaneCheckout` refuses those, and this suite is not about it. */
 const PRIMARY = '/primary/webeverything';
 
-/** Trial history that makes the criteria route a `build` to codex, at `spot-check` (5 clean verified trials after one
- *  informative rework) — the same shape `dispatch-contracts-route.test.mjs` uses for `doc-fix`. */
+/** Trial history that makes the criteria route a `build` to codex, at `spot-check` (8 clean verified trials —
+ *  minCleanStreak(5) + k(3) post-miss bar — after one informative, root-caused rework) — the same shape
+ *  `dispatch-contracts-route.test.mjs` uses for `doc-fix` (#3889, Rule 5 of #3690: a confirmed miss needs a
+ *  rootCause note on record, and then the post-miss bar is minCleanStreak + k, not just minCleanStreak). */
 const CODEX_TRIALS = [
-  { provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', subjectClass: 'work-agent', scoredAt: '2026-09-01T00:00:00Z', outcome: 'reworked', verifiedBy: 'independent-claude', findings: 'Corrected assertion' },
-  ...Array.from({ length: 5 }, (_, i) => ({ provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', subjectClass: 'work-agent', scoredAt: `2026-09-1${i}T00:00:00Z`, outcome: 'landed', verifiedBy: 'independent-claude', findings: null })),
+  { provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', subjectClass: 'work-agent', scoredAt: '2026-09-01T00:00:00Z', outcome: 'reworked', verifiedBy: 'independent-claude', findings: 'Corrected assertion', informative: true, rootCause: 'Diagnosed: assertion ordering flaked under load; fixed and root-caused.' },
+  ...Array.from({ length: 8 }, (_, i) => ({ provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', subjectClass: 'work-agent', scoredAt: `2026-09-1${i}T00:00:00Z`, outcome: 'landed', verifiedBy: 'independent-claude', findings: null })),
 ];
 
 /** A routing record as the io shell computes one, for the fixtures below. */

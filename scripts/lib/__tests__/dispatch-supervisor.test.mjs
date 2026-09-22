@@ -17,6 +17,11 @@ function rows(candidate = c.SUPERVISOR_CANDIDATES[0], count = 2, informative = f
     if (informative && i === 0) groundTruth.sources.push({ kind: 'rework-rounds', outcome: 'unclean', reworkRounds: 1, actorRef: 'counter', findings: ['Fixed assertion'] });
     const out = c.supervisorTrialFromVerdict(execution(), verdict({ supervisor: { provider: candidate.provider, model: candidate.model, sessionId: 'supervisor' } }), options({ now: `2026-09-${String(i + 1).padStart(2, '0')}T00:00:00Z`, groundTruth }));
     expect(out.ok).toBe(true); expect(validateScorecard(out.row).ok).toBe(true);
+    // #3889 (Rule 5 of #3690): a confirmed miss needs a rootCause note in its own field before any
+    // post-miss trial counts toward restoration; informative:true is likewise its own recorded field
+    // (#3888, rule 4), never inferred from outcome/findings. Harmless for callers whose clean count never
+    // reaches the post-miss bar anyway (still blocked, just by streak length instead of the missing note).
+    if (informative && i === 0) { out.row.informative = true; out.row.rootCause = 'Diagnosed: assertion ordering flaked under load; fixed and root-caused.'; }
     return out.row;
   });
 }
@@ -67,10 +72,13 @@ describe('supervisor ladder', () => {
     const p = profile({ estimatedLoc: 200, risk: 'medium' });
     expect(p.complexity).toBe('M');
     expect(c.selectSupervisor(p, { scorecards: rows(candidate, 5, true) }).shadow.model).toBe('claude-sonnet-5');
-    expect(c.selectSupervisor(p, { scorecards: rows(c.SUPERVISOR_CANDIDATES[2], 5, true) })).toMatchObject({ model: 'claude-sonnet-5', shadow: null });
+    // 8 clean trials = minCleanStreak(5) + default k(3) — the post-miss bar, not the cold-start bar (#3889).
+    expect(c.selectSupervisor(p, { scorecards: rows(c.SUPERVISOR_CANDIDATES[2], 8, true) })).toMatchObject({ model: 'claude-sonnet-5', shadow: null });
   });
   it('uses high-risk supervisor thresholds independently of task spot-check prohibition', () => {
-    const candidate = c.SUPERVISOR_CANDIDATES[3], scorecards = rows(candidate, 8, true), p = profile({ risk: 'high' });
+    // 11 clean trials = minCleanStreak(8) + default k(3) — high has no explicit k, so selectSupervisionLevel
+    // falls back to DEFAULT_BACKDOWN_THRESHOLDS.k (#3889).
+    const candidate = c.SUPERVISOR_CANDIDATES[3], scorecards = rows(candidate, 11, true), p = profile({ risk: 'high' });
     expect(c.selectSupervisor(p, { scorecards: scorecards.slice(0, -1) }).model).toBe('claude-opus-5');
     expect(c.selectSupervisor(p, { scorecards })).toMatchObject({ provider: 'antigravity', model: candidate.model, shadow: null });
   });

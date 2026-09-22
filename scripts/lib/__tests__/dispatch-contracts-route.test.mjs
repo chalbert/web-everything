@@ -5,7 +5,9 @@ import * as c from '../dispatch-contracts.mjs';
 const profile = (extra = {}) => c.buildDispatchProfile({ taskType: 'doc-fix', estimatedLoc: 30, filesTouched: ['docs/readme.md'], acceptanceTestable: true, dependsOn: [], ...extra }).profile;
 const card = (extra = {}) => ({ kind: 'story', size: 3, scope: ['src/example.js'], preparedDate: '2026-09-20', ...extra });
 const record = (extra = {}) => ({ provider: 'codex', model: 'gpt-5', taskType: 'doc-fix', scoredAt: '2026-09-20T00:00:00Z', outcome: 'landed', verifiedBy: 'independent-claude', findings: null, subjectClass: 'work-agent', ...extra });
-const history = () => [record({ scoredAt: '2026-09-01T00:00:00Z', outcome: 'reworked', findings: 'Corrected assertion' }), ...Array.from({ length: 5 }, (_, i) => record({ scoredAt: `2026-09-1${i}T00:00:00Z` }))];
+// #3889 (Rule 5): the historical miss needs a rootCause note on record, and the post-miss bar is
+// minCleanStreak(5) + k(3) = 8 clean trials, not the cold-start bar of 5.
+const history = () => [record({ scoredAt: '2026-09-01T00:00:00Z', outcome: 'reworked', findings: 'Corrected assertion', rootCause: 'Assertion relied on unstable map iteration order; fixed and diagnosed.' }), ...Array.from({ length: 8 }, (_, i) => record({ scoredAt: `2026-09-1${i}T00:00:00Z` }))];
 function freeze(value) { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; }
 
 describe('story routing', () => {
