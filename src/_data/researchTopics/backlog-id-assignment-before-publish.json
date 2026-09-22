@@ -1,0 +1,21 @@
+{
+  "id": "backlog-id-assignment-before-publish",
+  "title": "Where backlog ids are assigned so a temporary hash id cannot reach main: numbering point, allocator, and how far the guarantee reaches, grounded against the drain, pr-land, push-if-green and GitHub's enforcement primitives for a user-owned public repo",
+  "status": "open",
+  "summary": "Grounds decision #3732 (a backlog file with a temporary hash id must be structurally unable to reach main). Measured 2026-09-21: the drain publishes the merge first and numbers second (merge-ai-prs.mjs mergePr at :4567, numbering tail at :4704), so any failure between the two leaves a hash on main; that stranded card 3707 and then nine cards (3708-3716) on 2026-09-19. The scripted direct-push route already numbers before publish and fails closed (push-if-green.mjs, #3623/#3624); the PR route has no equivalent. THE LOAD-BEARING FINDINGS: (1) two invariants hide in the card: no hash-named file in the candidate tree is per-PR and compositional, so a required check on the candidate tree closes it; NNN uniqueness is not compositional and needs one allocation authority or a check at the point main is written. (2) The first draft's default, numbering at the drain's admission, is broken on the repo's own code: pr-land labels a PR ready-to-merge only after required checks are green, so a required hash-free check that is red on every fresh card-bearing PR means no PR is ever admitted, and a drain-authored commit on a reviewed PR voids its approval (#3735). (3) GitHub cannot do three things for this repo: the native merge queue needs an organization-owned public repo, push rulesets (restrict file paths) exist only for private or internal repos, and branch-protection restrict-who-can-push and bypass lists are organization features. Available: required checks pinned to the Actions app, enforce_admins, squash-only, branch rulesets. (4) GitHub PR numbers cannot be ids: the counter is at 2422 and backlog ids run to 3836. PRIOR ART: no mature system renumbers after merge. Gerrit, Phabricator, GitHub, Rust RFCs and Kubernetes KEPs allocate early from an atomic counter (Gerrit's is a git ref advanced by compare-and-swap); Changesets, Alembic, Rails and log4brains never assign a sequence; bors, homu, Zuul, Tide, Mergify and Chromium's commit queue all test an ephemeral candidate and advance or discard it, none promotes the trunk from a long-lived accumulating branch. RESHAPES (after two skeptic passes and two fresh-context screens): #3732's four forks become two. Fork 1 numbers at PR open by the producer, as a standalone operation callable on any lane ref (the conveyor fix agents push without pr-land), and the drain refuses a clashing NNN at the point main is written; the operator's integration-branch idea is kept as its alternative, and an atomic git-ref counter moves to rejected-on-evidence. Fork 2 asks whether reach main means the tip tree (default: a required, diff-scoped backlog-ids check; main held 13 stranded hash files at one point on 2026-09-21, so a whole-tree check would wedge every PR) or full reachability (squash-only, which ends ancestry as the landed truth that lane ownership, batch stacking and lane recycling read). The direct-push residual is #3423's rung knob, stated as a concession, not a fork.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "backlog",
+    "numbering",
+    "drain",
+    "merge-policy",
+    "branch-protection",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor",
+  "relatedReport": "reports/2026-09-21-backlog-id-assignment-prior-art.md"
+}

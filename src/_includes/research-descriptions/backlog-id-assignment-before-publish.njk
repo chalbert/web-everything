@@ -1,0 +1,92 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3732-decision-where-backlog-ids-are-assigned-so-a-temporary-hash/">#3732</a> asks where a
+backlog card's sequential number (NNN) is assigned, so that a card still carrying its temporary hash id can never
+reach <code>main</code>. Cards are born with a hash id in a lane branch and renumbered later
+(<a href="/backlog/2288-jit-backlog-numbering-drain-assigns-the-nnn-at-land-from-a-h/">#2288</a>). Today the drain publishes the merge first and numbers afterwards,
+so any failure in between leaves a hash on <code>main</code>. It happened twice on 2026-09-19: card 3707, then nine
+cards (3708–3716) across four pull requests, all merged by the drain. The full working is in
+<a href="/reports/2026-09-21-backlog-id-assignment-prior-art.md">the session report</a>.</p>
+
+<h2>Measured on 2026-09-21</h2>
+
+<ul>
+  <li>The repo is public and user-owned, with no organization. Merge commit, squash and rebase are all allowed.
+    Main requires <code>test</code> and <code>smoke</code>, both pinned to the GitHub Actions app; strict mode is
+    off; <code>enforce_admins</code> is off; there are no rulesets.</li>
+  <li>The drain merges with <code>--merge</code> inside its land mutex and numbers afterwards
+    (<code>scripts/merge-ai-prs.mjs</code>, the <code>mergePr</code> call, then <code>numberPendingHashes</code>).
+    It also pushes to <code>main</code> directly for regen, unqueue and resolve-on-land commits.</li>
+  <li>The drain already rebuilds a pull request's tip on top of <code>main</code> with plumbing before it merges
+    (<code>rebaseDropManifest</code>, #2198). Numbering a tip before merge is the same move with a different tree
+    edit.</li>
+  <li>GitHub's PR counter is at 2422. Backlog ids already run to 3836, so GitHub numbers overlap existing ids and
+    cannot be used as ids.</li>
+</ul>
+
+<h2>Finding 1: two invariants hide inside the card</h2>
+
+<p>"No hash-named file in the candidate tree" is per-PR and compositional: a clean <code>main</code> plus pull
+requests that each add no hash file stays clean, so a required check on the candidate tree closes it. "NNNs are
+unique" is not compositional: two PRs that each pick 3900 merge with no textual conflict, so it needs one
+allocation authority. The original draft mixed them, and its first two forks were the same choice under two names.</p>
+
+<h2>Finding 2: prior art does not support a long-lived staging branch</h2>
+
+<ul>
+  <li><strong>Gating systems test an ephemeral candidate.</strong> bors and homu (a per-batch <code>staging</code>
+    branch fast-forwarded on green), Zuul (speculative future states), Kubernetes Tide (retests against the newest
+    base), Chromium's commit queue, and Mergify (temporary branches and draft PRs) all test a candidate and then
+    advance or discard it. None promotes the trunk from a long-lived accumulating branch. A discarded candidate
+    needs no repair policy; a shared branch does (revert or reset, stacked-PR replay).</li>
+  <li><strong>No mature system renumbers after merge.</strong> Gerrit, Phabricator, GitHub, Rust RFCs (PR number)
+    and Kubernetes KEPs (issue number) allocate early from an atomic counter. Changesets, Alembic, Rails and
+    log4brains never assign a sequence. Python PEPs use human editors as the single writer.</li>
+  <li><strong>A git ref is a proven atomic counter.</strong> Gerrit's <code>RepoSequence</code> keeps the counter as
+    a blob under <code>refs/sequences/*</code>; the git push protocol carries <code>old-id</code> per ref update and
+    the server rejects the update if the ref moved. Whether GitHub honours this on a custom ref under 24 concurrent
+    lanes was not tested.</li>
+</ul>
+
+<h2>Finding 3: what GitHub can and cannot enforce on this repo</h2>
+
+<ul>
+  <li><strong>Native merge queue: unavailable.</strong> GitHub's own gating text limits it to public repositories
+    owned by an organization (or Enterprise Cloud). A queue also has no documented way for a check to rewrite the
+    queued commit, so it cannot number.</li>
+  <li><strong>Push rulesets (restrict file paths): unavailable.</strong> They exist only for private or internal
+    repositories. A path rule against hash-named files is not possible; a required status check is.</li>
+  <li><strong>Available:</strong> required checks, <code>enforce_admins</code>, squash-only through repository
+    settings, and branch rulesets (free on public repos). Branch-protection "restrict who can push" and bypass
+    lists are organization features.</li>
+  <li><strong>Skipped jobs pass.</strong> A required job skipped by an <code>if:</code> reports success, so the hash
+    check must have no <code>if:</code> and no path filter.</li>
+  <li><strong>Squash-only closes reachability.</strong> A squash merge puts one commit on <code>main</code>, so the
+    lane's commits (each of which added the hash-named file) are not ancestors of it.</li>
+</ul>
+
+<h2>What this reshapes</h2>
+
+<p>The item's original default was a persistent integration branch with one serialized numbering writer. Its four
+forks are now two, on the two invariants. Fork 1 is where numbering happens: the producer numbers at PR open, before CI and review, as an operation callable on any lane ref (the conveyor fix agents push without <code>pr-land</code>), and the drain refuses a clashing NNN at the point main is written. An atomic git-ref counter as allocator is rejected on evidence: the write-point check already guarantees uniqueness. Fork 2 is how far
+"reach main" reaches: the tip tree (a required <code>backlog-ids</code> check, merge method unchanged) or full
+reachability (squash-only).</p>
+
+<p>A first version of the default, numbering at the drain's admission, was refuted on the repo's own code.
+<code>pr-land</code> labels a PR <code>ready-to-merge</code> only after its required checks are green, and the
+drain admits only labelled PRs. A required hash-free check is red on every fresh card-bearing PR, so none would ever
+be admitted; and a drain-authored commit on a reviewed PR voids its approval (#3735). The old scope fork is a
+forced invariant, the old collision fork follows the allocation choice, and the direct-push residual is #3423's
+enforcement-rung knob, stated as a concession rather than a fork. The operator's integration-branch idea is kept as
+Fork 1's alternative, with its real strength (testing the numbered combination of several PRs before
+<code>main</code> moves) and its costs named.</p>
+
+<h2>Open items the report lists for verification</h2>
+
+<ul>
+  <li>Whether a GitHub App or the admin role can be a ruleset bypass actor on a personal repository.</li>
+  <li>Whether GitHub honours <code>old-id</code> compare-and-swap on a custom ref namespace.</li>
+  <li>The wall time of <code>test</code> plus <code>smoke</code>.</li>
+</ul>
+{% endraw %}
