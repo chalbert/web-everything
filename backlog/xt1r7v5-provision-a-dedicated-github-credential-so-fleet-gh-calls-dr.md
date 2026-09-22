@@ -4,6 +4,8 @@ parent: "3383"
 relatedTo: ["3670", "3699", "3573"]
 status: open
 dateOpened: "2026-09-21"
+preparedDate: "2026-09-21"
+preparedAgainstSha: "16bc75badca5561ce96e2406bfafe5186ed06894"
 tags: [github, rate-limit, credential, security, infra]
 ---
 
