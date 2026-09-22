@@ -35,6 +35,17 @@ export const LANE_RELEASE_LITTER_ALLOWLIST = [
   '.pr-body.txt',
   'review-*-output.json',
   'commit-msg-fix-*.txt',
+  // The dot-prefixed form of the two patterns above that didn't already have one (`review-*-output.json`,
+  // `commit-msg-fix-*.txt` — the other three already start with a dot) — live-caught 2026-09-22: several
+  // lanes' ONLY dirty file was `.review-loop-output.json` (leading dot), which `review-*-output.json` never
+  // matched (a glob has no implicit "optionally dotted" behavior), so
+  // `we:scripts/conveyor/lane-pool-health-watch.mjs` left them dirty forever even though the content is
+  // exactly the same already-vetted-safe scratch, just written with a leading dot. Added as explicit new
+  // entries, per this list's own stated philosophy ("extend this list, don't loosen the mechanism") — not a
+  // change to the matcher's semantics, and not a license to assume every dotfile is safe: only these two
+  // already-vetted patterns, dotted.
+  '.commit-msg-fix-*.txt',
+  '.review-*-output.json',
 ];
 
 /**

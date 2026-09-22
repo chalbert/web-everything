@@ -99,7 +99,26 @@ describe('LANE_RELEASE_LITTER_ALLOWLIST', () => {
   it('is the exact live-observed set (extend, never loosen the mechanism)', () => {
     expect(LANE_RELEASE_LITTER_ALLOWLIST).toEqual([
       '.commit-msg.txt', '.pr-body.md', '.pr-body.txt', 'review-*-output.json', 'commit-msg-fix-*.txt',
+      '.commit-msg-fix-*.txt', '.review-*-output.json',
     ]);
+  });
+
+  // Live-caught 2026-09-22: several lanes' ONLY dirty file was `.review-loop-output.json` (leading dot),
+  // which `review-*-output.json` never matched — a plain glob has no implicit "optionally dotted" behavior.
+  // Confirmed by reintroduction: this fails against the pre-fix 5-entry list.
+  it('the dot-prefixed form of review-*-output.json and commit-msg-fix-*.txt now matches too', () => {
+    expect(isAllowlistedLitterPath('.review-loop-output.json')).toBe(true);
+    expect(isAllowlistedLitterPath('.review-3568-output.json')).toBe(true);
+    expect(isAllowlistedLitterPath('.commit-msg-fix-1.txt')).toBe(true);
+  });
+
+  it('the un-dotted forms still match too — this is an addition, not a replacement', () => {
+    expect(isAllowlistedLitterPath('review-loop-output.json')).toBe(true);
+    expect(isAllowlistedLitterPath('commit-msg-fix-1.txt')).toBe(true);
+  });
+
+  it('the dot-prefixed pattern still respects the no-directory-traversal guard', () => {
+    expect(isAllowlistedLitterPath('.review-foo/bar-output.json')).toBe(false);
   });
 });
 
