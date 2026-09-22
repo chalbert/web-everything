@@ -3,10 +3,13 @@ bornAs: xxabopb
 kind: story
 size: 2
 parent: "3717"
-status: open
+status: resolved
 blockedBy: ["3840"]
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs", "we:scripts/operations/dispatch-providers/build.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -24,3 +27,11 @@ tags: []
 
 1. **Executable** — on the branch, `grep -n 'EXECUTABLE_PROVIDER' we:scripts/lib/dispatch-contracts.mjs` prints nothing (today it prints the constant at `:759` and its use at `:856`).
 2. **Executable** — `npx vitest run we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs` passes with new cases that fail before: (a) a `build` whose card carries `deliveryAgent: codex` and a reason records `executed: codex` while `routed` stays the criteria's choice; (b) an unmarked `build` records `executed: claude`; (c) when the converge round changed the lane's diff after the agent, the run record carries a field saying so, and it is false when converge changed nothing.
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `f6659a06b` ("#3848: the routing record's executed field names the real vendor, not a constant"), ahead of
+> this card being picked up. Re-verified: `grep -n 'EXECUTABLE_PROVIDER'
+> we:scripts/lib/dispatch-contracts.mjs` prints nothing, and both named test files pass (178 tests combined)
+> with the `executed: codex` override case and the `convergeEditedLane` case present. Resolved here as
+> `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through #3443, per this card's own
+> `Home:` section.

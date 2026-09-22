@@ -3,10 +3,13 @@ bornAs: xi8dngi
 kind: story
 size: 2
 parent: "3717"
-status: open
+status: resolved
 blockedBy: ["3839"]
 scope: ["we:scripts/operations/prepare-scope-wrapper.mjs", "we:skills-src/conveyor/prepare-scope-agent-brief-v2.md", "we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -22,3 +25,10 @@ Ruled in #3801 Fork 4 (b), consequence 3: prepared for the dispatch gate means s
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs` passes with new cases that fail before: (a) a prepare turn that writes `scope:` plus `size:` on a story is accepted; (b) one that writes `scope:` plus the estimate field on a task is accepted; (c) one that writes `size:` on a task, or a non-Fibonacci `size:`, is refused before commit; (d) the single-file-touched check still refuses a turn that edits any other file.
 2. **Executable** — on the branch, `grep -n "size" we:skills-src/conveyor/prepare-scope-agent-brief-v2.md` shows the brief asking for a size on a story and the estimate field on a task (it names neither today).
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `136519577` ("#3842 (Fork 4 \"prepare\" of #3801): the prepare turn now also authors size:/estimatedLoc:"),
+> ahead of this card being picked up. Re-verified:
+> `we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs` passes (33 tests) with the
+> `#3842 — the size/estimate guardrail` cases present. Resolved here as `graduatedTo: none` — the code is not
+> yet on `main`; it reaches `main` through #3443, per this card's own `Home:` section.
