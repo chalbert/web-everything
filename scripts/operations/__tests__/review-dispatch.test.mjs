@@ -11,10 +11,11 @@ import { describe, it, expect, vi } from 'vitest';
 
 import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, dispatchReviewCli, fillReviewBrief,
-  planReviewDispatch, reviewDispatchDisallowedToolsArgs, reviewSessionSlug, CODEX_JUDGE_PROVIDER_REFUSAL,
-  REVIEW_BRIEF_PLACEHOLDERS, REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
-  runAutoFixRoute,
+  planReviewDispatch, reviewDispatchDisallowedToolsArgs, reviewSeatRoutes, reviewSessionSlug,
+  CODEX_JUDGE_PROVIDER_REFUSAL, REVIEW_BRIEF_PLACEHOLDERS, REVIEW_DISPATCH_DISALLOWED_TOOLS,
+  REVIEW_DISPATCH_SYSTEM_PROMPT_FILE, runAutoFixRoute,
 } from '../review-dispatch.mjs';
+import { selectProvider } from '../../lib/provider-routing.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
 // below don't hand-duplicate the join.
@@ -272,6 +273,75 @@ describe('dispatchReview — judgeProvider (#xqa9ttq)', () => {
       judgeProvider: 'gemini',
     })).toThrow(/judgeProvider.*must be one of claude\|codex/);
     expect(readBriefCalls).toBe(0);
+  });
+});
+
+// #3846 — Fork 3 of #3801, review: review-dispatch becomes a ROUTER CALLER. One route per MANDATORY seat lens
+// (`MANDATORY_LENSES` = `['correctness', 'security']`), computed by the SAME provider cascade a work dispatch
+// uses (`selectProvider`), gated by the capability rule that only `claude` may seat a tool-bearing mandatory
+// seat — codex (#3581) and antigravity (#3383) are both structurally tool-free-only judge providers.
+describe('reviewSeatRoutes (#3846)', () => {
+  it('with empty scorecards, the result carries a route per mandatory seat, each with a lens subject and provider claude', () => {
+    const routes = reviewSeatRoutes({ scorecards: [] });
+    expect(routes).toHaveLength(2);
+    expect(routes.map((r) => r.lens)).toEqual(['correctness', 'security']);
+    for (const route of routes) {
+      expect(route.provider).toBe('claude');
+      expect(route.capable).toBe(true);
+      expect(route.role).toBe('review');
+    }
+  });
+
+  it('scorecards that would graduate codex on a lens still resolve that TOOL-BEARING seat to claude, with the capability reason in its audit trail', () => {
+    const scorecards = [{
+      provider: 'codex', taskType: 'correctness', model: 'gpt-5-codex', outcome: 'landed',
+      verifiedBy: 'independent-claude', scoredAt: '2026-09-20T00:00:00Z',
+    }];
+    // Sanity: this exact scorecard shape really would graduate codex for an ordinary (non-capability-gated) taskType.
+    expect(selectProvider({ taskType: 'correctness' }, { filesTouched: [], estimatedSize: 0, scorecards }).recommendation).toBe('codex');
+
+    const routes = reviewSeatRoutes({ scorecards });
+    const correctness = routes.find((r) => r.lens === 'correctness');
+    expect(correctness.provider).toBe('claude');
+    expect(correctness.capable).toBe(false);
+    const gate = correctness.auditTrail.find((a) => a.criterion === 'capability-entry-gate');
+    expect(gate.reasoning).toBe(CODEX_JUDGE_PROVIDER_REFUSAL);
+
+    // The untouched lens has no codex trial on record, so it is claude for the ordinary (no-track-record) reason.
+    const security = routes.find((r) => r.lens === 'security');
+    expect(security.provider).toBe('claude');
+    expect(security.capable).toBe(true);
+  });
+});
+
+describe('dispatchReview — per-seat routing (#3846)', () => {
+  it('the dispatch result carries a routing record per mandatory seat, each with a lens subject and provider claude', () => {
+    const result = dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: () => '',
+      checkStaleness: FRESH,
+      readScorecards: () => [],
+    });
+    expect(result.routing).toHaveLength(2);
+    expect(result.routing.map((r) => r.lens)).toEqual(['correctness', 'security']);
+    for (const route of result.routing) expect(route.provider).toBe('claude');
+  });
+
+  it('a `--judge-provider` run records BOTH the seat routing and the flag\'s value — the flag stays as-is, never overridden by the route', () => {
+    const result = dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: () => '',
+      checkStaleness: FRESH,
+      judgeProvider: 'codex',
+      readScorecards: () => [],
+    });
+    expect(result.judgeProvider).toBe('codex');
+    expect(result.routing).toHaveLength(2);
+    for (const route of result.routing) expect(route.provider).toBe('claude');
   });
 });
 

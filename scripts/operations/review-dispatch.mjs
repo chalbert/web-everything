@@ -156,17 +156,30 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, parseBackgroundedId, REPO_ROOT,
+  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultReadScorecards, defaultSpawnAgent,
+  parseBackgroundedId, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
 // #3717 — the `taskType` derivation. A review is a JUDGING role: it changes no product code, so it has no
-// router `taskType` and the provider cascade is never consulted for it. That answer is DERIVED here, from the
-// dispatch kind, and recorded on the result — it is not a sentence anyone typed.
+// router `taskType` and the provider cascade is never consulted for the DISPATCH KIND itself. That answer is
+// DERIVED here, from the dispatch kind, and recorded on the result — it is not a sentence anyone typed.
 import { taskTypeFor } from '../lib/dispatch-task-type.mjs';
-// #xqa9ttq — the single source of truth for the `claude`/`codex` juror-provider enum, shared with
-// `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
+// #3846 — Fork 3 of #3801, review: THE ROUTER ENTRY POINT itself, called once to confirm `review` takes the
+// role path (see `reviewSeatRoutes` below for what this file now does PER SEAT with that confirmation).
+import { decideDispatchRoute } from '../lib/dispatch-contracts.mjs';
+// #3846 — the SAME provider cascade a work dispatch uses, run per mandatory review lens rather than once for
+// the whole run. See `reviewSeatRoutes`.
+import { selectProvider } from '../lib/provider-routing.mjs';
+// #3846 — the mandatory, UNANIMOUS-ACCEPT lens pair (#2310/#3319) — both TOOL-BEARING seats
+// (`review-pr.mjs#JUDGE_SEATS` sets `allowedTools` unconditionally for both). A pure data export, not the
+// heavier `review-pr.mjs` operation itself.
+import { MANDATORY_LENSES } from '../lib/jury-core.mjs';
+// #xqa9ttq — the single source of truth for the `claude`/`codex`/`antigravity` juror-provider enum, shared
+// with `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
 // cannot silently drift out of step with what `review-loop-cli.mjs` (which the dispatched session runs)
-// actually accepts.
-import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
+// actually accepts. `TOOL_FREE_JUDGE_PROVIDER_NAMES` is #3846's capability gate: codex (#3581) and antigravity
+// (#3383) are BOTH structurally tool-free-only judge providers, so `claude` is the only candidate a
+// tool-bearing mandatory seat can ever seat today.
+import { JUDGE_PROVIDER_NAMES, TOOL_FREE_JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 // #xu2pp2m — THE MECHANICAL ARC THIS FILE NOW DEFAULTS TO. See the header block: the wrapper IS the three
 // commands `review-agent-brief.md` told a spawned agent to type, done as pure Node with no LLM turn.
 import { BLOCKED_ON_INFRA, dispatchReviewMechanical } from './review-dispatch-wrapper.mjs';
@@ -423,6 +436,10 @@ export function planReviewDispatch({ pr, repo } = {}) {
  * @param {string[]} [o.extraArgs] - forwarded to `buildAgentArgv`, exactly like `dispatch-lane-io.mjs`'s own.
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [o.checkStaleness] - injectable staleness
  *   check (#3439) — see `assertMainNotStale`.
+ * @param {(root: string) => Array<object>} [o.readScorecards] - #3846 — injectable scorecards read, same
+ *   `(root) => data` shape `readBrief` already uses. Defaults to the real `we:scripts/conveyor/
+ *   run-scorecards.json` read (`dispatch-lane-io.mjs#defaultReadScorecards`) scoped to `root`, exactly like a
+ *   work dispatch's own io edge (#3717) — see `reviewSeatRoutes`.
  * @param {string} [o.judgeProvider] - #xqa9ttq — which `JudgeProvider` the dispatched session's OWN
  *   `review-loop-cli.mjs` invocation (brief step 2) is told to pass `--provider=<this>`. One of
  *   `JUDGE_PROVIDER_NAMES`; defaults to `'claude'`, today's behaviour, unchanged — this is OPT-IN. Note what
@@ -439,6 +456,7 @@ export function dispatchReview({
   extraArgs = [],
   checkStaleness,
   judgeProvider = 'claude',
+  readScorecards = (r) => defaultReadScorecards({ root: r }),
   now = Date.now, actions = createActionStore({ now }), owner = DRIVER_ID,
 } = {}) {
   assertNotALaneCheckout(root);
@@ -486,11 +504,11 @@ export function dispatchReview({
   return {
     sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt,
     unknownTokens,
-    // #3717 — THE ROUTE THIS DISPATCH TOOK, recorded rather than assumed. `outcome: 'role'` with
-    // `taskType: null` IS the mechanical answer for a review (see `dispatch-task-type.mjs`'s own docblock for
-    // why the role path is a third outcome and not a `taskType`), so nothing here chooses a provider: the
-    // judge seat is `judgeProvider` just below, which is an explicit, already-recorded input.
-    routing: reviewDispatchRoute(),
+    // #3846 — Fork 3 of #3801, review: ONE ROUTE PER MANDATORY SEAT, computed by the SAME router a work
+    // dispatch calls (see `reviewSeatRoutes`) — replacing the single dispatch-kind-level role record #3717
+    // recorded here before this slice. `judgeProvider` just below is the explicit `--judge-provider` input,
+    // recorded BESIDE this, never overridden by it (this slice's own scope note).
+    routing: reviewSeatRoutes({ scorecards: readScorecards(root) }),
     // #xqa9ttq — the provider the dispatched session will judge with, echoed back so the CLI (and any
     // programmatic caller) can report WHICH judge was seated without re-deriving the default.
     judgeProvider,
@@ -501,6 +519,11 @@ export function dispatchReview({
  * #3717 — the review dispatch's route, derived from its kind alone. Its own function so the record has ONE
  * shape and the derivation is asserted rather than inlined at the return.
  *
+ * @test-only-export-ok: #3846 stopped calling this internally (dispatchReview now records routing from
+ *   reviewSeatRoutes instead — see that function's own header), but the sibling reconcile-fix-routing test
+ *   suite in scripts/conveyor/__tests__/ still asserts the dispatch-kind-level role-path shape through it, as
+ *   the other half of that file's own fix/conflict-resolution cause-routing proof. Kept, not deleted — this
+ *   scan cannot see across that file boundary.
  * @returns {{outcome: string, role: string|null, taskType: null, routed: null, executed: null, reason: string}}
  */
 export function reviewDispatchRoute() {
@@ -509,6 +532,75 @@ export function reviewDispatchRoute() {
     outcome: derived.outcome, role: derived.role, taskType: null, routed: null, executed: null,
     reason: derived.reason,
   };
+}
+
+/**
+ * #3846 — THE CAPABILITY REASON for one seat's fallback to claude. `codex` reuses
+ * {@link CODEX_JUDGE_PROVIDER_REFUSAL} verbatim (the SAME rule, restated as this slice's own first capability
+ * gate rather than a second one); any other non-claude recommendation (`gemini`, `both`, or a future
+ * `antigravity` cascade result) gets the equivalent, generalised reason — never the codex-specific string,
+ * which would misname what actually happened.
+ * @param {string} recommendation
+ * @param {string} lens
+ * @returns {string}
+ */
+function seatCapabilityReason(recommendation, lens) {
+  if (recommendation === 'codex') return CODEX_JUDGE_PROVIDER_REFUSAL;
+  return `review-dispatch: the router recommended '${recommendation}' for the ${lens} lens, but both mandatory `
+    + 'review seats set `allowedTools` unconditionally (#2310/#3319) and only `claude` is seated tool-bearing '
+    + `today — codex and antigravity are both structurally tool-free-only judge providers `
+    + '(TOOL_FREE_JUDGE_PROVIDER_NAMES, #3581/#3383), and `gemini`/`both` are not registered judge providers at '
+    + 'all (JUDGE_PROVIDER_NAMES). Falling back to claude.';
+}
+
+/**
+ * #3846 — Fork 3 of #3801, review: REVIEW-DISPATCH BECOMES A ROUTER CALLER. Computes and records a route per
+ * MANDATORY seat lens ({@link MANDATORY_LENSES}, #2310/#3319 — both TOOL-BEARING: `review-pr.mjs#JUDGE_SEATS`
+ * sets `allowedTools` unconditionally for `judge` and `judgeSecurity`), instead of the ONE `judgeProvider` that
+ * used to stand for the whole run. Each seat runs the SAME provider cascade a work dispatch uses
+ * ({@link selectProvider}), with the lens itself as the cascade's subject — `filesTouched`/`estimatedSize` are
+ * always empty/zero because a review lens changes no code and has no blast radius to measure; that keeps every
+ * lens trivially within `PROVEN_TASK_ENVELOPES`'s default envelope, so only the SCORECARD HISTORY for
+ * `{provider, taskType: lens}` decides fitness.
+ *
+ * THE CAPABILITY GATE (this slice's first one, per #3801 Fork 3 (c) — "capability is the entry gate"): a
+ * candidate is seated only if it is registered ({@link JUDGE_PROVIDER_NAMES}) and NOT tool-free-only
+ * ({@link TOOL_FREE_JUDGE_PROVIDER_NAMES}) — today that is `claude` alone. `CODEX_JUDGE_PROVIDER_REFUSAL` is
+ * reused verbatim for a codex recommendation, exactly the existing refusal this card's own text names; see
+ * {@link seatCapabilityReason} for the generalised form. WITH NO GRADUATED review-lens TRIAL ON RECORD every
+ * seat's candidate is already `claude`, so this changes NOTHING about what actually runs — only what is
+ * COMPUTED and RECORDED about why (this slice's own "behaviour is unchanged").
+ *
+ * {@link decideDispatchRoute} — the dispatch path's one router entry point (`dispatch-contracts.mjs`) — is
+ * called ONCE, on the dispatch KIND (`review`), to confirm it takes the role path (no router `taskType`,
+ * #3717): that is what makes the LENS, not the kind, the per-seat subject here, and its `role` is recorded on
+ * every seat so an auditor sees both without re-deriving either.
+ *
+ * THE SEAT'S EVIDENCE BAR IS NOT BUILT HERE. The labelled replay corpus and #3675's replay-parity gate
+ * (#3801 Fork 3) are a SIBLING slice's work: a route is computed and recorded, never enforced, until that gate
+ * lands — this function makes no dispatch decision, it only reports one.
+ *
+ * PURE: no fs, no process, no clock. `scorecards` arrives as data, read at the io edge by `dispatchReview`.
+ *
+ * @param {{scorecards?: unknown, lenses?: readonly string[]}} [o]
+ * @returns {ReadonlyArray<{lens: string, role: string, provider: string, capable: boolean, auditTrail: object[]}>}
+ */
+export function reviewSeatRoutes({ scorecards = [], lenses = MANDATORY_LENSES } = {}) {
+  const { role } = decideDispatchRoute({ kind: 'review' });
+  return Object.freeze(lenses.map((lens) => {
+    const selected = selectProvider({ taskType: lens }, { filesTouched: [], estimatedSize: 0, scorecards });
+    const capable = JUDGE_PROVIDER_NAMES.includes(selected.recommendation)
+      && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(selected.recommendation);
+    const auditTrail = capable ? [...selected.auditTrail] : [
+      ...selected.auditTrail,
+      {
+        criterion: 'capability-entry-gate', result: 'claude',
+        dataConsulted: `criteria recommended '${selected.recommendation}' for lens=${lens}`,
+        reasoning: seatCapabilityReason(selected.recommendation, lens),
+      },
+    ];
+    return Object.freeze({ lens, role, provider: capable ? selected.recommendation : 'claude', capable, auditTrail });
+  }));
 }
 
 /**
