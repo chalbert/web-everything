@@ -3817,7 +3817,7 @@ of its Done-when items and four of its five design points were unbuilt.
    Once Fork 5 is researched and ruled, re-examine whether this narrow hold is still needed as a fallback or
    can be retired.
 
-**Lineage:** `#3820` (ratified 2026-09-21, operator, in conversation; `bornAs: xggecwt`), copying #3816's own
+**Lineage:** `#3820` (ratified 2026-09-21, operator, in conversation; `bornAs: 3820`), copying #3816's own
 proposed default without re-researching it. Build tracked on `#3816`. Composes with
 [#repo-drain-check-contract](#repo-drain-check-contract) (a different axis of the same drain: what makes a
 check land-worthy, not what makes a card resolve-worthy) and with `#3575` Fork 5 (the durable replacement this
