@@ -1,4 +1,5 @@
 ---
+bornAs: xt1r7v5
 kind: decision
 parent: "3383"
 relatedTo: ["3670", "3699", "3573"]
@@ -46,5 +47,5 @@ Whether or when to actually register the App / create the bot account is not rul
 
 ## Done when
 
-1. **Observable** — `grep -l '^## Ruling' backlog/xt1r7v5*.md` lists this card (it fails until the operator has ratified Fork 1's chosen option).
+1. **Observable** — `grep -l '^## Ruling' backlog/3866*.md` lists this card (it fails until the operator has ratified Fork 1's chosen option).
 2. **Follow-on** — once ratified, the chosen path — an App registration + auth-layer swap (a), a bot-account PAT (b), or an explicit no-build (c)/(d) — is carved into a build story under #3383, `blockedBy` this decision, before this card resolves.
