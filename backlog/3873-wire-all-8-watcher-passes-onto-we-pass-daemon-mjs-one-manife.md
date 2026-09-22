@@ -5,7 +5,7 @@ size: 5
 parent: "3383"
 status: resolved
 blockedBy: ["3871"]
-scope: ["we:skills-src/conveyor/daemon-manifest.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs"]
+scope: ["we:skills-src/conveyor/daemon-manifest.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-22"
 dateResolved: "2026-09-22"
@@ -26,6 +26,9 @@ This directly matters for lane-pool-health-watch-plateau-app: plateau-app's own 
 
 we:skills-src/conveyor/runner.mjs is intentionally UNTOUCHED in this PR -- per the card's own "drop each from we:skills-src/conveyor/runner.mjs's own mechanicalPasses list AS IT BAKES," the same rolling, pass-by-pass cutover discipline #3870/#3876 already followed. Standing up the manifest here does not yet retire the old runner's own copy of any of these 7 sweeps; dropping them is later, separate work once each is confirmed stable running standalone.
 
+**Third correction, live-caught 2026-09-22 running all 15 entries for real** (the first non-dry-run, non-fixture run any of them had ever had): we:scripts/conveyor/lane-pool-health-watch.mjs's own --repo flag forwarded whatever it was given UNCHANGED into we:scripts/lane-pool.mjs status --repo=<value> -- but we:scripts/lane-pool.mjs's own --repo has ALWAYS been path-only (confirmed by direct read of its resolveRepo function -- no slug resolution exists there, by design, matching its many other established path-based callers). Every lane-pool-health-watch-<repo> daemon crashed on its first run: we:scripts/lane-pool.mjs tried to resolve a literal ./chalbert/plateau-app directory and refused. Fixed the ONE caller that got the contract backwards, not we:scripts/lane-pool.mjs's own long-established convention: added resolveLanePoolRepoPath to we:scripts/conveyor/lane-pool-health-watch.mjs, resolving a recognized constellation slug to its real checkout path (WE's own slug maps to null -- WE has no fixed path, matching every other pass's own '.'/null convention for it) before forwarding to we:scripts/lane-pool.mjs; an already-a-path value (an operator's own --dry-run, this file's pre-existing tests) passes through unchanged. Confirmed by reintroduction: the new test fails against the pre-fix unconditional-forward and passes with the fix. Re-verified live against the real plateau-app pool with the exact slug the manifest uses (--repo=chalbert/plateau-app) after the fix -- correctly resolves and reports pool health.
+
 ## Done when
 
 1. **Executable** — npx vitest run we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs passes (20/20): DAEMON_MANIFEST has exactly 15 entries (3 WE-only + 4 passes × 3 repos); every entry independently validates; the 3 WE-only entries carry no --repo flag; the 4 repo-generic passes each get one entry per constellation repo with the matching --repo=<slug>; lane-pool-health-watch-plateau-app is present and correctly scoped; poc-branch-sync is absent from the manifest (confirmed, not assumed, that the script doesn't exist).
+2. **Executable** — npx vitest run we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs passes (40/40): a constellation slug passed as --repo resolves to that repo's real checkout path before shelling we:scripts/lane-pool.mjs (confirmed by reintroduction to fail without the fix); the WE slug appends no --repo at all; an already-a-path value still passes through unchanged, matching every pre-existing case. Confirmed live: node we:scripts/conveyor/lane-pool-health-watch.mjs --repo=chalbert/plateau-app --dry-run reports real pool health with the manifest's own slug form, no crash.

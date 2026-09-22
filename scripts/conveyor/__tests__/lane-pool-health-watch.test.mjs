@@ -19,6 +19,7 @@ import {
   defaultIsLeasedNow,
   watchLanePoolHealth,
   runLanePoolHealthWatch,
+  resolveLanePoolRepoPath,
 } from '../lane-pool-health-watch.mjs';
 
 describe('planLaneReap — pure', () => {
@@ -116,11 +117,45 @@ describe('defaultListLaneStatus — argv shape (exec injected, no real subproces
     expect(out).toEqual({ repo: 'web-everything', root: '/pool/web-everything', lanes: [] });
   });
 
-  it('appends --repo when given', () => {
+  it('appends --repo when given a raw path, unchanged', () => {
     let capturedArgv;
     const exec = (cmd, argv) => { capturedArgv = argv; return '{"lanes":[]}'; };
     defaultListLaneStatus({ exec, root: '/repo', repo: '/some/checkout' });
     expect(capturedArgv).toEqual(['/repo/scripts/lane-pool.mjs', 'status', '--json', '--repo=/some/checkout']);
+  });
+
+  // Live-caught 2026-09-22 (#3873's own first real daemon run, non-dry-run): a caller passing a SLUG — the
+  // same convention every sibling repo-generic pass accepts — crashed every run, because this file forwarded
+  // it unchanged into lane-pool.mjs's own PATH-only --repo flag.
+  it('resolves a constellation SLUG to its real checkout path before shelling lane-pool.mjs', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return '{"lanes":[]}'; };
+    defaultListLaneStatus({ exec, root: '/repo', repo: 'chalbert/plateau-app' });
+    expect(capturedArgv).toEqual(['/repo/scripts/lane-pool.mjs', 'status', '--json', `--repo=${process.env.HOME}/workspace/plateau-app`]);
+  });
+
+  it('a WE slug appends NO --repo at all — WE has no fixed path, lane-pool.mjs defaults to the cwd toplevel', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return '{"lanes":[]}'; };
+    defaultListLaneStatus({ exec, root: '/repo', repo: 'chalbert/web-everything' });
+    expect(capturedArgv).toEqual(['/repo/scripts/lane-pool.mjs', 'status', '--json']);
+  });
+});
+
+describe('resolveLanePoolRepoPath', () => {
+  it('a recognized slug resolves to that repo\'s real checkout path, $HOME expanded', () => {
+    expect(resolveLanePoolRepoPath('chalbert/plateau-app', '/Users/x')).toBe('/Users/x/workspace/plateau-app');
+    expect(resolveLanePoolRepoPath('chalbert/frontierui', '/Users/x')).toBe('/Users/x/workspace/frontierui');
+  });
+  it('the WE slug resolves to null (no fixed path — let lane-pool.mjs default to the cwd toplevel)', () => {
+    expect(resolveLanePoolRepoPath('chalbert/web-everything', '/Users/x')).toBeNull();
+  });
+  it('an unrecognized value (already a path) passes through unchanged', () => {
+    expect(resolveLanePoolRepoPath('/some/checkout', '/Users/x')).toBe('/some/checkout');
+  });
+  it('null/empty passes through as null', () => {
+    expect(resolveLanePoolRepoPath(null)).toBeNull();
+    expect(resolveLanePoolRepoPath('')).toBeNull();
   });
 });
 
