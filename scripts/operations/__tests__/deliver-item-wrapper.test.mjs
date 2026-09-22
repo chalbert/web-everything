@@ -888,6 +888,51 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     expect(commitCalls[1].i).toBeGreaterThan(stepCalls[0].i);
     expect(commitCalls[1].i).toBeLessThan(stepCalls[1].i);
   });
+
+  // #3848 (carried from #3801 Fork 1) — the returned verdict also says whether the converge EDITOR actually
+  // changed the lane's diff, aggregated across every round of the loop, not just the last one before land/escalate.
+  it('(c) records `convergeEditedLane: true` when a round actually committed a real edit', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }),
+      steps: [landStep], gitStatus: ' M src/foo.mjs\n',
+    });
+
+    const result = runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    expect(result.convergeEditedLane).toBe(true);
+  });
+
+  it('(c) records `convergeEditedLane: false` when converge changed nothing — no edit round ever ran', () => {
+    const init = JSON.stringify({
+      action: 'read', round: 1, careLevel: 'elevated', jurorsPerLens: 1, roundCap: 5,
+      lenses: ['correctness'], seatableLenses: ['correctness'], mandatoryLenses: ['correctness'],
+      read: { command: 'git diff', cwd: lane },
+    });
+    const escalateStep = JSON.stringify({
+      action: 'escalate', round: 1, roundCap: 5, verdict: null, reason: 'mandatory-lens-absent', dismissed: [],
+    });
+    const run = fakeRun({ init, steps: [escalateStep] });
+
+    const result = runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    expect(result.convergeEditedLane).toBe(false);
+  });
+
+  it('(c) records `convergeEditedLane: false` when an edit round ran but nothing was accepted (`advanced: false`)', () => {
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init,
+      editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [{ summary: 'x', reason: 'not real' }] }) }),
+      steps: [landStep], gitStatus: ' M src/foo.mjs\n',
+    });
+
+    const result = runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    expect(result.convergeEditedLane).toBe(false);
+  });
 });
 
 describe('convergeRoundTouchedFiles (#3627 bug 14 helper — the real touched-file list for one round\'s commit)', () => {

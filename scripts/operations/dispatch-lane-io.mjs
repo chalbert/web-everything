@@ -85,7 +85,7 @@ import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, det
 // decision itself is `dispatch-contracts.mjs#decideDispatchRoute`, called from `dispatch-lane.mjs`'s pure
 // `shapeDispatchRead`; this file only supplies the two things that need a filesystem and an environment: the
 // scorecards and this flag.
-import { EXECUTABLE_PROVIDER, decideDispatchRoute, supervisionEnforcementFrom } from '../lib/dispatch-contracts.mjs';
+import { decideDispatchRoute, supervisionEnforcementFrom } from '../lib/dispatch-contracts.mjs';
 import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
 import {
   DISPATCH_PROVIDER_REGISTRY,
@@ -1317,17 +1317,16 @@ export function createDispatchSinks({
         dispatch: {
           supervisorModel, launchKind: payload?.launchKind ?? 'build',
           route: String(handle ?? '').startsWith(DETACHED_HANDLE_PREFIX) ? 'detached' : 'claude-bg',
-          // #3717 — WHAT THE CRITERIA CHOSE vs WHAT ACTUALLY RAN IT, both on the durable record.
+          // #3717/#3848 — WHAT THE CRITERIA CHOSE vs WHAT ACTUALLY RAN IT, both on the durable record.
           //
           // `routed` is `decideDispatchRoute`'s answer, computed before this spawn from the derived
-          // `taskType` and the scorecards. `executed` is the provider that ran: every implementation behind
-          // the `provider` port (#3579) — `defaultClaudeProvider` and each mechanical wrapper in
-          // `dispatch-provider-registry.mjs` — starts a Claude session, and no Codex or Gemini port exists
-          // yet (#3443, #3658). So a non-Claude ROUTE lands here as `routed: codex, executed: claude`: the
-          // gap is a recorded fact a trial can be measured against, not a silent collapse into "claude was
-          // chosen". The moment a real non-Claude port lands, this is the one line that changes.
+          // `taskType` and the scorecards. `executed` is ALREADY that same answer's own `executed` field
+          // (`dispatch-contracts.mjs#executedVendorFor`) — the override's `executedVendor` when the item's
+          // `deliveryAgent:` marker named one (#3840), else plain `claude`, the one port with no override. Read
+          // straight off `payload.routing` rather than re-derived here, so this record can never disagree with
+          // the routing decision it is describing.
           routedProvider: payload?.routing?.routed ?? null,
-          executedProvider: payload?.routing ? EXECUTABLE_PROVIDER : null,
+          executedProvider: payload?.routing?.executed ?? null,
           routedTaskType: payload?.routing?.taskType ?? null,
           supervisionLevel: payload?.routing?.supervision ?? null,
           supervisionEnforced: payload?.routing?.supervisionEnforced === true,
