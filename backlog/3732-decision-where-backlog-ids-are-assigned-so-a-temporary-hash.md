@@ -3,8 +3,12 @@ bornAs: x2len1z
 kind: decision
 parent: "2288"
 status: open
+relatedTo: ["2288", "2319", "2548", "3443", "3423", "3532", "3735", "2198", "3605", "1937"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lane-drain.mjs", "we:scripts/backlog.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-09-19"
+preparedDate: "2026-09-21"
+preparedAgainstSha: "a8f0eb9681bd23f4ad2d6e58aa5db9cfa8cd311a"
+relatedReport: reports/2026-09-21-backlog-id-assignment-prior-art.md
 tags: []
 ---
 
@@ -12,203 +16,140 @@ tags: []
 
 Operator requirement 2026-09-19: a backlog file with a temporary hash id must be STRUCTURALLY UNABLE to reach main — not caught after the fact, not repaired by a follow-up PR. Today's #2319 rule (we:scripts/check-standards-rules.mjs strandedHashesOnMain) is a post-land detector because numbering is deferred to land (#2288, we:scripts/merge-ai-prs.mjs numberPendingHashes tail); any land route or failed tail strands a hash and turns main red — twice on 2026-09-19 (3707 via PR #2335, then 9 cards via PRs #2032/#2318/#2210/#2338, all merged by the drain). Decide where numbering belongs and what makes it unskippable.
 
+*Prepared 2026-09-21 (session prepare-3732).* Research topic: [/research/backlog-id-assignment-before-publish/](/research/backlog-id-assignment-before-publish/). Session report: `we:reports/2026-09-21-backlog-id-assignment-prior-art.md`. Repo settings and code lines below were re-read on 2026-09-21 against `origin/main` `8a7583b8f`.
+
+**What this card delivers, and what it does not.** Delivers: a hash-named backlog file added by a pull request cannot merge to main through the drain or any non-admin route, and cannot be pushed by any script. Does not deliver: a stop to a raw `git push`, or a UI merge that uses the admin bypass, by the repo's one admin outside every script. That residual is #3423's accepted Rung 1; closing it is the rung knob #3532 builds, blocked on a distinct bot identity (see *Supported by default*). The operator's 2026-09-19 wording is absolute and newer than #3423, so if the operator wants the residual closed sooner the answer is #3532's trigger, not a redesign of this card.
+
 ## The requirement
 
 **A BACKLOG FILE WITH A TEMPORARY HASH ID MUST BE STRUCTURALLY UNABLE TO REACH MAIN — not caught after the fact, not repaired by a follow-up PR.**
 
 This decision is about **PREVENTION ONLY**. Repair already exists and is not a missing capability or a fork.
 The #2319 error, “is on main with a NON-NUMERIC leading id”, describes an already-published failure.
-`strandedHashesOnMain` in `we:scripts/check-standards-rules.mjs` inspects `origin/main`, with a 180-second
+`strandedHashesOnMain` in `we:scripts/check-standards-rules.mjs:2441` inspects `origin/main`, with a 180-second
 warning grace window. It cannot prevent a PR's new hash from landing: #2288 deliberately permits that hash
 until the land-time numbering step. Even a successful trailing repair violates the acceptance property.
-Here “reach main” includes commits made reachable through merge history, not merely the final tip's filenames.
+The sentence "reach main includes commits made reachable through merge history" was added to this card after the operator's wording; whether it binds is Fork 2.
 
-## Evidence
+## FOUND (re-verified 2026-09-21)
 
-**VERIFIED — measured live 2026-09-19 (`git log --diff-filter=A` on origin/main @ b4331d956 plus `gh pr view` merge-trace comments/labels for each PR).**
-After the 3707 incident repaired through #2335, nine more cards stranded on main:
+- **The incident is an ordering bug, not a missing branch.** The drain publishes first and numbers second. `we:scripts/merge-ai-prs.mjs:4567-4570` runs `mergePr({ …, method: 'merge', caller: 'drain' })` inside the land-write mutex; the numbering runs afterwards, at `:4704` (`numberPendingHashes`, `we:scripts/lane-drain.mjs:615`), best-effort, gated on `landedLocal`, its failure only a warning. `finalizeLand` (`we:scripts/lane-drain.mjs:851-880`) does the same for the `/pr` fast drain. Any failure between the two leaves a hash on main. The exact failing step for the nine cards is **UNVERIFIED** (drain stderr was not recorded); the four PRs' merge trace shows only "merged by drain".
+- **Nine cards stranded after 3707, all by the drain.** Hashes 3708–3716, PRs #2318 / #2032 / #2338 / #2210, merged 17:24–18:39 ET on 2026-09-19 (**VERIFIED** by `git log --diff-filter=A` plus each PR's merge-trace comment). They were numbered on main only when an unrelated later land (#2058, commit `11bc4e922`) happened to sweep them, so the tail is not a guarantee.
+- **A scripted direct push is already number-before-publish and fails closed.** `we:scripts/push-if-green.mjs` (step 3.5, `:160-184`) calls `numberPendingHashesBeforePush` (`we:scripts/lib/number-pending-hashes-before-push.mjs`) before every push of main and refuses the push if numbering fails (#3623/#3624). Its gaps: a `--sha` publish skips it (`:175`), and a raw `git push` with `--no-verify` or `MAIN_PUSH_OK=1` skips the local hook `we:scripts/guard-git-push.mjs`. The PR route has no equivalent, which is the whole incident.
+- **The drain already rewrites a lane tip before it merges.** `rebaseDropManifest` (`we:scripts/lib/rebase-drop-manifest.mjs:115`) and `healNnnCollision` (`we:scripts/lib/nnn-collision-heal.mjs:238`, called at `we:scripts/merge-ai-prs.mjs:3717-3721`) rebuild a tip with plumbing (`git merge-tree --write-tree` → temp index → `git commit-tree` → push the `lane/*` ref). `pr-land --fallback-git` (`we:scripts/pr-land.mjs:1136` onward) numbers hash cards before its direct push.
+- **Why numbering at drain admission cannot work (checked against the code).** `pr-land` labels a PR `ready-to-merge` only when its required checks are green (`we:scripts/pr-land.mjs:1018-1058`, aborting `check-red`), and the drain admits only labelled PRs, reading only the `test` check (`#repo-drain-check-contract`, `we:docs/agent/platform-decisions.md:3702`). A required hash-free check is red on every fresh card-bearing PR, so none would ever be labelled. And a drain-authored non-merge commit on a reviewed PR voids its `review:accepted` (`#merge-only-push-approval-carry`, `we:docs/agent/platform-decisions.md:5033`, clause 2). The first draft of this card's default numbered at admission and was refuted on both points.
+- **The local gate rejects a numbered tip.** `handNumberedNewItems` (`we:scripts/check-standards-rules.mjs:2490`, wired at `we:scripts/check-standards.mjs:591-596`, #2548) errors on any NNN in the working tree that is not on origin/main; only `WE_SKIP_HAND_NUMBERED_GATE` exempts it. A producer-numbered tip is exactly that until it lands.
+- **Not every PR is opened by `pr-land`.** The conveyor fix and ci-heal agents push `HEAD:refs/heads/<lane>` to update an existing PR and are told never to run `pr-land` (`we:skills-src/conveyor/fix-agent-brief.md:160-170`, `we:skills-src/conveyor/fix-agent-ci-brief.md`); `pr-land --sha` and a human's `gh pr create` are other routes. `number-stranded` refuses in a lane locus. A hash card filed in a fix round therefore has no numbering step today.
+- **A heal after review re-parks the PR.** The drain skips a `reviewHeld` PR before healing (`we:scripts/merge-ai-prs.mjs:3700-3705`) because the heal moves the head and voids the acceptance (#3735 clause 2).
+- **`bornAs` is not universal.** 1,428 of 3,824 numbered cards on `origin/main` carry it (measured 2026-09-21); every card numbered 3500 or higher has it. `healNnnCollision` detects a clash by filename, not by `bornAs` (`we:scripts/lib/nnn-collision-heal.mjs`).
+- **Hash files on main are transient, not zero.** At `b69c470aa` (about 19:00 ET, 2026-09-21) main held 13 hash-named files; at `a8f0eb968` (19:55 ET) none. A whole-tree hash check would have been red on every PR in between.
+- **The numbering mutex is machine-local and fails open.** `withNumberingLock` (`we:scripts/readiness/drain-lock.mjs:153`) keys on `~/.claude/drain-locks` (`:65`), has a 5-minute lease (`:74`), and by default proceeds unlocked on contention (`runUnlockedOnContention = true`, `:163`); `runUnlockedOnContention: false` (`:177`) is the fail-closed mode the POC land lock already uses (`:258`). `withNumberingLock` and `withLandWriteLock` share one key (`we:docs/agent/platform-decisions.md:2752`), so a producer holding it fail-closed waits behind any drain merge write, and the drain behind a producer.
+- **Everything that writes main today.** `mergePr` (`we:scripts/lib/pr-merge-gate.mjs:168`, `--merge` by default, `:16-22`) is the sole `gh pr merge` chokepoint. Direct pushes of `HEAD:main`: derived-artifact regen (`we:scripts/merge-ai-prs.mjs:2877`), the numbering push (`pushNumberingOnLand`, `:2901`), and `publishMain` → `push-if-green` (`we:scripts/lane-drain.mjs:843`; callers `:875`, `:897`, `:976`).
+- **Repo settings (`gh api`, 2026-09-21).** `chalbert/web-everything` is public, owner type User, no organization. Merge commit, squash and rebase are all allowed; `delete_branch_on_merge=true`; squash title `COMMIT_OR_PR_TITLE`; auto-merge off. Main protection: required checks `test` and `smoke`, **pinned to the GitHub Actions app (id 15368)**; `strict=false`; one PR required, 0 approvals; `enforce_admins=false`; no push restrictions; `rulesets=[]`. A pull-request check runs on the merge ref (the proposed integrated tree). `we:.github/workflows/review-gate.yml` reads checker code from main and is not a required check. The drain never passes `--admin`.
+- **GitHub cannot do three things here (prior-art report, VERIFIED from GitHub's docs source).** (1) The native merge queue needs an organization-owned public repository; this repo is user-owned; a queue also has no documented way for a check to rewrite the queued commit. (2) Push rulesets ("restrict file paths") exist only for private or internal repositories. (3) Branch-protection "restrict who can push" and bypass lists are organization features. Available: required checks, `enforce_admins`, squash-only via settings, branch rulesets (free on public repos; #3423 records that `bypass_actors` exist for public personal repos).
+- **Prior art (report, 40+ sources).** No mature system renumbers after merge. Gerrit, Phabricator, GitHub, Rust RFCs and KEPs allocate early from an atomic counter (Gerrit's is a git ref advanced by compare-and-swap, `refs/sequences/*`). Changesets, Alembic, Rails and log4brains never assign a sequence. Every gating system surveyed (bors, homu, Zuul, Tide, Mergify, Chromium CV) tests an *ephemeral* candidate and advances or discards it; none promotes main from a long-lived accumulating branch.
+- **GitHub numbers cannot serve as ids.** The PR counter is at 2422; backlog ids already run to 3836.
+- **Statute.** #3423 (`#pr-flow-rollout-mechanism` amendment): script discipline is the accepted enforcement layer for the sole-writer rule; `enforce_admins` stays `false`; the enforcement rung is a configurable dimension currently at Rung 1; revisit trigger = a distinct bot principal for the drain, or a second human; #3532 builds the knob. #1937 (`#gate-on-merged-tree-lane-fast-fail`): the binding gate runs centrally on the merged tree (context here, not authority over merge method or check content). `strandedHashesOnMain` and `duplicateBornAs` are #3423's "catch net".
 
-| Hash | Local repair NNN | PR | Merged (ET) | Route |
-| --- | --- | --- | --- | --- |
-| 3708 | #3708 | #2318 | 18:08 | Drain |
-| 3709 | #3709 | #2318 | 18:08 | Drain |
-| 3710 | #3710 | #2032 | 17:24 | Drain |
-| 3711 | #3711 | #2032 | 17:24 | Drain |
-| 3712 | #3712 | #2338 | 18:39 | Drain |
-| 3713 | #3713 | #2210 | 18:11 | Drain |
-| 3714 | #3714 | #2210 | 18:11 | Drain |
-| 3715 | #3715 | #2210 | 18:11 | Drain |
-| 3716 | #3716 | #2032 | 17:24 | Drain |
+## Two invariants hide inside this card
 
-**Later update (2026-09-19, VERIFIED):** the same nine were subsequently numbered on main by a drain
-commit (`11bc4e922`, "drain: JIT-number 3708→#3708 … 3716→#3716 at land (#2288)") — to exactly the
-numbers above — when PR #2058 landed. The hashes sat on main until an unrelated later land's tail happened to
-sweep them: a late, accidental repair, which confirms the tail is not a guarantee.
+- **Invariant A — no hash-named file in the candidate tree.** Per-PR and compositional: a clean main plus PRs that each add no hash file stays clean. A required check on the candidate tree closes it with no serialization.
+- **Invariant B — NNNs are unique.** Not compositional: two PRs that each pick 3900 merge with no textual conflict. It needs one allocation authority or a check at the point main is written.
 
-All four PRs have “📌 Merge trace … merged by drain (session unknown)” and labels `ready-to-merge` +
-`review:accepted`; none received a following `drain: JIT-number …` commit. The earlier UI/bare-merge
-explanation is refuted. **UNVERIFIED:** the exact failing step; drain stderr was not recorded.
+The original draft's first two forks were the same choice under two names; the frame here is: Fork 1 is *where numbering happens* (the timing that makes A satisfiable and B safe), Fork 2 is *how far A reaches* (tip or full history).
 
-**VERIFIED — local source reads.** In `we:scripts/merge-ai-prs.mjs`, `mergePr` (~4540) publishes first;
-`numberPendingHashes` (~4660–4675) is a best-effort tail after pull / `resyncDetachedCwdForLand`, gated by
-`landedLocal`, with failures reported as warnings. The already-merged concurrent-lander branch skips owning
-that tail; a later pass merging nothing does not re-enter it. `finalizeLand` in `we:scripts/lane-drain.mjs`
-(~850–882) likewise numbers after the remote merge. **INFERRED:** these are sufficient failure windows to
-explain how a drain merge can strand hashes; they do not identify which window caused these incidents.
-`WE_SKIP_HAND_NUMBERED_GATE` in `we:scripts/pr-land.mjs` (~1211) exempts the collision-heal self-check from
-#2548, not numbering; `--no-require-verified` bypasses only the lane-verified marker requirement.
+## Recommended path at a glance
 
-**VERIFIED — filing and repair.** `we:scripts/operations/file-item.mjs` calls `planScaffold` from
-`we:scripts/operations/scaffold.mjs`, whose default allocator is `nextHash` (~111). `--queue=false` only
-suppresses conveyor queueing; it creates the same hash-born card as queued filing. The operator observed
-3712 filed this way and landed within the hour. This is not a separate numbering bypass: both filing
-routes depend on land-time numbering, including cards carried incidentally by another PR.
-`we:scripts/backlog.mjs number-stranded [--dry-run]` is the existing working repair (#2319/#2288): it
-calls `numberPendingHashes` for every tracked hash card, rewrites references, and normally commits the result.
-It refuses a lane locus; untracked scaffolds are excluded. Its use for these nine and 3707 is supplied
-live evidence; this pass verified the implementation without executing the mutating command.
+| Fork | Default | Main alternative, and why it is not the default |
+| --- | --- | --- |
+| 1 — where numbering happens | **(a) the producer numbers at PR open, before CI and review; numbering is a standalone operation callable on any lane ref; the drain refuses a clashing NNN at the point main is written** | (b) a persistent integration branch (the operator's suggestion): a shared mutable branch can be left red and needs a repair policy, where prior art discards a bad ephemeral candidate |
+| 2 — how far "reach main" reaches | **(a) the tip tree: a required, diff-scoped `backlog-ids` check on the candidate; merge method unchanged** | (b) full reachability (squash-only): discards each PR's per-commit history and ends ancestry as the "landed" truth that lane ownership, batch stacking and lane recycling read |
+| not a fork — the direct-push residual | **left as #3423's accepted Rung 1; every scripted push refused at the chokepoints; knob #3532** | closing it now needs a bypass identity the repo lacks and blocks the drain's own direct pushes |
 
-**VERIFIED — GitHub API measurements (`gh api repos/chalbert/web-everything`, `.../branches/main/protection`, `.../rulesets`, 2026-09-19).**
-`chalbert/web-everything` is public, owner.type=User, organization=null; rulesets=[].
-Main protection requires `test`, `smoke`; strict=false; required approvals=0; enforce_admins=false;
-no push restrictions. Merge-commit, squash and rebase are
-allowed; auto-merge is off. These settings do not establish a universal, non-bypassable admission boundary.
-**VERIFIED — workflows.** `we:.github/workflows/ci.yml` runs on PRs and main pushes: `test` aggregates
-Vitest coverage, runs `check:standards` and the integration suite; `smoke` builds docs and runs interactions.
-PR checkout uses the PR merge ref: the proposed integrated tree, not a future main after numbering.
-The #2319 rule separately reads `origin/main`, so a PR-time green does not prove its new hash is absent.
-`we:.github/workflows/review-gate.yml` reads checker code from main and labels from the event; it checks
-review holds, not filenames, and `review-gate` is not in the measured required-check list.
+## Supported by default — not forks
 
-**VERIFIED — lineage and collision tools.** #2288 introduced hashes to remove parallel-lane NNN races;
-#2319 added repair plus detection. `we:scripts/backlog.mjs yield <NNN-slug>` reallocates a local-only
-collision and normally refuses tracked files, but the implementation has a `--force` escape. It is not
-an atomic cross-lane reservation. `we:scripts/lib/nnn-collision-heal.mjs` already heals new-item collisions
-before checks, preserving base-owned files/references; history includes `be71beb32` (#3075 → #2305) and
-`7f6ba8ed4` (#2383 → #2306). #2548's notes in `we:scripts/check-standards-rules.mjs` recall #558:
-hand-picked numbers collided and a heal blanked files. The gate now rejects an NNN absent from origin/main.
-`withNumberingLock` in `we:scripts/readiness/drain-lock.mjs` shares a HOME-level mutex across local clones,
-but numbering callers may proceed unlocked after contention. `numberPendingHashes` in
-`we:scripts/lane-drain.mjs` supplies reference rewrites and durable `bornAs` provenance; these are reusable,
-not a distributed reservation service. The repair wrapper itself does not acquire the mutex.
+- **Scope is every hash-id backlog file, whatever its kind or carrier** (stories, decisions, epics; queued and unqueued filing; drain-created cards; graduation slices; cards carried incidentally by an unrelated PR). The nine-card incident is the excluded branch: incidental cards escape any route-specific rule. A forced invariant.
+- **The rung is a configurable dimension, not a fork (#3423).** Whether a raw admin push or an admin-bypass merge is also refused server-side is the enforcement rung: Rung 1 now, Rung 2 "OFF, not weighed and lost", revisit trigger a distinct bot principal for the drain or a second human, knob #3532. Closing it now (`enforce_admins=true` or a no-bypass ruleset) blocks the drain's own direct pushes (regen `we:scripts/merge-ai-prs.mjs:2877`, unqueue, resolve-on-land flips, reopen), `--fallback-git` and `WE_MERGE_BREAK_GLASS` (reversing #2152), and a personal repo cannot name a bypass actor for the drain. What this card adds under the rung: refuse a hash-bearing tree at every scripted push of main, including the `--sha` publish path, and in a pre-push hook scoped to pushes of main (a push to a POC branch is not a push of main and is not covered). The refusal also binds the human's direct push, which Rung 1 permits in general but not with a hash card in it. The operator's absolute wording is not met for a raw admin push until #3532's trigger holds; that is stated, not hidden.
+- **The numbering tail after merge** is removed for the PR route once the required check exists (a hash-bearing PR cannot merge, so the tail is dead); it stays in `push-if-green` for the direct-filing route.
+- **Post-land repair is not prevention and is not an option.** `number-stranded` and `strandedHashesOnMain` stay as the catch net #3423 names, and for legacy hashes already on main. Already-published history is not rewritten.
+- **Ratification amends #2548 and restates the shared-lock sentence.** #2548's rule (an NNN not on origin/main is a hand-picked mistake) stays a lane-local fast-fail (#1937) and exempts the numbering operation's own commit; central uniqueness at the write point is the authority, so #2548 no longer has to be unforgeable. `#pr-flow-rollout-mechanism`'s sentence that a merge write and the numbering step are mutually exclusive on one key is restated: producer numbering takes the same key, waits behind a drain merge write, and fails closed on contention instead of running unlocked. #2288 has no statute anchor; ratification records that numbering moves from "at land" to "at PR open, verified at land".
+- **`strict` (require up to date) stays off.** The write-point verify covers invariant B, and the check is diff-scoped; revisit if a non-drain merge route ever exists.
+- **Rejected on evidence, with a revisit trigger (not options).** (1) Numbering at the drain's admission, after CI and review: deadlocks against the required check and voids approvals (see FOUND). (2) GitHub's native merge queue: ineligible while the repo is user-owned; a queue cannot number a commit; it becomes coherent only after an organization transfer, the same transfer that would unlock the rung knob. (3) Ids taken from GitHub PR or issue numbers: 1–2422 already overlap backlog ids. (4) Permanent non-sequential ids (Changesets, Alembic, log4brains): removes the problem, but cards are cited by number in commits, PRs, docs and about 3,800 files and the requirement's premise is the hash becoming an NNN; that is the id-model decision, not this one. (5) An atomic git-ref counter as the allocator (Gerrit's `RepoSequence`, `refs/sequences/backlog`): unnecessary while the write-point verify guarantees uniqueness; it would add gaps, custom refs outside branch protection and a second id lifecycle, and GitHub honouring `old-id` compare-and-swap on a custom ref under 24 concurrent lanes is **not tested**. Revisit if bounces at the write point turn out frequent or a merge queue is adopted.
 
-## Forks
+## Fork 1 — Where numbering happens
 
-Proposed defaults only; no ratification or full prepare pass is claimed. Option behavior below is
-**INFERRED / PROPOSED**, not an implemented guarantee; source findings are marked VERIFIED.
+*Fork-existence:* a number must exist before the PR's required checks and review, or the PR must merge into a branch in front of main. The remaining timing, numbering at the drain after CI and review, is broken (a red required check keeps the PR from ever being labelled, and a drain commit voids the approval), so the two survivors cannot both be the numbering point.
 
-### Fork 1 — Where numbering happens
+- **(a · DEFAULT) The producer numbers at PR open.** Every hash card on a lane tip gets its final NNN before that tip's first push for review, so CI and reviewers see final ids once. Numbering is a standalone operation callable on any lane ref, not a step inside `pr-land` alone: a route that bypasses `pr-land` (the conveyor fix and ci-heal agents, `pr-land --sha`, a human's `gh pr create`) calls it before its push, and the `backlog-ids` failure message names it. A numbering commit added to a tip that already holds an acceptance re-parks the PR (#3735 clause 2); only a hash card filed after review pays that. Allocation is best-effort and uniqueness is guaranteed where main is written: under the land mutex, on a fresh fetch, immediately before the merge, the drain compares each of the PR's NNNs with main (an identical path is the same card; a different path with the same NNN is a clash). A clash on a PR that holds an acceptance re-parks it, otherwise the existing heal renumbers it. The mutex is host-local, so producers on different hosts can be handed the same NNN and are caught at the write point, at the cost of one bounce and one CI cycle; the guarantee holds for drain-serialised merges. Numbering fails closed: if it cannot number, no PR is opened. A `blockedBy: xA` in PR B that points at PR A's hash resolves at the reader through `bornAs` (#3605 clause 1); the drain makes no commit on a sibling PR.
+- **(b) A persistent integration branch (the operator's suggestion, 2026-09-19).** PRs merge into `integration` (hash ids allowed there), one writer numbers on it and runs the full checks on the numbered result, then a promotion moves main to that result with a compare-and-swap on both tips; the required check applies only at main. It avoids the deadlock and the approval problem by placing the numbering point in front of main, and it tests the numbered combination of several PRs before main moves. Its merit costs are those of a shared mutable branch: it can be left red, so a repair policy is part of the design (revert vs reset, stacked-PR replay, retained numbering mappings), where every gating system surveyed (bors, Zuul, Tide, the native queue, Chromium CV) tests an ephemeral candidate and discards a bad one; and it needs the same server-side enforcement at main as (a). Under Fork 2 (a) the promotion can be an ordinary merge; under Fork 2 (b) it must be a squash.
 
-- (a) At file time: reserve NNNs atomically in one server-side registry before writing; no temporary IDs, but gaps and an online filing dependency. Local max+1 is rejected.
-- (b) At PR open and for later additions: centrally reserve and rewrite before checks; cheap hash drafts remain, but reservations need provenance and abandonment rules.
-- **(c · DEFAULT) On an integration/staging branch, before promotion to main:** PRs target integration; one serialized writer runs `we:scripts/backlog.mjs number-stranded`, then `npm run check:standards` and the required full checks on the numbered merged result. Only a green, fully-numbered candidate can advance main.
-- (d) At land without a persistent branch: build, number and check an isolated merged candidate before publishing; needs the same exclusive writer, candidate-bound checks and retry semantics. Native queue is compared in Fork 2.
+```js
+// we:scripts/pr-land.mjs — new step before the lane ref is pushed (today numbering runs only on the --fallback-git route, :1136+)
+const numbering = await numberPendingHashesBeforePush(REPO /* + the lane ref; build story 1 fixes the signature */);
+if (numbering.attempted && numbering.error) emit({ repo: REPO, merged: false, reason: 'numbering-failed', detail: numbering.error }); // fail closed, as push-if-green does
 
-The operator asks: “couldn't we have an intermediate branch where PRs are merged and ids resolved?”
-Yes, subject to enforceable exclusive promotion and the history constraint below. Its three strengths:
+// we:scripts/merge-ai-prs.mjs — new: inside withLandWriteLock, immediately before mergePr (today :4567-4570)
+const clash = nnnClashOnMain(c);   // identical path = same card; different path, same NNN = clash
+if (clash) return c.accepted ? { reparked: true } : { healed: healNnnCollision({ laneRef: c.headRef, base: 'origin/main' }) };
+mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' }); // unchanged under Fork 2 (a)
+```
 
-1. The acceptance property becomes STRUCTURAL: main accepts only an already-numbered, green promotion.
-2. Numbering is a SINGLE-WRITER operation on one branch. This dissolves the parallel-lane allocation race that #2288's hashes exist to avoid — its strongest argument; lanes never compete for NNNs.
-3. The gate runs on the EXACT combined, numbered result, catching cross-PR interactions that independent PR checks against an earlier base cannot establish. Both supplied incidents were interaction-shaped: individually acceptable PRs, then red main; the precise failing drain step remains UNVERIFIED.
+**Skeptic:** REFUTED as first written → rewritten, then SURVIVES-WITH-AMENDMENT (two rounds). Round 1 refuted numbering at the drain's admission: the required check keeps every card-bearing PR from being labelled (`we:scripts/pr-land.mjs:1018-1058`), and a drain commit voids the approval (#3735 clause 2); the default was flipped to producer-time numbering. Round 2 attacks landed and are folded in: routes that bypass `pr-land` (now a standalone operation and a failure message), "duplicates only across hosts" (false on one host until the ref is pushed; the allocator must scan every pushed `lane/*` ref and hold the mutex until its ref is pushed, build story 1), the heal after review (a clash on an accepted PR re-parks it), sibling references (reader-side through `bornAs`, no drain commit), #2548 (a lane-local fast-fail, exempting the numbering commit). Standing limit: uniqueness holds for drain-serialised merges only.
+**Screen:** flagged(prio) → fixed. (b)'s rejection was restated on merit, dropping the list of call sites it would retarget; the allocator sub-fork was dissolved into the default (allocation best-effort, uniqueness at the write point) with the atomic counter moved to *Rejected on evidence*; mechanism sentences moved to build story 1.
 
-History constraint: a normal merge or fast-forward of raw integration after a rename commit would expose
-its earlier hash-bearing commits. That satisfies a tip-only rule, NOT this card's stronger reachability
-rule. Build a sanitized promotion commit/tree atop current main (squash the staged changes), check it, and
-fast-forward main to that checked commit; alternatively rewrite and validate all newly reachable history
-before merge/fast-forward. Compare-and-swap the expected main base and integration tip; any movement
-invalidates approval. The raw staging history cannot be a parent of the promoted commit. Existing hashes
-already in main's history cannot be undone by a repair PR; prevention applies to newly reachable history.
+## Fork 2 — How far "reach main" reaches
 
-### Fork 2 — Which admission mechanism wins?
+*Fork-existence:* the rule is either about the tree main points to or about every commit reachable from main; the two cannot both be what the check enforces. The operator's own words say a hash file must be unable to reach main; the reading that includes ancestor commits was added to this card by a later drafting pass.
 
-- **(a · DEFAULT) Bespoke integration branch + exclusive green promotion:** selects Fork 1(c), serializing merge → numbering → full checks → promotion. Require a hash-free candidate and enforce every main-write boundary, including admin/direct-push routes. Pays for a second landing stage to obtain mutation support and collision-free numbering.
-- (b) GitHub native merge queue: prospective merged-state checks without a bespoke branch; preferred ONLY if available AND numbering is no longer a mutation. Neither condition holds on current evidence.
-- (c) Cheaper shift-left REQUIRED PR check: reject any PR adding `we:backlog/<hash>-*.md`, or more strongly any candidate branch tree carrying a hash-id file. No new branch; blocks the same filename failure, provided numbering and collision safety are solved BEFORE merge.
-- (d) Post-land repair — status quo, rejected as prevention: the repair works, but the forbidden file has already reached main.
+- **(a · DEFAULT) The tip tree.** A required `backlog-ids` check fails a PR whose merge ref adds a hash-named backlog path, or renames a file to one, checked as a diff against the base (not a scan of the whole tree, so a hash that reached main by another route does not wedge every PR) and switched on only after `number-stranded` has cleared the hash files on main. Every commit main points to is hash-free; the merge method is unchanged. It binds every route except an admin bypass. Ancestor commits that once added a hash-named file stay in history, as they already do for every PR landed since #2288, and nothing observable depends on them: the harm the operator named (main red, stranded cards) is a tip property.
+- **(b) Full reachability: squash-only.** `allow_merge_commit=false`, `allow_rebase_merge=false`, and the drain merges with `squash`, so a PR's own commits (each of which added the hash file) never become ancestors of main. It is the more literal reading and coherent. Its merit cost: it discards each PR's per-commit history and ends ancestry as the truth for "landed", which today's rules read: lane ownership by ancestry ("never sha equality", `we:scripts/pr-status.mjs:31`), stacked serial batches (`## Overlap-stacked serial batches` in `we:docs/agent/backlog-workflow.md`), lane recycling (`laneDirtyOrAhead` in `we:scripts/lane-pool.mjs`), the verification-marker test (`we:scripts/verify-lane.mjs:207`), and release-please, which reads main's commits. The right choice only if history itself must be hash-free.
 
-**INFERRED from [GitHub's merge-queue documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), read this pass; not tested by enabling it:** availability requires an organization-owned public repository, or an organization-owned private repository on Enterprise Cloud. This public USER-owned repo very likely needs an organization transfer first. A queue tests the latest base plus preceding entries on GitHub-owned temporary merge commits, then advances main on success. The docs support merge/rebase/squash methods, not an unconditional fast-forward promise. A `merge_group` workflow trigger is required. Checks have no documented supported way to mutate the queued commit with numbering and push that replacement back into the queue; numbering must precede enqueue or use a separate writer. Failed entries are removed and later candidates rebuilt. These availability and mutation gaps rule it out as today's default.
+**Skeptic:** SURVIVES-WITH-AMENDMENT. The fork is real (the tip and ancestry readings cannot both be the rule). Landed and folded in: a whole-tree check is red on every PR while any hash file sits on main (13 at 19:00 ET on 2026-09-21), so it is diff-scoped and activated after the legacy repair; the first regex missed a card file named by its id alone (no slug), so the pattern follows `ID_TOKEN_RE` (`we:scripts/backlog/id.mjs:37`); `refs/pull/N/merge` can lag the head, so the check asserts the merge commit's second parent equals the head sha; "any route" overclaimed given `enforce_admins=false`, so it binds every route except an admin bypass.
+**Screen:** flagged(prio) → fixed. (b)'s rejection was rebased on merit (lost per-commit history; ancestry as the landed truth); the per-consumer rework list, the `--fallback-git` line and the workflow YAML moved to build stories.
 
-Shift-left forces numbering on each PR branch, reopening the parallel-lane collision #2288 solved.
-It works only if Fork 3's earlier-numbering mechanism suffices: `yield` and the heal pre-check resolve
-observed collisions but do not reserve numbers against concurrent stale lanes. A required uniqueness
-check must validate the latest combined candidate with serialized admission, or allocation needs durable
-atomic reservations. Independent green checks alone do not close the race. Added-path checking also
-needs rename coverage and a clean-base assertion; candidate-tree checking is clearer. Both need Fork 1's
-history policy and trusted, candidate-bound checks. Neither today's admin exemption nor an optional check
-makes either approach structurally unskippable.
+## What ratifying files
 
-Recommendation after weighing all three: integration earns its extra machinery by allowing the necessary
-mutation at a single writer and checking cross-PR interactions before main moves. Prefer shift-left if a
-proven earlier allocator/serialized admission already closes collisions and its lower migration cost wins.
-Prefer native queue if organization eligibility is established AND IDs become mutation-free at queue time.
-If exclusive promotion, clean history or red-integration recovery cannot be enforced, integration is not
-ready to ship; its name alone is no guarantee. Closing bypasses explicitly changes the convention-only
-rung/human direct-write exemption in `we:docs/agent/platform-decisions.md#pr-flow-rollout-mechanism`;
-ratify that change and verify available enforcement controls before claiming structural prevention.
+Ratification records the selected forks in `we:docs/agent/platform-decisions.md` (a new anchor linked by `codifiedIn`; states how it composes with `#pr-flow-rollout-mechanism` and its #3423 amendment, `#gate-on-merged-tree-lane-fast-fail`, `#merge-only-push-approval-carry` and `#repo-drain-check-contract`; supersedes #2288's at-land timing; amends #2548) and files these build stories, each carrying its own slice of the touch-set as `scope:`:
 
-Integration migration costs — **VERIFIED source reads**, with **INFERRED required adaptations**:
+1. **Numbering as a declared operation** — `we:scripts/operations/`: callable on any lane ref; reads and writes; allocation reads `origin/main` and every pushed `lane/*` ref and holds the mutex until the new ref is pushed; fail-closed lock; idempotency; locus rules; refusal outcomes; adapts `numberPendingHashes` to a lane tip rather than a checkout. Acceptance names crash and retry behaviour, reference preservation, and how #2548's fast-fail recognises the operation's own commit. Prerequisite for the next two.
+2. **Producer numbering and the write-point verify** — `we:scripts/pr-land.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/lib/nnn-collision-heal.mjs`, `we:scripts/check-standards-rules.mjs` (#2548), the conveyor fix and ci-heal briefs under `we:skills-src/conveyor/`; the numbering tail removed. Acceptance: two lanes on two hosts handed the same NNN cannot both merge, and main stays green.
+3. **The `backlog-ids` check and repo settings** — `we:.github/workflows/ci.yml` (or a sibling workflow) plus the operator-run change to main's required contexts (a `setup` step; repo settings are not edited from an agent lane). Sketch (`pull_request_target`, so the check comes from main and a PR that edits the workflow cannot weaken the check that judges it; no `if:` and no path filter, since a skipped job reports success):
 
-| Call site | Observed assumption and migration cost |
-| --- | --- |
-| `we:scripts/pr-land.mjs:132` | `--base` defaults to main. Retarget all ordinary PRs, including already-open ones, to integration. |
-| `we:scripts/verify-lane.mjs:194`; `we:scripts/readiness/test-selection.mjs:253` | Default gate delegates to main-relative diff selection; change the comparison base. `we:scripts/verify-lane.mjs:207` also tests marker ancestry against origin/main. |
-| `we:scripts/merge-ai-prs.mjs:3087`; `we:scripts/merge-ai-prs.mjs:3548` | Drain's `--label=ready-to-merge` listing defaults to ANY base, not main; explicitly scope integration. Rebuilds DO hard-code origin/main at `we:scripts/merge-ai-prs.mjs:3758`; retarget these and separate staging merges from promotion/tail work. |
-| `we:scripts/operations/operator-queue.mjs:84`; `we:scripts/operations/operator-queue.mjs:123` | Reads mergeability against each PR's actual base; no hard-coded main filter, and no requested base field. Distinguish ready-for-integration from ready-for-main; a mergeable staging PR is not a promotable tip. |
-| `we:scripts/gen-decision-docket.mjs:36`; `we:scripts/gen-decision-docket.mjs:84` | Documents `--ref=origin/main` as landed truth; ref is configurable, not a hard-coded default. Ranking separately assumes main freshness. Decide whether staged cards appear and align ranking with reads; retain main as the promoted view. |
-| `we:backlog/3443-graduate-origin-lane-mechanical-dispatcher-to-main-in-small.md:29`; `we:backlog/3443-graduate-origin-lane-mechanical-dispatcher-to-main-in-small.md:31` | Graduation means small reviewed PR increments reaching main through the normal pipeline. Amend for PR-to-integration then promotion; staging alone must not count as graduation. |
+   ```yaml
+   backlog-ids:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4                      # base ref: trusted checker code, no PR code executed
+       - run: |
+           git fetch --depth=2 origin "refs/pull/${{ github.event.pull_request.number }}/merge"
+           # assert the merge commit's second parent == github.event.pull_request.head.sha, else fail (stale merge ref)
+           bad=$(git diff --name-only --diff-filter=AR HEAD~1 FETCH_HEAD -- backlog/ | grep -E '^backlog/x[0-9a-z]{6}(-|\.md$)' || true)
+           [ -z "$bad" ] || { echo "::error::hash-id backlog file(s) awaiting numbering — run the numbering operation on this lane ref:"; echo "$bad"; exit 1; }
+   ```
 
-Two-step latency is real: merged into integration is not visibly landed on main until numbering, full
-validation and promotion complete. Main currently requires `test`,`smoke`; integration needs its own
-protection/check policy, and main needs exclusive promotion enforcement. Update workflow branch triggers
-as well as protections; staging must permit hash drafts while promotion rejects them. Checks must run
-on the final numbered result, not merely the pre-numbering PR merge ref.
-
-Red-integration recovery is part of option (a), not deferred housekeeping. WHO fixes it, and does the
-owner REVERT the bad PR or RESET integration to main? Proposed ownership: the promotion operator freezes
-intake/promotion and owns recovery; the offending PR author supplies the fix, with a named fallback when
-absent. Ratification must choose the recovery policy. Revert preserves shared history but stacked PRs
-lose a dependency: hold them, adapt/rebuild and recheck, or restore the dependency before admitting them.
-Reset discards all unpromoted integration commits, including good work: record/replay survivors and
-rebuild every affected in-flight stack onto the new base; invalidate old checks and ready labels.
-Neither policy may silently reuse numbers already exposed on staging; retain allocation mappings across
-retries/reverts/resets. Main stays at its last green promotion while recovery runs.
-
-### Fork 3 — What prevents allocation collisions?
-
-- **(a · DEFAULT) One serialized integration numbering authority:** all lanes retain hashes; only the staging writer allocates against the latest numbered state, with fail-closed exclusivity, durable mappings and retry/crash recovery. No competing pre-merge NNN claims.
-- (b) If choosing earlier numbering: durable atomic reservations across every lane, bound to immutable item keys; retries reuse the binding and abandoned numbers stay reserved. CI validates provenance and uniqueness.
-- (c) Disjoint lane ranges: still requires atomic durable range grants and ownership across lane reuse; burns numbers.
-- (d) Yield/heal or a HOME-local lock alone: insufficient across independent writers; today's unlocked fallback is not exclusivity. May support shift-left only with latest-candidate uniqueness checks and serialized admission, not as an allocation guarantee itself.
-
-Reuse `bornAs`, reference rewriting and pre-check healing for legacy collisions; provenance alone is not
-trusted reservation proof. Replace #2548's “already on origin/main” rule with evidence appropriate to the
-selected authority. Exercise simultaneous lanes, retries, crashes and stale candidates.
-
-Repair-PR tension — the existing repair PR cannot pass today's origin/main-relative gates before landing:
-#2319 sees the stranded originals; #2548 rejects its new NNNs. Every option needs a narrow bootstrap
-transition validating the resulting candidate and exact hash→NNN mapping, never an unrelated-addition
-exemption. Integration removes routine repair PRs: numbering happens on staging before promotion; legacy
-repair can ride that validated promotion. Shift-left still needs a numbered repair PR plus that narrow
-transition. Native queue neither numbers nor bypasses these rules: repair/number the PR before enqueue
-and validate the same transition on the queue candidate. Already-published history is not repaired away.
-
-### Fork 4 — Scope and prerequisite slice
-
-- **(a · DEFAULT) Every hash-id backlog file, regardless of kind or carrier:** stories, decisions, epics; queued/unqueued filing; drain-created cards; incidental cards in unrelated PRs. One filename invariant.
-- (b) Only selected routes/items — rejected: the nine-card incident demonstrates incidental cards escape route-specific coverage.
-
-**VERIFIED:** `number-stranded` is a subcommand of `we:scripts/backlog.mjs`, not a declared operation in
-`we:scripts/operations/run.mjs`. Repair already exists; do not file another repair-capability story.
-**PREREQUISITE SLICE:** expose numbering as a small explicit declared operation callable by a transport,
-with reads/write effects, allocation authority, idempotency, locus rules and refusal outcomes. The
-integration option's serialized step needs this SAME prerequisite: the existing CLI refuses lane loci
-and does not acquire the mutex, so merely invoking it is not a transport contract. Preserve the working
-repair verb; adapt its reusable core for pre-publication use. An earlier-numbering choice wires the same
-slice to PR-open/later additions, with reservations as needed. Required checks verify; they never mutate.
+   The check guards against accidents and drift, not a PR author who adds a second workflow reporting the same status name (the app pin is per app, not per workflow); such a PR is a `.github/` change, which review escalation already raises (`we:scripts/lib/review-escalation.mjs:244`). Acceptance: a fixture PR that adds a hash file cannot merge (red before, green after); activation follows story 5.
+4. **Direct-push refusal** — `we:scripts/push-if-green.mjs` (the `--sha` path), a main-scoped pre-push hook beside `we:scripts/guard-git-push.mjs`. Acceptance: the same fixture cannot be pushed by any script.
+5. **Legacy repair transition** — hashes already on main are repaired by `number-stranded`; the repair PR cannot pass today's gates (#2319 sees the stranded originals, #2548 rejects the new NNNs), so the build validates the resulting tree and the exact hash-to-NNN mapping, never an unrelated-addition exemption. Blocks story 3's activation.
 
 ## Done when
 
-1. **Executable** — ratification records selected forks in `we:docs/agent/platform-decisions.md`, links this card via `codifiedIn`, and files a blocked-then-unblocked build story. `npm run check:standards` validates those artifacts. Name a runnable regression: a fixture PR adding a hash cannot publish to main (red before implementation, green after), with main unchanged on refusal.
-2. Cover every main-write route, merge method, late addition and hash-bearing ancestor; prove candidate-bound checks, serialized promotion and admin/direct-push enforcement against measured configuration. Include two individually green PRs whose combined result fails; main must remain green.
-3. Specify allocation ownership, retry/crash behavior, reference preservation and the narrow legacy repair transition. Integration additionally names the recovery owner, revert/reset policy, stacked-PR handling and retained numbering mappings; executable collision, repair and recovery fixtures are required.
-4. Reconcile #2288/#2319/#2548, #3443 and the writer-model statute; assign the declared-operation prerequisite and migration call sites. No post-land repair step may serve as prevention.
+1. **Executable** — ratification records the selected forks in `we:docs/agent/platform-decisions.md`, links this card via `codifiedIn`, and files the build stories above (blocked-then-unblocked). `npm run check:standards` validates those artifacts.
+2. Every pull-request main-write route and every scripted direct push is covered; the residual raw admin push is stated. Two PRs allocated the same NNN cannot both merge, and main stays green.
+3. #2288, #2319, #2548, #3443, #3735 and #3423 are reconciled; the declared-operation prerequisite and the migration call sites are assigned. No post-land repair step serves as prevention.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `high`. This jury binds against the item's predicted scope and is re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| claim-accuracy#1 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
+| claim-accuracy#2 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
