@@ -8,9 +8,8 @@ scope: ["we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interac
 dateOpened: "2026-09-20"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "7bdbe0c8a8fdd88b715e4094456b513823489179"
-relatedTo: ["3804", "3805", "3772", "3443", "3801", "3475"]
+relatedTo: ["3804", "3805", "3772", "3443", "3801", "3475", "3822"]
 relatedReport: reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md
-blockedBy: ["3822"]
 tags: []
 ---
 
@@ -136,4 +135,4 @@ Care level: `high`. This jury binds against the item's predicted scope and is re
 2. **Executable** — the same run prints no warning line for card 3475 (before: 3, its cites past the end of the branch's reaper file). Check: the output contains no line matching `warn backlog/3475`.
 3. **Executable** — a listing of the backlog folder on the branch has each of the ids 3663, 3664, 3665 and 3666 exactly once. (Passes today.)
 4. **Human verify** — `git log -5 --format=%an` on the branch shows the operator's real name on new commits, not the placeholder `test`.
-5. **Executable, if the ruling adopts the recurrence guard** — a test of the push guard fails when a push adds one `check:standards` error in its own files, and a test of the probe raises an alert when the tip has one error the push did not cause.
+5. **Executable — kept: #3822's ruling adopts the recurrence guard (Fork 3(a))** — a test of the push guard fails when a push adds one `check:standards` error in its own files, and a test of the probe raises an alert when the tip has one error the push did not cause.
