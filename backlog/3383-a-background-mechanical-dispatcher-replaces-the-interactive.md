@@ -4512,7 +4512,7 @@ Checks: `we:scripts/operations/__tests__`, `we:scripts/__tests__` and `we:script
 
 ## Session update (2026-09-21) — compact tracker page and a declared tracker-refresh operation: the default page is ~55 KB (was ~307 KB), the refresh is mechanical up to the Artifact call, first page published (code commit 837588300)
 
-The operator asked whether the Prototype Tracker Artifact is up to date ("is the list just upcoming items, in priority order; there is a lot of prose, is it required and useful") and ruled a compact page (the top of the list as a table, the notes collapsed), published by a worker, with the refresh made mechanical. Built on this branch (code commit 837588300; no PR, per the prototype rule) and published once by hand: **https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv** (private). No page had been published before, so there was nothing to be stale.
+The operator asked whether the Prototype Tracker Artifact is up to date ("is the list just upcoming items, in priority order; there is a lot of prose, is it required and useful") and ruled a compact page (the top of the list as a table, the notes collapsed), published by a worker, with the refresh made mechanical. Built on this branch (code commit 837588300; no PR, per the prototype rule) and published once by hand: a private Artifact page (its URL is recorded in the state file, see **Files** below, not pasted here). No page had been published before, so there was nothing to be stale.
 
 **What exists:**
 
@@ -4555,9 +4555,9 @@ The operator asked whether the Prototype Tracker Artifact is up to date ("is the
 ```
 node we:scripts/operations/run.mjs tracker-refresh --apply
 # then, with the Artifact tool:
-#   Artifact(action:"read",    url:"https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv")
-#   Artifact(action:"publish", file_path:"~/workspace/.operations/tracker/prototype-tracker.html", url:"https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv")
-node we:scripts/operations/tracker-refresh-state.mjs record --html=~/workspace/.operations/tracker/prototype-tracker.html --url=https://claude.ai/artifact/BD27KrofxNRPPdkx47Konv
+#   Artifact(action:"read",    url:"<url, from ~/workspace/.operations/tracker/artifact.json>")
+#   Artifact(action:"publish", file_path:"~/workspace/.operations/tracker/prototype-tracker.html", url:"<url, from ~/workspace/.operations/tracker/artifact.json>")
+node we:scripts/operations/tracker-refresh-state.mjs record --html=~/workspace/.operations/tracker/prototype-tracker.html --url=<url, from ~/workspace/.operations/tracker/artifact.json>
 # or, without the operation:  node we:scripts/prototype-tracker.mjs render > page.html   and publish page.html
 ```
 
