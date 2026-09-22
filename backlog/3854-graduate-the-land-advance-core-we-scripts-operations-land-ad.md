@@ -5,7 +5,7 @@ size: 3
 parent: "3443"
 status: open
 blockedBy: ["3853"]
-scope: ["we:scripts/operations/land-advance.mjs", "we:scripts/operations/land-advance-repair.mjs", "we:scripts/operations/land-advance-escalations.mjs", "we:scripts/operations/__tests__/land-advance.test.mjs", "we:scripts/operations/__tests__/land-advance-repair.test.mjs", "we:scripts/operations/__fixtures__/land-advance/today.json"]
+scope: ["we:scripts/operations/land-advance.mjs", "we:scripts/operations/land-advance-repair.mjs", "we:scripts/operations/land-advance-escalations.mjs", "we:scripts/operations/__tests__/land-advance.test.mjs", "we:scripts/operations/__tests__/land-advance-repair.test.mjs", "we:scripts/operations/__fixtures__/land-advance/today.json", "we:scripts/operations/land-advance-items.mjs", "we:scripts/operations/__tests__/land-advance-repair-io.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
 ---
@@ -25,3 +25,7 @@ Graduation slice 5 of 6 for the land-advance operation. Three pure modules missi
 - Part of the six-slice land-advance graduation under #3443. **CORRECTION to the inventory:** it lists this slice as depending on the watchdog, session-verdicts and ci-heal slices. Checked import by import, this slice needs only the land-advance-tools slice: `we:scripts/operations/land-advance.mjs` and its escalations module import nothing from those three, and the two pure tests import only these modules, the tools module and `we:scripts/lib/constellation-repos.mjs`. The dependency runs the other way: the session-verdicts slice needs this one.
 - Order across the six: tools (2) → this slice (5) → session-verdicts (3); watchdog (1) and ci-heal (4) are independent; IO and wiring (6) last.
 - Under the #3804 statute (`we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync`) a graduation slice ports a file main has moved AS A DIFF and is exempt from the drift hold. Shared modules that exist on `main` with a different body and that this slice imports from: `we:scripts/lib/constellation-repos.mjs` and `we:scripts/readiness/lane-manifest.mjs`. Do NOT overwrite either with the branch copy. Every named import this slice takes from them is already exported on `main` (checked name by name), so no hunk of them should be needed; if a test disagrees, diff-merge only the hunk it needs and name it in the PR.
+
+## Step 0 re-plan (2026-09-22)
+
+Moved `we:scripts/operations/land-advance-items.mjs` (17 lines, pure) into this slice from #3865: `we:scripts/operations/land-advance.mjs` imports it, so without it this slice could not pass the gate on main while #3865 waits.

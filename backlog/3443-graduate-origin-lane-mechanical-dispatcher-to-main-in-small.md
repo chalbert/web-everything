@@ -203,3 +203,32 @@ How each slice (a child of this item) graduates, per the statute
   the core and its escalations module; (c) that same test imports `classifySessionReapWithVerdict`, which `main`'s
   reaper does not export, so its last describe block waits for the reaper slice; (d) the repair-io test belongs to
   slice 6, not the pure core. Order: tools → core → verdicts, with the watchdog and ci-heal slices anywhere, IO last.
+
+- **2026-09-22 (Step 0 re-plan: whole remaining delta sliced; build ON HOLD).** Measured against branch tip
+  `ff1618065` (the **snapshot** every slice ports from): 287 ahead / 721 behind, merge base `ca7e68b71`
+  (2026-09-14 — the branch has not synced with main since, despite `autoSync`). Comparing each file tip-to-tip,
+  so already-landed work is excluded: **212 implementation files (~42k lines) + ~48k test lines still differ**;
+  58 of those files main also changed (diff-merge under Slice procedure rule 3). The earlier cards covered ~22
+  files, so every other file now has a card. Slices follow the branch's import graph, so each one passes the
+  gate on main's tree once its blockers have landed.
+
+  **Operator rules (2026-09-22):** faithful port, no behaviour change while porting; nothing is dropped, and
+  the end goal is still the whole branch; **no slice is dispatched until the operator confirms agent routing
+  works** — every new card was filed with `--queue=false`.
+
+  Waves (blockers in each card's `blockedBy`):
+  - **A (leaves):** xvrxwha coordination+action · xm24wzq telemetry · xnyz371 dispatch contracts ·
+    x4paeb9 priority/tracker libs · x87gqii run-quality · xzha7g1 conveyor watches · xl9vvqj gemini-direct-task ·
+    x28e3i6 guard-bash · 3854 land-advance core.
+  - **B:** 3855 · 3863 · xb9av7z delivery foundation · xgacnhr judges/review-pr · 3865 · x0mu20g restart-runner+priority-sync.
+  - **C:** x4rkpuk deliver-item → x67773u fix/ci-heal wrappers, x9lo11a prepare wrappers · 3856.
+  - **D:** xbunbsg dispatch path → xvknnyb review loop · 3862 · xao8xbi wip-agents/report.
+  - **E:** 3487 (**re-scoped to the runtime core, size 8**, one manual tick before any loop) · xysg9z7 tracker/turn-digest ·
+    x6j8mi0 host sampler (after 3487, still changing on 09-21) · xcx5m0x usage-report · xte9opm validate-and-promote.
+  - **Tail:** xchvd5s re-diffs against the moved tip, ports the docs, and closes this epic.
+
+  Critical path: xnyz371 → xb9av7z → x4rkpuk → xbunbsg → xvknnyb → 3487. Ordering bugs fixed on the existing
+  cards: `we:scripts/operations/land-advance-items.mjs` moved from 3865 into 3854; 3856 now also waits on 3865 and x4paeb9;
+  3863 waits on xvrxwha; 3865 no longer waits on decision 3864 (ratified; it resolves when 3865+3856 land);
+  3862 waits on xbunbsg and xgacnhr. `we:scripts/operations/run.mjs` and the http-adapter pin are shared: each slice appends only
+  its own lines.

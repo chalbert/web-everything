@@ -102,3 +102,7 @@ Ratified 2026-09-22 by the operator. The operator's own words, quoted: "I ratify
 ## Filing note
 
 Authored on the prototype branch (`origin/lane/mechanical-dispatcher`) as `xs340b6`, unnumbered — a decision card the operator must rule belongs on `main`, not buried in a branch commit. Filed here verbatim via `file-item` as part of the same PR as the #3720-remainder graduation slice it blocks (`3865`), per the operator's own instruction.
+
+## Step 0 re-plan (2026-09-22)
+
+Resolve this card when #3865 and #3856 have landed: that is when the tests its Done-when names exist on main. #3865 no longer waits on this card.
