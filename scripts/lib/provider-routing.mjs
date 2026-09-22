@@ -252,13 +252,17 @@ function isCleanRecord(record) {
   return record.outcome === 'landed';
 }
 
-/** Check if a scorecard record was informative (had a confirmed real problem from independent review). Pure. */
+/**
+ * Check if a scorecard record was informative (independent review found a real problem that was
+ * then fixed). Pure. Reads ONLY the explicit `informative` field the logging CLI writes — never
+ * inferred from `outcome` or `findings` (platform-decisions.md#delegation-trial-record-graduation,
+ * rule 4; #3888).
+ */
 function isInformativeRecord(record) {
   if (!record || typeof record !== 'object') return false;
   const isVerified = record.verifiedBy === 'claude-subagent' || record.verifiedBy === 'independent-claude';
   if (!isVerified) return false;
-  if (record.outcome !== 'rejected' && record.outcome !== 'reworked') return false;
-  return record.findings !== undefined && record.findings !== null && String(record.findings).trim() !== '';
+  return record.informative === true;
 }
 
 /**

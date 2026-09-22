@@ -43,6 +43,7 @@ function makeRecord({
   pr = null,
   handle = null,
   subjectClass = 'work-agent',
+  informative = false,
 } = {}) {
   return {
     v: 1,
@@ -57,6 +58,7 @@ function makeRecord({
     pr,
     handle,
     subjectClass,
+    informative,
     dispatchKind: 'session-delegation',
   };
 }
@@ -463,7 +465,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
       filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
       estimatedSize: 280,
       scorecards: [
-        makeRecord({ provider: 'antigravity', outcome: 'reworked', findings: 'Earlier review finding' }),
+        makeRecord({ provider: 'antigravity', outcome: 'reworked', findings: 'Earlier review finding', informative: true }),
         makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', scoredAt: '2026-09-15T03:00:00.000Z', verifiedBy: 'other', ...failure }),
         makeRecord({ provider: 'antigravity', scoredAt: '2026-09-15T02:00:00.000Z' }),
         makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T04:00:00.000Z' }),
@@ -492,7 +494,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
       model: 'claude-sonnet-4-6',
       scorecards: { records: [
         makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'other' }),
-        makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', outcome: 'rejected', findings: 'Unresolved build crash' }),
+        makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', outcome: 'rejected', findings: 'Unresolved build crash', informative: true }),
         makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T03:00:00.000Z', outcome: 'rejected' }),
       ] },
     };
@@ -599,7 +601,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
   it('counts explanatory landed accepts toward the clean streak without a hard veto', () => {
     const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
     const records = [
-      makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change' }),
+      makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true }),
       ...[1, 2, 3].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
       ...[2291, 2292].map((pr, index) => makeRecord({
         ...triple,
@@ -659,6 +661,72 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
       result: 'fail',
       dataConsulted: 'hasInformativeTrial=false, required=true',
     });
+  });
+
+  it('a verified rejected record with real findings but informative:false does NOT satisfy the requirement (#3888, rule 4)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      makeRecord({
+        ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'rejected',
+        findings: 'Unresolved build crash', informative: false, verifiedBy: 'independent-claude',
+      }),
+      ...[1, 2, 3, 4, 5].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')).toMatchObject({
+      result: 'fail',
+      dataConsulted: 'hasInformativeTrial=false, required=true',
+    });
+  });
+
+  it('a verified landed record with informative:true DOES satisfy the requirement (#3888, rule 4)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      makeRecord({
+        ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'landed',
+        informative: true, verifiedBy: 'independent-claude',
+      }),
+      ...[1, 2, 3, 4, 5].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')).toMatchObject({
+      result: 'pass',
+      dataConsulted: 'hasInformativeTrial=true, required=true',
+    });
+  });
+
+  it('returns full supervision with the "no informative trial" reason when every row is explicitly informative:false, even with rejected/reworked findings (#3888, rule 4)', () => {
+    const records = [
+      // Precede the trailing clean streak so they don't reset it, but would have counted as the
+      // positive control under the old outcome+findings inference this rule replaces.
+      makeRecord({ scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'caught bug', informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'rejected', findings: 'caught another bug', informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', findings: null, informative: false }),
+    ];
+
+    const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.reasoning).toContain('no informative trial');
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')?.result).toBe('fail');
   });
 
   it.each([
@@ -727,7 +795,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
   it('streak-met-and-informative case -> returns spot-check supervision', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'Independent review caught quoting bug' }), // informative
+      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'Independent review caught quoting bug', informative: true }), // informative
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 3
@@ -765,7 +833,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
   it('an other-verified record in the middle of a streak neither breaks nor extends it', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding' }), // informative
+      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding', informative: true }), // informative
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 2
       // 'other'-verified trial in the middle (e.g. smoke test)

@@ -61,6 +61,12 @@ export function logDelegationTrial(row, io = {}) {
   if (row.retroactive !== undefined && typeof row.retroactive !== 'boolean') {
     throw new Error('log-delegation-trial: retroactive must be a boolean');
   }
+  // `informative` is a recorded fact, never inferred (platform-decisions.md#delegation-trial-record-graduation,
+  // rule 4; #3888): a row that omits it is written with an explicit `false` below, never left absent, so no
+  // reader of the store has to guess. A non-boolean value is refused by name rather than silently coerced.
+  if (row.informative !== undefined && typeof row.informative !== 'boolean') {
+    throw new Error('log-delegation-trial: informative must be a boolean');
+  }
 
   try {
     return appendScorecard({
@@ -81,6 +87,7 @@ export function logDelegationTrial(row, io = {}) {
       verifiedBy: row.verifiedBy,
       findings: row.findings ?? null,
       retroactive: row.retroactive ?? false,
+      informative: row.informative ?? false,
       ...(row.scoredAt ? { scoredAt: row.scoredAt } : {}),
     }, io);
   } catch {
@@ -95,9 +102,11 @@ const usage = `Usage: node scripts/conveyor/log-delegation-trial.mjs
   --outcome=landed|rejected|reworked
   --verified-by=claude-subagent|independent-claude|other
   [--findings=TEXT] [--item=NUMBER] [--pr=NUMBER] [--scored-at=TIMESTAMP]
-  [--retroactive] [--help]
+  [--informative=true|false] [--retroactive] [--help]
 
-Quote values containing spaces. --retroactive marks reconstructed historical trials.`;
+Quote values containing spaces. --retroactive marks reconstructed historical trials.
+--informative marks whether independent review found a real problem that was then fixed
+(platform-decisions.md#delegation-trial-record-graduation, rule 4); omitted, it is written false.`;
 
 /** CLI seam accepts the store's injectable IO so tests never write the real store. */
 export function main(argv, io = {}) {
@@ -108,7 +117,7 @@ export function main(argv, io = {}) {
   const fields = {
     provider: 'provider', model: 'model', task: 'taskDescription', 'task-type': 'taskType',
     outcome: 'outcome', 'verified-by': 'verifiedBy', findings: 'findings', item: 'item',
-    pr: 'pr', 'scored-at': 'scoredAt',
+    pr: 'pr', 'scored-at': 'scoredAt', informative: 'informative',
   };
   try {
     const row = {};
@@ -127,6 +136,11 @@ export function main(argv, io = {}) {
           throw new Error(`--${flag} must be a positive integer`);
         }
         row[fields[flag]] = Number(value);
+      } else if (flag === 'informative') {
+        if (value !== 'true' && value !== 'false') {
+          throw new Error('--informative must be true or false');
+        }
+        row[fields[flag]] = value === 'true';
       } else {
         row[fields[flag]] = value;
       }

@@ -30,7 +30,7 @@ describe('logDelegationTrial', () => {
     expect(stored).toEqual({
       ...input, v: 1, subjectClass: 'work-agent', dispatchKind: 'session-delegation',
       rubricVersion: 'session-delegation.1', criteriaEvaluated: 0, score: null,
-      deductions: [], handle: null,
+      deductions: [], handle: null, informative: false,
     });
     expect(readStore(io).records).toEqual([{ existing: true }, stored]);
   });
@@ -42,6 +42,26 @@ describe('logDelegationTrial', () => {
     expect(stored.pr).toBeNull();
     expect(stored.retroactive).toBe(false);
     expect(new Date(stored.scoredAt).toISOString()).toBe(stored.scoredAt);
+  });
+
+  it('accepts explicit informative true/false and writes an explicit false when the field is omitted (#3888, rule 4)', () => {
+    const storedTrue = logDelegationTrial({ ...baseRow(), informative: true }, memIo());
+    expect(storedTrue.informative).toBe(true);
+
+    const storedFalse = logDelegationTrial({ ...baseRow(), informative: false }, memIo());
+    expect(storedFalse.informative).toBe(false);
+
+    const storedOmitted = logDelegationTrial(baseRow(), memIo());
+    expect(Object.hasOwn(storedOmitted, 'informative')).toBe(true);
+    expect(storedOmitted.informative).toBe(false);
+  });
+
+  it('rejects a non-boolean informative by name without writing (#3888, rule 4)', () => {
+    for (const informative of ['true', 'false', 1, 0, null, 'yes']) {
+      const io = memIo();
+      expect(() => logDelegationTrial({ ...baseRow(), informative }, io)).toThrow('informative');
+      expect(readStore(io).records).toEqual([]);
+    }
   });
 
   it.each(['taskType', 'outcome', 'verifiedBy'])('rejects an invalid %s before writing', (field) => {
@@ -125,6 +145,33 @@ describe('log-delegation-trial CLI', () => {
       taskDescription: 'Fix name=a b', item: 3690, pr: 2223, retroactive: true,
       findings: 'Fixed quoting', scoredAt: '2026-09-15T01:00:00.000Z',
     });
+  });
+
+  it('parses --informative=true|false onto the row (#3888, rule 4)', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const io = memIo();
+    expect(main([...args, '--informative=true'], io)).toBe(0);
+    expect(readStore(io).records[0].informative).toBe(true);
+    log.mockRestore();
+
+    const io2 = memIo();
+    expect(main([...args, '--informative=false'], io2)).toBe(0);
+    expect(readStore(io2).records[0].informative).toBe(false);
+  });
+
+  it('defaults informative to an explicit false when the CLI flag is omitted (#3888, rule 4)', () => {
+    const io = memIo();
+    expect(main(args, io)).toBe(0);
+    expect(Object.hasOwn(readStore(io).records[0], 'informative')).toBe(true);
+    expect(readStore(io).records[0].informative).toBe(false);
+  });
+
+  it('rejects --informative with a non-true/false value by name, without writing (#3888, rule 4)', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const io = memIo();
+    expect(main([...args, '--informative=yes'], io)).toBe(1);
+    expect(readStore(io).records).toEqual([]);
+    expect(error).toHaveBeenLastCalledWith(expect.stringContaining('--informative must be true or false'));
   });
 
   it('prints help without writing', () => {
