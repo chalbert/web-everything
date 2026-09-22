@@ -2,9 +2,11 @@
 bornAs: xxqa08p
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/runner-lock.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
 tags: []
 ---
 
@@ -14,4 +16,4 @@ we:skills-src/conveyor/runner-lock.mjs hardcodes its lease sentinel (RUNNER_LEAS
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/runner.test.mjs -t "a distinct key is an independent lease"` passes: two different `key` values on the same lock root acquire, heartbeat, and release fully independently (a live lease under one key never blocks or is visible under another). `-t "omitting .key. is unchanged behavior"` passes: every pre-#3877 call shape (no `key` argument) behaves exactly as before.

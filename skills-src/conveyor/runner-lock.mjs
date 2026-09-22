@@ -28,8 +28,15 @@
  *   machine-disposable (memory rule 105); it never lands on `main`.
  *
  * The atomic fs + reclaim decision live in file-locks.mjs (unit-tested there); this module is the thin,
- * runner-specific wiring over it (one fixed sentinel key + acquire/heartbeat/release/status), unit-tested in
+ * runner-specific wiring over it (a sentinel key + acquire/heartbeat/release/status), unit-tested in
  * skills-src/conveyor/__tests__/runner.test.mjs.
+ *
+ * #3877 — KEYED LEASES. Every acquire/heartbeat/release/status function below now takes an optional `key`
+ *   (default {@link RUNNER_LEASE_PATH}, so every existing caller is unaffected). This is what lets a SECOND
+ *   long-lived daemon (e.g. epic #3383's Verify daemon, #3878) take its own distinct singleton lease from
+ *   this SAME primitive, under its own sentinel key, rather than contending with the Dispatcher's lease or
+ *   forking this file. Two different keys are two independent lock dirs under the same {@link RUNNER_LOCK_ROOT}
+ *   — unrelated leases, never a shared critical section.
  */
 
 import { mkdirSync } from 'node:fs';
@@ -69,25 +76,25 @@ const nowIsoFrom = (nowMs) => new Date(nowMs).toISOString();
  * `reserve` (atomic win, or reclaim-a-dead-holder via the TTL). Injectable clock keeps it unit-testable.
  * @returns {{ ok: boolean, reason: string, heldBy: string|null }}
  */
-export function acquireRunnerLease(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner(), { pid = process.pid, leaseMinutes = RUNNER_LEASE_MINUTES, nowMs = Date.now() } = {}) {
+export function acquireRunnerLease(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner(), { pid = process.pid, leaseMinutes = RUNNER_LEASE_MINUTES, nowMs = Date.now(), key = RUNNER_LEASE_PATH } = {}) {
   ensureRoot(lockRoot);
-  return reserve(lockRoot, RUNNER_LEASE_PATH, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
+  return reserve(lockRoot, key, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
 }
 
 /** Refresh the runner lease heartbeat (a live runner extends its lease each tick). No-op returning `false` if
  *  the lease was reclaimed away from `owner` (a stale runner whose lease another process seized) — the caller
  *  should then STOP, since it no longer holds the singleton right to drive. */
-export function heartbeatRunnerLease(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner(), { pid = process.pid, nowMs = Date.now() } = {}) {
-  const cur = readLockEntry(lockRoot, RUNNER_LEASE_PATH);
+export function heartbeatRunnerLease(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner(), { pid = process.pid, nowMs = Date.now(), key = RUNNER_LEASE_PATH } = {}) {
+  const cur = readLockEntry(lockRoot, key);
   if (!cur || cur.owner !== owner) return false;
-  return heartbeat(lockRoot, RUNNER_LEASE_PATH, owner, nowIsoFrom(nowMs), pid);
+  return heartbeat(lockRoot, key, owner, nowIsoFrom(nowMs), pid);
 }
 
 /** Release the runner lease, but ONLY if `owner` still holds it (never stomp a reclaimer who seized it after a
  *  stale window — the file-locks fencing invariant). Idempotent (gone ⇒ no-op). */
-export function releaseRunnerLeaseIfOwned(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner()) {
-  const cur = readLockEntry(lockRoot, RUNNER_LEASE_PATH);
-  if (cur && cur.owner === owner) { releaseLockDir(lockRoot, RUNNER_LEASE_PATH); return true; }
+export function releaseRunnerLeaseIfOwned(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner(), { key = RUNNER_LEASE_PATH } = {}) {
+  const cur = readLockEntry(lockRoot, key);
+  if (cur && cur.owner === owner) { releaseLockDir(lockRoot, key); return true; }
   return false;
 }
 
@@ -98,8 +105,8 @@ export function releaseRunnerLeaseIfOwned(lockRoot = RUNNER_LOCK_ROOT, owner = r
  *   • `held:false, stale:false` — no lease at all → no runner running.
  * @returns {{ held: boolean, stale: boolean, owner: string|null, heartbeatAt: string|null }}
  */
-export function runnerLeaseStatus(lockRoot = RUNNER_LOCK_ROOT, { nowMs = Date.now(), leaseMinutes = RUNNER_LEASE_MINUTES } = {}) {
-  const entry = readLockEntry(lockRoot, RUNNER_LEASE_PATH);
+export function runnerLeaseStatus(lockRoot = RUNNER_LOCK_ROOT, { nowMs = Date.now(), leaseMinutes = RUNNER_LEASE_MINUTES, key = RUNNER_LEASE_PATH } = {}) {
+  const entry = readLockEntry(lockRoot, key);
   if (!entry) return { held: false, stale: false, owner: null, heartbeatAt: null };
   const stale = isLeaseExpired(entry, nowMs, leaseMinutes);
   return { held: !stale, stale, owner: entry.owner, heartbeatAt: entry.heartbeatAt };
