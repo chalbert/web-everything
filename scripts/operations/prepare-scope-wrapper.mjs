@@ -39,11 +39,13 @@
  * THE SELF-REVIEW STEP IS DROPPED, NOT SILENTLY LOST — the same call `we:backlog/3629-*.md` ratified for the fix
  * wrapper (see `fix-dispatch-wrapper.mjs`'s header, point 2): an agent spawning its own adversarial reviewer
  * INSIDE its own dispatched turn is the anti-pattern `#3627` already removed from the build agent. Its
- * replacement here is deliberately NOT a converge pass (that is sized for a code diff; this diff is one
- * frontmatter key). It is two mechanical checks this wrapper runs and the prose brief could only ask for:
+ * replacement here is deliberately NOT a converge pass (that is sized for a code diff; this diff is one or two
+ * frontmatter keys). It is mechanical checks this wrapper runs and the prose brief could only ask for:
  * {@link assertOnlyItemSpecTouched} (the "edit exactly one file" guardrail, now enforced against the real
- * working tree instead of trusted) and the gate itself, which is what actually rejects a malformed or empty
- * `scope:` (`check:standards` errors on `scope: []`). What is NOT replaced, and is named rather than papered
+ * working tree instead of trusted), {@link assertScopeSizeValid} (`#3842` — the same guardrail shape for the
+ * `size`/`estimatedLoc` the agent may now also write, enforced before commit rather than left to the gate), and
+ * the gate itself, which is what actually rejects a malformed or empty `scope:` (`check:standards` errors on
+ * `scope: []`). What is NOT replaced, and is named rather than papered
  * over: nothing here re-judges whether a WELL-FORMED prediction is a GOOD one. The live brief asked an agent to
  * self-review that; this wrapper does not, and the honest fallback is that a bad-but-well-formed scope is
  * caught where every other scope error already is — the PR, and the build that later runs under it. Building a
@@ -71,11 +73,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import matter from 'gray-matter';
 
 import {
   REPO_ROOT, run, RESTRICTED_PROVIDER_TOOLS, acquireLane, releaseLane, resolveLanePath,
   buildRestrictedProviderArgv, createHooksSettingsWriter, persistSpawnFailure, runVerifyOperation,
 } from './minimal-context-provider.mjs';
+// #3842 (Fork 4 "prepare" of #3801) — the SAME Fibonacci set `check-standards-rules.mjs`'s own Agile-sizing
+// block already gates the whole repo against; imported rather than restated so the two never drift.
+import { FIB } from '../check-standards-rules.mjs';
 // #3383 — delivery telemetry; see `telemetry-store.mjs`. Never throws, never alters control flow.
 import { recorderFor, setActiveRecorder, spanAroundAsyncWithCpu, recordChildResourceUsage } from './telemetry-store.mjs';
 import { spawnAgentToCompletion, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
@@ -390,6 +396,44 @@ export function assertOnlyItemSpecTouched({ lanePath, itemSpecPath, item }, { ru
 }
 
 /**
+ * THE SIZE/ESTIMATE GUARDRAIL (`#3842`, Fork 4 "prepare" of `#3801` consequence 3) — ratified: "prepared for the
+ * dispatch gate means shaped plus sized, both authored by prepare." Until now the wrapper checked only that the
+ * agent's one write was to the right file ({@link assertOnlyItemSpecTouched}); it never looked at what the write
+ * actually said. This reads that same file back and refuses BEFORE COMMIT — same guardrail shape, same reason:
+ * catching a malformed one-key edit here is free, while catching it only at the minutes-long `test:unit &&
+ * check:standards` gate (`runVerifyOperation`) burns a whole retry round for a mistake this cheap to see first.
+ *
+ * DELIBERATELY THE SAME TWO RULES `check-standards-rules.mjs`'s own Agile-sizing block enforces for every
+ * backlog item repo-wide (`item.size !== undefined && !FIB.has(item.size)`, `item.kind === 'task' &&
+ * item.size !== undefined`, plus `#3839`'s task-only `estimatedLoc` pair) — restated here rather than imported
+ * as one function because that full validator takes a repo-wide `ctx` (known ids, graduated registries) this
+ * one-file check has no reason to assemble; only the shared, context-free `FIB` set is imported, so the two
+ * never disagree on what counts as a valid Fibonacci point.
+ *
+ * NEITHER FIELD IS REQUIRED HERE — the block-unsized-card admission gate is `#3843`'s, a different file and a
+ * different concern (dispatch-time, not prepare-time). This only refuses a size or estimate that IS present and
+ * wrong; an item with neither field is untouched by this check, exactly as it was before this slice.
+ */
+export function assertScopeSizeValid({ lanePath, itemSpecPath, item }, { readFile = readFileSync } = {}) {
+  const { data } = matter(readFile(`${lanePath}/${itemSpecPath}`, 'utf8'));
+  const problems = [];
+  if (data.size !== undefined && !FIB.has(data.size))
+    problems.push(`non-Fibonacci size "${data.size}" (expected one of ${[...FIB].join(', ')})`);
+  if (data.kind === 'task' && data.size !== undefined)
+    problems.push('a task but has a size — tasks are never sized (they roll up under a story/epic)');
+  if (data.estimatedLoc !== undefined && data.kind !== 'task')
+    problems.push('declares estimatedLoc but is not a task — estimatedLoc is task-only');
+  if (data.estimatedLoc !== undefined && !(Number.isInteger(data.estimatedLoc) && data.estimatedLoc > 0))
+    problems.push(`non-numeric or non-positive estimatedLoc "${data.estimatedLoc}" (expected a positive integer)`);
+  if (problems.length) {
+    throw new Error(
+      `prepare-scope-wrapper: the prepare agent for #${item} wrote an invalid size/estimate into ${itemSpecPath} `
+      + `(${problems.join('; ')})`,
+    );
+  }
+}
+
+/**
  * REAL — one commit, explicit path, on the lane's CURRENT branch (its local `main`). Never `git add -A`, never
  * `git checkout -b`: the single-branch hook blocks branch creation even inside a lane clone, and `pr-land`
  * publishes HEAD to the `lane/…` ref itself (`--ref=… --sha=HEAD`).
@@ -477,16 +521,17 @@ function dropLearning({ sessionSlug, learning }, { run: runFn = run } = {}) {
  *   verbatim for the lane lease; omitted, it is derived as `we:<specPath>` — the value that dispatch step
  *   computes for a prepare anyway (`dispatch-lane.mjs`: "a PREPARE's lane scope is `we:<specPath>`").
  * @param {object} [provider] — the `DeliveryAgentProvider` the one judgment turn runs under.
- * @param {{newSessionId?: () => string, run?: Function, loadItems?: Function, deleteReport?: Function}} [deps]
- *   — every one of them injectable for the same reason the sibling wrappers' are: the whole arc must be
- *   assertable with no lane pool, no `claude`, and no real report sidecar on disk.
+ * @param {{newSessionId?: () => string, run?: Function, loadItems?: Function, deleteReport?: Function,
+ *   readFile?: Function}} [deps] — every one of them injectable for the same reason the sibling wrappers' are:
+ *   the whole arc must be assertable with no lane pool, no `claude`, no real report sidecar, and no real file
+ *   on disk at `itemSpecPath` (`readFile` — `#3842`, backing {@link assertScopeSizeValid}).
  */
 async function prepareScopeInner(
   launch,
   provider = CLAUDE_RESTRICTED_PREPARE_PROVIDER,
   {
     newSessionId = randomUUID, run: runFn = run, loadItems = () => defaultLoadItems(REPO_ROOT),
-    deleteReport = deleteDeliveryReport,
+    deleteReport = deleteDeliveryReport, readFile = readFileSync,
   } = {},
 ) {
   const { item, lane, sessionSlug } = launch ?? {};
@@ -549,6 +594,7 @@ async function prepareScopeInner(
     }
 
     assertOnlyItemSpecTouched({ lanePath, itemSpecPath, item }, { run: runFn });
+    assertScopeSizeValid({ lanePath, itemSpecPath, item }, { readFile });
     commitScopeEdit({ lanePath, itemSpecPath, item }, { run: runFn });
     const prResult = openScopePr({ item, lanePath, itemSpecPath, report, slug: found.slug }, { run: runFn });
 

@@ -35,7 +35,7 @@ import { createRegistry } from '../registry.mjs';
 import { DISPATCH_LANE_OP, DISPATCH_EFFECT, dispatchLaneOperation, shapeDispatchRead } from '../dispatch-lane.mjs';
 import { createDispatchSinks } from '../dispatch-lane-io.mjs';
 import {
-  EXECUTABLE_PROVIDER, DELIVERY_VENDOR_PROVIDERS, decideDispatchRoute, estimatedLocForSize, supervisionEnforcementFrom,
+  DELIVERY_VENDOR_PROVIDERS, decideDispatchRoute, estimatedLocForSize, supervisionEnforcementFrom,
   supervisionHold, SUPERVISION_ENFORCEMENT_ENV,
 } from '../../lib/dispatch-contracts.mjs';
 import { DELIVERY_AGENT_PROVIDER_NAMES } from '../deliver-item-wrapper.mjs';
@@ -172,7 +172,7 @@ describe('2. routed and executed both land in the run record', () => {
     const result = await sinks[DISPATCH_EFFECT](payload);
     expect(result.dispatch).toMatchObject({
       routedProvider: 'claude',
-      executedProvider: EXECUTABLE_PROVIDER,
+      executedProvider: 'claude',
       routedTaskType: 'build-new-feature',
       supervisionLevel: 'full',
       supervisionEnforced: false,
@@ -212,7 +212,7 @@ describe('2. routed and executed both land in the run record', () => {
     expect(effect.payload.routing.taskType).toBe('build-new-feature');
     expect(effect.payload.routing.auditTrail.some((a) => a.criterion === 'task-type-derivation')).toBe(true);
     // and the executor's own answer — the routed/executed pair — is on the effect, not only in the payload
-    expect(effect.dispatch).toMatchObject({ routedProvider: 'claude', executedProvider: EXECUTABLE_PROVIDER });
+    expect(effect.dispatch).toMatchObject({ routedProvider: 'claude', executedProvider: 'claude' });
   });
 });
 
@@ -239,6 +239,8 @@ describe('3. the override is the item\'s own marker, reasoned and recorded — o
     // no scorecards: the criteria chose Claude — the marker did NOT rewrite it
     expect(routed.routed).toBe('claude');
     expect(routed.override).toEqual({ requestedVendor: 'codex', executedVendor: 'codex', reason: 'operator trial #3840' });
+    // #3848 — `executed` follows the override's `executedVendor`, not `routed` (the criteria's choice, unchanged above)
+    expect(routed.executed).toBe('codex');
     expect(routed.model).toBe(route().model);
     const entry = routed.auditTrail.find((a) => a.criterion === 'provider-override');
     expect(entry.result).toBe('codex');
@@ -253,6 +255,8 @@ describe('3. the override is the item\'s own marker, reasoned and recorded — o
     const result = await sinks[DISPATCH_EFFECT](payload);
     expect(result.dispatch.routedProvider).toBe('claude');
     expect(result.dispatch.providerOverride).toEqual({ requestedVendor: 'codex', executedVendor: 'codex', reason: 'operator trial #3840' });
+    // #3848 — the durable record's `executedProvider` is the override's vendor, not the constant `claude`
+    expect(result.dispatch.executedProvider).toBe('codex');
   });
 
   it('(c) supervises an override as its OWN triple: routed at spot-check, override with no trials starts at full', () => {
@@ -368,6 +372,25 @@ describe('4. supervision is recorded, not enforced, until #3690 is ratified', ()
     expect(recorded.supervisionHold).toBeNull();
     expect(recorded.supervision).toBe('full');
     expect(shapeDispatchRead(tickRead({ routing: recorded }), { num: '3717', expectedWithinMinutes: 45 }).dispatching).toBe(true);
+  });
+});
+
+describe('5. #3848 — `executed` records who really ran it, never the `EXECUTABLE_PROVIDER` constant (removed)', () => {
+  it('(a) a build whose card carries `deliveryAgent: codex` and a reason records `executed: codex` while `routed` '
+    + 'stays the criteria\'s choice', () => {
+    const routed = route({ deliveryAgent: 'codex', deliveryAgentReason: 'trial #3848' });
+    expect(routed.routed).toBe('claude'); // the criteria's own pick, untouched — no trials for codex here
+    expect(routed.executed).toBe('codex'); // what actually ran, from the override
+    expect(routed.routed).not.toBe(routed.executed);
+  });
+
+  it('(b) an unmarked build records `executed: claude`', () => {
+    expect(route().executed).toBe('claude');
+    expect(route().override).toBeNull();
+  });
+
+  it('a `refused` route (marker with no reason) records `executed: null`, same as before', () => {
+    expect(route({ deliveryAgent: 'codex' }).executed).toBeNull();
   });
 });
 

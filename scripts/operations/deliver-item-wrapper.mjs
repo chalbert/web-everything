@@ -1633,6 +1633,14 @@ export function commitBuildTurn(
  * prints, until the action is genuinely `land` or `escalate` — replacing the sketch's single `step` call.
  * `run` is injectable (defaults to this file's own `run`) so the whole loop is testable against a scripted
  * fake CLI without spawning real processes.
+ *
+ * #3848 (carried from #3801 Fork 1) — the returned verdict also carries `convergeEditedLane`: `true` when ANY
+ * round across the whole loop actually committed a real edit ({@link commitConvergeRound}'s own `committed`,
+ * which is `false` for a dismissed-only round or one whose only touched paths were this wrapper's `.converge-*`
+ * bookkeeping), `false` when no round ever did (including a run that never reaches an `edit` action at all,
+ * e.g. an `escalate` straight off `read`/`panel`). A Claude converge EDITOR is a separate spawn from the build
+ * agent (this file's own header, above); this is the one fact that says whether it changed the diff the build
+ * agent handed it.
  */
 export function runConverge(
   { lane, item, goal },
@@ -1656,9 +1664,11 @@ export function runConverge(
   let jurorsPerLens = initOut.jurorsPerLens;
   let material = '';
   let lastLensResults = [];
+  // #3848 — accumulates across every round in the loop, not just the last one before land/escalate.
+  let convergeEditedLane = false;
 
   for (let i = 0; i < CONVERGE_MAX_LOOP_STEPS; i += 1) {
-    if (step.action === 'land' || step.action === 'escalate') return step;
+    if (step.action === 'land' || step.action === 'escalate') return { ...step, convergeEditedLane };
 
     const obs = { round: step.round };
     if (step.action === 'read') {
@@ -1685,6 +1695,7 @@ export function runConverge(
       // still be sitting on) and before any later `openPr --sha=HEAD` could run against a stale HEAD. A
       // dismissed-only round (`advanced: false`) commits nothing — see {@link commitConvergeRound}.
       if (obs.editResult.advanced) obs.commitResult = commitConvergeRound({ lane, item, round: step.round }, { run: runFn });
+      if (obs.commitResult?.committed) convergeEditedLane = true;
     } else if (step.action === 'invite') {
       obs.invite = step.invite;
       obs.inviteEcho = runConvergeInvite(step.invite, {

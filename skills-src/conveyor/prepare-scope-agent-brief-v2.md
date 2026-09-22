@@ -32,9 +32,9 @@ build of it would land.
 
 ## Your job (one sentence)
 
-Read `$LANE/$ITEM_SPEC_PATH` and the code it describes touching, then add a `scope:` key to that file's YAML
-frontmatter naming the path prefixes a build of it would modify — editing **that one file and nothing else** —
-and report the outcome through the one command in *Report your outcome* below.
+Read `$LANE/$ITEM_SPEC_PATH` and the code it describes touching, then add a `scope:` key — plus a `size:` or
+`estimatedLoc:` key, whichever its `kind:` takes — to that file's YAML frontmatter, editing **that one file and
+nothing else**, and report the outcome through the one command in *Report your outcome* below.
 
 ## Predict the touch-set
 
@@ -49,7 +49,16 @@ and report the outcome through the one command in *Report your outcome* below.
      - we:skills-src/conveyor/
    ```
 
-Four rules, all of them load-bearing:
+4. **Also write a size, in the same file, from the item's own `kind:`** (`#3842` — prepared means shaped
+   *plus* sized):
+
+   - `kind: story` (or an unstoried `epic`) — write Fibonacci `size:` (`1 / 2 / 3 / 5 / 8 / 13`) next to
+     `scope:`. Any other value — `4`, `0`, a string — is refused before commit.
+   - `kind: task` — write `estimatedLoc:` next to `scope:` instead: a positive integer estimate of changed
+     lines. A task never carries `size:` — writing one is refused before commit, same as a bad Fibonacci value.
+   - Any other `kind` (a storied `epic`, `decision`, `feature`) — leave both fields alone.
+
+Five rules, all of them load-bearing:
 
 - **Every entry is repo-qualified.** A Web Everything path is `we:…`; a cross-repo path is `fui:…` /
   `plateau:…`. A bare prefix is rejected at write-time by a hook, and the lease engine reads it as belonging to
@@ -62,6 +71,10 @@ Four rules, all of them load-bearing:
 - **Edit exactly one file: `$ITEM_SPEC_PATH`.** No code, no other backlog item, no docs. That single
   known-in-advance file is the entire parallel-safety guarantee, and the wrapper **checks it**: it refuses to
   commit anything if your lane's working tree touched any other path.
+- **Get the size or estimate right, or leave it out.** The wrapper checks this too, the same way: a
+  non-Fibonacci `size:`, a `size:` on a `task`, or an `estimatedLoc:` that is not a positive integer (or is on
+  anything but a `task`) is refused before commit. If you are not confident in the number, leave the field out
+  rather than guess — an absent size is not checked; a wrong one is.
 
 Do **not** commit. Do **not** push. Do **not** open a PR. Do **not** run any gate command. Do **not** spawn a
 review subagent of your own. The wrapper does all of that after you report.
@@ -77,7 +90,8 @@ node scripts/operations/delivery-report-cli.mjs report \
   --session=$DELIVERY_SESSION --item=$DELIVERY_ITEM --status=started
 ```
 
-**You predicted a scope.** The `scope:` key is written into `$ITEM_SPEC_PATH` and nothing else was edited:
+**You predicted a scope.** The `scope:` key (and, where it applies, `size:`/`estimatedLoc:`) is written into
+`$ITEM_SPEC_PATH` and nothing else was edited:
 
 ```bash
 node scripts/operations/delivery-report-cli.mjs report \

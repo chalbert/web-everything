@@ -14,9 +14,13 @@
  *      parallel-safety story is that it owns one known-in-advance backlog file. A second touched path is
  *      refused BEFORE the commit.
  *   4. **EVERY NON-PR OUTCOME RELEASES THE LANE**, and the PR path deliberately does not.
+ *   5. **THE SIZE/ESTIMATE GUARDRAIL IS ENFORCED TOO (`#3842`).** A story's `size:` must be Fibonacci and a
+ *      task's must be absent; a task's `estimatedLoc:` must be a positive integer and absent on anything else.
+ *      Both are refused BEFORE the commit, same as clause 3.
  *
  * NOTHING HERE SPAWNS A PROCESS. Every `run` call is injected; the only real fs is a temp lane directory the
- * PR body is genuinely written into.
+ * PR body is genuinely written into. `readFile` (`#3842`) is injected too — the item spec is never actually
+ * read from `lanePath` on disk.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -48,6 +52,7 @@ import {
   PREPARE_HOOKS_SETTINGS,
   PREPARE_SCOPE_LANE_PURPOSE,
   assertOnlyItemSpecTouched,
+  assertScopeSizeValid,
   buildPrepareAgentEnv,
   buildScopePrBody,
   commitScopeEdit,
@@ -111,8 +116,15 @@ const doneReport = (over = {}) => ({
   filesTouched: [SPEC], reason: null, learning: null, ...over,
 });
 
+/** A real YAML frontmatter block, the shape `assertScopeSizeValid`'s `gray-matter` read expects. */
+const frontmatter = (fields) => `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}\n---\nbody\n`;
+
 const deps = (run, extra = {}) => ({
-  run, loadItems, deleteReport: () => {}, newSessionId: () => '11111111-2222-3333-4444-555555555555', ...extra,
+  run, loadItems, deleteReport: () => {}, newSessionId: () => '11111111-2222-3333-4444-555555555555',
+  // #3842 — a story with a valid Fibonacci size by default, so tests not about the size/estimate guardrail
+  // keep passing unmodified; only the tests below override it.
+  readFile: () => frontmatter({ kind: 'story', size: 3, scope: ['we:scripts/x/'] }),
+  ...extra,
 });
 
 describe('#3641 — the prepare-scope wrapper owns the lifecycle the brief used to hand the agent', () => {
@@ -304,6 +316,106 @@ describe('#3641 — the "edit exactly one file" guardrail', () => {
     expect(shelled.some((s) => s.startsWith('git commit'))).toBe(false);
     expect(shelled.some((s) => s.includes('open-pr'))).toBe(false);
     expect(shelled.some((s) => s.includes('lane-pool.mjs release --lane=2'))).toBe(true);
+  });
+});
+
+describe('#3842 — the size/estimate guardrail (Fork 4 "prepare" of #3801)', () => {
+  it('accepts a story that wrote scope: plus a Fibonacci size:', () => {
+    const readFile = () => frontmatter({ kind: 'story', size: 5, scope: ['we:scripts/x/'] });
+    expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile })).not.toThrow();
+  });
+
+  it('accepts a task that wrote scope: plus estimatedLoc:', () => {
+    const readFile = () => frontmatter({ kind: 'task', estimatedLoc: 80, scope: ['we:scripts/x/'] });
+    expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile })).not.toThrow();
+  });
+
+  it('accepts an item that wrote scope: and neither field — size/estimate stay optional here', () => {
+    const readFile = () => frontmatter({ kind: 'story', scope: ['we:scripts/x/'] });
+    expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile })).not.toThrow();
+  });
+
+  it('refuses a task that wrote size: — tasks are never sized', () => {
+    const readFile = () => frontmatter({ kind: 'task', size: 3, scope: ['we:scripts/x/'] });
+    expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile }))
+      .toThrow(/a task but has a size/);
+  });
+
+  it('refuses a non-Fibonacci size:', () => {
+    const readFile = () => frontmatter({ kind: 'story', size: 4, scope: ['we:scripts/x/'] });
+    expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile }))
+      .toThrow(/non-Fibonacci size "4"/);
+  });
+
+  it('refuses estimatedLoc: on anything but a task', () => {
+    const readFile = () => frontmatter({ kind: 'story', size: 3, estimatedLoc: 80, scope: ['we:scripts/x/'] });
+    expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile }))
+      .toThrow(/declares estimatedLoc but is not a task/);
+  });
+
+  it('refuses a non-positive or non-integer estimatedLoc:', () => {
+    for (const bad of [0, 1.5]) {
+      const readFile = () => frontmatter({ kind: 'task', estimatedLoc: bad, scope: ['we:scripts/x/'] });
+      expect(() => assertScopeSizeValid({ lanePath: laneDir, itemSpecPath: SPEC, item: ITEM }, { readFile }))
+        .toThrow(/non-numeric or non-positive estimatedLoc/);
+    }
+  });
+
+  it('end to end: a story\'s scope + valid size reaches the PR — accepted, not refused', async () => {
+    tryReadDeliveryReport.mockReturnValue(doneReport());
+    const { fn: run, calls } = recordingRun();
+    const readFile = () => frontmatter({ kind: 'story', size: 8, scope: ['we:scripts/x/'] });
+
+    const out = await prepareScope({ item: ITEM, lane: 2, sessionSlug: SESSION }, recordingProvider().provider, deps(run, { readFile }));
+
+    expect(out).toEqual({ item: ITEM, result: 'scope → PR #2200 (ready-to-merge)' });
+    expect(calls.some((c) => c.args.includes('open-pr'))).toBe(true);
+  });
+
+  it('end to end: a task\'s scope + valid estimatedLoc reaches the PR — accepted, not refused', async () => {
+    tryReadDeliveryReport.mockReturnValue(doneReport());
+    const { fn: run, calls } = recordingRun();
+    const readFile = () => frontmatter({ kind: 'task', estimatedLoc: 200, scope: ['we:scripts/x/'] });
+
+    const out = await prepareScope({ item: ITEM, lane: 2, sessionSlug: SESSION }, recordingProvider().provider, deps(run, { readFile }));
+
+    expect(out).toEqual({ item: ITEM, result: 'scope → PR #2200 (ready-to-merge)' });
+    expect(calls.some((c) => c.args.includes('open-pr'))).toBe(true);
+  });
+
+  it('end to end: a task with an invalid size: is refused BEFORE the commit and the PR', async () => {
+    tryReadDeliveryReport.mockReturnValue(doneReport());
+    const { fn: run, calls } = recordingRun();
+    const readFile = () => frontmatter({ kind: 'task', size: 3, scope: ['we:scripts/x/'] });
+
+    await expect(prepareScope({ item: ITEM, lane: 2, sessionSlug: SESSION }, recordingProvider().provider, deps(run, { readFile })))
+      .rejects.toThrow(/a task but has a size/);
+    const shelled = calls.map((c) => `${c.cmd} ${c.args.join(' ')}`);
+    expect(shelled.some((s) => s.startsWith('git commit'))).toBe(false);
+    expect(shelled.some((s) => s.includes('open-pr'))).toBe(false);
+    expect(shelled.some((s) => s.includes('lane-pool.mjs release --lane=2'))).toBe(true);
+  });
+
+  it('end to end: a non-Fibonacci size: is refused BEFORE the commit and the PR', async () => {
+    tryReadDeliveryReport.mockReturnValue(doneReport());
+    const { fn: run, calls } = recordingRun();
+    const readFile = () => frontmatter({ kind: 'story', size: 4, scope: ['we:scripts/x/'] });
+
+    await expect(prepareScope({ item: ITEM, lane: 2, sessionSlug: SESSION }, recordingProvider().provider, deps(run, { readFile })))
+      .rejects.toThrow(/non-Fibonacci size "4"/);
+    const shelled = calls.map((c) => `${c.cmd} ${c.args.join(' ')}`);
+    expect(shelled.some((s) => s.startsWith('git commit'))).toBe(false);
+    expect(shelled.some((s) => s.includes('open-pr'))).toBe(false);
+  });
+
+  it('still refuses a turn that touched a second file — the one-file guardrail runs first, unaffected by #3842', async () => {
+    tryReadDeliveryReport.mockReturnValue(doneReport());
+    const { fn: run, calls } = recordingRun({ porcelain: ` M ${SPEC}\n M scripts/readiness/dispatch-plan.mjs\n` });
+
+    await expect(prepareScope({ item: ITEM, lane: 2, sessionSlug: SESSION }, recordingProvider().provider, deps(run)))
+      .rejects.toThrow(/outside its own backlog file/);
+    const shelled = calls.map((c) => `${c.cmd} ${c.args.join(' ')}`);
+    expect(shelled.some((s) => s.startsWith('git commit'))).toBe(false);
   });
 });
 
