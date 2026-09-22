@@ -426,7 +426,11 @@ function refused(errors) {
 // records get a canonical tie-break before the router's stable descending timestamp sort.
 function routingRecords(scorecards) {
   const records = Array.isArray(scorecards) ? scorecards : Array.isArray(scorecards?.records) ? scorecards.records : [];
-  const keys = ['role', 'subjectClass', 'provider', 'model', 'taskType', 'scoredAt', 'outcome', 'verifiedBy', 'findings', 'handle', 'pr', 'item', 'taskDescription'];
+  // 'informative' (#3888, rule 4) and 'rootCause' (#3889, rule 5) must survive this projection too —
+  // selectSupervisionLevel reads both directly off the row, never inferred from outcome/findings, and a
+  // row missing them here can never graduate to spot-check through this call path no matter what the
+  // scorecard actually records.
+  const keys = ['role', 'subjectClass', 'provider', 'model', 'taskType', 'scoredAt', 'outcome', 'verifiedBy', 'findings', 'handle', 'pr', 'item', 'taskDescription', 'informative', 'rootCause'];
   return records.filter(object).map((r) => Object.fromEntries(keys.map((k) => [k, ['string', 'number', 'boolean'].includes(typeof r[k]) ? r[k] : null])))
     .sort((a, b) => compare(b.scoredAt || '', a.scoredAt || '') || compare(JSON.stringify(a), JSON.stringify(b)));
 }
