@@ -49,7 +49,7 @@ The concern splits on four orthogonal axes, each pinned to the real tree. **Who 
 selectSupervisionLevel('codex', 'gpt-6-astra', 'self-fix', records,
   { minCleanStreak: 2, requireInformativeTrial: false },
   { prior: { virtualClean: 1, relation: 'same-model-other-taskType',
-             from: [{ triple: ['codex', 'gpt-6-astra', 'bugfix'], rows: ['PR #2301@2026-09-19', 'PR #2299@2026-09-19'] }] } });
+             from: [{ triple: ['codex', 'gpt-6-astra', 'bugfix'], rows: ['pr:2301@2026-09-19', 'pr:2299@2026-09-19'] }] } });
 // → auditTrail gains { criterion: 'virtual-prior', result: 'credited:1',
 //     dataConsulted: 'real=1, virtual=1, from=[…]', reasoning: '…' }
 ```
