@@ -1,0 +1,1 @@
+{"branch":"lane/mechanical-dispatcher","target":"main","checkedAt":"2026-09-22T22:59:35.272Z","ahead":291,"behind":750,"conflict":true,"maxBehind":40,"status":"blocked","reason":"dry-run merge conflicts (750 behind / 291 ahead) — reconciliation required before further dispatch onto this scope"}
