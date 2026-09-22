@@ -122,7 +122,13 @@ export function runReviewTick({
 
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
 
-function realSleep(ms) { return new Promise((resolve) => { const t = setTimeout(resolve, ms); t.unref?.(); }); }
+// Live-caught bug (this daemon's own first launchd-managed run, and the sibling #3870/pass-daemon.mjs
+// daemons built on this exact pattern): `.unref()`-ing this timer told Node it was fine to exit before it
+// fired. Between ticks, nothing else keeps the event loop alive (a spawned agent's own stdio is `ignore`d —
+// no other ref'd handle exists), so the daemon exited right after its FIRST tick instead of waiting out
+// `intervalMs` and looping. A REF'd timer (Node's default — no `.unref()`) is exactly what a resident
+// daemon needs: the sleep IS the reason it stays alive between ticks.
+export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
 
 export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
   return {
