@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+/**
+ * @file skills-src/conveyor/verify-daemon.mjs
+ * @description #3878 (epic #3383) — the standalone Verify daemon: a long-lived process that runs
+ *   {@link ../../scripts/conveyor/verify-dispatch.mjs}'s `runVerifyDispatch` on its own interval, standalone,
+ *   instead of relying on whatever else might invoke that script.
+ *
+ * THE GAP THIS CLOSES (confirmed by direct read — the one real gap named in the whole daemon-split epic).
+ * `we:scripts/conveyor/verify-dispatch.mjs`'s own header justified its blocking safety entirely on "the runner
+ * is a SINGLETON... so there is no risk of two dispatches racing the same lane's marker" — a property that
+ * lives in `we:skills-src/conveyor/runner.mjs`, not in that file itself; it held no lock of its own. Worse, a
+ * direct grep of `runner.mjs` turns up ZERO references to `verify-dispatch.mjs` at all — that file was never
+ * actually wired into the runner's own `makeCliMechanicalPasses` list on `main` (see
+ * `we:scripts/conveyor/verify-dispatch.mjs`'s own "CORRECTION (#3878...)" header note, and this item's
+ * `## Progress` section, for the full finding). So "the runner is a SINGLETON" was, at best, a borrowed,
+ * code-unenforced assumption about however else that file happened to be invoked — never a property it
+ * actually held. This daemon closes the gap FOR REAL: it takes its OWN keyed
+ * `we:skills-src/conveyor/runner-lock.mjs` lease ({@link VERIFY_DAEMON_LEASE_KEY}, #3877's generalized `key`
+ * param) BEFORE ticking `runVerifyDispatch` at all — unlike #3870's Fix-dispatch daemon or #3876's Review
+ * daemon (whose keyed leases are pure efficiency, not a correctness requirement, since their own dispatch
+ * scripts already fence through an independent durable ledger or upstream liveness read), a live lease here IS
+ * the only thing standing between "at most one gate run per lane at a time" and two standalone copies of this
+ * daemon racing the same `.lane-verify` marker.
+ *
+ * ROLLING CUTOVER, DEVIATING FROM THE CARD'S OWN LITERAL WORDING (documented per this epic's established
+ * practice — see #3870/#3876/#3873's own cards). The card's own digest says to "drop it from
+ * `we:skills-src/conveyor/runner.mjs`'s own mechanicalPasses list" once this daemon exists. That step is
+ * SKIPPED here, and not only because (per the finding above) there is nothing on `main` to drop: this epic's
+ * established, safer practice is a ROLLING, pass-by-pass cutover — stand up the new standalone daemon, prove
+ * it stable, and only THEN retire whatever else invokes the old script, in a separate, later change. That
+ * caution matters doubly here, specifically because this item's whole point is that `verify-dispatch.mjs`'s
+ * safety used to depend entirely on a borrowed, unverified assumption — removing whatever else might invoke it
+ * today before this daemon's own lease is proven correct in production would trade one unverified safety story
+ * for another, not close the gap this item exists to close.
+ *
+ * PURE-CORE / IO-SHELL SPLIT (mirrored from #3870's own daemon and runner.mjs's header): {@link runDaemonLoop}
+ * has no `setTimeout`/`setInterval`, no real lease, no real dispatch — every effect (stepping one tick,
+ * sleeping, heartbeating, logging) is injected, so the whole loop/backoff/stop-condition decision is
+ * unit-tested with fakes. {@link runVerifyTick} is the thin per-tick effect (the real `runVerifyDispatch` call
+ * is itself injectable, so it is unit-tested with a fake — no real subprocess/gh/git in unit tests). The IO
+ * shell (`main()`, gated on the direct-invocation check) wires the real `runVerifyDispatch`, a real interval
+ * sleep, and the real keyed runner-lock lease.
+ *
+ * `runDaemonLoop` is duplicated from #3870's own file rather than imported, matching this epic's own stated
+ * precedent (#3870/#3876): none of the sibling daemon files have landed on `main` as a shared module at the
+ * time each was written, so each carries its own identical copy; a follow-up can dedup them into one shared
+ * file once several exist there together.
+ */
+
+import { hostname } from 'node:os';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  RUNNER_LOCK_ROOT, makeOwner,
+  acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
+} from './runner-lock.mjs';
+import { runVerifyDispatch } from '../../scripts/conveyor/verify-dispatch.mjs';
+
+/** This daemon's own lease key — distinct from the Dispatcher's default sentinel and from the Fix-dispatch
+ *  and Review daemons' own keys (#3870, #3876), so none of them ever contend on the same lock dir (#3877).
+ *  UNLIKE those two, this key gates real correctness, not just efficiency — see the file header. */
+export const VERIFY_DAEMON_LEASE_KEY = '<conveyor:verify-daemon-lease>';
+
+/** Matches runner.mjs's own tick cadence (DEFAULT_TICK_INTERVAL_MS) and every sibling daemon in this epic —
+ *  standing alone, there is no reason to run this pass faster or slower. */
+export const DEFAULT_INTERVAL_MS = 120_000;
+
+// ── PURE CORE (no IO — every effect is injected; unit-tested directly) ─────────────────────────────────────
+
+/**
+ * The daemon's whole control flow — IDENTICAL in shape to #3870's own `runDaemonLoop` (see that file's header
+ * for why it is duplicated here rather than imported). Ticks `tickOnce` forever (or until `maxTicks`/
+ * `shouldStop`), isolating a single tick's failure (logged via `onTickError`, never fatal) so a transient
+ * `verify-lane.mjs`/gate hiccup degrades to "try again next tick", not a dead daemon. Stops immediately
+ * (before sleeping) if a tick's own heartbeat reports the lease was lost — continuing to dispatch gate runs
+ * without the lease would reopen exactly the double-dispatch risk this daemon exists to close.
+ * @param {{
+ *   tickOnce: () => Promise<object>|object,
+ *   sleep: (ms:number) => Promise<void>,
+ *   heartbeat?: () => Promise<boolean>|boolean,
+ *   onTick?: (result:object, tick:number) => void,
+ *   onTickError?: (error:Error, tick:number) => void,
+ *   intervalMs?: number,
+ *   maxTicks?: number,
+ * }} o
+ * @returns {Promise<{ticks:number, stoppedReason:string}>}
+ */
+export async function runDaemonLoop({
+  tickOnce, sleep, heartbeat = () => true, onTick = () => {}, onTickError = () => {},
+  intervalMs = DEFAULT_INTERVAL_MS, maxTicks = Infinity,
+}) {
+  if (typeof tickOnce !== 'function') throw new TypeError('runDaemonLoop requires a tickOnce effect');
+  let tick = 0;
+  for (;;) {
+    try {
+      const result = await tickOnce();
+      onTick(result, tick);
+    } catch (error) {
+      onTickError(error, tick);
+    }
+    const alive = await heartbeat();
+    if (!alive) return { ticks: tick + 1, stoppedReason: 'lease-lost' };
+    if (tick + 1 >= maxTicks) return { ticks: tick + 1, stoppedReason: 'max-ticks' };
+    await sleep(intervalMs);
+    tick += 1;
+  }
+}
+
+/**
+ * One tick: run a full `runVerifyDispatch` sweep. Thin on purpose — unlike #3876's Review daemon (a real
+ * multi-step sequence worth its own per-step effects), `verify-dispatch.mjs`'s own sweep is already ONE
+ * self-contained unit of work (scan every pool/lane, spawn a bounded gate run per lane needing one) — this
+ * wrapper exists so the dispatch call itself is a named, injectable effect (unit-tested with a fake `runVerify`
+ * — no real subprocess/gh/git in unit tests), the same discipline `sleep`/`heartbeat` already get one level up
+ * in {@link runDaemonLoop}.
+ * @param {{runVerify?: (o:object) => Promise<{dryRun:boolean, dispatched:Array<object>, failures:Array<object>}>}} [o]
+ * @returns {Promise<{dryRun:boolean, dispatched:Array<object>, failures:Array<object>}>}
+ */
+export async function runVerifyTick({ runVerify = runVerifyDispatch } = {}) {
+  return runVerify({});
+}
+
+// ── IO SHELL (runs only as a CLI — owns the real lease + the real dispatch pass) ─────────────────────────────
+
+// LIVE-CAUGHT BUG, already hit three times this epic (#3870's reconcile-fix-dispatch-daemon.mjs, #3871's
+// pass-daemon.mjs, #3876's review-daemon.mjs — see each file's own postmortem comment): `.unref()`-ing this
+// timer told Node it was fine to exit before it fired — with nothing else keeping the event loop alive between
+// ticks (a spawned child's own stdio is `ignore`d, no other ref'd handle exists), a daemon built this way
+// exited right after its FIRST tick instead of waiting and looping. A REF'd timer (Node's default — no
+// `.unref()`) is exactly what a resident daemon needs: the sleep IS the reason this process stays alive
+// between ticks, not incidental background bookkeeping safe to drop on exit. Copied here verbatim, on purpose
+// — do NOT add `.unref()` to this function.
+export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
+
+/** Build the real effects for {@link runDaemonLoop}: a real tick of {@link runVerifyTick} (which itself calls
+ *  the real `runVerifyDispatch`), a real interval sleep, and a real keyed lease heartbeat. Kept as its own
+ *  factory (mirroring `buildCliDaemonEffects` in the sibling daemons) so `main()` stays a thin wire-up. */
+export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
+  return {
+    intervalMs,
+    tickOnce: () => runVerifyTick({}),
+    sleep: realSleep,
+    heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY }),
+    onTick: (result) => {
+      const { dispatched = [], failures = [] } = result || {};
+      log.error(`verify-daemon: tick — dispatched ${dispatched.length}, failed ${failures.length}`);
+      for (const f of failures) {
+        log.error(`verify-daemon: ${f.pool}/lane-${f.lane} failed (non-fatal)${f.timedOut ? ` [timed out: ${f.timedOutPhase}]` : ''}`);
+      }
+    },
+    onTickError: (error) => {
+      log.error(`verify-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);
+    },
+  };
+}
+
+async function main() {
+  const owner = makeOwner('verify-daemon');
+  const acquired = acquireRunnerLease(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY });
+  if (!acquired.ok) {
+    // Unlike the Fix-dispatch/Review daemons' own no-op case, this refusal IS the correctness guarantee this
+    // daemon exists to provide, not merely an efficiency short-circuit — see the file header.
+    console.error(`verify-daemon: a live instance already holds the lease (${acquired.heldBy}) — exiting.`);
+    return;
+  }
+  let stopping = false;
+  const shutdown = (signal) => {
+    if (stopping) return;
+    stopping = true;
+    console.error(`verify-daemon: ${signal} — releasing the lease and exiting.`);
+    releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY });
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  console.error(`verify-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
+  const { stoppedReason } = await runDaemonLoop(buildCliDaemonEffects({ owner }));
+  if (!stopping) {
+    console.error(`verify-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
+    releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY });
+  }
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  main().catch((e) => { console.error(`verify-daemon: fatal: ${String((e && e.message) || e)}`); process.exit(1); });
+}
