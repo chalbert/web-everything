@@ -2,6 +2,7 @@
 kind: story
 size: 5
 parent: "3383"
+blockedBy: ["3866"]
 status: open
 scope: ["we:scripts/lib/gh-throttle.mjs"]
 dateOpened: "2026-09-22"
