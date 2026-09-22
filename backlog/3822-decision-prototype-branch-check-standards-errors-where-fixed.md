@@ -2,9 +2,11 @@
 bornAs: xuw7mmi
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:.githooks/pre-push", "we:scripts/guard-poc-branch-health.mjs", "we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md", "we:scripts/operations/tracker-refresh-state.mjs"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: one-off
 preparedDate: "2026-09-21"
 preparedAgainstSha: "12dd24e0e934a05a442335426480f6ef7e8e880b"
 relatedTo: ["3768", "3804", "3772", "3443", "3805"]
@@ -87,6 +89,15 @@ printf '%s' "$payload" | node scripts/guard-poc-branch-health.mjs "$@" || exit $
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT → applied. Verified: one error, and `#main` anchors resolve on both sides for the 3475 cites. Amended: the tracker runbook must stop pasting the URL, or the error returns; the detector's Rust twin is named.
 **Screen:** flagged(prio) → fixed. The first draft's "order with the catch-up" fork was sequencing only; it is now two requirements (*Required, not forks*), and the one merit question inside it, note versus detector, became this fork.
+
+## Ruling
+
+Ratified 2026-09-22 by the operator. The operator's own words, quoted: "I ratify 3822". No fork-by-fork overrides were given, so this ratifies the card's own stated bold defaults for all four forks — copied unchanged from #3768 as prepared, nothing re-researched, no default changed.
+
+- **Fork 1 — RATIFIED, (a).** On the branch, as soon as they appear; the tip stays at 0.
+- **Fork 2 — RATIFIED, (a).** Split by cause: a push owns errors in the files it changed; drift reconciliation (#3804) owns every other error.
+- **Fork 3 — RATIFIED, (a).** Both halves: refuse a push that adds an error in its own files, and probe the tip on every runner tick for the rest.
+- **Fork 4 — RATIFIED, (a).** Reword the note; the Artifact's URL stays in the tracker's state file.
 
 ## Order with #3804 (required, not forks)
 
