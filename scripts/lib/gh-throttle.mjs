@@ -79,15 +79,50 @@
  * `--body-file`/`--*-file` flag instead, the same reason `we:scripts/lib/review-label-provider.mjs` posts
  * comments via a temp file rather than piped stdin) will NOT see the same stdin bytes on a second attempt. This
  * mirrors an inherent limit of retrying any subprocess call with piped input; it is not special to this module.
+ *
+ * ================================================================================================
+ * #3670'S ADDITION (2026-09-22): a PER-MINUTE POINTS BUDGET, and CALL-VOLUME/EXHAUSTED-RETRY RECORDING. The
+ * concurrency cap above bounds how many `gh` calls run AT ONCE; it says nothing about how many GitHub REST
+ * "points" are spent over time, and a cap-6 semaphore alone still lets 6 calls a second sail past GitHub's
+ * 900-points-per-minute secondary ceiling. {@link acquireGhPointsSync} adds that second, independent gate —
+ * a fixed 60s window token bucket — using the SAME reuse discipline as the concurrency semaphore above: it
+ * does not invent a new cross-process primitive, it calls `file-locks.mjs`'s existing `reserve`/`releaseLockDir`
+ * (the same atomic mkdir/O_EXCL + heartbeat-TTL mutex heavy-admission.mjs's own slots are built from) as a
+ * plain single-holder mutex guarding a tiny read-modify-write of one shared JSON state file
+ * (`points-budget-state.json`, a sibling of the concurrency semaphore's own slot dirs under `.admission/gh`) —
+ * so the budget is HOST-SHARED across every lane/process on the box, exactly like the concurrency cap, not a
+ * per-process guess that many concurrent lanes could each independently blow past.
+ *
+ * THE DEFAULT (`DEFAULT_GH_POINTS_BUDGET_PER_MIN`, overridable via `WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN`) is
+ * derived, not invented — see that constant's own doc comment for the full methodology.
+ *
+ * POINTS-PER-CALL is a per-call declaration (`opts.throttle.points`, default 1 — the cost of the majority
+ * shape, a single-item view), because different `gh` calls cost GitHub different points (card #3670's own
+ * measurement: a single-PR view is 1 point, a 100-PR open list is 4). This module does not maintain a
+ * per-subcommand cost table — that would need re-deriving GitHub's own points formula — a caller that knows
+ * its call costs more than the default passes `throttle.points` explicitly.
+ *
+ * A CALL BEYOND BUDGET WAITS, IT DOES NOT FIRE — {@link acquireGhPointsSync} polls (bounded, fail OPEN on
+ * timeout, mirroring {@link acquireGhSlotSync}'s own policy exactly) until the current window has room or a
+ * new window rolls over, exactly the shape `acquireGhSlotSync` already uses for the concurrency slot.
+ *
+ * RECORDING — {@link recordGhCallLogEntry} appends one JSON line per `gh` attempt (`calls.jsonl`, a sibling of
+ * the budget state file) so the load estimates #3699 used stay honest going forward: this module used to have
+ * no memory of how much it was actually called. A `retry_exhausted` line is appended in addition, on the
+ * attempt that finally gives up — best-effort (never throws past the call, mirrors `recordGhThrottleMetric`'s
+ * own discipline elsewhere in this codebase): a logging failure must never turn a working `gh` call into a
+ * broken one.
+ * ================================================================================================
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { tryAcquireSlot, releaseOwnedSlot, admissionStatus, ADMISSION_LEASE_MINUTES } from '../readiness/heavy-admission.mjs';
+import { reserve, releaseLockDir } from '../readiness/file-locks.mjs';
 import { defaultPoolRoot } from './lane-pool-paths.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import { classifyPrOpenFailure } from '../conveyor/infra-blocked.mjs';
@@ -120,7 +155,48 @@ export const DEFAULT_RETRY_CAP_MS = 60_000;
  *  unchanged. Overridable via `WE_GH_THROTTLE_RETRY_MAX_ATTEMPTS`. */
 export const DEFAULT_RETRY_MAX_ATTEMPTS = 5;
 
+/** The points-budget window — fixed, not sliding (mirrors GitHub's own "per minute" framing). Not currently
+ *  overridable: unlike the tuning above, changing the window size changes what the budget NUMBER means, so a
+ *  caller that wants a different window should also reconsider the budget rather than flip one env var. */
+export const GH_POINTS_WINDOW_MS = 60_000;
+
+/**
+ * Per-minute GitHub REST "points" budget for `gh` calls routed through this wrapper — distinct from
+ * `DEFAULT_GH_CONCURRENCY_CAP` above: that bounds how many calls run AT ONCE, this bounds how many POINTS are
+ * spent over a rolling 60s window (see the module header's #3670 section). Overridable via
+ * `WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN`.
+ *
+ * DERIVED 2026-09-22, from three inputs, not invented:
+ *   1. GitHub's documented secondary ceiling — 900 REST points/minute, ACCOUNT-WIDE (this module header's own
+ *      opening paragraph; also #3670's own text).
+ *   2. This item's own measured call costs (#3670: a single-PR view is 1 point, a 100-PR open list is 4) and
+ *      #3699's own load estimate from those costs: today's WE watchers (`pr-watch`/`wait-green`/the conveyor's
+ *      review-reconcile pass) cost roughly 24-56 points/minute STEADY STATE at their current poll intervals.
+ *   3. This wrapper's lock root is HOST-SHARED (the concurrency cap already proves this — see the module
+ *      header), so ONE default here is spent by every lane/process on the box combined, not per-process; but
+ *      it is NOT account-wide across every host, and NOT every `gh`-calling site is migrated onto this wrapper
+ *      yet (#3670's own remaining ~78-of-84, filed as this item's slice-2 follow-on) — calls outside the
+ *      wrapper spend from the SAME 900-point ceiling without this budget ever seeing them.
+ *
+ * 300 (one third of the documented 900-point ceiling) sits 5-12x above today's measured steady-state load
+ * (headroom for the `merge-ai-prs.mjs` volume #3670 adds and for legitimate bursts), while leaving roughly 600
+ * points/minute of the real ceiling for callers not yet migrated onto this wrapper — the same "conservative,
+ * not near-full-utilization, leave headroom for the unmigrated sites" principle `DEFAULT_GH_CONCURRENCY_CAP`
+ * already states for itself (6 of GitHub's 100-concurrent ceiling). Revisit once slice-2's migration and/or
+ * #3699's state-feed adoption change how much of this account's quota this wrapper actually owns.
+ */
+export const DEFAULT_GH_POINTS_BUDGET_PER_MIN = 300;
+
+export function resolveGhPointsBudgetPerMin(env = process.env) {
+  const n = Number(env.WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_GH_POINTS_BUDGET_PER_MIN;
+}
+
 const SUBDIR = join('.admission', 'gh');
+const POINTS_BUDGET_LOCK_KEY = 'points-budget';
+const POINTS_BUDGET_LOCK_LEASE_MINUTES = 1; // short — the mutex is held only across one tiny JSON read/write
+const POINTS_BUDGET_STATE_FILENAME = 'points-budget-state.json';
+const CALL_LOG_FILENAME = 'calls.jsonl';
 
 export function resolveGhCap(env = process.env) {
   const n = Number(env.WE_GH_THROTTLE_CAP);
@@ -152,6 +228,17 @@ function resolveRetryTuning(env = process.env) {
  *  proven mechanism, not one cap wearing two names. */
 export function ghThrottleLockRoot(checkoutRoot = process.cwd(), env = process.env) {
   return join(defaultPoolRoot(checkoutRoot, env), SUBDIR);
+}
+
+/** Where the points-budget window state lives — a sibling of the concurrency semaphore's own slot dirs, under
+ *  the SAME host-shared lock root (never a separate root: one `.admission/gh` for both gates). */
+export function ghPointsBudgetStatePath(lockRoot) {
+  return join(lockRoot, POINTS_BUDGET_STATE_FILENAME);
+}
+
+/** The sidecar call/retry-exhausted log's path (#3670) — a sibling of the budget state file, same lock root. */
+export function ghThrottleLogPath(lockRoot) {
+  return join(lockRoot, CALL_LOG_FILENAME);
 }
 
 // ── rate-limit classification (reused, not re-guessed — see module header) ─────────────────────────────────
@@ -225,6 +312,94 @@ export function ghThrottleStatus({ lockRoot, cap }) {
   return admissionStatus({ lockRoot, cap });
 }
 
+// ── the per-minute points budget (#3670) — a SECOND, independent gate over SPEND, not concurrency ────────────
+
+function readGhPointsBudgetState(lockRoot) {
+  try {
+    const parsed = JSON.parse(readFileSync(ghPointsBudgetStatePath(lockRoot), 'utf8'));
+    if (Number.isFinite(parsed.windowStartMs) && Number.isFinite(parsed.spent)) return parsed;
+  } catch {
+    /* absent or corrupt — decideGhPointsSpend treats a null state as a fresh window */
+  }
+  return null;
+}
+
+function writeGhPointsBudgetState(lockRoot, state) {
+  writeFileSync(ghPointsBudgetStatePath(lockRoot), JSON.stringify(state) + '\n', 'utf8');
+}
+
+/**
+ * PURE decision: may `points` be spent right now against `state` (the current window's `{windowStartMs,
+ * spent}`, or `null` for a never-yet-written one), and if not, how long until it may. A window whose age has
+ * reached `windowMs` is treated as freshly rolled over (spent resets to 0) BEFORE checking whether `points`
+ * fits — so a caller that arrives just past the boundary spends against the new window, not the exhausted one.
+ * @returns {{allowed:boolean, nextState:{windowStartMs:number, spent:number}, waitMs?:number}}
+ */
+export function decideGhPointsSpend({ state, points, nowMs, budgetPerMin, windowMs = GH_POINTS_WINDOW_MS }) {
+  const priorStart = state && Number.isFinite(state.windowStartMs) ? state.windowStartMs : nowMs;
+  const priorSpent = state && Number.isFinite(state.spent) ? state.spent : 0;
+  const rolledOver = nowMs - priorStart >= windowMs;
+  const windowStartMs = rolledOver ? nowMs : priorStart;
+  const spent = rolledOver ? 0 : priorSpent;
+  if (spent + points <= budgetPerMin) {
+    return { allowed: true, nextState: { windowStartMs, spent: spent + points } };
+  }
+  return { allowed: false, nextState: { windowStartMs, spent }, waitMs: windowMs - (nowMs - windowStartMs) };
+}
+
+/**
+ * Cross-process-safe points-budget gate. Spins (bounded, injectable `sleep`/`now` for tests — no real
+ * waiting) until `points` fits in the current 60s window or `timeoutMs` elapses, guarding the shared window
+ * state with `file-locks.mjs#reserve`/`releaseLockDir` (a plain single-holder mutex, held only across one
+ * tiny JSON read/write — see the module header's #3670 section for why this reuses that primitive rather than
+ * inventing a new one). FAILS OPEN on timeout (`{ok:false, timedOut:true}`) — mirrors {@link acquireGhSlotSync}
+ * exactly: a stuck budget gate must never strand an otherwise-healthy `gh` call forever.
+ */
+export function acquireGhPointsSync({
+  lockRoot, points = 1, budgetPerMin, owner, pid = process.pid,
+  now = () => Date.now(), sleep = sleepSyncMs, pollMs = DEFAULT_ACQUIRE_POLL_MS,
+  timeoutMs = DEFAULT_ACQUIRE_TIMEOUT_MS, windowMs = GH_POINTS_WINDOW_MS,
+}) {
+  mkdirSync(lockRoot, { recursive: true });
+  const startedAt = now();
+  for (;;) {
+    const nowMs = now();
+    const nowIso = new Date(nowMs).toISOString();
+    const locked = reserve(lockRoot, POINTS_BUDGET_LOCK_KEY, owner, nowMs, nowIso, pid, 'unknown', POINTS_BUDGET_LOCK_LEASE_MINUTES);
+    let decision = null;
+    if (locked.ok) {
+      try {
+        decision = decideGhPointsSpend({ state: readGhPointsBudgetState(lockRoot), points, nowMs, budgetPerMin, windowMs });
+        if (decision.allowed) writeGhPointsBudgetState(lockRoot, decision.nextState);
+      } finally {
+        releaseLockDir(lockRoot, POINTS_BUDGET_LOCK_KEY);
+      }
+    }
+    if (decision && decision.allowed) return { ok: true, waitedMs: nowMs - startedAt, timedOut: false };
+    if (nowMs - startedAt >= timeoutMs) return { ok: false, waitedMs: nowMs - startedAt, timedOut: true };
+    sleep(decision ? Math.min(pollMs, Math.max(1, decision.waitMs)) : pollMs);
+  }
+}
+
+// ── call-volume / exhausted-retry recording (#3670) ────────────────────────────────────────────────────────
+
+/**
+ * Append one line to the sidecar call log (`calls.jsonl`) — best-effort, mirrors `recordGhThrottleMetric`'s
+ * own discipline: a logging failure must never turn a working `gh` call into a broken one, so this never
+ * throws past the call. `outcome` is `'call'` for every attempt (success or failure alike — the point is
+ * VOLUME, not just failures) or `'retry_exhausted'` for the one extra line appended when a rate-limit-shaped
+ * failure gives up after `maxAttempts`.
+ * @param {string} logPath
+ * @param {{op:string, attempt:number, points:number, outcome:('call'|'retry_exhausted'), ok?:boolean}} entry
+ */
+export function recordGhCallLogEntry(logPath, entry) {
+  try {
+    appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', 'utf8');
+  } catch {
+    /* best-effort — see docblock */
+  }
+}
+
 // ── the transparent, importable, drop-in replacement for `execFileSync('gh', args, opts)` ───────────────────
 
 /**
@@ -251,6 +426,12 @@ export function ghThrottleStatus({ lockRoot, cap }) {
  *   @param {()=>number} [opts.throttle.now]           injectable clock (tests)
  *   @param {(args:string[], opts:object)=>*} [opts.throttle.exec]  injectable `gh` exec (tests — mocks the real
  *     `execFileSync('gh', …)` call so no `gh` binary is needed to prove the semaphore/backoff logic)
+ *   @param {number} [opts.throttle.points]            REST points this call costs (default 1 — see the module
+ *     header's #3670 section; pass the real cost for a known-heavier call, e.g. a 100-item list is 4)
+ *   @param {number} [opts.throttle.budgetPerMin]      override the points-budget-per-minute (tests)
+ *   @param {string} [opts.throttle.op]                low-cardinality label for the sidecar log (default:
+ *     derived from `args`, e.g. "pr view")
+ *   @param {string} [opts.throttle.logPath]           override the sidecar call-log path (tests)
  * @returns {Buffer|string} whatever the underlying `exec`/`execFileSync` call returns on success
  */
 export function runGhSync(args, opts = {}) {
@@ -268,12 +449,21 @@ export function runGhSync(args, opts = {}) {
   const pid = throttle.pid || process.pid;
   const owner = throttle.owner || `${pid}:${randomUUID()}`;
   const exec = throttle.exec || ((a, o) => execFileSync('gh', a, o));
+  const points = throttle.points != null ? throttle.points : 1;
+  const budgetPerMin = throttle.budgetPerMin != null ? throttle.budgetPerMin : resolveGhPointsBudgetPerMin(env);
+  const pointsWindowMs = throttle.pointsWindowMs != null ? throttle.pointsWindowMs : GH_POINTS_WINDOW_MS;
+  const opLabel = throttle.op || (Array.isArray(args) ? args.slice(0, 2).join(' ') : 'unknown');
+  const logPath = throttle.logPath || ghThrottleLogPath(lockRoot);
 
   mkdirSync(lockRoot, { recursive: true });
 
   let attempt = 0;
   for (;;) {
     attempt += 1;
+    // The points-budget gate runs BEFORE the concurrency slot — a call waiting out its budget must not hold a
+    // scarce concurrency slot idle while it waits (same reasoning as releasing the slot before a backoff sleep,
+    // below).
+    acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
     const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
     // Fail OPEN on an acquire timeout too — proceeding unslotted rather than stranding this `gh` call forever
     // (the residual-risk policy heavy-admission.mjs itself names: a fixed cap bounds concurrency and makes the
@@ -287,11 +477,15 @@ export function runGhSync(args, opts = {}) {
     } finally {
       if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
     }
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure });
     if (!failure) return result;
 
     const text = `${failure && failure.stderr ? String(failure.stderr) : ''}\n${failure && failure.message ? String(failure.message) : ''}`;
     const retryable = attempt < maxAttempts && isRateLimitShaped(text);
-    if (!retryable) throw failure;
+    if (!retryable) {
+      if (isRateLimitShaped(text)) recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted' });
+      throw failure;
+    }
 
     // Sleep OUTSIDE the held slot — a multi-second backoff must not idle a scarce concurrency slot other
     // pending `gh` calls could use in the meantime.
@@ -339,12 +533,18 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } =
   const now = throttle.now || (() => Date.now());
   const pid = throttle.pid || process.pid;
   const owner = throttle.owner || `${pid}:${randomUUID()}`;
+  const points = throttle.points != null ? throttle.points : 1;
+  const budgetPerMin = throttle.budgetPerMin != null ? throttle.budgetPerMin : resolveGhPointsBudgetPerMin(env);
+  const pointsWindowMs = throttle.pointsWindowMs != null ? throttle.pointsWindowMs : GH_POINTS_WINDOW_MS;
+  const opLabel = throttle.op || (Array.isArray(argv) ? argv.slice(0, 2).join(' ') : 'unknown');
+  const logPath = throttle.logPath || ghThrottleLogPath(lockRoot);
 
   mkdirSync(lockRoot, { recursive: true });
 
   let attempt = 0;
   for (;;) {
     attempt += 1;
+    acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
     const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
     let r;
     try {
@@ -355,8 +555,12 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } =
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
     const stderrText = r.stderr ? r.stderr.toString('utf8') : '';
     const failed = typeof r.status === 'number' && r.status !== 0;
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failed });
     const retryable = failed && attempt < maxAttempts && isRateLimitShaped(stderrText);
-    if (!retryable) return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+    if (!retryable) {
+      if (failed && isRateLimitShaped(stderrText)) recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted' });
+      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+    }
     sleep(retryBackoffMs(attempt, retryTuning));
   }
 }
