@@ -3,11 +3,12 @@ bornAs: xt6vu5s
 kind: story
 size: 5
 parent: "3383"
-status: active
+status: resolved
 blockedBy: ["3877"]
 scope: ["we:scripts/conveyor/verify-dispatch.mjs", "we:skills-src/conveyor/runner-lock.mjs", "we:skills-src/conveyor/verify-daemon.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
 tags: []
 ---
 
