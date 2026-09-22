@@ -1,4 +1,5 @@
 ---
+bornAs: x9ytnq8
 kind: story
 size: 3
 parent: "3443"
@@ -39,8 +40,8 @@ Ports the vitest setup/config, we:scripts/readiness/heavy-admission.mjs, we:scri
 **Merge notes:**
 - `we:.gitignore` — clean 3-way (main `21ee7d6f9` touched other lines).
 - `we:vitest.config.ts` — clean (adds `setupFiles: ['we:vitest.setup.ts']`).
-- `we:scripts/readiness/file-locks.mjs` — 1 region vs main `d622b4d80` (#xaipsbs): keep main's entryless-lock-dir grace block (`lockDirAgeMs` / `ENTRYLESS_LOCK_DIR_GRACE_MS`), then the branch's `reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes, requireOwnProcess ? pid : null)`. Test merges clean.
-- `we:scripts/readiness/heavy-admission.mjs` — 6 regions; a semantic overlap with main's `d622b4d80` (#xaipsbs / #3785), which independently built the stale-waiter reap (`classifyWaiter`, `reapStaleWaiters`, `reapHistory`, `reap` CLI), `admissionBypassReason`, `admittedArgv` / `admittedShellCommand`, and its own `run` wrapper. **Ruled resolution:**
+- `we:scripts/readiness/file-locks.mjs` — 1 region vs main `d622b4d80` (#3785): keep main's entryless-lock-dir grace block (`lockDirAgeMs` / `ENTRYLESS_LOCK_DIR_GRACE_MS`), then the branch's `reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes, requireOwnProcess ? pid : null)`. Test merges clean.
+- `we:scripts/readiness/heavy-admission.mjs` — 6 regions; a semantic overlap with main's `d622b4d80` (#3785 / #3785), which independently built the stale-waiter reap (`classifyWaiter`, `reapStaleWaiters`, `reapHistory`, `reap` CLI), `admissionBypassReason`, `admittedArgv` / `admittedShellCommand`, and its own `run` wrapper. **Ruled resolution:**
   - Main's machinery is the base (live callers: `we:scripts/pr-land.mjs`, `we:scripts/readiness/test-selection.mjs`, `we:scripts/operations/mutation-check-io.mjs`, `we:scripts/dev/regression.mjs`).
   - Add the branch's exports `partitionWaiting`, `pruneStaleWaiting`, `WAITING_STALE_GRACE_MS` (branch test + #3899 need them).
   - `markWaiting`: union signature `{ ..., pid = process.pid, repo = null }`, body `{ owner, lane, num, pid, requestedAt, host, repo }`.

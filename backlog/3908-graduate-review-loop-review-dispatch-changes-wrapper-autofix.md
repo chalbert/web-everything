@@ -22,7 +22,7 @@ Ports 8 files (we:scripts/operations/review-dispatch.mjs, we:scripts/operations/
 
 Trial merges ran in the scratch dir with `git merge-file -p main base branch`. Base is `ca7e68b71`, main is `origin/main`, branch is `ff1618065`. No checkout was touched.
 
-> **Base caveat:** `git merge-base --all` returns two bases: `ca7e68b71` and `21aaedb0b`. The branch also merged main at `4261ef224` (`d5a9dc0d0`), and several commits were cherry-picked onto both sides (#3331, #3634, #xqa9ttq, #3383 round-cap). For `we:scripts/conveyor/reconcile-fix-dispatch.mjs`, use branch `1024822db` as the effective base. It is byte-identical to main `8ab3e976e`, and it cuts the conflicts from 17 to 5. For the other files, `ca7e68b71` is fine.
+> **Base caveat:** `git merge-base --all` returns two bases: `ca7e68b71` and `21aaedb0b`. The branch also merged main at `4261ef224` (`d5a9dc0d0`), and several commits were cherry-picked onto both sides (#3331, #3634, #3704, #3383 round-cap). For `we:scripts/conveyor/reconcile-fix-dispatch.mjs`, use branch `1024822db` as the effective base. It is byte-identical to main `8ab3e976e`, and it cuts the conflicts from 17 to 5. For the other files, `ca7e68b71` is fine.
 
 ---
 
@@ -88,7 +88,7 @@ Trial merges ran in the scratch dir with `git merge-file -p main base branch`. B
 #### 5. `we:scripts/operations/review-dispatch.mjs`: 9 conflicts (same with base `4261ef224`)
 - **Main:**
   - `f211888d0`: multi-repo `planReviewDispatch`: `repoKeyForSlug`, `laneRepo`, a check that the checkout exists, and `reviewSessionSlug(prNum, repoKey)`. `LANE_REPO` brief placeholder. `repoKey` on the result.
-  - #xqa9ttq review fixes: `TOOL_FREE_ONLY_JUDGE_PROVIDERS = ['codex']` guard inside `dispatchReview`.
+  - #3704 review fixes: `TOOL_FREE_ONLY_JUDGE_PROVIDERS = ['codex']` guard inside `dispatchReview`.
   - `acbc4c425` / `3225ed6fb`: `assertMainNotStale` moved into `we:scripts/lib/main-staleness.mjs` and re-exported. The branch never modified that function (verified), so main's extraction wins cleanly.
 - **Branch:**
   - `02d9af300`: the CLI becomes `dispatchReviewCli`. The default is the **mechanical** `dispatchReviewMechanical` (synchronous, no `claude` session); `--agent` is opt-in. `CODEX_JUDGE_PROVIDER_REFUSAL`. `--codex-advisory`, `--correctness-advisory`, `--antigravity-review`.
@@ -114,7 +114,7 @@ Trial merges ran in the scratch dir with `git merge-file -p main base branch`. B
 - **Risk: #3437 does not apply to the mechanical path.** The mechanical default spawns no `claude` session, so reconcile-core's name bind never sees a live review. The only guards against a second concurrent review of the same PR are `guardedDispatch` (resource `repo#pr:N`, shared by `kind:'review'` and `'fix'`, so review and fix also exclude each other) and the tick mutex. If the action store is missing or unavailable, `guardedDispatch` returns `held:'unavailable'`, which fails closed. If `runId` is null, the record stays `dispatching` and later ticks are held until the lease/absence grace ends (10 + 15 min).
 - **Risk: multi-repo loss on the default path.** `we:scripts/operations/review-dispatch-wrapper.mjs#planReviewDispatchWrapper` accepts any `owner/repo`, uses `reviewSessionSlug(prNum)` with no repo, and acquires a **WE** lane. So a FUI or plateau-app review runs in a WE lane, and main's checkout check and `unsupported-repo` error never fire. Main's runner parses the `unsupported-repo` text in stderr. Raise this against the wrapper card; it is not solvable in this file.
 - **Risk: staleness guard.** Main's #3474 staleness guard runs only on the `--agent` path. The mechanical default skips it; the branch behaves the same way.
-- **Risk: runner coupling.** Main's `we:skills-src/conveyor/runner.mjs` calls this CLI with a blocking `exec` and no heartbeat. The mechanical default now blocks for the whole review. Land this together with or after the runner card's #xu2pp2m heartbeat change.
+- **Risk: runner coupling.** Main's `we:skills-src/conveyor/runner.mjs` calls this CLI with a blocking `exec` and no heartbeat. The mechanical default now blocks for the whole review. Land this together with or after the runner card's #3629 heartbeat change.
 
 ---
 

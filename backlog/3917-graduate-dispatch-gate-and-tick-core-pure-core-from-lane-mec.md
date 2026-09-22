@@ -1,4 +1,5 @@
 ---
+bornAs: xa9fkfz
 kind: story
 size: 5
 parent: "3443"
@@ -36,7 +37,7 @@ Ports we:scripts/readiness/dispatch-pause.mjs, we:scripts/readiness/dispatch-pla
 
 **Merge notes** (freshness rule: route tick-core, its test, queue-report and dispatch-plan through the staging ref `origin/lane/mechanical-dispatcher-catchup` — step 1 `git merge-file catchup <659744301> ff1618065`, step 2 `git merge-file origin/main 5ab140f50 <step1>`; a direct 3-way from `ca7e68b71` gives 7 / 4 / 1 / 7 conflicts instead):
 - `we:scripts/conveyor/__tests__/tick-core.test.mjs`, `we:scripts/readiness/queue-report.mjs` — 0 conflicts via catchup.
-- `we:scripts/conveyor/tick-core.mjs` — 1 region via catchup, the `planPrepareSpawns({...})` call in `planTick` (~L1266). Catchup passes `pausedKinds` into `planPrepareSpawns` (per-kind `dispatch-paused` trace, #xupukxa); the branch empties each input per kind instead. Resolution: keep catchup's pass-through (`unshaped, decisions, investigations, ..., pausedKinds`) but with `unshaped: scopeOrSizeNeeded` (#3849), and take the branch's comment line about the `no-size` union.
+- `we:scripts/conveyor/tick-core.mjs` — 1 region via catchup, the `planPrepareSpawns({...})` call in `planTick` (~L1266). Catchup passes `pausedKinds` into `planPrepareSpawns` (per-kind `dispatch-paused` trace, #3612); the branch empties each input per kind instead. Resolution: keep catchup's pass-through (`unshaped, decisions, investigations, ..., pausedKinds`) but with `unshaped: scopeOrSizeNeeded` (#3849), and take the branch's comment line about the `no-size` union.
 - `we:scripts/readiness/dispatch-plan.mjs` — 5 regions via catchup:
   1. imports — keep main's `import { driftDefaults, findPocBranch, readRegistry } from we:scripts/lib/poc-branches.mjs` plus the branch's `import { PAUSABLE_KINDS, normalizePausedKinds, resolvePausedKinds } from we:scripts/readiness/dispatch-pause.mjs`.
   2. `dispatchPlan` signature — union: `{ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, sizePolicy = null, trace = false }` (`driftGraduationItem` is main's #3836).

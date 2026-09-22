@@ -22,7 +22,7 @@ Ports 17 files (we:scripts/lib/antigravity-judge-spawn.mjs, we:scripts/lib/codex
 
 **Card scope correction.** The card says only 3 files changed on both sides. Main has actually changed 10 of the card's source files since `ca7e68b71`, plus 10 of its test/brief files. Only three files are branch-only and can be copied as-is: we:scripts/lib/judge-spawn.mjs, we:scripts/lib/judge-panel.mjs and we:scripts/lib/jury-core.mjs. Everything else needs a 3-way merge.
 
-**Root cause of most conflicts.** Card #xqa9ttq (Codex as the third judge) was cherry-picked into both histories. The pairs `b36e0f2fd`/`06e96a884` and `f968bcefd`/`20e26c3cb` are identical twins. Main then added review fixes on top (#2115/#2117 rounds: env allowlist, scratch HOME, advisory seat can't block, roster read from the saved run, `advisory:*` labels). The branch added seats 4 and 5, probation defaults, transcript and scorecard recording, and `review:awaiting-advisory`. Most conflicts are these two layers touching the same xqa9ttq lines.
+**Root cause of most conflicts.** Card #3704 (Codex as the third judge) was cherry-picked into both histories. The pairs `b36e0f2fd`/`06e96a884` and `f968bcefd`/`20e26c3cb` are identical twins. Main then added review fixes on top (#2115/#2117 rounds: env allowlist, scratch HOME, advisory seat can't block, roster read from the saved run, `advisory:*` labels). The branch added seats 4 and 5, probation defaults, transcript and scorecard recording, and `review:awaiting-advisory`. Most conflicts are these two layers touching the same 3704 lines.
 
 **Dependencies (must land first).**
 - #3893 provides we:scripts/lib/model-probation.mjs (+ `.json`) and we:scripts/conveyor/run-quality-record.mjs (with its scorer and subject-class imports).

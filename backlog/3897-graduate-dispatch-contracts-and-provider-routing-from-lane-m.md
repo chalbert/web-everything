@@ -44,7 +44,7 @@ Ports 10 files (we:scripts/lib/dispatch-task-type.mjs, we:scripts/lib/dispatch-t
 - **Main side:**
   - Bug fixes from the PR #2254 review rounds: maxBuffer, UTF-8 decoding, killing the whole process group, the Ctrl-C leak, `-z` status parsing, and the log path taken from `rev-parse --absolute-git-dir`.
   - `90b9ab8a8`: FOREGROUND ONLY banner.
-  - `d622b4d80` (xaipsbs): the full gate now runs `npm run test:unit`.
+  - `d622b4d80` (3785): the full gate now runs `npm run test:unit`.
 - **Branch side:** `5238fe08c` (#3635)
   - The `CODEX_EFFORT_MAP`, `CODEX_MODEL`, `CODEX_TIER_EFFORT` and `resolveCodexEffort` definitions move out to `we:scripts/lib/codex-model-routing.mjs`. This file now re-exports them.
   - `buildCodexDirectTaskArgv` always pushes `-m` via `assertCodexModel(model, 'codex-direct-task')`, replacing the old `if (model !== undefined)` check.

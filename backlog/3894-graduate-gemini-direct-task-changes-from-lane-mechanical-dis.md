@@ -25,13 +25,13 @@ Ports 1 files (we:scripts/gemini-direct-task.mjs) plus their tests. Standalone. 
 **`we:scripts/gemini-direct-task.mjs`** and **`we:scripts/__tests__/gemini-direct-task.test.mjs`**
 - **Main side:**
   - Main created the script (`baeb001a7`), then added the #2254 fixes, the one-time `agy --conversation` resume, the TOOL_ERROR surfacing, the empty `--print` fix, and the FOREGROUND ONLY banner.
-  - `d622b4d80` (xaipsbs): the full gate runs `npm run test:unit` instead of `npx vitest run`, with the matching one-line test change.
+  - `d622b4d80` (3785): the full gate runs `npm run test:unit` instead of `npx vitest run`, with the matching one-line test change.
 - **Branch side:** only `6761be552`, a squashed copy of main's files as of `90b9ab8a8` (script) and `34be1853e` (test). `git diff 90b9ab8a8 ff1618065 -- we:scripts/gemini-direct-task.mjs` is empty, so the branch made no change of its own.
 - **Trial merge:**
   - Against `ca7e68b71`: 2 fake conflicts (the file is absent there, so git sees it as added on both sides).
   - Against the effective base `90b9ab8a8`: 0 conflicts, and the result is byte-identical to main.
 - **Dependencies:** none.
-- **Semantic risks:** copying the branch file over main would regress main's xaipsbs fix (back to a raw `npx vitest run`).
+- **Semantic risks:** copying the branch file over main would regress main's 3785 fix (back to a raw `npx vitest run`).
 
 **Worker steps**
 1. Confirm `git diff 90b9ab8a8 ff1618065 -- we:scripts/gemini-direct-task.mjs we:scripts/__tests__/gemini-direct-task.test.mjs` is empty.
