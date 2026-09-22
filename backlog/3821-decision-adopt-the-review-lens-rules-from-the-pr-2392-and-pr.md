@@ -2,9 +2,13 @@
 bornAs: xq4aezx
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/review-core.mjs", "we:scripts/lib/__tests__/review-core.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: one-off
+graduatedTo: none
 preparedDate: "2026-09-21"
 preparedAgainstSha: "12dd24e0e934a05a442335426480f6ef7e8e880b"
 relatedTo: ["3813", "3280", "3814", "3815", "2860", "2967"]
@@ -65,6 +69,16 @@ Rule whether to add three review rules, and in what form. Story #3813 (filed as 
 - **(b) Folded with #3280, one edit to the correctness lens.** Rejected as the default, not on merit: one edit is tidier, but it ties this build's timing to #3280's. Pick it if one review of the correctness lens is preferred.
 
 **Skeptic:** not run as a separate pass on #3813.
+
+## Ruling
+
+Ratified as written (operator, 2026-09-21) — all three forks on their recommended default:
+
+- **Fork 1 — (a)** A `LENS_HUNT_BRIEF` entry carrying all three rules.
+- **Fork 2 — (a)** The correctness lens only.
+- **Fork 3 — (a)** Its own edit (not folded with #3280).
+
+Red-team pass at ratification: checked each fork for a cost/effort-only downside masquerading as merit, and for an impl-detail-dressed-as-standard framing. Fork 2's "two copies to keep in sync" con is not the deciding reason — (a) is chosen because the rules are the correctness lens's existing test-coverage bar, and the security lens keeps finding the same gaps under its own charter regardless. Fork 3 is an explicit operator-preference call (own edit vs. folding into #3280's unrelated table edit), not a merit fork; no principle favors either shape. No fork rested on cost alone; no fork misplaces an implementation concern as a standards call (this is an internal review-tooling mechanism, not a WE/FUI/Plateau standard). Defaults hold unamended.
 
 ## Not in this decision
 

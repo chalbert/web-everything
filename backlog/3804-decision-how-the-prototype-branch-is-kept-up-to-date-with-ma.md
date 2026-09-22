@@ -177,7 +177,7 @@ done
 
 ## Not in this decision
 
-Duplicate backlog ids stay on #3772 point 3 and #3768. The loop's build details stay on 3797: which of the three sync actors survives, the dedicated clone, retiring pid 81962. The five judgment calls of the first catch-up stay on #3803. Two security questions the advisory review of PR #2415 raised about the promotion are open decisions, not part of this ruling: what the pass checks about test and gate files before it promotes (`x86eyvl`), and how the reconcile agent is kept from pushing to the shared branch (`xm96s8j`).
+Duplicate backlog ids stay on #3772 point 3 and #3768. The loop's build details stay on 3797: which of the three sync actors survives, the dedicated clone, retiring pid 81962. The five judgment calls of the first catch-up stay on #3803. Two security questions the advisory review of PR #2415 raised about the promotion are open decisions, not part of this ruling: what the pass checks about test and gate files before it promotes (`3841`), and how the reconcile agent is kept from pushing to the shared branch (`3847`).
 
 ### Review jury (provisional — pre-registered #2638)
 

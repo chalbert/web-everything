@@ -1,9 +1,10 @@
 ---
+bornAs: xi8dngi
 kind: story
 size: 2
 parent: "3717"
 status: open
-blockedBy: ["x00f4mm"]
+blockedBy: ["3839"]
 scope: ["we:scripts/operations/prepare-scope-wrapper.mjs", "we:skills-src/conveyor/prepare-scope-agent-brief-v2.md", "we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []

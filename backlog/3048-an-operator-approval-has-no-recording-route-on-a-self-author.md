@@ -1,8 +1,11 @@
 ---
 bornAs: x12910p
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateStarted: "2026-09-21"
+dateResolved: "2026-09-21"
+codifiedIn: "docs/agent/platform-decisions.md#clear-operator-proven-self-clear-only"
 preparedDate: "2026-08-16"
 relatedTo: ["2844", "2895", "2888", "2439", "2398", "2946", "3006", "3028", "3039", "3055"]
 scope:

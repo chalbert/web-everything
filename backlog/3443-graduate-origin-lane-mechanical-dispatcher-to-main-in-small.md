@@ -183,3 +183,23 @@ How each slice (a child of this item) graduates, per the statute
   dispatch instructions) was deliberately NOT attempted this pass — it needs the dedicated, low-contention,
   most-scrutiny turn its own card calls for, not a slot in a night this saturated. **#3487** stays
   `blockedBy: 3483, 3486` as before, now half-unblocked (3483 landed).
+
+- **2026-09-21 (operator priority: graduation; land-advance slices filed).** The `land-advance` operation and
+  everything it imports exists only on the prototype branch. Filed as six children, hash ids (the drain numbers
+  them at land), each ported as a diff under the #3804 statute, none built yet:
+  1. `3853`: `we:scripts/operations/land-advance-tools.mjs` (26 lines, no imports). No blockers.
+  2. `3854`: the land-advance core, `we:scripts/operations/land-advance.mjs` plus its repair and escalations
+     modules, the pure tests and the fixture. `blockedBy: 3853`.
+  3. `3855`: `we:scripts/conveyor/session-verdicts.mjs` and `we:scripts/conveyor/session-verdicts-io.mjs` + tests
+     (minus the reaper-plan test block, which needs the reaper slice). `blockedBy: 3853, 3854`.
+  4. `3851`: `we:scripts/conveyor/driver-watchdog.mjs` and `we:scripts/conveyor/driver-mode.mjs` + the watchdog test. No blockers.
+  5. `3852`: `we:scripts/operations/ci-heal-pr-dispatch.mjs`. No blockers.
+  6. `3856`: `we:scripts/operations/land-advance-io.mjs` and `we:scripts/operations/land-advance-cli.mjs`, the
+     `we:scripts/operations/run.mjs` registration, the http-adapter pin and the io, cli, real and repair-io tests.
+     `blockedBy` all five above. This also unblocks the reaper slice above (it imports `readFollowUps` from the io module).
+
+  Checked against the earlier inventory and corrected: (a) the core does NOT depend on the watchdog, verdicts or
+  ci-heal slices, only on the tools slice; (b) the verdicts slice DOES depend on the core, because its test imports
+  the core and its escalations module; (c) that same test imports `classifySessionReapWithVerdict`, which `main`'s
+  reaper does not export, so its last describe block waits for the reaper slice; (d) the repair-io test belongs to
+  slice 6, not the pure core. Order: tools → core → verdicts, with the watchdog and ci-heal slices anywhere, IO last.

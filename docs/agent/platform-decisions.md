@@ -3010,8 +3010,8 @@ points, ruled here:
    resolution the agent cannot make on merit, including one that changes a test's assertions, comes back as a
    decision card. This amends #3556 (merge only; staging ref only; promotion by the pass). Two open
    decisions may add to this point, and do not change it until ruled: what the pass checks about test and
-   gate files before it promotes (`x86eyvl`), and how the agent is kept from pushing to the shared branch
-   (`xm96s8j`).
+   gate files before it promotes (`3841`), and how the agent is kept from pushing to the shared branch
+   (`3847`).
 3. **Alert.** The operator is alerted only when they must act (the agent's one attempt failed, or the tests
    on the resolved staging ref are red). Nothing is raised while the agent works. It is a line in the every-turn turn digest plus a row in the wip
    report, and it fails visible: an unreadable record is "status unknown", never "all clear". The record is
@@ -4091,6 +4091,59 @@ human-only). Implementation follow-on: the guard clause in `we:scripts/review-se
 `advisory-sha` marker in `we:scripts/operations/review-pr.mjs`, and the config toggle — filed as `3692`
 ("Gate `clear-human` on a posted advisory review for the current head"), `blockedBy` nothing (ratified in
 the same lane it was filed from), numbered on land.
+
+---
+
+### A proven self-authored `review:pending` PR clears through `clear-operator` — `clear-human`'s twin one tier down, gated to a proven self-clear {#clear-operator-proven-self-clear-only}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), Fork 1(a) approved as prepared, no amendment
+(`#3048`).** An operator's verbal approval of a PR whose author actor is the approving session itself had **no
+recording route**: `--to=accepted` refuses as a self-clear (#2439/#2398), and `--to=clear-human` refuses
+because the PR carries `review:pending`, not `review:human` — the human-ceremony exemption exists only one
+tier up. Two ways to close the gap were forked; only one is ratified.
+
+1. **Mint `clear-operator`.** `REVIEW_LABEL_TARGETS` (`we:scripts/review-set-label.mjs`) gains a
+   `'clear-operator'` member. `decideSetLabel` grows a branch parallel to the existing `clear-human` one, keyed
+   on `REVIEW_LABELS.pending` instead of `REVIEW_LABELS.human`: label-shape only, refused when the PR does not
+   carry `review:pending`, otherwise clearing it to `review:accepted` (never touching `review:human` —
+   INVARIANT 2 stays untouched).
+2. **Gated to a PROVEN self-clear, never a general bypass.** `review:pending` is the default parked state
+   nearly every PR passes through, unlike the rare `review:human` label `clear-human` guards — so
+   `clear-operator` reuses the same `decideClearerIndependence` call `--to=accepted` already makes, but
+   **inverts** the requirement: `clear-operator` is refused **unless** independence reads `SELF_CLEAR`. This
+   keeps its blast radius scoped to exactly the reported gap; it can never be used on a PR someone else
+   authored.
+3. **Inherits the existing honesty tax, unchanged.** `--actor=<name>` and a quoted `--reason=<...>` stay
+   mandatory and are posted verbatim, exactly as `clear-human` already requires. The durable comment gains a
+   **third** phrasing alongside "a human ceremony cleared it" / "an established-independent agent cleared it":
+   *"an operator ceremony cleared it (review:pending tier, proven self-authored)"*.
+4. **The residual is pre-existing, not new.** The unforgeable-actor-signal gap `#2895` already deferred to
+   `#2946` applies here unchanged — `clear-operator` grants no capability an unforged `--to=accepted` call
+   didn't already grant, so no new residual is introduced at this tier.
+
+**Rejected — (b) auto-escalate self-authorship into `review:human`.** Adding self-authorship as a third
+`humanRequired` trigger in `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) would re-litigate
+[#review-human-declarative-leash-only](#review-human-declarative-leash-only) (#2771), which closed the
+`review:human` trigger set at exactly three members and explicitly rejected "an agent might be policing its
+own leash" — the same structural case as an actor clearing its own PR. Widening that closed set, or amending
+the ratified statute outright, is a larger decision this item has no authority to make on its own; (a) never
+touches that boundary.
+
+**What this ruling does not do.** It builds nothing (no `clear-operator` branch, no independence-inversion
+check, no new comment phrasing) and changes no gate by itself; the build is separately-scoped follow-on work
+tracked on the backlog.
+
+**Lineage:** ratified via `#3048` (2026-09-21), grounded in the item's own prior-art check against
+`we:scripts/lib/gate-config.mjs`'s `TRUST_CHAIN` and `we:scripts/lib/review-policy.contract.json`; re-validated
+for currency at ratification (statutes #3434/#3589 ratified since prep compose without conflict; the item's
+`file:line` citations had drifted from unrelated commits but the underlying mechanism they describe was
+unchanged) and re-attacked by a fresh independent skeptic pass, which found nothing that survived. Composes
+with — does not alter — [#review-human-declarative-leash-only](#review-human-declarative-leash-only) (#2771,
+the trigger set (b) would have widened) and
+[#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (#3434, the
+sibling mechanical-accept path for a genuinely independent verdict — orthogonal, since this rule's gate fires
+only on `SELF_CLEAR`, never on independent review). Full reasoning and the rejected option:
+[#3048](/backlog/3048-an-operator-approval-has-no-recording-route-on-a-self-author.md).
 
 ---
 

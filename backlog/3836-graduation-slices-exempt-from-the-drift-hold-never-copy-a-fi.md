@@ -5,8 +5,9 @@ size: 3
 parent: "3383"
 relatedTo: ["3804", "3443", "3797"]
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:docs/agent/platform-decisions.md"]
-status: open
+status: resolved
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-21"
 tags: []
 ---
 

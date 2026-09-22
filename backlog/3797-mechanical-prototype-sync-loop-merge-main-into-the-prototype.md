@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["x86eyvl", "xm96s8j"]
+blockedBy: ["3841", "3847"]
 relatedTo: ["3772", "3472", "3443", "3607", "3556", "3464", "3553"]
 scope: ["we:scripts/conveyor/branch-sync.mjs", "we:scripts/lib/poc-branches.mjs", "we:scripts/lib/poc-branches.json", "we:scripts/operations/poc-land.mjs", "we:scripts/readiness/drain-lock.mjs"]
 dateOpened: "2026-09-21"

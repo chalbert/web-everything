@@ -6,13 +6,14 @@ parent: "3383"
 status: open
 scope: ["we:scripts/lib/review-core.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/jury-ledger.mjs", "we:scripts/lib/__tests__/review-core.test.mjs"]
 dateOpened: "2026-09-21"
-blockedBy: ["3821"]
 tags: []
 ---
 
 # Proposal: two review-lens rules from PR #2392 (a header "never"/"still refused" claim needs a named test; a state-matrix check needs one test per cell)
 
-FOUND 2026-09-21. The review of PR #2392 found two untested guards by mutation probe (the assertReady race re-check and the deleted-branch refusal in we:scripts/operations/handoff-home.mjs), and each finding asked for a lens rule: any never or still refused claim in a file header needs a named test for that exact line, and a state-matrix check needs one test per cell. Design-first, UNCLEARED, a proposal only: it changes a review prompt, so it needs the operator's OK before any build. Do not build, and do not queue, until the operator says so.
+FOUND 2026-09-21. The review of PR #2392 found two untested guards by mutation probe (the assertReady race re-check and the deleted-branch refusal in we:scripts/operations/handoff-home.mjs), and each finding asked for a lens rule: any never or still refused claim in a file header needs a named test for that exact line, and a state-matrix check needs one test per cell. Design-first, a proposal only: it changes a review prompt, so it needed the operator's OK before any build.
+
+**Ruled 2026-09-21 via #3821 (ratified as written):** build option (1), correctness lens only, its own edit (not folded with #3280). Cleared to build.
 
 ## Evidence
 
@@ -55,8 +56,8 @@ Nothing is built and this card stays uncleared: it still needs the operator's OK
 
 ## Done when
 
-Written for the proposed default (1). NOT to be built until the operator says so.
+Written for the ruled default (1) — see #3821's Ruling.
 
-1. **Executable** — `npx vitest run review-core` passes with a new case asserting that `huntBriefForLens('correctness')` is non-empty and contains both rules (the named phrases "still refused" and "one test per cell"), and that the correctness entry of `REVIEW_LENS_CHARTER` (we:scripts/lib/jury-ledger.mjs:149) is unchanged. Fails today: `huntBriefForLens('correctness')` returns the empty string.
+1. **Executable** — `npx vitest run review-core` passes with a new case asserting that `huntBriefForLens('correctness')` is non-empty and contains all three rules (the named phrases "still refused", "one test per cell", and a phrase naming the card-sentence rule — a "must not"/"must use X rather than Y"/"never" sentence needs a Done-when case, named and with its exact fixture, that fails under the wrong choice), and that the correctness entry of `REVIEW_LENS_CHARTER` (we:scripts/lib/jury-ledger.mjs:149) is unchanged. Fails today: `huntBriefForLens('correctness')` returns the empty string.
 2. **Executable** — `npx vitest run review-core jury-core jury-ledger` stays green (the every-key-is-a-panel-lens check at we:scripts/lib/__tests__/review-core.test.mjs:1792 covers the new entry).
 3. **Executable** — `npm run check:standards` reports 0 errors.

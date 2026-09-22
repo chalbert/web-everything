@@ -1,0 +1,79 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Backlog <a href="/backlog/3806-one-weighted-worker-budget-plus-the-heavy-pool-or-separate-h/">#3806</a>
+    asks how dispatch of worker agents should be limited on one 12-core host: by <strong>one weighted budget</strong>
+    (a weight per dispatch kind: review 0.25, light task 0.5, prepare 1.0, build or fix 1.5, calibration exclusive)
+    on top of the structural heavy-command pool (<code>scripts/readiness/heavy-admission.mjs</code>, cap 2, see
+    <a href="/research/heavy-command-admission-queue-capacity-throttle/">the admission-queue survey</a>), or by
+    <strong>two separate counts</strong> (heavy workers, light workers). This survey grounds the call in how
+    shipped schedulers that mix cheap and expensive jobs bound them.
+</p>
+
+<h3>Recommendation (feeding #3806's forks)</h3>
+<ol>
+    <li><strong>Fork 1 — one weighted budget plus the structural heavy pool.</strong> Ninja, Gradle, Bazel, Airflow and
+        Jenkins all pair one shared budget with a hard cap on the scarce step; the one documented static two-class
+        split (Hadoop MRv1) was replaced.</li>
+    <li><strong>Fork 2 — an exclusive kind drains the budget; every other kind is admitted by per-item fit, with a per-kind
+        <code>drain</code> flag (default false).</strong>
+        Strict FIFO (Go's weighted semaphore) guarantees the large request is served but can idle free capacity; pure
+        skip-ahead (Airflow's complaint, issue 29474) starves an exclusive weight under load. Strict order for any other
+        kind is the flag set to true, not a rival rule. The budget needs one tick-wide ledger shared by every planner.</li>
+</ol>
+<p>
+    Not a fork: optional per-kind ceilings inside the same budget (Jenkins Throttle categories, Slurm
+    <code>GrpTRES</code>/<code>MaxJobs</code>) are an additive extension, added only when calibration data shows one
+    kind's RAM binds before the budget does.
+</p>
+
+<h3>Findings</h3>
+<table>
+    <thead><tr><th>System</th><th>Model</th><th>Shape for #3806</th></tr></thead>
+    <tbody>
+        <tr><td><a href="https://ninja-build.org/manual.html">Ninja</a></td>
+            <td>Global <code>-j</code> plus <code>pool</code> with <code>depth</code>. "No matter what pools you specify, ninja will never run more concurrent jobs than the default parallelism, or the number of jobs specified on the command line (with <code>-j</code>)."</td>
+            <td>One budget plus a structural pool for the scarce step (option A).</td></tr>
+        <tr><td><a href="https://docs.gradle.org/current/userguide/build_services.html">Gradle</a></td>
+            <td><code>--max-workers</code> global count; <code>maxParallelUsages</code> caps concurrent users of one shared service.</td>
+            <td>Global count plus a structural pool; no weights.</td></tr>
+        <tr><td><a href="https://bazel.build/docs/user-manual">Bazel</a></td>
+            <td>Job cap plus a scheduler that reserves declared CPU/RAM per action; a <code>cpu:n</code> tag reserves n cores. Modeling is admitted to be inaccurate (<a href="https://jmmv.dev/2019/12/bazel-local-resources.html">jmmv.dev</a>).</td>
+            <td>Declared weights against one budget; the reason the pool stays.</td></tr>
+        <tr><td><a href="https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/pools.html">Airflow</a></td>
+            <td>Pool slots; a task takes one or more via <code>pool_slots</code>; separate named pools also exist.</td>
+            <td>Weights inside a shared budget. Failure modes: <a href="https://github.com/apache/airflow/issues/29474">heavy tasks overtaken</a>, <a href="https://github.com/apache/airflow/discussions/25139">free slots wasted across pools</a>.</td></tr>
+        <tr><td><a href="https://plugins.jenkins.io/heavy-job">Jenkins Heavy Job</a> + <a href="https://plugins.jenkins.io/throttle-concurrents/">Throttle Concurrent Builds</a></td>
+            <td>A job consumes N executors; categories add per-category caps, all of which must be satisfied.</td>
+            <td>Weighted budget plus per-kind ceilings (the supported-by-default extension).</td></tr>
+        <tr><td><a href="https://slurm.schedmd.com/tres.html">Slurm</a></td>
+            <td><code>TRESBillingWeights</code> price a job; <code>GrpTRES</code>/<code>MaxJobs</code> cap classes.</td>
+            <td>Weights and per-class limits together.</td></tr>
+        <tr><td><a href="https://pkg.go.dev/golang.org/x/sync/semaphore">Go semaphore.Weighted</a></td>
+            <td><code>Acquire(n)</code> against one budget; strict FIFO so large requests are not starved.</td>
+            <td>The head-of-line rule of Fork 2.</td></tr>
+        <tr><td>Hadoop MRv1 &rarr; YARN</td>
+            <td>Fixed map and reduce slots idled one class while the other was saturated; MRv2 uses fungible containers (read from search excerpts of the <a href="https://issues.apache.org/jira/secure/attachment/12486023/MapReduce_NextGen_Architecture.pdf">MRv2 architecture note</a>; PDF not opened).</td>
+            <td>The documented failure of static two-class counts (option B).</td></tr>
+    </tbody>
+</table>
+
+<h3>What this repo adds</h3>
+<ul>
+    <li>The heavy pool <strong>fails open</strong> after 20 minutes of waiting and is bypassed under <code>CI</code>,
+        <code>WE_HEAVY_ADMISSION=off</code> or a missing pool root (<code>scripts/readiness/heavy-admission.mjs</code> lines 114-117 and 449-455).
+        It is a bounded-wait guarantee, not a hard cap, so an upstream budget that keeps the waiting count low earns its place.</li>
+    <li>Today the only worker limit is one shared lane <em>count</em> (<code>scripts/lib/lane-concurrency.mjs</code>), applied identically to
+        builds and to prepare/fix spawns (<code>scripts/conveyor/tick-core.mjs</code> lines 1118 and 1157). Weights refine that one number;
+        two counts would add a second.</li>
+    <li>The item and card 3807 never say what happens when the next item does not fit the remaining budget: that is Fork 2.</li>
+</ul>
+
+<h3>Cross-references</h3>
+<ul>
+    <li><a href="/research/heavy-command-admission-queue-capacity-throttle/">Heavy-command admission queue</a> — the pool this budget sits on.</li>
+    <li>Backlog <a href="/backlog/3807-put-the-dispatch-budget-in-a-tracked-dispatch-budget-config/">#3807</a> (the tracked config),
+        <a href="/backlog/3808-add-a-read-only-capacity-review-operation-that-reads-the-kne/">#3808</a> (capacity-review),
+        <a href="/backlog/3800-reevaluate-the-core-budget-and-the-dispatch-weights-from-tel/">#3800</a> (weights re-fit).</li>
+</ul>
+{% endraw %}

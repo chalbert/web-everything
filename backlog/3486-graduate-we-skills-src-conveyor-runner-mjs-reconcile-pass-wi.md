@@ -23,7 +23,7 @@ Part 3 of 3 of the core reconcile-pass payload, and the piece #3443s own Done-wh
 
 ## Resolution (2026-09-21) — already on main, card was stale
 
-The wiring this card names landed on `main` under a duplicate card, #3499 (`bornAs: x5v8yy9`): commit `98c6e53cc` + fix `12811c7ac`, merged via PR #1944 on 2026-09-05. `main` has since reshaped the same block for multi-repo (`f211888d0`, 2026-09-20): `makeCliMechanicalPasses` in `we:skills-src/conveyor/runner.mjs` shells `we:scripts/conveyor/reconcile-pass.mjs --json` per repo, then `we:scripts/operations/review-dispatch.mjs --pr=<N>` for each `kind:'review'` entry, `we:scripts/conveyor/review-round-tag.mjs` only on a successful dispatch, and `we:scripts/conveyor/review-status-tag.mjs` for every `selectStatusCandidates` PR. Nothing was ported; nothing is owed on the review-reconcile wiring itself.
+The wiring this card names landed on `main` under a duplicate card, #3499 (`bornAs: 3499`): commit `98c6e53cc` + fix `12811c7ac`, merged via PR #1944 on 2026-09-05. `main` has since reshaped the same block for multi-repo (`f211888d0`, 2026-09-20): `makeCliMechanicalPasses` in `we:skills-src/conveyor/runner.mjs` shells `we:scripts/conveyor/reconcile-pass.mjs --json` per repo, then `we:scripts/operations/review-dispatch.mjs --pr=<N>` for each `kind:'review'` entry, `we:scripts/conveyor/review-round-tag.mjs` only on a successful dispatch, and `we:scripts/conveyor/review-status-tag.mjs` for every `selectStatusCandidates` PR. Nothing was ported; nothing is owed on the review-reconcile wiring itself.
 
 Done-when, checked against `main` at `8a7583b8f`:
 

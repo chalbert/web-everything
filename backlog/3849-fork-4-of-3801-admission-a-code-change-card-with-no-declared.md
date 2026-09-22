@@ -1,9 +1,10 @@
 ---
+bornAs: xxvinxv
 kind: story
 size: 3
 parent: "3717"
 status: open
-blockedBy: ["xlq2jh7", "x00f4mm", "xi8dngi"]
+blockedBy: ["3843", "3839", "3842"]
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/readiness/__tests__/dispatch-plan.test.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/conveyor/__tests__/tick-core.test.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-21"
 tags: []
