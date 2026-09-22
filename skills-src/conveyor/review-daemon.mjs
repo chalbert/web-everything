@@ -104,7 +104,7 @@ export function runReviewTick({
   const failed = [];
   for (const d of reviews) {
     try {
-      const result = dispatch({ pr: d.prNumber, repo: null });
+      const result = dispatch({ pr: d.prNumber, repo });
       dispatched.push({ prNumber: d.prNumber, agentId: result.agentId ?? null });
     } catch (e) {
       failed.push({ prNumber: d.prNumber, error: String((e && e.message) || e).split('\n')[0] });
