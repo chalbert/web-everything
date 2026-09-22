@@ -3,9 +3,12 @@ bornAs: xl9vvqj
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/__tests__/gemini-direct-task.test.mjs", "we:scripts/gemini-direct-task.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: one-off
 tags: []
 ---
 
@@ -16,3 +19,20 @@ Ports 1 files (we:scripts/gemini-direct-task.mjs) plus their tests. Standalone. 
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+### Merge notes for #3894 (2026-09-22)
+
+**`we:scripts/gemini-direct-task.mjs`** and **`we:scripts/__tests__/gemini-direct-task.test.mjs`**
+- **Main side:**
+  - Main created the script (`baeb001a7`), then added the #2254 fixes, the one-time `agy --conversation` resume, the TOOL_ERROR surfacing, the empty `--print` fix, and the FOREGROUND ONLY banner.
+  - `d622b4d80` (xaipsbs): the full gate runs `npm run test:unit` instead of `npx vitest run`, with the matching one-line test change.
+- **Branch side:** only `6761be552`, a squashed copy of main's files as of `90b9ab8a8` (script) and `34be1853e` (test). `git diff 90b9ab8a8 ff1618065 -- we:scripts/gemini-direct-task.mjs` is empty, so the branch made no change of its own.
+- **Trial merge:**
+  - Against `ca7e68b71`: 2 fake conflicts (the file is absent there, so git sees it as added on both sides).
+  - Against the effective base `90b9ab8a8`: 0 conflicts, and the result is byte-identical to main.
+- **Dependencies:** none.
+- **Semantic risks:** copying the branch file over main would regress main's xaipsbs fix (back to a raw `npx vitest run`).
+
+**Worker steps**
+1. Confirm `git diff 90b9ab8a8 ff1618065 -- we:scripts/gemini-direct-task.mjs we:scripts/__tests__/gemini-direct-task.test.mjs` is empty.
+2. Make no code change. Resolve this card as already at parity, noting that main is a superset of the branch.
