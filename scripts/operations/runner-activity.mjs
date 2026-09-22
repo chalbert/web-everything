@@ -4,39 +4,78 @@ import { compute } from './step-kinds.mjs';
 
 export const RUNNER_ACTIVITY_OP = 'runner-activity';
 
-/** A quiet queue is not a stall. Only stale driver evidence or the tick's own diagnosis says stalled. */
-export function assessRunnerActivity(read) {
-  if (!read || !Array.isArray(read.inFlightDispatches) || !Array.isArray(read.completedDispatches)) {
-    throw new TypeError('runner-activity: unreadable snapshot is not a down runner');
+/**
+ * The three-way (four-state) health vocabulary for ONE daemon entry — `down` / `dead` / `alive-and-stalled` /
+ * `alive-and-idle` — computed identically for every daemon in `runners[]`, not just the dispatcher. `lastTick`
+ * is passed only for the dispatcher (the only daemon with a tick/driver-status concept of its own); the
+ * fix-dispatch and review daemons are assessed on heartbeat freshness alone, since they have no tick to
+ * corroborate against. A quiet daemon is not a stall — only stale heartbeat/tick evidence or the tick core's
+ * own held-work diagnosis says stalled.
+ * @param {{ present: boolean|null, alive: boolean, heartbeatAt: string|null, error?: string }} entry
+ * @param {{ observedAt: string, staleAfterMs: number, lastTick: object|null }} ctx
+ */
+export function assessDaemonState(entry, { observedAt, staleAfterMs, lastTick = null }) {
+  if (entry.present === null) {
+    return { state: 'down', stalled: false,
+      stalledReason: `This daemon's lease could not be read reliably: ${entry.error || 'unknown error'}.` };
   }
-  const { runner, lastTick, observedAt, staleAfterMs } = read;
-  let state;
-  let stalled = false;
-  let stalledReason;
-  if (!runner.present) {
-    state = 'down';
-    stalledReason = 'No singleton runner lease exists; no runner is registered.';
-  } else if (!runner.alive) {
-    state = 'dead';
-    stalledReason = 'The recorded PID is absent or no longer identifies the conveyor runner.';
-  } else {
-    const heartbeatAge = Date.parse(observedAt) - Date.parse(runner.heartbeatAt);
+  if (!entry.present) {
+    return { state: 'down', stalled: false, stalledReason: 'No singleton lease exists; no daemon is registered.' };
+  }
+  if (!entry.alive) {
+    return { state: 'dead', stalled: false,
+      stalledReason: 'The recorded PID is absent or no longer identifies this daemon process.' };
+  }
+  const heartbeatAge = Date.parse(observedAt) - Date.parse(entry.heartbeatAt);
+  if (lastTick) {
     const tickAge = lastTick.at == null ? heartbeatAge : Date.parse(observedAt) - Date.parse(lastTick.at);
     const stale = !Number.isFinite(heartbeatAge) || !Number.isFinite(tickAge)
       || heartbeatAge > staleAfterMs || tickAge > staleAfterMs;
-    stalled = stale || lastTick.stalled.length > 0;
-    state = stalled ? 'alive-and-stalled' : 'alive-and-idle';
-    stalledReason = stale
-      ? 'Runner process exists, but its heartbeat or last tick exceeds the runner lease window (or is unreadable).'
+    const stalled = stale || lastTick.stalled.length > 0;
+    const stalledReason = stale
+      ? 'Daemon process exists, but its heartbeat or last tick exceeds the lease window (or is unreadable).'
       : lastTick.stalled.length
         ? `Tick reports held-work stalls: ${lastTick.stalled.map((s) => `#${s.num}: ${s.reason}`).join('; ')}`
         : lastTick.at == null
-          ? 'Runner heartbeat is fresh; no completed tick recorded yet. No stall established.'
-          : 'Runner heartbeat and tick are fresh; the tick reports no stall. Quiet work is not a stall.';
+          ? 'Daemon heartbeat is fresh; no completed tick recorded yet. No stall established.'
+          : 'Daemon heartbeat and tick are fresh; the tick reports no stall. Quiet work is not a stall.';
+    return { state: stalled ? 'alive-and-stalled' : 'alive-and-idle', stalled, stalledReason };
   }
-  // The requested three-way state vocabulary describes driver health. Dispatch activity is a separate axis.
+  const stale = !Number.isFinite(heartbeatAge) || heartbeatAge > staleAfterMs;
+  return {
+    state: stale ? 'alive-and-stalled' : 'alive-and-idle', stalled: stale,
+    stalledReason: stale
+      ? 'Daemon process exists, but its heartbeat exceeds the lease window (or is unreadable).'
+      : 'Daemon heartbeat is fresh; no stall established.',
+  };
+}
+
+/**
+ * Assess the raw `collectRunnerActivity` snapshot: each `runners[]` entry gets its own `state`/`stalled`/
+ * `stalledReason` via {@link assessDaemonState}. The top-level `state`/`stalled`/`stalledReason`/`dispatching`
+ * fields mirror the `dispatcher` entry specifically (the pre-existing "driver health" vocabulary the
+ * `runner-status` skill and `docs/agent/testing.md` already document) — a consumer that only cares about the
+ * conveyor dispatcher, as every caller did before this operation reported on three daemons, reads exactly the
+ * same top-level shape as before. A consumer that wants the fix-dispatch or review daemon's health reads
+ * `runners[]` by `name`.
+ */
+export function assessRunnerActivity(read) {
+  if (!read || !Array.isArray(read.runners) || !Array.isArray(read.inFlightDispatches) || !Array.isArray(read.completedDispatches)) {
+    throw new TypeError('runner-activity: unreadable snapshot is not a down runner');
+  }
+  const { lastTick, observedAt, staleAfterMs } = read;
+  const runners = read.runners.map((entry) => ({
+    ...entry,
+    ...assessDaemonState(entry, { observedAt, staleAfterMs, lastTick: entry.name === 'dispatcher' ? lastTick : null }),
+  }));
+  const dispatcher = runners.find((r) => r.name === 'dispatcher');
+  // Dispatch activity is a separate axis from driver health, independent of any daemon's own state.
   const dispatching = read.inFlightDispatches.some((r) => r.live === true);
-  return { ...read, state, stalled, stalledReason, dispatching };
+  return {
+    ...read, runners,
+    state: dispatcher?.state, stalled: dispatcher?.stalled, stalledReason: dispatcher?.stalledReason,
+    dispatching,
+  };
 }
 
 export function runnerActivityOperation({ readActivity } = {}) {

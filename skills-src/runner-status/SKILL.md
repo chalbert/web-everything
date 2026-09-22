@@ -18,7 +18,13 @@ dispatch records (default 10). See [the report contract](../../docs/agent/testin
 
 ## Read the evidence
 
-A quiet runner is not necessarily stalled. Use `stalled` and `stalledReason` rather than guessing
+`verdict.runners` is an array with one entry per known standalone daemon — `dispatcher`,
+`fix-dispatch`, `review` — each with its own `state`/`stalled`/`stalledReason`/`alive`/`pid`/
+`heartbeatAt`. The top-level `state`/`stalled`/`stalledReason`/`dispatching` mirror the `dispatcher`
+entry specifically (the conveyor's mechanized tick driver); read `runners` by `name` for the other
+two daemons' health.
+
+A quiet daemon is not necessarily stalled. Use `stalled` and `stalledReason` rather than guessing
 from an empty dispatch list. `state` describes driver health; `dispatching` separately reports
 whether an in-flight dispatch session is actually listed alive. Planned dispatches are not launches.
 
