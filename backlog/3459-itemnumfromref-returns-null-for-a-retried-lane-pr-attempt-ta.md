@@ -3,9 +3,10 @@ bornAs: xaa7r2n
 kind: story
 size: 3
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-02"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-22"
 tags: []
 scope:
   - we:scripts/readiness/
