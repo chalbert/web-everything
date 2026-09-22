@@ -26,6 +26,19 @@
  * lanes each still contend for host CPU exactly as a directly-run `npm run test:unit` always has (#3372
  * already shrinks the common case); this file changes WHO runs the gate, not how expensive it is.
  *
+ * CORRECTION (#3878, epic #3383). The paragraph above states the intended safety property, but confirmed by
+ * direct read (grep over `we:skills-src/conveyor/runner.mjs` turns up zero references to this file), this
+ * script was NEVER actually wired into that runner's own `makeCliMechanicalPasses` list on `main` — there is
+ * no `mechanicalPasses` entry for it to be "dropped" once a standalone daemon exists, contrary to what this
+ * file's own header (and #3878's own card digest, copying it) implied. So "the runner is a SINGLETON" was, at
+ * best, a borrowed, code-unenforced assumption about however else this file happened to be invoked — never a
+ * property THIS file held. #3878 closes that gap for real: `we:skills-src/conveyor/verify-daemon.mjs` now
+ * wraps {@link runVerifyDispatch} (below) as a standalone daemon that takes its OWN keyed
+ * `we:skills-src/conveyor/runner-lock.mjs` lease (`<conveyor:verify-daemon-lease>`) before ticking it, so at
+ * most one live copy of that daemon ever dispatches a gate run at a time — independent of whatever else may
+ * invoke this file directly (a human running the CLI by hand, say), which carries the same standing,
+ * unchanged risk it always has.
+ *
  * A HARD WALL-CLOCK CEILING, NOT JUST A DOCUMENTED ONE (epic #3383, live incident 2026-09-14). The gate's
  * documented normal range is 150-350s; before this, nothing here bounded it — a single genuinely-stuck (or
  * merely starved, under heavy concurrent-lane contention) gate blocked EVERY lane's dispatch indefinitely,
@@ -64,8 +77,12 @@
  * timeout the whole process-group kill above still applies unchanged.
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors lease-reaper.mjs): {@link laneNeedsVerifyDispatch} is pure (no fs/git);
- * the IO shell (`main()`) owns the POOL_ROOT walk, marker reads, the `git rev-parse HEAD` per lane, and the
- * actual `verify-lane.mjs` spawn.
+ * the IO shell owns the POOL_ROOT walk, marker reads, the `git rev-parse HEAD` per lane, and the actual
+ * `verify-lane.mjs` spawn. {@link runVerifyDispatch} is that whole IO-shell sweep, exported and exit-free (it
+ * never calls `process.exit`) — the same "export the sweep, let the CLI own exit/format" shape
+ * `we:scripts/conveyor/reconcile-fix-dispatch.mjs#runReconcileFixDispatch` already established, which is what
+ * lets #3878's standalone `we:skills-src/conveyor/verify-daemon.mjs` tick it directly. `main()` below is now a
+ * thin CLI shell over it.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -255,9 +272,16 @@ export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs }) {
   });
 }
 
-async function main(argv) {
-  const flags = parseFlags(argv);
-  const dryRun = !!flags['dry-run'];
+/**
+ * Run one full sweep: scan every pool/lane for a lane whose marker needs a verify dispatch (per
+ * {@link laneNeedsVerifyDispatch}), spawn a bounded gate run for each, and return a plain summary. Never calls
+ * `process.exit` — this is the one thing #3878's standalone Verify daemon
+ * (`we:skills-src/conveyor/verify-daemon.mjs`) ticks directly, and `main()` below is now a thin CLI shell over
+ * it (exit code + `--json`/plain formatting only).
+ * @param {{dryRun?:boolean}} [o]
+ * @returns {Promise<{dryRun:boolean, dispatched:Array<object>, failures:Array<object>}>}
+ */
+export async function runVerifyDispatch({ dryRun = false } = {}) {
   const dispatched = [];
   const failures = [];
 
@@ -312,12 +336,19 @@ async function main(argv) {
     }
   }
 
+  return { dryRun, dispatched, failures };
+}
+
+async function main(argv) {
+  const flags = parseFlags(argv);
+  const result = await runVerifyDispatch({ dryRun: !!flags['dry-run'] });
+
   if (flags.json) {
-    writeAllSync(1, JSON.stringify({ dryRun, dispatched, failures }, null, 2) + '\n');
-  } else if (dispatched.length === 0 && failures.length === 0) {
+    writeAllSync(1, JSON.stringify(result, null, 2) + '\n');
+  } else if (result.dispatched.length === 0 && result.failures.length === 0) {
     log('verify-dispatch: nothing pending.');
   }
-  process.exit(failures.length > 0 ? 1 : 0);
+  process.exit(result.failures.length > 0 ? 1 : 0);
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
