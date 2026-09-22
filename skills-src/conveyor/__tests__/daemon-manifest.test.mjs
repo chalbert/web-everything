@@ -1,17 +1,56 @@
 /**
  * @file skills-src/conveyor/__tests__/daemon-manifest.test.mjs
  * @description Unit proof of #3871's closed allowlist — the one gate standing between a `--pass=<name>` flag
- *   and a real spawn. The REAL {@link DAEMON_MANIFEST} starts empty by design (see that file's header); every
- *   test here supplies its OWN fixture manifest rather than mutating the shared one.
+ *   and a real spawn. #3873 populated {@link DAEMON_MANIFEST} with the 7 real watcher passes (the manifest
+ *   started empty by design at #3871 — see that file's own header history); most tests below still supply
+ *   their OWN fixture manifest rather than the shared one, except the `DAEMON_MANIFEST` describe block, which
+ *   pins the real, populated shape.
  */
 import { describe, it, expect } from 'vitest';
 import {
   DAEMON_MANIFEST, isSafeManifestScriptPath, assertValidManifestEntry, resolveManifestEntry,
 } from '../daemon-manifest.mjs';
+import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 
-describe('DAEMON_MANIFEST — starts empty by design', () => {
-  it('has no entries yet (populated by later daemon-launcher slices, not this one)', () => {
-    expect(Object.keys(DAEMON_MANIFEST)).toEqual([]);
+describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
+  const REPO_KEYS = Object.keys(CONSTELLATION_REPOS);
+
+  it('has exactly the 3 WE-only entries plus 4 passes × 3 repos = 15 total', () => {
+    expect(Object.keys(DAEMON_MANIFEST).sort()).toEqual([
+      'branch-drift', 'infra-blocked', 'duplicate-pr-watch',
+      ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch']
+        .flatMap((p) => REPO_KEYS.map((k) => `${p}-${k}`)),
+    ].sort());
+  });
+
+  it('every entry is independently valid (no manifest entry ships broken)', () => {
+    for (const name of Object.keys(DAEMON_MANIFEST)) {
+      expect(() => assertValidManifestEntry(name, DAEMON_MANIFEST[name]), name).not.toThrow();
+    }
+  });
+
+  it('the 3 WE-only passes carry no --repo flag at all — genuinely single-repo, not merely unbuilt cross-repo', () => {
+    for (const name of ['branch-drift', 'infra-blocked', 'duplicate-pr-watch']) {
+      expect(DAEMON_MANIFEST[name].args.some((a) => a.startsWith('--repo='))).toBe(false);
+    }
+  });
+
+  it('the 4 repo-generic passes each get one entry per constellation repo, with the matching --repo=<slug>', () => {
+    for (const passName of ['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch']) {
+      for (const [key, { slug }] of Object.entries(CONSTELLATION_REPOS)) {
+        const entry = DAEMON_MANIFEST[`${passName}-${key}`];
+        expect(entry, `${passName}-${key}`).toBeDefined();
+        expect(entry.args).toContain(`--repo=${slug}`);
+      }
+    }
+  });
+
+  it('lane-pool-health-watch is wired for plateau-app specifically (live-caught 2026-09-22: PR #167 had no lane-pool coverage)', () => {
+    expect(DAEMON_MANIFEST['lane-pool-health-watch-plateau-app'].args).toContain('--repo=chalbert/plateau-app');
+  });
+
+  it('poc-branch-sync is deliberately absent — it does not exist as a script on main (a false premise in #3873\'s own scope, corrected here rather than invented)', () => {
+    expect(Object.keys(DAEMON_MANIFEST).some((n) => n.includes('poc-branch-sync'))).toBe(false);
   });
 });
 
@@ -79,6 +118,7 @@ describe('resolveManifestEntry — the closed-allowlist lookup itself', () => {
     expect(() => resolveManifestEntry('bad', { bad: { script: '/etc/passwd', intervalMs: 1000 } })).toThrow(/script must be a repo-relative path/);
   });
   it('defaults to the real DAEMON_MANIFEST when none is supplied', () => {
-    expect(() => resolveManifestEntry('anything')).toThrow(/No entries are registered yet/);
+    expect(resolveManifestEntry('branch-drift')).toEqual(DAEMON_MANIFEST['branch-drift']);
+    expect(() => resolveManifestEntry('totally-made-up')).toThrow(/"totally-made-up" is not in the daemon manifest/);
   });
 });
