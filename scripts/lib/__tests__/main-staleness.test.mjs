@@ -4,7 +4,7 @@
  *   here and unit-tested without a real repo.
  */
 import { describe, it, expect } from 'vitest';
-import { classifyStaleness, checkMainStaleness } from '../main-staleness.mjs';
+import { classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy } from '../main-staleness.mjs';
 
 describe('classifyStaleness', () => {
   it('behind 0 → fresh', () => {
@@ -148,5 +148,45 @@ describe('checkMainStaleness — cleanOnly (#3474)', () => {
   it('a failing merge → warn with reason ff-failed carrying git\'s own message', () => {
     const r = checkMainStaleness({ cleanOnly: true, run: behind({ merge: { status: 128, stderr: 'fatal: Not possible to fast-forward\n' } }) });
     expect(r).toMatchObject({ action: 'warn', reason: 'ff-failed', detail: 'fatal: Not possible to fast-forward' });
+  });
+});
+
+// #3875 — assertMainNotStale/staleRemedy, extracted verbatim from we:scripts/operations/review-dispatch.mjs
+// (which now re-exports them, byte-identical default behavior) so a future daemon can self-check freshness
+// without depending on the whole review-dispatch module. The one genuinely NEW surface is `label`.
+describe('assertMainNotStale', () => {
+  it('fresh/offline pass through unchanged, no throw', () => {
+    expect(assertMainNotStale('/repo', () => ({ fresh: true, behind: 0 }))).toEqual({ fresh: true, behind: 0 });
+    expect(assertMainNotStale('/repo', () => ({ offline: true }))).toEqual({ offline: true });
+  });
+
+  it('a synced (auto-ff) result logs, does not throw, and returns the synced status', () => {
+    const st = { synced: true, behind: 4 };
+    expect(assertMainNotStale('/repo', () => st)).toBe(st);
+  });
+
+  it('default label is "review-dispatch" — unchanged wording for its original, still most common caller', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'dirty', behind: 3, ahead: 0, dirty: true })))
+      .toThrow(/^review-dispatch: the dispatching checkout is 3 commit\(s\) behind origin\/main/);
+  });
+
+  it('a caller-supplied label replaces the prefix — the whole point of the #3875 extraction', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'dirty', behind: 3, ahead: 0, dirty: true }), { label: 'pass-daemon' }))
+      .toThrow(/^pass-daemon: the dispatching checkout is 3 commit\(s\) behind origin\/main/);
+  });
+
+  it('a non-default base flows through both the thrown message and staleRemedy', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'diverged', behind: 1, ahead: 2, dirty: false }), { base: 'lane/mechanical-dispatcher', label: 'infra-blocked' }))
+      .toThrow(/infra-blocked: the dispatching checkout is 1 commit\(s\) behind origin\/lane\/mechanical-dispatcher.*DIVERGED \(2 local commit\(s\) ahead of origin\/lane\/mechanical-dispatcher\)/s);
+  });
+});
+
+describe('staleRemedy', () => {
+  it('names the right remedy per reason, and falls back to a generic one for an unknown/absent reason', () => {
+    expect(staleRemedy({ reason: 'diverged', ahead: 2 }, 'main')).toMatch(/DIVERGED \(2 local commit\(s\) ahead/);
+    expect(staleRemedy({ reason: 'dirty' }, 'main')).toMatch(/uncommitted changes/);
+    expect(staleRemedy({ reason: 'not-on-base' }, 'main')).toMatch(/HEAD is not on main/);
+    expect(staleRemedy({ reason: 'ff-failed', detail: 'conflict' }, 'main')).toMatch(/failed \(conflict\)/);
+    expect(staleRemedy({}, 'main')).toMatch(/^Sync \(git pull --ff-only\)/);
   });
 });
