@@ -20,7 +20,6 @@ import { REFUSAL_KINDS } from '../conveyor/reconcile-core.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const TRACKER_REF = 'origin/lane/mechanical-dispatcher';
 export const TRACKER_PATH = 'backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md';
-export const ITEM_SKIP_REASONS = Object.freeze(['claimed', 'design-first', 'needs-operator', 'operator-decision', 'needs-operator-fast-forward', 'in-flight']);
 /**
  * The queue source: epic #3383's `## Priority order`, read with the gate's own row reader (`parsePriorityRows`, over
  * `parsePriorityOrder`), never a second parser. PURE. Operator rule 1 skips claimed, design-first (band B), operator

@@ -5,7 +5,6 @@
  * `scope:`, scope overlap, free lanes, the pause) is dispatch-plan's rule: `planItems` only takes its launches up to
  * the budget land-advance has left, and never re-derives a hold.
  */
-export const ITEM_SKIP_REASONS = Object.freeze(['claimed', 'design-first', 'needs-operator', 'operator-decision', 'needs-operator-fast-forward', 'in-flight']);
 /** How many items one call may queue while the operator has not ruled otherwise (the safest non-zero value). */
 export const DEFAULT_MAX_ITEMS_PER_CALL = 1;
 export function planItems({ queue = [], skipped = [], itemPlan = {}, budget = 0, maxItems = DEFAULT_MAX_ITEMS_PER_CALL } = {}) {
