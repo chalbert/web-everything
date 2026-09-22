@@ -4930,3 +4930,29 @@ session's commit.)
 Not resolved — `#3889` itself is closed out together with its two sibling rule-cards (rule 4,
 rule 7) by the orchestrating session, not per-card here. This session did not touch
 `backlog/3889-*.md`.
+
+## Session update (2026-09-22) — routingRecords() collateral fix: rules 4/5 (#3888/#3889) now actually take effect through the real dispatch path; 10 collateral test failures fixed across 4 files (commits 9a714989c, b3a8ac1ea)
+
+Follow-up to the two "reported not fixed here" collateral test failures flagged in the #3889 session
+update above: `routingRecords()` in `we:scripts/lib/dispatch-contracts.mjs` was silently stripping the
+`informative` and `rootCause` fields that rule 4 (`#3888`) and rule 5 (`#3889`) each depend on, projecting
+every scorecard row through a hardcoded field whitelist before handing it to `selectSupervisionLevel` — a
+whitelist never extended when either field was added. Net effect: rules 4 and 5 never actually took effect
+through the real dispatch path (`routeDispatch`/`decideDispatchRoute`) — only when `selectSupervisionLevel`
+is called directly. Fixed by adding `informative` and `rootCause` to `routingRecords()`'s keys array
+(commit `9a714989c`).
+
+That fix exposed the 10 collateral test failures the #3889 note above already predicted, across the 4
+files it named — all reusing the "graduated via one un-rootcaused historical miss + `minCleanStreak` clean
+trials" fixture pattern rule 5 invalidated, but routed through `routeDispatch`/`decideDispatchRoute`/
+`selectSupervisor` rather than calling `selectSupervisionLevel` directly, so they needed the
+`routingRecords()` fix before any fixture change could take effect. Fixed in the same pass (commit
+`b3a8ac1ea`): added a `rootCause` (and, where missing, `informative`) note to each fixture's historical
+miss row and extended its post-miss clean-trial count to `minCleanStreak + k` —
+`we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs`, `we:scripts/lib/__tests__/dispatch-thresholds.test.mjs`, `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs`,
+`we:scripts/lib/__tests__/dispatch-supervisor.test.mjs` (the last confirmed as a genuine, not stale, failure once run at its real
+path, `we:scripts/lib/__tests__/`).
+
+Full suite after both commits: 591/593 files, 16435/16448 tests; the 2 remaining failures
+(`we:scripts/operations/__tests__/host-sampler-capacity.test.mjs`, `we:scripts/operations/__tests__/host-sampler-large-file.test.mjs`) are confirmed pre-existing and
+unrelated to this fix.
