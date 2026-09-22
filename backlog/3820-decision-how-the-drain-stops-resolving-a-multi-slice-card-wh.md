@@ -2,9 +2,12 @@
 bornAs: xggecwt
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lane-drain.mjs", "we:scripts/lib/open-pr-items.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#drain-multi-slice-card-interim-hold"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "12dd24e0e934a05a442335426480f6ef7e8e880b"
 relatedTo: ["3816", "3779", "3441", "3473", "3575"]
@@ -49,6 +52,21 @@ Rule how the drain avoids setting `status: resolved` on a whole card when a PR f
 - **(b) Also a frontmatter field** (for example a declared slice list). Rejected as the default: a second marker must be kept in step with the headings, and it needs a schema change and a check before it protects anything.
 
 **Skeptic:** not run as a separate pass; #3816 raises the question without a verdict.
+
+## Ruling
+
+**Ratified 2026-09-21 (operator, in conversation), as an explicit TEMPORARY fix — not the final design.**
+
+- **Fork 1 — (B) card-side refusal.** A card that holds a `## Slice <label>` section is never auto-resolved
+  by the drain; the drain reports `deferred: multi-slice card` instead. (A), the explicit PR marker, stays a
+  later additive backstop, not built here.
+- **Fork 2 — (a) the `## Slice ` heading only.** No new frontmatter field.
+
+**Why temporary:** this only protects a card that already carries the heading, and it was picked to stop the
+narrow #3779 failure mode without inventing new machinery. The general question of how a split card is
+delivered and which event counts as "finished" is the real fix and is out of scope here — it is Fork 5 on
+#3575, unresearched, to be ruled separately once prepared. When Fork 5 lands, re-examine whether (B) is still
+needed as a fallback or can be retired.
 
 ## Not in this decision
 
