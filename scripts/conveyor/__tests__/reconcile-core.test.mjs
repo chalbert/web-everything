@@ -601,6 +601,32 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates(null, null)).toEqual([]);
     expect(selectStatusCandidates(undefined, undefined)).toEqual([]);
   });
+
+  // Live-caught 2026-09-22, PR #2472: same root shape as the #1920 owed-elsewhere miss above, a different
+  // exclusion — a PR that moved to being owed a FIX (not a review) never got its status label re-derived,
+  // so review-status:reviewing sat stale for ~2 hours after its review session had already finished.
+  it('includes every fixesOwed entry too — a PR owed a fix deserves a status refresh exactly like one owed a review', () => {
+    const fixesOwed = [{ prNumber: 2472, kind: 'fix' }];
+    expect(selectStatusCandidates([], [], fixesOwed)).toEqual(fixesOwed);
+  });
+
+  it('combines reviewsOwed + fixesOwed + non-nothing-owed refusals, all three sources at once', () => {
+    const reviewsOwed = [{ prNumber: 1, kind: 'review' }];
+    const fixesOwed = [{ prNumber: 2, kind: 'fix' }];
+    const refusals = [{ prNumber: 3, kind: 'owed-elsewhere' }, { prNumber: 4, kind: 'nothing-owed' }];
+    expect(selectStatusCandidates(reviewsOwed, refusals, fixesOwed).map((c) => c.prNumber)).toEqual([1, 2, 3]);
+  });
+
+  it('a 2-arg call (fixesOwed omitted) is byte-identical to before this fix — every existing caller unaffected', () => {
+    const reviewsOwed = [{ prNumber: 1 }];
+    const refusals = [{ prNumber: 2, kind: 'owed-elsewhere' }];
+    expect(selectStatusCandidates(reviewsOwed, refusals)).toEqual([{ prNumber: 1 }, { prNumber: 2, kind: 'owed-elsewhere' }]);
+  });
+
+  it('tolerates non-array fixesOwed', () => {
+    expect(selectStatusCandidates([], [], null)).toEqual([]);
+    expect(selectStatusCandidates([], [], undefined)).toEqual([]);
+  });
 });
 
 it('binds names only for the invocation repo', () => {

@@ -113,6 +113,11 @@ export function runReviewTick({
   // own `runReconcilePass` already accepts `{repo}` end to end — this was the one call site that dropped it.
   const plan = reconcile({ repo });
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
+  // Live-caught 2026-09-22, #xli631k: a PR that moved to being owed a FIX (not a review) used to never
+  // reach `statusCandidates` at all, so its `review-status:reviewing` label sat stale once its review
+  // session finished (PR #2472, ~2 hours stale). `selectStatusCandidates` now takes fix-owed entries as a
+  // real third source, included below the same unconditional way `reviews` already is.
+  const fixes = (plan.dispatch ?? []).filter((d) => d && d.kind === 'fix');
   const dispatched = [];
   const failed = [];
   for (const d of reviews) {
@@ -126,7 +131,7 @@ export function runReviewTick({
     try { tagRound({ pr: d.prNumber, repo, round: (d.attempts ?? 0) + 1 }); }
     catch { /* cosmetic — a failed tag never fails the tick, see review-round-tag.mjs's own header */ }
   }
-  for (const c of statusCandidates(reviews, plan.refusals ?? [])) {
+  for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes)) {
     try { tagStatus({ pr: c.prNumber, repo }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
