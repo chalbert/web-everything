@@ -3,10 +3,13 @@ bornAs: xbz4sn2
 kind: story
 size: 2
 parent: "3717"
-status: open
+status: resolved
 blockedBy: ["3843"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs", "we:scripts/lib/dispatch-contracts.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -24,3 +27,10 @@ Ruled in #3801 Fork 4: the reconcile fix path passes no size (we:scripts/conveyo
 
 1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs` passes with new cases that fail before: (a) a planned fix whose item has `size: 2` records an estimate of 80 lines, `sized: true` and the source `card-size`; (b) with no item size and a PR diff of 120 changed lines, it records the source `measured-diff`; (c) with neither, it records `assumed` and the 13 band, and is dispatched, not held, under `unsizedCardPolicy: block`.
 2. **Executable** — the same three cases pass for a `ci-heal` dispatch in the `ci-heal` provider's test.
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `a4960b51b` ("#3844 fork 4 (fix path) of #3801: fix/ci-heal dispatches take their size from the
+> fixSizeSource chain"), ahead of this card being picked up. Re-verified:
+> `we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs` passes (9 tests) with the `card-size` /
+> `measured-diff` / `assumed` source cases present. Resolved here as `graduatedTo: none` — the code is not
+> yet on `main`; it reaches `main` through #3443, per this card's own `Home:` section.

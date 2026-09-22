@@ -3,10 +3,13 @@ bornAs: x2vf12v
 kind: story
 size: 3
 parent: "3717"
-status: open
+status: resolved
 blockedBy: ["3845"]
 scope: ["we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/dispatch-task-type.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -24,3 +27,11 @@ Ruled in #3801 Fork 3 (c): review-dispatch becomes a router caller, as #3717 ste
 
 1. **Executable** — on the branch, `grep -nE "decideDispatchRoute|routeDispatch" we:scripts/operations/review-dispatch.mjs` prints at least one import and one call (today it prints nothing).
 2. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-dispatch.test.mjs` passes with new cases that fail before: (a) with empty scorecards, the dispatch result carries a `routing` record per mandatory seat, each with a lens subject and provider `claude`; (b) with scorecards that would graduate `codex` on a lens, a tool-bearing seat still resolves to `claude`, with the capability reason in its audit trail; (c) a run with `--judge-provider` records both the route and the flag's value.
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `15d003432` ("#3846 fork 3 of #3801, review: review-dispatch becomes a router caller"), ahead of this card
+> being picked up. Re-verified: `we:scripts/operations/review-dispatch.mjs` imports and calls
+> `decideDispatchRoute`, and `we:scripts/operations/__tests__/review-dispatch.test.mjs` passes (59 tests) with
+> the `reviewSeatRoutes (#3846)` cases present, including the tool-bearing-seat capability-gate case. Resolved
+> here as `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through #3443, per this
+> card's own `Home:` section.

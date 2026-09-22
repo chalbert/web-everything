@@ -3,9 +3,12 @@ bornAs: x07d2yq
 kind: story
 size: 3
 parent: "3717"
-status: open
+status: resolved
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs", "we:scripts/operations/delivery-agent-marker.mjs", "we:scripts/operations/fix-run.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/dispatch-providers/build.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -23,3 +26,11 @@ Ruled in #3801 Fork 5 (c) and its Settled-by-statute points: the per-item delive
 
 1. **Executable** — on the branch, `grep -rnwE 'WE_DISPATCH_PROVIDER_OVERRIDE|WE_DISPATCH_OVERRIDE_REASON|DELIVERY_AGENT_PROVIDER' we:scripts/ --include='*.mjs' --exclude-dir=__tests__` prints nothing. Today it prints the reads at `we:scripts/operations/dispatch-lane-io.mjs:229-230`, `we:scripts/operations/fix-run.mjs:122` and `we:scripts/operations/deliver-item-run.mjs:116`.
 2. **Executable** — `npx vitest run we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` passes with new cases that fail before: (a) a card with `deliveryAgent: codex` and no `deliveryAgentReason:` is refused with a named reason; (b) with the reason, the record keeps `routed` as the criteria's choice and records the override beside it, referencing the marker's rule-4 fields (`requestedVendor`, `executedVendor`, `reason`) rather than copying them; (c) given scorecards where the routed triple is at `spot-check`, an override to a triple with no trials records `supervision: full`.
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `7f585337a` ("#3840 deliveryAgent marker + required deliveryAgentReason is the one provider override;
+> retire the process-wide override variables"), ahead of this card being picked up. Re-verified: the grep for
+> `WE_DISPATCH_PROVIDER_OVERRIDE`/`WE_DISPATCH_OVERRIDE_REASON`/`DELIVERY_AGENT_PROVIDER` outside `__tests__`
+> prints nothing, and both named test files pass with the `deliveryAgentReason` cases present
+> (`we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs:104-119`). Resolved here as `graduatedTo: none`
+> — the code is not yet on `main`; it reaches `main` through #3443, per this card's own `Home:` section.
