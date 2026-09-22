@@ -3,9 +3,12 @@ bornAs: xlq2jh7
 kind: story
 size: 2
 parent: "3717"
-status: open
+status: resolved
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/lib/dispatch-size-policy.json", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -29,3 +32,11 @@ fixSizeSource: [card-size, measured-diff, assumed]   # default; any one value or
 
 1. **Executable** — `npx vitest run we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs` passes with new cases that fail before: (a) the checked-in setting loads as `block`, `13` and the three-step chain; (b) `fixSizeSource: [policy]` with `unsizedCardPolicy: block` is refused as invalid; (c) `defaultSize: 2` is refused with a reason naming #3784; (d) under `default-size` an unsized route records `sized: false` and the setting's name and value as the source of its size, and a sized route records the card as the source.
 2. **Executable** — on the branch, `test -f we:scripts/lib/dispatch-size-policy.json` succeeds and the file parses as JSON (it does not exist today).
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `375d95fb5` ("#3843 dispatch-contracts: the checked-in unsized-card size policy (#3801 Fork 4 (b))"), ahead
+> of this card being picked up. Re-verified: `we:scripts/lib/dispatch-size-policy.json` exists and parses;
+> `we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs` carries the `fixSizeSource: [policy]` refusal
+> and the `defaultSize: 2` refusal naming #3784 (`:155-164`), and passes. Resolved here as
+> `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through #3443, per this card's own
+> `Home:` section.

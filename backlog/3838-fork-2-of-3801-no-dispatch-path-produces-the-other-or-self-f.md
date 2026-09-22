@@ -3,9 +3,12 @@ bornAs: x004wgy
 kind: story
 size: 2
 parent: "3717"
-status: open
+status: resolved
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-profile.test.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -21,3 +24,12 @@ Ruled in #3801 Fork 2 (a): self-fix and other are never produced, and conflict-r
 
 1. **Executable** — on the branch, `grep -n "TASK_TYPE_BY_CARD_KIND = " we:scripts/lib/dispatch-contracts.mjs` shows no `'other'` or `'self-fix'` value (today it shows `task: 'other', epic: 'other'` at `:83`).
 2. **Executable** — `npx vitest run we:scripts/lib/__tests__/dispatch-contracts-profile.test.mjs we:scripts/lib/__tests__/dispatch-task-type.test.mjs` passes with new cases that fail before: `deriveDispatchProfile` on a card of kind `task`, of kind `epic`, and with no kind and no `taskType` returns `ready: false` with a named reason instead of a profile whose `taskType` is `other` (`:392`); a `fix` without the `conflict` cause never derives `conflict-resolution`.
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `8beac4407` ("#3838 dispatch-contracts: no default task type — a task/epic/kindless card is refused
+> (taskType:underivable) instead of labelled `other`"), ahead of this card being picked up. Both Done-when
+> criteria re-verified against the branch tip: `TASK_TYPE_BY_CARD_KIND` carries no `'other'`/`'self-fix'`
+> value, and both named test files pass (77 tests) with the required new cases present
+> (`we:scripts/lib/__tests__/dispatch-contracts-profile.test.mjs:67-84`). Resolved here as
+> `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through #3443, per this card's own
+> `Home:` section.

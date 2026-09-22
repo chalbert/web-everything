@@ -3,9 +3,12 @@ bornAs: xm3i597
 kind: story
 size: 3
 parent: "3717"
-status: open
+status: resolved
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs", "we:scripts/gen-dispatch-routing-table.mjs", "we:docs/agent/dispatcher-runbook.md"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
@@ -25,3 +28,13 @@ Ruled in #3801 Fork 3 (c): trust is per {provider, model, subject} and never car
 
 1. **Executable** — `npx vitest run we:scripts/lib/__tests__/provider-routing.test.mjs we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs we:scripts/lib/__tests__/dispatch-task-type.test.mjs` passes with new cases that fail before: (a) a reviewer-subject scorecard row with the same provider and model never counts toward a work triple, and a work row never counts toward a review-lens subject; (b) a `prepare` dispatch records the tier `STORY_KIND_RUNGS.prepare` names and a `prepare-decision` or `investigate` dispatch the Opus tier, with `routed: null`; (c) a review-lens subject with no graduated candidate resolves to Claude at `full`.
 2. **Executable** — the routing-table drift test named in #3717 still passes unchanged: `node we:scripts/gen-dispatch-routing-table.mjs` output equals the table in `we:docs/agent/dispatcher-runbook.md` (the work routes did not move).
+
+> **Verified done, 2026-09-22.** Already built and committed straight to `lane/mechanical-dispatcher` at
+> `d6c1bab3a` ("#3845 fork 3 of #3801: trust keyed {provider, model, subjectClass, taskType}; role dispatches
+> record their STORY_KIND_RUNGS tier"), ahead of this card being picked up. Re-verified: all three named test
+> files pass (`we:scripts/lib/__tests__/provider-routing.test.mjs`,
+> `we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs`,
+> `we:scripts/lib/__tests__/dispatch-task-type.test.mjs`) with the subject-axis cases present, and
+> `node we:scripts/gen-dispatch-routing-table.mjs` reports the runbook table unchanged. Resolved here as
+> `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through #3443, per this card's own
+> `Home:` section.
