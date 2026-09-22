@@ -4725,3 +4725,35 @@ pre-existing, unrelated host-sampler-large-file.test.mjs date-fixture failure, c
 check:standards: 2 pre-existing errors, both on unrelated backlog cards (xohvzus stranded id; #3383's own
 opaque-token flag), not introduced by this diff. Not resolved (orchestrator resolves after graduation via
 #3443).
+
+## Session update (2026-09-22) — #3846 fork 3 of #3801, review: review-dispatch becomes a router caller
+
+**#3846** (fork 3 of #3801, review): built on lane/mechanical-dispatcher (commits 15d003432,
+merged/pushed at b0699b967). review-dispatch.mjs is now a router caller: dispatchReview computes
+and records a route per mandatory review seat lens (correctness, security) via a new
+reviewSeatRoutes function, running the SAME provider cascade a work dispatch uses (selectProvider)
+per lens, with decideDispatchRoute called once to confirm the review dispatch kind itself still
+takes the role path (#3717). Capability is the entry gate: a provider seats a tool-bearing
+mandatory seat only if it is not tool-free-only (TOOL_FREE_JUDGE_PROVIDER_NAMES); the existing
+Codex refusal (CODEX_JUDGE_PROVIDER_REFUSAL, #3581) is reused verbatim as that first rule, with a
+generalised reason for any other non-claude recommendation. Scorecards are read at the io edge
+(dispatch-lane-io.mjs's own defaultReadScorecards, scoped to root) exactly like a work dispatch.
+With no graduated review-lens trial on record (confirmed against the real run-scorecards.json, 18
+records, 0 with taskType correctness/security) every seat still resolves to claude, so behaviour is
+unchanged. The explicit --judge-provider flag is untouched and recorded beside the route, never
+overridden by it. reviewDispatchRoute() (the old dispatch-kind-level role record) is kept, marked
+test-only-export-ok, because scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs still
+asserts the dispatch-kind role path through it as the sibling half of its own fix/
+conflict-resolution cause-routing proof.
+
+Tests: scripts/operations/__tests__/review-dispatch.test.mjs 55 -> 59 (+4: empty-scorecards
+per-seat routing, a graduated-codex-on-a-lens capability-gate proof, the plain dispatchReview
+per-seat routing shape, and a --judge-provider run recording both the route and the flag). All
+adjacent suites (dispatch-contracts-route, provider-routing, dispatch-task-type, land-advance-io,
+reconcile-fix-routing) pass unchanged. Full-repo verify-lane.mjs (foreground, JSON): 591/592 files,
+16358/16371 tests passed, 1 pre-existing failure (host-sampler-large-file.test.mjs, the same flake
+#3845 already documented as unrelated). check:standards: 1 pre-existing error (the #3383 tracker
+card's own opaque-token block, decision #3822 unruled — not touched by this work); 0 errors in
+files this slice touched.
+
+Not resolved — the orchestrator resolves after graduation to main via #3443.
