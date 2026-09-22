@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import * as c from '../dispatch-contracts.mjs';
 
 const profile = (extra = {}) => c.buildDispatchProfile({ taskType: 'doc-fix', estimatedLoc: 30, filesTouched: ['docs/readme.md'], acceptanceTestable: true, dependsOn: [], ...extra }).profile;
@@ -119,5 +120,43 @@ describe('the task-only estimatedLoc field', () => {
       expect(out.ready).toBe(false);
       expect(out.missing).toContain('estimatedLoc:invalid');
     }
+  });
+});
+
+// #3843 (Fork 4 (b) of #3801) — the checked-in unsized-card size policy: `unsizedCardPolicy` / `defaultSize` /
+// `fixSizeSource`, as one setting, with every fallback recorded.
+describe('the size-policy setting', () => {
+  it('the checked-in setting loads as block, 13, and the three-step chain', () => {
+    const raw = JSON.parse(readFileSync('scripts/lib/dispatch-size-policy.json', 'utf8'));
+    expect(c.validateSizePolicy(raw)).toMatchObject({
+      ok: true,
+      policy: { unsizedCardPolicy: 'block', defaultSize: 13, fixSizeSource: ['card-size', 'measured-diff', 'assumed'] },
+    });
+    expect(c.DEFAULT_SIZE_POLICY).toEqual({ unsizedCardPolicy: 'block', defaultSize: 13, fixSizeSource: ['card-size', 'measured-diff', 'assumed'] });
+  });
+  it('refuses `fixSizeSource: [policy]` under `unsizedCardPolicy: block` as invalid', () => {
+    const result = c.validateSizePolicy({ unsizedCardPolicy: 'block', defaultSize: 13, fixSizeSource: ['policy'] });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('`policy`');
+    expect(c.validateSizePolicy({ unsizedCardPolicy: 'default-size', defaultSize: 13, fixSizeSource: ['policy'] }).ok).toBe(true);
+  });
+  it('refuses a `defaultSize` below 13, naming #3784', () => {
+    const result = c.validateSizePolicy({ unsizedCardPolicy: 'default-size', defaultSize: 2, fixSizeSource: ['card-size'] });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('#3784');
+    expect(c.validateSizePolicy({ unsizedCardPolicy: 'default-size', defaultSize: 13, fixSizeSource: ['card-size'] }).ok).toBe(true);
+  });
+  it('under default-size an unsized route records the setting as the source; a sized route records the card', () => {
+    const base = { kind: 'build', scopePaths: ['we:scripts/operations/example.mjs'] };
+    const unsized = c.decideDispatchRoute({ ...base }, {
+      sizePolicy: { unsizedCardPolicy: 'default-size', defaultSize: 13, fixSizeSource: ['card-size', 'measured-diff', 'assumed'] },
+    });
+    expect(unsized.outcome).toBe('routed');
+    expect(unsized.sized).toBe(false);
+    expect(unsized.sizeSource).toBe('defaultSize=13');
+    const sized = c.decideDispatchRoute({ ...base, size: 3 });
+    expect(sized.outcome).toBe('routed');
+    expect(sized.sized).toBe(true);
+    expect(sized.sizeSource).toBe('card');
   });
 });

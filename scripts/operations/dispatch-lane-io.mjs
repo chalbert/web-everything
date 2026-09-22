@@ -219,6 +219,8 @@ export function readTick({
   // missing or unreadable file reads as NO trials, which is the fail-closed direction: with no clean trials
   // the cascade can never find a non-Claude provider fit and resolves to Claude.
   readScorecards = () => defaultReadScorecards({ root, readText }),
+  // #3843 (#3801 Fork 4 (b)) — the checked-in unsized-card size policy, read at this same io edge.
+  readSizePolicy = () => defaultReadSizePolicy({ root, readText }),
   // #3717 step 3 — supervision is RECORDED, not enforced, until #3690 is ratified. Off by default.
   enforceSupervision = supervisionEnforcementFrom(process.env),
   // #3840 (Fork 5 of #3801) — THE ONE PROVIDER OVERRIDE: the item's own `deliveryAgent:` frontmatter marker and
@@ -334,6 +336,8 @@ export function readTick({
   // #3717 — read ONCE per tick read: the routing record below and the `scorecards` the pure half reports are
   // the same evidence, and two reads could disagree if the file changed between them.
   const scorecards = readScorecards();
+  // #3843 — same reasoning, for the checked-in size policy.
+  const sizePolicy = readSizePolicy();
   return {
     resolvedNum: key,
     launch,
@@ -374,7 +378,7 @@ export function readTick({
         // #3840 — the marker and its reason ride in as data; `null` (no marker, unreadable file) is no override, and the
         // router ignores them for a kind that does not honour the marker.
         ...(readDeliveryAgentOverride(key) ?? {}),
-      }, { scorecards, enforceSupervision: enforceSupervision === true })
+      }, { scorecards, enforceSupervision: enforceSupervision === true, sizePolicy })
       : null,
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
@@ -408,6 +412,26 @@ export function defaultReadScorecards({ root = REPO_ROOT, readText = (p) => read
     return records.filter((r) => r && typeof r === 'object');
   } catch {
     return [];
+  }
+}
+
+/**
+ * #3843 (#3801 Fork 4 (b)) — THE CHECKED-IN SIZE POLICY, `we:scripts/lib/dispatch-size-policy.json`, read the
+ * same way {@link defaultReadScorecards} reads its own file: at this io edge, handed across as data.
+ *
+ * A missing or unreadable file returns `null` — `decideDispatchRoute`'s `validateSizePolicy` treats a `null`
+ * (or any non-object) candidate as "every field absent" and resolves each one to `DEFAULT_SIZE_POLICY`'s own
+ * value, so a broken read is byte-identical to today's behaviour rather than a refused route.
+ *
+ * @param {{root?: string, readText?: (p: string) => string}} [io]
+ * @returns {object|null} the parsed setting, or `null`.
+ */
+export function defaultReadSizePolicy({ root = REPO_ROOT, readText = (p) => readFileSync(p, 'utf8') } = {}) {
+  try {
+    const parsed = JSON.parse(String(readText(join(root, 'scripts', 'lib', 'dispatch-size-policy.json'))));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
 

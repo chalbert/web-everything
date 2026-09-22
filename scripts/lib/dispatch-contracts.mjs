@@ -742,6 +742,95 @@ export function supervisionHold(routing, { enforce = false } = {}) {
 }
 
 /**
+ * #3801 Fork 4 (b) — the `unsizedCardPolicy` vocabulary: `block` (default) leaves an unsized card for the
+ * admission gate to hold (a sibling slice; not built here); `default-size` reads {@link DEFAULT_SIZE_POLICY}'s
+ * `defaultSize` instead.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const UNSIZED_CARD_POLICIES = Object.freeze(['block', 'default-size']);
+
+/**
+ * #3801 Fork 4 (b) — the `fixSizeSource` chain vocabulary for `fix`/`ci-heal` dispatches (the chain's own
+ * execution — reading a measured diff — is a sibling slice; this is only the settable, validated value).
+ * `policy` defers to `unsizedCardPolicy` and is valid only when that policy is `default-size`: under `block`
+ * it would silently stop a conflict fix.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const FIX_SIZE_SOURCES = Object.freeze(['card-size', 'measured-diff', 'assumed', 'policy']);
+
+/**
+ * #3784's constraint, carried here per #3801 Fork 4 (b): a `defaultSize` below this makes unsized cards
+ * eligible for delegation on an unmeasured number, and must not be enabled before #3784's rule-3 and rule-6
+ * fixes land. #3784 removes this floor.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const MIN_DEFAULT_SIZE = 13;
+
+/**
+ * #3801 Fork 4 (b) — the ruled setting, checked in at `we:scripts/lib/dispatch-size-policy.json` and the
+ * default {@link decideDispatchRoute} uses when no `sizePolicy` is supplied: `block`, `defaultSize: 13` (read
+ * only under `default-size`), `fixSizeSource` the ordered chain `card-size`, then `measured-diff`, then
+ * `assumed`. This default keeps an unsized card's route byte-identical to before #3843: `block` does not gate
+ * admission (that is the sibling slice), so {@link decideDispatchRoute} still falls back to the largest band.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const DEFAULT_SIZE_POLICY = Object.freeze({
+  unsizedCardPolicy: 'block', defaultSize: 13, fixSizeSource: Object.freeze(['card-size', 'measured-diff', 'assumed']),
+});
+
+/**
+ * VALIDATE THE CHECKED-IN SIZE-POLICY SETTING (#3801 Fork 4 (b)). Pure: takes whatever
+ * `we:scripts/lib/dispatch-size-policy.json` parsed to (or any candidate override), returns a normalized,
+ * frozen policy or the reasons it fails closed. A missing field reads as {@link DEFAULT_SIZE_POLICY}'s own
+ * value for it, so a partial override still validates. Refuses a `defaultSize` below {@link MIN_DEFAULT_SIZE},
+ * naming #3784; refuses `policy` in `fixSizeSource` unless `unsizedCardPolicy` is `default-size`.
+ *
+ * @param {unknown} raw
+ * @returns {{ok: true, policy: {unsizedCardPolicy: string, defaultSize: number, fixSizeSource: string[]}} | {ok: false, errors: string[]}}
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function validateSizePolicy(raw) {
+  const errors = [];
+  const p = object(raw) ? raw : {};
+
+  const unsizedCardPolicy = owns(p, 'unsizedCardPolicy') ? p.unsizedCardPolicy : DEFAULT_SIZE_POLICY.unsizedCardPolicy;
+  if (!UNSIZED_CARD_POLICIES.includes(unsizedCardPolicy)) {
+    errors.push(`unsizedCardPolicy must be one of ${UNSIZED_CARD_POLICIES.join(', ')}, got ${JSON.stringify(unsizedCardPolicy)}`);
+  }
+
+  const defaultSize = owns(p, 'defaultSize') ? p.defaultSize : DEFAULT_SIZE_POLICY.defaultSize;
+  if (typeof defaultSize !== 'number' || !owns(SIZE_TO_ESTIMATED_LOC, defaultSize)) {
+    errors.push(`defaultSize must be one of ${Object.keys(SIZE_TO_ESTIMATED_LOC).join(', ')}, got ${JSON.stringify(defaultSize)}`);
+  } else if (defaultSize < MIN_DEFAULT_SIZE) {
+    errors.push(
+      `defaultSize ${defaultSize} is below ${MIN_DEFAULT_SIZE} — #3784's rule-3 and rule-6 fixes must land `
+      + 'before an unsized card can be admitted on an unmeasured number this small',
+    );
+  }
+
+  const fixSizeSourceRaw = owns(p, 'fixSizeSource') ? p.fixSizeSource : DEFAULT_SIZE_POLICY.fixSizeSource;
+  if (!Array.isArray(fixSizeSourceRaw) || fixSizeSourceRaw.length === 0) {
+    errors.push(`fixSizeSource must be a non-empty array, got ${JSON.stringify(fixSizeSourceRaw)}`);
+  } else {
+    const seen = new Set();
+    for (const source of fixSizeSourceRaw) {
+      if (!FIX_SIZE_SOURCES.includes(source)) errors.push(`fixSizeSource entry ${JSON.stringify(source)} is not one of ${FIX_SIZE_SOURCES.join(', ')}`);
+      if (seen.has(source)) errors.push(`fixSizeSource repeats ${JSON.stringify(source)}`);
+      seen.add(source);
+    }
+    if (fixSizeSourceRaw.includes('policy') && unsizedCardPolicy !== 'default-size') {
+      errors.push('fixSizeSource cannot include `policy` unless unsizedCardPolicy is `default-size` — under `block` it would silently stop a conflict fix');
+    }
+  }
+
+  if (errors.length) return { ok: false, errors };
+  return {
+    ok: true,
+    policy: Object.freeze({ unsizedCardPolicy, defaultSize, fixSizeSource: Object.freeze([...fixSizeSourceRaw]) }),
+  };
+}
+
+/**
  * THE `size:` → estimated-LOC read, with the ONE safe answer for a card that declares no size.
  *
  * 1,148 of the backlog's cards carry no `size:` (see {@link SIZE_TO_ESTIMATED_LOC}'s own table), so refusing
@@ -822,11 +911,15 @@ export const EXECUTABLE_PROVIDER = 'claude';
  *     here, not a second vocabulary), and its supervision is the level of the OVERRIDE's own
  *     `{provider, model, taskType}` triple (an override to a triple with no trials starts at `full`), never the
  *     level the routed triple earned. It does not touch admission: an unsized card is still held for prepare.
- * @param {{scorecards?: unknown, enforceSupervision?: boolean}} [deps]
+ * @param {{scorecards?: unknown, enforceSupervision?: boolean, sizePolicy?: unknown}} [deps]
+ *   - `sizePolicy` — the checked-in `we:scripts/lib/dispatch-size-policy.json` setting (#3801 Fork 4 (b)), read
+ *     at the io edge and handed across as data exactly like `scorecards`. Defaults to
+ *     {@link DEFAULT_SIZE_POLICY} and is validated by {@link validateSizePolicy}; an invalid policy refuses the
+ *     whole route rather than routing on a setting nobody checked.
  * @returns {object} the routing record — see the file's own test for the exact shape.
  */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
-export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSupervision = false } = {}) {
+export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSupervision = false, sizePolicy: rawSizePolicy = DEFAULT_SIZE_POLICY } = {}) {
   try {
     const kind = String(dispatch?.kind ?? '').trim();
     const scopePaths = Array.isArray(dispatch?.scopePaths) ? dispatch.scopePaths.map(String) : [];
@@ -850,6 +943,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
         supervision: SUPERVISION_LEVELS.FULL,
         spotCheck: null,
         sized: null,
+        sizeSource: null,
         override: override.value,
         refusal: null,
         supervisionEnforced: enforceSupervision,
@@ -861,9 +955,31 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       return record;
     }
 
-    const { estimatedLoc, sized } = dispatch?.estimatedLoc != null
-      ? { estimatedLoc: dispatch.estimatedLoc, sized: true }
-      : estimatedLocForSize(dispatch?.size);
+    const sizePolicyResult = validateSizePolicy(rawSizePolicy);
+    if (!sizePolicyResult.ok) {
+      return routeRefused(kind, derivation, `the size policy does not validate: ${sizePolicyResult.errors.join('; ')}`);
+    }
+    const sizePolicy = sizePolicyResult.policy;
+
+    // #3801 Fork 4 (b) — WHERE THE SIZE CAME FROM, recorded beside the number itself. An explicit override or
+    // the card's own `size:` is `sized: true`, source `card`. Otherwise (`sized: false`) `unsizedCardPolicy`
+    // decides the FALLBACK NUMBER: `default-size` reads `sizePolicy.defaultSize` (the setting's name and
+    // value ARE the source); `block` does not gate admission here (that is the sibling slice), so the number
+    // stays the pre-#3843 largest-band answer, unchanged.
+    let estimatedLoc; let sized; let sizeSource;
+    if (dispatch?.estimatedLoc != null) {
+      estimatedLoc = dispatch.estimatedLoc; sized = true; sizeSource = 'card';
+    } else {
+      const bySize = estimatedLocForSize(dispatch?.size);
+      sized = bySize.sized;
+      if (sized) {
+        estimatedLoc = bySize.estimatedLoc; sizeSource = 'card';
+      } else if (sizePolicy.unsizedCardPolicy === 'default-size') {
+        estimatedLoc = SIZE_TO_ESTIMATED_LOC[sizePolicy.defaultSize]; sizeSource = `defaultSize=${sizePolicy.defaultSize}`;
+      } else {
+        estimatedLoc = bySize.estimatedLoc; sizeSource = 'largest-band';
+      }
+    }
     const filesTouched = [...new Set(scopePaths.map((p) => p.replace(/^we:/, '').replace(/^([A-Za-z0-9._-]+):/, '$1/').replace(/^\.\//, '')).filter(Boolean))];
     const input = {
       taskType: derivation.taskType,
@@ -926,13 +1042,21 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       complexity: built.profile.complexity,
       estimatedLoc,
       sized,
+      sizeSource,
       override: override.value,
       refusal: null,
       supervisionEnforced: enforceSupervision,
       supervisionHold: null,
       auditTrail: [
         audit('task-type-derivation', derivation.taskType, `kind=${kind}, cause=${dispatch?.cause ?? 'none'}, scope=${scopePaths.length} path(s)`, derivation.reason),
-        audit('estimated-loc', String(estimatedLoc), `size=${JSON.stringify(dispatch?.size ?? null)}`, sized ? 'from the card\'s own `size:`' : 'the card declares no `size:` — read as the largest band, which sits outside every proven envelope'),
+        audit(
+          'estimated-loc', String(estimatedLoc), `size=${JSON.stringify(dispatch?.size ?? null)}`,
+          sized
+            ? 'from the card\'s own `size:`'
+            : sizeSource === 'largest-band'
+              ? 'the card declares no `size:` — read as the largest band, which sits outside every proven envelope'
+              : `the card declares no \`size:\` — unsizedCardPolicy is \`default-size\`, read as ${sizeSource}`,
+        ),
         ...overrideAudit,
         ...out.auditTrail,
       ],
@@ -947,7 +1071,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
 function routeRefused(kind, derivation, reason) {
   return {
     kind, outcome: 'refused', role: null, taskType: null, routed: null, executed: null, model: null, tier: null,
-    supervision: SUPERVISION_LEVELS.FULL, spotCheck: null, sized: null, override: null,
+    supervision: SUPERVISION_LEVELS.FULL, spotCheck: null, sized: null, sizeSource: null, override: null,
     refusal: reason, supervisionEnforced: false, supervisionHold: null,
     auditTrail: [audit('dispatch-task-type', 'refused', `kind=${kind}`, derivation?.reason ?? reason)],
   };
