@@ -82,7 +82,12 @@ Rule the four open points of the land-advance item-pull and dispatch gate that #
 
 ## Ruling
 
-Pending.
+Ratified 2026-09-22 by the operator. The operator's own words, quoted: "I ratify it" (referring to #3864). No fork-by-fork overrides were given, so this ratifies the card's own stated bold defaults for all four forks unchanged.
+
+- **Fork 1 — RATIFIED, (a).** Name it in one operator machine setting — one absolute path (for example a `WE_CANONICAL_CHECKOUT` variable in the operator's shell profile, or a one-line file in the operator's home Claude folder), read by `canonicalRoot`. While it is unset and more than one primary exists, land-advance stays at plan. **Not self-executing:** as of this ruling, `canonicalRoot` (`we:scripts/operations/land-advance-gate.mjs`) has no env-var-or-file reader wired in — its `primary` parameter defaults to `null` and no production caller supplies it, so ratifying the choice does not yet set it. The operator still owes the actual setting; see the RESULT file for the exact mechanism this needs.
+- **Fork 2 — RATIFIED, (a).** One item per call. Built as `DEFAULT_MAX_ITEMS_PER_CALL = 1` (`--max-items=N` overrides it for a manual run).
+- **Fork 3 — RATIFIED, (a).** `we:.conveyor/land-advance-opt-in.json` in the canonical checkout, `{ "prs": true|false, "items": true|false }`, written by the operator by hand.
+- **Fork 4 — RATIFIED, (a).** Queue it into the canonical conveyor sidecar; the runner's tick launches it through `dispatch-lane`. Built: `queueItemInto` in `we:scripts/operations/land-advance-items-io.mjs`.
 
 ## Not in this decision
 
