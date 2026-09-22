@@ -323,6 +323,10 @@ export function makeCliMechanicalPasses({
           try {
             const plan = JSON.parse(result.output);
             const reviews = (plan.dispatch ?? []).filter((d) => d?.kind === 'review');
+            // Live-caught 2026-09-22, #xli631k: a PR owed a FIX (not a review) never reached
+            // selectStatusCandidates at all, so its review-status:* label could go stale indefinitely once
+            // its review session finished. Same fix as we:skills-src/conveyor/review-daemon.mjs's own.
+            const fixes = (plan.dispatch ?? []).filter((d) => d?.kind === 'fix');
             const unsupported = [];
             for (const d of reviews) {
               const dispatched = run('operations/review-dispatch.mjs', [`--pr=${d.prNumber}`], key, slug);
@@ -335,7 +339,7 @@ export function makeCliMechanicalPasses({
               }
               run('conveyor/review-round-tag.mjs', [String(d.prNumber), `--round=${(d.attempts ?? 0) + 1}`], key, slug);
             }
-            for (const c of selectStatusCandidates(reviews, plan.refusals)) {
+            for (const c of selectStatusCandidates(reviews, plan.refusals, fixes)) {
               run('conveyor/review-status-tag.mjs', [String(c.prNumber)], key, slug);
             }
             if (key !== 'we') {

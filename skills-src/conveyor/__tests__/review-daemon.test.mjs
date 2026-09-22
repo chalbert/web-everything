@@ -90,8 +90,19 @@ describe('runReviewTick — the per-tick sequence', () => {
     const statusCandidates = vi.fn((r, ref) => [...r, ...ref]);
     const tagStatus = vi.fn();
     runReviewTick({ reconcile, dispatch: () => ({ agentId: 'a' }), tagRound: () => {}, tagStatus, statusCandidates });
-    expect(statusCandidates).toHaveBeenCalledWith(reviews, refusals);
+    expect(statusCandidates).toHaveBeenCalledWith(reviews, refusals, []);
     expect(tagStatus).toHaveBeenCalledTimes(2);
+  });
+
+  // Live-caught 2026-09-22, #xli631k: a PR owed a FIX (not a review) used to never reach statusCandidates at
+  // all, so review-status:reviewing sat stale once its review session finished (PR #2472, ~2h stale).
+  it('fix-kind dispatch entries reach statusCandidates as its own third argument, not silently dropped', () => {
+    const reviews = [{ kind: 'review', prNumber: 10, attempts: 0 }];
+    const fixes = [{ kind: 'fix', prNumber: 20, attempts: 1 }];
+    const reconcile = vi.fn(() => owedPlan([...reviews, ...fixes], []));
+    const statusCandidates = vi.fn(() => []);
+    runReviewTick({ reconcile, dispatch: () => ({ agentId: 'a' }), tagRound: () => {}, tagStatus: () => {}, statusCandidates });
+    expect(statusCandidates).toHaveBeenCalledWith(reviews, [], fixes);
   });
 
   it('an agent id missing from the dispatch result records null, not undefined or a throw', () => {

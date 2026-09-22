@@ -560,13 +560,26 @@ export function planReconcile({ repo = 'we', prs = [], agents = [], durableCount
  * `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a PR with nothing live simply clears any
  * stale label — safe to call on every candidate this returns, including a genuinely-foreign PR that happens to
  * reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst, never a wrong label).
+ * SAME BUG CLASS, THIRD TIME (live-caught 2026-09-22, PR #2472): a PR that moves to being owed a FIX
+ * (`plan.dispatch`'s `kind:'fix'` entries — e.g. a `review:changes` bounce) used to be in NEITHER
+ * `reviewsOwed` NOR `refusals`, so its status label never got re-derived once it left the review-owed
+ * state. PR #2472's own `review-2472` session finished and posted its real `review:changes` verdict, but
+ * `review-status:reviewing` sat stale on the PR for ~2 hours — nothing ever called `review-status-tag.mjs`
+ * for it again to notice the session was `done` and clear the label. Exactly the same root shape as the
+ * `owed-elsewhere` miss documented above (a real, currently-relevant PR silently excluded from the refresh
+ * sweep), just a different exclusion. Fixed by adding `fixesOwed` as a THIRD candidate source, included the
+ * same unconditional way `reviewsOwed` already is — `review-status-tag.mjs` stays idempotent and
+ * name-keyed, so including a fix-owed PR here costs one wasted read at worst on a genuinely quiet PR, never
+ * a wrong label.
  * @param {Array<{prNumber:number}>} reviewsOwed - the `kind:'review'` subset of this pass's own `dispatch`
  * @param {Array<{kind:string, prNumber:number}>} refusals - this pass's own `refusals`
- * @returns {Array<{prNumber:number}>} reviewsOwed, plus every refusal except `nothing-owed`
+ * @param {Array<{prNumber:number}>} [fixesOwed] - the `kind:'fix'` subset of this pass's own `dispatch`
+ * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed, plus every refusal except `nothing-owed`
  */
-export function selectStatusCandidates(reviewsOwed, refusals) {
+export function selectStatusCandidates(reviewsOwed, refusals, fixesOwed) {
   return [
     ...(Array.isArray(reviewsOwed) ? reviewsOwed : []),
+    ...(Array.isArray(fixesOwed) ? fixesOwed : []),
     ...(Array.isArray(refusals) ? refusals : []).filter((r) => r && r.kind !== 'nothing-owed'),
   ];
 }
