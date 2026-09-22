@@ -4858,3 +4858,75 @@ needed; the push went through cleanly on the first try.
 `spot-check` to a lighter or absent check (#3867, a separate, deliberately parked decision card the operator
 must revisit by hand). `backlog/3887-*.md` itself was not touched — closeout is handled separately once all
 three rule cards (#3887, #3888, #3889) are built.
+
+## Session update (2026-09-22) — #3889 (Rule 5 of #3690): a root-cause note in its own field, then a post-miss bar of minCleanStreak + k
+
+Built the SECOND of #3784's three rule children (Rule 5 of #3690, `#3889`) on this branch, commit
+`121a48fc6` (rebased cleanly onto `#3887`'s `d9ebfff1f`/`b01c98416`, which landed on this branch
+while this session was in flight — disjoint files, no conflict): a root-cause note in its own
+field, then a post-miss bar of `minCleanStreak + k`.
+
+- **`we:scripts/conveyor/log-delegation-trial.mjs`** — gained a `--root-cause=TEXT` CLI flag /
+  `rootCause` field on the validated row shape, alongside the `informative` field rule 4 (`#3888`)
+  added. Must be a non-empty string or `null`; anything else refused by name. Included in the
+  secret scrub alongside `provider`/`model`/`taskDescription`/`findings`. `findings` and
+  `rootCause` are two distinct fields, neither derived from the other.
+- **`we:scripts/lib/provider-routing.mjs`** — `DEFAULT_BACKDOWN_THRESHOLDS` gains a `k` field
+  (structural addition; `minCleanStreak: 5` and `requireInformativeTrial: true` byte-identical).
+  `selectSupervisionLevel` now computes `hasConfirmedMiss` (any verified unclean record for the
+  triple, anywhere in its recorded history — not only the current most-recent trial the existing
+  hard veto already covers) and `hasRootCause` (a non-empty `rootCause` field on any row for the
+  triple, never inferred from `findings`). A confirmed miss with no root-cause note blocks
+  graduation regardless of streak length, naming the missing note in the reasoning. Once a
+  root-cause note is on record, the bar becomes `minCleanStreak + k` instead of `minCleanStreak`.
+  A cold-start triple (no miss ever recorded) is unaffected, still graduating at exactly
+  `minCleanStreak`. The audit trail gained two entries (`post-miss-bar-selection`,
+  `post-miss-root-cause-requirement`) stating which bar applied and why, matching the existing
+  `criterion`/`reason` pattern.
+- **`k`** is set to `3` as a placeholder (post-miss bar `8` against the default `minCleanStreak`
+  of `5`) — its real value, like `minCleanStreak`'s own, is explicitly out of scope per the card,
+  deferred to a future batched finding against real trial-count data.
+
+**Tests** — `we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs` 24 → 30 (new:
+`--root-cause`/`rootCause` accepted as a non-empty string or `null`, refused by name otherwise,
+written to its own field distinct from `findings`, defaults to `null` when omitted, both as
+direct calls and via the CLI). `we:scripts/lib/__tests__/provider-routing.test.mjs` 79 → 83 (new,
+matching the card's named cases exactly: a confirmed miss with no root-cause note never reaches
+`spot-check` no matter how many clean trials follow, naming the missing note; with a root-cause
+note on record, `minCleanStreak` clean trials still return `full` and `minCleanStreak + k` return
+`spot-check`; a root-cause note left in a later row's `findings` instead of its own field does not
+clear the miss; a cold-start triple with no miss ever recorded still graduates at exactly
+`minCleanStreak`, unaffected). 6 pre-existing `selectSupervisionLevel` fixtures elsewhere in that
+file had an un-rootcaused historical miss (the same pattern rule 4 hit when it added the
+`informative` field) — each now either has a `rootCause` note added plus its clean-trial count
+extended to the post-miss bar, or (one case) had its unrelated historical-miss record simply
+removed since the test's actual intent (a pure cold-start "streak not yet met" case) didn't need
+it.
+
+`npm run check:standards -- --scope=<session>`: 2 pre-existing errors, both on `backlog/3383`'s
+own tracker card (opaque-token + stranded-hash-on-main), unrelated to this diff — 0 new errors on
+any file this item touched.
+
+**Collateral, reported not fixed here (out of `#3889`'s declared scope, and outside the files
+`#3887`'s concurrent session owns on this branch):** `npx vitest run` across the whole repo now
+shows 4 additional test files failing that are outside this card's declared scope —
+`we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs`, `we:scripts/lib/__tests__/dispatch-supervisor.test.mjs`,
+`we:scripts/lib/__tests__/dispatch-thresholds.test.mjs`, and `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs`.
+Each reuses a shared "graduated via one un-rootcaused historical miss + `minCleanStreak` clean
+trials" fixture pattern through `we:scripts/lib/dispatch-contracts.mjs`'s call into
+`selectSupervisionLevel`, which now correctly fails post-rule-5 for the same reason the
+`we:scripts/lib/__tests__/provider-routing.test.mjs` fixtures did before this session's fix. Not touched here:
+`we:scripts/lib/dispatch-contracts.mjs` is explicitly `#3887`'s file on this branch right now, and
+these four consumer test files sit outside `#3889`'s declared `scope:` (`we:scripts/conveyor/log-delegation-trial.mjs`/
+`we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs`, `we:scripts/lib/provider-routing.mjs`/`we:scripts/lib/__tests__/provider-routing.test.mjs` only). Whoever reconciles the three rule cards for
+`main` (`#3443`) should budget a pass over these four files' fixtures — same fix shape as this
+session applied to `we:scripts/lib/__tests__/provider-routing.test.mjs`: add a `rootCause` note and extend the clean-trial
+count to `minCleanStreak + k`, or drop the unused historical-miss record where the fixture's real
+intent doesn't need one. (Two additional failures, `we:scripts/operations/__tests__/host-sampler-capacity.test.mjs`
+and `we:scripts/operations/__tests__/host-sampler-large-file.test.mjs`, are pre-existing environment/timing flakiness confirmed
+unrelated to this diff — same failures reproduce on a clean stash of this branch before this
+session's commit.)
+
+Not resolved — `#3889` itself is closed out together with its two sibling rule-cards (rule 4,
+rule 7) by the orchestrating session, not per-card here. This session did not touch
+`backlog/3889-*.md`.
