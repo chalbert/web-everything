@@ -1,0 +1,23 @@
+{
+  "id": "supervision-graduation-borrowed-evidence",
+  "title": "May a delegated agent's supervision bar borrow evidence from a sibling identity or a benchmark? Capped priors, dynamic borrowing and the bridging-trial requirement, grounded against the live store",
+  "status": "open",
+  "summary": "Grounds decision #3734: may agent-family or benchmark data count as a small, capped, audited prior toward supervision graduation, given three ratified rulings (#3654 clause 4, #3383, #3690) that say no. Where evidence is borrowed in practice -- FDA Bayesian device guidance, robust mixture priors, ICH E5 bridging studies, FAA derivative certification -- the borrowing carries three guards: a demonstrated relation (exchangeability, not a label), a reported borrowed amount (effective sample size) and an automatic discount on conflict; ICH E5 also never lets borrowed data replace the local trial. Computed here: with a required real clean verified trial (#3690 rules 3-4) the credit at the in-flight low-risk placeholder of two clean trials is at most ONE virtual trial, worth almost nothing (exact 95% upper bound on failure rate 95.00% at N=1, 77.64% at N=2). Replayed over the 26-row, 10-triple scorecard store: a label-constant one-trial prior flips four triples, one of them from a family whose only recorded sibling outcome is a rejected trial, and two of them are the same model on another task type; a prior derived from a same-family sibling that cleared the bar at the same task type flips none. The store has no vendor line with a graduated predecessor and a measured successor, so transfer cannot be back-tested. A virtual trial must be an argument to selectSupervisionLevel returned in its audit trail, never a row: evaluateProviderFitness reads the same rows and treats one clean verified row as fitness to be handed the work. The benchmark leg has no input (the ratings registry ships empty) and a validity problem (SWE-Bench+ found 32.67% solution leakage and 31.08% weak-test passes on the original SWE-bench; METR measured a 19% slowdown on real tasks while developers believed they were 20% faster). Recommended: no prior, with a concrete back-test trigger to reopen.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "delegation",
+    "graduation",
+    "supervision",
+    "scorecard",
+    "calibration",
+    "prior",
+    "benchmark",
+    "model-routing",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}

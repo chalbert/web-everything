@@ -1,0 +1,127 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3734-may-agent-family-and-benchmark-data-act-as-a-capped-prior-to/">#3734</a> asks whether a
+delegated agent's supervision bar may count evidence that did not come from that exact
+<code>{provider, model, taskType}</code> triple — a small, capped, labelled "virtual trial" drawn from a sibling
+identity (an agent family) or from an external benchmark. Three ratified rulings currently say no:
+<a href="/backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob/">#3654</a> clause 4 (no easier
+bar "by vendor reputation, or by benchmark claims made outside this system"),
+<a href="/backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive/">#3383</a> (a new release "starts
+cold" even with a shared family label) and
+<a href="/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/">#3690</a> (trust "never
+carries across triples").</p>
+
+<p>This survey asks two things: how do fields that <em>do</em> borrow evidence keep it safe, and what does this
+repository's own store say about what a borrowed trial would buy. The full working, with the replay over the live
+store, is in <a href="/reports/2026-09-21-supervision-prior-grounding.md">the session report</a>. It extends,
+and does not repeat, <a href="/research/delegation-graduation-and-supervision-tiers/">the 2026-09-20 graduation
+survey</a>.</p>
+
+<h2>Finding 1 — where evidence is borrowed in practice, the borrowing is bounded, named and revocable</h2>
+
+<table>
+<thead><tr><th>Practice</th><th>What may be borrowed</th><th>The guard</th><th>Maps to</th></tr></thead>
+<tbody>
+<tr>
+<td><a href="https://www.fda.gov/media/71512/download">FDA Bayesian guidance for medical devices</a></td>
+<td>Informative priors from predecessor-device trials, registries, literature</td>
+<td>The sponsor must show the historical and current populations are <strong>exchangeable</strong>; dynamic borrowing (hierarchical models, power priors) is preferred because it <strong>discounts the history if current data drift</strong>; the borrowed amount is reported as an <strong>effective sample size</strong></td>
+<td>Credit needs a demonstrated relation, not a label; borrowed and real counts are reported apart; a miss discounts the credit</td>
+</tr>
+<tr>
+<td><a href="https://pubmed.ncbi.nlm.nih.gov/25355546/">Robust meta-analytic-predictive priors</a> (Schmidli et al., Biometrics 2014)</td>
+<td>An informative prior from historical controls</td>
+<td>The prior is mixed with a dispersed component so that <strong>large prior–data conflict lets the prior be dropped</strong></td>
+<td>The "a real miss zeroes the prior" rule is the binary limit of this</td>
+</tr>
+<tr>
+<td><a href="https://www.ema.europa.eu/en/ich-e5-r1-ethnic-factors-acceptability-foreign-clinical-data-scientific-guideline">ICH E5(R1) bridging studies</a></td>
+<td>Foreign clinical data, for a new region</td>
+<td>The region may require a <strong>bridging study</strong> — a local study showing the foreign data apply</td>
+<td>Borrowed evidence shortens the local trial, never replaces it: at least one real clean verified trial</td>
+</tr>
+<tr>
+<td><a href="https://www.ecfr.gov/current/title-14/chapter-I/subchapter-C/part-21/subpart-B/section-21.19">FAA 14 CFR 21.19 / 21.101</a></td>
+<td>The earlier certification basis, for a changed aircraft</td>
+<td>Only where the change is <strong>not significant</strong>; a change "so extensive that a substantially complete investigation" is needed gets a new certificate; significance is judged in context with the previous changes</td>
+<td>The relation between two products is judged and bounded; the manufacturer's name is not the relation</td>
+</tr>
+<tr>
+<td>AWS graduated autonomy (see the 2026-09-20 survey §6.4)</td>
+<td>Nothing — "trust is non-transitive"</td>
+<td>A delegated action's effective tier is the minimum across the chain</td>
+<td>The default in the closest published agent scheme is no borrowing</td>
+</tr>
+</tbody>
+</table>
+
+<p>Every one of the four borrowing practices carries the same three guards: a <em>demonstrated</em> relation, a
+<em>reported</em> borrowed amount, and an <em>automatic discount</em> on conflict. None of them lets a name or a
+reputation stand in for the relation.</p>
+
+<h2>Finding 2 — the safe end of the exception is worth close to nothing</h2>
+
+<p>Two ratified rules bound any credit. Rule 3 of
+<a href="/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/">#3690</a> requires a clean most
+recent <em>verified</em> trial, which only a real row can supply; rule 4 makes the positive control "its own
+recorded field". So at least one real clean trial is always required, and the credit must stay below the tier
+threshold. At the in-flight low-risk placeholder of two clean trials, the credit is one trial. With zero
+failures observed, the exact one-sided 95% upper bound on the failure rate (<code>1 − 0.05<sup>1/N</sup></code>)
+is:</p>
+
+<table>
+<thead><tr><th>N clean trials</th><th>1</th><th>2</th><th>3</th><th>5</th></tr></thead>
+<tbody><tr><td>95% upper bound on failure rate</td><td>95.00 %</td><td>77.64 %</td><td>63.16 %</td><td>45.07 %</td></tr></tbody>
+</table>
+
+<p>A borrowed trial moves the bound from 95% to 77.6%, and the borrowed half was never measured against this
+identity. The credit grows with the tier threshold — which is where the exposure grows too.</p>
+
+<h2>Finding 3 — on the live store a label-based prior is unsafe and a derived one is inert</h2>
+
+<p><code>scripts/conveyor/run-scorecards.json</code> holds 26 rows over 10 triples. Replaying the real
+<code>selectSupervisionLevel</code> at the low-risk bar with one virtual trial flips four triples. One of them,
+<code>claude-native / claude-sonnet-5 / other</code>, would be credited from a family whose only recorded
+sibling outcome (<code>antigravity / claude-sonnet-4-6 / other</code>) is a <em>rejected</em> trial; two others are
+<code>gpt-6-astra</code> cells whose "sibling" is the same model on another task type. A credit derived from a
+different identity of the same family that has itself cleared the bar at the same task type flips
+<strong>none</strong> today. The store has no vendor line with a graduated predecessor and a measured successor,
+so nothing can be back-tested.</p>
+
+<h2>Finding 4 — a benchmark leg has no input and a validity problem</h2>
+
+<ul>
+<li>The registry <code>scripts/lib/model-capability-ratings.json</code> ships with <code>"entries": []</code>; its
+header says leaderboard numbers must not become facts by being checked in.</li>
+<li>Its five categories are keyed by <code>{provider, model}</code> only — no task-type or risk axis to match a
+triple.</li>
+<li><a href="https://arxiv.org/abs/2410.06992">SWE-Bench+</a> found 32.67% of the passing patches on the original
+SWE-bench involved solution leakage and 31.08% were suspicious because of weak tests; excluding them dropped one
+agent's resolution rate from 12.47% to 3.97%.</li>
+<li><a href="https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/">METR's randomised trial</a> on
+246 real tasks in the developers' own repositories found a 19% slowdown against a self-estimated 20% speedup:
+an external measure and an in-context outcome can point in opposite directions.</li>
+</ul>
+
+<h2>What this means for #3734</h2>
+
+<ul>
+<li>A virtual trial must be an <strong>argument</strong> to <code>selectSupervisionLevel</code> that comes back in
+its audit trail, never a row in the store: <code>evaluateProviderFitness</code> reads the same rows and treats one
+clean verified row as fitness to be handed the work.</li>
+<li>If a prior is admitted at all, the relation must be declared and bounded, the credit derived from a sibling's
+real record, at least one real trial required, and a real miss must zero it and keep it zero.</li>
+<li>The benchmark leg is an excluded branch on validity as well as on the ratified text.</li>
+<li>The recommended default is no prior; the risk tier is the lever that varies the bar, and a concrete
+back-test trigger says when to reopen.</li>
+</ul>
+
+<h2>Cross-references</h2>
+
+<p><a href="/backlog/3654-define-graduation-criteria-for-a-model-provider-to-exit-prob/">#3654</a> ·
+<a href="/backlog/3673-define-what-clears-a-triggered-calibration-veto-so-a-role-ca/">#3673</a> ·
+<a href="/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/">#3690</a> ·
+<a href="/backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive/">#3383</a> ·
+<a href="/research/delegation-graduation-and-supervision-tiers/">delegation graduation survey</a></p>
+{% endraw %}
