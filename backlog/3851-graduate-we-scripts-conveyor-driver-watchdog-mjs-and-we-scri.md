@@ -3,9 +3,11 @@ bornAs: x3pkdii
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/driver-watchdog.mjs", "we:scripts/conveyor/driver-mode.mjs", "we:scripts/conveyor/__tests__/driver-watchdog.test.mjs"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-21"
+graduatedTo: none
 tags: []
 ---
 
