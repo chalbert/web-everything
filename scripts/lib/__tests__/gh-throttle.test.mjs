@@ -6,19 +6,27 @@
  *   discipline of proving the atomic fs layer for real), and `runGhSync`'s retry/pass-through logic with a
  *   MOCKED `gh` exec (no real subprocess, no real `gh` binary needed) — the real, unmocked, side-by-side
  *   fidelity proof against the actual `gh` binary lives in `scripts/lib/__tests__/gh-throttle.fidelity.test.mjs`.
+ *   Also proves #3670's addition: the per-minute points budget (a REAL temp lock root, same discipline as the
+ *   concurrency semaphore) and the sidecar call/exhausted-retry log.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_GH_CONCURRENCY_CAP, DEFAULT_ACQUIRE_TIMEOUT_MS, DEFAULT_RETRY_MAX_ATTEMPTS,
   DEFAULT_RETRY_BASE_MS, DEFAULT_RETRY_CAP_MS,
-  resolveGhCap, resolveAcquireTimeoutMs, resolveRetryMaxAttempts,
+  DEFAULT_GH_POINTS_BUDGET_PER_MIN, GH_POINTS_WINDOW_MS,
+  resolveGhCap, resolveAcquireTimeoutMs, resolveRetryMaxAttempts, resolveGhPointsBudgetPerMin,
   isRateLimitShaped, retryBackoffMs,
   acquireGhSlotSync, releaseGhSlotSync, ghThrottleStatus,
+  decideGhPointsSpend, acquireGhPointsSync, ghThrottleLogPath, recordGhCallLogEntry,
   runGhSync, execFileSyncThrottled, runGhCliPassthrough,
 } from '../gh-throttle.mjs';
+
+function readJsonl(path) {
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
 
 // ── env tuning ───────────────────────────────────────────────────────────────────────────────────────────
 describe('resolveGhCap / resolveAcquireTimeoutMs / resolveRetryMaxAttempts — env override, clamped sane', () => {
@@ -36,6 +44,19 @@ describe('resolveGhCap / resolveAcquireTimeoutMs / resolveRetryMaxAttempts — e
     expect(resolveGhCap({ WE_GH_THROTTLE_CAP: 'nope' })).toBe(DEFAULT_GH_CONCURRENCY_CAP);
     expect(resolveGhCap({ WE_GH_THROTTLE_CAP: '0' })).toBe(DEFAULT_GH_CONCURRENCY_CAP);
     expect(resolveRetryMaxAttempts({ WE_GH_THROTTLE_RETRY_MAX_ATTEMPTS: '0' })).toBe(DEFAULT_RETRY_MAX_ATTEMPTS);
+  });
+});
+
+describe('resolveGhPointsBudgetPerMin — env override, clamped sane (#3670)', () => {
+  it('defaults when unset', () => {
+    expect(resolveGhPointsBudgetPerMin({})).toBe(DEFAULT_GH_POINTS_BUDGET_PER_MIN);
+  });
+  it('reads WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN', () => {
+    expect(resolveGhPointsBudgetPerMin({ WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN: '50' })).toBe(50);
+  });
+  it('falls back on a non-finite or invalid value', () => {
+    expect(resolveGhPointsBudgetPerMin({ WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN: 'nope' })).toBe(DEFAULT_GH_POINTS_BUDGET_PER_MIN);
+    expect(resolveGhPointsBudgetPerMin({ WE_GH_THROTTLE_POINTS_BUDGET_PER_MIN: '0' })).toBe(DEFAULT_GH_POINTS_BUDGET_PER_MIN);
   });
 });
 
@@ -282,5 +303,190 @@ describe('runGhCliPassthrough — full-process transparency, injected spawn', ()
     const spawn = vi.fn(() => ({ status: null, stdout: null, stderr: null, error: spawnErr }));
     const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
     expect(() => runGhCliPassthrough(['pr', 'list'], { throttle: { lockRoot, cap: 2, sleep: () => {} }, spawn })).toThrow(spawnErr);
+  });
+});
+
+// ── decideGhPointsSpend — the PURE budget-window decision (#3670) ────────────────────────────────────────────
+describe('decideGhPointsSpend — pure fixed-window token-bucket decision', () => {
+  it('allows a call that fits the budget, on a fresh (null) window', () => {
+    const r = decideGhPointsSpend({ state: null, points: 4, nowMs: 1_000, budgetPerMin: 10, windowMs: 60_000 });
+    expect(r.allowed).toBe(true);
+    expect(r.nextState).toEqual({ windowStartMs: 1_000, spent: 4 });
+  });
+
+  it('accumulates spend within the same window', () => {
+    const state = { windowStartMs: 1_000, spent: 4 };
+    const r = decideGhPointsSpend({ state, points: 4, nowMs: 1_500, budgetPerMin: 10, windowMs: 60_000 });
+    expect(r.allowed).toBe(true);
+    expect(r.nextState).toEqual({ windowStartMs: 1_000, spent: 8 });
+  });
+
+  it('disallows a call that would push spend over budget, and reports how long until the window rolls over', () => {
+    const state = { windowStartMs: 1_000, spent: 8 };
+    const r = decideGhPointsSpend({ state, points: 4, nowMs: 1_500, budgetPerMin: 10, windowMs: 60_000 });
+    expect(r.allowed).toBe(false);
+    expect(r.nextState).toEqual({ windowStartMs: 1_000, spent: 8 }); // unchanged — nothing was spent
+    expect(r.waitMs).toBe(60_000 - 500);
+  });
+
+  it('a window whose age has reached windowMs rolls over BEFORE the budget check, even from a maxed-out prior window', () => {
+    const state = { windowStartMs: 1_000, spent: 10 };
+    const r = decideGhPointsSpend({ state, points: 10, nowMs: 61_000, budgetPerMin: 10, windowMs: 60_000 });
+    expect(r.allowed).toBe(true);
+    expect(r.nextState).toEqual({ windowStartMs: 61_000, spent: 10 });
+  });
+});
+
+// ── acquireGhPointsSync — the cross-process points-budget gate, REAL temp lock root ───────────────────────────
+describe('acquireGhPointsSync — cross-process points budget over a real lock root (#3670)', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'gh-throttle-budget-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('admits a call that fits the budget immediately (waitedMs 0, no sleep)', () => {
+    const sleep = vi.fn();
+    const r = acquireGhPointsSync({ lockRoot, points: 1, budgetPerMin: 5, owner: 'A', now: () => 0, sleep });
+    expect(r.ok).toBe(true);
+    expect(r.waitedMs).toBe(0);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('a call beyond the per-minute points budget WAITS instead of firing — it only succeeds once the window rolls over', () => {
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls = [];
+    const sleep = (ms) => { sleepCalls.push(ms); clock += ms; };
+    const windowMs = 100;
+    const common = { lockRoot, budgetPerMin: 2, owner: 'A', now, sleep, pollMs: 10, timeoutMs: 10_000, windowMs };
+
+    // First two calls (1 point each) fit the 2-point budget and fire immediately.
+    expect(acquireGhPointsSync({ ...common, points: 1 }).ok).toBe(true);
+    expect(acquireGhPointsSync({ ...common, points: 1 }).ok).toBe(true);
+    expect(sleepCalls.length).toBe(0);
+
+    // A third call is over budget for the CURRENT window — it must wait (sleep called at least once) rather
+    // than fire immediately, and it only succeeds once the fake clock has advanced past the window boundary.
+    const r3 = acquireGhPointsSync({ ...common, points: 1 });
+    expect(r3.ok).toBe(true);
+    expect(r3.timedOut).toBe(false);
+    expect(sleepCalls.length).toBeGreaterThan(0);
+    expect(r3.waitedMs).toBeGreaterThan(0);
+    expect(clock).toBeGreaterThanOrEqual(windowMs);
+  });
+
+  it('fails OPEN (ok:false, timedOut:true) if the budget never clears within timeoutMs — mirrors acquireGhSlotSync', () => {
+    let clock = 0;
+    const now = () => clock;
+    const sleep = (ms) => { clock += ms; };
+    // budget already exhausted for a window far longer than the timeout — it can never roll over in time.
+    const r1 = acquireGhPointsSync({ lockRoot, points: 5, budgetPerMin: 5, owner: 'A', now, sleep, pollMs: 10, timeoutMs: 10_000, windowMs: 60_000 });
+    expect(r1.ok).toBe(true);
+    const r2 = acquireGhPointsSync({ lockRoot, points: 1, budgetPerMin: 5, owner: 'A', now, sleep, pollMs: 10, timeoutMs: 50, windowMs: 60_000 });
+    expect(r2.ok).toBe(false);
+    expect(r2.timedOut).toBe(true);
+  });
+
+  it('the budget is host-shared across DIFFERENT owners (a real cross-process gate, not per-owner)', () => {
+    const r1 = acquireGhPointsSync({ lockRoot, points: 3, budgetPerMin: 4, owner: 'A', now: () => 0, sleep: vi.fn() });
+    expect(r1.ok).toBe(true);
+    let clock = 0;
+    const sleepCalls = [];
+    const r2 = acquireGhPointsSync({
+      lockRoot, points: 3, budgetPerMin: 4, owner: 'B', now: () => clock,
+      sleep: (ms) => { sleepCalls.push(ms); clock += ms; }, pollMs: 10, timeoutMs: 1000, windowMs: 100,
+    });
+    // owner B's call would push total spend (3+3=6) over the shared 4-point budget — it must wait, proving
+    // the two owners share ONE window rather than each getting their own.
+    expect(sleepCalls.length).toBeGreaterThan(0);
+    expect(r2.ok).toBe(true);
+  });
+});
+
+// ── the sidecar call/exhausted-retry log (#3670) ────────────────────────────────────────────────────────────
+describe('recordGhCallLogEntry — best-effort JSONL append', () => {
+  it('appends one JSON line per call, carrying op/attempt/points/outcome', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-throttle-log-'));
+    const logPath = join(dir, 'calls.jsonl');
+    try {
+      recordGhCallLogEntry(logPath, { op: 'pr view', attempt: 1, points: 1, outcome: 'call', ok: true });
+      recordGhCallLogEntry(logPath, { op: 'pr list', attempt: 1, points: 4, outcome: 'call', ok: true });
+      const entries = readJsonl(logPath);
+      expect(entries.length).toBe(2);
+      expect(entries[0]).toMatchObject({ op: 'pr view', attempt: 1, points: 1, outcome: 'call', ok: true });
+      expect(entries[1]).toMatchObject({ op: 'pr list', attempt: 1, points: 4, outcome: 'call', ok: true });
+      expect(typeof entries[0].ts).toBe('string');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('never throws — a bad path is swallowed (best-effort, a logging failure must never break a gh call)', () => {
+    expect(() => recordGhCallLogEntry('/nonexistent-dir-xyz/calls.jsonl', { op: 'x', attempt: 1, points: 1, outcome: 'call' })).not.toThrow();
+  });
+});
+
+describe('runGhSync — points budget + sidecar log wiring (#3670)', () => {
+  it('gates each attempt on the points budget, and logs a "call" entry per attempt', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => 'ok');
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls = [];
+    const sleep = (ms) => { sleepCalls.push(ms); clock += ms; };
+    const common = { lockRoot, cap: 2, sleep, now, exec, owner: 'same-owner', budgetPerMin: 1, points: 1, pollMs: 10, pointsWindowMs: 100, op: 'pr-view' };
+
+    runGhSync(['pr', 'view', '1'], { throttle: common });
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(sleepCalls.length).toBe(0); // first call fits the 1-point budget immediately
+
+    runGhSync(['pr', 'view', '2'], { throttle: common });
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(sleepCalls.length).toBeGreaterThan(0); // second call had to wait for the window to roll over
+
+    const entries = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entries.length).toBe(2);
+    expect(entries.every((e) => e.op === 'pr-view' && e.outcome === 'call' && e.ok === true)).toBe(true);
+  });
+
+  it('appends a retry_exhausted entry (in addition to each attempt\'s own "call" entry) when retries give up', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => { const e = new Error('fail'); e.stderr = 'secondary rate limit hit'; throw e; });
+    const sleep = vi.fn();
+    let caught = null;
+    try {
+      runGhSync(['pr', 'create'], { throttle: { lockRoot, cap: 2, sleep, exec, maxAttempts: 2, retryBaseMs: 1, op: 'pr-create' } });
+    } catch (e) { caught = e; }
+    expect(caught).toBeTruthy();
+
+    const entries = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entries.filter((e) => e.outcome === 'call').length).toBe(2); // one per attempt
+    const exhausted = entries.filter((e) => e.outcome === 'retry_exhausted');
+    expect(exhausted.length).toBe(1);
+    expect(exhausted[0].attempt).toBe(2);
+    expect(exhausted[0].op).toBe('pr-create');
+  });
+
+  it('a non-rate-limit failure logs one "call" entry and no retry_exhausted entry (never retried)', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => { const e = new Error('fail'); e.stderr = 'gh: pull request #9 already exists'; throw e; });
+    try {
+      runGhSync(['pr', 'create'], { throttle: { lockRoot, cap: 2, sleep: () => {}, exec } });
+    } catch { /* expected */ }
+    const entries = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entries.length).toBe(1);
+    expect(entries[0].outcome).toBe('call');
+    expect(entries[0].ok).toBe(false);
+  });
+});
+
+describe('runGhCliPassthrough — points budget + sidecar log wiring (#3670)', () => {
+  it('logs a "call" entry per attempt and a retry_exhausted entry on final give-up', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('You have exceeded a secondary rate limit.'), error: null }));
+    const sleep = vi.fn();
+    runGhCliPassthrough(['pr', 'list'], { throttle: { lockRoot, cap: 2, sleep, maxAttempts: 2, retryBaseMs: 1, op: 'pr-list' }, spawn });
+    const entries = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entries.filter((e) => e.outcome === 'call').length).toBe(2);
+    expect(entries.filter((e) => e.outcome === 'retry_exhausted').length).toBe(1);
   });
 });
