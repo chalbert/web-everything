@@ -38,10 +38,12 @@
  */
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
 import { planLitterCleanup, cleanLaneLitter, LANE_RELEASE_LITTER_ALLOWLIST } from '../lib/lane-litter.mjs';
+import { CONSTELLATION_REPOS, repoKeyForSlug } from '../lib/constellation-repos.mjs';
 // #3568 — the pure decision core only, reused rather than re-derived (the SAME `isLeaseStale`
 // `we:scripts/lane-pool.mjs` itself calls). See `defaultIsLeasedNow` below.
 import { LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
@@ -129,6 +131,37 @@ export function summarizeHealth(lanes, plan, reaped = []) {
 // ── IO SHELL (subprocess/git only past this point — the CLI, gated on the main-module check) ────────────────
 
 /**
+ * Resolve a caller-supplied `--repo` into what `we:scripts/lane-pool.mjs --repo=` actually needs: a
+ * filesystem path. Live-caught 2026-09-22, first real (non-dry-run, non-fixture) run under a standalone
+ * daemon: every OTHER repo-generic conveyor pass (`we:scripts/conveyor/reconcile-pass.mjs`,
+ * `we:scripts/operations/review-dispatch.mjs`, …) accepts a constellation SLUG (`chalbert/plateau-app`) and
+ * resolves it internally; this file forwarded whatever it was given UNCHANGED straight into
+ * `lane-pool.mjs status --repo=<value>`, which has ALWAYS been, and stays, path-only (confirmed by direct
+ * read of `we:scripts/lane-pool.mjs#resolveRepo` — no slug resolution exists there, and giving it one now
+ * would be a much bigger, riskier change than fixing the one caller that got the contract backwards). A
+ * daemon wired with `--repo=chalbert/plateau-app` (matching its own manifest entry's sibling convention)
+ * crashed every run: `lane-pool.mjs` tried to resolve a literal `./chalbert/plateau-app` directory.
+ *
+ * Accepts EITHER form so an existing caller already passing a raw path (this file's own tests, an operator's
+ * `--dry-run` from the command line) is unaffected: a recognized slug resolves to that repo's real checkout
+ * path; anything else (already a path, or `null`) passes through UNCHANGED. WE's own `CONSTELLATION_REPOS`
+ * entry has an EMPTY `path` (it answers to the caller's cwd, not a fixed location, same as every other
+ * repo-generic pass's own `'.'`/`null` convention for WE) — resolving it here would be wrong, so a `we` slug
+ * maps to `null`, the same "let `lane-pool.mjs` default to the cwd's own git toplevel" every other caller
+ * already relies on, and exactly today's real default behavior when this runs from a WE checkout.
+ * @param {string|null} repo
+ * @param {string} [home]
+ * @returns {string|null}
+ */
+export function resolveLanePoolRepoPath(repo, home = homedir()) {
+  if (!repo) return null;
+  const key = repoKeyForSlug(repo);
+  if (key === null) return repo; // not a recognized slug — treat it as already a path, unchanged
+  if (key === 'we') return null; // WE has no fixed path; let lane-pool.mjs default to the cwd's own toplevel
+  return CONSTELLATION_REPOS[key].path.replace(/^\$HOME(?=\/|$)/, home);
+}
+
+/**
  * The live pool-status query — shells `node lane-pool.mjs status --json`, the SAME data
  * `we:scripts/lane-pool.mjs#printStatus --json` reports (never a re-derived reader). `exec` is injectable so
  * the argv is assertable with no real subprocess.
@@ -137,7 +170,8 @@ export function summarizeHealth(lanes, plan, reaped = []) {
  */
 export function defaultListLaneStatus({ exec = execFileSync, repo = null, root = REPO_ROOT } = {}) {
   const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'status', '--json'];
-  if (repo) argv.push(`--repo=${repo}`);
+  const repoPath = resolveLanePoolRepoPath(repo);
+  if (repoPath) argv.push(`--repo=${repoPath}`);
   const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
   const parsed = JSON.parse(String(out || '{}'));
   return { repo: parsed.repo, root: parsed.root, lanes: Array.isArray(parsed.lanes) ? parsed.lanes : [] };

@@ -21,9 +21,72 @@
  *   - `intervalMs`: how often {@link ../pass-daemon.mjs} re-runs this pass after each run completes.
  */
 
-/** @type {Record<string, DaemonManifestEntry>} */
+import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
+
+/** Every mechanical pass ran at this same cadence as one of `runner.mjs`'s own `makeCliMechanicalPasses`
+ *  steps — unchanged here, since #3873 wires the SAME passes onto standalone daemons, not a redesign of how
+ *  often they run. */
+const DEFAULT_PASS_INTERVAL_MS = 120_000;
+
+/**
+ * #3873 — one manifest entry per (repo-generic pass × constellation repo), matching exactly what
+ * `runner.mjs`'s own per-repo loop already does today (`run(path, args, key, slug)` appends `--repo=${slug}`
+ * for every repo in `CONSTELLATION_REPOS`). A single WE-only entry per pass here would have silently
+ * narrowed each one's real coverage from three repos down to one — the exact class of bug just live-caught
+ * and fixed in `we:skills-src/conveyor/review-daemon.mjs` (#xvyuwtg, plateau-app PR #167 sat unwatched
+ * because ITS daemon never asked any repo but WE). Named `<passName>-<repoKey>` (e.g. `ci-queue-watch-we`,
+ * `ci-queue-watch-plateau-app`) so each repo's sweep is its own independently-launchable, independently-leased
+ * pass-daemon process — consistent with this whole epic's "many small independent daemons" shape, not a
+ * special case.
+ * @param {string} passName
+ * @param {string} script
+ * @param {string[]} args
+ * @returns {Record<string, DaemonManifestEntry>}
+ */
+function perRepoEntries(passName, script, args) {
+  const out = {};
+  for (const [key, { slug }] of Object.entries(CONSTELLATION_REPOS)) {
+    out[`${passName}-${key}`] = { script, args: [...args, `--repo=${slug}`], intervalMs: DEFAULT_PASS_INTERVAL_MS };
+  }
+  return out;
+}
+
+/**
+ * #3873 (epic #3383) — the 8 watcher passes named in that card's scope, wired onto `pass-daemon.mjs`.
+ *
+ * ONE NAMED SCRIPT DOES NOT EXIST ON `main`: `poc-branch-sync.mjs`. Confirmed by direct read (no such file
+ * under `scripts/conveyor/`, and no reference to it anywhere in the tree outside a stray, unrelated
+ * `.git/poc-branch-sync` ref) — a false premise carried into the card's scope, corrected here rather than
+ * invented from scratch (inventing a new pass's own logic is a different, much bigger task than "wire an
+ * existing pass"). The other 7 are real and wired below.
+ *
+ * THREE stay WE-only, genuinely — not a coverage gap, a real invariant of each:
+ *   - `branch-drift.mjs` / `infra-blocked.mjs` — neither script HAS a `--repo` flag at all (confirmed by
+ *     direct read); both monitor WE-specific concepts (the WE mechanical-dispatcher branch; WE backlog
+ *     infra holds) with no cross-repo equivalent to watch.
+ *   - `duplicate-pr-watch.mjs` — DOES accept `--repo`, but `runner.mjs`'s own comment states why it is never
+ *     called with one: "duplicate item numbers refer to WE backlog ids, not cross-repo deliveries." Using it
+ *     cross-repo would be semantically wrong, not merely unbuilt.
+ *
+ * FOUR are wired per-repo via {@link perRepoEntries}, matching their own real, already-cross-repo behavior
+ * in `runner.mjs` today: `ci-queue-watch.mjs`, `parked-pr-conflict-watch.mjs`, `parked-pr-progress-watch.mjs`,
+ * `lane-pool-health-watch.mjs` (the last of these matters concretely: plateau-app's own lane pool has no
+ * health-watch coverage today precisely because nothing runs this pass against it — live-caught 2026-09-22
+ * investigating why plateau-app PR #167 couldn't get a review lane).
+ *
+ * `runner.mjs`'s own `makeCliMechanicalPasses` still runs all 7 scripts inline, unchanged, in this same PR —
+ * per the card's own "drop each from runner.mjs's own mechanicalPasses list AS IT BAKES" (a rolling,
+ * pass-by-pass cutover, the same discipline #3870/#3876 already followed): standing up a daemon here does
+ * not yet retire the old runner's own copy of the same sweep.
+ */
 export const DAEMON_MANIFEST = {
-  // Populated by later daemon-launcher slices (#3873, #3874, …) — see the file header. Deliberately empty here.
+  'branch-drift': { script: 'scripts/conveyor/branch-drift.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
+  'infra-blocked': { script: 'scripts/conveyor/infra-blocked.mjs', args: ['retry'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
+  'duplicate-pr-watch': { script: 'scripts/conveyor/duplicate-pr-watch.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
+  ...perRepoEntries('ci-queue-watch', 'scripts/conveyor/ci-queue-watch.mjs', ['sweep']),
+  ...perRepoEntries('parked-pr-conflict-watch', 'scripts/conveyor/parked-pr-conflict-watch.mjs', ['sweep']),
+  ...perRepoEntries('parked-pr-progress-watch', 'scripts/conveyor/parked-pr-progress-watch.mjs', ['sweep']),
+  ...perRepoEntries('lane-pool-health-watch', 'scripts/conveyor/lane-pool-health-watch.mjs', []),
 };
 
 /** A script path may be `undefined` is never intended; it must be a plain repo-relative path with no `..`
