@@ -1,0 +1,20 @@
+{
+  "id": "session-reaper-graduation",
+  "title": "Graduating the conveyor session reaper from the prototype branch to main: slice order, the human gate the stop module answers on its own, and what an untagged session name means",
+  "status": "open",
+  "summary": "Grounds decision #3802 (how the session reaper, built as a split of four modules on the prototype branch lane/mechanical-dispatcher, reaches main, where a single 488-line session-reaper.mjs still runs). Measured 2026-09-21 against origin/main, the prototype and the staging ref lane/mechanical-dispatcher-catchup. LOAD-BEARING FINDINGS: (1) the earlier card counted the reaper's whole static import closure (253 paths, 113 of them different from or missing on main), but almost all of those are files main already has. Counting only the files main lacks, the whole reaper is 13 new files, 9 once readFollowUps (a 5-line ledger read that drags in 5 land-advance files) is extracted to a leaf. (2) The pure planner needs 3 new files and no change to any file main has; its 36 tests pass on a copy of main with only those files added. (3) The stop module, which carries the #3744 fix, does nothing on main until the CLI facade replaces main's monolith, so #3744 closes at the last slice; that slice is also the first to run the verdict axis, the pid-dead axis and the ledger read on main. (4) The stop module auto-answers the human authorize gate of the clear-stuck-session operation (a step its own header reserves for a person), which is the open, unprepared decision #3684; on this machine 13 of 15 recorded runs moved a job directory, all human-answered, none unattended. (5) Main mints a WE session name WITHOUT a repo marker by design (CONSTELLATION_REPOS.we.slugTag is empty), but the prototype's runner and four minters on the staging ref still mint untagged names for other repos, so 'untagged means WE after a cutover' would stop a live session; of 437 untagged PR-session names in the live listing 363 predate the marker commit and 3 are not terminal. PRIOR ART: Fowler's Strangler Fig, Branch by Abstraction and Parallel Change (small separately releasable increments beside the old code, then switch); Google's engineering practices on small changes (about 100 lines reasonable, 1000 usually too large); Terraform's apply, which asks for approval by default and makes -auto-approve an explicit opt-in; Kubernetes namespaces (an unqualified name resolves in a default scope, so a name minted before that rule needs a stated boundary). RESHAPES (after two skeptic passes and two fresh-context screens): the slicing question dissolves into a ratify (the epic already rules how increments are cut), a fork on the human gate is added, the readFollowUps fork dissolves into a build note, and the untagged-name fork keeps its filed default (check every repo) after an attack that tried to replace it, with its sunset restated as a test-pinned code condition.",
+  "dateOpened": "2026-09-21",
+  "lastReviewed": "2026-09-21",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "conveyor",
+    "prototype-branch",
+    "graduation",
+    "session-reaper",
+    "incremental-migration",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}

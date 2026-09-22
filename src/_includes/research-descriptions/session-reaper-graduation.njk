@@ -1,0 +1,113 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>The conveyor's session reaper stops finished background sessions. On <code>main</code> it is one 488-line file,
+<code>scripts/conveyor/session-reaper.mjs</code>, run by hand at hand-off. On the prototype branch
+<code>lane/mechanical-dispatcher</code> it is split into a pure planner, an evidence module, a stop module and a
+323-line facade, and the stop module carries the fix for
+<a href="/backlog/3744-session-reaper-cannot-verify-a-stop-took-effect-and-re-stops/">#3744</a> (the reaper
+re-stopped about 570 finished sessions per run). Decision
+<a href="/backlog/3802-decision-graduate-the-session-reaper-planner-first-graduate/">#3802</a> asks how the
+reaper reaches <code>main</code>, where its one blocking dependency goes, and what an unmarked session name means
+there. The full working is in <a href="/reports/2026-09-21-session-reaper-graduation-grounding.md">the session
+report</a>. How a slice is ported (any time, as a diff onto main's current file) is already ruled by
+<a href="/backlog/3804-decision-how-the-prototype-branch-is-kept-up-to-date-with-ma/">#3804</a>.</p>
+
+<h2>Finding 1: the closure is 13 new files, not 110</h2>
+
+<p>The earlier count (218 files, 110 missing from or different from <code>main</code>) walked every static import
+of the reaper. Re-run on the staging ref it reads 253 files, 139 identical to <code>main</code>, 51 different, 62
+missing. But a file <code>main</code> already has does not have to be ported; it only has to export the names the
+reaper asks for. Counting only the files <code>main</code> lacks, and checking every named import against
+<code>main</code>'s copy (all satisfied):</p>
+
+<table>
+  <thead><tr><th>Piece</th><th>New files on main</th><th>Lines (staging ref)</th></tr></thead>
+  <tbody>
+    <tr><td>Planner</td><td><code>session-reap-plan</code>, <code>session-verdicts</code>, <code>land-advance-tools</code></td><td>294 + 202 + 26</td></tr>
+    <tr><td>Evidence</td><td><code>session-reap-evidence</code>, <code>session-verdicts-io</code></td><td>195 + 132</td></tr>
+    <tr><td>Stop (carries #3744)</td><td><code>session-reap-stop</code></td><td>314</td></tr>
+    <tr><td>Watchdog chain</td><td><code>driver-watchdog</code>, <code>driver-mode</code></td><td>890 + 145</td></tr>
+    <tr><td>Facade (replaces main's monolith)</td><td>none (a rewrite of <code>session-reaper.mjs</code>)</td><td>325 (was 488)</td></tr>
+    <tr><td><code>readFollowUps</code> if imported from land-advance</td><td>5 more: <code>land-advance-io</code>, <code>land-advance</code>, <code>land-advance-escalations</code>, <code>land-advance-repair</code>, <code>ci-heal-pr-dispatch</code></td><td>n/a</td></tr>
+  </tbody>
+</table>
+
+<p>Only one function forces the last row: <code>readFollowUps</code>, five lines over the run store, lives in
+<code>land-advance-io.mjs</code>. Extracted to a leaf, the whole reaper is 8 new files plus the leaf.</p>
+
+<h2>Finding 2: the planner slice stands alone, measured</h2>
+
+<p>A copy of <code>origin/main</code> with only the planner's three files and the planner test added runs 36 of 36
+planner tests green. The verdicts test does not: it imports the facade, <code>land-advance-escalations</code> and
+<code>land-advance.mjs</code> (for <code>OWED_ACTIONS</code>), so that test is rewired or held back, not carried as
+is.</p>
+
+<h2>Finding 3: the stop module fixes nothing on main until the facade swap</h2>
+
+<p>Nothing on <code>main</code> imports the new modules. Main's monolith keeps its own stop code, so the #3744 fix
+takes effect only when the facade replaces the monolith. The earlier card said #3744 would close when the stop
+module graduated; it closes at the last slice.</p>
+
+<h2>Finding 4: the stop module answers a human gate on its own</h2>
+
+<p>The prototype's stop module auto-answers <code>proceed</code> to the <code>authorize</code> step of the
+<code>clear-stuck-session</code> operation, for any session whose <code>claude stop</code> threw. That step is a
+person's by the operation's own header: the move is "recoverable (quarantined, never deleted), it is still
+irreversible-ish in effect: the daemon is expected to drop the session from its listings once its job directory is
+gone." Whether the gate may be narrowed is the open, unprepared decision
+<a href="/backlog/3684-narrow-the-human-authorize-gate-in-clear-stuck-session-for-o/">#3684</a>, whose approved
+direction is to collect a scorecard first. On this machine the operation has 15 recorded runs: 13 moved a job
+directory, each after a human answer of 2.8 to 199 seconds, 1 was refused, 1 is pending. The repair fires only when a
+stop throws, not for sessions whose stop "succeeded" but still list, so holding it back costs little.</p>
+
+<h2>Finding 5: untagged names are normal on main and not yet gone elsewhere</h2>
+
+<p><code>CONSTELLATION_REPOS.we.slugTag</code> is empty, so <code>mintSessionSlug</code> emits
+<code>review-148</code>, with no marker, for a WE pull request; only other repos get <code>review-pa-148</code>. But
+the prototype's review dispatch still mints <code>reviewSessionSlug(prNum)</code> with no repo, and four minters on
+the staging ref still do (<code>ci-heal-pr-dispatch</code>, <code>review-dispatch-wrapper</code>,
+<code>review-dispatch</code> at the evidence call, <code>dispatch-lane</code>). The live session listing on
+2026-09-21: 885 rows, 455 with a PR-style name, 18 tagged, 437 untagged. Of the untagged, 363 started before the
+marker code landed on main (2026-09-20 08:45 EDT), 13 between that commit and the first tagged session (12:17 EDT),
+61 after. Three untagged sessions are not terminal, all from before the commit. Numbers do collide (WE has pull
+requests 1 to about 2,300, so a plateau-app number in the 50 to 150 range has a WE twin), but the every-repo check
+reaps only when every existing PR of that number is terminal, so a session whose real PR is open is kept.</p>
+
+<h2>Prior art</h2>
+
+<ul>
+  <li><strong>Strangler Fig (Fowler):</strong> "Like the fig, it begins with small additions, often new features,
+    that are built on top of, yet separate to the legacy code base." and "Since these components are small, there
+    isn't so much risk involved when we introduce the new software."</li>
+  <li><strong>Branch By Abstraction (Fowler):</strong> a long change is done so the team can "release the system
+    regularly while the change is still in-progress", with the system building and running "correctly at all
+    times". Steps: build the new supplier behind the abstraction, switch a section of clients, repeat until all
+    use the new one. The reaper's facade is the abstraction, the split modules the new supplier.</li>
+  <li><strong>Parallel Change (Fowler):</strong> expand, migrate, contract. Landing the new modules beside the
+    monolith is the expand step; the facade swap is the migrate step; nothing to contract because the swap
+    replaces the old file.</li>
+  <li><strong>Google engineering practices, small changes:</strong> "100 lines is usually a reasonable size for a
+    CL, and 1000 lines is usually too large, but it's up to the judgment of your reviewer." Related tests ship with
+    the code. The watchdog chain alone is 1,035 lines.</li>
+  <li><strong>Terraform apply:</strong> <code>-auto-approve</code> "Skips interactive approval of the plan before
+    applying", and the docs recommend using it in automation only after a plan has been performed and reviewed. The
+    default asks; the unattended path is an explicit opt-in.</li>
+  <li><strong>Kubernetes namespaces:</strong> "Names of resources need to be unique within a namespace, but not
+    across namespaces", and an unqualified name resolves in the <code>default</code> namespace. A name with no
+    scope is safe only where the default is defined and stable; a name minted before that rule needs a stated
+    boundary, not a guess.</li>
+</ul>
+
+<h2>How the decision was reshaped</h2>
+
+<p>The filed draft had three forks. Two skeptic passes and two fresh-context screens changed it as follows. The
+slicing fork (planner first, one piece, or keep on the prototype) dissolved into a ratify: the epic already rules
+that each increment is its own small pull request, and the only broken branch is keeping the reaper on the
+prototype. The <code>readFollowUps</code> fork dissolved into a build note, because which file holds a five-line
+reader is not a call a person needs to make. A new fork was added for the stop module's human-gate answer (default:
+split it out and hold it for #3684; the close alternative is to graduate it opt-in and off by default on both
+sides). The untagged-name fork kept its filed default, to check every repo for every untagged name, after an attack
+that tried to replace it with a start-time cutover, and its sunset was rewritten from a fleet-state condition to a
+test-pinned code condition. The cost of the whole reaper was corrected from 110 files to 13.</p>
+{% endraw %}
