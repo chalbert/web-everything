@@ -3,9 +3,7 @@ bornAs: xoiscdi
 kind: story
 size: 5
 parent: "3718"
-status: active
-scaffoldedBy: "prepare-3690"
-dateScaffolded: "2026-09-20"
+status: open
 scope: ["we:scripts/conveyor/"]
 dateOpened: "2026-09-20"
 tags: []

@@ -2,9 +2,10 @@
 bornAs: x3jmao3
 kind: task
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-04"
 dateStarted: "2026-09-04"
+dateResolved: "2026-09-22"
 relatedTo: ["3235", "2659", "2660"]
 tags: [lane-pool, review-dispatch, retry-backoff, live-caught]
 ---

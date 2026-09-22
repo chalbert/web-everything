@@ -2,9 +2,7 @@
 bornAs: xsuoup2
 kind: task
 parent: "3383"
-status: active
-scaffoldedBy: "file-3383-runner-restart-gap"
-dateScaffolded: "2026-09-03"
+status: open
 dateOpened: "2026-09-03"
 relatedTo: ["3397", "3443", "3435", "3464", "2501", "2468"]
 tags: [conveyor, runner, restart, reload, operability]
