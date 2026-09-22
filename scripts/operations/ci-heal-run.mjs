@@ -87,22 +87,26 @@ export function parseCiHealRunArgv(argv = []) {
     repo: repo || null,
     reason: reason || null,
     // #3383 (mechanical-dispatcher) — parsed, NOT validated, here — same split `fix-run.mjs#parseFixRunArgv`
-    // keeps for its own `--provider=`. `selectCiHealAgentProvider` below owns the name check + env fallback.
+    // keeps for its own `--provider=`. `selectCiHealAgentProvider` below owns the name check + the default.
     provider: String(flags.provider ?? '').trim(),
   };
 }
 
 /**
- * #3383 (mechanical-dispatcher, Part 1) — WHICH CLI RUNS THE CI-HEAL AGENT. Same flag-wins-env-fallback shape
- * `fix-run.mjs#selectFixAgentProvider`/`deliver-item-run.mjs#selectDeliveryAgentProvider` already use, so one
- * selection mechanism covers all three dispatch kinds.
+ * #3383 (mechanical-dispatcher, Part 1) — WHICH CLI RUNS THE CI-HEAL AGENT. Same shape
+ * `fix-run.mjs#selectFixAgentProvider`/`deliver-item-run.mjs#selectDeliveryAgentProvider` use: an explicit
+ * `--provider=` beats the default, so one selection mechanism covers all three dispatch kinds.
+ *
+ * #3840 (Fork 5 of #3801): the delivery-agent environment-variable fallback is RETIRED — a process-wide
+ * variable applied to every dispatch of that process, with no reason and no per-item scope. The one override is
+ * the item's own `deliveryAgent:` marker with a required `deliveryAgentReason:`, which the dispatcher passes
+ * here as `--provider=`.
  *
  * @param {string} flagValue - the parsed `--provider=` value, `''` when absent.
- * @param {Record<string, (string|undefined)>} [env] - the environment to read `DELIVERY_AGENT_PROVIDER` from.
  * @returns {{name: string, provider: object}}
  */
-export function selectCiHealAgentProvider(flagValue, env = process.env) {
-  const name = String(flagValue || env.DELIVERY_AGENT_PROVIDER || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
+export function selectCiHealAgentProvider(flagValue) {
+  const name = String(flagValue || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
   return { name, provider: resolveCiHealAgentProvider(name) };
 }
 
@@ -177,7 +181,6 @@ export async function runCiHealCli(argv = [], {
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
   selectProvider = selectCiHealAgentProvider,
-  env = process.env,
 } = {}) {
   let launch;
   let selected;
@@ -191,7 +194,7 @@ export async function runCiHealCli(argv = [], {
     );
     // #3383 — resolved BEFORE the heal starts, so a bad `--provider=` exits here rather than after a lane and a
     // rebase have already happened (see `selectCiHealAgentProvider`'s own docblock).
-    selected = selectProvider(launch.provider, env);
+    selected = selectProvider(launch.provider);
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };

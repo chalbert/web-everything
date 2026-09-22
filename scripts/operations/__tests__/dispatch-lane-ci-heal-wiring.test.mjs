@@ -426,17 +426,26 @@ describe('#3642 — ci-heal-run.mjs, the per-dispatch process', () => {
 
 // mechanical-dispatcher (epic #3383, Part 1) — mirrors `dispatch-lane-fix-wiring.test.mjs`'s identical suite.
 describe('#3383 — ci-heal-run.mjs provider selection', () => {
-  it('selects the ci-heal agent provider: flag beats env, env beats the default, and Claude IS the default', () => {
-    expect(selectCiHealAgentProvider('', {}).name).toBe('claude-restricted');
-    expect(selectCiHealAgentProvider('', { DELIVERY_AGENT_PROVIDER: 'codex' }).name).toBe('codex');
-    expect(selectCiHealAgentProvider('codex', {}).name).toBe('codex');
-    expect(selectCiHealAgentProvider('claude-restricted', { DELIVERY_AGENT_PROVIDER: 'codex' }).name)
-      .toBe('claude-restricted');
-    expect(selectCiHealAgentProvider('codex', {}).provider).toBe(CI_HEAL_AGENT_PROVIDERS.codex);
+  it('selects the ci-heal agent provider: the flag wins, and Claude IS the default', () => {
+    expect(selectCiHealAgentProvider('').name).toBe('claude-restricted');
+    expect(selectCiHealAgentProvider('codex').name).toBe('codex');
+    expect(selectCiHealAgentProvider('claude-restricted').name).toBe('claude-restricted');
+    expect(selectCiHealAgentProvider('codex').provider).toBe(CI_HEAL_AGENT_PROVIDERS.codex);
+  });
+
+  it('#3840 — the process-wide environment variable NO LONGER selects a provider', () => {
+    const before = process.env.DELIVERY_AGENT_PROVIDER;
+    process.env.DELIVERY_AGENT_PROVIDER = 'codex';
+    try {
+      expect(selectCiHealAgentProvider('').name).toBe('claude-restricted');
+    } finally {
+      if (before === undefined) delete process.env.DELIVERY_AGENT_PROVIDER;
+      else process.env.DELIVERY_AGENT_PROVIDER = before;
+    }
   });
 
   it('refuses an unknown provider name BEFORE any lane/rebase work happens, exiting the CLI with code 1', async () => {
-    expect(() => selectCiHealAgentProvider('gemini', {})).toThrow(/unknown delivery agent provider/);
+    expect(() => selectCiHealAgentProvider('gemini')).toThrow(/unknown delivery agent provider/);
     let dispatched = false;
     const res = await runCiHealCli(['--pr=743', '--session=ci-heal-743', '--provider=gemini'], {
       repoSlug: () => 'chalbert/web-everything', write: () => {}, writeErr: () => {}, env: {},

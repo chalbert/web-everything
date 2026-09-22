@@ -406,20 +406,30 @@ describe('#3640 — fix-run.mjs, the per-dispatch process', () => {
   });
 });
 
-// mechanical-dispatcher (epic #3383, Part 1) — the SAME flag-wins-env-fallback provider selection
-// `deliver-item-run.mjs#selectDeliveryAgentProvider` proves for `build`, mirrored here for `fix`.
+// mechanical-dispatcher (epic #3383, Part 1) — the SAME flag-or-default provider selection
+// `deliver-item-run.mjs#selectDeliveryAgentProvider` proves for `build`, mirrored here for `fix`. #3840: the
+// environment fallback is retired; the item's `deliveryAgent:` marker (passed as `--provider=`) is the override.
 describe('#3383 — fix-run.mjs provider selection', () => {
-  it('selects the fix agent provider: flag beats env, env beats the default, and Claude IS the default', () => {
-    expect(selectFixAgentProvider('', {}).name).toBe('claude-restricted');
-    expect(selectFixAgentProvider('', { DELIVERY_AGENT_PROVIDER: 'codex' }).name).toBe('codex');
-    expect(selectFixAgentProvider('codex', {}).name).toBe('codex');
-    expect(selectFixAgentProvider('claude-restricted', { DELIVERY_AGENT_PROVIDER: 'codex' }).name)
-      .toBe('claude-restricted');
-    expect(selectFixAgentProvider('codex', {}).provider).toBe(FIX_AGENT_PROVIDERS.codex);
+  it('selects the fix agent provider: the flag wins, and Claude IS the default', () => {
+    expect(selectFixAgentProvider('').name).toBe('claude-restricted');
+    expect(selectFixAgentProvider('codex').name).toBe('codex');
+    expect(selectFixAgentProvider('claude-restricted').name).toBe('claude-restricted');
+    expect(selectFixAgentProvider('codex').provider).toBe(FIX_AGENT_PROVIDERS.codex);
+  });
+
+  it('#3840 — the process-wide environment variable NO LONGER selects a provider', () => {
+    const before = process.env.DELIVERY_AGENT_PROVIDER;
+    process.env.DELIVERY_AGENT_PROVIDER = 'codex';
+    try {
+      expect(selectFixAgentProvider('').name).toBe('claude-restricted');
+    } finally {
+      if (before === undefined) delete process.env.DELIVERY_AGENT_PROVIDER;
+      else process.env.DELIVERY_AGENT_PROVIDER = before;
+    }
   });
 
   it('refuses an unknown provider name BEFORE any lane/PR work happens, exiting the CLI with code 1', async () => {
-    expect(() => selectFixAgentProvider('gemini', {})).toThrow(/--provider must be one of|unknown delivery agent provider/);
+    expect(() => selectFixAgentProvider('gemini')).toThrow(/--provider must be one of|unknown delivery agent provider/);
     let dispatched = false;
     const res = await runFixCli(['--pr=2108', '--session=fix-2108', '--provider=gemini'], {
       repoSlug: () => 'chalbert/web-everything', write: () => {}, writeErr: () => {}, env: {},

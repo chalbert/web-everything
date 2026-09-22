@@ -132,6 +132,13 @@ describe('the three taskTypes with no producing dispatch kind', () => {
       expect(taskTypeFor({ kind, cause: null, scopePaths: ['we:scripts/a.mjs'] }).taskType)
         .not.toBe('conflict-resolution');
     }
+    // a `fix` WITHOUT the conflict cause never derives it, whatever the other cause or scope
+    for (const cause of [null, '', 'review-finding', 'ci-failure']) {
+      for (const scopePaths of [[], ['we:scripts/a.mjs'], ['we:docs/a.md']]) {
+        expect(taskTypeFor({ kind: 'fix', cause, scopePaths }).taskType).toBe('bugfix');
+      }
+    }
+    expect(taskTypeFor({ kind: 'fix', cause: 'cosmic-ray', scopePaths: ['we:scripts/a.mjs'] }).outcome).toBe('refused');
     // and the cause only means that on a `fix`: a conflict-caused `build` is not a conflict resolution
     expect(taskTypeFor({ kind: 'build', cause: CONFLICT_CAUSE, scopePaths: ['we:scripts/a.mjs'] }).taskType)
       .toBe('build-new-feature');

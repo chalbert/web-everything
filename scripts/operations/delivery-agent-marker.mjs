@@ -39,12 +39,32 @@ import { checkMainStaleness, gitRun } from '../lib/main-staleness.mjs';
 export const DELIVERY_AGENT_MARKER_KEY = 'deliveryAgent';
 
 /**
+ * The REQUIRED companion key (#3840, Fork 5 of #3801). A `deliveryAgent:` marker with no `deliveryAgentReason:`
+ * is refused at routing (`we:scripts/lib/dispatch-contracts.mjs#decideDispatchRoute`): git's who and when is
+ * not a why, and #3717 requires every override to carry its reason. This is the ONE provider override; the
+ * process-wide environment variables that once selected a provider (three of them, retired by #3840) are
+ * gone.
+ */
+export const DELIVERY_AGENT_REASON_KEY = 'deliveryAgentReason';
+
+/**
  * PURE. Extracts `deliveryAgent:` from an already-read file's raw text, or `null` when absent/blank.
  * @param {string} content
  * @returns {string|null}
  */
 export function parseDeliveryAgentMarker(content) {
   const raw = readField(content, DELIVERY_AGENT_MARKER_KEY);
+  const value = raw ? String(raw).trim() : '';
+  return value || null;
+}
+
+/**
+ * PURE. Extracts `deliveryAgentReason:` from an already-read file's raw text, or `null` when absent/blank.
+ * @param {string} content
+ * @returns {string|null}
+ */
+export function parseDeliveryAgentReason(content) {
+  const raw = readField(content, DELIVERY_AGENT_REASON_KEY);
   const value = raw ? String(raw).trim() : '';
   return value || null;
 }
@@ -74,6 +94,38 @@ export function readItemDeliveryAgentMarker(num, {
     const file = resolveBacklogFile(key, root, listFiles);
     if (!file) return null;
     return parseDeliveryAgentMarker(read(join(root, 'backlog', file)));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE IO SHELL for the whole override — the marker AND its reason — from ONE read of the item's own file
+ * (#3840). Same never-throws, best-effort posture as {@link readItemDeliveryAgentMarker}: `null` when the item
+ * cannot be resolved or read, or when NEITHER key is present. Otherwise both halves are returned as the file
+ * states them (`null` for an absent one), so the caller can refuse a marker with no reason AND a reason with no
+ * marker by name rather than by silence. Validation of the vendor name and of the pairing is NOT done here: it
+ * is the router's (`decideDispatchRoute`), which is the one place that refuses.
+ *
+ * @param {string|number|null|undefined} num
+ * @param {{root?: string, listFiles?: (dir: string) => string[], read?: (path: string) => string}} [io]
+ * @returns {{deliveryAgent: (string|null), deliveryAgentReason: (string|null)}|null}
+ */
+export function readItemDeliveryAgentOverride(num, {
+  root = REPO_ROOT,
+  listFiles = (dir) => readdirSync(dir),
+  read = (p) => readFileSync(p, 'utf8'),
+} = {}) {
+  const key = String(num ?? '').trim();
+  if (!key) return null;
+  try {
+    const file = resolveBacklogFile(key, root, listFiles);
+    if (!file) return null;
+    const content = read(join(root, 'backlog', file));
+    const deliveryAgent = parseDeliveryAgentMarker(content);
+    const deliveryAgentReason = parseDeliveryAgentReason(content);
+    if (!deliveryAgent && !deliveryAgentReason) return null;
+    return { deliveryAgent, deliveryAgentReason };
   } catch {
     return null;
   }
