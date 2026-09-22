@@ -14,8 +14,12 @@ import {
   planReviewDispatch, reviewDispatchDisallowedToolsArgs, reviewSeatRoutes, reviewSessionSlug,
   CODEX_JUDGE_PROVIDER_REFUSAL, REVIEW_BRIEF_PLACEHOLDERS, REVIEW_DISPATCH_DISALLOWED_TOOLS,
   REVIEW_DISPATCH_SYSTEM_PROMPT_FILE, runAutoFixRoute,
+  // #3887 — rule 7 of #3690 at `spot-check`.
+  FLOOR_LENS, fileFloorFindingFollowUp, runFloorPass,
 } from '../review-dispatch.mjs';
-import { selectProvider } from '../../lib/provider-routing.mjs';
+import { selectProvider, SUPERVISION_LEVELS } from '../../lib/provider-routing.mjs';
+import { REVIEW_HOLD_LABELS } from '../../lib/review-escalation.mjs';
+import { createMemoryRunStore } from '../run-store.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
 // below don't hand-duplicate the join.
@@ -311,6 +315,120 @@ describe('reviewSeatRoutes (#3846)', () => {
     const security = routes.find((r) => r.lens === 'security');
     expect(security.provider).toBe('claude');
     expect(security.capable).toBe(true);
+  });
+});
+
+// #3887 — Rule 7 of #3690 at `spot-check`: full coverage at every supervision level, moving only in depth.
+// `full` keeps the existing mandatory panel unchanged (regression guard for #3850, already ratified and
+// built); `spot-check` resolves the `#every-pr-gets-a-look-advisory-floor` (#3313) shape instead; no level
+// resolves to zero independent seats.
+describe('reviewSeatRoutes — supervision-level depth (#3887, rule 7)', () => {
+  it('a `spot-check` route resolves ONE floor seat: tool-free, one round, capped findings, non-blocking', () => {
+    const routes = reviewSeatRoutes({ scorecards: [], supervision: SUPERVISION_LEVELS.SPOT_CHECK });
+    expect(routes).toHaveLength(1);
+    const [seat] = routes;
+    expect(seat.lens).toBe(FLOOR_LENS);
+    expect(seat.toolFree).toBe(true);
+    expect(seat.rounds).toBe(1);
+    expect(seat.maxFindings).toBeGreaterThan(0);
+    expect(seat.blocking).toBe(false);
+    // #3313: looking and blocking are separate decisions — this seat carries no `review:*` label at all, and
+    // is not a member of the ratified hold-label set (a grep of scripts/ backs this up independently — see
+    // `we:scripts/lib/review-escalation.mjs#REVIEW_HOLD_LABELS`).
+    expect(seat.label).toBeNull();
+    expect(REVIEW_HOLD_LABELS).not.toContain(seat.lens);
+    expect(REVIEW_HOLD_LABELS.some((l) => String(l).includes(seat.lens))).toBe(false);
+  });
+
+  it('a `full` route still resolves the existing #3850 mandatory panel, unchanged (regression guard)', () => {
+    const routes = reviewSeatRoutes({ scorecards: [], supervision: SUPERVISION_LEVELS.FULL });
+    expect(routes).toHaveLength(2);
+    expect(routes.map((r) => r.lens)).toEqual(['correctness', 'security']);
+    for (const route of routes) {
+      expect(route.provider).toBe('claude');
+      expect(route.capable).toBe(true);
+    }
+  });
+
+  it('omitting `supervision` defaults to `full` — byte-identical to pre-#3887 behaviour', () => {
+    expect(reviewSeatRoutes({ scorecards: [] })).toEqual(reviewSeatRoutes({ scorecards: [], supervision: SUPERVISION_LEVELS.FULL }));
+  });
+
+  it('no route at either level resolves zero independent seats', () => {
+    expect(reviewSeatRoutes({ scorecards: [], supervision: SUPERVISION_LEVELS.FULL }).length).toBeGreaterThan(0);
+    expect(reviewSeatRoutes({ scorecards: [], supervision: SUPERVISION_LEVELS.SPOT_CHECK }).length).toBeGreaterThan(0);
+  });
+
+  it('an unrecognised supervision level fails loud rather than silently resolving to zero seats', () => {
+    expect(() => reviewSeatRoutes({ scorecards: [], supervision: 'none' })).toThrow(/unknown supervision level/);
+  });
+});
+
+// #3887 — the floor pass's two standing, non-optional obligations (#3313): a finding files its own follow-up
+// item through the DECLARED `file-item` operation, and the pass's cost/yield ride back on the return.
+describe('fileFloorFindingFollowUp / runFloorPass (#3887)', () => {
+  function stubFileItemIo({ existingIds = [] } = {}) {
+    const written = [];
+    const queued = [];
+    return {
+      readScaffoldContext: () => ({ existingIds, today: '2026-09-22', dir: '/repo/backlog' }),
+      sinks: {
+        'scaffold.write': async (p) => { written.push(p); return { rel: p.rel, written: true }; },
+        'file-item.queue-add': async (p) => { queued.push(p); return { num: p.num, queued: true }; },
+      },
+      store: createMemoryRunStore(),
+      written, queued,
+    };
+  }
+
+  it('files a follow-up item through the declared file-item operation, referencing the PR and the finding', async () => {
+    const io = stubFileItemIo();
+    const result = await fileFloorFindingFollowUp({
+      pr: 4242, repo: 'chalbert/web-everything', finding: 'the diff removes a null check the card never asked to remove',
+      readScaffoldContext: io.readScaffoldContext, sinks: io.sinks, store: io.store, mintRunId: () => 'run-floor-1',
+    });
+    expect(result.filed).toBe(true);
+    expect(io.written).toHaveLength(1);
+    expect(io.written[0].content).toMatch(/4242/);
+    expect(io.written[0].content).toMatch(/null check/);
+    expect(result.num).toBe(io.queued[0]?.num);
+  });
+
+  it('refuses with no finding text — a follow-up with nothing to act on files nothing', async () => {
+    await expect(fileFloorFindingFollowUp({ pr: 1, finding: '' })).rejects.toThrow(/finding is required/);
+  });
+
+  it('a finding recorded by the floor pass actually triggers the filing (runFloorPass)', async () => {
+    const io = stubFileItemIo();
+    let fileFollowUpCalls = 0;
+    const { record, filed } = await runFloorPass(
+      { pr: 99, repo: 'chalbert/web-everything' },
+      { findings: ['the fix silently swallows the original error'] },
+      {
+        fileFollowUp: async (o) => {
+          fileFollowUpCalls += 1;
+          return fileFloorFindingFollowUp({
+            ...o, readScaffoldContext: io.readScaffoldContext, sinks: io.sinks, store: io.store,
+            mintRunId: () => `run-floor-${fileFollowUpCalls}`,
+          });
+        },
+      },
+    );
+    expect(record.outcome).toBe('findings');
+    expect(fileFollowUpCalls).toBe(1);
+    expect(filed).toHaveLength(1);
+    expect(filed[0].filed).toBe(true);
+    expect(io.written).toHaveLength(1);
+  });
+
+  it('a clean floor pass (no findings) files nothing', async () => {
+    let fileFollowUpCalls = 0;
+    const { record, filed } = await runFloorPass({ pr: 1 }, { findings: [] }, {
+      fileFollowUp: async () => { fileFollowUpCalls += 1; return null; },
+    });
+    expect(record.outcome).toBe('clean');
+    expect(fileFollowUpCalls).toBe(0);
+    expect(filed).toHaveLength(0);
   });
 });
 

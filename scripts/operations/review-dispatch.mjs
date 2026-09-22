@@ -165,21 +165,33 @@ import {
 import { taskTypeFor } from '../lib/dispatch-task-type.mjs';
 // #3846 — Fork 3 of #3801, review: THE ROUTER ENTRY POINT itself, called once to confirm `review` takes the
 // role path (see `reviewSeatRoutes` below for what this file now does PER SEAT with that confirmation).
-import { decideDispatchRoute } from '../lib/dispatch-contracts.mjs';
+// #3887 — Rule 7 of #3690 at `spot-check`: the pure supervision→depth contract `reviewSeatRoutes` consults
+// below, so the depth mapping lives in exactly one place.
+import { decideDispatchRoute, independentReviewDepthFor } from '../lib/dispatch-contracts.mjs';
 // #3846 — the SAME provider cascade a work dispatch uses, run per mandatory review lens rather than once for
-// the whole run. See `reviewSeatRoutes`.
-import { selectProvider } from '../lib/provider-routing.mjs';
+// the whole run. See `reviewSeatRoutes`. #3887 — `SUPERVISION_LEVELS` is `reviewSeatRoutes`'s own default and
+// the vocabulary `independentReviewDepthFor` above accepts.
+import { selectProvider, SUPERVISION_LEVELS } from '../lib/provider-routing.mjs';
 // #3846 — the mandatory, UNANIMOUS-ACCEPT lens pair (#2310/#3319) — both TOOL-BEARING seats
 // (`review-pr.mjs#JUDGE_SEATS` sets `allowedTools` unconditionally for both). A pure data export, not the
-// heavier `review-pr.mjs` operation itself.
-import { MANDATORY_LENSES } from '../lib/jury-core.mjs';
+// heavier `review-pr.mjs` operation itself. #3887 — `FLOOR_MAX_FINDINGS`/`recordFloorRun` are the
+// `spot-check` floor's own cap and verdict+cost record; see `runFloorPass` below.
+import { MANDATORY_LENSES, FLOOR_MAX_FINDINGS, recordFloorRun } from '../lib/jury-core.mjs';
 // #xqa9ttq — the single source of truth for the `claude`/`codex`/`antigravity` juror-provider enum, shared
 // with `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
 // cannot silently drift out of step with what `review-loop-cli.mjs` (which the dispatched session runs)
 // actually accepts. `TOOL_FREE_JUDGE_PROVIDER_NAMES` is #3846's capability gate: codex (#3581) and antigravity
 // (#3383) are BOTH structurally tool-free-only judge providers, so `claude` is the only candidate a
 // tool-bearing mandatory seat can ever seat today.
-import { JUDGE_PROVIDER_NAMES, TOOL_FREE_JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
+import { JUDGE_PROVIDER_NAMES, TOOL_FREE_JUDGE_PROVIDER_NAMES, driveRun } from './cli-adapter.mjs';
+// #3887 — driving the DECLARED `file-item` operation end to end, the same way `we:scripts/conveyor/
+// session-reap-stop.mjs#attemptClearStuckSession` drives `clear-stuck-session`: a fresh registry, `startRun`,
+// `driveRun`. Never a hand-rolled scaffold call — see `fileFloorFindingFollowUp`'s own header.
+import { startRun } from './engine.mjs';
+import { createRegistry } from './registry.mjs';
+import { createFileRunStore, newRunId } from './run-store.mjs';
+import { fileItemOperation, FILE_ITEM_OP } from './file-item.mjs';
+import { createFileItemReader, createFileItemSinks } from './file-item-io.mjs';
 // #xu2pp2m — THE MECHANICAL ARC THIS FILE NOW DEFAULTS TO. See the header block: the wrapper IS the three
 // commands `review-agent-brief.md` told a spawned agent to type, done as pure Node with no LLM turn.
 import { BLOCKED_ON_INFRA, dispatchReviewMechanical } from './review-dispatch-wrapper.mjs';
@@ -585,8 +597,17 @@ function seatCapabilityReason(recommendation, lens) {
  * @param {{scorecards?: unknown, lenses?: readonly string[]}} [o]
  * @returns {ReadonlyArray<{lens: string, role: string, provider: string, capable: boolean, auditTrail: object[]}>}
  */
-export function reviewSeatRoutes({ scorecards = [], lenses = MANDATORY_LENSES } = {}) {
+export function reviewSeatRoutes({
+  scorecards = [], lenses = MANDATORY_LENSES, supervision = SUPERVISION_LEVELS.FULL,
+} = {}) {
   const { role } = decideDispatchRoute({ kind: 'review' });
+  // #3887 — RULE 7: full coverage at EVERY supervision level, moving only in DEPTH. `independentReviewDepthFor`
+  // fails loud on anything but `full`/`spot-check`, so an unrecognised level throws here rather than silently
+  // resolving to zero seats — the exact failure rule 7 forbids. `spot-check` resolves the ONE floor seat below,
+  // never the per-mandatory-lens fan-out that follows (that fan-out IS the `full`-depth panel — #3850, already
+  // ratified and built; this function changes nothing about it).
+  const depth = independentReviewDepthFor(supervision);
+  if (depth.depth === 'floor') return Object.freeze([floorSeatRoute(role, depth)]);
   return Object.freeze(lenses.map((lens) => {
     const selected = selectProvider({ taskType: lens }, { filesTouched: [], estimatedSize: 0, scorecards });
     const capable = JUDGE_PROVIDER_NAMES.includes(selected.recommendation)
@@ -601,6 +622,126 @@ export function reviewSeatRoutes({ scorecards = [], lenses = MANDATORY_LENSES } 
     ];
     return Object.freeze({ lens, role, provider: capable ? selected.recommendation : 'claude', capable, auditTrail });
   }));
+}
+
+/**
+ * #3887 — Rule 7 of #3690 at `spot-check`: the `#every-pr-gets-a-look-advisory-floor` (#3313) SEAT, resolved
+ * as routing data in the same shape {@link reviewSeatRoutes} already returns per mandatory lens —
+ * `lens`/`role`/`provider`/`capable`/`auditTrail` — plus the floor-specific fields a caller needs to actually
+ * seat it: `toolFree`/`rounds`/`maxFindings`/`blocking`.
+ *
+ * STRUCTURALLY NON-BLOCKING (Done-when #2): this descriptor carries NO `label` field at all, and neither this
+ * function nor anything else in this file reads or writes `we:scripts/lib/review-escalation.mjs`'s
+ * `REVIEW_HOLD_LABELS` — a `review:*` label is applied only by `we:scripts/review-set-label.mjs`, which this
+ * seat is never wired to. "Looking and blocking are separate decisions" (#3313) — a floor seat can look, it
+ * cannot park.
+ */
+export const FLOOR_LENS = 'floor';
+
+function floorSeatRoute(role, depth) {
+  // Any provider may fill the reviewer seat; a different provider from the builder is preferred, never
+  // required (rule 7's own words) — `TOOL_FREE_JUDGE_PROVIDER_NAMES[0]` is a deterministic default, the same
+  // shape `review-pr.mjs#ADVISORY_JUDGE_SEAT` already defaults its own third seat to.
+  const provider = TOOL_FREE_JUDGE_PROVIDER_NAMES[0];
+  return Object.freeze({
+    lens: FLOOR_LENS, role, provider, capable: true,
+    toolFree: depth.toolFree, rounds: depth.rounds, maxFindings: FLOOR_MAX_FINDINGS, blocking: depth.blocking,
+    label: null,
+    auditTrail: [{
+      criterion: 'independent-review-depth', result: depth.depth, dataConsulted: `supervision=${depth.supervision}`,
+      reasoning: 'rule 7 (#delegation-trial-record-graduation) at spot-check: the #every-pr-gets-a-look-advisory-floor '
+        + '(#3313) shape — one tool-free juror, one round, capped findings, non-blocking.',
+    }],
+  });
+}
+
+/**
+ * #3887 — FILE THE FOLLOW-UP a floor finding OWES (#3313's second, non-optional obligation: "a finding must
+ * file a follow-up item, because a review nobody is required to act on decays into noise"). Drives the
+ * DECLARED `file-item` operation end to end — never a hand-rolled scaffold call — exactly the way
+ * `we:scripts/conveyor/session-reap-stop.mjs#attemptClearStuckSession` drives `clear-stuck-session`: a fresh
+ * registry, `startRun`, `driveRun`. `file-item` declares no `confirm`/`judge` step, so `driveRun` reaches
+ * `stopped: 'complete'` in one pass with no `autoConfirm`/`judge` policy to supply — the `judge` stub below
+ * exists only so a future `judge` step on this operation fails loud here rather than silently hanging.
+ *
+ * @param {object} o
+ * @param {number} o.pr - the PR the floor pass looked at.
+ * @param {string} [o.repo] - `owner/repo`, when known; folded into the filed card's digest.
+ * @param {string} o.finding - the floor juror's own finding text.
+ * @param {ReturnType<typeof createFileItemReader>} [o.readScaffoldContext] - injected reader; see `file-item.mjs`.
+ * @param {Record<string, Function>} [o.sinks]
+ * @param {{read: Function, write: Function}} [o.store]
+ * @param {() => string} [o.mintRunId]
+ * @returns {Promise<{filed: boolean, num: (number|null), runId: (string|null), stopped: string, reason: string}>}
+ */
+export async function fileFloorFindingFollowUp({
+  pr, repo, finding,
+  readScaffoldContext = createFileItemReader(),
+  sinks = createFileItemSinks(),
+  store = createFileRunStore(),
+  mintRunId = () => newRunId(FILE_ITEM_OP),
+} = {}) {
+  if (!Number.isInteger(pr) || pr <= 0) {
+    throw new Error(`fileFloorFindingFollowUp: pr must be a positive integer, got ${JSON.stringify(pr)}`);
+  }
+  if (typeof finding !== 'string' || !finding.trim()) {
+    throw new Error('fileFloorFindingFollowUp: finding is required — a follow-up with no finding text files nothing an owner could act on');
+  }
+
+  const registry = createRegistry();
+  const declaration = fileItemOperation({ readScaffoldContext });
+  registry.register(declaration);
+
+  const subject = repo ? `${repo}#${pr}` : `PR #${pr}`;
+  const title = `Floor-pass finding on ${subject}`;
+  const digest = `we:scripts/operations/review-dispatch.mjs's spot-check floor pass (#every-pr-gets-a-look-advisory-floor, `
+    + `#3313; rule 7, #3887) raised a finding on ${subject}, non-blocking — filed as the pass's own required `
+    + `follow-up: ${finding.trim()}`;
+
+  const run = startRun({
+    op: declaration.name, id: mintRunId(), input: { title, kind: 'task', digest, queue: 'true' }, registry,
+  });
+  store.write(run);
+
+  const outcome = await driveRun({
+    run, registry, store, sinks,
+    judge: async () => {
+      throw new Error('review-dispatch: file-item declared no `judge` step this caller cannot answer');
+    },
+  });
+
+  const filed = outcome.stopped === 'complete';
+  return {
+    filed, num: outcome.run?.verdict?.num ?? null, runId: outcome.run?.id ?? null, stopped: outcome.stopped,
+    reason: filed
+      ? 'floor finding filed as a follow-up item through the declared file-item operation'
+      : `file-item did not complete (stopped: ${outcome.stopped}${outcome.error ? `, error: ${String(outcome.error?.message ?? outcome.error)}` : ''})`,
+  };
+}
+
+/**
+ * #3887 — DRIVE the floor pass's own two standing obligations end to end (#3313, neither optional): every
+ * recorded finding files its own follow-up item, and the pass's cost/yield rides back on the return so a
+ * caller can report it to the owning program. Composes {@link recordFloorRun} (jury-core's pure verdict+cost
+ * record) with {@link fileFloorFindingFollowUp} (the one declared way to file a follow-up) — it never files
+ * ad hoc and never skips a finding.
+ *
+ * @param {{pr: number, repo?: string}} subject
+ * @param {Parameters<typeof recordFloorRun>[0]} run
+ * @param {{fileFollowUp?: Function}} [io] - injectable; defaults to the real {@link fileFloorFindingFollowUp}.
+ * @returns {Promise<{record: ReturnType<typeof recordFloorRun>, filed: Array<object>}>}
+ */
+export async function runFloorPass({ pr, repo } = {}, run = {}, { fileFollowUp = fileFloorFindingFollowUp } = {}) {
+  const record = recordFloorRun(run);
+  const filed = [];
+  for (const finding of record.findings) {
+    const text = typeof finding === 'string' ? finding : (finding?.summary ?? JSON.stringify(finding));
+    // eslint-disable-next-line no-await-in-loop -- each filing is its own operation run; sequential keeps the
+    // filed order matching the findings order, and the floor's own cap (FLOOR_MAX_FINDINGS) already bounds
+    // how many of these ever run.
+    filed.push(await fileFollowUp({ pr, repo, finding: text }));
+  }
+  return { record, filed };
 }
 
 /**

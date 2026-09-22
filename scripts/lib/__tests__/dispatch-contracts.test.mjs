@@ -30,10 +30,12 @@ describe('closed contracts and pure boundary', () => {
     // impure) is unchanged.
     expect([...source.matchAll(/from '([^']+)'/g)].map((m) => m[1])).toEqual(['./provider-routing.mjs', './secret-scrub.mjs', './dispatch-thresholds.mjs', './codex-model-routing.mjs', './dispatch-task-type.mjs']);
     const lines = source.split('\n');
-    // See the sibling assertion below for why two annotations are accepted since #3717 wired slice G2.
+    // See the sibling assertion below for why three annotations are accepted since #3717 wired slice G2 and
+    // #3887 added a second real runtime caller outside that wiring (review-dispatch.mjs).
     const G1 = '// @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)';
     const G2 = '// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)';
-    for (let i = 0; i < lines.length; i++) if (lines[i].startsWith('export ')) expect([G1, G2]).toContain(lines[i - 1]);
+    const G3 = '// @wired-by-3887: has a runtime caller — scripts/operations/review-dispatch.mjs#reviewSeatRoutes';
+    for (let i = 0; i < lines.length; i++) if (lines[i].startsWith('export ')) expect([G1, G2, G3]).toContain(lines[i - 1]);
   });
   it('all validators fail closed on arbitrary and cyclic input', () => {
     const cyclic = {}; cyclic.self = cyclic;
@@ -185,12 +187,14 @@ describe('session names and new provenance fields', () => {
       const source = readFileSync(`scripts/lib/${name}.mjs`, 'utf8');
       for (const forbidden of ['node:fs', 'Date.now', 'new Date', 'process.env', 'Math.random']) expect(source).not.toContain(forbidden);
       const lines = source.split('\n');
-      // #3717 WIRED SLICE G2, so "no runtime caller" stopped being true for part of this module. The rule the
-      // test is FOR is unchanged — every export is annotated with why it exists — so it now accepts either
-      // annotation: the G1 one (still exact, still the default) or the G2 one, which names the runtime caller.
+      // #3717 WIRED SLICE G2, so "no runtime caller" stopped being true for part of this module. #3887 added a
+      // second real runtime caller outside that wiring. The rule the test is FOR is unchanged — every export
+      // is annotated with why it exists — so it now accepts any of three annotations: the G1 one (still exact,
+      // still the default), the G2 one (the G2 dispatcher wiring), or the G3 one (review-dispatch.mjs).
       const G1 = '// @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)';
       const G2 = '// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)';
-      lines.forEach((line, i) => { if (line.startsWith('export ')) expect([G1, G2]).toContain(lines[i - 1]); });
+      const G3 = '// @wired-by-3887: has a runtime caller — scripts/operations/review-dispatch.mjs#reviewSeatRoutes';
+      lines.forEach((line, i) => { if (line.startsWith('export ')) expect([G1, G2, G3]).toContain(lines[i - 1]); });
     }
   });
 });

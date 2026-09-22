@@ -120,6 +120,22 @@ live process to chase down.
 Linked from `we:skills-src/conveyor/SKILL.md` §2 ("Start the runner") — that's where an operator running the
 dispatcher will naturally land first.
 
+## Independent review by supervision level (rule 7, #3887)
+
+Which independent-pass **depth** each computed supervision level gets, and what enforces it —
+`we:docs/agent/platform-decisions.md#delegation-trial-record-graduation` rule 7: full coverage at every level,
+moving only in depth. Computed by `we:scripts/lib/dispatch-contracts.mjs#independentReviewDepthFor` and
+resolved into seats by `we:scripts/operations/review-dispatch.mjs#reviewSeatRoutes`; a floor-depth run's own
+verdict and cost are recorded by `we:scripts/lib/jury-core.mjs#recordFloorRun`.
+
+| supervision | independent pass | enforced by |
+|---|---|---|
+| `full` | the mandatory two-lens panel (`correctness`, `security`) — unanimous-accept, tool-bearing | `we:scripts/operations/review-pr.mjs#JUDGE_SEATS` (#2310/#3319); ratified as the `full`-depth pass by #3850 |
+| `spot-check` | the `#every-pr-gets-a-look-advisory-floor` shape (#3313): one tool-free juror, one round, capped findings, non-blocking | `we:scripts/operations/review-dispatch.mjs#reviewSeatRoutes`/`#runFloorPass`; a finding files its own follow-up item through the declared `file-item` operation, and the pass's cost/yield are measured and reported |
+
+No supervision level resolves to zero independent seats: `independentReviewDepthFor` fails loud on any value
+outside `full`/`spot-check` rather than silently returning none — the exact failure rule 7 forbids.
+
 <!-- BEGIN GENERATED: dispatch routing table — `npm run gen:dispatch-routing-table` -->
 
 ## The routing table (generated)

@@ -2143,3 +2143,60 @@ export function deriveLoopOutcome({ verdict, round = 1, cap = DEFAULT_ROUND_CAP 
  * work, and the point of the cap is to catch a loop that is not progressing, not to ration one that is.
  */
 export const DEFAULT_ROUND_CAP = 5;
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #3887 — RULE 7 OF #3690 AT `spot-check`: the independent pass keeps full COVERAGE at every supervision
+// level and moves only in DEPTH (`#delegation-trial-record-graduation`, rule 7). `full` keeps the existing
+// mandatory panel (`MANDATORY_LENSES`/`PANEL_LENSES` above) unchanged — #3850 already ratified that panel AS
+// the full-depth independent pass, and nothing here touches it. `spot-check` owns the
+// `#every-pr-gets-a-look-advisory-floor` shape instead (#3313): ONE tool-free juror, ONE round, the diff and
+// the item card, a CAPPED finding count, and — the structural half of "advisory, never a park" — STRUCTURALLY
+// NON-BLOCKING: this module records the floor's verdict and cost; it never emits a `review:*` label and is
+// never a `REVIEW_HOLD_LABELS` member (`we:scripts/lib/review-escalation.mjs`) — a review that cannot park
+// cannot cost latency (#3313's own words).
+//
+// TWO OBLIGATIONS COME WITH THE FLOOR, AND NEITHER IS OPTIONAL (#3313): a finding files a follow-up item
+// (`we:scripts/operations/review-dispatch.mjs#runFloorPass`, which drives the declared `file-item` operation),
+// and the floor's own cost and yield are measured and reported — `recordFloorRun` below is that record, kept
+// in a shape a report can fold later, the same way `panelRigorForCareLevel` above already carries the
+// mandate's OTHER standing dial (rounds/lenses/jurors) as a pure, auditable table rather than an inline
+// decision.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The floor's own finding cap (#3313 — "a capped finding count"). A small number by design: the floor's bar
+ *  is "catch the obvious", not "converge" — see the anchor's own text in `we:docs/agent/platform-decisions.md`.
+ *  Extra findings are never silently dropped: {@link recordFloorRun} reports how many it truncated. */
+export const FLOOR_MAX_FINDINGS = 3;
+
+/**
+ * RECORD one floor-depth (`spot-check`) independent-pass run — its verdict AND its cost, in one field a
+ * report can read later (Done-when #3, #3887). Pure: no fs, no clock, no process — every number arrives as
+ * data, read at whichever io edge actually ran the pass (mirrors this module's own pure contract).
+ *
+ * DELIBERATELY NOT A `VERDICTS` MEMBER. `VERDICTS` (`accept`/`changes`/`needs-human`/`prevention-outstanding`)
+ * is the BLOCKING panel's vocabulary — a floor run is structurally non-blocking (#3313) and must never be
+ * mistaken for a value `derivePanelVerdict`/`deriveLoopOutcome` would act on. `outcome` here is its own,
+ * narrower, two-value vocabulary instead.
+ *
+ * @param {object} [o]
+ * @param {Array<Finding|string>} [o.findings] - the floor juror's raw findings; capped at
+ *   {@link FLOOR_MAX_FINDINGS} — any beyond that are counted in `truncatedCount`, never silently dropped.
+ * @param {number} [o.jurorCount] - the floor's own juror count (#3313: "one tool-free juror" — default 1).
+ * @param {number} [o.rounds] - the floor's own round count (#3313: "one round" — default 1).
+ * @param {number|null} [o.tokens] - measured token cost of the pass, when the caller has it.
+ * @param {number|null} [o.wallTimeMs] - measured wall-clock cost of the pass, when the caller has it.
+ * @returns {{runKind:'floor', outcome:('clean'|'findings'), findings:ReadonlyArray, truncatedCount:number, cost:{jurorCount:number, rounds:number, tokens:(number|null), wallTimeMs:(number|null)}}}
+ */
+export function recordFloorRun({ findings = [], jurorCount = 1, rounds = 1, tokens = null, wallTimeMs = null } = {}) {
+  const list = Array.isArray(findings) ? findings : [];
+  const kept = Object.freeze(
+    list.slice(0, FLOOR_MAX_FINDINGS).map((f) => (typeof f === 'string' ? f : Object.freeze({ ...f }))),
+  );
+  return Object.freeze({
+    runKind: 'floor',
+    outcome: kept.length ? 'findings' : 'clean',
+    findings: kept,
+    truncatedCount: Math.max(0, list.length - kept.length),
+    cost: Object.freeze({ jurorCount, rounds, tokens, wallTimeMs }),
+  });
+}

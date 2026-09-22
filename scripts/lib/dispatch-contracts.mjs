@@ -626,6 +626,32 @@ export function selectSupervisor(profile, options = {}) {
   } catch { return refused(['unreadable supervisor input']); }
 }
 
+/**
+ * #3887 — RULE 7 of #3690 at `spot-check` (`#delegation-trial-record-graduation`): the independent-pass DEPTH
+ * a computed supervision level owns. Full COVERAGE at every level, moving only in DEPTH — `full` keeps the
+ * existing mandatory panel unchanged (already ratified and built by #3850; this contract changes nothing
+ * about it), `spot-check` owns the `#every-pr-gets-a-look-advisory-floor` shape (#3313): one tool-free juror,
+ * one round, capped findings, structurally non-blocking. FAILS LOUD on any other value — a route that
+ * resolved to neither depth would resolve to NO independent seat, which is the exact failure rule 7 forbids.
+ *
+ * @param {string} supervision - one of {@link SUPERVISION_LEVELS}'s values.
+ * @returns {{supervision:string, depth:'full-panel'|'floor', toolFree:boolean, rounds:number, blocking:boolean}}
+ */
+// @wired-by-3887: has a runtime caller — scripts/operations/review-dispatch.mjs#reviewSeatRoutes
+export function independentReviewDepthFor(supervision) {
+  if (supervision === SUPERVISION_LEVELS.FULL) {
+    return Object.freeze({ supervision, depth: 'full-panel', toolFree: false, rounds: 1, blocking: true });
+  }
+  if (supervision === SUPERVISION_LEVELS.SPOT_CHECK) {
+    return Object.freeze({ supervision, depth: 'floor', toolFree: true, rounds: 1, blocking: false });
+  }
+  throw new Error(
+    `independentReviewDepthFor: unknown supervision level ${JSON.stringify(supervision)} — must be one of `
+    + `${Object.values(SUPERVISION_LEVELS).join(', ')}. A route with neither depth would resolve to NO `
+    + 'independent seat, which rule 7 (#delegation-trial-record-graduation) forbids.',
+  );
+}
+
 // One idempotent row per task, from its final accepted attempt.
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
 export function trialIdempotencyKey(storyRef, round, taskId) { return `mech-trial:${storyRef}:r${round}:${taskId}`; }
