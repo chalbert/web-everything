@@ -257,7 +257,7 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
  * @param {{number:number|string, repo?:string|null, exec?:Function}} o
  * @returns {Array<{createdAt:string, labelName:string}>}
  */
-export function defaultListLabelEvents({ number, repo, exec = execFileSync } = {}) {
+export function defaultListLabelEvents({ number, repo, exec = execFileSyncThrottled } = {}) {
   const path = repo ? `repos/${repo}/issues/${number}/events` : `repos/{owner}/{repo}/issues/${number}/events`;
   const argv = ['api', '--paginate', '-X', 'GET', '-F', 'per_page=100', path,
     '--jq', '.[] | select(.event == "labeled") | [.created_at, .label.name] | @tsv'];

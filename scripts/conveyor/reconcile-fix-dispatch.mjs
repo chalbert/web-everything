@@ -54,6 +54,7 @@
  * the tick.
  */
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -219,7 +220,7 @@ export function isSafeFallbackScopeEntry(entry) {
  *   to that repo, the same `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use.
  * @returns {string[]}
  */
-export function fetchPrDiffScope(pr, { exec = execFileSync, root = REPO_ROOT, repo = null } = {}) {
+export function fetchPrDiffScope(pr, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
   try {
     const argv = ['pr', 'diff', String(pr), '--name-only'];
     if (repo) argv.push('--repo', repo);

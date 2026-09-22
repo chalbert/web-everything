@@ -208,7 +208,7 @@ export const GH_FILES_GRAPHQL_CAP = 100;
  * @param {{number:number|string, repo?:string|null, exec?:Function}} o
  * @returns {string[]} every changed file's path, real pagination applied — no cap.
  */
-export function defaultListPrFiles({ number, repo, exec = execFileSync }) {
+export function defaultListPrFiles({ number, repo, exec = execFileSyncThrottled }) {
   const path = repo ? `repos/${repo}/pulls/${number}/files` : `repos/{owner}/{repo}/pulls/${number}/files`;
   const argv = ['api', '--paginate', '-F', 'per_page=100', path, '--jq', '.[].filename'];
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
