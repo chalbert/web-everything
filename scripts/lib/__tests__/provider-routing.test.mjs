@@ -42,6 +42,7 @@ function makeRecord({
   taskDescription = 'Test delegation task',
   pr = null,
   handle = null,
+  subjectClass = 'work-agent',
 } = {}) {
   return {
     v: 1,
@@ -55,7 +56,7 @@ function makeRecord({
     taskDescription,
     pr,
     handle,
-    subjectClass: 'work-agent',
+    subjectClass,
     dispatchKind: 'session-delegation',
   };
 }
@@ -799,6 +800,41 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
   });
+
+  it('#3801 Fork 3: a reviewer-subject row never counts toward a work triple with the same provider/model/subject', () => {
+    // Same provider, model AND subject string ('bugfix') as a work triple, but a review-lens subjectClass.
+    const records = [1, 2, 3, 4, 5].map((hour) =>
+      makeRecord({ scoredAt: `2026-09-15T0${hour}:00:00.000Z`, findings: null, subjectClass: 'review-lens' })
+    );
+
+    const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, { minCleanStreak: 5, requireInformativeTrial: false });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({ result: 'fail', dataConsulted: expect.stringContaining('streak=0') });
+  });
+
+  it('#3801 Fork 3: a work row never counts toward a review-lens subject with the same provider/model/subject', () => {
+    // Same provider, model AND subject string as the review-lens query, but subjectClass defaults to work-agent.
+    const records = [1, 2, 3, 4, 5].map((hour) =>
+      makeRecord({ scoredAt: `2026-09-15T0${hour}:00:00.000Z`, taskType: 'design-review', findings: null })
+    );
+
+    const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'design-review', records, { minCleanStreak: 5, requireInformativeTrial: false }, 'review-lens');
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({ result: 'fail', dataConsulted: expect.stringContaining('streak=0') });
+  });
+
+  it('#3801 Fork 3: a review-lens subject with no graduated candidate resolves to Claude at full', () => {
+    // The router already accepts any subject string generically; a lens subject with no scorecard history
+    // resolves exactly like an unseen work task type — Claude, fully supervised.
+    const res = selectProvider({ taskType: 'design-review' }, { filesTouched: ['scripts/lib/example.mjs'], estimatedSize: 30, scorecards: [] });
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+
+    const supervision = selectSupervisionLevel('claude', res.model, 'design-review', [], {}, 'review-lens');
+    expect(supervision.level).toBe(SUPERVISION_LEVELS.FULL);
+  });
 });
 
 describe('selectProvider — explorationHint (model-capability-ratings)', () => {
@@ -927,11 +963,12 @@ describe('selectProvider — explorationHint (model-capability-ratings)', () => 
 });
 
 describe('selectSupervisionLevel — architectural separation from model-capability-ratings', () => {
-  it('retains its five declared parameters and identical behavior on identical evidence', () => {
-    // JavaScript .length stops before the first default: backdownThresholds = {}.
+  it('retains its six declared parameters and identical behavior on identical evidence', () => {
+    // JavaScript .length stops before the first default: backdownThresholds = {}. subjectClass follows it
+    // (also defaulted, #3801 Fork 3) and so is likewise excluded from .length.
     expect(selectSupervisionLevel.length).toBe(4);
     expect(selectSupervisionLevel.toString().split('\n')[0]).toBe(
-      'function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}) {'
+      "function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}, subjectClass = 'work-agent') {"
     );
     const scorecards = [makeRecord()];
     const thresholds = { minCleanStreak: 1, requireInformativeTrial: false };

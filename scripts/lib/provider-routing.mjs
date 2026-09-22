@@ -19,7 +19,11 @@
  * NEVER inside `selectSupervisionLevel`. It cannot change recommendation, claudeTier, or level.
  *
  * PROGRESSIVE BACKDOWN & GRADUATION MODEL (#3690):
- *   • Unit of trust is strictly {provider, model, taskType}, never broader (identity never inherits trust).
+ *   • Unit of trust is strictly {provider, model, subjectClass, taskType}, never broader (identity never
+ *     inherits trust). `taskType` carries whatever the caller's subject axis is — a work task type, a role
+ *     kind, or a review lens — and `subjectClass` keeps those axes from colliding: a review-lens or role-kind
+ *     subject never counts toward a work triple's streak, and a work subject never counts toward one of theirs,
+ *     even where the subject strings happen to match (#3801 Fork 3).
  *   • N = 5 consecutive clean trials (verified by claude-subagent or independent-claude) required for spot-check.
  *   • 'other'-verified trials (e.g. smoke tests) neither advance nor reset the streak.
  *   • Informative-trial requirement: at least one historical trial for the triple must have caught and fixed
@@ -642,7 +646,9 @@ export function selectProvider(task, context) {
  * SELECT SUPERVISION LEVEL (`selectSupervisionLevel`).
  *
  * Implements the progressive backdown plan from backlog item #3690:
- *   - Unit of trust: exact `{provider, model, taskType}` triple.
+ *   - Unit of trust: exact `{provider, model, subjectClass, taskType}` tuple. `taskType` is whatever the
+ *     caller's subject is (a work task type, a role kind, or a review lens); `subjectClass` keeps those
+ *     subject classes from mixing evidence even when the subject strings coincide (#3801 Fork 3).
  *   - Counts TRAILING consecutive clean streak (most recent first; verified by
  *     'claude-subagent' or 'independent-claude'; 'other'-verified records are skipped).
  *   - Clean record: outcome === 'landed' (fail-closed; missing/rejected/reworked all count unclean).
@@ -657,13 +663,15 @@ export function selectProvider(task, context) {
  *
  * @param {string} provider
  * @param {string} model
- * @param {string} taskType
+ * @param {string} taskType - the caller's subject: a work task type, a role kind, or a review lens.
  * @param {Array<object>} scorecards
  * @param {{ minCleanStreak?: number, requireInformativeTrial?: boolean }} [backdownThresholds={}]
+ * @param {string} [subjectClass='work-agent'] - which subject class `taskType` belongs to; only records with
+ *   the same `subjectClass` count toward this triple (#3801 Fork 3).
  * @returns {SupervisionRecommendation}
  */
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
-export function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}) {
+export function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}, subjectClass = 'work-agent') {
   const minCleanStreak = typeof backdownThresholds?.minCleanStreak === 'number'
     ? backdownThresholds.minCleanStreak
     : DEFAULT_BACKDOWN_THRESHOLDS.minCleanStreak;
@@ -675,12 +683,14 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
     ? scorecards
     : (Array.isArray(scorecards?.records) ? scorecards.records : []);
 
-  // Filter to exact {provider, model, taskType} triple
+  // Filter to exact {provider, model, subjectClass, taskType} tuple — subjectClass keeps a review-lens or
+  // role-kind subject from ever counting toward a work triple's streak, or vice versa (#3801 Fork 3).
   const matching = records.filter((r) =>
     r && typeof r === 'object' &&
     r.provider === provider &&
     r.model === model &&
-    r.taskType === taskType
+    r.taskType === taskType &&
+    r.subjectClass === subjectClass
   );
 
   // Walk in scoredAt order, most recent first (deterministic ISO-8601 string sort)

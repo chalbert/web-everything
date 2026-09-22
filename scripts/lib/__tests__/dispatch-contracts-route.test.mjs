@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as c from '../dispatch-contracts.mjs';
 
 const profile = (extra = {}) => c.buildDispatchProfile({ taskType: 'doc-fix', estimatedLoc: 30, filesTouched: ['docs/readme.md'], acceptanceTestable: true, dependsOn: [], ...extra }).profile;
-const record = (extra = {}) => ({ provider: 'codex', model: 'gpt-5', taskType: 'doc-fix', scoredAt: '2026-09-20T00:00:00Z', outcome: 'landed', verifiedBy: 'independent-claude', findings: null, ...extra });
+const record = (extra = {}) => ({ provider: 'codex', model: 'gpt-5', taskType: 'doc-fix', scoredAt: '2026-09-20T00:00:00Z', outcome: 'landed', verifiedBy: 'independent-claude', findings: null, subjectClass: 'work-agent', ...extra });
 const history = () => [record({ scoredAt: '2026-09-01T00:00:00Z', outcome: 'reworked', findings: 'Corrected assertion' }), ...Array.from({ length: 5 }, (_, i) => record({ scoredAt: `2026-09-1${i}T00:00:00Z` }))];
 function freeze(value) { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; }
 
@@ -78,6 +78,24 @@ describe('task routing', () => {
     for (const entry of out.auditTrail) expect(Object.keys(entry)).toEqual(['criterion', 'result', 'dataConsulted', 'reasoning']);
     for (const p of [null, [], 1, 'x']) expect(c.routeDispatch(p, { stage: 'task' }).role).toBe('refused');
     for (const options of [null, {}, { stage: 'unknown' }]) expect(c.routeDispatch(profile(), options).role).toBe('refused');
+  });
+});
+
+// #3801 Fork 3 — the role path's interim tier: prepare/prepare-decision/investigate keep `routed: null` and no
+// provider decision, but now record the STORY_KIND_RUNGS tier for their own authoring-role trust record.
+describe('the role path\'s interim tier (#3801 Fork 3)', () => {
+  const roleDispatch = (kind) => ({ kind, scopePaths: ['we:backlog/1.md'] });
+  it('records the STORY_KIND_RUNGS tier for prepare, prepare-decision and investigate, with routed still null', () => {
+    for (const kind of ['prepare', 'prepare-decision', 'investigate']) {
+      const out = c.decideDispatchRoute(roleDispatch(kind));
+      expect(out).toMatchObject({ outcome: 'role', role: kind, taskType: null, routed: null, model: null, tier: c.STORY_KIND_RUNGS[kind], supervision: 'full' });
+    }
+    expect(c.decideDispatchRoute(roleDispatch('prepare')).tier).toBe('sonnet');
+    expect(c.decideDispatchRoute(roleDispatch('prepare-decision')).tier).toBe('opus');
+    expect(c.decideDispatchRoute(roleDispatch('investigate')).tier).toBe('opus');
+  });
+  it('leaves review at tier: null — its subject key and positive control are the sibling slice', () => {
+    expect(c.decideDispatchRoute(roleDispatch('review'))).toMatchObject({ outcome: 'role', role: 'review', routed: null, tier: null });
   });
 });
 

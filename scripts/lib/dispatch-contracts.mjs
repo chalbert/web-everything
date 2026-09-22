@@ -592,14 +592,16 @@ export const SUPERVISOR_LADDERS = Object.freeze(Object.fromEntries(Object.entrie
 export function selectSupervisor(profile, options = {}) {
   try {
     const valid = validateDispatchProfile(profile); if (!valid.ok) return refused(valid.errors);
-    // selectSupervisionLevel has no role/subjectClass filter; partition before calling.
-    const records = routingRecords(options.scorecards).filter(r => r.role === 'supervise' && r.subjectClass === 'driver');
+    // selectSupervisionLevel has no role filter (role sits outside its {provider, model, subjectClass,
+    // taskType} trust key, #3801 Fork 3), so a 'supervise' role dispatch is still partitioned here; the
+    // subjectClass:'driver' argument below is the callee's own enforcement of the subject-class boundary.
+    const records = routingRecords(options.scorecards).filter(r => r.role === 'supervise');
     const hard = profile.filesTouched.some(isStatuteTierPath) || ['architectural-decision', 'triage-research'].includes(profile.taskType);
     const ids = hard ? ['claude-opus-5'] : SUPERVISOR_LADDERS[`${profile.risk}/${profile.complexity}`];
     const auditTrail = []; let chosen;
     for (const id of ids) {
       const candidate = SUPERVISOR_CANDIDATES.find(c => c.id === id);
-      const assessment = selectSupervisionLevel(candidate.provider, candidate.model, profile.taskType, records, thresholdsForRisk(profile.risk));
+      const assessment = selectSupervisionLevel(candidate.provider, candidate.model, profile.taskType, records, thresholdsForRisk(profile.risk), 'driver');
       const fallback = id === ids.at(-1);
       auditTrail.push(audit('supervisor-candidate', id, assessment.auditTrail, fallback ? 'fallback' : assessment.reasoning));
       if (fallback || assessment.level === 'spot-check') { chosen = candidate; break; }
@@ -795,6 +797,11 @@ export const EXECUTABLE_PROVIDER = 'claude';
  * THE ROLE PATH takes none of that: a `prepare`/`prepare-decision`/`investigate`/`review` dispatch has no
  * router `taskType` by nature, so the provider cascade is NEVER consulted for it and the record says `role`
  * with `routed: null`. That is the honest answer, and it is still mechanical — the kind decided it.
+ * INTERIM (#3801 Fork 3): `prepare`, `prepare-decision` and `investigate` still keep their Claude spawn and
+ * `routed: null`, but `tier` now names the {@link STORY_KIND_RUNGS} rung for the role instead of staying
+ * `null` — the authoring role's own trust record, not a routing decision. `review` has no row in
+ * `STORY_KIND_RUNGS` yet (its subject key and positive control are the sibling slice, `blockedBy` this one),
+ * so it keeps `tier: null` until that slice lands.
  *
  * @param {object} dispatch
  *   - `kind`, `cause`, `scopePaths` — handed to {@link ./dispatch-task-type.mjs#taskTypeFor}.
@@ -834,7 +841,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
         routed: null,
         executed: null,
         model: null,
-        tier: null,
+        tier: STORY_KIND_RUNGS[derivation.role] ?? null,
         supervision: SUPERVISION_LEVELS.FULL,
         spotCheck: null,
         sized: null,

@@ -93,7 +93,7 @@ describe('acting and shadow supervisor trials', () => {
   it('records accepted-but-bounced work as a calibration miss that fires the router veto', () => {
     const clean = rows(), out = c.supervisorTrialFromVerdict(execution(), verdict(), options({ groundTruth: gt('unclean') }));
     expect(out.row.outcome).toBe('rejected'); expect(validateScorecard(out.row).ok).toBe(true);
-    const level = scorecards => selectSupervisionLevel(supervisor.provider, supervisor.model, 'doc-fix', scorecards, thresholdsForRisk('low'));
+    const level = scorecards => selectSupervisionLevel(supervisor.provider, supervisor.model, 'doc-fix', scorecards, thresholdsForRisk('low'), 'driver');
     expect(level(clean).level).toBe('spot-check');
     expect(level([...clean, out.row])).toMatchObject({ level: 'full', reasoning: expect.stringContaining('veto') });
     expect(level([...clean, out.row]).auditTrail[0].result).toBe('veto-fired');
