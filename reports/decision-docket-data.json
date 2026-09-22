@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-22T06:18:38.361Z",
+  "generatedAt": "2026-09-22T12:36:58.333Z",
   "generatedFromRef": "origin/main",
   "targetCount": null,
   "counts": {
-    "open": 90,
-    "prepared": 55,
-    "inReview": 4
+    "open": 91,
+    "prepared": 56,
+    "inReview": 2
   },
   "items": [
     {
@@ -20,7 +20,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-04",
-      "ageInDays": 80,
+      "ageInDays": 81,
       "digest": [
         "The single most upstream branding call: does the constellation's mark language stay **flat-minimal**\n(current: solid white glyphs on a 45° gradient squircle) or move to **rich-dimensional** (light, shadow,\ndepth)? It gates every mark and the website, so it is #2256's first child."
       ],
@@ -65,7 +65,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-03",
-      "ageInDays": 81,
+      "ageInDays": 82,
       "digest": [
         "The 2026-07-03 cross-project branding review (rendered gallery: `plateau:branding.html`, generated\nby `plateau:scripts/gen-branding.mjs` from the live assets of all three repos) found the brand\n*system* already coherent — all three marks share one construction (40×40 squircle, `rx=\"12\"`, 45°\ngradient, white glyph; `we:src/assets/logo.svg`, `fui:src/assets/logo.svg`, `plateau:favicon.svg`) with\none hue per project — but six live choices sit unratified, plus a tier of mechanical drift.",
         "**Visual candidates for every mark fork are rendered side by side (64/32/16 px) at\n`plateau:branding.html#proposals`** (on the plateau dev server, port 4000; candidate sources:\n`plateau:branding-proposals/` SVGs + manifest). Survey, inventory, and the branding-methodology\nwrite-up that grounds Fork 6 (kept durable for the #2207 design-AI reviewer training):\n[report](../reports/2026-07-03-constellation-branding-system.md) ·\n[/research/](/research/#constellation-branding-system).",
@@ -242,7 +242,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Security finding 6 of the advisory review on PR #2415 (the #3804 ruling): the promotion gate (a true fast-forward plus tests green at that commit) does not stop the reconcile agent from editing the tests or gate config it is judged by; today only the agent brief forbids it. Ruling the guard is a real choice between stricter-than-ratified and brief-only. Relates #3804, #3607, #3797, we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync.",
         "This card does NOT reopen #3804. The ratified promotion (point 2 of `#poc-branch-mechanical-sync`: a true fast-forward, the tests green at that exact commit as the pass itself runs them, the same lock and `autoSync` gate) stands. The question is whether the pass adds one more check before it promotes, and how strict it is. Filed 2026-09-21 by the follow-up session to PR #2415 (session followup-3804), from the draft of the cancelled fix worker `fix-pr-2415`."
@@ -309,7 +309,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Security finding 7 of the advisory review on PR #2415 (the #3804 ruling): 'the agent pushes to the staging ref only, never the shared branch' is an instruction in the agent brief, not an enforced boundary; the agent reads content from main (prompt injection is possible) and runs with the operator's git credentials. Enforcing it is a real choice between a local push guard, a separate identity with a GitHub ruleset, or the brief alone. Relates #3804, #3607, #3797, we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync.",
         "This card does NOT reopen #3804. The ratified rule (point 2 of `#poc-branch-mechanical-sync`: the agent works \"by merge commits only, never touching the shared branch\", and the sync pass alone promotes) stands. The question is how that boundary is enforced rather than only instructed. Filed 2026-09-21 by the follow-up session to PR #2415 (session followup-3804), from the draft of the cancelled fix worker `fix-pr-2415`."
@@ -368,7 +368,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-03",
-      "ageInDays": 81,
+      "ageInDays": 82,
       "digest": [
         "A reusable **design-compare** surface: view two rendered states (before/after, a/b,\ncurrent-vs-proposed) together, sighted, instead of hand-building a throwaway screenshot board each time.\nSurfaced 2026-07-03 in the Plateau brand-alignment work — logo-vs-site, hero before/after, and mark a/b\nwere each hand-composited in scratch this session (the proven pain). A Brand Studio a/b card pattern and\n`gen-branding`s before/after exist as skill/generator output, not as a reusable in-app tool.",
         "This is a **validation-gate** decision (go / not-yet / no on a candidate), NOT a shape fork. The standing\ntest dissolves every apparent fork: **component-vs-tool** is composable (build a component, mount it in a\ntool); **modality** is a set of coexisting view modes (the call is only the default); and **static-vs-live\nis a timing deferral, not a design fork** — under a free-to-build screen a live dual-run strictly dominates\nstatic, so the only thing making static \"v1\" is that live costs the #142 capture substrate we are not\npaying for yet. That is a roadmap call, correctly recorded here as a deferral, not laundered as a fork.",
@@ -402,7 +402,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-11",
-      "ageInDays": 73,
+      "ageInDays": 74,
       "digest": [
         "Constellation placement for the coordinator: inside plateau-app (a `tools/` sibling of the\ndev-panel), a fourth constellation repo, or the core of the Plateau product itself. Weighs the\nrepo-constellation rules (WE zero-impl), multi-project registry needs, and later SaaS packaging."
       ],
@@ -457,7 +457,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-05",
-      "ageInDays": 48,
+      "ageInDays": 49,
       "digest": [
         "A named-path blast-radius list is correct only while someone remembers to register each future behaviour-defining surface, and three regressions proved that memory unreliable. This decides whether to keep enumerating or invert the we:.claude/ anchor to default-deny with an exemption list, and settles the same question for we:AGENTS.md, we:CLAUDE.md and non-statute we:docs/agent/.",
         "Carved out of **#2939** (the build item), which now `blockedBy`-waits on this call. #2939 enumerates *which* surfaces are unregistered and proves each scores `false`; this item is the one design question that enumeration cannot answer for itself — **how the net decides about a surface nobody has enumerated yet.** Filed separately because #2939 is `kind: task`: an agent claiming it would otherwise hit this question mid-lane and either stall or rule on it unratified."
@@ -573,7 +573,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-08",
-      "ageInDays": 45,
+      "ageInDays": 46,
       "digest": [
         "No greenfield design is at stake here — this is internal delivery-tooling policy, grounded entirely in the\nshipped mechanism (every claim below is a `file:line` cite into the real tree), so no `/research/` prior-art\nsurvey applies; the same carve-out #2908 itself used for this exact question. **One fork.** The recommended\ndefault below is **(b) — leave `/converge` ungated and codify why**. It survived a dedicated skeptic attack\n(see `Skeptic:` below) on the strength of two facts the original framing under-weighted: #2908's hazard is a\n**two-party** one (a machine substituting for *another person's* fix, irreversibly, on *their* branch), and\n`/converge` has no second party — the operator who runs it **is** the owner of the tree it edits — *and*\n`/converge` is stated ADVISORY-ONLY and never itself opens, labels, or lands a PR, so nothing it does reaches\nanother reviewer without the operator separately choosing to promote it."
       ],
@@ -637,7 +637,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "[#2797]'s prep found the escalated (`policy=park`, retry-bound exhausted) scope-breach case has no home in the\nRATIFIED 37-state / 17-you-act-verb `§6e` taxonomy (`plateau-app:docs/backlog-console-design.md` §6e,\n`we:scripts/readiness/scope-lease.mjs:326-358 breachOutcome`'s `'park'` branch). §2574's own Fork 4 already\nrules that \"any change to the count is a *separate* decision that supersedes §6e with lineage — never an edit\nfolded into A4's transition table.\" This settles the one open fork Fork 4 anticipated but did not itself\ndecide: which UC-id and grammar the escalated card gets. Ratifying this unblocks [#2797]'s build."
       ],
@@ -661,7 +661,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "Names the fork #1693 and #1694 both left as under-specified prose: what live/diff signal proves a declared rule (#1689 DeclaredRuleRegistry) is violated, and how a judging binding is produced per-app. Blocks #1694 (and #1693) from a decided design."
       ],
@@ -685,7 +685,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "Found while preparing #1755 to build-ready (2026-08-15) — not a re-litigation of #1673, a fresh gap #1673 didn't have to close (it only needed the extension's *passive light-up* gate, and ruled probe for that; it explicitly left DECLARED as a future opt-in tier without designing that tier's mechanics).",
         "#1755's whole premise is reading a loaded app's declared CapabilityManifest (we:capability-manifest/provider.ts) to gate which dev-browser capability modules light up. Verified against the tree (2026-08-15): that data source does not exist yet, on either side. (1) Zero implementations ship one — we:capability-manifest/check.ts:107's `IMPLEMENTATION_MANIFESTS` is still empty, its own comment says so, and a repo-wide grep for 'export const manifest' (the #266 OP-19 static-export convention) finds nothing in plateau-app or frontierui. (2) Even if one existed, there is no channel to read it across the loaded-page boundary: the CapabilityManifest is a build-time static export (OP-19), not runtime-queryable, and the one runtime channel that does cross that boundary — `window.__WE_DEVTOOLS_GLOBAL_HOOK__` (frontierui:plugs/webregistries/declarativeRegistry.ts:330) — only carries a generic activation-surface `features: ReadonlySet<string>` (e.g. `'declarative-registry'`, `'plugged-mode'`), not the structured `{specVersion, conformanceLevel, features: ValidationFeatureId[], concerns}` shape. #268's `guardCapability(manifest, feature)` (we:capability-manifest/guard.ts:51) is intra-process only (called by validation-runtime code that already holds the manifest in scope) — no cross-boundary read exists there either. #1673 (ratified 2026-06-23) already found this for the extension case and deliberately demoted DECLARED to an \"opt-in upgrade tier\" for exactly this reason; that finding still holds today and applies identically to the standalone shell."
@@ -766,7 +766,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "Split off #2690's prep (2026-08-15): #2690 (\"generalize the rollup tree to N levels + a program/portfolio\nzoom above feature\") names this exact fork in its own body as an open question — PROGRAM (rolls up\npoints) vs INITIATIVE (a time-boxed bet) vs OKR OBJECTIVE (rolls up outcome-metrics, not points). Per the\nstory-preparation checklist (`we:agent-memory-src/story-preparation-checklist.md` item 4), a real fork\nmust be named as its own open decision, never buried in a story — mirroring the sibling split already\ndone for #2689 (configurable hierarchy levels) out of the same feature-tracking-screen design session."
       ],
@@ -860,7 +860,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-27",
-      "ageInDays": 26,
+      "ageInDays": 27,
       "digest": [
         "A calibrated severity-and-disposition model for review findings: whether severity exists as a second axis alongside impactIfUnfixed, whether the level is asserted by the juror or derived in code from typed sub-answers, where reach and likelihood belong, and what artifact a juror's labels are checked against."
       ],
@@ -1327,7 +1327,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-06",
-      "ageInDays": 16,
+      "ageInDays": 17,
       "digest": [
         "An agent review can be made cheaper two ways: **look less hard** (fewer rounds, fewer lenses, fewer jurors) or\n**use a weaker reviewer** (a smaller model, a lower effort). The first is already ratified and dialled. The\nsecond is not ruled anywhere — and this card exists because a cost analysis nearly recommended it on evidence\nthat does not apply to this repo."
       ],
@@ -1389,7 +1389,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -1409,7 +1409,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule the one point #3801 Fork 1 carried into #3784: a dispatch-lane launch of build, fix or ci-heal is one worker, and every such route is full today, but no route names a supervisor, so enforcement as built holds every code-change dispatch. The ratified statute (we:docs/agent/platform-decisions.md#delegation-trial-record-graduation, rule 7) says a full route gets a full independent review. This card rules what counts as that review for a single-worker lane, where it is checked, and which routes it binds.",
         "*Prepared 2026-09-21 (session slice-3717-after-ruling), from the #3801 ruling, #3784's findings and the ratified statute. No research topic: the question is internal to this repo's review path, and every citation below was read on the prototype tip `5ab89f87b` (`git show origin/lane/mechanical-dispatcher:<path>`; `we:scripts/lib/dispatch-contracts.mjs` and the two wrappers exist only there).*"
@@ -1423,7 +1423,7 @@
             {
               "label": "(a)",
               "kind": "default",
-              "body": "**The review panel on the lane's own PR, as a merge hold — recommended.** The dispatch records the supervisor as that PR review (so `supervisionHold` no longer holds it), and the obligation moves to land: the PR of a `full` route opens parked `review:pending` whatever its escalation score, and cannot land until the review panel records `review:accepted`. The reviewer is the `review-dispatch` panel (a fresh session with its own jurors), not converge's panel. For a `fix` or `ci-heal`, which pushes onto an existing PR, the hold is enforced at the land seam, not by the wrapper writing a label: a push by a bound route makes any earlier `review:accepted` stale (the existing head-SHA re-park), and a bound route's PR may not land on `ready-to-merge` alone. `ci-heal`'s rule never to touch a review label is unchanged. This is the \"full independent review at `full`\" rule 7 names: fresh validators who did not write the diff, as `#agent-convergence-independent-validation` requires, and it already exists as the parked path of today's review flow. Any provider may sit in the seat, a different one from the builder preferred. **Delegation trials:** the panel's verdict is the independent result the trial row is scored against. **Supervision:** at `spot-check` the PR takes the advisory floor instead, per rule 7."
+              "body": "**The review panel on the lane's own PR, as a merge hold — recommended.** The dispatch records the supervisor as that PR review (so `supervisionHold` no longer holds it), and the obligation moves to land: the PR of a `full` route opens parked `review:pending` whatever its escalation score, and cannot land until the review panel records `review:accepted`. The reviewer is the `review-dispatch` panel (a fresh session with its own jurors), not converge's panel. For a `fix` or `ci-heal`, which pushes onto an existing PR, the hold is enforced at the land seam, not by the wrapper writing a label: a push by a bound route makes any earlier `review:accepted` stale (the existing head-SHA re-park), and a bound route's PR may not land on `ready-to-merge` alone. `ci-heal`'s rule never to touch a review label is unchanged. This is the \"full independent review at `full`\" rule 7 names: fresh validators who did not write the diff, as `#agent-convergence-independent-validation` requires, and it already exists as the parked path of today's review flow. Any provider may sit in the seat, a different one from the builder preferred. **Delegation trials:** the panel's verdict is the independent result the trial row is scored against. **Supervision:** at `spot-check` the PR takes the advisory floor instead, per rule 7 — the lowest level the ratified statute defines (`SUPERVISION_LEVELS` in `we:scripts/lib/provider-routing.mjs` has exactly two values, `full` and `spot-check`); rule 7's floor \"gets shallower but never goes away,\" so no triple, however proven, ever reaches zero independent review under the ruling as it stands today. **Scope:** this fork governs `dispatch-lane` launches whose output is a standard PR to `main`; it has no bearing on epic #3383's own prototype delivery, which commits straight to `lane/mechanical-dispatcher` with no PR and no review pass of any shape (`we:docs/agent/backlog-workflow.md#delivery-target`). **Not branch or trust graduation:** the hold is about when #3784 switches this enforcement on for the mechanical dispatch path — not #3443's branch-to-main graduation or #3690's per-triple trust promotion; once enforcement is on, how long any one `{provider, model, taskType}` triple stays at `full` is governed entirely by #3690's rule 6 (`we:docs/agent/platform-decisions.md#delegation-trial-record-graduation`), not by this fork."
             },
             {
               "label": "(b)",
@@ -1494,7 +1494,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule the four open points of the land-advance item-pull and dispatch gate that #3720's remainder built on the prototype branch (`we:scripts/operations/land-advance-gate.mjs`, `we:scripts/operations/land-advance-items.mjs`, `we:scripts/operations/land-advance-items-io.mjs`, `we:scripts/operations/land-advance-cli.mjs`). Until this is ruled the build runs its safest default: plan only. Nothing is dispatched or queued unless the operator writes the opt-in file, and even then an ambiguous canonical checkout keeps it at plan. #3720's dispatch half waits on this card; its plan half is live."
       ],
@@ -1627,7 +1627,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-06-23",
-      "ageInDays": 91,
+      "ageInDays": 92,
       "digest": [
         "> **KEPT as a validation gate — reshaped per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/) (the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) dissolve test).** Unlike its ten #142 siblings, this candidate's merit is **conditional, not conceded**, so it does *not* dissolve — it stays a live go/no/not-yet call. The gate leads with the merit unknown below."
       ],
@@ -1659,7 +1659,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-06-30",
-      "ageInDays": 84,
+      "ageInDays": 85,
       "digest": [
         "Designs the MECHANISM #1987 deferred here: the app-level knob that remaps WE's behaviour/event\nattribute-name spelling (the objector escape hatch + the `enh-*` migration bridge). Default stays colon;\nthe knob is opt-in. The prep reframes the knob from a *separator char* to a *naming-scheme config\ndimension* (Fork 1), pins the canonical-identity contract (Fork 2), the flavor-exclusivity rule (Fork 3),\nand the value's scope (Fork 4); surface-scope and layer-placement are statute-settled, not forks. Prior-art\nsurvey: [`configurable-attr-naming-scheme`](/research/configurable-attr-naming-scheme/) (report via\n`relatedReport`)."
       ],
@@ -1815,7 +1815,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-02",
-      "ageInDays": 82,
+      "ageInDays": 83,
       "digest": [
         "**Prepared for ratification — RE-PREPARED 2026-09-06 (#1935).** The original prep (2026-07-02) framed this\nas greenfield. **It is not, and that is the single most important thing to know before ruling it:** all three\nrecommended defaults have since SHIPPED, and the code asserts a ratification that never happened. See\n*[What changed since the 2026-07-02 prep](#what-changed)* below before reading the forks — it reframes every\none of them from \"choose\" to \"confirm, or reverse what is already live\".",
         "The forks remain grounded in the spec-ecosystem prior-art survey (W3C/WHATWG · TC39 · IETF · design-system\ncomponent specs) published as the [spec-register-prior-art](/research/spec-register-prior-art/) research topic\n(session report via `relatedReport`), each with a recommended default in **bold**. That survey was re-checked\non 2026-09-06 and still stands — no fork's *reasoning* was invalidated. Ruling them sets the home, the\nregister, and the work-list for every authoring wave of epic\n[#2079](/backlog/2079-author-w3c-spec-shaped-normative-standards-for-every-we-stan/).",
@@ -1952,7 +1952,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-02",
-      "ageInDays": 82,
+      "ageInDays": 83,
       "digest": [
         "The project `status` axis is named by three different vocabularies — the data convention, the public five-stage ladder, and the descriptor `LIFECYCLE` enum — and the statute *deliberately* keeps project status outside `LIFECYCLE`, so closing the drift is a statute amendment, not a plain drift fix. Surfaced by the #2088 grounding digest and explicitly reserved by the `#portfolio-project-tiering` lineage as \"a separate statute-amendment decision\". Two forks: which vocabulary is canonical for the project axis, and whether the gate enforces it. Research topic: [`project-lifecycle-vocabulary`](/research/project-lifecycle-vocabulary/)."
       ],
@@ -2025,7 +2025,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-02",
-      "ageInDays": 82,
+      "ageInDays": 83,
       "digest": [
         "> **Prep note (2026-07-09, `/prepare all`).** No `/research/` topic — this ratifies a distribution mechanism\n> over shipped constellation build tooling. A hostile skeptic pass **corrected the framing**: the end-state\n> direction (FUI ships the tool, WE consumes it single-repo) survives, but every *supporting* claim in the\n> earlier draft was refuted or amended. Folded: (1) Option B is **dominated on merit, not statute-broken** — the\n> `{#zero-impl}`/#6 citation was a mis-cite; (2) a **cheaper option D (git-dependency)** the draft never weighed\n> delivers the same wins without a publish pipeline; (3) the **credential is swapped, not dropped**, and\n> **happy-dom lands in WE either way**; (4) the real statute anchor is **#1946** (`we:docs/agent/platform-decisions.md:1498-1508`,\n> which this decision *amends*), plus an **embed-boundary collision** (`@frontierui/*` never in WE `node_modules`)\n> the draft never cited; (5) Fork 2 (source vs bundle) is **FUI-internal packaging**, demoted out of a fork."
       ],
@@ -2061,7 +2061,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-03",
-      "ageInDays": 81,
+      "ageInDays": 82,
       "digest": [],
       "forks": [
         {
@@ -2123,7 +2123,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-06",
-      "ageInDays": 78,
+      "ageInDays": 79,
       "digest": [],
       "forks": [
         {
@@ -2180,7 +2180,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-06",
-      "ageInDays": 78,
+      "ageInDays": 79,
       "digest": [],
       "forks": [
         {
@@ -2237,7 +2237,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-06",
-      "ageInDays": 78,
+      "ageInDays": 79,
       "digest": [],
       "forks": [
         {
@@ -2291,7 +2291,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-18",
-      "ageInDays": 66,
+      "ageInDays": 67,
       "digest": [
         "Fork E follow-on from **[#2538](/backlog/2538-shape-the-annotated-visual-diff-surface-contract-then-decide-mint/)**\n(ratified: mint the `visual-diff` intent now, name the differ seam as a separable follow-on). This decision\ndesigns that seam: the **visual-differ protocol** — the contract that turns *two renders* into the *typed\ndelta regions* the `visual-diff` review surface ([#2545](/backlog/2545-mint-the-visual-diff-intent-author-the-three-axis-review-sur/))\nreviews. It mirrors Web Graph's two-seam split: `CustomGraphLayout` *invents* positions and `CustomGraphRenderer`\n*draws* them; here a **differ** *derives* typed regions and the **review surface** *dispositions* them.",
         "**Prepared 2026-07-28** — grounded in the already-published research (below); forks are ready to ratify.\nThis is a fast ratification, not cold research."
@@ -2324,7 +2324,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-19",
-      "ageInDays": 65,
+      "ageInDays": 66,
       "digest": [
         "Carved from [#2561] F4 (ruled 2026-07-18): F4 ratified the **principle** — the constitution is the FEW big\ncore principles, the specifics become *specs* (§3b split), no duplication — but deferred the **form**. The\n**same-day sibling [#2564] Fork 5** (ratified 2026-07-19, never cross-referenced with F4 — the conflict filed\nas #3144 on 2026-08-16) adds a hard constraint the form choice must now satisfy: whichever form wins, an edit\nto the constitution tier has to be **identifiable as such**, because Fork 5 gates that edit with a\nsubstantively-entrenched ceremony strictly harder than the ordinary statute `review:human` gate — exempt from\n#911 supersede-with-lineage, a cooling period measured in days, a committed external record\n(`we:docs/agent/platform-decisions.md#spec-is-schema-human-gates-spec:2981-2984`). This item settles **form**\n(the one live fork below, now read against that constraint) and provides a **researched candidate set** for\n**membership** (a curation task, not a fork — see below), so the F4 mechanism is fully realized and Fork 5's\nentrenchment gate has something concrete to attach to.",
         "**`blockedBy: [\"2561\"]` removed as stale.** #2561 resolved 2026-07-19 (its own Ruling section records F4 as\n\"PRINCIPLE RATIFIED, FORM DEFERRED\" to *this* item by name). This item was actually unblocked — and\nun-prepared — the whole time; flagged by the #3144 reconciliation item filed 2026-08-16."
@@ -2384,7 +2384,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-07-26",
-      "ageInDays": 58,
+      "ageInDays": 59,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -2404,7 +2404,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-05",
-      "ageInDays": 48,
+      "ageInDays": 49,
       "digest": [
         "`#blast-radius-advisory-care-not-a-gate` point 1 says scored signals \"do **not** block the land on a review\nverdict … just not a human park.\" Every escalating PR does block, and two rulings that tried to reconcile\nthat by re-reading the anchor's wording were struck. This amends the anchor instead. **No new design is\nminted here:** the single fork below is grounded in a fresh prior-art survey published as\n[`/research/machine-cleared-merge-holds/`](/research/machine-cleared-merge-holds/) (report\n[`we:reports/2026-08-17-machine-cleared-merge-holds.md`](reports/2026-08-17-machine-cleared-merge-holds.md))\nplus a 2026-08-17 re-grounding against the live tree, and it carries a **bold** recommended default.\nSurfaced by the 2026-08-04 red-team of [#2572].",
         "**Research and the adversarial passes reshaped this item rather than confirming it — it now offers the\ndecider *less* to weigh, not more.** Three candidate forks were drafted and two dissolved. The item's own\n\"bounded time\" aside became a fork, then dissolved into a ratified *property* of Fork 1 once its remaining\ncontent proved unobservable across the WE/FUI boundary; a fork on whether the anchor narrates the pre-flip\ninterim dissolved as prioritization in a fork's clothing. Both dissolutions are recorded under *Supported by\ndefault* with the reasoning, so a decider who disagrees can promote either back. Two of the item's own\nfactual claims are also **withdrawn** — see *Corrections* in the Context section."
@@ -2467,7 +2467,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-05",
-      "ageInDays": 48,
+      "ageInDays": 49,
       "digest": [
         "#2909 registered the two agent-behaviour trees (`we:skills-src/`, `we:agent-memory-src/`, and both `.claude/` spellings) as **blast-radius**, which makes them **agent-clearable**. But some of those files are the operative rules a *reviewing agent* is itself governed by — the land bar, the review procedure — so an agent clearing a diff that loosens them is policing its own leash. The gate's **code** half is protected against exactly this (`isGateSelfPath('we:scripts/lib/review-escalation.mjs')` is `true` → `review:human`); its **prose** half is not. This decision is whether the governing subset moves up a tier."
       ],
@@ -2547,7 +2547,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-07",
-      "ageInDays": 46,
+      "ageInDays": 47,
       "digest": [
         "Delegate-by-default (#1855, PR #1075) inverted execution routing but deliberately left judgment work —\nselection, the decision arc, slicing/splitting, preparing a fork — inline. A stronger claim was drafted\ninto that PR and **carved back out**: that each of these splits, with the *work* half (survey prior art,\ndraft the fork's options, draft the slice breakdown) going to an Opus sub-agent and only the *call* half\nstaying on the loop. It is attractive — `/prepare-decision-item` is arguably already that shape — but the\ngrounding story does not hold, so it needs a ruling rather than a paragraph. This item was carved out of\nPR #1075 as its own item rather than settled inline (the shape #2950 prescribes for a finding that\nintroduces a new goal instead of serving the item's stated one)."
       ],
@@ -2583,7 +2583,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-06",
-      "ageInDays": 47,
+      "ageInDays": 48,
       "digest": [
         "When `/consolidate` (#2983) proves two open items are one job, the backlog has **no honest way to retire the\nabsorbed one** — `resolve` means *delivered* and books points, a park needs a real structural gate, and\n`supersededBy` points at research topics. Prep surveyed five trackers: **all five retire a duplicate with a\nnon-delivered close plus a pointer to the survivor; none leaves it open with only a cross-reference.** Two\nforks follow — whether a proven-contained duplicate leaves the open set, and whether the marker is a new\n`status` value or a field on an item that stays `open`."
       ],
@@ -2701,7 +2701,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-08",
-      "ageInDays": 45,
+      "ageInDays": 46,
       "digest": [
         "Prep found the card's premise stale: its own recommended option — age in the operator's day, not UTC — already\nshipped in #2747, so on one machine the skew is zero. A grace day then failed the fork test outright and is\nrecorded as a finding, not a branch. What is left is one genuine call: when a host that is not the operator's\ncompares a stamped day against its own \"today\", how does it learn which frame the stamp was written in?"
       ],
@@ -2786,7 +2786,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-08",
-      "ageInDays": 45,
+      "ageInDays": 46,
       "digest": [
         "**No design survey applies — this decides internal delivery governance, not a browser-standard artifact, so\nprep re-derives the item's own factual premise from git/PR history instead of surveying prior art (see\n`relatedReport`).** One genuine fork plus one validation gate below, each with a recommended default in\n**bold**. A fresh-context screen (run for real, not asserted — see each section's `Screen:`/reasoning) found\nthe original \"Fork B\" (the product quota) collapses under the zero-cost merit test to a **timing** question,\nnot a two-sided policy call, so it is prepared as a validation gate (go/no/**not-yet** + a concrete trigger)\nrather than a `## Fork N` — see *Validation gate* below."
       ],
@@ -2844,7 +2844,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-08",
-      "ageInDays": 45,
+      "ageInDays": 46,
       "digest": [
         "> **RULED 2026-08-09 (operator, in session), Fork 2 → (c): the irreversibility criterion becomes DATA in the\n> review-policy contract, computed from the DIFF, fail-closed.** Ruled in the words *\"3013 Fork 2 ratified\"*,\n> on the prepared default. #2563 point 3's always-review blacklist is ratified and **unpopulated**; this\n> populates it. It is data, not a new rubric term — **no new anchor, no new hold tier, and no path gating in\n> `we:scripts/lib/review-escalation.mjs`**, which #2840 cleaned of exactly that on 2026-08-02.\n>\n> **What is ratified is the four classes plus the fail-closed default — never the regexes.** The regexes are\n> illustrative and must be replaceable without a re-ruling. The four classes, each grounded in a verified case:\n> 1. **Unattended execution** — PR #1113: the converge daemon self-updates by `reset --hard origin/main` every\n>    15 minutes, so anything landing on `main` that touches it executes unattended within 15 minutes.\n> 2. **Writes outside version control** — PR #1101 (board state), PR #1068 (pool + agent memory): a revert\n>    restores the code and none of the data.\n> 3. **Publishes or pushes externally** — undoing needs a history rewrite.\n> 4. **Adds a destructive git operation** (`reset --hard`, `clean -fd`, `push --force`, branch delete) — PR\n>    #1120 records a real 2026-08-08 incident of exactly this at the primary checkout.\n>\n> **FAIL CLOSED is part of the ruling, not an implementation note.** `diffHunks` is genuinely `null` when the\n> drain has no local clone (documented fallback in `we:scripts/merge-ai-prs.mjs`). **Absent diff ⇒ not\n> routine.** Prep's own first draft returned \"routine\" for anything unmatched — the identical fail-open this\n> fork rejects branch (b) for — and the polarity was corrected before ruling.\n>\n> **This predicate is a fail-closed FLOOR, never a complete taxonomy.** The skeptic named a real fifth class\n> it misses — **weakening a schema validator** (the PR #1096 shape: an ordinary logic defect silently\n> corrupting version-controlled content, where everything corrupted while the guard was weak stays corrupt\n> after the revert). That class is already governed by\n> [#agent-convergence-independent-validation](docs/agent/platform-decisions.md#agent-convergence-independent-validation)'s\n> coverage-drop and test-tampering clauses, so any statute text must **cite and compose with #2398 rather than\n> silently narrow it**.\n>\n> **Both forks are now ruled.** The item remains `open` for one reason only: `codifiedIn` is blocked on the\n> four statute collisions below. It is not awaiting further judgment.\n>\n> **RULED 2026-08-09 (operator, in session), Fork 1 → (a): prevention stands. No routine tier.**\n> No PR merges with its review hold unsatisfied. The operator ruled on the presented preparation, in the\n> words *\"3013 keep prevention\"*, after being shown that prep's own recommendation had **reversed** during\n> preparation and why.\n>\n> **The warrant for this ruling is the collapse of the cost premise, not a claim that reverts fail.**\n> Reverts mostly work — 73% of recent merges revert cleanly on code, and the \"23 of 30 fail\" figure prep\n> first produced was a 3× artifact of #2288 rename collisions in `backlog/*.md`, corrected before ruling.\n> What went away is the *reason to accept the risk*: all-time p90 open→merged is **4.0 hours**, not the 77\n> hours the filed premise asserted, and there was **one open PR** when measured. The 77-hour figure was the\n> open→merged time of a single PR (#1034) occupying the p90 rank slot of a trailing-100 window that lands on\n> the 2026-08-08 backlog flush; it appears nowhere in the repo except the premise asserting it. A routine\n> tier buys throughput. There is no throughput problem to buy. Taking on a new failure mode to unblock a\n> queue that is not backed up is a bad trade at any revert cost.\n>\n> **The second leg: tests do not make these catches.** PR #1113 shipped a daemon that, with\n> `CONVERGE_DAEMON_CLONE` pointed at a pooled lane clone, would have run `git reset --hard` + `git clean -fdq`\n> over a live session's working tree every 15 minutes — and whose documented uninstall reported success\n> without checking `launchctl bootout`'s exit status, so the kill switch lied. Suite **30/30 green**,\n> `check:standards` exit 0, on the defective head. No revert restores destroyed uncommitted work. PR #1124\n> was **540/540 green with its delivery path gutted**. PR #1096 landed a 0-byte blob on `main` at exit 0 and\n> took ~30 days to root-cause. The pattern the audit branch cannot answer: **detect-and-revert has no\n> detector for a non-event.**\n>\n> **What this ruling does NOT say.** It does not endorse the current gate's defects, which are real and are\n> separately filed: the merge-path fail-open (`#3047`), the false-stale re-park on an unchanged\n> contribution (`#3046`), and the #2288 rename artifact that makes reverts look worse than they are.\n> It does not rule Fork 2 — see below. It is **revisitable on a measurable trigger**, not on a vibe: if the\n> queue backs up the way it did 2026-08-04→08, re-run the measurement appendix and reopen this.\n>\n> **Honest cost, accepted knowingly:** the operator stays first reader on every hold until #3007 lands.\n> The ratified throughput path is #3007 → #2838's triple gate — **build it rather than routing around it.**\n>\n> **No `codifiedIn` yet.** Prep found four statute collisions that must be resolved before any statute text\n> is written — see *Statute collisions* below, in particular #2840, which ratified path gating **out of**\n> `we:scripts/lib/review-escalation.mjs` on 2026-08-02, and `enforceFlipReady`, which the statute names but\n> which **does not exist in the tree**. Fork 2 is also still open and the statute text depends on both.",
         "Rule what `main` is allowed to cost. The filed premise was that a bad routine merge costs one revert while a\nstalled queue costs the week. Prep re-derived both halves. The **cost** half collapsed: all-time p90 open→merged\nis 4.0 hours, not 77, with one open PR when measured. The **revert** half held up better than prep's own first\nprobe said — 73% of recent merges still revert cleanly on code. The fork stays open, but its warrant moved: a\nroutine tier can no longer be justified by throughput, nor refused because \"reverts don't work here.\""
@@ -2945,7 +2945,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-08",
-      "ageInDays": 45,
+      "ageInDays": 46,
       "digest": [
         "No greenfield design is at stake here — this is internal delivery-tooling policy, grounded entirely in\nthe shipped mechanism (every claim below is a `file:line` cite into the real tree), the same carve-out\n#2908 and #3043 used for adjacent questions on this loop. **Two independent forks, not one either/or** —\nthe original framing paired them as alternatives, but nothing forces a choice between them: a round-budget\npolicy (how long the loop keeps trying) and an escalation-granularity policy (what gets handed to a human\nwhen it stops trying) answer different questions and could both ship, one, or neither.",
         "### Correction folded at prep — \"elevated gets 2 rounds\" describes code that #2908 (ratified the same day\n### this item opened) already retired; genuine round-cap deadlock is narrower than the opening text assumes",
@@ -3050,7 +3050,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-09",
-      "ageInDays": 44,
+      "ageInDays": 45,
       "digest": [
         "Operator framing, in-session 2026-08-09: the conveyor — a UI surface that manages automated, standards-conformant AI development — is not only how the next features get delivered, it is itself a valuable product, and provable conformity is what separates it from single-agent vibe coding in the enterprise. Records the consequence for the open #3010 quota decision, since the #3012 output-mix classifier counts conveyor work as machinery, and opens the third-class question. Capture only — nothing built, nothing ruled."
       ],
@@ -3142,7 +3142,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-09",
-      "ageInDays": 44,
+      "ageInDays": 45,
       "digest": [
         "The independence check compares exactly two identities: the `authored-by-actor` stamp written once at PR-open,\nnaming only the opener, and the clearing session's live id. No commit authorship on the branch is ever read, so a\nthird session that lands a commit on the branch and then clears it passes the machine check while failing the\nindependence bar the check exists to enforce.",
         "**Prepared.** The two forks below are grounded in a prior-art + codebase survey (`relatedReport`): industry\nprecedent (GitHub's \"require approval of the most recent reviewable push\", Gerrit's uploader-cannot-self-`+2`)\nand two already-shipped patterns in this exact repo (`we:scripts/merge-ai-prs.mjs`'s per-commit author read,\nand the `we:.githooks/` + `core.hooksPath` git-hook wiring `we:scripts/guard-git-push.mjs` already uses). Each\nfork carries a recommended default in **bold**, attacked by a skeptic sub-agent and cleared by a fresh-context\ntwo-confusion screen — recorded inline. Nothing is ruled; the record below is options + tradeoffs for a human\nto ratify."
@@ -3252,7 +3252,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-11",
-      "ageInDays": 42,
+      "ageInDays": 43,
       "digest": [
         "> **2026-08-12 (operator, in-session note, not a formal ruling):** leaning toward a dedicated `StartInterval`\n> job that calls `advance` and nothing else — the converge daemon's SHAPE, not the converge daemon. Awake-only\n> accepted, in the words *\"For now ok if only run on awake Mac.\"* Recorded here as the strongest signal for the\n> default below; **not** treated as ratification — this card still carries no `ratifiedBy` and no `## Ruling`,\n> and only a human ratification turn can close it (see the standing rule at\n> [we:docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md): every decision item requires explicit\n> human ratification, never a self-rule).\n>\n> **Blocked on `#3073`** at the time of that note — resolved 2026-08-12. The in-flight/dispatch vocabulary this\n> decision assumes now exists in the tree (`we:scripts/operations/effect-executor.mjs`), and the waker's BODY\n> that polls it has since shipped too (#3084, resolved): `we:scripts/operations/wake.mjs`. What is chosen here\n> is narrower than it was when this card opened — not the shape of the pass (built), only WHAT TRIGGERS it,\n> unattended.",
         "A suspended run resumes only when someone calls `advance`, and it cannot be the session that dispatched the\nwork — that session is gone. The [#3030] spike named three candidates and costed none, and filed nothing.\n`we:scripts/operations/wake.mjs` (#3084) is the pass a trigger would call — `wakePass`/`wakeRun`, already\nbuilt, already tested, already fail-soft per run. Until a trigger is chosen, that pass has no unattended\ncaller, and every run that parks on dispatched work stays parked until a person happens to run it by hand."
@@ -3321,7 +3321,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-12",
-      "ageInDays": 41,
+      "ageInDays": 42,
       "digest": [
         "> **RULED 2026-08-13 (operator, in session). The mechanism is settled; the NUMBERS are deliberately not.**\n>\n> **Declared per EFFECT** — beside `idempotent`, which is the same shape for the same reason: only the effect\n> knows whether it is a cheap comment or a forty-minute build. Scoping it to \"operations that spend on AI\"\n> was considered and rejected as the wrong axis: spend and retry are different questions, and every effect is\n> retryable.\n>\n> **Enforced in the EXECUTOR**, the one chokepoint every caller passes through. Enforcing in the waker would\n> bound today's timer and leave the next automatic caller unbounded — and \"the next caller must remember\" is\n> the class of rule this repo keeps proving does not hold.\n>\n> **Default: the machine does not retry; a person still may.** An effect that declares nothing is retried by\n> people exactly as before, and not by the timer. Unlimited automatic retry IS the defect — measured at\n> eleven dispatches over ten ticks at exit 0. A first draft defaulted to \"unlimited, blast radius zero\"; that\n> was risk-management dressed as a recommendation, and merit says the timer needs permission.\n>\n> **Exhaustion returns a DISPOSITION, not a boolean.** Initially `retry` and `ask-human`. The set is closed\n> and versioned, and may grow — a blocker identified, needs splitting — but **an outcome earns its place only\n> when it changes what happens next**, either machine-actioned or actionable by a person reading it.\n> Otherwise it is a label on a shrug, which is exactly how the waker's `unresolved` cost three rounds. An\n> unknown member read from an older record routes to a human; never ignored, never crashed.\n>\n> **Only `retry` is automatic.** Everything else goes to a person. That is what stops the set becoming a way\n> for the machine to keep deciding things about itself.\n>\n> **The numbers stay unset**, and now for a measured reason rather than caution: #3090 found that the\n> sample-size estimator answers `1` above a 97% base rate, so the tool meant to say \"we have enough\" cannot\n> yet. The collector (#3091) is accumulating; the floor needs deriving from a fixed estimator.\n>\n> **Follow-up, not part of this:** on exhaustion, ask a juror to diagnose rather than only reporting. Better\n> suited to a judge than the convergence question refused in #3079 — it runs ONCE and reads an ERROR, not the\n> work's own plausible output. Two constraints: it may grant ONE bounded extension, never repeatedly, and any\n> failure or unrecognised answer routes to the human. It may RECOMMEND a different approach in prose; it may\n> not apply one, because applying one is the converge loop with write access and its own review.",
         "The executor's `failed` means *\"the sink threw `notApplied` — I am CERTAIN nothing landed\"*, and its\npre-flight lets such an entry straight back through to the sink. That is correct and always has been, because\nuntil now the only thing that re-entered `applyPendingEffects` after a failure was **a person re-running the\ncommand**. Retry was bounded by someone deciding to retry.",
@@ -3379,7 +3379,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "**Prepared 2026-08-16.** No new external prior-art survey was needed — this decision ratifies which piece of\n*already-shipped-but-uncomposed* internal library code (jury engine, visual comparator, disposition judge, jury\nledger) a NEW Plateau product surface should wrap first; per we:docs/agent/backlog-workflow.md (\"a decision that\nonly ratifies existing code still needs the concrete-refs check... but not a web survey\"), the grounding below is\na **direct read of the actual library signatures**, not a `/research/` topic. One fork, with a bold recommended\ndefault that survived an adversarial attack (see `Skeptic:` / `Screen:` below). Filed while preparing\n[#2696](/backlog/2696-integration-phase-compose-parts-into-one-operable-page-integ.md) to build-ready\n(2026-08-15): epic [#2676](/backlog/2676-plateau-design-studio-request-a-screen-change-ai-design-comm.md)\nhas **zero product-surface code in either repo** — verified by grepping `plateau-app` and `webeverything` for\n`design-studio`/`design_studio` and by `git log --all --grep=\"2676\"` in both, which turns up only backlog `.md`\nfilings and two `docs/agent/*.md` skill-fold commits (#2708, #2706), never application code. The epic itself says\nits four NEW pieces — (a) request-intake surface, (b) live committee-run + trace view, (c) proposed-vs-current\nreview surface, (d) ratify → build trigger — are \"kept unsliced for now — a future /slice candidate.\" None of\nthe four has even been broken into a buildable slice yet, let alone built."
       ],
@@ -3439,7 +3439,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "**The conflict dissolves on inspection; prep's job was to prove that, not to manufacture a choice.** #2576's\n*per-option 1–5 rating* and jury-core's *categorical verdict* grade **different objects** — one subject\njudged by a lens, versus candidate A against candidate B. The engine has no candidate axis at all, so the\ngap is **dimensional, not lexical**. Everything else the card frames as a call is **already ruled** — by\nshipped code, by `#blast-radius-advisory-care-not-a-gate`, and by\n[#1034](/backlog/1034-design-critique-rubric-what-a-page-review-measures-and-how-w/), which already ratified a 1–5 scale here as *advisory,\nnever a gate*. Those settled answers are tabled below with citations. **One narrow either/or survives:** what\nWE's method doc does with moves 3–4. Grounded in\n[/research/judge-grading-instruments/](/research/judge-grading-instruments/)."
       ],
@@ -3502,7 +3502,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "Preparing #2727 (S3, velocity panels) to build-ready found that the ratified v3 baseline mock draws the throughput sparkline, cycle where-the-time-goes bar, and burn-up as THREE SIBLING panels inside one `.velocity` 3-column CSS grid, populated by one render call. The build plan splits that same row into three independently self-registering sections — velocity (S3 #2727), burnup (S4 #2732), rollup (S5 #2726) — registering into S2 (#2725) a data-driven section registry, with no stated contract for whether a registrant gets a shared grid cell or its own standalone block. Grounded and ruled below: **fork 1 (shared row) and fork 2 (registry-owned `group` key) are both at Definition of Ready with an attacked, surviving default** — a fast ratification, not cold research."
       ],
@@ -3550,7 +3550,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-15",
-      "ageInDays": 38,
+      "ageInDays": 39,
       "digest": [
         "**Widened during independent review (2026-08-15) — the first draft undercounted this.** It named only two\nproducer/consumer pairs; the real count across epic #2705 is at least three producer files and nine\nregistering consumers:",
         "- **#2721 (S1b, the mount file)** pre-builds \"the header banner slot\" for **#2723** (S8, the bottleneck\n  banner).\n- **#2725 (S2, the detail shell)** pre-builds \"the dependencies-tab content slot\" for **#2729** (S7, the\n  one-hop dependency DAG — its own text: \"registers into S2's dep-tab slot — does NOT edit the detail\n  shell\"), AND separately pre-builds \"a data-driven section registry\" that **#2727** (S3, velocity),\n  **#2732** (S4, burn-up), and **#2726** (S5, rollup) each independently \"register into.\"\n- **#2726 (S5, the rollup)**, once built, itself becomes a THIRD producer: **#2731** (S6a, ship-log markers)\n  \"registers via rollup's marker slot,\" and **#2728** (S6b, filmstrip markers) is `blockedBy` #2726 with\n  near-identical deliverable shape to #2731 though its own card text does not use the word \"registers.\"",
@@ -3603,7 +3603,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-17",
-      "ageInDays": 36,
+      "ageInDays": 37,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3623,7 +3623,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-18",
-      "ageInDays": 35,
+      "ageInDays": 36,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3643,7 +3643,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-26",
-      "ageInDays": 27,
+      "ageInDays": 28,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3663,7 +3663,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-27",
-      "ageInDays": 26,
+      "ageInDays": 27,
       "digest": [
         "Every gate in the review-corpus gate library is imported only by the replay harness and its tests, so a defect a gate detects still ships. Prepared as a decision. Most of the \"which gates, where, at what severity\" question is already settled — the call sites compose, corpus scope is settled by #3026's shipped diff-scoped precedent, the deployment set is derived from the registry, and #3314 was researched and does not reach a deterministic gate. One fork remains: what licenses a card gate to ERROR rather than WARN."
       ],
@@ -3780,7 +3780,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-27",
-      "ageInDays": 26,
+      "ageInDays": 27,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3800,7 +3800,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-08-28",
-      "ageInDays": 25,
+      "ageInDays": 26,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3820,7 +3820,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-03",
-      "ageInDays": 19,
+      "ageInDays": 20,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3840,7 +3840,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3860,7 +3860,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3880,7 +3880,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3900,7 +3900,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3920,7 +3920,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-08",
-      "ageInDays": 14,
+      "ageInDays": 15,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3940,7 +3940,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-08",
-      "ageInDays": 14,
+      "ageInDays": 15,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3960,7 +3960,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-09",
-      "ageInDays": 13,
+      "ageInDays": 14,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -3980,7 +3980,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-12",
-      "ageInDays": 10,
+      "ageInDays": 11,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4000,7 +4000,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-12",
-      "ageInDays": 10,
+      "ageInDays": 11,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4020,7 +4020,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-13",
-      "ageInDays": 9,
+      "ageInDays": 10,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4040,7 +4040,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4060,7 +4060,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4080,7 +4080,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4100,7 +4100,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4120,7 +4120,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4140,7 +4140,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4160,7 +4160,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4180,7 +4180,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4200,7 +4200,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4220,7 +4220,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-14",
-      "ageInDays": 8,
+      "ageInDays": 9,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4240,7 +4240,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-15",
-      "ageInDays": 7,
+      "ageInDays": 8,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4260,7 +4260,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-18",
-      "ageInDays": 4,
+      "ageInDays": 5,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4280,7 +4280,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-18",
-      "ageInDays": 4,
+      "ageInDays": 5,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4300,7 +4300,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4320,7 +4320,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-07",
-      "ageInDays": 15,
+      "ageInDays": 16,
       "digest": [],
       "forks": [],
       "gate": null,
@@ -4340,7 +4340,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-19",
-      "ageInDays": 3,
+      "ageInDays": 4,
       "digest": [
         "The operator wants a live session and the runner to add work and handle it identically. Most of the seams exist. This item rules whether to converge on one system (the session becomes one more caller of the same operations) or keep two systems over shared operations, and settles the places the two currently differ: the loop's owner (Fork 1), how a person differs from no person (Fork 2), and where shared state lives (Fork 3). It also ratifies one launch-model target (the Ratify section).",
         "*Prepared 2026-09-21 (session prep-3722).* No design exists yet for the shared state home or the run-to-completion launch, so the three forks and the ratify below are grounded in a prior-art survey published as [/research/session-runner-one-system/](/research/session-runner-one-system/) (session report: `we:reports/2026-09-21-session-runner-one-system-grounding.md`), a read of the code, and five live probes of `claude -p`. Each fork carries a recommended default in **bold**.",
@@ -4478,6 +4478,188 @@
       "warnings": []
     },
     {
+      "num": "3732",
+      "title": "Decision: where backlog ids are assigned so a temporary hash id is structurally unable to reach main",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-19",
+      "ageInDays": 4,
+      "digest": [
+        "Operator requirement 2026-09-19: a backlog file with a temporary hash id must be STRUCTURALLY UNABLE to reach main — not caught after the fact, not repaired by a follow-up PR. Today's #2319 rule (we:scripts/check-standards-rules.mjs strandedHashesOnMain) is a post-land detector because numbering is deferred to land (#2288, we:scripts/merge-ai-prs.mjs numberPendingHashes tail); any land route or failed tail strands a hash and turns main red — twice on 2026-09-19 (3707 via PR #2335, then 9 cards via PRs #2032/#2318/#2210/#2338, all merged by the drain). Decide where numbering belongs and what makes it unskippable.",
+        "*Prepared 2026-09-21 (session prepare-3732).* Research topic: [/research/backlog-id-assignment-before-publish/](/research/backlog-id-assignment-before-publish/). Session report: `we:reports/2026-09-21-backlog-id-assignment-prior-art.md`. Repo settings and code lines below were re-read on 2026-09-21 against `origin/main` `8a7583b8f`.",
+        "**What this card delivers, and what it does not.** Delivers: a hash-named backlog file added by a pull request cannot merge to main through the drain or any non-admin route, and cannot be pushed by any script. Does not deliver: a stop to a raw `git push`, or a UI merge that uses the admin bypass, by the repo's one admin outside every script. That residual is #3423's accepted Rung 1; closing it is the rung knob #3532 builds, blocked on a distinct bot identity (see *Supported by default*). The operator's 2026-09-19 wording is absolute and newer than #3423, so if the operator wants the residual closed sooner the answer is #3532's trigger, not a redesign of this card."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "Where numbering happens",
+          "why": "*Fork-existence:* a number must exist before the PR's required checks and review, or the PR must merge into a branch in front of main. The remaining timing, numbering at the drain after CI and review, is broken (a red required check keeps the PR from ever being labelled, and a drain commit voids the approval), so the two survivors cannot both be the numbering point.",
+          "options": [],
+          "notes": [],
+          "skeptic": null,
+          "screen": null,
+          "parseOk": false,
+          "warning": "Fork 1: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork."
+        },
+        {
+          "n": 2,
+          "crux": "How far \"reach main\" reaches",
+          "why": "*Fork-existence:* the rule is either about the tree main points to or about every commit reachable from main; the two cannot both be what the check enforces. The operator's own words say a hash file must be unable to reach main; the reading that includes ancestor commits was added to this card by a later drafting pass.",
+          "options": [],
+          "notes": [],
+          "skeptic": null,
+          "screen": null,
+          "parseOk": false,
+          "warning": "Fork 2: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork."
+        }
+      ],
+      "gate": null,
+      "doneWhen": [
+        "1. **Executable** — ratification records the selected forks in `we:docs/agent/platform-decisions.md`, links this card via `codifiedIn`, and files the build stories above (blocked-then-unblocked). `npm run check:standards` validates those artifacts.",
+        "2. Every pull-request main-write route and every scripted direct push is covered; the residual raw admin push is stated. Two PRs allocated the same NNN cannot both merge, and main stays green.",
+        "3. #2288, #2319, #2548, #3443, #3735 and #3423 are reconciled; the declared-operation prerequisite and the migration call sites are assigned. No post-land repair step serves as prevention.\n### Review jury (provisional — pre-registered #2638)\nCare level: `high`. This jury binds against the item's predicted scope and is re-checked against the real diff at PR open.\n| juror | lens | grounding method | pre-registered expectation |\n| --- | --- | --- | --- |\n| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |\n| correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |\n| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |\n| security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |\n| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |\n| simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |\n| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |\n| standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |\n| claim-accuracy#1 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |\n| claim-accuracy#2 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |"
+      ],
+      "parseOk": false,
+      "warnings": [
+        "Fork 1: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork.",
+        "Fork 2: no lettered options (\"- **(a)** …\") found — cannot render a fork breakdown for this fork."
+      ]
+    },
+    {
+      "num": "3734",
+      "title": "May agent-family and benchmark data act as a capped prior toward supervision graduation?",
+      "prepared": true,
+      "preparedDate": "2026-09-21",
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-20",
+      "ageInDays": 3,
+      "digest": [
+        "No design for a borrowed-evidence prior exists yet. The three forks below are grounded in a prior-art survey published as [/research/supervision-graduation-borrowed-evidence/](/research/supervision-graduation-borrowed-evidence/) (report linked via `relatedReport`) and a replay over the live scorecard store; each carries a **bold** default. **Prep recommends no prior**, reversing the filing's lean toward a low-risk family prior: the safe credit is at most one trial worth almost nothing, and on today's store a cross-identity family prior is unsafe or inert. The filing's option 2 stays fully specified, so ratifying it is a nod."
+      ],
+      "forks": [
+        {
+          "n": 1,
+          "crux": "May evidence from outside the exact triple count toward a supervision bar?",
+          "why": "**Why this is a fork.** Case (b), a real either/or: the ratified rule \"trust never carries across triples\" and a credit cannot both stand, because a credit is by definition a different amount of real evidence for different triples. **Composability probe, failed:** expose the cap as project config (0 by default) so both coexist. The statute admits config only as an \"optional per-project tightening\" over \"one uniform FLOOR\" (`we:docs/agent/platform-decisions.md:4707-4715`); a loosening knob is an easier bar for some identity, which that clause forecloses. So this is a statute amendment, not a config dimension: `#config-extends-platform-default` covers multi-legitimate-end-state concerns, not trust loosening.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**No credit from outside the exact triple. ← RECOMMENDED.** The record stays the single source of evidence for both consumers; the risk tier (in flight, below) and role authority (#3654 clause 3) vary the bar, uniformly for every identity, never by identity. Merit: `taskType` is this context's *operational design domain* (`we:backlog/3690-track-and-consider-graduating-session-initiated-codex-delega.md:141-146`), and a safety case is scoped to its domain — evidence in one domain does not carry into another by definition. Downside on merit: a new identity's low-risk cell needs its own two clean full-supervision trials before the check lightens."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**A capped, audited credit — low-risk ceiling only** (the filing's option 2, with Forks 2–3 and the forced invariants below fixed). Merit: for a cell whose lending relation has a cleared record, the check lightens one trial sooner. Downsides on merit: the credit crosses an operational design domain on an unmeasured claim, and nothing in the store can measure it; ratifying it amends #3690's \"never across triples\" and, for any wider relation, #3654 clause 4. **The ceiling is low risk.** Widening it to medium (the filing's option 3, minus its benchmark half, which is Fork 3) is *Rejected as a co-equal branch*: the credit's value scales with the tier threshold and its exposure with risk, so the benefit and the risk of the exception both grow only there, with no data to size either; a later widening is a new ratification, never a batched-finding value change."
+            }
+          ],
+          "notes": [
+            {
+              "kind": "text",
+              "text": "**The two computed findings behind the default** (full working in the session report §3–§4, verified against `origin/main`):"
+            },
+            {
+              "kind": "text",
+              "text": "1. *The safe-end credit is at most one trial, worth almost nothing.* Rule 3 of `#delegation-trial-record-graduation` requires a clean most-recent **verified** trial, which only a real row supplies, so at least one real clean trial is always required; at the in-flight low-risk bar of two (a placeholder on the POC branch — a higher calibrated bar would raise the credit, never the one-real-trial floor) the credit is one. With zero failures, the exact one-sided 95% upper bound on the failure rate is 95.00% at N=1 and 77.64% at N=2, and the borrowed half was never measured against this identity.\n2. *Across identities a family credit is unsafe or inert on today's store.* Replaying the real `selectSupervisionLevel` over the 26 rows, a label-constant one-trial credit flips four triples. Two are `gpt-6-astra` cells whose lender is the same model on another task type (the relation Fork 2 (a) endorses); one is `gemini-3.8/other`, whose Gemini siblings have no cleared record at that task type; one is `claude-sonnet-5/other`, whose only recorded family-sibling outcome is a **rejected** trial. A credit derived from a *different identity* of the same family that has cleared the bar at the same task type flips **none**. The same-model relation moves two cells, but only one model (`gpt-6-astra`) qualifies, so it is unvalidated too."
+            },
+            {
+              "kind": "text",
+              "text": "**Known occurrences.** Borrowing from a predecessor is a named practice, and it is never label-only: FDA's Bayesian guidance for medical devices accepts priors from predecessor-device trials only with demonstrated exchangeability and prefers borrowing that discounts itself when new data drift; ICH E5 bridging studies accept foreign data but a region may still require a local study; FAA 14 CFR 21.19/21.101 reuses an earlier certification basis only where a change is not significant. AWS's graduated-autonomy scheme keeps trust non-transitive. Each carries the three guards the forced invariants below copy."
+            },
+            {
+              "kind": "text",
+              "text": "**Code shape (illustrative — the API below does not exist).** The only form that touches one consumer, keyed to the real signature at `we:scripts/lib/provider-routing.mjs:670`:"
+            },
+            {
+              "kind": "code",
+              "text": "// Fork 1 (b) — the credit is an ARGUMENT, and comes back in the audit trail\nselectSupervisionLevel('codex', 'gpt-6-astra', 'self-fix', records,\n  { minCleanStreak: 2, requireInformativeTrial: false },\n  { prior: { virtualClean: 1, relation: 'same-model-other-taskType',\n             from: [{ triple: ['codex', 'gpt-6-astra', 'bugfix'], rows: ['pr:2301@2026-09-19', 'pr:2299@2026-09-19'] }] } });\n// → auditTrail gains { criterion: 'virtual-prior', result: 'credited:1',\n//     dataConsulted: 'real=1, virtual=1, from=[…]', reasoning: '…' }"
+            },
+            {
+              "kind": "code",
+              "text": "// Fork 1 (b), REJECTED form — a row in run-scorecards.json\n{ provider: 'codex', model: 'gpt-6-astra', taskType: 'self-fix',\n  outcome: 'landed', verifiedBy: 'independent-claude', virtual: true }\n// isCleanRecord (provider-routing.mjs:250) reads outcome only → evaluateProviderFitness (:341) counts it"
+            },
+            {
+              "kind": "text",
+              "text": "**Trigger to reopen (a).** Through an ordinary batched finding, once the store can back-test a declared relation: at least five triples, across at least two models, that graduated on their own data after a same-relation lender had already graduated, and a replay shows lender-derived credit would never have advanced a triple that later recorded a miss. The counts are placeholders for that finding to set, like every other number in the graduation rulings."
+            }
+          ],
+          "skeptic": "SURVIVES-WITH-AMENDMENT — the default held against the classification, merit, statute-overlap and citation-scope attacks; amendments folded in: the (b)/(c) tier split collapsed (a tier ceiling is a per-tier cap value, so medium became a named rejected extension, not a rival branch); finding 2 restated to separate the same-model relation from cross-identity credit; the \"needs a taxonomy\" downside moved to Fork 2, where it applies; \"only lever\" reworded to \"not by identity\"; the placeholder-bar caveat added; the merit basis moved to the operational-design-domain statement.",
+          "screen": "clear — a legitimate governance ruling on repo-internal tooling (not an impl detail); with both branches free to build, a merit difference remains (evidence crossing a domain on an unmeasured claim, and precedent-consistency, against one trial of lighter checking).",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 2,
+          "crux": "If a credit is admitted, which relation may lend? *(applies only if Fork 1 is (b))*",
+          "why": "**Why this is a fork.** Case (a), an excluded branch: crediting by **vendor-line name** is the flawed one, because a label with no in-system record behind it is exactly the reputation `#model-probation-graduation-criteria` clause 4 forecloses, and the store shows it: a name-based credit would lend `claude-sonnet-5/other` a family whose one recorded outcome is a miss. The remaining relations form a nested ladder, and the statute must fix one ceiling because config may only tighten; they differ in *which ratified rule each overturns*.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Same `{provider, model}`, other task type, where that triple has itself cleared the bar. ← RECOMMENDED.** *This is not cross-model family* — it is the same model's own record on neighbouring work, the narrowest relation. It overturns only #3690's \"never across triples\", leaves #3654's identity rule and #3383's release rule intact, and needs no family taxonomy. It applies to two cells today. The credit needs the lender's *record*, not a label, and drops when that record does (a forced invariant below)."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**(a) plus the same model weights served by another host** (agy-hosted Claude ↔ native Claude, `AGY_CLAUDE_MODEL_BY_TIER` at `we:scripts/lib/provider-routing.mjs:132`), declared in a hand-edited table. Downside on merit: the provider is part of the unit and the execution context differs (the header at `:44-46` says Antigravity's sandbox is not a native session), so the lender's record describes a different harness; the relation also needs a declared table, the \"ungrounded category\" the #3654 skeptic flagged for risk classes."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "**(b) plus adjacent releases of one vendor line**, declared in the same table — the only branch that serves the operator's \"agent family\" wording. **Rejected as the default:** it overturns #3383's identity rule and the ratified \"never inherited by a model upgrade\" (`we:docs/agent/platform-decisions.md:4682`) — and the store's one such pair (`claude-sonnet-5` clean, `claude-sonnet-4-6` rejected; one row each, cross-release) is an anecdote that points the wrong way, not evidence. Supporting context, not the ground: no vendor line in the store has a cleared predecessor whose successor has been measured."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "**Vendor line by name. Rejected** — reputation, per above."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES-WITH-AMENDMENT — default held; folded in: the fork retitled from \"family\" to \"which relation may lend\" and (a) labelled as not cross-model family; the rationale re-cited from the ratified operational-design-domain statement instead of superseded backdown-plan prose; the cross-release pair moved to (c); (c)'s rejection re-grounded on the ratified \"never inherited by a model upgrade\" text rather than #3383's word \"automatically\", since the credit here is not automatic.",
+          "screen": "flagged(prio) → rewritten: the rejection of (b) and (c) now rests on merit (a different execution context; the identity rule and the no-inheritance statute), and \"no validating data\" is demoted to supporting context; the ceiling is stated as a statute-level choice because config may only tighten.",
+          "parseOk": true,
+          "warning": null
+        },
+        {
+          "n": 3,
+          "crux": "If a credit is admitted, may a benchmark rating count toward it? *(applies only if Fork 1 is (b))*",
+          "why": "**Why this is a fork.** Case (a), an excluded branch: benchmark credit is the flawed one. **Load-bearing on merit:** (1) it measures a different population — the header at `we:scripts/lib/model-capability-ratings.mjs:3-4` says a rating \"cannot establish trust\", and external measures overstate: SWE-Bench+ found 32.67% of passing patches on the original SWE-bench involved solution leakage and 31.08% were weak-test passes, and METR's randomised trial on real tasks found a 19% slowdown while the developers believed they were 20% faster — measures of AI coding ability and in-context outcomes can diverge; (2) its five categories are keyed by `{provider, model}` only, with no task-type or risk axis to match a triple. **Already ratified, so precedent rather than new merit:** #3654 clause 4 forecloses \"benchmark claims made outside this system\". **Contingent, not load-bearing:** the registry ships `\"entries\": []` today. **Composability probe, failed:** a benchmark would have to be converted into virtual trials by a transfer function, and no in-system data can calibrate one. Tightening is unaffected: clause 4 lets a project use any signal to make a bar stricter.",
+          "options": [
+            {
+              "label": "(a)",
+              "kind": "default",
+              "body": "**Never — a benchmark stays an advisory tiebreak inside `selectProvider`'s `explorationHint` (`we:scripts/lib/provider-routing.mjs:21-23`). ← RECOMMENDED.** The ratings module header at `:12-15` is unchanged."
+            },
+            {
+              "label": "(b)",
+              "kind": "rejected",
+              "body": "**Named benchmark fields add capped credit** (the filing's option 3, benchmark half). Rejected for the reasons above; ratifying it would also amend the ratings header."
+            }
+          ],
+          "notes": [],
+          "skeptic": "SURVIVES — the attacks (a benchmark as a tighten-only input; the empty registry being contingent) did not reach the credit question; folded in: the METR claim scoped to \"measures diverge\" (its 20% was a post-task belief, its pre-task forecast 24%), the ratified-text and empty-registry grounds relabelled as precedent and contingent, and a Done-when branch for 3 (b) added.",
+          "screen": "clear — a trust-input policy with a real merit difference (validity and domain match), not an impl detail; ground (3) marked non-load-bearing.",
+          "parseOk": true,
+          "warning": null
+        }
+      ],
+      "gate": null,
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
       "num": "3801",
       "title": "Decision: review the five choices the #3717 dispatch-routing build made (forks A to E)",
       "prepared": true,
@@ -4489,7 +4671,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Review the five choices the #3717 build made on the prototype branch (commit `0f1d0fb8f`, pushed to `lane/mechanical-dispatcher`, no pull request) where the card left a call open. The worker chose the smallest reading at each fork and recorded the alternatives; nothing here is ratified. One card, not five: all five sit in one small area (`we:scripts/lib/dispatch-contracts.mjs`, `we:scripts/lib/dispatch-task-type.mjs`, `we:scripts/operations/dispatch-lane-io.mjs`) and are ruled together. Relates #3717, #3690 (the router's graduation model, now ratified as `#delegation-trial-record-graduation`), #3443, #3730, #3784 and #3658.",
         "*Prepared 2026-09-21 (session prepare-3801-and-3768).* Research topic: [/research/dispatch-routing-build-review/](/research/dispatch-routing-build-review/). Session report: `we:reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md`. Every citation below was re-read on the prototype tip `5ab89f87b` (read with `git show origin/lane/mechanical-dispatcher:<path>`; these files do not exist on `main`, so their `we:` cites resolve only on the branch). The forks keep their filed letters as Fork 1 (A) to Fork 5 (E)."
@@ -4691,7 +4873,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule how the session reaper reaches `main`. The stop-verify fix for #3744 is built only on the prototype branch and stays open on `main` because it lands in the stop module, whose graduation waits on the planner's — a graduation with no card, existing only as a Progress note in #3443. This card is that missing decision. Relates #3744, #3443, #3765, #3766 (planner fixes, open), #3803, #3804 (the catch-up merge and sync policy) and #3684 (the stuck-session human gate).",
         "*Prepared 2026-09-21 (session prepare-3802).* Research topic: [/research/session-reaper-graduation/](/research/session-reaper-graduation/). Session report: `we:reports/2026-09-21-session-reaper-graduation-grounding.md`. One ratify and two forks, each with a bold default, a `Skeptic:` and a `Screen:` line. **Changed from the filed draft:** the reaper's cost is 13 new files, not 110; the slicing fork dissolved into the ratify below (the epic already rules how increments are cut); a fork was added for the stop module's own human-gate answer; the `readFollowUps` fork dissolved into a build note; the untagged-name default survived an attack that tried to replace it. Measured 2026-09-21 against `origin/main` (`ad60a9153`), the prototype and the staging ref `origin/lane/mechanical-dispatcher-catchup` (`dd9d51bfb`)."
@@ -4771,7 +4953,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule whether to accept, in five places, the behaviour the merge of `main` into the prototype branch `lane/mechanical-dispatcher` kept. The merge (54 conflicted files, no rebase, no force) is staged on `origin/lane/mechanical-dispatcher-catchup`, sha dd9d51bfb, and was NOT pushed to the shared branch. It kept the BRANCH's behaviour in four places (fork 4 took `main`'s argv) and named `main`'s half. **After this ruling the operator brings the staging ref up to the shared branch and fast-forwards it** (steps under \"At ratification\"). One card, not five: the forks share one ref and one fast-forward. Relates #3772, #3443 and the reaper graduation card #3802.",
         "**Prepared 2026-09-21.** No design is invented here: every fork ratifies a resolution that already exists on the staging ref, so the grounding is a read of the three refs (`main`, the branch, the staging ref), published as [the grounding report](/reports/2026-09-21-catchup-merge-forks-grounding.md), not a web survey; no `/research/` topic. All `:line` cites are to the staging ref unless marked `main`. **The recommendation is to accept all five as staged**, with named follow-up work. Three claims in the card as first written were wrong and are corrected below: fork 2's account of `main`'s evidence, fork 3's \"coverage is gone\" (part of it is pinned, and the rest pins the opposite outcome), and fork 5's \"cannot be exercised today\". Prep also found one defect the merge introduced (fork 5: the foreign-repo guard refuses WE's own PRs when land-advance calls it with a slug), fixed in the follow-up commit."
@@ -4946,7 +5128,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Recommendation: keep ONE weighted worker budget (a weight per dispatch kind: review 0.25, light task 0.5, prepare 1.0, build or fix 1.5, calibration exclusive) on top of the structural heavy-command pool, and do NOT add separate heavy-worker and light-worker counts. No weighted budget exists in the repo yet: the only worker limit today is one shared lane COUNT (`we:scripts/lib/lane-concurrency.mjs:38`), and the weights live in the orchestrator's local notes (rule v4), so both forks below are new design. They are grounded in a prior-art survey published as [/research/weighted-worker-budget-vs-split-counts/](/research/weighted-worker-budget-vs-split-counts/) (session report linked via `relatedReport`), and each carries a recommended default in **bold**. Operator, 2026-09-21: \"Do we need heavy worker and light worker count?\" — the survey's answer is no: Ninja, Gradle, Bazel, Airflow and Jenkins all pair one shared budget with a hard cap on the scarce step, and the one documented static two-class split (Hadoop MRv1's map and reduce slots) idled one class while the other was saturated and was replaced. The survey also surfaced a second call the card and #3807 left implicit (Fork 2): what happens when the next queued item does not fit the remaining budget. Both forks are ratifies of a forced invariant: Fork 1 rejects two counts that REPLACE the shared sum, Fork 2 rejects skip-ahead for the exclusive kind (calibration could never drain the budget). Everything else the survey turned up is a supported-by-default extension, not a rival branch."
       ],
@@ -5058,7 +5240,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule how the phone /wip page (plateau-app) stops a leaked publish token from putting a phishing link on its \"Open PR\" button, and whether a standing check follows. The finding comes from the accepted review of chalbert/plateau-app PR #161 (\"wip relay: PR #160 review follow-ups\", merged as `9b7a08d54`, reviewed sha `17f9f3350`, verdict recorded 2026-09-21T20:18:03Z). The reviewer marked it `PLAUSIBLE`, impact \"degraded\", and its prevention line \"OWED — file it\". This card is that filing. Code references are to plateau-app `main` at `9b7a08d54`, read from a read-only clone on 2026-09-21. No mutation was run, by the reviewer or here."
       ],
@@ -5160,7 +5342,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "On the gated plateau-app deploy a home-screen launch of /wip ends on the dashboard, not /wip. plateau:worker.js answers a correct gate code with 302 Location / (line 155), so the deep link is lost at the gate; the SPA then remembers / as the sign-in return target. Found by the review of chalbert/plateau-app PR #157, held for a design review by the PR #158 fix worker. Rule how the target survives the gate, which deep links it accepts and where that check lives, and what plateau:docs/wip-page.md must say.",
         "Operator rule 7 (2026-09-21): \"If unsure we should have a design review\". This card is that review, prepared. It does not change plateau-app. All line numbers are chalbert/plateau-app `main` at `14b45e0` (PR #157's merge), re-read on 2026-09-21. PR #158 (open, head `7906cf0`) moves `isProductRoute` / `rememberReturnTo` / `takeReturnTo` verbatim into `plateau:src/return-to.ts`.",
@@ -5271,7 +5453,7 @@
       "pr": null,
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule how many independent-advisory rounds a docs-only ratification PR gets before it reaches the operator. On 2026-09-21 the ratification of #3735 went through three superseding PRs (2388, 2401, 2407); each advisory returned human review required with three new findings, about 30 minutes of worker time and a new PR number per round, while the operator's own rule is to open a human PR only after advisory:accepted. Forks: a round cap that hands the PR over with its open findings listed, a split that lets findings about a not-yet-built card's Done-when text become follow-up items, keeping every round blocking, or relying on the operator to clear early.",
         "*Prepared 2026-09-21 (session file-recurring-friction). No `/research/` topic: this rules a threshold in shipped internal machinery, so the grounding is the three PRs' own comment threads and the code, all re-read on 2026-09-21. The skeptic passes below are the preparer's own adversarial reads, not a separate skeptic agent.*"
@@ -5324,65 +5506,42 @@
       "warnings": []
     },
     {
-      "num": "3866",
-      "title": "Provision a dedicated GitHub credential so fleet gh calls draw from a budget separate from the operator's personal account",
-      "prepared": true,
-      "preparedDate": "2026-09-21",
+      "num": "3867",
+      "title": "Decision: should a delegated vendor graduate past spot-check to a lighter or absent independent review after sustained high confidence — reopens ratified rule 7 of #delegation-trial-record-graduation",
+      "prepared": false,
+      "preparedDate": null,
       "leverageScore": 0,
       "directUnblocks": 0,
       "transitiveUnblocks": 0,
       "unblocksToReady": 0,
       "pr": null,
       "blockedBy": [],
-      "dateOpened": "2026-09-21",
+      "dateOpened": "2026-09-22",
       "ageInDays": 1,
-      "digest": [
-        "Fleet gh calls and the operator's own personal-account GitHub usage share the SAME primary rate-limit bucket (5,000 points/hour). On 2026-09-22 the operator's own session hit 'API rate limit already exceeded for user ID 760299' after fleet load. #3670 (built, PR #2444) throttles per-call bursts and adds a per-minute points budget, but that only bounds one account's own spend, not the shared ceiling. #3699's ratified ruling addresses request volume via a shared state feed, not credential-level separation. Whether to provision a separate credential — a GitHub App installation token, or a dedicated bot/machine account PAT — so the fleet draws from its own budget."
-      ],
-      "forks": [
-        {
-          "n": 1,
-          "crux": "Which credential should the fleet's `gh`/API calls authenticate as?",
-          "why": "**Why this is a fork:** the fleet's automated `gh`/API calls authenticate as some one identity, and that identity is what determines which rate-limit bucket every one of those calls draws down. Keeping the fleet on the operator's own personal token and giving it a separate identity are not compatible answers to \"whose budget does fleet traffic spend\" — exactly one is true going forward, not both a little. #3670's per-minute throttle and #3699's state feed both ship under every option below; they are prerequisites, not rivals to this fork.",
-          "options": [
-            {
-              "label": "(a)",
-              "kind": "default",
-              "body": "Provision a GitHub App for this repo/org, install it, and route the fleet's `gh`/API calls through its INSTALLATION access token (app-to-server auth — the app authenticates as itself, never as a user, never via `gh auth login`). This is the only shape confirmed above to get a genuinely separate bucket, and it is a *larger* one on this account's own repo count (~5,800/hour today per #3573's math, scaling toward 12,500/hour as repos are added) than a flat personal-token ceiling. Real cost: a one-time setup step — register the app, install it, and swap the fleet's auth layer to mint/refresh short-lived (1-hour) installation tokens instead of a long-lived OAuth token — security-sensitive because it touches the auth layer, but the resulting token is short-lived, scoped to exactly the app's installed permissions, and revocable at the app level without touching the operator's own account credentials. Since #3670 already centralizes every migrated call through one wrapper module, the auth swap is localized there, not per call site."
-            },
-            {
-              "label": "(b)",
-              "kind": "rejected",
-              "body": "Create a dedicated bot/machine GitHub account and mint its own PAT for the fleet to use. GitHub's Terms of Service explicitly permit this (\"a machine account... set up by an individual human who accepts the Terms on behalf of the Account... used exclusively for performing automated tasks\"; one such account is allowed per person in addition to their own). Simpler to stand up than (a) — no app registration, no JWT/installation-token minting, just a second `gh auth login`. But its PAT is still a personal-access-token bucket: flat 5,000 requests/hour with no repo/user scaling, the SAME ceiling class as the operator's own account, not the higher App-installation class — less throughput than (a) for this account's shape. It also adds a second full human identity to manage long-term (its own 2FA and recovery email) and its one secret is a long-lived PAT whose leak exposes that account's full granted scope, versus (a)'s short-lived, narrowly-scoped, centrally-revocable token."
-            },
-            {
-              "label": "(c)",
-              "kind": "rejected",
-              "body": "Do nothing beyond #3670's per-call/per-minute throttle. *Rejected:* #3670 bounds bursts (the 900-points/minute secondary ceiling) and now the fleet's own steady-state volume (its 300-points/minute budget), but every one of those points is still drawn from the SAME shared 5,000-points/hour PRIMARY bucket the operator's own interactive `gh`/browser use draws from — the throttle caps how fast the fleet spends, never separates whose budget it spends from. That is exactly the failure this decision exists to fix: on 2026-09-22 the operator's OWN session, not a fleet worker, was the one refused, after the fleet's sanctioned, throttled usage had already drawn the shared bucket down. #3699's ruling is a genuine, complementary lever (cutting call volume via one shared reader instead of N pollers) but its own worst-case estimate (~2,400-4,500/hour) still lands inside the same 5,000/hour bucket the operator's manual use shares — it was never meant to, and does not, separate the credential."
-            },
-            {
-              "label": "(d)",
-              "kind": "rejected",
-              "body": "A fine-grained PAT, scoped narrowly, still issued under the operator's own personal account. *Rejected:* GitHub's rate-limit accounting keys on the authenticated USER, not the token's scope shape — a fine-grained PAT's requests \"count towards your personal rate limit of 5,000 requests per hour\" exactly like a classic PAT, confirmed in the same docs pass above. Narrower scopes shrink the BLAST RADIUS of a leaked token (worth doing regardless of this fork's outcome) but do nothing to separate the BUDGET — the fleet would still be spending the operator's own bucket, so this is not a genuinely different answer to this fork's question."
-            }
-          ],
-          "notes": [
-            {
-              "kind": "text",
-              "text": "**Default: (a).** A GitHub App installation, authenticated app-to-server via its installation access token, is the only option confirmed above to give the fleet a rate-limit bucket genuinely independent of the operator's personal account, and it is larger, not merely separate, on this account's own repo count. The one-time app registration and auth-layer swap is real cost, but it is paid once at the auth layer — #3670's existing wrapper centralizes the call sites already. (b) is simpler to stand up but is dominated on both throughput ceiling and secret blast-radius; (c) leaves the exact failure that triggered this decision unaddressed; (d) doesn't touch the actual axis (whose bucket, not which scopes)."
-            }
-          ],
-          "skeptic": "Attacked (a)'s premise that \"a GitHub App\" alone means a separate bucket — the docs' own worked example shows a GitHub App authorized *on a user's behalf* shares that user's bucket instead, which would have silently defeated this decision if unnoticed. Fixed by naming the app-to-server / installation-token requirement explicitly in (a)'s own body, not left implicit. Also attacked whether (c) is really inadequate now that #3670 ships a 300-points/minute budget: confirmed #3699's own worst-case load (~4,500/hour) still fits under 5,000/hour alone, but that headroom is shared with the operator's own manual use, which is exactly what was refused on 2026-09-22 — the throttle governs how fast the fleet spends, never from whose account. Holds.",
-          "screen": "Infra-credential governance (which GitHub identity the fleet's automation authenticates as) — decidable in-repo, no WE platform-standard boundary at stake. The differences named (separate vs. shared bucket, scaling ceiling, secret blast-radius, one-time setup cost) are real functional merit differences, not a timing or prioritization call in fork costume. Clear.",
-          "parseOk": true,
-          "warning": null
-        }
-      ],
+      "digest": [],
+      "forks": [],
       "gate": null,
-      "doneWhen": [
-        "1. **Observable** — `grep -l '^## Ruling' backlog/3866*.md` lists this card (it fails until the operator has ratified Fork 1's chosen option).",
-        "2. **Follow-on** — once ratified, the chosen path — an App registration + auth-layer swap (a), a bot-account PAT (b), or an explicit no-build (c)/(d) — is carved into a build story under #3383, `blockedBy` this decision, before this card resolves."
-      ],
+      "doneWhen": [],
+      "parseOk": true,
+      "warnings": []
+    },
+    {
+      "num": "3872",
+      "title": "Decide the credential/token scoping model for the conveyor's daemonized processes",
+      "prepared": false,
+      "preparedDate": null,
+      "leverageScore": 0,
+      "directUnblocks": 0,
+      "transitiveUnblocks": 0,
+      "unblocksToReady": 0,
+      "pr": null,
+      "blockedBy": [],
+      "dateOpened": "2026-09-22",
+      "ageInDays": 1,
+      "digest": [],
+      "forks": [],
+      "gate": null,
+      "doneWhen": [],
       "parseOk": true,
       "warnings": []
     },
@@ -5405,7 +5564,7 @@
       },
       "blockedBy": [],
       "dateOpened": "2026-09-21",
-      "ageInDays": 1,
+      "ageInDays": 2,
       "digest": [
         "Rule how the drain avoids setting `status: resolved` on a whole card when a PR for only one of its slices lands. Story #3816 (filed as `3816`) lists the options and says: do not build until the operator picks. The operator reviews decisions only in decision cards (operator rule 9, 2026-09-21), so the choice moves here; #3816 stays the build card and is blocked by this one. **The options, the evidence and the proposed default are copied from #3816; nothing was re-researched and the default was not changed.**"
       ],
@@ -5474,168 +5633,72 @@
       "warnings": []
     },
     {
-      "num": "3144",
-      "title": "Reconcile #2564's constitution-tier artifact with #2561 F4's rejection of a standalone constitution doc, then quantify the amendment-entrenchment gate",
+      "num": "3866",
+      "title": "Provision a dedicated GitHub credential so fleet gh calls draw from a budget separate from the operator's personal account",
       "prepared": true,
-      "preparedDate": "2026-08-17",
+      "preparedDate": "2026-09-21",
       "leverageScore": 0,
       "directUnblocks": 0,
       "transitiveUnblocks": 0,
       "unblocksToReady": 0,
       "pr": {
-        "number": 2442,
+        "number": 2453,
         "state": "open",
-        "kind": "other",
-        "title": "backlog: ratify #3144 — quantify the constitutional-amendment gate",
-        "url": "https://github.com/chalbert/web-everything/pull/2442",
+        "kind": "ratification",
+        "title": "ratify #3866: GitHub App installation-token auth (Fork 1a); file follow-on build",
+        "url": "https://github.com/chalbert/web-everything/pull/2453",
         "repo": "chalbert/web-everything"
       },
       "blockedBy": [],
-      "dateOpened": "2026-08-16",
-      "ageInDays": 37,
+      "dateOpened": "2026-09-21",
+      "ageInDays": 2,
       "digest": [
-        "#2564 Fork 5 ratified a **substantively entrenched** constitutional-amendment gate as three qualitative\nclauses — exempt from #911's supersede-with-lineage, a cooling period \"in days, not sessions\", a committed\nexternal artifact — and none carries a number, a format, or a mechanism. The **reconciliation** half of this\nitem is **closed** by #2568's prep, not open work. Three forks remain: **what class of surface may confer**\nthe entrenchment, **what timestamp** the cooling clock may read, and **what surface** a subordinate project\nconstitution joins the tier through. The record's shape turned out to be settled by precedent, not a fork."
+        "Fleet gh calls and the operator's own personal-account GitHub usage share the SAME primary rate-limit bucket (5,000 points/hour). On 2026-09-22 the operator's own session hit 'API rate limit already exceeded for user ID 760299' after fleet load. #3670 (built, PR #2444) throttles per-call bursts and adds a per-minute points budget, but that only bounds one account's own spend, not the shared ceiling. #3699's ratified ruling addresses request volume via a shared state feed, not credential-level separation. Whether to provision a separate credential — a GitHub App installation token, or a dedicated bot/machine account PAT — so the fleet draws from its own budget."
       ],
       "forks": [
         {
           "n": 1,
-          "crux": "What class of surface may carry the entrenchment declaration",
-          "why": "*Fork exists (forced invariant): the excluded branch — **declare the exemption on a surface outside the\ndeclarative leash** — is **broken**, and the repo's own ratifications say so more sharply than the legal\nanalogue does. #2771 clause 1 ratified `we:scripts/lib/review-escalation.mjs` **agent-clearable**\n(`we:docs/agent/platform-decisions.md:3412`), so an entrenchment declaration living in the rubric can be\nemptied by a committee-cleared PR with no human in the loop. A new file outside the roster is worse: it\nmatches nothing in `we:scripts/lib/gate-config.mjs`'s `POLICY_SPEC_BASENAMES`\n(`we:scripts/lib/gate-config.mjs:355-374`) and nothing in `we:scripts/lib/review-escalation.mjs`'s\n`STATUTE_PATHS` (`:70-73`) or blast-radius set (`:245-254`), so it is an ordinary agent-clearable file. A\ndeclaration the gated path can rewrite is a **lower**-order instrument than the floor it claims to stack on —\nprecisely the failure `Thoburn v Sunderland CC` describes, where a rule does not become immune by declaring\nitself so. Exactly one class of surface can be authoritative, so the choice is a real either/or.*\n\n**What this fork rules, and what it deliberately does not.** It rules the **class**: the declaration must sit\non a surface whose gating is conferred by the leash roster, not on one whose protection is asserted by its\nown contents. It does **not** rule which leash file — putting the block inside the existing\n`we:scripts/lib/review-policy.contract.json` versus registering a new file in `POLICY_SPEC_BASENAMES` are\nbehaviourally identical once either is on the roster, so that is an implementation choice for the follow-on\nPR, not a decider's call. (The first draft of this fork put the file names in the option set; the\nfresh-context re-screen flagged that as implementation altitude and it was corrected — see `Screen:`.)",
+          "crux": "Which credential should the fleet's `gh`/API calls authenticate as?",
+          "why": "**Why this is a fork:** the fleet's automated `gh`/API calls authenticate as some one identity, and that identity is what determines which rate-limit bucket every one of those calls draws down. Keeping the fleet on the operator's own personal token and giving it a separate identity are not compatible answers to \"whose budget does fleet traffic spend\" — exactly one is true going forward, not both a little. #3670's per-minute throttle and #3699's state feed both ship under every option below; they are prerequisites, not rivals to this fork.",
           "options": [
             {
               "label": "(a)",
+              "kind": "default",
+              "body": "Provision a GitHub App for this repo/org, install it, and route the fleet's `gh`/API calls through its INSTALLATION access token (app-to-server auth — the app authenticates as itself, never as a user, never via `gh auth login`). This is the only shape confirmed above to get a genuinely separate bucket, and it is a *larger* one on this account's own repo count (~5,800/hour today per #3573's math, scaling toward 12,500/hour as repos are added) than a flat personal-token ceiling. Real cost: a one-time setup step — register the app, install it, and swap the fleet's auth layer to mint/refresh short-lived (1-hour) installation tokens instead of a long-lived OAuth token — security-sensitive because it touches the auth layer, but the resulting token is short-lived, scoped to exactly the app's installed permissions, and revocable at the app level without touching the operator's own account credentials. Since #3670 already centralizes every migrated call through one wrapper module, the auth swap is localized there, not per call site."
+            },
+            {
+              "label": "(b)",
               "kind": "rejected",
-              "body": "**A `POLICY_SPEC` leash member. The exemption, the tier's anchor list, the interval, and the record\nrequirement are declared as DATA on a surface registered in the leash roster;\n`we:scripts/lib/review-escalation.mjs` only *reads* the declaration and never defines it; the conformance\nsuite is the backstop.** **DEFAULT.** This is the only class that satisfies the higher-order test on the\nrepo's own ratified terms: #2840 trigger 3 pins every `POLICY_SPEC` file human-gated **as a whole file,\npermanently**, \"because those files *are* the encoded principle and have no behaviour-preserving edit\"\n(`we:docs/agent/platform-decisions.md:3480`), and the contract's own charter is that policy **values** live\nthere and nowhere else. **Self-referential closure comes free** rather than needing invention: the surface\ndeclaring the ceremony is itself inside the pinned leash, so amending the thing that protects the\nconstitution is already human-only — #2568's laundering fix\n(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:102-106`) generalized one\nlevel up, and Roznai's double-amendment residual answered by an existing mechanism rather than a promise.\n**This inverts this item's first draft**, which rejected the contract as \"not entrenched\"; that rejection\nwas written against the pre-#2840 gate and is wrong.\n- (b) **A surface outside the leash** — a new `we:docs/agent/constitution-index.json`, or the anchor list\ninside `we:docs/agent/platform-decisions.md` itself, protected only by what it says about itself.\n*Rejected* on the forced invariant: unregistered files are agent-clearable today, and a self-protecting\ndeclaration is the decorative self-declaration `Thoburn` rules insufficient. (A pointer index remains the\nright *shape* for which anchors are constitution-tier — that is #2568's call; this fork only rules that\nwherever it lives, that surface must be a leash member.)\n- (c) **In the derivation code** (`we:scripts/lib/review-escalation.mjs`), as logic rather than data.\n*Rejected on the ratified split:* #2771 clause 1 routes derivation code to the independent committee, not a\nhuman; the contract exists precisely so policy values never live in the code that applies them.\n- (d) A **priced override** rather than a bar — Finland's §73 shape, where the waiting period may be skipped\nby a higher threshold (5/6 where 2/3 passes). *Rejected as structurally undefined, not deferred:* an\noverride priced in headcount has no meaning at N=1 — 5/6 and 2/3 of one ratifier are the same ratifier — so\nit is not a coherent option in the present polity rather than an unaffordable one. It is already tracked\nwhere it belongs: #2564 Fork 5(b) ratified that a headcount quorum is adopted when the polity grows, so\nthis needs no new home here."
+              "body": "Create a dedicated bot/machine GitHub account and mint its own PAT for the fleet to use. GitHub's Terms of Service explicitly permit this (\"a machine account... set up by an individual human who accepts the Terms on behalf of the Account... used exclusively for performing automated tasks\"; one such account is allowed per person in addition to their own). Simpler to stand up than (a) — no app registration, no JWT/installation-token minting, just a second `gh auth login`. But its PAT is still a personal-access-token bucket: flat 5,000 requests/hour with no repo/user scaling, the SAME ceiling class as the operator's own account, not the higher App-installation class — less throughput than (a) for this account's shape. It also adds a second full human identity to manage long-term (its own 2FA and recovery email) and its one secret is a long-lived PAT whose leak exposes that account's full granted scope, versus (a)'s short-lived, narrowly-scoped, centrally-revocable token."
+            },
+            {
+              "label": "(c)",
+              "kind": "rejected",
+              "body": "Do nothing beyond #3670's per-call/per-minute throttle. *Rejected:* #3670 bounds bursts (the 900-points/minute secondary ceiling) and now the fleet's own steady-state volume (its 300-points/minute budget), but every one of those points is still drawn from the SAME shared 5,000-points/hour PRIMARY bucket the operator's own interactive `gh`/browser use draws from — the throttle caps how fast the fleet spends, never separates whose budget it spends from. That is exactly the failure this decision exists to fix: on 2026-09-22 the operator's OWN session, not a fleet worker, was the one refused, after the fleet's sanctioned, throttled usage had already drawn the shared bucket down. #3699's ruling is a genuine, complementary lever (cutting call volume via one shared reader instead of N pollers) but its own worst-case estimate (~2,400-4,500/hour) still lands inside the same 5,000/hour bucket the operator's manual use shares — it was never meant to, and does not, separate the credential."
+            },
+            {
+              "label": "(d)",
+              "kind": "rejected",
+              "body": "A fine-grained PAT, scoped narrowly, still issued under the operator's own personal account. *Rejected:* GitHub's rate-limit accounting keys on the authenticated USER, not the token's scope shape — a fine-grained PAT's requests \"count towards your personal rate limit of 5,000 requests per hour\" exactly like a classic PAT, confirmed in the same docs pass above. Narrower scopes shrink the BLAST RADIUS of a leaked token (worth doing regardless of this fork's outcome) but do nothing to separate the BUDGET — the fleet would still be spending the operator's own bucket, so this is not a genuinely different answer to this fork's question."
             }
           ],
           "notes": [
             {
-              "kind": "code",
-              "text": "// Fork 1 (a) — the declaration is DATA on a leash-registered surface. Shown in the existing contract, which\n// is already a POLICY_SPEC member (gate-config.mjs:355-374 → clearance: human, autoLand: false); registering\n// a new file in POLICY_SPEC_BASENAMES instead is equivalent and is an impl choice, not this ruling.\n{\n  \"constitution\": {\n    \"description\": \"The constitution tier and its amendment ceremony. Editing this block IS a constitutional amendment: the block sits inside the POLICY_SPEC leash, so it is human-only and whole-file pinned by construction (#2840 trigger 3) — the self-referential closure #2568's skeptic required, and the higher-order instrument Fork 5(i)'s exemption must be conferred by.\",\n    \"exemptFromSupersede\": true,           // clause (i): the ordinary #911 path does not reach these anchors\n    \"coolingPeriod\": \"P10D\",               // clause (ii) — a platform-default VALUE, not a ratified constant\n    \"recordRequired\": true,                // clause (iii): an amending decision item + its transcript report\n    \"anchors\": [\"<from #2568's curation>\"]  // WHICH anchors are constitution-tier — #2568's call\n  }\n}\n// (b) excluded — an unregistered file (or a self-protecting statute block) is agent-clearable today.\n// (c) excluded — review-escalation.mjs is ratified agent-clearable derivation code (#2771 clause 1)."
-            },
-            {
               "kind": "text",
-              "text": "**Known occurrences.** This is how entrenchment is made to bind in practice, and the pattern is \"conferred\nfrom outside, enforced by something the protected party cannot edit\": the UK's constitutional-statute\ncategory is assigned by the courts, not claimed by the statute (`Thoburn`; Magna Carta, the Bill of Rights\n1689, the Acts of Union, the Human Rights Act 1998 are the named members), and `AG for NSW v Trethowan`'s\nself-referential referendum lock bound future parliaments **only** because a higher-order instrument\nauthorised it. Germany's Article 79(3) and Brazil's *cláusulas pétreas* are the textual-eternity variants,\nboth enforced by a constitutional court — again from outside. **These are analogy, not authority:** the\nargument that decides this fork is the repo-native one — #2771 makes the rubric agent-clearable and #2840\nmakes the leash human-only-and-pinned."
+              "text": "**Default: (a).** A GitHub App installation, authenticated app-to-server via its installation access token, is the only option confirmed above to give the fleet a rate-limit bucket genuinely independent of the operator's personal account, and it is larger, not merely separate, on this account's own repo count. The one-time app registration and auth-layer swap is real cost, but it is paid once at the auth layer — #3670's existing wrapper centralizes the call sites already. (b) is simpler to stand up but is dominated on both throughput ceiling and secret blast-radius; (c) leaves the exact failure that triggered this decision unaddressed; (d) doesn't touch the actual axis (whose bucket, not which scopes)."
             }
           ],
-          "skeptic": "**REFUTED → default flipped.** A throwaway skeptic sub-agent ran the four-axis prompt against the\nfirst draft, told to default to \"this default is wrong.\" It found the governance cluster above (#2771 /\n#2785 / #2839 / #2840 / #2851) — **zero hits on a grep of this item and #2568 together** — and refuted the\noriginal default outright: it had placed the constitution's only real protection in\n`we:scripts/lib/review-escalation.mjs`, the file #2771 ratified agent-clearable, so an AI panel could have\nemptied the check with no human involved. It also caught the mirror-image incoherence: the draft *rejected*\nthe contract as insufficiently protected while homing the day-count in an ungated new file — a strictly\nhigher bar applied to the number than to the gate enforcing it. Every claim was verified against the tree\nbefore folding.",
-          "screen": "**flagged(impl) → fixed.** The fresh-context re-screen (a separate agent, no visibility into this\nsession's authoring) independently verified the roster claims in `we:scripts/lib/gate-config.mjs` and\nconfirmed the premise, then flagged the fork's *shape*: as written it offered three named JSON files as\nbranches, and since \"the gating property is not intrinsic to either file, it is conferred by a roster entry\",\nwhat remained inside the fork after the forced invariant was \"which already-or-newly-pinned file holds the\nblock\" — implementation altitude — while the principle with teeth sat in the excluded-branch preamble rather\nthan in the ruling. **Fixed by re-shaping the fork to rule the surface *class*** (leash member vs not), with\nthe file choice explicitly demoted to the follow-on PR. Q2 was clear on both passes: (c) is refuted on\nratified authority and (b) stays defeatable however cheap maintenance is, so the difference is\nauthority and correctness, not effort.",
-          "parseOk": false,
-          "warning": "Fork 1: no option marked RECOMMENDED — default could not be identified."
-        },
-        {
-          "n": 2,
-          "crux": "The cooling clock: which timestamp it may read, what cancels it, and its floor",
-          "why": "*Fork exists (forced invariant): the excluded branch — **a clock whose input the gated actor can set** — is\n**broken**, and the item's own cited authority is what breaks it. #2978 rules that an emitter-written value\n\"authenticates nothing\" (`we:docs/agent/platform-decisions.md:3496`). A git committer date is emitter-written\n(`GIT_COMMITTER_DATE=… git commit` sets it to anything), a start date recorded in the record is self-reported\nby definition, and `Date.now()` is wall clock. Support-both is unavailable here in a way worth stating: two\naccepted clock inputs means the gated actor picks the weaker one, which *is* the vulnerability. Exactly one\ntimestamp can define one interval, so the choice among inputs is a real either/or.*",
-          "options": [
-            {
-              "label": "(a)",
-              "kind": "rejected",
-              "body": "**The server-side merge timestamp of the PR that landed the amendment's record, read from the forge\nAPI. A substantive change to the proposed amendment text **cancels** the period — a new record starts a new\nclock, it does not resume. The interval must **exceed one continuous working stretch**. And the gate\n**parks** the PR with its ripe-at date stated, rather than hard-refusing.** **DEFAULT.** The merge timestamp\nis the only date in the flow the amending actor does not write: it is stamped by the forge, after the record\nhas already passed the ordinary gate, and it cannot be backdated without rewriting history the drain and CI\nboth observe. **Cancel, not restart** is the verified Rust FCP behaviour — a substantive new argument does\nnot reset the countdown, \"the FCP is canceled, and the RFC goes back into development mode\" — and it is\nstrictly stronger than a restart against the attack that matters: landing a placeholder record, letting the\nclock run, and swapping in the real text at the end. It also avoids a defect the first draft shipped:\n`git log -1` returns the *latest* commit touching the path, so a git-date clock silently *restarts* on any\ntouch, the exact opposite of the rule it was meant to encode. \"Substantive\" is the test the repo already\napplies to a spec — any diff to the proposed amendment text, prose included\n(`we:docs/agent/platform-decisions.md:2962-2963`). **The floor is ruled, not configured:** the interval must\nexceed one continuous working stretch, because that is the single failure #2564 Fork 5(a)(ii) named (\"a\nsingle actor re-reading a self-proposal minutes later\"), and it is the only constraint on the duration that\nsurvives a zero-cost strip — which is exactly why the *value* above it is configuration (see \"Settled, not\nforks\") and this bound is not. It is also scope-independent, so a project may only ever tighten the value.\n**Park, not hard-block, is required by a sibling anchor rather than chosen:**\n`#blast-radius-advisory-care-not-a-gate` rules that where a signal is tightened to a gate, \"`gate` means\nroute-to-a-human, never hard-block-with-no-reviewer\" (`we:docs/agent/platform-decisions.md:2883`). So an\nun-ripe amendment PR is *parked with its ripe-at date surfaced*, on the existing `review:human` hold — a\nstate a human can see and act on — never a refusal with no path.\n- (b) The record file's **git committer date** (`git log -1 --format=%cI`). *Rejected:* settable by one\nenvironment variable, by the very actor the clause gates — cheaper to forge than the session id this item\nelsewhere honest-costs — and it restarts on any touch, as above.\n- (c) A **self-reported start date** recorded in the record itself. *Rejected on #2978 directly* — the emitter\nwriting its own start date is the shape that anchor exists to refuse. Dropped from the record template\naccordingly.\n- (d) A **non-authoring-session condition** (the ratifying session must not be the authoring one) as an\nadditional structural requirement. *Rejected — it cannot fire on this class of PR, and that is ratified\ndesign, not oversight.* A constitution amendment touches the statute, so it routes `review:human`, and the\nonly clear path for a `review:human` PR is `--to=clear-human`, which\n`we:scripts/lib/review-independence.mjs:42-48` **explicitly exempts** from the self-clear refusal — an\nexemption the file documents as load-bearing, because \"the operator's own `/review` ceremony shells the CLI\nfrom inside the very session that opened the PR.\" The same file records that **a subagent inherits its\nparent's session id** (`we:scripts/lib/review-independence.mjs:301-307`), so no throwaway agent satisfies\nit either. Adding the condition would be inert at best and would deadlock the sanctioned operator path at\nworst. **What replaces it, and is real:** the `clear-human` ceremony already demands an explicit `--actor`\nand a quoted `--reason` posted verbatim as a durable comment, and the entrenched path additionally requires\n`redteam:accepted`, the independent-validator label (`we:scripts/lib/review-escalation.mjs:42`)."
-            }
-          ],
-          "notes": [
-            {
-              "kind": "code",
-              "text": "// Fork 2 (a) — the clock, as review-escalation.mjs would evaluate it (extension, not built here).\n// Every input is forge-side or base-vs-head; none is written by the actor being gated.\nimport { addIsoDuration } from './research-freshness.cjs';        // the repo's only calendar arithmetic\nif (proposedTextChangedSinceRecord(amendment))                    // base-vs-head on the record's diff block\n  return park('constitution: cooling period CANCELED — re-record and restart');\nconst openedAt = prMergedAt(amendment.recordPr);                  // forge API, not GIT_COMMITTER_DATE\nconst ripeAt   = addIsoDuration(new Date(openedAt), policy.constitution.coolingPeriod);\nif (Date.now() < ripeAt)\n  return park(`constitution: cooling until ${ripeAt.toISOString().slice(0,10)}`);  // park, never refuse (#2563)\n// (b) git committer date and (c) a self-reported start date are both settable by the gated actor.\n// (d) a non-authoring-session check cannot fire: `clear-human` is exempt from the self-clear refusal."
-            },
-            {
-              "kind": "text",
-              "text": "**Known occurrences.** Mandated pre-decision intervals are standard governance equipment and the attested\nband is narrow: Apache's 72-hour voting minimum, Rust's 10-day Final Comment Period, IETF Last Call at two\nweeks (four for individual submissions), Debian's bounded two-to-three-week window, W3C's 28-day Advisory\nCommittee review. Debian's is the most implementable restart design in the survey — new input resets the\nclock but never past a hard ceiling, so drip-fed objections cannot filibuster. **The instructive\ncounter-example is TC39, which has no waiting period at all** (its gate is unanimity among independent\ndelegations), worth recording because it shows an interval is not self-evidently required; it does not\nreopen the clause, since #2564 Fork 5 already ratified that one exists and unanimity is the substitute\nunavailable solo."
-            }
-          ],
-          "skeptic": "**REFUTED → default flipped, twice over.** The skeptic destroyed the first draft's clock on its\nown cited authority: the draft asserted the git commit date was \"never a self-reported field, because an\nemitter-written date authenticates nothing (#2978)\" — but a committer date *is* emitter-written, so the\nrationale falsified the mechanism it defended, and `git log -1` restarts rather than cancels. It separately\nshowed the non-authoring-session condition is unreachable on `review:human` PRs (the `clear-human` exemption,\nplus subagent session inheritance), verified in the file before folding. Both were fixed by moving to the\nforge-stamped merge timestamp and by replacing the condition with ceremony signals that already exist. The\nskeptic also surfaced `#blast-radius-advisory-care-not-a-gate`'s route-to-a-human clause, which the draft's\nhard `refuse(...)` violated — folded as park-with-a-ripe-date.",
-          "screen": "**flagged(prio) → fixed by re-shaping the fork; re-screen clear.** The first screen flagged the\npredecessor of this fork: its branches were four *integers* (10 / 28 / 14 / 3), and under the zero-cost\nhypothetical the only downside of the longest was waiting longer — pure throughput — while the rejection of\n14 was \"underived\", a provenance preference rather than a merit axis. It observed that the parts genuinely\ncarrying merit \"appear in no rival branch at all, which is the signature of a forced invariant\", and\nprescribed re-shaping around the clock's *structure* with the day-count demoted to a platform-default value.\nThat was done. The re-screen then cleared both questions on the rewritten fork — Q1 because \"under (b) an\nactor sets `GIT_COMMITTER_DATE` and the amendment ripens immediately\", a divergence anyone who attempts it\nobserves; Q2 because \"a clock whose input the gated actor writes is defeatable no matter how free maintenance\nis.\" It noted the fork now reads closer to a forced invariant than an either/or, which is accepted: the\nfork-existence line above states it as a forced invariant.",
-          "parseOk": false,
-          "warning": "Fork 2: no option marked RECOMMENDED — default could not be identified."
-        },
-        {
-          "n": 3,
-          "crux": "Project scope: the surface a subordinate constitution joins the tier through",
-          "why": "*Fork exists (forced invariant): the excluded branch — **a project declares itself into the tier from its own\nfile** — is **broken**. `we:src/_data/projects/` matches nothing in the escalation roster (blast-radius\ncovers only `src/_data/{blocks,plugs,intents,protocols,semantics}.json`,\n`we:scripts/lib/review-escalation.mjs:252`), so a project could opt **into or out of** the constitution tier\nvia an ordinary agent-clearable PR — reproducing verbatim, at project scope, the membership laundering\n#2568's skeptic closed at platform scope\n(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:102-106`). A tier you can\njoin and leave by an unwatched edit is not a tier. Membership by **artifact name or repository location** is\nbroken for the same family of reason plus one more — it would make membership depend on a filename in repos\nWE does not gate, so any repo could unilaterally entrench arbitrary prose, and could evade the ceremony with\na rename.*\n\n#2564 already ratified that subordinate tiers **exist** — \"Tiers exist at platform scope (supreme) and\nper-project scope (subordinate — a project constitution derives from and may not contradict the platform\none); the amendment gate and consistency check scale with scope\"\n(`we:docs/agent/platform-decisions.md:2969-2970`). What it left open, and this fork settles, is the surface\nmembership is asserted on.\n\n**A grounding correction this fork turns on.** #2564's \"project\" is a **WE standards project** — the\n`ownedByProject` owner of intents and protocols, e.g. `webrealtime`\n(`we:backlog/2564-adopt-spec-based-programming-across-the-constellation-schema.md:126-131`); 46 of them live\nunder `we:src/_data/projects/`. It does **not** mean a constellation repo. That matters because a real\ndocument already exists at `plateau-app:constitution.md` — published at a public `/constitution` route by\n`plateau-app:packages/saas/src/marketing/constitution.ts`, which bundles the repo-root file so the page\ncannot drift from the doc (single-authoring-SoT and a derived projection, already correctly applied). It is a\n**product north-star** that explicitly disclaims build decisions (\"It does **not** decide how we build\nanything\"), so it is a different artifact class sharing a word. Under the default below it is outside the\ntier by construction — a vocabulary collision worth disambiguating, not a governance breach.",
-          "options": [
-            {
-              "label": "(a)",
-              "kind": "rejected",
-              "body": "**A project joins the tier by being listed in the platform-scope declaration — the `constitution` block\non the leash surface (Fork 1(a)) — so joining or leaving is itself a platform-tier act carrying the full\nceremony. The project's own file may then hold its stricter anchors, but its membership is not\nself-asserted.** **DEFAULT.** This is the federal/state relation applied rather than re-invented: a state\nconstitution is one because a ratifying process at the higher level made it one, not because the document\nsays so. It closes the laundering hole at project scope with the same mechanism that closes it at platform\nscope, instead of leaving the lower tier protected by nothing. **The honest current answer to #2564's open\nsub-question** (\"whether a project needs an explicit constitution artifact at all, or only gets one when it\nasserts principles beyond the platform's\",\n`we:backlog/2564-adopt-spec-based-programming-across-the-constellation-schema.md:138-140`) follows: **no\nproject is listed, so project scope is defined-but-unpopulated** — the ceremony is specified so the first\nproject to assert a principle beyond the platform's has a gate to walk through, and nothing is built until\none does.\n- (b) **Self-declaration in the project's own `we:src/_data/projects/<id>.json`.** *Rejected* on the forced\ninvariant above — an ungated surface today. It could be rescued by adding `we:src/_data/projects/` to the\n`POLICY_SPEC` leash, and that variant is rejected on merit rather than cost: pinning 46 ordinary metadata\nfiles as human-gated whole files widens the human gate far past genuine judgment, which\n`#human-required-is-judgment-only` (`we:docs/agent/platform-decisions.md:3430`) reserves it for. (a)\nachieves the same protection with one already-pinned block.\n- (c) Membership by **name or location** — any repo-root constitution document in a constellation repo.\n*Rejected* on the forced invariant above; it would also pull `plateau-app:constitution.md` into a ceremony\ndesigned for conduct principles, which is not what that document is.\n- (d) **No project scope at all** — one constellation constitution, projects get specs only. *Rejected:*\n#2564 ratified subordinate tiers (`we:docs/agent/platform-decisions.md:2969-2970`); removing them is a\nreversal of a ratified call, which is its own #911 supersede decision with its own lineage — not something\nthis item may do in passing."
-            }
-          ],
-          "notes": [
-            {
-              "kind": "code",
-              "text": "// Fork 3 (a) — membership is asserted at PLATFORM scope, on the pinned leash surface, so entry and exit are\n// themselves constitutional acts. Alongside the `constitution` block of Fork 1(a):\n{\n  \"constitution\": {\n    \"anchors\": [\"<platform-tier anchors, from #2568>\"],\n    \"projects\": {                       // EMPTY today — the tier is defined but unpopulated\n      // \"webrealtime\": { \"anchors\": [\"…\"], \"coolingPeriod\": \"P14D\" }  // may only TIGHTEN (#2564 federation)\n    }\n  }\n}\n// (b) excluded — src/_data/projects/<id>.json is matched by no roster pattern, so a project would both\n// entrench and un-entrench itself through an ordinary agent-cleared PR."
-            },
-            {
-              "kind": "text",
-              "text": "**Known occurrences.** The federal/state relation #2564 cites is the standard model, and its defining feature\nis exactly declared-at-the-higher-level membership plus a supremacy clause. The same shape appears in\nsoftware federation: a Kubernetes SIG's charter binds because the org's governance repo lists it, not because\na charter file exists in some repo."
-            }
-          ],
-          "skeptic": "**REFUTED → default flipped.** The first draft made a project enter the tier by declaring a\n`constitution` block in its own `we:src/_data/projects/<id>.json`. The skeptic showed that path matches\nnothing in the escalation roster (verified at `we:scripts/lib/review-escalation.mjs:252`), so a project would\nboth entrench and un-entrench itself through an ordinary agent-cleared edit — the exact laundering hole\n#2568's skeptic had closed one scope up, reproduced and left open. The default flipped to membership asserted\nat platform scope on the pinned leash surface. The skeptic separately routed the draft's interval-scaling\nsub-fork to `#config-extends-platform-default`, which is correct and removed it from this fork.",
-          "screen": "**clear on both passes.** Q1: the adversarial read (\"a key in one JSON versus a key in another, and\nthe map is empty today\") fails, because \"the rule allocates *who may change membership*\" — an authority\ncontract spanning platform and project scope, observable to anyone who opens such a PR. Q2: support-both is\nunavailable, because a union rule \"means a project self-enters *and* self-exits by the same ungated edit,\nwhich reinstates the laundering hole intact\", and (c) actively contradicts (a) on the same artifact. The\nre-screen specifically checked whether (b)'s rejection had cost creeping in and confirmed it lands on merit\nvia `#human-required-is-judgment-only`.",
-          "parseOk": false,
-          "warning": "Fork 3: no option marked RECOMMENDED — default could not be identified."
+          "skeptic": "Attacked (a)'s premise that \"a GitHub App\" alone means a separate bucket — the docs' own worked example shows a GitHub App authorized *on a user's behalf* shares that user's bucket instead, which would have silently defeated this decision if unnoticed. Fixed by naming the app-to-server / installation-token requirement explicitly in (a)'s own body, not left implicit. Also attacked whether (c) is really inadequate now that #3670 ships a 300-points/minute budget: confirmed #3699's own worst-case load (~4,500/hour) still fits under 5,000/hour alone, but that headroom is shared with the operator's own manual use, which is exactly what was refused on 2026-09-22 — the throttle governs how fast the fleet spends, never from whose account. Holds.",
+          "screen": "Infra-credential governance (which GitHub identity the fleet's automation authenticates as) — decidable in-repo, no WE platform-standard boundary at stake. The differences named (separate vs. shared bucket, scaling ceiling, secret blast-radius, one-time setup cost) are real functional merit differences, not a timing or prioritization call in fork costume. Clear.",
+          "parseOk": true,
+          "warning": null
         }
       ],
       "gate": null,
-      "doneWhen": [],
-      "parseOk": false,
-      "warnings": [
-        "Fork 1: no option marked RECOMMENDED — default could not be identified.",
-        "Fork 2: no option marked RECOMMENDED — default could not be identified.",
-        "Fork 3: no option marked RECOMMENDED — default could not be identified."
-      ]
-    },
-    {
-      "num": "3732",
-      "title": "Decision: where backlog ids are assigned so a temporary hash id is structurally unable to reach main",
-      "prepared": false,
-      "preparedDate": null,
-      "leverageScore": 0,
-      "directUnblocks": 0,
-      "transitiveUnblocks": 0,
-      "unblocksToReady": 0,
-      "pr": {
-        "number": 2435,
-        "state": "open",
-        "kind": "preparation",
-        "title": "prepare #3732: backlog id numbering point to Definition of Ready",
-        "url": "https://github.com/chalbert/web-everything/pull/2435",
-        "repo": "chalbert/web-everything"
-      },
-      "blockedBy": [],
-      "dateOpened": "2026-09-19",
-      "ageInDays": 3,
-      "digest": [],
-      "forks": [],
-      "gate": null,
-      "doneWhen": [],
-      "parseOk": true,
-      "warnings": []
-    },
-    {
-      "num": "3734",
-      "title": "May agent-family and benchmark data act as a capped prior toward supervision graduation?",
-      "prepared": false,
-      "preparedDate": null,
-      "leverageScore": 0,
-      "directUnblocks": 0,
-      "transitiveUnblocks": 0,
-      "unblocksToReady": 0,
-      "pr": {
-        "number": 2429,
-        "state": "open",
-        "kind": "preparation",
-        "title": "prepare #3734: drop PR-number form that read as a backlog ref (G8)",
-        "url": "https://github.com/chalbert/web-everything/pull/2429",
-        "repo": "chalbert/web-everything"
-      },
-      "blockedBy": [],
-      "dateOpened": "2026-09-20",
-      "ageInDays": 2,
-      "digest": [],
-      "forks": [],
-      "gate": null,
-      "doneWhen": [],
+      "doneWhen": [
+        "1. **Observable** — `grep -l '^## Ruling' backlog/3866*.md` lists this card (it fails until the operator has ratified Fork 1's chosen option).",
+        "2. **Follow-on** — once ratified, the chosen path — an App registration + auth-layer swap (a), a bot-account PAT (b), or an explicit no-build (c)/(d) — is carved into a build story under #3383, `blockedBy` this decision, before this card resolves."
+      ],
       "parseOk": true,
       "warnings": []
     }
