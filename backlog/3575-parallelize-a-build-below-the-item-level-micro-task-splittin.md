@@ -5,7 +5,7 @@ parent: "3383"
 status: open
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js", "we:skills-src/split-backlog-item/SKILL.md", "we:scripts/operations/explore.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-07"
-relatedTo: ["3820", "3816", "3779", "xxxraos"]
+relatedTo: ["3820", "3816", "3779", "3922"]
 tags: [parallel, dispatch, split, workflow, conveyor]
 ---
 
