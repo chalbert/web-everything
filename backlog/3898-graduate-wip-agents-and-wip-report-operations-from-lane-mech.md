@@ -1,9 +1,10 @@
 ---
+bornAs: xao8xbi
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["3856", "xnyz371"]
+blockedBy: ["3856", "3897"]
 scope: ["we:scripts/operations/__tests__/wip-agents-io.test.mjs", "we:scripts/operations/__tests__/wip-agents.test.mjs", "we:scripts/operations/__tests__/wip-report-compact.test.mjs", "we:scripts/operations/__tests__/wip-report-io-real.test.mjs", "we:scripts/operations/__tests__/wip-report-io.test.mjs", "we:scripts/operations/__tests__/wip-report-queue.test.mjs", "we:scripts/operations/__tests__/wip-report.test.mjs", "we:scripts/operations/wip-agents-cli.mjs", "we:scripts/operations/wip-agents-io.mjs", "we:scripts/operations/wip-agents.mjs", "we:scripts/operations/wip-report-cli.mjs", "we:scripts/operations/wip-report-io.mjs", "we:scripts/operations/wip-report-queue.mjs", "we:scripts/operations/wip-report.mjs", "we:scripts/operations/__fixtures__/wip-agents/", "we:scripts/operations/__fixtures__/wip-report/", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []

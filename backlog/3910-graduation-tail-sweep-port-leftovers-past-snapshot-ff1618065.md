@@ -1,8 +1,9 @@
 ---
+bornAs: xchvd5s
 kind: task
 parent: "3443"
 status: open
-blockedBy: ["3487", "3862", "3863", "3485", "xl9vvqj", "x6j8mi0", "xcx5m0x", "xte9opm", "xysg9z7", "x67773u", "x9lo11a"]
+blockedBy: ["3487", "3862", "3863", "3485", "3894", "3899", "3896", "3900", "3909", "3904", "3905"]
 scope: ["we:AGENTS.md", "we:agent-memory-src/index-meta.md", "we:docs/agent/backlog-workflow.md", "we:docs/agent/dispatcher-runbook.md", "we:docs/agent/platform-decisions.md", "we:docs/agent/testing.md", "we:scripts/conveyor/run-scorecards.json", "we:backlog/3443-graduate-origin-lane-mechanical-dispatcher-to-main-in-small.md"]
 dateOpened: "2026-09-22"
 tags: []

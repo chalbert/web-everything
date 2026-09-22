@@ -217,18 +217,18 @@ How each slice (a child of this item) graduates, per the statute
   works** — every new card was filed with `--queue=false`.
 
   Waves (blockers in each card's `blockedBy`):
-  - **A (leaves):** xvrxwha coordination+action · xm24wzq telemetry · xnyz371 dispatch contracts ·
-    x4paeb9 priority/tracker libs · x87gqii run-quality · xzha7g1 conveyor watches · xl9vvqj gemini-direct-task ·
-    x28e3i6 guard-bash · 3854 land-advance core.
-  - **B:** 3855 · 3863 · xb9av7z delivery foundation · xgacnhr judges/review-pr · 3865 · x0mu20g restart-runner+priority-sync.
-  - **C:** x4rkpuk deliver-item → x67773u fix/ci-heal wrappers, x9lo11a prepare wrappers · 3856.
-  - **D:** xbunbsg dispatch path → xvknnyb review loop · 3862 · xao8xbi wip-agents/report.
-  - **E:** 3487 (**re-scoped to the runtime core, size 8**, one manual tick before any loop) · xysg9z7 tracker/turn-digest ·
-    x6j8mi0 host sampler (after 3487, still changing on 09-21) · xcx5m0x usage-report · xte9opm validate-and-promote.
-  - **Tail:** xchvd5s re-diffs against the moved tip, ports the docs, and closes this epic.
+  - **A (leaves):** 3901 coordination+action · 3895 telemetry · 3897 dispatch contracts ·
+    3891 priority/tracker libs · 3893 run-quality · 3911 conveyor watches · 3894 gemini-direct-task ·
+    3890 guard-bash · 3854 land-advance core.
+  - **B:** 3855 · 3863 · 3902 delivery foundation · 3907 judges/review-pr · 3865 · 3892 restart-runner+priority-sync.
+  - **C:** 3903 deliver-item → 3904 fix/ci-heal wrappers, 3905 prepare wrappers · 3856.
+  - **D:** 3906 dispatch path → 3908 review loop · 3862 · 3898 wip-agents/report.
+  - **E:** 3487 (**re-scoped to the runtime core, size 8**, one manual tick before any loop) · 3909 tracker/turn-digest ·
+    3899 host sampler (after 3487, still changing on 09-21) · 3896 usage-report · 3900 validate-and-promote.
+  - **Tail:** 3910 re-diffs against the moved tip, ports the docs, and closes this epic.
 
-  Critical path: xnyz371 → xb9av7z → x4rkpuk → xbunbsg → xvknnyb → 3487. Ordering bugs fixed on the existing
-  cards: `we:scripts/operations/land-advance-items.mjs` moved from 3865 into 3854; 3856 now also waits on 3865 and x4paeb9;
-  3863 waits on xvrxwha; 3865 no longer waits on decision 3864 (ratified; it resolves when 3865+3856 land);
-  3862 waits on xbunbsg and xgacnhr. `we:scripts/operations/run.mjs` and the http-adapter pin are shared: each slice appends only
+  Critical path: 3897 → 3902 → 3903 → 3906 → 3908 → 3487. Ordering bugs fixed on the existing
+  cards: `we:scripts/operations/land-advance-items.mjs` moved from 3865 into 3854; 3856 now also waits on 3865 and 3891;
+  3863 waits on 3901; 3865 no longer waits on decision 3864 (ratified; it resolves when 3865+3856 land);
+  3862 waits on 3906 and 3907. `we:scripts/operations/run.mjs` and the http-adapter pin are shared: each slice appends only
   its own lines.

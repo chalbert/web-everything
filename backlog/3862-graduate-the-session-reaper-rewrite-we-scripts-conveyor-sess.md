@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3855", "3856", "xbunbsg", "xgacnhr"]
+blockedBy: ["3855", "3856", "3906", "3907"]
 scope: ["we:scripts/conveyor/session-reap-plan.mjs", "we:scripts/conveyor/session-reap-stop.mjs", "we:scripts/conveyor/session-reap-evidence.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/__tests__/session-reap-plan.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-finished-cli.test.mjs", "we:scripts/operations/clear-stuck-session.mjs", "we:scripts/operations/clear-stuck-session-io.mjs", "we:scripts/operations/__tests__/clear-stuck-session.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
@@ -30,4 +30,4 @@ Ports #3721's reaper rewrite: we:scripts/conveyor/session-reap-plan.mjs (285 lin
 
 ## Step 0 re-plan (2026-09-22)
 
-Added blockers xbunbsg and xgacnhr: `we:scripts/conveyor/session-reap-stop.mjs` uses the branch versions of `we:scripts/operations/dispatch-lane-io.mjs` and `we:scripts/operations/cli-adapter.mjs`. Also owns the branch diffs to `we:scripts/operations/clear-stuck-session.mjs` and `we:scripts/operations/clear-stuck-session-io.mjs`.
+Added blockers 3906 and 3907: `we:scripts/conveyor/session-reap-stop.mjs` uses the branch versions of `we:scripts/operations/dispatch-lane-io.mjs` and `we:scripts/operations/cli-adapter.mjs`. Also owns the branch diffs to `we:scripts/operations/clear-stuck-session.mjs` and `we:scripts/operations/clear-stuck-session-io.mjs`.

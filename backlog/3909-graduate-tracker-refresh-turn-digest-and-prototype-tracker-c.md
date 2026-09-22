@@ -1,9 +1,10 @@
 ---
+bornAs: xysg9z7
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["xao8xbi", "x0mu20g", "x4paeb9"]
+blockedBy: ["3898", "3892", "3891"]
 scope: ["we:scripts/__tests__/fixtures/prototype-tracker-full.golden.html", "we:scripts/lib/prototype-tracker-compact-io.mjs", "we:scripts/operations/__tests__/tracker-refresh-real.test.mjs", "we:scripts/operations/__tests__/tracker-refresh.test.mjs", "we:scripts/operations/__tests__/turn-digest.test.mjs", "we:scripts/operations/tracker-refresh-io.mjs", "we:scripts/operations/tracker-refresh-state.mjs", "we:scripts/operations/tracker-refresh.mjs", "we:scripts/operations/turn-digest-io.mjs", "we:scripts/operations/turn-digest.mjs", "we:scripts/prototype-tracker.mjs", "we:skills-src/prototype-tracker/SKILL.md", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []

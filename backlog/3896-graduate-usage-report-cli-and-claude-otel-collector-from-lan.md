@@ -1,9 +1,10 @@
 ---
+bornAs: xcx5m0x
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["xm24wzq", "x28e3i6"]
+blockedBy: ["3895", "3890"]
 scope: ["we:scripts/operations/__tests__/claude-otel-collector.test.mjs", "we:scripts/operations/claude-otel-collector.mjs", "we:scripts/usage-report/.env.example", "we:scripts/usage-report/README.md", "we:scripts/usage-report/__tests__/usage-report.test.mjs", "we:scripts/usage-report/usage-report.mjs", "we:scripts/usage-report/__tests__/usage-ledger.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []

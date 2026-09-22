@@ -1,9 +1,10 @@
 ---
+bornAs: x6j8mi0
 kind: story
 size: 8
 parent: "3443"
 status: open
-blockedBy: ["xao8xbi", "xm24wzq", "3854", "3487"]
+blockedBy: ["3898", "3895", "3854", "3487"]
 scope: ["we:scripts/operations/__tests__/host-sampler-attribution.test.mjs", "we:scripts/operations/__tests__/host-sampler-capacity.test.mjs", "we:scripts/operations/__tests__/host-sampler-classes.test.mjs", "we:scripts/operations/__tests__/host-sampler-episodes.test.mjs", "we:scripts/operations/__tests__/host-sampler-extras.test.mjs", "we:scripts/operations/__tests__/host-sampler-install.test.mjs", "we:scripts/operations/__tests__/host-sampler-large-file.test.mjs", "we:scripts/operations/__tests__/host-sampler-retention.test.mjs", "we:scripts/operations/__tests__/host-sampler-rollup.test.mjs", "we:scripts/operations/__tests__/host-sampler.test.mjs", "we:scripts/operations/__tests__/load-analysis.test.mjs", "we:scripts/operations/__tests__/load-review.test.mjs", "we:scripts/operations/host-sampler-attribution.mjs", "we:scripts/operations/host-sampler-calibrate.mjs", "we:scripts/operations/host-sampler-classes.mjs", "we:scripts/operations/host-sampler-episodes.mjs", "we:scripts/operations/host-sampler-extras.mjs", "we:scripts/operations/host-sampler-install.mjs", "we:scripts/operations/host-sampler-retention.mjs", "we:scripts/operations/host-sampler-rollup.mjs", "we:scripts/operations/host-sampler-selfcheck.mjs", "we:scripts/operations/host-sampler-tail.mjs", "we:scripts/operations/host-sampler.mjs", "we:scripts/operations/load-analysis.mjs", "we:scripts/operations/load-report-cli.mjs", "we:scripts/operations/load-review.mjs"]
 dateOpened: "2026-09-22"
 tags: []

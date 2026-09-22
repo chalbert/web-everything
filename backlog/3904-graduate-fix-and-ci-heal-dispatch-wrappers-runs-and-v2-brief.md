@@ -1,9 +1,10 @@
 ---
+bornAs: x67773u
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["x4rkpuk"]
+blockedBy: ["3903"]
 scope: ["we:scripts/operations/__tests__/ci-heal-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs", "we:scripts/operations/ci-heal-dispatch-wrapper.mjs", "we:scripts/operations/ci-heal-run.mjs", "we:scripts/operations/fix-dispatch-wrapper.mjs", "we:scripts/operations/fix-run.mjs", "we:skills-src/conveyor/ci-heal-agent-brief-v2.md", "we:skills-src/conveyor/fix-agent-brief-v2.md", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md"]
 dateOpened: "2026-09-22"
 tags: []

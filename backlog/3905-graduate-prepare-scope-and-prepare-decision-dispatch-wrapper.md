@@ -1,9 +1,10 @@
 ---
+bornAs: x9lo11a
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["x4rkpuk"]
+blockedBy: ["3903"]
 scope: ["we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs", "we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs", "we:scripts/operations/prepare-decision-run.mjs", "we:scripts/operations/prepare-decision-wrapper.mjs", "we:scripts/operations/prepare-scope-run.mjs", "we:scripts/operations/prepare-scope-wrapper.mjs", "we:skills-src/conveyor/prepare-decision-agent-brief-v2.md", "we:skills-src/conveyor/prepare-decision-agent-brief.md", "we:skills-src/conveyor/prepare-scope-agent-brief-v2.md", "we:skills-src/conveyor/prepare-scope-agent-brief.md"]
 dateOpened: "2026-09-22"
 tags: []

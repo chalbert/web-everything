@@ -1,9 +1,10 @@
 ---
+bornAs: x4rkpuk
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["xb9av7z", "x87gqii"]
+blockedBy: ["3902", "3893"]
 scope: ["we:scripts/operations/__tests__/completion-cli.test.mjs", "we:scripts/operations/__tests__/completion-record.test.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs", "we:scripts/operations/__tests__/delivery-agent-marker.test.mjs", "we:scripts/operations/completion-cli.mjs", "we:scripts/operations/completion-record.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/delivery-agent-marker.mjs", "we:scripts/operations/delivery-report-store.mjs", "we:skills-src/conveyor/delivery-agent-brief-v2.md", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-22"
 tags: []

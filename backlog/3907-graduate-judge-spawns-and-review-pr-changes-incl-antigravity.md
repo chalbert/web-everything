@@ -1,9 +1,10 @@
 ---
+bornAs: xgacnhr
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["xvrxwha", "x87gqii", "xnyz371"]
+blockedBy: ["3901", "3893", "3897"]
 scope: ["we:scripts/lib/__tests__/antigravity-judge-spawn.integration.test.mjs", "we:scripts/lib/__tests__/antigravity-judge-spawn.test.mjs", "we:scripts/lib/__tests__/codex-judge-spawn.test.mjs", "we:scripts/lib/__tests__/judge-panel.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs", "we:scripts/lib/__tests__/review-core.test.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/antigravity-judge-spawn.mjs", "we:scripts/lib/codex-judge-spawn.mjs", "we:scripts/lib/judge-panel.mjs", "we:scripts/lib/judge-spawn.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/review-core.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/lib/review-render.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs", "we:scripts/operations/__tests__/review-pr-io.test.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/record-verdict-io.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/operations/review-pr-io.mjs", "we:scripts/operations/review-pr.mjs", "we:skills-src/review/review-agent-brief.md", "we:scripts/operations/__tests__/judge-provider-port.test.mjs", "we:scripts/operations/__tests__/judge-provider-selection.test.mjs", "we:scripts/operations/__tests__/juror-flags.test.mjs", "we:scripts/operations/__tests__/record-verdict-cli.test.mjs", "we:scripts/operations/__tests__/helpers/fake-claude.mjs", "we:scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt"]
 dateOpened: "2026-09-22"
 tags: []

@@ -1,9 +1,10 @@
 ---
+bornAs: xvknnyb
 kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["xbunbsg", "x67773u", "xgacnhr"]
+blockedBy: ["3906", "3904", "3907"]
 scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/autofix-review-findings.test.mjs", "we:scripts/conveyor/__tests__/fix-autofix-gate.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/advisory-round-count.mjs", "we:scripts/conveyor/autofix-review-findings.mjs", "we:scripts/conveyor/fix-autofix-gate.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/operations/review-dispatch-wrapper.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []

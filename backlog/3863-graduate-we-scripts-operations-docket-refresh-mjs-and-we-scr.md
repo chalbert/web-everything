@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["xvrxwha"]
+blockedBy: ["3901"]
 scope: ["we:scripts/operations/docket-refresh.mjs", "we:scripts/operations/docket-refresh-io.mjs", "we:scripts/operations/__tests__/docket-refresh.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
@@ -29,4 +29,4 @@ Ports #3723's docket-on-completion operation: we:scripts/operations/docket-refre
 
 ## Step 0 re-plan (2026-09-22)
 
-Added blocker xvrxwha: `we:scripts/operations/docket-refresh-io.mjs` imports `we:scripts/operations/coordination-root.mjs`, which is in that slice.
+Added blocker 3901: `we:scripts/operations/docket-refresh-io.mjs` imports `we:scripts/operations/coordination-root.mjs`, which is in that slice.
