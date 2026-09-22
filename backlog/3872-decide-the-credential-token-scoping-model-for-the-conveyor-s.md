@@ -5,6 +5,8 @@ parent: "3383"
 status: open
 scope: ["we:skills-src/conveyor/", "we:scripts/conveyor/"]
 dateOpened: "2026-09-22"
+preparedDate: "2026-09-22"
+preparedAgainstSha: "3f19a2dcbabf3221ff5fe887a173b114c1c25104"
 relatedReport: reports/2026-09-22-daemon-role-credential-scoping.md
 tags: []
 ---
