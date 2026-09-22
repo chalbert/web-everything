@@ -80,3 +80,24 @@ describe('task routing', () => {
     for (const options of [null, {}, { stage: 'unknown' }]) expect(c.routeDispatch(profile(), options).role).toBe('refused');
   });
 });
+
+// #3840 (Fork 5 of #3801) — the item's `deliveryAgent:` marker + required `deliveryAgentReason:` is the one override.
+describe('the deliveryAgent marker override', () => {
+  const dispatch = (extra = {}) => ({ kind: 'build', scopePaths: ['we:scripts/operations/example.mjs'], size: 3, ...extra });
+  const trials = () => history().map((r) => ({ ...r, taskType: 'build-new-feature' }));
+  it('refuses a marker with no reason, naming the field, and a reason with no marker', () => {
+    expect(c.decideDispatchRoute(dispatch({ deliveryAgent: 'codex' })).refusal).toContain('deliveryAgentReason');
+    expect(c.decideDispatchRoute(dispatch({ deliveryAgentReason: 'x' })).refusal).toContain('deliveryAgent:');
+  });
+  it('leaves routed as the criteria chose it and records the override beside it', () => {
+    const plain = c.decideDispatchRoute(dispatch(), { scorecards: trials() });
+    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), { scorecards: trials() });
+    expect(plain).toMatchObject({ routed: 'codex', supervision: 'spot-check' });
+    expect(over).toMatchObject({ routed: 'codex', model: plain.model, override: { requestedVendor: 'claude-restricted', executedVendor: 'claude-restricted', reason: 'pin' } });
+  });
+  it('gives an override the supervision of its own triple: no trials means full, the routed spot-check is not inherited', () => {
+    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), { scorecards: trials() });
+    expect(over.supervision).toBe('full');
+    expect(over.spotCheck).toBeNull();
+  });
+});

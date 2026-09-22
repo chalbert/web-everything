@@ -99,27 +99,29 @@ export function parseFixRunArgv(argv = []) {
     repo: repo || null,
     // #3383 (mechanical-dispatcher) — parsed, NOT validated, here: same split
     // `deliver-item-run.mjs#parseDeliverItemRunArgv` keeps for `build`'s own `--provider=`. This function stays
-    // a PURE argv→shape mapper; `selectFixAgentProvider` below owns the name check and the env fallback.
+    // a PURE argv→shape mapper; `selectFixAgentProvider` below owns the name check and the default.
     provider: String(flags.provider ?? '').trim(),
   };
 }
 
 /**
- * #3383 (mechanical-dispatcher, Part 1) — WHICH CLI RUNS THE FIX AGENT. Deliberately the SAME
- * flag-wins-env-fallback shape `deliver-item-run.mjs#selectDeliveryAgentProvider` already uses for `build`, so
- * an operator who has met one selection mechanism has met both: an explicit `--provider=` beats the
- * `DELIVERY_AGENT_PROVIDER` environment variable, the environment beats the default, and the default is
- * unchanged (`claude-restricted`).
+ * #3383 (mechanical-dispatcher, Part 1) — WHICH CLI RUNS THE FIX AGENT. The SAME shape
+ * `deliver-item-run.mjs#selectDeliveryAgentProvider` uses for `build`: an explicit `--provider=` beats the
+ * default, and the default is unchanged (`claude-restricted`).
+ *
+ * #3840 (Fork 5 of #3801): the delivery-agent environment-variable fallback is RETIRED — a process-wide
+ * variable applied to every dispatch of that process, with no reason and no per-item scope. The one override is
+ * the item's own `deliveryAgent:` marker with a required `deliveryAgentReason:`, which the dispatcher passes
+ * here as `--provider=`.
  *
  * Resolved BEFORE any lane is acquired or PR resolved (see {@link runFixCli}) — same reasoning as the build
  * kind's own resolver: a typo here must exit before real work starts, not after.
  *
  * @param {string} flagValue - the parsed `--provider=` value, `''` when absent.
- * @param {Record<string, (string|undefined)>} [env] - the environment to read `DELIVERY_AGENT_PROVIDER` from.
  * @returns {{name: string, provider: object}}
  */
-export function selectFixAgentProvider(flagValue, env = process.env) {
-  const name = String(flagValue || env.DELIVERY_AGENT_PROVIDER || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
+export function selectFixAgentProvider(flagValue) {
+  const name = String(flagValue || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
   return { name, provider: resolveFixAgentProvider(name) };
 }
 
@@ -195,7 +197,6 @@ export async function runFixCli(argv = [], {
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
   selectProvider = selectFixAgentProvider,
-  env = process.env,
 } = {}) {
   let launch;
   let selected;
@@ -209,7 +210,7 @@ export async function runFixCli(argv = [], {
     );
     // #3383 — resolved BEFORE the repair starts, so a bad `--provider=` exits here rather than after a lane and
     // a claim have already been taken (see `selectFixAgentProvider`'s own docblock).
-    selected = selectProvider(launch.provider, env);
+    selected = selectProvider(launch.provider);
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };

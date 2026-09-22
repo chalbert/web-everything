@@ -9,8 +9,9 @@
  *     --scope='we:scripts/...' --attempt=b [--provider=claude-restricted|codex]
  *
  * `--provider=` (#3580, optional) picks which CLI runs the delivery AGENT — `claude-restricted` by default,
- * `codex` to run it under Codex CLI instead. Flag wins, then `DELIVERY_AGENT_PROVIDER` in the environment,
- * then the default; see `selectDeliveryAgentProvider` below, and
+ * `codex` to run it under Codex CLI instead. The flag wins, then the default (#3840: no environment variable
+ * selects a provider any more — the per-item `deliveryAgent:` marker, with its required `deliveryAgentReason:`, is
+ * the one override, and the dispatcher turns it into this flag); see `selectDeliveryAgentProvider` below, and
  * `we:scripts/operations/codex-delivery-provider.mjs` for what the Codex side actually does.
  *
  * ── WHY THIS FILE EXISTS AT ALL, AND NOT JUST A DIRECT `deliverItem(...)` CALL IN THE SINK ──────────────────
@@ -99,21 +100,22 @@ export function parseDeliverItemRunArgv(argv = []) {
 }
 
 /**
- * #3580 — WHICH CLI RUNS THE DELIVERY AGENT. Deliberately the SAME flag-wins-env-fallback shape
- * `we:scripts/operations/run.mjs` already uses for the judge seam's `--provider` / `JUDGE_PROVIDER`, so an
- * operator who has met one selection mechanism has met both: an explicit `--provider=` beats the environment,
- * the environment beats the default, and the default is unchanged (`claude-restricted`). Codex is therefore
- * genuinely SELECTABLE but never accidental.
+ * #3580 — WHICH CLI RUNS THE DELIVERY AGENT. An explicit `--provider=` beats the default, and the default is
+ * unchanged (`claude-restricted`). Codex is therefore genuinely SELECTABLE but never accidental.
+ *
+ * #3840 (Fork 5 of #3801): the delivery-agent environment-variable fallback is RETIRED. A process-wide
+ * variable applied to every delivery that process launched, with no reason and no per-item scope; the one
+ * override is the item's own `deliveryAgent:` marker with a required `deliveryAgentReason:`, which the
+ * dispatcher passes here as `--provider=`.
  *
  * An unknown name is refused HERE, before a lane is acquired or an item claimed — a typo that only surfaced
  * at `provider.spawn` would leave a real claim and a real lease held by a delivery that was never going to run.
  *
  * @param {string} flagValue - the parsed `--provider=` value, `''` when absent.
- * @param {Record<string, (string|undefined)>} [env] - the environment to read `DELIVERY_AGENT_PROVIDER` from.
  * @returns {{name: string, provider: object}}
  */
-export function selectDeliveryAgentProvider(flagValue, env = process.env) {
-  const name = String(flagValue || env.DELIVERY_AGENT_PROVIDER || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
+export function selectDeliveryAgentProvider(flagValue) {
+  const name = String(flagValue || DEFAULT_DELIVERY_AGENT_PROVIDER_NAME).trim();
   if (!DELIVERY_AGENT_PROVIDER_NAMES.includes(name)) {
     throw new TypeError(
       `deliver-item-run: --provider must be one of ${DELIVERY_AGENT_PROVIDER_NAMES.join('|')}, `
@@ -143,7 +145,6 @@ export async function runDeliverItemCli(argv = [], {
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
   selectProvider = selectDeliveryAgentProvider,
-  env = process.env,
 } = {}) {
   let launch;
   let selected;
@@ -151,7 +152,7 @@ export async function runDeliverItemCli(argv = [], {
     launch = parseDeliverItemRunArgv(argv);
     // #3580 — resolved BEFORE the delivery starts, so a bad `--provider=` exits here rather than after a lane
     // and a claim have already been taken (see `selectDeliveryAgentProvider`'s own docblock).
-    selected = selectProvider(launch.provider, env);
+    selected = selectProvider(launch.provider);
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };

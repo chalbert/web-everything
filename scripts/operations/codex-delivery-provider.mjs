@@ -9,8 +9,8 @@
  * `#3581` ratified that Codex proves itself as a REVIEWER before it does delivery work. The operator
  * explicitly chose to build this ahead of that gate — a deliberate, informed call, recorded here rather than
  * left to look like an oversight. Nothing below makes Codex the DEFAULT: `deliverItem`'s default provider is
- * still `CLAUDE_RESTRICTED_PROVIDER`, and reaching this file requires naming `--provider=codex` (or
- * `DELIVERY_AGENT_PROVIDER=codex`) on purpose.
+ * still `CLAUDE_RESTRICTED_PROVIDER`, and reaching this file requires naming `--provider=codex` (the
+ * dispatcher passes it for an item's `deliveryAgent: codex` marker + reason) on purpose.
  *
  * ── EVERY FLAG BELOW WAS CONFIRMED LIVE, NOT ASSUMED (codex-cli 0.153.4, 2026-09-12) ─────────────────────
  * The previous `CODEX_PROVIDER` stub named three unknowns and threw rather than guess. All three are now

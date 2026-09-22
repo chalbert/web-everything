@@ -741,9 +741,21 @@ export function estimatedLocForSize(size) {
   return { estimatedLoc: SIZE_TO_ESTIMATED_LOC[Math.max(...bands)], sized: false };
 }
 
-/** The providers an explicit `--provider-override` may name. `both` is a routing recommendation, not a provider. */
+/**
+ * THE MARKER'S VOCABULARY (#3840, Fork 5 of #3801): the registered delivery vendors an item's `deliveryAgent:`
+ * marker may name, each with the routing provider (a member of {@link PROVIDERS}) whose trial history its runs
+ * accrue to. Antigravity is absent until #3658 gives it a descriptor. It is a copy of
+ * `deliver-item-wrapper.mjs#DELIVERY_AGENT_PROVIDER_NAMES` because this pure library may not import the wrapper
+ * (its graph reaches the filesystem and the spawn code); `dispatch-lane-routing-record.test.mjs` pins the two
+ * key lists equal so they cannot drift.
+ */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
-export const OVERRIDABLE_PROVIDERS = Object.freeze([...PROVIDERS]);
+export const DELIVERY_VENDOR_PROVIDERS = Object.freeze({ 'claude-restricted': 'claude', codex: 'codex' });
+
+/** The launch kinds whose dispatch honours the marker (`build`, `fix`, `ci-heal` — the three provider modules that
+ *  read it). A marker on an item the tick launches as a `prepare`/`investigate` is not read: it is not an override
+ *  of anything there, so it is neither recorded nor refused. */
+const MARKER_KINDS = Object.freeze(['build', 'fix', 'ci-heal']);
 
 /**
  * THE PROVIDER ACTUALLY AVAILABLE TO EXECUTE A DISPATCH TODAY.
@@ -780,9 +792,15 @@ export const EXECUTABLE_PROVIDER = 'claude';
  *   - `size` the card's `size:` frontmatter (see {@link estimatedLocForSize}); `estimatedLoc` overrides it.
  *   - `acceptanceTestable` (default `true`), `dependsOn` (default `[]`), `risk` (optional raise-only floor).
  *   - `taskKey` `{storyRef, round, taskId}` — spot-check sampling only; omitted means no sample.
- *   - `providerOverride` / `overrideReason` — an EXPLICIT, RECORDED operator input (#3717 step 4 of the card's
- *     proposed shape). An override with no reason, or naming an unknown provider, is REFUSED: an unexplained
- *     override is indistinguishable from the brief-sentence delegation this card exists to abolish.
+ *   - `deliveryAgent` / `deliveryAgentReason` — the item's own frontmatter marker and its required reason: the
+ *     ONE provider override (#3840, Fork 5 of #3801; the process-wide environment variables are retired). A
+ *     marker with no reason, a reason with no marker, or a vendor outside {@link DELIVERY_VENDOR_PROVIDERS} is
+ *     REFUSED: an unexplained override is indistinguishable from the brief-sentence delegation #3717 abolishes.
+ *     `routed` stays the CRITERIA's choice; the override is recorded BESIDE it as `override`
+ *     (`{requestedVendor, executedVendor, reason}` — the `#agent-vendor-registry` rule-4 field names, referenced
+ *     here, not a second vocabulary), and its supervision is the level of the OVERRIDE's own
+ *     `{provider, model, taskType}` triple (an override to a triple with no trials starts at `full`), never the
+ *     level the routed triple earned. It does not touch admission: an unsized card is still held for prepare.
  * @param {{scorecards?: unknown, enforceSupervision?: boolean}} [deps]
  * @returns {object} the routing record — see the file's own test for the exact shape.
  */
@@ -793,7 +811,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
     const scopePaths = Array.isArray(dispatch?.scopePaths) ? dispatch.scopePaths.map(String) : [];
     const derivation = taskTypeFor({ kind, cause: dispatch?.cause ?? null, scopePaths });
 
-    const override = normalizeOverride(dispatch);
+    const override = normalizeOverride(dispatch, kind);
     if (override.refusal) return routeRefused(kind, derivation, override.refusal);
 
     if (derivation.outcome === 'refused') return routeRefused(kind, derivation, derivation.reason);
@@ -817,8 +835,8 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
         supervisionHold: null,
         auditTrail: [audit('role-path', derivation.role, `kind=${kind}`, derivation.reason)],
       };
-      // An override on a role dispatch is recorded and does NOT invent a route: the role path has no provider
-      // decision to override, and silently minting one would be the guess this whole card removes.
+      // A role dispatch has no provider decision to override, and the marker is not read for these kinds (see
+      // `MARKER_KINDS`), so `override` is `null` here: minting a route for it would be the guess this card removes.
       return record;
     }
 
@@ -844,7 +862,32 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       return routeRefused(kind, derivation, `the router refused this dispatch: ${out.auditTrail.map((a) => a.reasoning).join('; ')}`);
     }
 
-    const routed = override.value ? override.value.provider : out.provider;
+    // #3840 — `routed` is ALWAYS the criteria's choice. The override sits beside it, and it is supervised as the
+    // triple it actually is: `selectSupervisionLevel` over the OVERRIDE's own `{provider, model, taskType}`, so a
+    // vendor the criteria did not pick cannot inherit the `spot-check` the routed triple earned. The model is the
+    // routed one only when the override lands on the same provider; otherwise it is unknown here (the wrapper
+    // picks it) and matches no trial, so the triple starts at `full`.
+    let supervision = out.supervision;
+    let spotCheck = out.spotCheck;
+    const overrideAudit = [];
+    if (override.value) {
+      const provider = DELIVERY_VENDOR_PROVIDERS[override.value.requestedVendor];
+      const model = provider === out.provider ? out.model : null;
+      const own = selectSupervisionLevel(
+        provider, model, derivation.taskType, routingRecords(scorecards).filter((r) => r.role !== 'supervise'), thresholdsForRisk(built.profile.risk),
+      );
+      supervision = own.level;
+      if (neverSpotCheck(built.profile) && supervision === SUPERVISION_LEVELS.SPOT_CHECK) supervision = SUPERVISION_LEVELS.FULL;
+      spotCheck = supervision === SUPERVISION_LEVELS.SPOT_CHECK && taskSessionName(dispatch?.taskKey)
+        ? spotCheckSample(dispatch.taskKey, built.profile.risk)
+        : null;
+      overrideAudit.push(
+        audit('provider-override', override.value.requestedVendor, `criteria routed ${out.provider}`, override.value.reason),
+        audit('override-supervision', supervision, `triple=${provider}/${model ?? 'unknown-model'}/${derivation.taskType}; routed triple was ${out.supervision}`, 'An override is a trial of its own triple, supervised at that triple\'s level, never at the routed one\'s.'),
+        ...own.auditTrail,
+      );
+    }
+    const routed = out.provider;
     const record = {
       kind,
       outcome: 'routed',
@@ -854,10 +897,10 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       // WHAT ACTUALLY RUNS IT. One provider port exists; see {@link EXECUTABLE_PROVIDER}. `routed !== executed`
       // is the delegation gap, recorded rather than silently collapsed.
       executed: EXECUTABLE_PROVIDER,
-      model: override.value ? null : out.model,
-      tier: override.value ? null : out.tier,
-      supervision: out.supervision,
-      spotCheck: out.spotCheck,
+      model: out.model,
+      tier: out.tier,
+      supervision,
+      spotCheck,
       risk: built.profile.risk,
       complexity: built.profile.complexity,
       estimatedLoc,
@@ -869,7 +912,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       auditTrail: [
         audit('task-type-derivation', derivation.taskType, `kind=${kind}, cause=${dispatch?.cause ?? 'none'}, scope=${scopePaths.length} path(s)`, derivation.reason),
         audit('estimated-loc', String(estimatedLoc), `size=${JSON.stringify(dispatch?.size ?? null)}`, sized ? 'from the card\'s own `size:`' : 'the card declares no `size:` — read as the largest band, which sits outside every proven envelope'),
-        ...(override.value ? [audit('provider-override', override.value.provider, `router said ${out.provider}`, override.value.reason)] : []),
+        ...overrideAudit,
         ...out.auditTrail,
       ],
     };
@@ -889,20 +932,24 @@ function routeRefused(kind, derivation, reason) {
   };
 }
 
-function normalizeOverride(dispatch) {
-  const provider = dispatch?.providerOverride == null ? '' : String(dispatch.providerOverride).trim();
-  const reason = dispatch?.overrideReason == null ? '' : String(dispatch.overrideReason).trim();
-  if (!provider) {
+function normalizeOverride(dispatch, kind) {
+  if (!MARKER_KINDS.includes(kind)) return { value: null, refusal: null };
+  const vendor = dispatch?.deliveryAgent == null ? '' : String(dispatch.deliveryAgent).trim();
+  const reason = dispatch?.deliveryAgentReason == null ? '' : String(dispatch.deliveryAgentReason).trim();
+  if (!vendor) {
     if (reason) {
-      return { value: null, refusal: 'an `--override-reason` was given with no `--provider-override` — a reason for nothing is a sentence in a brief, which is what #3717 abolishes' };
+      return { value: null, refusal: 'a `deliveryAgentReason:` is set with no `deliveryAgent:` marker — a reason for nothing is a sentence in a brief, which is what #3717 abolishes' };
     }
     return { value: null, refusal: null };
   }
-  if (!OVERRIDABLE_PROVIDERS.includes(provider)) {
-    return { value: null, refusal: `--provider-override=${JSON.stringify(provider)} is not one of ${OVERRIDABLE_PROVIDERS.join(', ')}` };
+  if (!Object.hasOwn(DELIVERY_VENDOR_PROVIDERS, vendor)) {
+    return { value: null, refusal: `\`deliveryAgent: ${vendor}\` is not one of ${Object.keys(DELIVERY_VENDOR_PROVIDERS).join(', ')}` };
   }
   if (!reason) {
-    return { value: null, refusal: `--provider-override=${provider} was given with no \`--override-reason\` — an unexplained override is indistinguishable from the brief-sentence delegation this card removes, so it is refused` };
+    return { value: null, refusal: `\`deliveryAgent: ${vendor}\` has no \`deliveryAgentReason:\` — an unexplained override is indistinguishable from the brief-sentence delegation #3717 abolishes, so it is refused` };
   }
-  return { value: { provider, reason }, refusal: null };
+  // The rule-4 field names (`#agent-vendor-registry`). The marker's vendor is honoured verbatim by the build / fix /
+  // ci-heal providers, so requested and executed are the same vendor; a fallback for a kind a vendor cannot run is
+  // #3658's and is not built yet.
+  return { value: { requestedVendor: vendor, executedVendor: vendor, reason }, refusal: null };
 }

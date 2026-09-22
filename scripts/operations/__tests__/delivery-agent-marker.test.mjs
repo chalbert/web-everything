@@ -5,8 +5,8 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  DELIVERY_AGENT_MARKER_KEY, parseDeliveryAgentMarker, readItemDeliveryAgentMarker,
-  defaultFreshenPrimaryCheckout,
+  DELIVERY_AGENT_MARKER_KEY, DELIVERY_AGENT_REASON_KEY, parseDeliveryAgentMarker, parseDeliveryAgentReason,
+  readItemDeliveryAgentMarker, readItemDeliveryAgentOverride, defaultFreshenPrimaryCheckout,
 } from '../delivery-agent-marker.mjs';
 
 describe('parseDeliveryAgentMarker (PURE)', () => {
@@ -145,5 +145,32 @@ describe('defaultFreshenPrimaryCheckout (mechanical-dispatcher #3383 Part 2 foll
     });
     defaultFreshenPrimaryCheckout('/repo', { run });
     expect(calls).toContainEqual(['pull', '--ff-only', '--autostash']);
+  });
+});
+
+// #3840 (Fork 5 of #3801) — the required companion field, read from the same file as the marker.
+describe('deliveryAgentReason (the required companion of the marker)', () => {
+  const files = { '3629-some-item.md': '---\nstatus: open\ndeliveryAgent: codex\ndeliveryAgentReason: "trial of codex on a scoped doc fix"\n---\nBody\n' };
+  const io = (fileMap) => ({ root: '/x', listFiles: () => Object.keys(fileMap), read: (p) => fileMap[p.split('/').pop()] });
+
+  it('is named by ONE exported key, and the marker key does not match it as a prefix', () => {
+    expect(DELIVERY_AGENT_REASON_KEY).toBe('deliveryAgentReason');
+    expect(parseDeliveryAgentMarker('---\ndeliveryAgentReason: only a reason\n---\n')).toBeNull();
+    expect(parseDeliveryAgentReason('---\ndeliveryAgent: codex\n---\n')).toBeNull();
+    expect(parseDeliveryAgentReason('---\ndeliveryAgentReason: "why"\n---\n')).toBe('why');
+  });
+
+  it('reads both halves from one file, and never throws', () => {
+    expect(readItemDeliveryAgentOverride('3629', io(files)))
+      .toEqual({ deliveryAgent: 'codex', deliveryAgentReason: 'trial of codex on a scoped doc fix' });
+    expect(readItemDeliveryAgentOverride(null, io({}))).toBeNull();
+    expect(readItemDeliveryAgentOverride('9999', io(files))).toBeNull();
+    expect(readItemDeliveryAgentOverride('3629', { root: '/x', listFiles: () => { throw new Error('boom'); } })).toBeNull();
+  });
+
+  it('returns a marker with a null reason (so the router can refuse it by name), and null for neither', () => {
+    expect(readItemDeliveryAgentOverride('3629', io({ '3629-a.md': '---\ndeliveryAgent: codex\n---\n' })))
+      .toEqual({ deliveryAgent: 'codex', deliveryAgentReason: null });
+    expect(readItemDeliveryAgentOverride('3629', io({ '3629-a.md': '---\nstatus: open\n---\n' }))).toBeNull();
   });
 });

@@ -339,20 +339,28 @@ describe('#3645 — the mode knob and the per-dispatch process', () => {
     expect(() => parseDeliverItemRunArgv(['--num=3645'])).toThrow(/--lane=.*--session=/);
   });
 
-  // #3580 — WHICH CLI runs the delivery agent. Same flag-wins-env-fallback shape `run.mjs` uses for the judge
-  // seam's `--provider`/`JUDGE_PROVIDER`, so one selection mechanism covers both seams.
-  it('selects the delivery agent provider: flag beats env, env beats the default, and Claude IS the default', () => {
-    expect(selectDeliveryAgentProvider('', {}).name).toBe('claude-restricted');
-    expect(selectDeliveryAgentProvider('', { DELIVERY_AGENT_PROVIDER: 'codex' }).name).toBe('codex');
-    expect(selectDeliveryAgentProvider('codex', {}).name).toBe('codex');
-    // An explicit flag OUTRANKS the environment — never the other way round.
-    expect(selectDeliveryAgentProvider('claude-restricted', { DELIVERY_AGENT_PROVIDER: 'codex' }).name)
-      .toBe('claude-restricted');
-    expect(selectDeliveryAgentProvider('codex', {}).provider).toBe(DELIVERY_AGENT_PROVIDERS.codex);
+  // #3580 — WHICH CLI runs the delivery agent. #3840: the environment fallback is retired, so the flag (which
+  // the dispatcher fills from the item's `deliveryAgent:` marker) and the default are the whole mechanism.
+  it('selects the delivery agent provider: the flag wins, and Claude IS the default', () => {
+    expect(selectDeliveryAgentProvider('').name).toBe('claude-restricted');
+    expect(selectDeliveryAgentProvider('codex').name).toBe('codex');
+    expect(selectDeliveryAgentProvider('claude-restricted').name).toBe('claude-restricted');
+    expect(selectDeliveryAgentProvider('codex').provider).toBe(DELIVERY_AGENT_PROVIDERS.codex);
+  });
+
+  it('#3840 — the process-wide environment variable NO LONGER selects a provider', () => {
+    const before = process.env.DELIVERY_AGENT_PROVIDER;
+    process.env.DELIVERY_AGENT_PROVIDER = 'codex';
+    try {
+      expect(selectDeliveryAgentProvider('').name).toBe('claude-restricted');
+    } finally {
+      if (before === undefined) delete process.env.DELIVERY_AGENT_PROVIDER;
+      else process.env.DELIVERY_AGENT_PROVIDER = before;
+    }
   });
 
   it('refuses an unknown provider name BEFORE a lane is acquired or an item claimed', async () => {
-    expect(() => selectDeliveryAgentProvider('gemini', {})).toThrow(/--provider must be one of/);
+    expect(() => selectDeliveryAgentProvider('gemini')).toThrow(/--provider must be one of/);
     let delivered = false;
     const res = await runDeliverItemCli(['--num=1', '--lane=2', '--session=s', '--provider=gemini'], {
       write: () => {}, writeErr: () => {}, env: {},

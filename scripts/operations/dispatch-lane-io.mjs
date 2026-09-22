@@ -86,6 +86,7 @@ import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, det
 // `shapeDispatchRead`; this file only supplies the two things that need a filesystem and an environment: the
 // scorecards and this flag.
 import { EXECUTABLE_PROVIDER, decideDispatchRoute, supervisionEnforcementFrom } from '../lib/dispatch-contracts.mjs';
+import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
 import {
   DISPATCH_PROVIDER_REGISTRY,
   dispatchModeFor,
@@ -220,14 +221,14 @@ export function readTick({
   readScorecards = () => defaultReadScorecards({ root, readText }),
   // #3717 step 3 — supervision is RECORDED, not enforced, until #3690 is ratified. Off by default.
   enforceSupervision = supervisionEnforcementFrom(process.env),
-  // #3717 — THE EXPLICIT, RECORDED PROVIDER OVERRIDE. Read from the ENVIRONMENT for exactly the reason
-  // `WE_BUILD_DISPATCH_MODE` is (see `dispatch-provider-registry.mjs#dispatchModeFor`): "a knob only a test
-  // can reach is not a knob, and the `dispatch-lane` operation's declared input has no field for this". The
-  // card asks for `--provider-override=<p> --override-reason=<text>`; the operation's input is the TICK's,
-  // not the operator's, and adding a field to it is what `dispatch-lane.test.mjs` pins against. Either half
-  // without the other is REFUSED by `decideDispatchRoute` — an unexplained override is a brief sentence.
-  providerOverride = process.env.WE_DISPATCH_PROVIDER_OVERRIDE ?? '',
-  overrideReason = process.env.WE_DISPATCH_OVERRIDE_REASON ?? '',
+  // #3840 (Fork 5 of #3801) — THE ONE PROVIDER OVERRIDE: the item's own `deliveryAgent:` frontmatter marker and
+  // its REQUIRED `deliveryAgentReason:`, read from the item's file. It replaces the process-wide environment
+  // pair that used to sit here: a variable exported in the runner's environment applied to every dispatch that
+  // process launched, not one item, so a stale export silently re-routed the whole conveyor. Read here, at the
+  // IO edge, and handed across as data exactly like the scorecards. The marker with no reason (or a reason with
+  // no marker, or an unregistered vendor) is REFUSED by `decideDispatchRoute` — an unexplained override is a
+  // brief sentence. Only `build`/`fix`/`ci-heal` honour it.
+  readDeliveryAgentOverride = (n) => readItemDeliveryAgentOverride(n, { root }),
   now = () => new Date(),
 } = {}) {
   const key = normNum(num);
@@ -370,7 +371,9 @@ export function readTick({
         scopePaths: Array.isArray(item?.scope) ? item.scope : [],
         size: item?.size ?? null,
         taskKey: { storyRef: key, round: 1, taskId: launchKind },
-        providerOverride, overrideReason,
+        // #3840 — the marker and its reason ride in as data; `null` (no marker, unreadable file) is no override, and the
+        // router ignores them for a kind that does not honour the marker.
+        ...(readDeliveryAgentOverride(key) ?? {}),
       }, { scorecards, enforceSupervision: enforceSupervision === true })
       : null,
     bookkeepingSource,
