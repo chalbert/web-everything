@@ -1,0 +1,98 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>The operator wants a live session and the unattended runner to add work and handle it identically.
+<a href="/backlog/3722-decision-are-the-interactive-session-and-the-runner-one-syst/">#3722</a> asks whether that
+means one system (the session is one more caller of the same operations) or two systems over shared operations.
+The full working, with every probe and citation, is in
+<a href="/reports/2026-09-21-session-runner-one-system-grounding.md">the session report</a>.</p>
+
+<h2>What prior art says</h2>
+
+<table>
+  <thead><tr><th>System</th><th>Finding</th><th>Adoptable here</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Kubernetes controllers</td>
+      <td>Level-based, not edge-based. Status is the latest observation, never a tracked event. The store adds
+        compare-and-swap.</td>
+      <td>The discipline: list the world, compute what is wrong, fix one thing. Not the store.</td>
+    </tr>
+    <tr>
+      <td>bors, Homu, rust-lang/bors, GitHub merge queue</td>
+      <td>The original bors was stateless and exited each run. The successors added a database and re-sync from
+        GitHub every 15-30 minutes. Humans and bots use the same queue.</td>
+      <td>One entry point for humans and bots. Derive what you can; keep a small store for the rest.</td>
+    </tr>
+    <tr>
+      <td>Temporal, GitHub Actions, Argo Events</td>
+      <td>One declared workflow, several triggers. Trigger identity is data, not a code fork. An overlap policy
+        covers two callers at once. Scheduled runs can be dropped.</td>
+      <td>Same shape as one declared operation with many callers. Ticks must be level-triggered.</td>
+    </tr>
+    <tr>
+      <td>Kubernetes Job, ephemeral CI runners</td>
+      <td>Run-to-completion makes "process alive" mean "work in progress". A finished process that never exits
+        is the classic zombie; the fix was structural.</td>
+      <td>Launch one-turn workers so they exit. Keep a lease TTL for a worker that hangs.</td>
+    </tr>
+    <tr>
+      <td>git notes, per-checkout files</td>
+      <td>Sync is opt-in and merges are manual. Operator intent works best where every reader sees it with no
+        sync step.</td>
+      <td>Not a per-checkout file plus a sync.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>What the code says</h2>
+
+<ul>
+  <li>Guard bookkeeping is mostly derived already. The build guard has a restart-surviving floor read from
+    <code>claude agents</code> (#3403). The fix and ci-heal caps read the PR's own re-arm comments (#2643,
+    #2666).</li>
+  <li>Seven stores (queue, pause marker, run records, completion records, infra-blocked, jury ledger, red-main
+    freeze) resolve their root from the script location, so a hook or session in a lane clone sees different
+    files than the runner. Run records are the fact the card proposes to derive from, so this defect sits under
+    its own default.</li>
+  <li>The three liveness models are one source. The lane lease pid is dormant (it records the short-lived
+    <code>acquire</code> CLI, not the agent). The run record stamp is a cache of the listing. Every reader calls
+    one function, <code>defaultListAgents</code>.</li>
+  <li>The pause marker's own header says it stops all new dispatch, and the lane ceiling is a standing ceiling,
+    but both are checked only in the planners; no dispatch operation reads them. So "a session's dispatch is
+    supervised by construction" is contradicted: load reached 28 on 12 cores on 2026-09-19 from hand dispatch.</li>
+  <li>Run-to-completion is not a launch flag. The spawn is a blocking call with a 60-second kill, the
+    lease reaper skips any session whose <code>kind</code> is not <code>background</code> (so a live
+    <code>-p</code> worker's lane would be released), and the permission profile under <code>-p</code> is unprobed.</li>
+</ul>
+
+<h2>Probes of claude -p (CLI 2.1.278, 2026-09-21)</h2>
+
+<table>
+  <thead><tr><th>Question</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>Exits when its turn ends?</td><td>Yes. Exit code 0, 4 seconds for a one-word reply.</td></tr>
+    <tr><td>Listed while running?</td><td>Yes: <code>kind: interactive</code>, <code>status: busy</code>, with a
+      <code>pid</code>.</td></tr>
+    <tr><td>Takes <code>-n &lt;slug&gt;</code>?</td><td>Yes. The row carried the name.</td></tr>
+    <tr><td>Leaves the listing on exit?</td><td>Yes.</td></tr>
+    <tr><td>Resumable after exit?</td><td>Yes. <code>claude -p --resume &lt;id&gt;</code> returned the same session
+      id and remembered the earlier turn.</td></tr>
+    <tr><td>Not probed</td><td>Worker permission profile under <code>-p</code>; background subagents holding a
+      <code>-p</code> worker open (documented ceiling: 10 minutes); a hung worker.</td></tr>
+  </tbody>
+</table>
+
+<h2>Recommendation</h2>
+
+<p>One loop, expressed as declared operations, with every actor a caller (the runner is a scheduler over them).
+Every resource gate (pause, capacity, load, lane, in-flight) binds every caller and is enforced inside the
+operation, which today it is not; the human/unattended difference lives only in how a refusal is delivered.
+Move the seven shared sidecars to one machine-level home until the shared store (#2742) lands. Keep workers
+resident and reap them on the completion record plus a deadline (#3721); run-to-completion is the better model
+in principle but is gated on three preconditions the skeptic found: a supervisor shape (#3627 is open), every
+consumer that filters on <code>kind: background</code>, and the worker permission profile under <code>-p</code>. The
+four forks and their skeptic verdicts are in
+<a href="/backlog/3722-decision-are-the-interactive-session-and-the-runner-one-syst/">#3722</a>.</p>
+
+{% endraw %}
