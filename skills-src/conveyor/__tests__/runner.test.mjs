@@ -94,6 +94,31 @@ describe('runner singleton lease — two runners never both drive', () => {
     expect(runnerLeaseStatus(root, { nowMs: T0 + 1 * MIN, leaseMinutes: 15 })).toMatchObject({ held: true, stale: false, owner: 'A' });
     expect(runnerLeaseStatus(root, { nowMs: T0 + 16 * MIN, leaseMinutes: 15 })).toMatchObject({ held: false, stale: true, owner: 'A' });
   });
+
+  // #3877 — a distinct `key` is a wholly independent lock dir: a second daemon takes its own singleton lease
+  // from this SAME primitive without contending with (or being visible to) the default-keyed one.
+  it('a distinct key is an independent lease — default-key callers never see it, and vice versa', () => {
+    const DISPATCHER_KEY = RUNNER_LEASE_PATH; // the default every existing caller already uses, unchanged
+    const VERIFY_KEY = '<conveyor:verify-daemon-lease>';
+    expect(acquireRunnerLease(root, 'DISPATCHER', { nowMs: T0, key: DISPATCHER_KEY })).toMatchObject({ ok: true });
+    // The Verify daemon's OWN key is untouched by the Dispatcher's live lease — no false 'held'.
+    expect(acquireRunnerLease(root, 'VERIFY', { nowMs: T0, key: VERIFY_KEY })).toMatchObject({ ok: true });
+    expect(runnerLeaseStatus(root, { nowMs: T0, key: DISPATCHER_KEY })).toMatchObject({ held: true, owner: 'DISPATCHER' });
+    expect(runnerLeaseStatus(root, { nowMs: T0, key: VERIFY_KEY })).toMatchObject({ held: true, owner: 'VERIFY' });
+    // Heartbeating/releasing one key never touches the other.
+    expect(heartbeatRunnerLease(root, 'VERIFY', { nowMs: T0 + 1 * MIN, key: VERIFY_KEY })).toBe(true);
+    expect(releaseRunnerLeaseIfOwned(root, 'VERIFY', { key: VERIFY_KEY })).toBe(true);
+    expect(runnerLeaseStatus(root, { nowMs: T0 + 1 * MIN, key: VERIFY_KEY })).toMatchObject({ held: false, owner: null });
+    expect(runnerLeaseStatus(root, { nowMs: T0 + 1 * MIN, key: DISPATCHER_KEY })).toMatchObject({ held: true, owner: 'DISPATCHER' });
+  });
+
+  it('omitting `key` is unchanged behavior — every existing call site keeps working with no edits', () => {
+    // No `key` passed anywhere here — this is the exact call shape every pre-#3877 caller already uses.
+    expect(acquireRunnerLease(root, 'A', { nowMs: T0, leaseMinutes: 15 })).toMatchObject({ ok: true });
+    expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe('A');
+    expect(heartbeatRunnerLease(root, 'A', { nowMs: T0 + 1 * MIN })).toBe(true);
+    expect(releaseRunnerLeaseIfOwned(root, 'A')).toBe(true);
+  });
 });
 
 // ── (2) the runner's pure control flow — thin shell over the core ───────────────────────────────────────────
