@@ -1,11 +1,12 @@
 ---
+bornAs: x9fa1uo
 kind: story
 size: 3
 parent: "3383"
 status: open
 scaffoldedBy: "design-3784-supervision"
 dateScaffolded: "2026-09-22"
-blockedBy: ["xlbgizn"]
+blockedBy: ["3888"]
 scope: ["we:scripts/conveyor/log-delegation-trial.mjs", "we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs"]
 relatedTo: ["3690", "3784", "3673"]
 dateOpened: "2026-09-22"

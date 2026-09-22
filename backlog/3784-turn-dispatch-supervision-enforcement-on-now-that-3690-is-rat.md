@@ -4,7 +4,7 @@ kind: story
 size: 8
 parent: "3383"
 status: open
-blockedBy: ["3850", "3840", "3848", "3838", "3845", "3846", "xlbgizn", "x9fa1uo", "xd6uqr9"]
+blockedBy: ["3850", "3840", "3848", "3838", "3845", "3846", "3888", "3889", "3887"]
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-supervision-promotions.json", "we:scripts/conveyor/log-delegation-trial.mjs"]
 dateOpened: "2026-09-21"
 relatedTo: ["3690", "3717", "3783", "3801", "3843", "3850"]
@@ -118,13 +118,13 @@ Split, following how the #3801 ruling carved its children: onto the family's umb
 edges back, not onto the ruling card itself. The three new children are `parent: "3383"` and this card is
 `blockedBy` all three.
 
-- **Rule 4** — a trial is informative only by its own recorded field (`xlbgizn`). Touches the row schema in
+- **Rule 4** — a trial is informative only by its own recorded field (`3888`). Touches the row schema in
   we:scripts/conveyor/log-delegation-trial.mjs and the predicate `isInformativeRecord`
   (we:scripts/lib/provider-routing.mjs:256), which today infers it from `outcome ∈ {rejected, reworked}` plus a
   non-empty `findings`.
-- **Rule 5** — a `rootCause` field, then a post-miss bar of `minCleanStreak + k` (`x9fa1uo`, `blockedBy`
-  `xlbgizn`).
-- **Rule 7 at `spot-check`** — the independent pass gets shallower, never absent (`xd6uqr9`). #3850 (ratified
+- **Rule 5** — a `rootCause` field, then a post-miss bar of `minCleanStreak + k` (`3889`, `blockedBy`
+  `3888`).
+- **Rule 7 at `spot-check`** — the independent pass gets shallower, never absent (`3887`). #3850 (ratified
   2026-09-22) already settled the `full` half: the supervisor is the review panel on the lane's own PR, held at
   the land seam. Only the `spot-check` depth is left, and it lands in the review/jury files, not in dispatch.
 
@@ -141,8 +141,8 @@ rule-3 and rule-6 fixes" as what removes its `defaultSize < 13` refusal. A rule-
 would be inert on its own — nothing reads the promotion record until the gate is on — and the opposite order is
 forbidden, so the split would buy no schedule and cost one more seam. This card grows from size 5 to 8 to carry it.
 
-**Build order** (a file dependency, not three independent cards): `xlbgizn` (rule 4) → `x9fa1uo` (rule 5);
-`xd6uqr9` (rule 7) in parallel with either; then this card — promotion record, then the flip, then the wording
+**Build order** (a file dependency, not three independent cards): `3888` (rule 4) → `3889` (rule 5);
+`3887` (rule 7) in parallel with either; then this card — promotion record, then the flip, then the wording
 fix below.
 
 ### 4. Which branch — `lane/mechanical-dispatcher` first
