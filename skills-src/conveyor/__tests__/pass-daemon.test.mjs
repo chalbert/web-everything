@@ -4,7 +4,7 @@
  *   no real timer, no real lease): injected effects, mirroring #3870's own `runDaemonLoop` tests.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runPassDaemonLoop, passDaemonLeaseKey, DEFAULT_HEARTBEAT_INTERVAL_MS } from '../pass-daemon.mjs';
+import { runPassDaemonLoop, passDaemonLeaseKey, realSleep, DEFAULT_HEARTBEAT_INTERVAL_MS } from '../pass-daemon.mjs';
 
 describe('runPassDaemonLoop — the pure run/sleep control flow', () => {
   it('requires a runPass effect and a positive intervalMs', async () => {
@@ -72,5 +72,24 @@ describe('DEFAULT_HEARTBEAT_INTERVAL_MS — the independent-timer property this 
   it('is meaningfully shorter than a realistic pass interval, so it can beat DURING a long single run', () => {
     expect(DEFAULT_HEARTBEAT_INTERVAL_MS).toBe(30_000);
     expect(DEFAULT_HEARTBEAT_INTERVAL_MS).toBeLessThan(120_000); // the runner's own tick cadence, for scale
+  });
+});
+
+describe('realSleep — regression, live-caught on the sibling #3870/#3876 daemons', () => {
+  // Both sibling daemons built on this exact `realSleep` pattern died right after their first run/tick
+  // instead of looping: `.unref()`-ing the timer told Node it was fine to exit before it fired, and nothing
+  // else kept the event loop alive between runs. This file shipped the same bug (confirmed by direct read)
+  // — never caught live only because DAEMON_MANIFEST is still empty, so nothing has run through it yet.
+  it('realSleep\'s own timer is REF\'d — a resident daemon must not let Node exit before it fires', () => {
+    const real = global.setTimeout;
+    let captured;
+    global.setTimeout = (fn, ms) => { captured = real(fn, ms); return captured; };
+    try {
+      realSleep(60_000); // never awaited — only the timer's own ref state is asserted, then cleared
+      expect(captured.hasRef()).toBe(true); // FAILS if realSleep re-adds `.unref()`
+    } finally {
+      clearTimeout(captured);
+      global.setTimeout = real;
+    }
   });
 });
