@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3853", "3854", "3851", "3852", "3855"]
+blockedBy: ["3853", "3854", "3851", "3852", "3855", "3865", "x4paeb9"]
 scope: ["we:scripts/operations/land-advance-io.mjs", "we:scripts/operations/land-advance-cli.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__tests__/land-advance-io.test.mjs", "we:scripts/operations/__tests__/land-advance-io-real.test.mjs", "we:scripts/operations/__tests__/land-advance-cli.test.mjs", "we:scripts/operations/__tests__/land-advance-repair-io.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
@@ -28,3 +28,7 @@ Graduation slice 6 of 6 for the land-advance operation, the wiring slice. Ports 
 - **What this slice does NOT deliver:** the item-pull half of #3720, the single-flight lease, the pause marker and the `Stop` hook. The prototype branch does not have them either (see the 2026-09-21 build-3720-queue-next result in the operations jobs folder), so #3720 stays open after this lands.
 - Under the #3804 statute (`we:docs/agent/platform-decisions.md#poc-branch-mechanical-sync`) a graduation slice ports a file main has moved AS A DIFF and is exempt from the drift hold. Shared modules that exist on `main` with a different body and that this slice imports from: `we:scripts/operations/dispatch-lane-io.mjs`, `we:scripts/operations/dispatch-lane.mjs`, `we:scripts/operations/review-dispatch.mjs`, `we:scripts/conveyor/reconcile-fix-dispatch.mjs`, `we:scripts/conveyor/parked-pr-conflict-watch.mjs`, `we:scripts/operations/run-store.mjs`, `we:scripts/operations/effect-executor.mjs`. Every named import land-advance takes from them is already exported on `main`, checked name by name (`createFileRunStore` and `DISPATCH_EFFECT` included), so do NOT overwrite any of them with the branch copy. The files `main` has moved that this slice must edit are `we:scripts/operations/run.mjs` (add the two imports and the `LAND_ADVANCE_OP` registry line only) and `we:scripts/operations/__tests__/http-adapter.test.mjs` (add the `LAND_ADVANCE_OP` import and its read-only map entry only). If a test disagrees with a shared module's body, diff-merge only the hunk it needs and name it in the PR.
 - The read-only pin only holds if `we:scripts/operations/land-advance.mjs` (the core slice) still reaches nothing that can act. All the effects live behind `we:scripts/operations/land-advance-io.mjs`. Run the http-adapter test before anything else.
+
+## Step 0 re-plan (2026-09-22)
+
+Added blockers #3865 and x4paeb9: `we:scripts/operations/land-advance-io.mjs` imports `we:scripts/operations/land-advance-items-io.mjs` (#3865), which imports `we:scripts/lib/prototype-tracker-compact.mjs` (x4paeb9).

@@ -4,8 +4,8 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3855", "3856"]
-scope: ["we:scripts/conveyor/session-reap-plan.mjs", "we:scripts/conveyor/session-reap-stop.mjs", "we:scripts/conveyor/session-reap-evidence.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/__tests__/session-reap-plan.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-finished-cli.test.mjs"]
+blockedBy: ["3855", "3856", "xbunbsg", "xgacnhr"]
+scope: ["we:scripts/conveyor/session-reap-plan.mjs", "we:scripts/conveyor/session-reap-stop.mjs", "we:scripts/conveyor/session-reap-evidence.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/__tests__/session-reap-plan.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-finished-cli.test.mjs", "we:scripts/operations/clear-stuck-session.mjs", "we:scripts/operations/clear-stuck-session-io.mjs", "we:scripts/operations/__tests__/clear-stuck-session.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
 ---
@@ -27,3 +27,7 @@ Ports #3721's reaper rewrite: we:scripts/conveyor/session-reap-plan.mjs (285 lin
 - Shared modules `we:scripts/conveyor/session-reap-stop.mjs` imports, all confirmed present on `main` by name (not diffed by this filing — check the body at port time): `we:scripts/operations/dispatch-abort.mjs`, `we:scripts/operations/dispatch-lane-io.mjs` (`normalizeHandle`), `we:scripts/readiness/drain-lock.mjs`, `we:scripts/operations/cli-adapter.mjs`, `we:scripts/operations/engine.mjs`, `we:scripts/operations/registry.mjs`, `we:scripts/operations/run-store.mjs`, `we:scripts/operations/clear-stuck-session.mjs`, `we:scripts/operations/clear-stuck-session-io.mjs`.
 - Downstream consequence, NOT in this slice's scope: `we:scripts/operations/wip-report.mjs`, `we:scripts/operations/wip-report-cli.mjs` and `we:scripts/operations/wip-report-queue.mjs` (branch-only, unfiled anywhere, missing from `main` entirely) read the same verdict classifier and had two fixture-snapshot recalibrations on the branch as a side effect of the grace-period fix (its `wip-report-compact` and `wip-report-queue` test cases, and `we:scripts/operations/__fixtures__/wip-report/bullets-2026-09-20.txt`). Not ported here; a future wip-report graduation slice inherits that recalibration.
 - The 30-minute grace default (= the reaper's pre-existing stall threshold) was a deliberate non-decision by the #3721 build (see the operator's own job-result notes, "Choices" section — the author explicitly flagged it as the one item to turn into a decision card if rule 9 disagreed). No decision card accompanies this slice; `--grace-minutes` overrides it.
+
+## Step 0 re-plan (2026-09-22)
+
+Added blockers xbunbsg and xgacnhr: `we:scripts/conveyor/session-reap-stop.mjs` uses the branch versions of `we:scripts/operations/dispatch-lane-io.mjs` and `we:scripts/operations/cli-adapter.mjs`. Also owns the branch diffs to `we:scripts/operations/clear-stuck-session.mjs` and `we:scripts/operations/clear-stuck-session-io.mjs`.

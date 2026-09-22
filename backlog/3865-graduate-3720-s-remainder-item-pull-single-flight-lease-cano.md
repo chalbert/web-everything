@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3864"]
+blockedBy: ["3854", "x4paeb9"]
 scope: ["we:scripts/operations/land-advance-items.mjs", "we:scripts/operations/land-advance-items-io.mjs", "we:scripts/operations/land-advance-gate.mjs", "we:scripts/land-advance-hook.mjs", "we:scripts/operations/__tests__/land-advance-items-io.test.mjs", "we:scripts/operations/__tests__/land-advance-hook.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
@@ -27,3 +27,7 @@ Ports the rest of #3720 beyond the six-slice land-advance core (#3853/3854/3855/
 - The decision card #3864 (filed on `main` as part of this same PR, `parent: 3383`) rules the four open forks this slice's build ran with defaults on: canonical-checkout naming, items-per-call, opt-in file home, what "dispatch" means. `blockedBy` here points to it so the operator can find and rule it; the code itself is safe to land unruled (plan-only default).
 - `TODO(#3807)`: the `os.loadavg()` capacity gate in `we:scripts/operations/land-advance.mjs` (#3854's scope, not this slice's) stays until #3807's `dispatch-budget` config lands.
 - The `Stop` hook install (a `we:.claude/settings.json` snippet) and the operator's durable opt-in file (`we:.conveyor/land-advance-opt-in.json`) are operator actions, not part of this graduation.
+
+## Step 0 re-plan (2026-09-22)
+
+Dropped blocker #3864: it was ratified 2026-09-22, and its own Done-when needs this slice's tests on main, so waiting on it was circular. #3864 resolves when this slice and #3856 land. Added blockers #3854 (`we:scripts/operations/land-advance-items.mjs` moved there) and x4paeb9 (`we:scripts/lib/prototype-tracker-compact.mjs`).

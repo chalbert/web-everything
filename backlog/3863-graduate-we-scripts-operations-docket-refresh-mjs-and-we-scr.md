@@ -4,6 +4,7 @@ kind: story
 size: 3
 parent: "3443"
 status: open
+blockedBy: ["xvrxwha"]
 scope: ["we:scripts/operations/docket-refresh.mjs", "we:scripts/operations/docket-refresh-io.mjs", "we:scripts/operations/__tests__/docket-refresh.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
@@ -25,3 +26,7 @@ Ports #3723's docket-on-completion operation: we:scripts/operations/docket-refre
 - Not wired to a trigger: nothing on the branch calls `docket-refresh` automatically. #3720's `Stop` hook (a separate slice) is the intended future caller; until then it runs by hand or from a tick, e.g. `WE_COORDINATION_ROOT=<root> node we:scripts/operations/run.mjs docket-refresh --checkout=<lane at origin/main> --apply`.
 - Publish is a hand-off record only (a `publish-owed` record naming #3277 as `publishVia`, unbuilt) — no new publish path invented, and no lane or session is spent by the refresh itself.
 - Two real generator defects the #3723 build found and fixed travel with this port: an older generator wrote an absolute `--out` INSIDE the checkout (fixed by passing checkout-relative paths); an older generator's `check-readiness` ran its own `git fetch`, moving `origin/main` past the checked `HEAD` mid-run (fixed by passing the checked sha as `--ref` and excluding `generatedFromRef` from the content hash). Both are covered by named tests in `we:scripts/operations/__tests__/docket-refresh.test.mjs`.
+
+## Step 0 re-plan (2026-09-22)
+
+Added blocker xvrxwha: `we:scripts/operations/docket-refresh-io.mjs` imports `we:scripts/operations/coordination-root.mjs`, which is in that slice.
