@@ -22,14 +22,16 @@ describe('decideSelfSync — pure', () => {
 describe('selfSyncCheckout — injected git', () => {
   const runner = (overrides = {}) => {
     const calls = [];
-    const run = (args) => {
+    const opts = [];
+    const run = (args, o) => {
       calls.push(args.join(' '));
+      opts.push(o);
       const key = args[0] === 'rev-list' ? 'rev-list' : args[0];
       const r = overrides[key];
       if (typeof r === 'function') return r(args);
       return r ?? { status: 0, stdout: key === 'symbolic-ref' ? 'main\n' : key === 'rev-list' ? '2\n' : '' };
     };
-    return { run, calls };
+    return { run, calls, opts };
   };
 
   it('behind on a clean main → merges and reports the commit count', () => {
@@ -55,6 +57,34 @@ describe('selfSyncCheckout — injected git', () => {
     selfSyncCheckout({ root: '/the/clone', run: (args, opts) => { seen.push(opts.cwd); return { status: 0, stdout: args[0] === 'symbolic-ref' ? 'main' : '0' }; } });
     expect(new Set(seen)).toEqual(new Set(['/the/clone']));
   });
+
+  it('every git command carries a timeout + SIGKILL, defaulting to 60s', () => {
+    const { run, opts } = runner();
+    selfSyncCheckout({ root: '/x', run });
+    expect(opts.length).toBeGreaterThan(0);
+    for (const o of opts) expect(o).toMatchObject({ cwd: '/x', timeout: 60_000, killSignal: 'SIGKILL' });
+  });
+
+  it('the timeout is overridable via timeoutMs, and reaches every call including merge --abort', () => {
+    const { run, opts } = runner({ merge: (args) => (args[1] === '--abort' ? { status: 0, stdout: '' } : { status: 1, stdout: '', stderr: 'CONFLICT' }) });
+    selfSyncCheckout({ root: '/x', run, timeoutMs: 5_000 });
+    expect(opts.length).toBeGreaterThan(0);
+    for (const o of opts) expect(o).toMatchObject({ timeout: 5_000, killSignal: 'SIGKILL' });
+  });
+
+  it('a timed-out fetch (null status, like a killed spawnSync) is treated as fetch-failed, never reaching merge', () => {
+    const { run, calls } = runner({ fetch: { status: null, stdout: '', stderr: '', signal: 'SIGKILL' } });
+    expect(selfSyncCheckout({ root: '/x', run })).toEqual({ merged: false, commits: 0, reason: 'fetch-failed' });
+    expect(calls.some((c) => c.startsWith('merge'))).toBe(false);
+  });
+
+  it('a timed-out merge (null status) is ABORTED and reported the same as any other failed merge', () => {
+    const { run, calls } = runner({
+      merge: (args) => (args[1] === '--abort' ? { status: 0, stdout: '' } : { status: null, stdout: '', stderr: '', signal: 'SIGKILL' }),
+    });
+    expect(selfSyncCheckout({ root: '/x', run })).toEqual({ merged: false, commits: 0, reason: 'conflict' });
+    expect(calls).toContain('merge --abort');
+  });
 });
 
 describe('withSelfSync — restart INSTEAD of ticking when new code arrived', () => {
@@ -75,6 +105,13 @@ describe('withSelfSync — restart INSTEAD of ticking when new code arrived', ()
     const w = withSelfSync({ tickOnce: () => 'ticked' }, { root: '/x', onRestart: vi.fn(), sync: () => ({ merged: false, commits: 0, reason: 'conflict' }), log });
     await expect(w.tickOnce()).resolves.toBe('ticked');
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('needs a hand merge'));
+  });
+
+  it('an explicit timeoutMs is forwarded to the injected sync', async () => {
+    const sync = vi.fn(() => ({ merged: false, commits: 0, reason: 'up-to-date' }));
+    const w = withSelfSync({ tickOnce: () => 'ticked' }, { root: '/x', onRestart: vi.fn(), sync, timeoutMs: 5_000 });
+    await w.tickOnce();
+    expect(sync).toHaveBeenCalledWith({ root: '/x', timeoutMs: 5_000 });
   });
 });
 

@@ -41,11 +41,18 @@ export function decideSelfSync({ fetched, behind, dirty, onBase }) {
 /**
  * The git IO: fetch, measure, and merge when {@link decideSelfSync} says so. Never throws; never leaves a
  * half-merged tree (a failed merge is aborted).
- * @param {{root:string, base?:string, run?:typeof gitRun}} o
+ *
+ * Every git command carries a per-command `timeout` (default 60s, overridable via `timeoutMs`) + `killSignal:
+ * 'SIGKILL'`, spread straight into `spawnSync` by `gitRun` (or any injected `run` that does the same) — so a
+ * hung `fetch`/`merge` (network stall, credential prompt) can NEVER freeze the caller indefinitely. `gitRun`
+ * already treats a null/non-zero `status` as failure, so a timed-out command falls through the existing
+ * fetch-failed / merge-abort paths unchanged: a timed-out fetch → `fetch-failed` (never reaches merge); a
+ * timed-out merge → aborted (itself under the same timeout) and reported as `conflict`.
+ * @param {{root:string, base?:string, run?:typeof gitRun, timeoutMs?:number}} o
  * @returns {{merged:boolean, commits:number, reason:string}}
  */
-export function selfSyncCheckout({ root, base = 'main', run = gitRun }) {
-  const git = (args) => run(args, { cwd: root });
+export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs = 60_000 }) {
+  const git = (args) => run(args, { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
   const fetched = git(['fetch', 'origin', base, '--quiet']).status === 0;
   const count = (range) => {
     const r = git(['rev-list', '--count', range]);
@@ -71,14 +78,14 @@ export function selfSyncCheckout({ root, base = 'main', run = gitRun }) {
  * Wrap a daemon's `runDaemonLoop` effects so each tick first self-syncs the clone. When new commits arrive,
  * `onRestart` runs in place of the tick (the caller releases its lease and exits); otherwise the tick runs.
  * @param {{tickOnce:()=>any}} effects
- * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, log?:Console}} o
+ * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, log?:Console, timeoutMs?:number}} o
  */
-export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout, log = console }) {
+export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout, log = console, timeoutMs }) {
   const tick = effects.tickOnce;
   return {
     ...effects,
     tickOnce: async () => {
-      const r = sync({ root });
+      const r = sync({ root, ...(timeoutMs != null ? { timeoutMs } : {}) });
       if (r.merged) {
         log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
         return onRestart(r);
