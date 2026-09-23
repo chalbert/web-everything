@@ -1,4 +1,5 @@
 ---
+bornAs: xj4ksy4
 kind: epic
 parent: "3383"
 status: open
@@ -23,13 +24,13 @@ graduation of agents, not the prototype branch's graduation to `main` (#3443).
 
 ## Slices (in order)
 
-1. `xtw2rap` — WE: `graduation-progress-report` returns schema 2 by calling the router.
-2. `xeudj65` — plateau-app: the laptop answers a `graduation` ask over the /wip relay; dev route.
-3. `x03sp54` — plateau-app: the `/graduation` view in every state, linked from /wip.
+1. `3926` — WE: `graduation-progress-report` returns schema 2 by calling the router.
+2. `3927` — plateau-app: the laptop answers a `graduation` ask over the /wip relay; dev route.
+3. `3928` — plateau-app: the `/graduation` view in every state, linked from /wip.
 
 ## Done when
 
 1. **Executable** — every child is `status: resolved`:
-   `node we:scripts/backlog.mjs show xj4ksy4` lists no open child.
+   `node we:scripts/backlog.mjs show 3925` lists no open child.
 2. **Observable** — on the running plateau-app dev server, `/graduation` renders the real trial record with the
    `codex · gpt-6-astra · other` row in the Needs-you section, in both themes at 390px and 1280px.

@@ -1,11 +1,12 @@
 ---
+bornAs: xeudj65
 kind: story
 size: 3
-parent: "xj4ksy4"
+parent: "3925"
 status: open
 scaffoldedBy: "graduation-page-file"
 dateScaffolded: "2026-09-22"
-blockedBy: ["xtw2rap"]
+blockedBy: ["3926"]
 scope: ["plateau:src/graduation/graduation-read.ts", "plateau:src/graduation/types.ts", "plateau:wip-relay.js", "plateau:scripts/wip-publish.ts", "plateau:vite.config.mts"]
 dateOpened: "2026-09-22"
 tags: [delegation, graduation, operator-page]
@@ -24,8 +25,8 @@ The agent graduation page gets its data the way /decide does: the page sends a r
 - The relay change is one entry in `ASKS`; the existing bounded-JSON check covers the payload. Do not add a
   Worker route, secret or Durable Object table.
 - The dev route caches one answer for 8 s, like `/api/wip`, and sends no CORS header.
-- Contract dependency: `xtw2rap` defines schema 2. Tests use a fixture in that shape; the live smoke check
-  (Done when 3) needs `xtw2rap` merged on WE `main`.
+- Contract dependency: `3926` defines schema 2. Tests use a fixture in that shape; the live smoke check
+  (Done when 3) needs `3926` merged on WE `main`.
 
 ## Done when
 
@@ -35,5 +36,5 @@ The agent graduation page gets its data the way /decide does: the page sends a r
 2. **Executable** — `npx vitest run plateau:scripts/wip-relay.test.mjs` passes with a new case: an ask
    `{t:'ask', id, what:'graduation'}` validates, and `what:'graduation'` with any argument is refused.
 3. **Observable** — with the dev server running, `curl -s localhost:<port>/api/graduation` returns JSON whose
-   `schema` is 2 (needs `xtw2rap` on WE main).
+   `schema` is 2 (needs `3926` on WE main).
 4. **Clean gate** — `npx vitest run` passes in the lane.

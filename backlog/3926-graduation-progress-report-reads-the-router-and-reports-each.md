@@ -1,7 +1,8 @@
 ---
+bornAs: xtw2rap
 kind: story
 size: 3
-parent: "xj4ksy4"
+parent: "3925"
 status: open
 scaffoldedBy: "graduation-page-file"
 dateScaffolded: "2026-09-22"

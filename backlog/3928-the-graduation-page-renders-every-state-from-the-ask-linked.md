@@ -1,11 +1,12 @@
 ---
+bornAs: x03sp54
 kind: story
 size: 3
-parent: "xj4ksy4"
+parent: "3925"
 status: open
 scaffoldedBy: "graduation-page-file"
 dateScaffolded: "2026-09-22"
-blockedBy: ["xeudj65"]
+blockedBy: ["3927"]
 scope: ["plateau:src/graduation/graduation-view.ts", "plateau:src/graduation/graduation-view.css", "plateau:src/main.ts", "plateau:docs/graduation-page.md"]
 dateOpened: "2026-09-22"
 tags: [delegation, graduation, operator-page]
