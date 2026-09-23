@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	STAGED, NOT INSTALLED. This is an EXAMPLE launchd plist for the conveyor build Dispatcher
+	(we:skills-src/conveyor/runner.mjs), modelled on the real com.we.review-daemon.plist
+	(~/Library/LaunchAgents/com.we.review-daemon.plist). Nothing here is switched on by landing it: the
+	operator reviews it, fills in the placeholders below, and copies it to
+	~/Library/LaunchAgents/com.we.dispatcher.plist themselves (never automatically — no session may write
+	into ~/Library/LaunchAgents/ or run `launchctl load` on the operator's behalf).
+
+	BEFORE INSTALLING:
+	  1. Replace <app-id>, <installation-id>, and <path-to-private-key.pem> below with the real GitHub App
+	     values (see ~/.claude/github-app-token/ or wherever the operator keeps them) — NEVER commit the
+	     real values into this repo; this file only ever holds placeholders.
+	  2. Confirm the WorkingDirectory clone (/Users/nicolasgilbert/workspace/wev-review-daemon) is the
+	     Dispatcher's own dedicated checkout, on `main`, clean — the same clone the standalone Review daemon
+	     already runs from (self-sync, wired in runner.mjs's `wireSelfSyncAndAppAuth`, keeps it caught up with
+	     `origin/main` between ticks and restarts onto new code rather than refusing every dispatch).
+	  3. The four --skip-pass flags below name the mechanical passes that ALREADY run as their own standalone
+	     daemon/watcher today — reconcile-fix-dispatch-daemon.mjs, review-daemon.mjs (the reconcile-pass →
+	     review-dispatch → review-round-tag/review-status-tag group, skipped here under the single name
+	     'reconcile-pass'), and the two pass-daemon.mjs watchers (parked-pr-conflict-watch,
+	     lane-pool-health-watch). Starting the Dispatcher WITHOUT these four skipped would duplicate every one
+	     of them. If a listed daemon is ever retired, drop its --skip-pass flag here so the Dispatcher resumes
+	     covering it.
+	-->
+	<key>Label</key>
+	<string>com.we.dispatcher</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/nicolasgilbert/.nvm/versions/node/v22.1.0/bin/node</string>
+		<string>/Users/nicolasgilbert/workspace/wev-review-daemon/skills-src/conveyor/runner.mjs</string>
+		<string>--json</string>
+		<string>--skip-pass=reconcile-fix-dispatch</string>
+		<string>--skip-pass=reconcile-pass</string>
+		<string>--skip-pass=parked-pr-conflict-watch</string>
+		<string>--skip-pass=lane-pool-health-watch</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/nicolasgilbert/.nvm/versions/node/v22.1.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>WE_GITHUB_APP_ID</key>
+		<string>&lt;app-id&gt;</string>
+		<key>WE_GITHUB_APP_INSTALLATION_ID</key>
+		<string>&lt;installation-id&gt;</string>
+		<key>WE_GITHUB_APP_PRIVATE_KEY_PATH</key>
+		<string>&lt;path-to-private-key.pem&gt;</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/nicolasgilbert/workspace/wev-review-daemon</string>
+	<key>StandardOutPath</key>
+	<string>/Users/nicolasgilbert/workspace/wev-review-daemon/.conveyor/dispatcher.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/nicolasgilbert/workspace/wev-review-daemon/.conveyor/dispatcher.log</string>
+	<key>KeepAlive</key>
+	<true/>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>60</integer>
+</dict>
+</plist>
