@@ -61,6 +61,19 @@ export const STAND_DOWN_REASONS = Object.freeze({
 });
 
 /**
+ * DELIBERATELY NOT A REASON HERE: a permission / tool-use denial while applying an otherwise-clear fix (live
+ * 2026-09-23, PR #2518 — a `python3` heredoc rewriting `backlog/3945-*.md` was denied by Claude Code's own
+ * auto-mode classifier, `[Modify Shared Resources]`). That is infrastructure friction, not a judgment call: the
+ * WHAT to do stayed unambiguous, only the HOW failed. Adding a `blocked-by-permission`-shaped entry here would
+ * make it terminal (this marker has no decay, no clock — see the file header) when the right behaviour is a
+ * RETRY once the friction clears. `we:skills-src/conveyor/fix-agent-brief.md` step 3 routes this case through
+ * `completion-cli.mjs report --outcome=blocked-on-infra` instead — the same self-reported-done channel
+ * `we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone` already retries after
+ * `INFRA_RETRY_COOLOFF_MS` — and never through this script. Keep it that way: a future reason added here for
+ * "the tool call was denied" would re-introduce the exact misclassification this comment documents.
+ */
+
+/**
  * we:scripts/conveyor/stand-down.mjs#standDownComments — every comment on a PR whose LEADING line is
  * {@link STAND_DOWN_MARKER}, normalized to `{ body, createdAt }` in the order `comments` was given. Pure, and the
  * ONE place the leading-line match rule is written — {@link countStandDownComments} is just its length, and any
