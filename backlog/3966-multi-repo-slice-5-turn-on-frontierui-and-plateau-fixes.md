@@ -3,10 +3,11 @@ bornAs: x33jgwt
 kind: story
 size: 5
 parent: "3963"
-status: open
+status: active
 blockedBy: ["3958", "3959", "3960", "3965"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
 tags: []
 ---
 

@@ -48,12 +48,14 @@ const SCOPE_PREFIXES = Object.freeze({
 // `we:` 31513 vs `webeverything:` 5; `fui:` 4147 vs `frontierui:` 281; `plateau:` 1667 vs `plateau-app:` 1436.
 const CANONICAL_PREFIX = Object.freeze({ we: 'we', frontierui: 'fui', 'plateau-app': 'plateau' });
 
-// TODAY'S truth (#3919-adjacent): only `we` has a fix loop and a CI-heal path; the couple-repos have neither yet
-// — a later multi-repo slice flips these as their own gates come online. `review` is true everywhere already.
+// TODAY'S truth. `review` is true everywhere already; multi-repo slice 5 (`we:backlog/3966-*.md`) turns `fix` on
+// for the couple-repos too — `reconcile-fix-dispatch.mjs#runReconcileFixDispatch` now dispatches a real fix agent
+// for frontierui/plateau-app rather than recording `unsupported-repo`. `ciHeal` stays off for the couple-repos —
+// CI-heal is its own capability/stage (slice 7) and turns on independently of `fix`.
 const CAPABILITIES = Object.freeze({
   we: Object.freeze({ review: true, fix: true, ciHeal: true, build: 'direct' }),
-  frontierui: Object.freeze({ review: true, fix: false, ciHeal: false, build: 'couple' }),
-  'plateau-app': Object.freeze({ review: true, fix: false, ciHeal: false, build: 'couple' }),
+  frontierui: Object.freeze({ review: true, fix: true, ciHeal: false, build: 'couple' }),
+  'plateau-app': Object.freeze({ review: true, fix: true, ciHeal: false, build: 'couple' }),
 });
 
 // A scope prefix or full name that is not already a key/slug/slugTag (those are covered by `repoKeyForSlug` /
@@ -157,10 +159,10 @@ export function gateFor(keyOrSlugOrPrefix, { home, checkoutExists = existsSync, 
  * before this slice, byte-for-byte; a PR with no backlog item is `PR #<pr>`.
  *
  * Returns `null` when the profile is unknown OR its gate is unresolvable (mirrors {@link gateFor}'s own
- * fail-closed shape) — the caller decides what that means. Today only `we` ever reaches this (`dispatchFix`
- * refuses any other repo before it gets here; nothing yet dispatches `ci-heal` for a sibling repo either), and
- * WE's own checkout always resolves, so the `null` branch is exercised only by tests and by whatever turns on
- * multi-repo dispatch next (slice 5).
+ * fail-closed shape) — the caller decides what that means. As of multi-repo slice 5, `dispatchFix` reaches this
+ * for frontierui/plateau-app too (their `capabilities.fix` is now true — see `runReconcileFixDispatch`'s own
+ * capability check); `ci-heal` still only ever reaches this for `we` (its capability stays off elsewhere until
+ * slice 7). WE's own checkout always resolves, so the `null` branch there is exercised only by tests.
  * @param {unknown} keyOrSlugOrPrefix
  * @param {{itemNum?: (string|number|null), prNum?: (string|number|null), home?: string,
  *   checkoutExists?: (p: string) => boolean, readPackageJson?: (p: string) => string}} [o] - `itemNum`/`prNum`

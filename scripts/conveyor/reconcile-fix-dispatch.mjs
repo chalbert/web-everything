@@ -325,13 +325,19 @@ export function buildResumePrompt({ pr, itemNum, cwd = null }) {
 /** we:scripts/conveyor/reconcile-fix-dispatch.mjs#freeLaneNumbers — the SAME `lane-pool.mjs list --acquirable
  *  --json` read `we:scripts/conveyor/tick-core.mjs`'s own IO shell uses to build `freeLanes`, reused rather than
  *  re-derived. A READ, not a lock — see the file header for why that is the correct trade here.
- * @param {{exec?:Function, root?:string}} [o]
+ * @param {{exec?:Function, root?:string, lanePoolRepo?:string|null}} [o] - `lanePoolRepo` is what
+ *   `lane-pool.mjs --repo=` itself expects (`we:scripts/lib/repo-profile.mjs#repoProfile`'s own `lanePoolRepo`
+ *   field — `.` for WE, an absolute checkout path for a sibling repo). Omitted/`null` falls back to whatever
+ *   `lane-pool.mjs` itself defaults to with no `--repo=` (the cwd's own git toplevel — WE, in every real caller
+ *   before multi-repo slice 5), so a pre-slice-5 caller sees byte-identical behaviour.
  * @returns {number[]} ascending lane ids currently acquirable, or `[]` on any read failure (fail-soft — the
  *   caller reports `no-lane` for every planned fix rather than throwing the whole pass over a `gh`/pool hiccup).
  */
-export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) {
+export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT, lanePoolRepo = null } = {}) {
   try {
-    const out = exec('node', [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'], {
+    const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'];
+    if (lanePoolRepo) argv.push(`--repo=${lanePoolRepo}`);
+    const out = exec('node', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024,
     });
     const paths = JSON.parse(String(out || '[]'));
@@ -424,7 +430,11 @@ export function tryResumeFix(planned, {
   resolveHead = resolveLaneHead,
   wait = defaultConfirmWait,
 } = {}) {
-  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
+  // #x33jgwt multi-repo slice 5 — no repo gate HERE any more: `runReconcileFixDispatch` is the ONE place that
+  // decides whether this repo's `fix` capability is on (`docs/agent/platform-decisions.md#conveyor-multi-repo-
+  // model` clause 1, "capability, not repo identity"), before this function is ever called. This primitive is
+  // repo-generic; `repo` only threads through to keep the resume-candidate's session-name check (below) and any
+  // fresh dispatch fallback correctly repo-tagged.
   assertNotALaneCheckout(root);
   if (!planned.isConflict) return { resumed: false, resumeAttempt: null };
 
@@ -549,15 +559,26 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   resumeAttempt = null,
+  // #x33jgwt multi-repo slice 5 — threaded straight through to `briefTokensForRepo`/`repoProfile`/`gateFor`
+  // (all three already accept them), never re-derived here. Before this slice only `we` ever reached this
+  // function, and WE's own checkout + real `homedir()` are always correct/present wherever this process runs,
+  // so nothing injected these. A sibling repo's checkout is NOT guaranteed present (or, in a test, must not be
+  // touched at all — see `constellation-repos-profile.test.mjs`'s own "hermetic" header), so a real dispatch for
+  // a sibling repo — and every test of one — needs these seams open.
+  home,
+  checkoutExists,
+  readPackageJson,
 } = {}) {
-  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
+  // #x33jgwt multi-repo slice 5 — no repo gate HERE any more (see {@link tryResumeFix}'s own docblock for why):
+  // `runReconcileFixDispatch` already refused a repo whose profile lacks the `fix` capability before this ever
+  // runs. `briefTokensForRepo` still fails closed (`null`) for a genuinely unknown/unresolvable profile below.
   assertNotALaneCheckout(root);
 
   const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
   // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here). The
-  // `repo !== 'we'` refusal above means only `we`'s profile ever reaches this today; the token computation
-  // itself is repo-generic so slice 5 only has to lift that guard, not touch this fill.
-  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr });
+  // token computation itself is repo-generic, so slice 5's capability gate (moved up to
+  // `runReconcileFixDispatch`) needed no change here at all.
+  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
   if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the fix brief`);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
     ITEM_NUM: planned.itemNum,
@@ -603,12 +624,36 @@ export function dispatchFix(planned, {
  * a successful resume returns straight into `dispatched` and `continue`s to the next entry having never touched
  * `lanes` — the pool is left exactly as {@link pickFreeLanes} produced it for every entry that resolves via
  * resume.
+ *
+ * #x33jgwt (multi-repo slice 5) — THE REPO GATE LIVES HERE, ON CAPABILITY, NOT IDENTITY
+ * (`docs/agent/platform-decisions.md#conveyor-multi-repo-model` clause 1). This function reads `repo`'s profile
+ * ONCE and asks two INDEPENDENT questions of it — `fix` and `ci-heal` are separate stages/capabilities, each
+ * with its own on/off switch, not one "is this repo supported at all" bit:
+ *   - `!profile.capabilities.fix` → this whole pass is a no-op for the repo: every `fix` entry `reconcile-pass`
+ *     offered is recorded `unsupported-repo` (never touching the lane pool or a dispatch sink), exactly as
+ *     EVERY non-WE repo behaved before this slice. Only `we` was ever missing this bit before; frontierui and
+ *     plateau-app both flip it on in `repo-profile.mjs` as part of this same slice, so in practice this branch
+ *     is only reachable today via an injected `resolveProfile` (see below) — a real, un-injected call never
+ *     takes it for a real constellation repo, but the check itself must stay capability-shaped so the NEXT repo
+ *     this constellation ever grows (with `fix` genuinely off) is refused for the right reason, not silently
+ *     let through because it happens to resolve to *some* profile.
+ *   - `!profile.capabilities.ciHeal` → independently of the above, any `ci-heal` entry in the SAME
+ *     `reconcile-pass` reading is recorded `unsupported-repo` too (CI-heal is its own stage, its own future
+ *     slice — #3958). This file dispatches no `ci-heal` itself either way; recording the refusal here (rather
+ *     than dropping the entry silently) preserves the exact visibility the pre-slice-5 blanket branch gave every
+ *     non-WE repo's ci-heal population, now scoped to its own capability instead of riding on `fix`'s.
+ * Both checks read the SAME `profile`, computed once, never re-derived per entry or per kind.
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.
  * @param {Function} [o.tryResume] - injectable, defaults to the real {@link tryResumeFix}.
  * @param {Function} [o.resolveFallbackScope] - injectable, defaults to the real {@link fetchPrDiffScope} (one
  *   `gh pr diff --name-only` per entry that reaches it — see {@link planFixesFromReconcile}'s own docblock for
  *   why this is only ever called once a declared `scope:` has already come back empty, never unconditionally).
+ * @param {Function} [o.resolveProfile] - injectable, defaults to the real {@link repoProfile}; a pure lookup, so
+ *   the only reason a test ever overrides it is to exercise a `capabilities.fix === false` repo now that every
+ *   REAL constellation repo profile has `fix` on (see the docblock above).
+ * @param {Function} [o.pickFreeLanes] - injectable; when omitted, defaults to {@link freeLaneNumbers} scoped to
+ *   THIS repo's own lane pool (`profile.lanePoolRepo`) — never the WE pool for a non-WE repo.
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
  */
 export function runReconcileFixDispatch({
@@ -616,11 +661,12 @@ export function runReconcileFixDispatch({
   repo = null,
   findItemFn = findItem,
   loadItems = () => defaultLoadItems(root),
-  pickFreeLanes = () => freeLaneNumbers({ root }),
+  pickFreeLanes = null,
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
   resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
+  resolveProfile = repoProfile,
   checkStaleness,
   prsFile, unsupportedPath,
 } = {}) {
@@ -628,25 +674,50 @@ export function runReconcileFixDispatch({
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
   // #x1rr9rh (multi-repo slice 2) — this staleness check guards the DISPATCHING checkout (this WE checkout's
   // own import path), not the target repo: the fix path always runs WE's own code, whatever repo it dispatches
-  // (or, for a foreign repo today, merely records as unsupported) a fix for. Gating it on `repoKey === 'we'`
+  // (or, for an unsupported repo, merely records as unsupported) a fix for. Gating it on `repoKey === 'we'`
   // was therefore the wrong condition — it let a stale WE checkout record foreign-repo unsupported rows (and
-  // will, once a later slice turns on foreign fix dispatch, dispatch fixes) from code that had already been
-  // proven stale. Run it for every repo.
+  // will, once fix dispatch is turned on for that repo, dispatch fixes) from code that had already been proven
+  // stale. Run it for every repo.
   assertMainNotStale(root, checkStaleness);
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
-  if (repoKey !== 'we') {
-    // Foreign fixes need their own brief and gate; never consult or lease the WE pool.
-    const refusals = (reconciled.dispatch ?? []).filter((entry) => ['fix', 'ci-heal'].includes(entry.kind)).map((entry) => ({
-      kind: 'unsupported-repo', repo: repoKey, prNumber: entry.prNumber, action: entry.kind,
-      why: 'Fix and CI-heal dispatch require a repo-specific brief and gate; the existing worker is WE-only.',
-    }));
+  const dispatchEntries = Array.isArray(reconciled.dispatch) ? reconciled.dispatch : [];
+  const profile = resolveProfile(repoKey);
+
+  const unsupportedFor = (kind, action, why) => dispatchEntries
+    .filter((entry) => entry.kind === kind)
+    .map((entry) => ({ kind: 'unsupported-repo', repo: repoKey, prNumber: entry.prNumber, action, why }));
+
+  // CI-heal is a capability of its own — refused independently of whatever `fix` decides below (see this
+  // function's own docblock).
+  const ciHealRefusals = profile?.capabilities?.ciHeal ? [] : unsupportedFor(
+    'ci-heal', 'ci-heal', 'CI-heal dispatch requires a repo-specific brief and gate; the existing worker is WE-only.',
+  );
+
+  if (!profile?.capabilities?.fix) {
+    // This repo's fix stage is off entirely: every `fix` entry is unsupported, never touching the lane pool or
+    // a dispatch sink. Durable ledger write mirrors the pre-slice-5 blanket branch exactly — preserve any
+    // already-recorded `review` rows for this repo (a DIFFERENT stage this file knows nothing about), replace
+    // its `fix`/`ci-heal` rows with what THIS pass just computed.
+    const fixRefusals = unsupportedFor(
+      'fix', 'fix', 'Fix dispatch requires a repo-specific brief and gate; the existing worker is WE-only.',
+    );
+    const refusals = [...fixRefusals, ...ciHealRefusals];
     const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
     return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
   }
-  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope, repoKey);
+  // `fix` IS supported here — still durably record any ci-heal refusals (a separate capability, possibly still
+  // off), preserving prior `review` rows exactly as above.
+  if (ciHealRefusals.length) {
+    const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
+    recordUnsupported({ repo: repoKey, rows: [...reviews, ...ciHealRefusals], path: unsupportedPath });
+  }
+  const { planned, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey);
+  const refusals = [...ciHealRefusals, ...planRefusals];
 
-  const lanes = [...pickFreeLanes()];
+  // Lanes: THIS repo's own pool (`profile.lanePoolRepo` — `.` for WE, an absolute checkout path for a sibling
+  // repo), never the WE pool for a non-WE repo (#x33jgwt).
+  const lanes = [...(typeof pickFreeLanes === 'function' ? pickFreeLanes() : freeLaneNumbers({ root, lanePoolRepo: profile.lanePoolRepo }))];
   const dispatched = [];
   for (const entry of planned) {
     // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
