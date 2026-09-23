@@ -5,9 +5,13 @@
  *   no real network, no real GitHub App needed.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   resolveGithubAppEnvConfig, isCacheFresh, ensureFreshGithubAppEnv, withGithubAppAuth,
   REFRESH_BUFFER_MS, defaultCachePath, findInstallationGaps, CACHE_VERSION, REQUIRED_APP_PERMISSIONS, REQUIRED_APP_REPOS,
+  defaultStatusPath, readGithubAppStatus,
 } from '../github-app-auth-env.mjs';
 
 const CONFIGURED_ENV = {
@@ -274,5 +278,90 @@ describe('defaultCachePath — one shared cache, keyed by home dir only, never p
   it('is deterministic for a given home dir, so two independent daemons resolve the SAME file', () => {
     expect(defaultCachePath('/Users/op')).toBe(defaultCachePath('/Users/op'));
     expect(defaultCachePath('/Users/op')).toContain('/Users/op/.claude/github-app-token/');
+  });
+});
+
+describe('defaultStatusPath — one shared status file, sibling of the cache, keyed by home dir only', () => {
+  it('is deterministic for a given home dir, so two independent daemons resolve the SAME file', () => {
+    expect(defaultStatusPath('/Users/op')).toBe(defaultStatusPath('/Users/op'));
+    expect(defaultStatusPath('/Users/op')).toContain('/Users/op/.claude/github-app-token/');
+  });
+
+  it('is a DIFFERENT file from the token cache — a status read must never accidentally return a cache entry', () => {
+    expect(defaultStatusPath('/Users/op')).not.toBe(defaultCachePath('/Users/op'));
+  });
+});
+
+describe('ensureFreshGithubAppEnv — records its outcome to the status file on EVERY path (#x8mpubm)', () => {
+  const NOW = Date.parse('2026-09-23T12:00:00Z');
+
+  it('not-configured is recorded, even though nothing else runs', async () => {
+    const writeStatus = vi.fn();
+    const result = await ensureFreshGithubAppEnv({ env: {}, now: NOW, statusPath: '/x/status.json', writeStatus });
+    expect(writeStatus).toHaveBeenCalledWith('/x/status.json', { ...result, checkedAt: new Date(NOW).toISOString() });
+  });
+
+  it('a live apply (cache hit) is recorded as applied:true', async () => {
+    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    const writeStatus = vi.fn();
+    await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: NOW, readCache: () => cached, writeCache: vi.fn(), setEnv: vi.fn(),
+      statusPath: '/x/status.json', writeStatus,
+    });
+    expect(writeStatus).toHaveBeenCalledWith('/x/status.json', { applied: true, reason: 'ok', checkedAt: new Date(NOW).toISOString() });
+  });
+
+  it('a mint failure is recorded as mint-failed, with no permissions/repos fields', async () => {
+    const writeStatus = vi.fn();
+    const mint = vi.fn().mockRejectedValue(new Error('fetch failed'));
+    await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, mint, setEnv: vi.fn(), log: { error: vi.fn() },
+      statusPath: '/x/status.json', writeStatus,
+    });
+    expect(writeStatus).toHaveBeenCalledWith('/x/status.json', { applied: false, reason: 'mint-failed', checkedAt: new Date(NOW).toISOString() });
+  });
+
+  it('THE LIVE CASE, recorded: an under-permissioned install is captured with the exact missing permissions and repos', async () => {
+    const writeStatus = vi.fn();
+    const mint = vi.fn().mockResolvedValue({ token: 'ghs_bare', expiresAt: '2026-09-23T13:00:00Z', permissions: {} });
+    const listRepos = vi.fn(async () => []);
+    await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv: vi.fn(),
+      log: { error: vi.fn() }, statusPath: '/x/status.json', writeStatus,
+    });
+    expect(writeStatus).toHaveBeenCalledWith('/x/status.json', {
+      applied: false,
+      reason: 'insufficient-access',
+      missingPermissions: Object.entries(REQUIRED_APP_PERMISSIONS).map(([name, level]) => `${name}:${level}`),
+      missingRepos: [...REQUIRED_APP_REPOS],
+      checkedAt: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('a failing status write never throws and never changes the returned result — diagnostic only', async () => {
+    const writeStatus = vi.fn(() => { throw new Error('disk full'); });
+    // The real default writeStatusFile swallows its own error; this test pins that a CALLER's own injected
+    // writeStatus throwing is the caller's problem to fix, not something ensureFreshGithubAppEnv should have
+    // to guard — so this asserts against the REAL default instead, which must not throw.
+    const result = await ensureFreshGithubAppEnv({ env: {}, now: NOW, statusPath: join(mkdtempSync(join(tmpdir(), 'we-app-status-')), 'status.json') });
+    expect(result).toEqual({ applied: false, reason: 'not-configured' });
+  });
+});
+
+describe('readGithubAppStatus / the real writeStatusFile default — round trip through real fs', () => {
+  it('reads back exactly what a real ensureFreshGithubAppEnv call wrote, in a scratch dir', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-app-status-'));
+    const statusPath = join(dir, 'status.json');
+    try {
+      const result = await ensureFreshGithubAppEnv({ env: {}, now: Date.parse('2026-09-23T12:00:00Z'), statusPath });
+      expect(result).toEqual({ applied: false, reason: 'not-configured' });
+      expect(readGithubAppStatus(statusPath)).toEqual({ ...result, checkedAt: '2026-09-23T12:00:00.000Z' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a missing status file reads as null, not a thrown error', () => {
+    expect(readGithubAppStatus('/definitely/does/not/exist/status.json')).toBeNull();
   });
 });

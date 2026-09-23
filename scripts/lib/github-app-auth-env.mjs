@@ -104,6 +104,20 @@ export function defaultCachePath(home = homedir()) {
 }
 
 /**
+ * ONE SHARED STATUS FILE, sibling of the token cache (#x8mpubm). Live-caught 2026-09-23: an installation
+ * missing every required permission and repo left {@link ensureFreshGithubAppEnv} refusing to apply the App
+ * token on EVERY tick, of EVERY daemon, since the App was registered — and the only trace of that was a
+ * repeated line in one daemon's own log file, which is why plateau-app PR #181's review session ran a whole
+ * incident on the operator's personal `gh` credential before anyone noticed. This file is the fix for
+ * "noticed": every {@link ensureFreshGithubAppEnv} call, whichever process runs it, overwrites the SAME
+ * status file with its own outcome, so `we:scripts/conveyor/github-app-status.mjs` (or a future monitoring
+ * skill) can answer "is App auth actually applying?" with one read, no daemon log to grep.
+ */
+export function defaultStatusPath(home = homedir()) {
+  return `${home}/.claude/github-app-token/status.json`;
+}
+
+/**
  * The three env vars that opt a process into GitHub App auth. All three or none — a partially-configured
  * process is almost certainly a typo, not an intentional two-thirds opt-in, so it refuses closed (falls back
  * to personal auth) rather than guessing which piece is missing.
@@ -151,6 +165,32 @@ function writeCacheFile(path, data) {
 }
 
 /**
+ * BEST-EFFORT, atomic like {@link writeCacheFile} — but a status write is diagnostic, never load-bearing, so
+ * unlike every other effect in this module it swallows its OWN failure (a read-only home dir, a full disk)
+ * rather than reporting one: {@link ensureFreshGithubAppEnv} must stay exactly as reliable as it was before
+ * this file existed, for a caller that never reads the status back.
+ */
+function writeStatusFile(path, status) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(tmp, JSON.stringify(status, null, 2), 'utf8');
+    renameSync(tmp, path);
+  } catch { /* diagnostic only — see docblock above */ }
+}
+
+/**
+ * Read the status file back, for `we:scripts/conveyor/github-app-status.mjs` and any future caller — the
+ * counterpart read to {@link writeStatusFile}, exported for the same reason {@link defaultCachePath} is: so
+ * a reader resolves the SAME path this module writes without duplicating the join logic.
+ * @param {string} [path]
+ * @returns {{applied:boolean, reason:string, missingPermissions?:string[], missingRepos?:string[], checkedAt:string}|null}
+ */
+export function readGithubAppStatus(path = defaultStatusPath()) {
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
+}
+
+/**
  * The IO shell a process's own bootstrap calls: if GitHub App auth is configured, ensure the shared cache
  * holds a token fresh enough to use, minting a new one when it does not, then set `process.env.GH_TOKEN` to
  * it so every `gh` CLI call and every raw `execFileSync('gh', …)` this process (or anything it spawns)
@@ -166,9 +206,15 @@ function writeCacheFile(path, data) {
  * the same way a failed mint is — personal auth stays in effect, and the log names exactly what to grant — so
  * switching the App on can never leave the fleet less able to act than it was before. Only a token that
  * passed this check is ever written to the cache, so a cache hit needs no re-check.
+ * RECORDS ITS OUTCOME (#x8mpubm), always, on every path below — including `not-configured` — to
+ * {@link defaultStatusPath} by default, so a fail-closed state that would otherwise sit invisible in one
+ * daemon's own log is checkable from anywhere with one file read (`we:scripts/conveyor/github-app-status.mjs`).
+ * The write is best-effort ({@link writeStatusFile} never throws) and never changes what this function
+ * returns — a caller that ignores `statusPath`/`writeStatus` entirely sees byte-identical behavior to before.
  * @param {{env?:NodeJS.ProcessEnv, cachePath?:string, now?:number, readCache?:Function, writeCache?:Function,
  *   mint?:typeof mintInstallationToken, listRepos?:(token:string)=>Promise<string[]>,
- *   required?:{permissions?:object, repos?:string[]}, setEnv?:(token:string)=>void, log?:Console}} [o]
+ *   required?:{permissions?:object, repos?:string[]}, setEnv?:(token:string)=>void, log?:Console,
+ *   statusPath?:string, writeStatus?:(path:string, status:object)=>void}} [o]
  * @returns {Promise<{applied:boolean, reason:string, missingPermissions?:string[], missingRepos?:string[]}>}
  */
 export async function ensureFreshGithubAppEnv({
@@ -182,9 +228,16 @@ export async function ensureFreshGithubAppEnv({
   required,
   setEnv = (token) => { process.env.GH_TOKEN = token; },
   log = console,
+  statusPath = defaultStatusPath(),
+  writeStatus = writeStatusFile,
 } = {}) {
+  const record = (result) => {
+    writeStatus(statusPath, { ...result, checkedAt: new Date(now).toISOString() });
+    return result;
+  };
+
   const config = resolveGithubAppEnvConfig(env);
-  if (!config) return { applied: false, reason: 'not-configured' };
+  if (!config) return record({ applied: false, reason: 'not-configured' });
 
   let cached = readCache(cachePath);
   if (!isCacheFresh(cached, now)) {
@@ -197,7 +250,7 @@ export async function ensureFreshGithubAppEnv({
       // Never echo a partial token or the private key path's contents — only the API's own error message,
       // already scrubbed of secrets by github-app-token.mjs's own mint failure path.
       log.error?.(`github-app-auth-env: mint failed (falling back to personal auth): ${String((e && e.message) || e)}`);
-      return { applied: false, reason: 'mint-failed' };
+      return record({ applied: false, reason: 'mint-failed' });
     }
     const { missingPermissions, missingRepos } = findInstallationGaps({ permissions: minted.permissions, repos }, required);
     if (missingPermissions.length || missingRepos.length) {
@@ -206,14 +259,14 @@ export async function ensureFreshGithubAppEnv({
         + (missingPermissions.length ? `Grant repository permissions: ${missingPermissions.join(', ')}. ` : '')
         + (missingRepos.length ? `Add repositories to the installation: ${missingRepos.join(', ')}.` : ''),
       );
-      return { applied: false, reason: 'insufficient-access', missingPermissions, missingRepos };
+      return record({ applied: false, reason: 'insufficient-access', missingPermissions, missingRepos });
     }
     cached = { v: CACHE_VERSION, token: minted.token, expiresAt: minted.expiresAt };
     writeCache(cachePath, cached);
   }
 
   setEnv(cached.token);
-  return { applied: true, reason: 'ok' };
+  return record({ applied: true, reason: 'ok' });
 }
 
 /**
