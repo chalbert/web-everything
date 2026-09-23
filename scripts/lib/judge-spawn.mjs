@@ -72,8 +72,8 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { resolve as resolvePath } from 'node:path';
-import { realpathSync, statSync } from 'node:fs';
+import { resolve as resolvePath, dirname, join } from 'node:path';
+import { realpathSync, statSync, existsSync } from 'node:fs';
 
 /**
  * Are these two paths the SAME DIRECTORY? By inode + device, never by comparing the strings.
@@ -123,8 +123,30 @@ if (typeof REAL_PATH !== 'function') {
   throw new Error('judge-spawn: `fs.realpathSync.native` is unavailable — the lane check cannot distinguish two spellings of one directory without it');
 }
 
+/**
+ * Resolve the `claude` binary WITHOUT a PATH lookup, when possible. Live-caught 2026-09-23: a headless
+ * review-dispatch session's own spawn environment did not carry the nvm-managed `claude` binary's directory
+ * on `PATH`, so `nodeSpawn('claude', ...)` failed `ENOENT` — even though the review session ITSELF had
+ * started fine moments earlier (its own launch used an absolute path; only the JUROR it then tried to spawn
+ * from inside itself used the bare command name + PATH lookup, and that is exactly what broke). This blocked
+ * every dispatched review, not only this daemon's.
+ *
+ * nvm (and most other Node version managers) installs `claude` as a SIBLING of the `node` binary currently
+ * running this process — confirmed live: `which claude` and `process.execPath` shared the same directory.
+ * Resolving it that way needs no `PATH` lookup at all. Falls back to the bare name (this constant's prior,
+ * unconditional value) when that sibling file does not exist — a different install layout is still handled
+ * by whatever `PATH` the caller's own environment happens to have, exactly as before this fix.
+ * @param {{execPath?: string, exists?: typeof existsSync}} [o] - injectable for the fallback branch's own
+ *   test, which cannot otherwise force `process.execPath`'s real sibling to be absent.
+ * @returns {string}
+ */
+export function resolveJudgeCli({ execPath = process.execPath, exists = existsSync } = {}) {
+  const sibling = join(dirname(execPath), 'claude');
+  return exists(sibling) ? sibling : 'claude';
+}
+
 /** The CLI a juror runs as. Named once so a test can assert it and a caller can override the path. */
-export const JUDGE_CLI = 'claude';
+export const JUDGE_CLI = resolveJudgeCli();
 
 /**
  * How long a juror may run before it is killed — DERIVED, with the measurement it was derived from recorded

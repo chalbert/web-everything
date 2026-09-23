@@ -22,9 +22,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import {
   JUDGE_CLI,
+  resolveJudgeCli,
   FORBIDDEN_ARGV,
   assertNoForbiddenArgv,
   EFFORT_LEVELS,
@@ -184,8 +185,42 @@ describe('buildJudgeArgv — the recipe, pinned exactly (#3028)', () => {
     expect(a).not.toBe(b);
   });
 
-  it('names the CLI once, so a caller can point at another binary without re-deriving flags', () => {
-    expect(JUDGE_CLI).toBe('claude');
+  // Live-caught 2026-09-23: JUDGE_CLI used to be the literal string 'claude', PATH-resolved at spawn time —
+  // a headless review session's own environment did not carry the nvm-managed claude binary's directory on
+  // PATH, so every juror it tried to spawn failed ENOENT (the review session ITSELF had started fine; only
+  // the grandchild juror spawn, relying on PATH lookup from inside that session's own env, broke). Fixed by
+  // resolving the binary as a sibling of the currently-running node executable (nvm's own install layout)
+  // instead of a bare name — see resolveJudgeCli's own header for the full incident.
+  it('names the CLI once, so a caller can point at another binary without re-deriving flags — an absolute path on this dev box (nvm sibling), never a bare name that needs a PATH lookup', () => {
+    expect(JUDGE_CLI.endsWith('/claude') || JUDGE_CLI === 'claude').toBe(true);
+    // On THIS machine (nvm-managed node), the sibling genuinely exists, so the resolved value must be the
+    // absolute path, not the bare fallback — proves the fix is actually active in this dev environment, not
+    // merely present in the source.
+    expect(JUDGE_CLI).not.toBe('claude');
+  });
+});
+
+describe('resolveJudgeCli — PATH-independent binary resolution (live-caught 2026-09-23)', () => {
+  it('resolves the sibling of process.execPath when a real exists() confirms it — the real default path', () => {
+    const resolved = resolveJudgeCli();
+    expect(resolved).toBe(join(dirname(process.execPath), 'claude'));
+    expect(existsSync(resolved)).toBe(true); // genuinely exists on disk, not just string-shaped
+  });
+
+  it('resolves the sibling of an injected execPath when the injected exists() says it is there', () => {
+    const resolved = resolveJudgeCli({ execPath: '/fake/nvm/v99/bin/node', exists: () => true });
+    expect(resolved).toBe('/fake/nvm/v99/bin/claude');
+  });
+
+  it('falls back to the bare name when the sibling does not exist (a non-nvm install layout)', () => {
+    const resolved = resolveJudgeCli({ execPath: '/usr/local/bin/node', exists: () => false });
+    expect(resolved).toBe('claude');
+  });
+
+  it('the exists() check is asked about the SIBLING path, not process.execPath itself', () => {
+    const asked = [];
+    resolveJudgeCli({ execPath: '/opt/node/bin/node', exists: (p) => { asked.push(p); return true; } });
+    expect(asked).toEqual(['/opt/node/bin/claude']);
   });
 });
 
@@ -418,7 +453,10 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
       lens: 'rigor',
       spawnFn: fn,
     });
-    expect(seen.cli).toBe('claude');
+    // Live-caught 2026-09-23: JUDGE_CLI is no longer always the bare literal 'claude' — it resolves to an
+    // absolute sibling-of-node path when that exists (see resolveJudgeCli's own header). Assert against the
+    // real constant, not a hardcoded literal that only held before that fix.
+    expect(seen.cli).toBe(JUDGE_CLI);
     expect(seen.argv).toEqual(buildJudgeArgv({
       mandate: 'You are the rigor juror.', shape: SHAPE, model: 'opus', effort: 'high', budget: 0.75,
       sessionId: deriveSessionId(sessionSeed(['run-7', 'rigor'])),
