@@ -2,11 +2,13 @@
 kind: story
 size: 3
 parent: "xjtmptc"
-status: active
+status: resolved
 blockedBy: ["xs0eutz"]
 scope: ["we:scripts/lib/telemetry-machine.mjs", "we:scripts/__tests__/telemetry-machine.test.mjs", "we:scripts/operations/telemetry-summary.mjs", "we:scripts/operations/telemetry-summary-io.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/telemetry-summary.test.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: "we:scripts/operations/telemetry-summary.mjs"
 tags: []
 ---
 
