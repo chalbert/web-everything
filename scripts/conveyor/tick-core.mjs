@@ -1382,6 +1382,34 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   };
 }
 
+/**
+ * The extra `--repo=` argument (if any) the free-lane list read needs so a tick's capacity accounting reflects
+ * the TARGET repo's own lane pool — never always WE's. #xr4ygg7 (multi-repo slice 9, we:reports/2026-09-23-
+ * conveyor-multi-repo-gap-map.md) — `main()`'s free-lane read (`lane-pool.mjs list --acquirable --json`) never
+ * threaded this shell's own `--repo` flag through, unlike every other subprocess call it makes (conveyor-state,
+ * the gh PR-comment reads, heavy-admission) — so a tick invoked with `--repo=frontierui` (or `plateau-app`)
+ * still counted only the WE pool's free lanes, silently mis-sizing capacity for a repo whose fix/ci-heal spawns
+ * draw from an entirely different pool (the gap-map's "tick capacity counts only the WE pool" row).
+ *
+ * PURE given the injected profile resolver, mirroring this file's own "no node: import in the pure core"
+ * convention: `main()` resolves `repoProfile` via a dynamic `import()` (same as every other IO-adjacent helper
+ * it pulls in — `rearm-review.mjs`, `dispatch-pause.mjs`, `driver-verbose.mjs`, …) and hands it in here, rather
+ * than this file importing `repo-profile.mjs` at the top.
+ *
+ * Returns `[]` (no change to the call) whenever `repoFlag` is absent/not a string, resolves to no known
+ * profile, or resolves to the WE profile itself — i.e. every invocation in production TODAY (nothing currently
+ * calls this shell with `--repo=`), so this is a zero-behavior-change addition until a caller actually opts in.
+ * @param {unknown} repoFlag - the raw `--repo` CLI value, or undefined/not-a-string.
+ * @param {(v:unknown) => ({key:string, lanePoolRepo:string}|null)} resolveProfile - `repo-profile.mjs#repoProfile`.
+ * @returns {string[]} `[]`, or a single `--repo=<lanePoolRepo>` element.
+ */
+export function lanePoolListArgsForRepo(repoFlag, resolveProfile) {
+  if (typeof repoFlag !== 'string' || !repoFlag || typeof resolveProfile !== 'function') return [];
+  const profile = resolveProfile(repoFlag);
+  if (!profile || profile.key === 'we') return [];
+  return [`--repo=${profile.lanePoolRepo}`];
+}
+
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
 
 /** Read all of STDIN as a string (the SESSION-EPHEMERAL bookkeeping is piped in — never a committed repo store). */
@@ -1469,7 +1497,11 @@ async function main(argv) {
   const plan = time('planReadMs', () => runJson('node', [PLAN_CLI, ...planArgs], 'dispatch-plan'));
 
   // Free lane ids — the same acquirable picker dispatch-plan's shell uses (ascending, deterministic assignment).
-  const paths = time('lanePoolListMs', () => runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list'));
+  // #xr4ygg7 — the free-lane read must reflect flags.repo's OWN pool, exactly like every other subprocess call
+  // in this shell already threads `--repo=${flags.repo}` through (see `lanePoolListArgsForRepo`'s own docblock).
+  const { repoProfile } = await import('../lib/repo-profile.mjs');
+  const lanePoolListArgs = ['list', '--acquirable', '--json', ...lanePoolListArgsForRepo(flags.repo, repoProfile)];
+  const paths = time('lanePoolListMs', () => runJson('node', [LANE_POOL_CLI, ...lanePoolListArgs], 'lane-pool list'));
   const freeLanes = (Array.isArray(paths) ? paths : [])
     .map((p) => { const m = /lane-(\d+)\/?$/.exec(String(p)); return m ? Number(m[1]) : null; })
     .filter((n) => n != null)
