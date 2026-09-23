@@ -2,10 +2,13 @@
 bornAs: x2n4o16
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 relatedTo: ["3717", "3690", "3443", "3730", "3784", "3798", "3658", "3804"]
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+codifiedIn: "docs/agent/platform-decisions.md#dispatch-routing-fork-rulings"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "7bdbe0c8a8fdd88b715e4094456b513823489179"
 relatedReport: reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md
