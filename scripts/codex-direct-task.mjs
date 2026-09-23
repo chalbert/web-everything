@@ -80,7 +80,9 @@
  * clone), --repo-root=<path> (default: this script's own repo root — where a scratch clone is cloned FROM),
  * --model=<model>, --effort=low|medium|high|xhigh|max|ultra, --timeout-ms=<n> (default 30 min), --gate=none|
  * standards|full (default none), --ephemeral, --no-stream (still logs to file, just not to stdout too),
- * --log=<path> (default: alongside the target dir), --json (machine-readable final report on stdout).
+ * --log=<path> (default: alongside the target dir), --wire-origin-to-remote (#3782 — opt-in; a fresh scratch
+ * clone's `origin` otherwise stays at the local repoRoot path, non-push-capable, with the real remote only
+ * PRINTED for a human to wire up by hand), --json (machine-readable final report on stdout).
  */
 
 import { spawn as nodeSpawn, execFileSync } from 'node:child_process';
@@ -534,6 +536,24 @@ export const defaultExecFn = (bin, args, opts = {}) =>
  * Make a fresh, isolated scratch clone of `repoRoot` and install its deps — the default target when the
  * caller names no existing directory. Injectable `execFn`/`mkTempDir`/`existsFn` for testing without a real
  * git/npm process.
+ *
+ * #3782 — RATIFIED 2026-09-22 (this item's own resolution). This used to unconditionally rewrite the clone's
+ * `origin` from the local `repoRoot` path to the REAL push remote ("so a human who likes the diff can push
+ * straight from the scratch clone if they choose to"), while `buildCodexPrompt` told Codex — in prose alone —
+ * never to commit or push. Codex runs here with `-s workspace-write` and a real shell; nothing enforced that
+ * sentence. #3690 Fork 1 rules that authority over what a delegated agent may DO belongs to the typed-operation
+ * catalog, never to a transport's prompt text — this rewrite was exactly that gap: it handed the clone a
+ * push-capable origin by default. A live probe on this operator's own machine (see the PR this landed in)
+ * found ambient SSH-agent credentials that WOULD authenticate a push through that rewritten origin — the risk
+ * was real, not theoretical.
+ *
+ * The fix is least-privilege by default: leave `origin` at the local `repoRoot` path (clone's default) and
+ * resolve+return the real remote URL as `realOrigin` for the caller to print, rather than wiring it into the
+ * clone's git config. A human who wants the convenience the old comment described can still get it — either
+ * by running `git -C <dest> remote set-url origin <realOrigin>` themselves after reading the printed report,
+ * or by passing `wireOriginToRemote: true` here (CLI: `--wire-origin-to-remote`) to opt back into the old
+ * behavior explicitly. Nothing about `--dir` (an existing checkout a caller names directly) changes — that
+ * checkout's own `origin` was never touched by this function and still is not.
  * @param {object} opts
  * @param {string} opts.repoRoot
  * @param {(prefix: string) => string} [opts.mkTempDir]
@@ -541,7 +561,11 @@ export const defaultExecFn = (bin, args, opts = {}) =>
  * @param {(path: string) => boolean} [opts.existsFn]
  * @param {boolean} [opts.installDeps] - default true; a caller in a hurry for a task that touches no code
  *   dependent on `node_modules` may pass false.
- * @returns {{dest: string, cloned: true, depsInstall: {bin: string, args: string[]}|null}}
+ * @param {boolean} [opts.wireOriginToRemote] - default false (#3782). When true, opts back into the pre-#3782
+ *   behavior: rewrite the clone's `origin` to the real remote so a human can push straight from it. Best-effort
+ *   either way — an offline/no-remote `repoRoot` (e.g. a test fixture) just leaves `realOrigin` null.
+ * @returns {{dest: string, cloned: true, depsInstall: {bin: string, args: string[]}|null, realOrigin:
+ *   string|null, originWired: boolean}}
  */
 export function setupScratchClone({
   repoRoot,
@@ -549,23 +573,33 @@ export function setupScratchClone({
   execFn = defaultExecFn,
   existsFn = existsSync,
   installDeps = true,
+  wireOriginToRemote = false,
 } = {}) {
   if (typeof repoRoot !== 'string' || !repoRoot.trim()) {
     throw new TypeError('codex-direct-task: `repoRoot` must be a non-empty path');
   }
   const dest = mkTempDir(join(tmpdir(), 'we-codex-direct-'));
   execFn('git', buildScratchCloneArgv({ repoRoot, dest }));
-  // Best-effort: point the clone's `origin` at the REAL remote (not the local repoRoot path) so a human who
-  // likes the diff can push straight from the scratch clone if they choose to. Never fatal — an offline/no-
-  // remote repoRoot (e.g. a test fixture) just leaves the local-path origin in place.
+  // Resolve the real push remote so it can be REPORTED — never silently wired in by default (#3782). Best-
+  // effort: an offline/no-remote repoRoot (e.g. a test fixture) just leaves `realOrigin` null; `origin` in the
+  // clone stays at the local `repoRoot` path (git clone's own default), which is not push-capable to anywhere
+  // that matters.
+  let realOrigin = null;
   try {
-    const realOrigin = execFn('git', ['-C', repoRoot, 'remote', 'get-url', 'origin']).trim();
-    if (realOrigin) execFn('git', ['-C', dest, 'remote', 'set-url', 'origin', realOrigin]);
-  } catch { /* no origin on repoRoot, or remote command unavailable — harmless, clone still works */ }
+    const url = execFn('git', ['-C', repoRoot, 'remote', 'get-url', 'origin']).trim();
+    if (url) realOrigin = url;
+  } catch { /* no origin on repoRoot, or remote command unavailable */ }
+  let originWired = false;
+  if (wireOriginToRemote && realOrigin) {
+    try {
+      execFn('git', ['-C', dest, 'remote', 'set-url', 'origin', realOrigin]);
+      originWired = true;
+    } catch { /* set-url failed — clone still works with the local-path origin */ }
+  }
 
   const depsInstall = installDeps ? planDepsInstall(dest, existsFn) : null;
   if (depsInstall) execFn(depsInstall.bin, depsInstall.args, { cwd: dest, stdio: 'inherit' });
-  return { dest, cloned: true, depsInstall };
+  return { dest, cloned: true, depsInstall, realOrigin, originWired };
 }
 
 /**
@@ -770,6 +804,8 @@ export async function runCodexDirectExec({
  * @param {string} [opts.logFile]
  * @param {boolean} [opts.stream]
  * @param {boolean} [opts.installDeps]
+ * @param {boolean} [opts.wireOriginToRemote] - #3782: default false — forwarded to `setupScratchClone`. Only
+ *   meaningful when `dir` is omitted (a scratch clone is actually made); ignored for a caller-named `--dir`.
  * @param {boolean} [opts.clearRolloutAfterRun] - #x8wbivt Fork 4: when true, use the ratified read-then-delete
  *   shape (`collectAndClearRolloutQuota`) instead of the default read-only lookup — only worth setting for a
  *   caller with no `codex exec resume` use case for this particular run (see `readRolloutQuota`'s header).
@@ -796,6 +832,7 @@ export async function codexDirectTask({
   logFile,
   stream = true,
   installDeps = true,
+  wireOriginToRemote = false,
   clearRolloutAfterRun = false,
   env = process.env,
   execFn = defaultExecFn,
@@ -815,7 +852,9 @@ export async function codexDirectTask({
     if (typeof repoRoot !== 'string' || !repoRoot.trim()) {
       throw new TypeError('codex-direct-task: `dir` was omitted, so `repoRoot` is required to make a scratch clone from');
     }
-    scratch = setupScratchClone({ repoRoot, mkTempDir, execFn, existsFn, installDeps });
+    scratch = setupScratchClone({
+      repoRoot, mkTempDir, execFn, existsFn, installDeps, wireOriginToRemote,
+    });
     targetDir = scratch.dest;
   } else if (!existsFn(targetDir)) {
     throw new Error(`codex-direct-task: --dir=${targetDir} does not exist`);
@@ -862,7 +901,16 @@ export async function codexDirectTask({
 
   return {
     dir: targetDir,
-    scratch: scratch ? { created: true, source: repoRoot, depsInstall: scratch.depsInstall } : { created: false },
+    scratch: scratch ? {
+      created: true,
+      source: repoRoot,
+      depsInstall: scratch.depsInstall,
+      // #3782: `origin` inside the scratch clone stays at the local `repoRoot` path by default (NOT
+      // push-capable to anywhere that matters) — `realOrigin` is only ever REPORTED, never silently wired in,
+      // unless the caller explicitly opted in via `wireOriginToRemote`/`--wire-origin-to-remote`.
+      realOrigin: scratch.realOrigin,
+      originWired: scratch.originWired,
+    } : { created: false },
     startSha,
     argv: run.argv,
     logFile: resolvedLogFile,
@@ -907,10 +955,13 @@ async function main() {
       'usage: node scripts/codex-direct-task.mjs --task=<text>|--task-file=<path> [--dir=<checkout>] '
       + '[--repo-root=<path>] [--model=<m>] [--effort=low|medium|high|xhigh|max|ultra] [--tier=haiku|sonnet|opus] '
       + '[--timeout-ms=<n>] [--gate=none|standards|full] [--ephemeral] [--clear-rollout-after-run] '
-      + '[--no-stream] [--log=<path>] [--no-install] [--json]\n'
+      + '[--no-stream] [--log=<path>] [--no-install] [--wire-origin-to-remote] [--json]\n'
       + '  --model defaults to the ratified CODEX_MODEL pin (#x8wbivt); --effort/--tier default to the '
       + "sonnet rung's `medium` — neither is ever left to codex's own implicit default. --tier is ignored "
-      + 'when --effort is also given.',
+      + 'when --effort is also given.\n'
+      + "  --wire-origin-to-remote (#3782): a fresh scratch clone's `origin` stays at the local repoRoot path "
+      + 'by default (not push-capable) — the real remote is only printed. Pass this to opt back into rewriting '
+      + "origin to the real remote so a human can push straight from the clone. No effect with --dir.",
     );
     return;
   }
@@ -939,6 +990,7 @@ async function main() {
       logFile: flags.log ? resolve(flags.log) : undefined,
       stream: !flags['no-stream'],
       installDeps: !flags['no-install'],
+      wireOriginToRemote: Boolean(flags['wire-origin-to-remote']),
       clearRolloutAfterRun: Boolean(flags['clear-rollout-after-run']),
     });
   } catch (e) {
@@ -952,6 +1004,12 @@ async function main() {
   } else {
     console.log('\n──────────────────────────────────────────────────────────');
     console.log(`codex-direct-task: ${report.scratch.created ? 'scratch clone' : 'target dir'} → ${report.dir}`);
+    if (report.scratch.created && report.scratch.realOrigin) {
+      console.log(report.scratch.originWired
+        ? `  origin wired to the real remote (--wire-origin-to-remote): ${report.scratch.realOrigin}`
+        : `  origin left at the local clone source (#3782, not push-capable). Real remote: ${report.scratch.realOrigin}\n`
+          + `    to push from here yourself: git -C ${report.dir} remote set-url origin ${report.scratch.realOrigin}`);
+    }
     console.log(`  thread: ${report.events.threadId ?? '<none>'}  turns: ${report.events.turns}  terminal: ${report.events.terminal ?? '<none — timed out or killed>'}  timedOut: ${report.timedOut}  exit: ${report.exitCode}`);
     console.log(`  tool calls: ${report.events.commands.length}  files touched: ${report.events.filesChanged.length}`);
     for (const f of report.events.filesChanged) console.log(`    - ${f.kind} ${f.path}`);
