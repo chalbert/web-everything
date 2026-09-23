@@ -1,0 +1,72 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>The operator has asked several times that a build stop being one worker writing the whole card. Instead, a
+planner writes a plan of typed steps, and each step is either run by a script or sent to the cheapest model that
+can do it. <a href="/backlog/3922-decision-the-planner-build-g2-a-planner-splits-a-build-into/">#3922</a>
+decides how that build works. The full working is in
+<a href="/reports/2026-09-22-planner-build-g2-prep.md">the session report</a>.</p>
+
+<h2>Measured on 2026-09-22, prototype tip da085d438</h2>
+
+<ul>
+  <li><strong>Already built, never called:</strong> a plan format (tasks with dependencies and a profile), a
+    supervisor verdict format (accept, rework or reject, with optional new tasks), the planner role, and the
+    per-task router.</li>
+  <li><strong>The router already prefers Gemini first</strong> through its fixed cascade. A model earns lighter
+    supervision per kind of task, after five clean trials.</li>
+  <li><strong>The build is one blocking agent turn today.</strong> That turn is the one place a plan would plug in.
+    The gate, the convergence rounds and the pull request stay as they are.</li>
+  <li><strong>No Gemini Flash combination has earned trust yet.</strong> <code>main</code> records five clean
+    conflict-fix trials, but they lack the field that marks a trial as informative, and no promotion has been
+    ratified.</li>
+  <li><strong>Nothing joins parallel edits back into one lane.</strong> The parallel workflow's old "one
+    integration worktree" model was dropped in July 2026, so #3575's plan to reuse it is out of date.</li>
+</ul>
+
+<h2>Prior art</h2>
+
+<table>
+  <thead><tr><th>System</th><th>What it does</th><th>What it shows</th></tr></thead>
+  <tbody>
+    <tr><td><a href="https://aider.chat/2024/09/26/architect.html">Aider architect/editor</a></td>
+      <td>A strong model plans in prose; a cheaper model turns the plan into edits.</td>
+      <td>The pair scored 85.0%, against 80.5% for a strong model doing both jobs. Splitting by role can raise quality, not only cut cost.</td></tr>
+    <tr><td><a href="https://arxiv.org/abs/2312.04511">LLMCompiler</a></td>
+      <td>A planner writes a task graph with dependencies; ready tasks run in parallel.</td>
+      <td>Up to 3.7× faster and 6.7× cheaper than a step-by-step agent loop.</td></tr>
+    <tr><td><a href="https://microsoft.github.io/autogen/stable//user-guide/agentchat-user-guide/magentic-one.html">Magentic-One</a></td>
+      <td>An orchestrator keeps a task ledger and a progress ledger.</td>
+      <td>It replans when progress stalls, which is a per-step check, not only a final one.</td></tr>
+    <tr><td><a href="https://www.lmsys.org/blog/2024-07-01-routellm/">RouteLLM</a>, <a href="https://arxiv.org/abs/2305.05176">FrugalGPT</a></td>
+      <td>Send each query to a cheap or strong model, or try cheap first and escalate.</td>
+      <td>Large cost cuts at equal quality. But a router near-randomly misroutes kinds of work it hasn't seen, so trust must be earned per kind of task.</td></tr>
+    <tr><td><a href="https://www.anthropic.com/research/building-effective-agents">Anthropic: orchestrator-workers</a></td>
+      <td>A central model splits the work and hands the pieces to worker models.</td>
+      <td>Recommended for changes spanning several files, with a warning that errors compound.</td></tr>
+    <tr><td><a href="https://cognition.com/blog/swe-bench-technical-report">Devin</a>; Codex cloud, Jules, Copilot coding agent</td>
+      <td>Isolate each task, plan before editing, run tests in the loop, produce one PR.</td>
+      <td>The main failures are wrong-file edits and partial multi-file changes. Checking each step's files is the counter.</td></tr>
+  </tbody>
+</table>
+
+<h2>How the findings reshape the decision</h2>
+
+<ul>
+  <li><strong>Who runs the plan:</strong> code in the build wrapper, not an agent spawning its own helpers.
+    Otherwise a model would choose the models.</li>
+  <li><strong>Parallel steps:</strong> each agent step works in its own throwaway worktree. The wrapper applies
+    the results in dependency order, and a clash sends that step back.</li>
+  <li><strong>What a step can be:</strong> either an agent task, or a named declared operation from a reviewed
+    list. Never a shell command the planner wrote.</li>
+  <li><strong>Routing inputs:</strong> the task type is worked out from the files a step touches, never declared
+    by the planner. A step that goes beyond its declared files or size counts against that model's trust.</li>
+  <li><strong>Per-step checks</strong> follow the step's supervision level. The planner-supervisor's
+    <em>accept</em> fills the supervisor slot that routing requires, and the pull request is still reviewed once
+    at the end.</li>
+  <li><strong>A <code>deliveryAgent:</code> marker keeps its meaning.</strong> That vendor builds the whole card,
+    and no plan runs.</li>
+</ul>
+
+<p>Related: <a href="/research/dispatch-routing-build-review/">the #3717 dispatch-routing build review</a>.</p>
+{% endraw %}
