@@ -2,9 +2,11 @@
 bornAs: xjko7gy
 kind: task
 parent: "3963"
-status: open
+status: resolved
 scope: ["we:scripts/lib/constellation-repos.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
