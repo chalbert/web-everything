@@ -77,6 +77,10 @@ import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
+// #xr4ygg7 (multi-repo slice 9, we:reports/2026-09-23-conveyor-multi-repo-gap-map.md) — the constellation table,
+// so a lease's POOL (ground truth) and a `fix-<tag>-<id>` session's own tag both resolve through the ONE source
+// every other conveyor script already keys off, never a private re-derivation here.
+import { CONSTELLATION_REPOS, repoKeyForDir } from '../lib/constellation-repos.mjs';
 
 // ── PURE CORE (no fs / git / gh / clock — every signal is injected) ───────────────────────────────────────────
 
@@ -109,15 +113,50 @@ import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lan
  * @returns {string|null}
  */
 /** Shared match, so {@link itemNumFromSession} and {@link sessionSlugAttemptTag} can never disagree about
- *  where the retry-suffix letter sits — same reason {@link laneRefItemNum} names for its own couple. */
+ *  where the retry-suffix letter sits — same reason {@link laneRefItemNum} names for its own couple.
+ *
+ *  #xr4ygg7 (multi-repo slice 9) — WIDENED to match a `fix-<tag>-<id>` session for ANY constellation repo, not
+ *  only `we`. Before this, a dead `fix-pa-181`/`fix-fui-49` session's lane was reclaimed ONLY by the zero-IO
+ *  TTL-stale backstop (4 hours) — the PR-terminal and session-gone axes were both structurally unreachable for
+ *  it, because `itemNumFromSession` (the only lookup key either axis has) returned `null` for any non-`we`
+ *  tagged session. That is the exact gap `we:backlog/xr4ygg7-*.md` names: "dead leases in the frontierui and
+ *  plateau pools are reclaimed only by TTL". Item-kind sessions (`conveyor-`/`prepare-`/`prepare-decision-`)
+ *  are UNAFFECTED — `mintSessionSlug` forbids them from ever carrying a non-`we` repo tag, so `parsed.repo` is
+ *  always `'we'` for those and this widening only ever activates a NEW path for `fix-<tag>-<id>`.
+ *
+ *  WHY THIS IS SAFE despite widening what `itemNumFromSession` returns: the PR-terminal axis is the one that
+ *  could turn "yes, this session names an item" into a WRONG reap if the lookup then mixed repos — e.g. reading
+ *  a merged WE PR #49 as proof that plateau-app's OWN, unrelated item 49 is done. That hazard is closed at the
+ *  LOOKUP, not here: the IO shell's `fetchPrStatesForRepo`/`prStatesByRepo` key every PR-state Map by repo (see
+ *  their own docblocks), so a plateau-app lease's num is only ever checked against plateau-app's own `gh pr
+ *  list`, never WE's. `lane-pool.mjs`'s acquire-native backstop (the OTHER consumer of this widened
+ *  `itemNumFromSession`) was ALREADY per-repo-scoped before this change (its own `gh pr list` runs with
+ *  `cwd: repo.referencePath`, i.e. inside the ONE pool being acquired against) — so it needed no change at all
+ *  to safely benefit from the wider match. */
 function matchSessionSlug(session) {
   const parsed = parseSessionSlug(session);
-  return parsed?.repo === 'we' && (parsed.itemKind || parsed.kind === 'fix')
-    ? { num: parsed.id, tag: parsed.attempt } : null;
+  return parsed && (parsed.itemKind || parsed.kind === 'fix')
+    ? { num: parsed.id, tag: parsed.attempt, repo: parsed.repo } : null;
 }
 
 export function itemNumFromSession(session) {
   return matchSessionSlug(session)?.num ?? null;
+}
+
+/**
+ * #xr4ygg7 (multi-repo slice 9) — the internal repo key a lane-pool DIRECTORY NAME names (`'web-everything'` /
+ * `'webeverything'` → `'we'`, `'frontierui'` → `'frontierui'`, `'plateau-app'` → `'plateau-app'`), or `null` for
+ * a pool this constellation table doesn't recognize (a one-off scratch clone under `POOL_ROOT` that never has
+ * `lane-N` children, so `poolsToScan` never surfaces it here anyway — this only ever sees a real per-repo lane
+ * pool's own dir name). THE GROUND TRUTH for which repo a held lease belongs to, used instead of the lease's
+ * own `session` field: the pool a lane is checked out under cannot be wrong the way a free-text session name
+ * conceivably could be. A thin, named wrapper over `constellation-repos.mjs#repoKeyForDir` — reused, not
+ * re-derived — so a reader searching this file for "which repo is this pool" finds the answer here.
+ * @param {string} poolName
+ * @returns {string|null}
+ */
+export function repoKeyForPool(poolName) {
+  return repoKeyForDir(poolName);
 }
 
 /**
@@ -444,21 +483,37 @@ export function pidAliveForLease(lease) {
 }
 
 /**
- * ONE `gh pr list` → a Map of item-num → terminal PR state (`merged` / `closed` / `open`), keyed by matching
- * each PR's head ref `lane/<num>-*`. Terminal states win over `open` so a couple's merged WE PR reads `merged`.
- * Best-effort: any gh failure disables the axis (returns null → every lease's prState is unknown → TTL still
- * bites). Scoped to the current repo (`--pr-repo=<owner/name>` overrides); a couple's WE PR num reclaims the
- * impl-pool half too, since both halves share the item number.
+ * ONE `gh pr list` PER DISTINCT REPO among this pass's held leases → THAT repo's own Map of item-num → terminal
+ * PR state (`merged` / `closed` / `open`), keyed by matching each PR's head ref `lane/<num>-*`. Terminal states
+ * win over `open` so a couple's merged WE PR reads `merged`.
+ *
+ * #xr4ygg7 (multi-repo slice 9) — REPLACES the old single, ALWAYS-WE read (`fetchPrStates`, no `repoKey`
+ * parameter at all): now that {@link itemNumFromSession} resolves a `fix-<tag>-<id>` session's num for ANY
+ * constellation repo (see its own docblock), a plateau-app item "49" and a WE item "49" are BOTH real, DISTINCT
+ * lookup keys — reading them out of ONE shared Map would let an unrelated WE PR #49 merging read as "plateau-
+ * app's own item 49 is done", reclaiming a lane whose real work is still in flight (the reap axis this file
+ * exists to gate SAFELY, per its own header). Scoping the `gh pr list` to `repoKey`'s own slug is what keeps a
+ * WE lookup and a plateau-app lookup from ever sharing a Map.
+ *
+ * @param {string} repoKey - which constellation repo's PR list to read (`'we'`/`'frontierui'`/`'plateau-app'`).
+ * @param {object} flags - the CLI flags; `--no-check-prs` disables the axis globally, `--pr-repo=<owner/name>`
+ *   overrides the WE slug ONLY (its historical pin, e.g. a fork/mirror) — a sibling repo always reads its own
+ *   real constellation slug, never the override.
+ * @param {{exec?:Function}} [o] - `exec` is injectable (mirrors `reconcile-fix-dispatch.mjs#freeLaneNumbers`'s
+ *   own convention) so a unit test can assert the exact `--repo` argument without touching real `gh`.
+ * @returns {Map<string,string>|null} null = axis off for this repo this run (gh failed, `--no-check-prs`, or
+ *   `repoKey` has no known slug).
  */
-function fetchPrStates(flags) {
+export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {}) {
   if (flags['no-check-prs']) return null;
-  const args = ['pr', 'list', '--state', 'all', '--limit', String(Number(flags['pr-limit']) || 400), '--json', 'number,state,mergedAt,headRefName'];
-  if (typeof flags['pr-repo'] === 'string') args.push('--repo', flags['pr-repo']);
+  const slug = repoKey === 'we' && typeof flags['pr-repo'] === 'string' ? flags['pr-repo'] : CONSTELLATION_REPOS[repoKey]?.slug;
+  if (!slug) return null; // an unrecognized repo key has no gh slug to scope the read to — axis off for it
+  const args = ['pr', 'list', '--state', 'all', '--limit', String(Number(flags['pr-limit']) || 400), '--json', 'number,state,mergedAt,headRefName', '--repo', slug];
   let prs;
   try {
-    prs = JSON.parse(execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+    prs = JSON.parse(exec('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   } catch (e) {
-    log(`  ⚠ gh pr list failed — PR-terminal reap axis OFF this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
+    log(`  ⚠ gh pr list (${slug}) failed — PR-terminal reap axis OFF for ${repoKey} this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
     return null;
   }
   return prStatesFromList(prs); // pure "open wins" reduction — see prStatesFromList
@@ -472,7 +527,7 @@ function fetchPrStates(flags) {
  * precisely the `done`/`failed`/`stopped` shape this axis needs to see, not the shape it needs hidden.
  * Best-effort: any failure (no `claude` on PATH, a hung/timed-out CLI, unparsable output) disables the axis for
  * this run (returns null → every lease's `sessionGone` is unknown → TTL-stale still bites), matching
- * {@link fetchPrStates}'s own degrade-on-failure convention. Routes through {@link sessionStatesForReap}, NOT
+ * {@link fetchPrStatesForRepo}'s own degrade-on-failure convention. Routes through {@link sessionStatesForReap}, NOT
  * {@link sessionStateByName} directly, so a listing that PARSED but yielded zero background rows (a review
  * finding on #1921 — indistinguishable from a bad read) degrades the axis off too, not just a hard throw.
  */
@@ -519,23 +574,33 @@ function main(argv) {
   const ttlMs = ttlMinutes * 60_000;
   const nowMs = Date.now();
 
-  const prStates = fetchPrStates(flags); // null when the axis is off
-  const sessionStates = fetchSessionStates(flags); // null when the axis is off
+  const sessionStates = fetchSessionStates(flags); // null when the axis is off (one global, repo-agnostic listing)
 
-  // Collect every held lease across the scanned pools into flat candidates.
+  // Collect every held lease across the scanned pools into flat candidates, tagging each with the repo key ITS
+  // POOL names (#xr4ygg7 — ground truth; see repoKeyForPool's own docblock for why this, never the session, is
+  // what a PR-state lookup is scoped by).
   const candidates = [];
   for (const pool of poolsToScan(flags)) {
     const poolDir = join(POOL_ROOT, pool);
+    const repoKey = repoKeyForPool(pool);
     for (const lane of laneIndicesIn(poolDir)) {
       const dir = join(poolDir, `lane-${lane}`);
       const lease = readLease(dir);
-      if (lease) candidates.push({ pool, lane, dir, lease });
+      if (lease) candidates.push({ pool, lane, dir, lease, repoKey });
     }
   }
 
+  // #xr4ygg7 — ONE `gh pr list` per DISTINCT repo actually present among this pass's held leases (never one
+  // always-WE read): fetched only for repos this pass will actually need, and cached so two candidates sharing
+  // a pool never re-fetch. A pool this constellation table doesn't recognize (repoKey === null) never reaches
+  // `fetchPrStatesForRepo` at all — its candidates simply carry no PR-terminal signal (TTL-stale still bites).
+  const distinctRepoKeys = [...new Set(candidates.map((c) => c.repoKey).filter(Boolean))];
+  const prStatesByRepo = new Map(distinctRepoKeys.map((repoKey) => [repoKey, fetchPrStatesForRepo(repoKey, flags)]));
+
   const signalsFor = (c) => {
     const num = itemNumFromSession(c.lease?.session);
-    const prState = prStates && num ? prStates.get(num) ?? null : null;
+    const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
+    const prState = repoStates && num ? repoStates.get(num) ?? null : null;
     return { prState, sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs }), pidAlive: pidAliveForLease(c.lease) };
   };
   const { reap, keep } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
@@ -562,6 +627,9 @@ function main(argv) {
     }
   }
 
+  // #xr4ygg7 — the PR-terminal axis is now PER REPO (see fetchPrStatesForRepo): reported as an object, not one
+  // shared flag, so a WE-only `gh` outage never reads as "plateau-app's axis was down too" or vice-versa.
+  const prAxisByRepo = Object.fromEntries(distinctRepoKeys.map((k) => [k, prStatesByRepo.get(k) ? 'on' : 'off']));
   if (flags.json) {
     process.stdout.write(
       JSON.stringify(
@@ -572,7 +640,7 @@ function main(argv) {
           wouldReap: dryRun ? reap.map((c) => ({ pool: c.pool, lane: c.lane, reason: c.reason, session: c.lease?.session ?? null })) : undefined,
           collected: dryRun ? undefined : done,
           kept: keep.length,
-          prAxis: prStates ? 'on' : 'off',
+          prAxis: prAxisByRepo,
           sessionAxis: sessionStates ? 'on' : 'off',
         },
         null,
@@ -580,10 +648,13 @@ function main(argv) {
       ) + '\n',
     );
   } else {
+    const prAxisSummary = distinctRepoKeys.length
+      ? distinctRepoKeys.map((k) => `${k}:${prAxisByRepo[k]}`).join(',')
+      : 'off';
     log(
       `lease-reaper: ${candidates.length} held lease(s) · ` +
         `${dryRun ? `${reap.length} would reap` : `${reaped} reaped${failures ? `, ${failures} failed` : ''}`} · ${keep.length} kept · ` +
-        `PR-axis ${prStates ? 'on' : 'off'} · session-axis ${sessionStates ? 'on' : 'off'}`,
+        `PR-axis [${prAxisSummary}] · session-axis ${sessionStates ? 'on' : 'off'}`,
     );
   }
   // Non-zero exit only when a release we attempted actually FAILED (a gh-axis-off run is a clean degrade, not a

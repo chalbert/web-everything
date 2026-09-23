@@ -24,6 +24,8 @@ import {
   sessionStatesForReap,
   sessionGoneForLease,
   AGENT_GONE_STATES,
+  repoKeyForPool,
+  fetchPrStatesForRepo,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
@@ -474,10 +476,87 @@ describe('reapPlan — maps classifyReap over candidates, splitting reap vs keep
   });
 });
 
-it('never treats a sibling PR as a WE item', () => {
-  expect(itemNumFromSession('fix-fui-49')).toBeNull();
-  expect(itemNumFromSession('fix-pa-49')).toBeNull();
+// #xr4ygg7 (multi-repo slice 9) — a `fix-<tag>-<id>` session now resolves its item number for ANY constellation
+// repo, not only WE: before this, a dead `fix-pa-*`/`fix-fui-*` lease's lane was reclaimed only by the 4-hour
+// TTL backstop, because this exact lookup returned null for it (see matchSessionSlug's own docblock for why
+// that was safe to widen). `review-`/`ci-heal-` sessions are UNCHANGED — still never matched here (a
+// deliberate, separate restriction: those release on merge via `pr-watch.mjs`, not this reaper).
+it('a fix session resolves its item number for ANY constellation repo (widened #xr4ygg7); review/ci-heal never match', () => {
+  expect(itemNumFromSession('fix-fui-49')).toBe('49');
+  expect(itemNumFromSession('fix-pa-49')).toBe('49');
   expect(itemNumFromSession('fix-49')).toBe('49');
   expect(itemNumFromSession('review-49')).toBeNull();
   expect(itemNumFromSession('ci-heal-49')).toBeNull();
+});
+
+describe('repoKeyForPool — #xr4ygg7 the repo a lane-pool DIRECTORY NAME names (ground truth)', () => {
+  it('maps every known pool dir name to its repo key', () => {
+    expect(repoKeyForPool('web-everything')).toBe('we');
+    expect(repoKeyForPool('webeverything')).toBe('we');
+    expect(repoKeyForPool('frontierui')).toBe('frontierui');
+    expect(repoKeyForPool('plateau-app')).toBe('plateau-app');
+  });
+  it('an unrecognized pool dir name → null (a one-off scratch clone, never a real per-repo lane pool)', () => {
+    expect(repoKeyForPool('we-drain-daemon')).toBeNull();
+    expect(repoKeyForPool('pipeline-2248')).toBeNull();
+    expect(repoKeyForPool('')).toBeNull();
+  });
+});
+
+describe('fetchPrStatesForRepo — #xr4ygg7 ONE gh pr list PER REPO, never one shared always-WE read', () => {
+  it('scopes the gh call to the repo\'s own constellation slug via --repo', () => {
+    const calls = [];
+    const exec = (cmd, args) => { calls.push({ cmd, args }); return JSON.stringify([{ headRefName: 'lane/181-x', state: 'MERGED', mergedAt: '2026-09-22T00:00:00Z' }]); };
+    const states = fetchPrStatesForRepo('plateau-app', {}, { exec });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe('gh');
+    expect(calls[0].args).toContain('--repo');
+    expect(calls[0].args[calls[0].args.indexOf('--repo') + 1]).toBe('chalbert/plateau-app');
+    expect(states.get('181')).toBe('merged');
+  });
+  it('--pr-repo overrides the slug for we ONLY — a sibling repo always reads its own real slug', () => {
+    const calls = [];
+    const exec = (cmd, args) => { calls.push(args); return '[]'; };
+    fetchPrStatesForRepo('we', { 'pr-repo': 'chalbert/some-fork' }, { exec });
+    expect(calls[0][calls[0].indexOf('--repo') + 1]).toBe('chalbert/some-fork');
+    fetchPrStatesForRepo('frontierui', { 'pr-repo': 'chalbert/some-fork' }, { exec });
+    expect(calls[1][calls[1].indexOf('--repo') + 1]).toBe('chalbert/frontierui');
+  });
+  it('--no-check-prs disables the axis with no exec call at all', () => {
+    const exec = () => { throw new Error('must not be called'); };
+    expect(fetchPrStatesForRepo('we', { 'no-check-prs': true }, { exec })).toBeNull();
+  });
+  it('an unrecognized repo key → null, no exec call (no slug to scope the read to)', () => {
+    const exec = () => { throw new Error('must not be called'); };
+    expect(fetchPrStatesForRepo('not-a-real-repo', {}, { exec })).toBeNull();
+  });
+  it('a gh failure degrades this repo\'s axis to null (TTL-stale still applies), never throws', () => {
+    const exec = () => { throw new Error('gh: not authenticated'); };
+    expect(fetchPrStatesForRepo('we', {}, { exec })).toBeNull();
+  });
+});
+
+describe('#xr4ygg7 — the collision hazard the per-repo split closes: same item NUMBER, different repos', () => {
+  // Reproduces main()'s own composition (candidates tagged by POOL via repoKeyForPool, one prStates Map per
+  // distinct repo, signalsFor scoped by each candidate's own repoKey) using only the exported pure pieces — no
+  // fs/gh touched. Proves the exact hazard `fetchPrStatesForRepo`'s docblock names never actually fires: a WE
+  // PR #49 merging must NEVER reap a plateau-app lease for its OWN, unrelated item 49 whose real PR is open.
+  it('never reaps a live plateau-app lease just because a same-numbered WE PR merged', () => {
+    const candidates = [
+      { pool: 'web-everything', lane: 3, dir: '/x/web-everything/lane-3', lease: { session: 'fix-49', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES }, repoKey: repoKeyForPool('web-everything') },
+      { pool: 'plateau-app', lane: 6, dir: '/x/plateau-app/lane-6', lease: { session: 'fix-pa-49', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES }, repoKey: repoKeyForPool('plateau-app') },
+    ];
+    const prStatesByRepo = new Map([
+      ['we', new Map([['49', 'merged']])],       // WE's own #49 merged
+      ['plateau-app', new Map([['49', 'open']])], // plateau-app's own #49 is still open — unrelated work
+    ]);
+    const signalsFor = (c) => {
+      const num = itemNumFromSession(c.lease?.session);
+      const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
+      return { prState: repoStates && num ? repoStates.get(num) ?? null : null, sessionGone: null, pidAlive: null };
+    };
+    const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
+    expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-3:pr-merged']);
+    expect(keep.map((c) => `${c.pool}/lane-${c.lane}`)).toEqual(['plateau-app/lane-6']);
+  });
 });

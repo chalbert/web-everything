@@ -41,8 +41,10 @@ import {
   advanceHeldStall,
   DEFAULT_STALL_TICKS,
   buildDecisionTrace,
+  lanePoolListArgsForRepo,
 } from '../tick-core.mjs';
 import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
+import { repoProfile } from '../../lib/repo-profile.mjs';
 
 // ── The in-flight dispatch (build) guard — filter by num OR lane ──────────────────────────────────────────────
 
@@ -1611,5 +1613,33 @@ describe('planTick — manual dispatch-pause (#3609): holds ALL new prepare/fix/
     });
     expect(out.nextState.fixAttempts).toEqual({ 99: 1 });
     expect(out.nextState.ciHealAttempts).toEqual({ 98: 1 });
+  });
+});
+
+// #xr4ygg7 (multi-repo slice 9, we:reports/2026-09-23-conveyor-multi-repo-gap-map.md) — the free-lane read must
+// reflect the TARGET repo's own pool, not always WE's (the gap-map's "tick capacity counts only the WE pool"
+// row, `we:scripts/conveyor/tick-core.mjs:1472` at the time the item was filed).
+describe('lanePoolListArgsForRepo — the free-lane read now honors --repo, exactly like every other subprocess call', () => {
+  it('no --repo flag at all (today\'s every real invocation) → no change, byte-identical to before this item', () => {
+    expect(lanePoolListArgsForRepo(undefined, repoProfile)).toEqual([]);
+    expect(lanePoolListArgsForRepo(true, repoProfile)).toEqual([]); // a bare `--repo` (no `=value`) is not a string
+  });
+  it('--repo resolving to the WE profile itself → no change (lane-pool.mjs already defaults to the WE pool)', () => {
+    expect(lanePoolListArgsForRepo('we', repoProfile)).toEqual([]);
+    expect(lanePoolListArgsForRepo('chalbert/web-everything', repoProfile)).toEqual([]);
+  });
+  it('--repo naming a sibling repo → the matching --repo=<lanePoolRepo> argument, scoping capacity to ITS pool', () => {
+    expect(lanePoolListArgsForRepo('plateau-app', repoProfile)).toEqual([`--repo=${repoProfile('plateau-app').lanePoolRepo}`]);
+    expect(lanePoolListArgsForRepo('frontierui', repoProfile)).toEqual([`--repo=${repoProfile('frontierui').lanePoolRepo}`]);
+    // Accepts every vocabulary repoProfile itself accepts (gh slug, slug tag, scope prefix) — not re-derived here.
+    expect(lanePoolListArgsForRepo('chalbert/plateau-app', repoProfile)).toEqual([`--repo=${repoProfile('plateau-app').lanePoolRepo}`]);
+    expect(lanePoolListArgsForRepo('fui', repoProfile)).toEqual([`--repo=${repoProfile('frontierui').lanePoolRepo}`]);
+  });
+  it('an unresolvable --repo value → [] (falls back to lane-pool.mjs\'s own WE-cwd default, never throws)', () => {
+    expect(lanePoolListArgsForRepo('not-a-real-repo', repoProfile)).toEqual([]);
+  });
+  it('a missing/non-function resolver → [] (never guesses)', () => {
+    expect(lanePoolListArgsForRepo('plateau-app', undefined)).toEqual([]);
+    expect(lanePoolListArgsForRepo('plateau-app', null)).toEqual([]);
   });
 });
