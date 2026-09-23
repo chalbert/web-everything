@@ -27,23 +27,34 @@
  * (`DAEMON_SELF_SYNC_BRANCH=lane/daemon-poc`) switches a clone's "home" branch from `main` to the named POC
  * branch and, each tick, fetches BOTH `origin/main` AND `origin/<poc>`, merging whichever has commits the
  * clone lacks — same merge-commit-never-rebase-never-push contract as the default path, just against two
- * upstreams instead of one. {@link decidePocSelfSync} / {@link selfSyncCheckoutPoc} carry this; the DEFAULT
- * (env unset) path through {@link decideSelfSync} / {@link selfSyncCheckout} is UNCHANGED — not refactored to
- * share the two-source logic — specifically so the already-shipped, live daemon behavior stays byte-identical
- * rather than riding on a generalization it never asked for.
+ * upstreams instead of one, and the SAME fail-closed/timeout posture the default path already carries (a
+ * failed/timed-out probe is never silently read as clean/up-to-date). {@link decidePocSelfSync} /
+ * {@link selfSyncCheckoutPoc} carry this; the DEFAULT (env unset) path through {@link decideSelfSync} /
+ * {@link selfSyncCheckout} is UNCHANGED — not refactored to share the two-source logic — specifically so the
+ * already-shipped, live daemon behavior stays byte-identical rather than riding on a generalization it never
+ * asked for.
  */
 
 import { gitRun } from './main-staleness.mjs';
 
 /**
  * Pure: what should a daemon's clone do, given where it stands against `origin/main`?
- * @param {{fetched:boolean, behind:number, dirty:boolean, onBase:boolean}} s
+ * `dirty: null` means the tree state is UNKNOWN (the `git status` itself failed or timed out) — that fails
+ * CLOSED (`status-failed`), never as clean: merging a tree we could not inspect could restart the daemon over
+ * uncommitted work. The same fail-closed rule covers every other probe: `behind: null` (the `rev-list --count`
+ * failed, timed out, or printed no number) is `count-failed`, NEVER `up-to-date` — reading an unknown distance
+ * as 0 would let the clone silently fall behind `origin/main` forever with no signal; `onBase: null` (the
+ * `symbolic-ref` failed) is `head-failed`, not a misleading `not-on-main`.
+ * @param {{fetched:boolean, behind:number|null, dirty:boolean|null, onBase:boolean|null}} s
  * @returns {{action:'none'|'merge'|'skip', reason:string}}
  */
 export function decideSelfSync({ fetched, behind, dirty, onBase }) {
   if (!fetched) return { action: 'skip', reason: 'fetch-failed' };
+  if (behind === null) return { action: 'skip', reason: 'count-failed' };
   if (!behind) return { action: 'none', reason: 'up-to-date' };
+  if (onBase === null) return { action: 'skip', reason: 'head-failed' };
   if (!onBase) return { action: 'skip', reason: 'not-on-main' };
+  if (dirty === null) return { action: 'skip', reason: 'status-failed' };
   if (dirty) return { action: 'skip', reason: 'dirty' };
   return { action: 'merge', reason: 'behind' };
 }
@@ -51,20 +62,32 @@ export function decideSelfSync({ fetched, behind, dirty, onBase }) {
 /**
  * The git IO: fetch, measure, and merge when {@link decideSelfSync} says so. Never throws; never leaves a
  * half-merged tree (a failed merge is aborted).
- * @param {{root:string, base?:string, run?:typeof gitRun}} o
+ *
+ * Every git command carries a per-command `timeout` (default 60s, overridable via `timeoutMs`) + `killSignal:
+ * 'SIGKILL'`, spread straight into `spawnSync` by `gitRun` (or any injected `run` that does the same) — so a
+ * hung `fetch`/`merge` (network stall, credential prompt) can NEVER freeze the caller indefinitely. `gitRun`
+ * already treats a null/non-zero `status` as failure, so a timed-out command falls through the existing
+ * fetch-failed / merge-abort paths unchanged: a timed-out fetch → `fetch-failed` (never reaches merge); a
+ * timed-out merge → aborted (itself under the same timeout) and reported as `conflict`; a failed/timed-out
+ * `status` → `status-failed` (fail closed — an uninspected tree is never treated as clean); a failed/timed-out
+ * (or non-numeric) `rev-list --count` → `count-failed` (never coerced to 0 / `up-to-date`); a failed/timed-out
+ * `symbolic-ref` → `head-failed`.
+ * @param {{root:string, base?:string, run?:typeof gitRun, timeoutMs?:number}} o
  * @returns {{merged:boolean, commits:number, reason:string}}
  */
-export function selfSyncCheckout({ root, base = 'main', run = gitRun }) {
-  const git = (args) => run(args, { cwd: root });
+export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs = 60_000 }) {
+  const git = (args) => run(args, { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
   const fetched = git(['fetch', 'origin', base, '--quiet']).status === 0;
   const count = (range) => {
     const r = git(['rev-list', '--count', range]);
-    return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
+    const out = String(r.stdout ?? '').trim();
+    return r.status === 0 && /^\d+$/.test(out) ? Number(out) : null;
   };
   const behind = fetched ? count(`HEAD..origin/${base}`) : 0;
   const head = git(['symbolic-ref', '--short', 'HEAD']);
-  const onBase = head.status === 0 && head.stdout.trim() === base;
-  const dirty = !!git(['status', '--porcelain']).stdout.trim();
+  const onBase = head.status === 0 ? String(head.stdout ?? '').trim() === base : null;
+  const status = git(['status', '--porcelain']);
+  const dirty = status.status === 0 ? !!String(status.stdout ?? '').trim() : null;
 
   const decision = decideSelfSync({ fetched, behind, dirty, onBase });
   if (decision.action !== 'merge') return { merged: false, commits: 0, reason: decision.reason };
@@ -102,49 +125,67 @@ export function resolvePocSyncBranch({ pocBranch, env = process.env } = {}) {
  * Pure: what should a POC-mode clone do, given fetch/behind readings against BOTH `origin/main` and the POC
  * branch it now also tracks? Generalizes {@link decideSelfSync} to two independent sources — `onBranch`
  * replaces `onBase` (the clone's home branch is the POC branch itself, not `main`, once this mode is active);
- * every other gate means the same thing it always did: a dirty tree or an off-branch checkout is never
- * touched, and a source that never fetched contributes nothing. Order: the two clone-wide gates (`onBranch`,
- * `dirty`) are checked before either source's own fetch/behind, since they apply regardless of what either
- * source reports.
- * @param {{dirty:boolean, onBranch:boolean, main:{fetched:boolean, behind:number}, poc:{fetched:boolean, behind:number}}} s
+ * every other gate means the same thing it always did, including the SAME fail-closed treatment of an unknown
+ * probe: `onBranch: null` (symbolic-ref failed) is `head-failed`; `dirty: null` (status failed) is
+ * `status-failed`; a source whose OWN `behind` is `null` despite a successful fetch (`rev-list` failed, timed
+ * out, or printed no number) never counts as mergeable, and if NEITHER source has anything mergeable and at
+ * least one is in that state, the tick reports `count-failed` rather than the misleading `up-to-date`. Order:
+ * the two clone-wide gates (`onBranch`, `dirty`) are checked before either source's own fetch/behind, since
+ * they apply regardless of what either source reports.
+ * @param {{dirty:boolean|null, onBranch:boolean|null, main:{fetched:boolean, behind:number|null}, poc:{fetched:boolean, behind:number|null}}} s
  * @returns {{action:'none'|'merge'|'skip', reason:string, mergeMain:boolean, mergePoc:boolean}}
  */
 export function decidePocSelfSync({ dirty, onBranch, main, poc }) {
+  if (onBranch === null) return { action: 'skip', reason: 'head-failed', mergeMain: false, mergePoc: false };
   if (!onBranch) return { action: 'skip', reason: 'not-on-branch', mergeMain: false, mergePoc: false };
+  if (dirty === null) return { action: 'skip', reason: 'status-failed', mergeMain: false, mergePoc: false };
   if (dirty) return { action: 'skip', reason: 'dirty', mergeMain: false, mergePoc: false };
-  if (!main?.fetched && !poc?.fetched) return { action: 'skip', reason: 'fetch-failed', mergeMain: false, mergePoc: false };
-  const mergeMain = !!main?.fetched && (main?.behind ?? 0) > 0;
-  const mergePoc = !!poc?.fetched && (poc?.behind ?? 0) > 0;
-  if (!mergeMain && !mergePoc) return { action: 'none', reason: 'up-to-date', mergeMain: false, mergePoc: false };
+  const mainFetched = !!main?.fetched;
+  const pocFetched = !!poc?.fetched;
+  if (!mainFetched && !pocFetched) return { action: 'skip', reason: 'fetch-failed', mergeMain: false, mergePoc: false };
+  const mainCountFailed = mainFetched && main?.behind == null;
+  const pocCountFailed = pocFetched && poc?.behind == null;
+  const mergeMain = mainFetched && Number.isFinite(main?.behind) && main.behind > 0;
+  const mergePoc = pocFetched && Number.isFinite(poc?.behind) && poc.behind > 0;
+  if (!mergeMain && !mergePoc) {
+    if (mainCountFailed || pocCountFailed) return { action: 'skip', reason: 'count-failed', mergeMain: false, mergePoc: false };
+    return { action: 'none', reason: 'up-to-date', mergeMain: false, mergePoc: false };
+  }
   return { action: 'merge', reason: 'behind', mergeMain, mergePoc };
 }
 
 /**
  * The git IO for POC mode: fetch BOTH `origin/<base>` and `origin/<pocBranch>`, measure each independently,
  * and merge whichever has commits the clone lacks — each its OWN merge commit, never a rebase, never a push.
+ * Same per-command `timeout`/`killSignal: 'SIGKILL'` posture as {@link selfSyncCheckout} (default 60s,
+ * overridable via `timeoutMs`), and the same fail-closed reads (a failed/timed-out `status` or `rev-list` is
+ * never coerced into "clean" or "up to date").
+ *
  * A conflict on either merge aborts THAT merge only (never leaves a half-merged tree — same contract as
  * {@link selfSyncCheckout}) and STOPS this tick's sync (the other source is not attempted once one has
  * conflicted). A merge that already landed earlier in the SAME tick (`origin/main` merged cleanly, then
  * `origin/<pocBranch>` conflicted) stays committed — real, completed progress, not a rollback candidate — and
  * is reported as `reason: 'merged-partial'` so the caller still restarts onto it while logging that the other
  * source needs a hand merge.
- * @param {{root:string, base?:string, pocBranch:string, run?:typeof gitRun}} o
+ * @param {{root:string, base?:string, pocBranch:string, run?:typeof gitRun, timeoutMs?:number}} o
  * @returns {{merged:boolean, commits:number, reason:string}}
  */
-export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitRun }) {
+export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitRun, timeoutMs = 60_000 }) {
   if (!pocBranch) throw new TypeError('selfSyncCheckoutPoc requires a pocBranch');
-  const git = (args) => run(args, { cwd: root });
+  const git = (args) => run(args, { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
   const fetchedMain = git(['fetch', 'origin', base, '--quiet']).status === 0;
   const fetchedPoc = git(['fetch', 'origin', pocBranch, '--quiet']).status === 0;
   const count = (range) => {
     const r = git(['rev-list', '--count', range]);
-    return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
+    const out = String(r.stdout ?? '').trim();
+    return r.status === 0 && /^\d+$/.test(out) ? Number(out) : null;
   };
   const behindMain = fetchedMain ? count(`HEAD..origin/${base}`) : 0;
   const behindPoc = fetchedPoc ? count(`HEAD..origin/${pocBranch}`) : 0;
   const head = git(['symbolic-ref', '--short', 'HEAD']);
-  const onBranch = head.status === 0 && head.stdout.trim() === pocBranch;
-  const dirty = !!git(['status', '--porcelain']).stdout.trim();
+  const onBranch = head.status === 0 ? String(head.stdout ?? '').trim() === pocBranch : null;
+  const status = git(['status', '--porcelain']);
+  const dirty = status.status === 0 ? !!String(status.stdout ?? '').trim() : null;
 
   const decision = decidePocSelfSync({
     dirty,
@@ -177,13 +218,14 @@ export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitR
  *
  * POC mode ({@link resolvePocSyncBranch} resolves non-null, from `pocBranch` or
  * {@link DAEMON_SELF_SYNC_BRANCH_ENV}) routes through {@link selfSyncCheckoutPoc} instead of
- * {@link selfSyncCheckout} — everything else about the wrapper (restart-on-merge, tick-through otherwise) is
- * identical. The DEFAULT (unset) path below is the ORIGINAL code, untouched, so byte-identical behavior for
- * every daemon that does not opt in is a property of the diff, not a claim about it.
+ * {@link selfSyncCheckout} — everything else about the wrapper (restart-on-merge, tick-through otherwise,
+ * `timeoutMs` forwarding) is identical in shape. The DEFAULT (unset) path below matches
+ * {@link selfSyncCheckout}'s own shipped behavior verbatim, so it stays byte-identical for every daemon that
+ * does not opt in.
  * @param {{tickOnce:()=>any}} effects
- * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, syncPoc?:typeof selfSyncCheckoutPoc, base?:string, pocBranch?:string, env?:NodeJS.ProcessEnv, log?:Console}} o
+ * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, syncPoc?:typeof selfSyncCheckoutPoc, base?:string, pocBranch?:string, env?:NodeJS.ProcessEnv, log?:Console, timeoutMs?:number}} o
  */
-export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout, syncPoc = selfSyncCheckoutPoc, base = 'main', pocBranch, env = process.env, log = console }) {
+export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout, syncPoc = selfSyncCheckoutPoc, base = 'main', pocBranch, env = process.env, log = console, timeoutMs }) {
   const tick = effects.tickOnce;
   const resolvedPocBranch = resolvePocSyncBranch({ pocBranch, env });
   return {
@@ -194,7 +236,7 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
     // built this helper pass a zero-arg tickOnce, so `...args` is empty for them and nothing changes.
     tickOnce: async (...args) => {
       if (resolvedPocBranch) {
-        const r = syncPoc({ root, base, pocBranch: resolvedPocBranch });
+        const r = syncPoc({ root, base, pocBranch: resolvedPocBranch, ...(timeoutMs != null ? { timeoutMs } : {}) });
         if (r.merged) {
           const partial = r.reason === 'merged-partial';
           log.error?.(
@@ -205,17 +247,33 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
         }
         if (r.reason === 'conflict' || r.reason === 'dirty' || r.reason === 'not-on-branch') {
           log.error?.(`daemon-self-sync: [POC mode: ${resolvedPocBranch}] behind but NOT syncing (${r.reason}) — needs a hand merge`);
+        } else if (r.reason === 'status-failed') {
+          log.error?.(`daemon-self-sync: [POC mode: ${resolvedPocBranch}] NOT syncing (status-failed) — \`git status\` failed or timed out; retrying next tick`);
+        } else if (r.reason === 'fetch-failed') {
+          log.error?.(`daemon-self-sync: [POC mode: ${resolvedPocBranch}] NOT syncing (fetch-failed) — both fetches failed or timed out; retrying next tick`);
+        } else if (r.reason === 'count-failed') {
+          log.error?.(`daemon-self-sync: [POC mode: ${resolvedPocBranch}] NOT syncing (count-failed) — \`git rev-list --count\` failed or timed out for a fetched source; retrying next tick`);
+        } else if (r.reason === 'head-failed') {
+          log.error?.(`daemon-self-sync: [POC mode: ${resolvedPocBranch}] NOT syncing (head-failed) — \`git symbolic-ref HEAD\` failed or timed out; retrying next tick`);
         }
         return tick(...args);
       }
-      // ---- DEFAULT (unset) path — verbatim original behavior ----
-      const r = sync({ root });
+      // ---- DEFAULT (unset) path — matches selfSyncCheckout's own shipped behavior verbatim ----
+      const r = sync({ root, ...(timeoutMs != null ? { timeoutMs } : {}) });
       if (r.merged) {
         log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
         return onRestart(r);
       }
       if (r.reason === 'conflict' || r.reason === 'dirty' || r.reason === 'not-on-main') {
         log.error?.(`daemon-self-sync: behind origin/main but NOT syncing (${r.reason}) — needs a hand merge`);
+      } else if (r.reason === 'status-failed') {
+        log.error?.('daemon-self-sync: behind origin/main but NOT syncing (status-failed) — `git status` failed or timed out; retrying next tick');
+      } else if (r.reason === 'fetch-failed') {
+        log.error?.('daemon-self-sync: NOT syncing (fetch-failed) — `git fetch origin` failed or timed out; retrying next tick');
+      } else if (r.reason === 'count-failed') {
+        log.error?.('daemon-self-sync: NOT syncing (count-failed) — `git rev-list --count` failed or timed out, so the distance to origin/main is unknown; retrying next tick');
+      } else if (r.reason === 'head-failed') {
+        log.error?.('daemon-self-sync: behind origin/main but NOT syncing (head-failed) — `git symbolic-ref HEAD` failed or timed out; retrying next tick');
       }
       return tick(...args);
     },
