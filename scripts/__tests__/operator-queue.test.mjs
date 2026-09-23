@@ -1,7 +1,8 @@
 /** @file Operator readiness gates (label gate, label/comment cross-check, transient mergeability) and the read-only CLI report over inline gh fixtures. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { evaluatePr, main, pollMergeable } from '../operations/operator-queue.mjs';
+import { evaluatePr, main, pollMergeable, standDownRow } from '../operations/operator-queue.mjs';
+import { STAND_DOWN_MARKER, buildStandDownComment } from '../conveyor/stand-down.mjs';
 
 vi.mock('node:child_process', () => {
   const execFileSync = vi.fn();
@@ -201,6 +202,7 @@ describe('main', () => {
         repo: 'owner/good', number: 43, title: 'Ready for review',
         reasons: ['label/comment disagreement: advisory comment says accept on this head but advisory:accepted is absent'],
       }],
+      stoodDown: [],
       errors: ['owner/broken: unavailable'],
       unsupported: [],
     });
@@ -218,7 +220,7 @@ describe('main', () => {
       .mockReturnValueOnce(JSON.stringify({ mergeable: 'MERGEABLE' }));
     main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], errors: [], unsupported: [],
+      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], stoodDown: [], errors: [], unsupported: [],
     });
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1000, 2000]);
   });
@@ -230,7 +232,7 @@ describe('main', () => {
     vi.mocked(execFileSync).mockReturnValue(JSON.stringify({ mergeable: 'UNKNOWN' }));
     main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], errors: [], unsupported: [],
+      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], stoodDown: [], errors: [], unsupported: [],
     });
     expect(sleep).toHaveBeenCalledTimes(4);
   });
@@ -255,6 +257,7 @@ describe('main', () => {
       'PENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):', 'o/n#43  Ready for review',
       'UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:', '(none)',
       'NOT READY — agent work (review:human but gates fail):', '(none)',
+      'STOOD DOWN — needs your judgment (a fix agent asked a question; no label changed):', '(none)',
     ]);
   });
 
@@ -267,9 +270,121 @@ describe('main', () => {
       'PENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):', '(none)',
       'UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:', '(none)',
       'NOT READY — agent work (review:human but gates fail):', '(none)',
+      'STOOD DOWN — needs your judgment (a fix agent asked a question; no label changed):', '(none)',
     ]);
     expect(vi.mocked(execFileSync).mock.calls.map(([, args]) => args[3])).toEqual([
       'chalbert/web-everything', 'chalbert/frontierui', 'chalbert/plateau-app',
     ]);
+  });
+});
+
+// STOOD DOWN — we:backlog/x6cjgz5. A conveyor stand-down comment changes no label, so a stood-down PR without
+// `review:human` was in nobody's queue (live: PR #2505). This section lists every open PR carrying at least one
+// leading-line stand-down comment, regardless of label, and never repeats a PR already shown in NEEDS YOU.
+describe('standDownRow', () => {
+  it('returns null for a PR with no stand-down comment', () => {
+    expect(standDownRow('o/n', fixture())).toBeNull();
+  });
+
+  it('extracts the stated reason and timestamp from a leading-line stand-down comment', () => {
+    const body = buildStandDownComment({ reason: 'gate-red' });
+    const pr = fixture({ labels: [], comments: [{ body, createdAt: '2026-09-20T10:00:00Z' }] });
+    expect(standDownRow('o/n', pr)).toEqual({
+      repo: 'o/n', number: 42, title: 'Ready for review',
+      standDownAt: '2026-09-20T10:00:00Z',
+      reason: 'the gate stayed RED after the repair, and a red diff must never be re-pushed',
+      alsoReviewHuman: false,
+    });
+  });
+
+  it('ignores a marker that is only QUOTED, not the leading line', () => {
+    const pr = fixture({ labels: [], comments: [{ body: `> ${STAND_DOWN_MARKER}\n\nI'll take it.`, createdAt: 't' }] });
+    expect(standDownRow('o/n', pr)).toBeNull();
+  });
+
+  it('flags alsoReviewHuman when the PR still carries review:human', () => {
+    const body = buildStandDownComment({ reason: 'conflict' });
+    const pr = fixture({ labels: [HUMAN], comments: [{ body, createdAt: 't' }] });
+    expect(standDownRow('o/n', pr).alsoReviewHuman).toBe(true);
+  });
+
+  it('picks the most recent stand-down comment when a PR has stood down more than once', () => {
+    const pr = fixture({ labels: [], comments: [
+      { body: buildStandDownComment({ reason: 'gate-red' }), createdAt: '2026-09-20T10:00:00Z' },
+      { body: buildStandDownComment({ reason: 'conflict' }), createdAt: '2026-09-18T10:00:00Z' },
+    ] });
+    expect(standDownRow('o/n', pr).reason).toContain('gate stayed RED');
+  });
+});
+
+describe('main — STOOD DOWN section', () => {
+  const list = (...prs) => vi.mocked(execFileSync).mockReset().mockReturnValueOnce(JSON.stringify(prs));
+
+  it('lists an open PR with a leading-line stand-down comment regardless of labels, with its reason', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const body = buildStandDownComment({ reason: 'needs-judgment' });
+    list(fixture({ number: 99, labels: [], comments: [{ body, createdAt: '2026-09-20T00:00:00Z' }] }));
+    main(['--repo=o/n', '--json'], { unsupportedPath: NO_UNSUPPORTED });
+    expect(JSON.parse(log.mock.calls[0][0]).stoodDown).toEqual([{
+      repo: 'o/n', number: 99, title: 'Ready for review',
+      standDownAt: '2026-09-20T00:00:00Z',
+      reason: 'the reviewer\'s finding needs a judgment the fix agent could not safely make, so it did NOT guess',
+      alsoReviewHuman: false,
+    }]);
+  });
+
+  it('does not list a PR whose stand-down marker is only quoted, not leading', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    list(fixture({ number: 99, labels: [], comments: [{ body: `> ${STAND_DOWN_MARKER}\nI'll take it.`, createdAt: 't' }] }));
+    main(['--repo=o/n', '--json'], { unsupportedPath: NO_UNSUPPORTED });
+    expect(JSON.parse(log.mock.calls[0][0]).stoodDown).toEqual([]);
+  });
+
+  it('never duplicates a PR already listed in NEEDS YOU', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const body = buildStandDownComment({ reason: 'conflict' });
+    // fixture() is a fully-ready PR by default; give it a stand-down comment too (e.g. stood down, then cleared
+    // and re-armed by a human without deleting the old comment).
+    list(fixture({ comments: [advisory(), { body, createdAt: 't' }] }));
+    main(['--repo=o/n', '--json'], { unsupportedPath: NO_UNSUPPORTED });
+    const report = JSON.parse(log.mock.calls[0][0]);
+    expect(report.ready).toEqual([{ repo: 'o/n', number: 42, title: 'Ready for review' }]);
+    expect(report.stoodDown).toEqual([]);
+  });
+
+  it('notes when a listed PR also still carries review:human, rather than hiding it', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const body = buildStandDownComment({ reason: 'lane-ref-gone' });
+    // review:human alone, with no advisory/CI, is NOT ready — so it is not in NEEDS YOU and is free to also
+    // appear here, flagged.
+    list(fixture({ number: 7, labels: [HUMAN], comments: [{ body, createdAt: 't' }] }));
+    main(['--repo=o/n', '--json'], { unsupportedPath: NO_UNSUPPORTED });
+    const report = JSON.parse(log.mock.calls[0][0]);
+    expect(report.stoodDown).toEqual([{
+      repo: 'o/n', number: 7, title: 'Ready for review', standDownAt: 't',
+      reason: 'the PR\'s lane ref no longer resolves, so the ~done work could not be reconstituted',
+      alsoReviewHuman: true,
+    }]);
+    expect(report.notReady.some((pr) => pr.number === 7)).toBe(true);
+  });
+
+  it('renders the text section, empty state included, and with a reason and quoted marker present', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    list();
+    main(['--repo=o/n'], { unsupportedPath: NO_UNSUPPORTED });
+    const out = log.mock.calls.map(([line]) => line).join('\n');
+    expect(out).toContain('STOOD DOWN — needs your judgment (a fix agent asked a question; no label changed):');
+    expect(out.trim().endsWith('(none)')).toBe(true);
+  });
+
+  it('renders a real stood-down row as text, with reason and repo#number', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const body = buildStandDownComment({ reason: 'gate-red' });
+    list(fixture({ number: 55, labels: [], comments: [{ body, createdAt: '2026-09-21T00:00:00Z' }] }));
+    main(['--repo=o/n'], { unsupportedPath: NO_UNSUPPORTED });
+    const out = log.mock.calls.map(([line]) => line).join('\n');
+    expect(out).toContain('o/n#55  Ready for review');
+    expect(out).toContain('stood down 2026-09-21T00:00:00Z');
+    expect(out).toContain('gate stayed RED');
   });
 });

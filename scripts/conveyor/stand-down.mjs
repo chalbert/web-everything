@@ -61,27 +61,76 @@ export const STAND_DOWN_REASONS = Object.freeze({
 });
 
 /**
+ * DELIBERATELY NOT A REASON HERE: a permission / tool-use denial while applying an otherwise-clear fix (live
+ * 2026-09-23, PR #2518 — a `python3` heredoc rewriting `backlog/3945-*.md` was denied by Claude Code's own
+ * auto-mode classifier, `[Modify Shared Resources]`). That is infrastructure friction, not a judgment call: the
+ * WHAT to do stayed unambiguous, only the HOW failed. Adding a `blocked-by-permission`-shaped entry here would
+ * make it terminal (this marker has no decay, no clock — see the file header) when the right behaviour is a
+ * RETRY once the friction clears. `we:skills-src/conveyor/fix-agent-brief.md` step 3 routes this case through
+ * `completion-cli.mjs report --outcome=blocked-on-infra` instead — the same self-reported-done channel
+ * `we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone` already retries after
+ * `INFRA_RETRY_COOLOFF_MS` — and never through this script. Keep it that way: a future reason added here for
+ * "the tool call was denied" would re-introduce the exact misclassification this comment documents.
+ */
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#standDownComments — every comment on a PR whose LEADING line is
+ * {@link STAND_DOWN_MARKER}, normalized to `{ body, createdAt }` in the order `comments` was given. Pure, and the
+ * ONE place the leading-line match rule is written — {@link countStandDownComments} is just its length, and any
+ * caller that needs to read a stand-down comment BACK (not just know one exists — e.g. the operator queue's
+ * STOOD DOWN section, which surfaces when it stood down and why) filters through this, never re-derives the rule.
+ *
+ * The caller passes the PR's `comments` exactly as `gh pr view <pr> --json comments` returns them
+ * (`[{ body, createdAt }]`); a bare-string array is tolerated too (its `createdAt` comes back `null`). A comment
+ * matches only when the marker is its LEADING line (`trimStart().startsWith`), so a human QUOTING the stand-down
+ * comment in a reply never counts — the same narrowing `countRearmComments` and `countCiHealComments` apply, for
+ * the same reason.
+ * @param {Array<{body?:string, createdAt?:string}|string>|null|undefined} comments
+ * @returns {Array<{body: string, createdAt: ?string}>}
+ */
+export function standDownComments(comments) {
+  if (!Array.isArray(comments)) return [];
+  const out = [];
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER)) {
+      out.push({ body, createdAt: (typeof c === 'string' ? null : c?.createdAt) ?? null });
+    }
+  }
+  return out;
+}
+
+/**
  * we:scripts/conveyor/stand-down.mjs#countStandDownComments — the DURABLE, restart-surviving stand-down count for
  * a PR (#3296). Every fix-agent escalation posts exactly ONE comment whose leading line is
  * {@link STAND_DOWN_MARKER}, so counting those comments recovers "has a fixer already stopped to ask here" from
  * the PR ITSELF. `planReconcile` refuses to dispatch a fixer at any PR whose count is above zero — terminal, with
  * no decay and no clock, because re-running an agent that stood down only re-asks the same question.
  *
- * Pure — the caller passes the PR's `comments` exactly as `gh pr view <pr> --json comments` returns them
- * (`[{ body }]`); a bare-string array is tolerated too. A comment counts only when the marker is its LEADING line
- * (`trimStart().startsWith`), so a human QUOTING the stand-down comment in a reply never inflates it — the same
- * narrowing `countRearmComments` and `countCiHealComments` apply, for the same reason.
+ * Pure — built on {@link standDownComments}, which is where the leading-line match rule actually lives.
  * @param {Array<{body?:string}|string>|null|undefined} comments
  * @returns {number} the number of conveyor stand-down comments on the PR (0 for a non-array / empty input)
  */
 export function countStandDownComments(comments) {
-  if (!Array.isArray(comments)) return 0;
-  let n = 0;
-  for (const c of comments) {
-    const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER)) n += 1;
-  }
-  return n;
+  return standDownComments(comments).length;
+}
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#standDownReason — read back the stated reason clause from a stand-down
+ * comment body built by {@link buildStandDownComment}. Pure string parsing — the inverse of that builder: the
+ * comment's third line always reads `<actor> stopped rather than guessing: <why>.<detail>`, so the clause between
+ * the colon and the sentence's end is what a reader actually wants (the operator queue surfaces it verbatim,
+ * per-PR, rather than making a human open the comment to find out).
+ *
+ * Returns `null` when the body does not carry that sentence — a hand-written or otherwise malformed stand-down
+ * comment — so the caller decides how to render "no reason stated"; this never invents one.
+ * @param {string} body
+ * @returns {?string}
+ */
+export function standDownReason(body) {
+  const match = /stopped rather than guessing:\s*([^\n]*)/.exec(typeof body === 'string' ? body : '');
+  if (!match) return null;
+  return match[1].trim().replace(/\.$/, '').trim() || null;
 }
 
 /**

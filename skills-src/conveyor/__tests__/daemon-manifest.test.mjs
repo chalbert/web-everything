@@ -20,12 +20,20 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
   const REPO_KEYS = Object.keys(CONSTELLATION_REPOS);
 
-  it('has exactly the 4 WE-only entries (incl. #3913 orphan-claim-release) plus 4 passes × 3 repos = 16 total', () => {
+  it('has exactly the 5 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep) plus 4 passes × 3 repos = 17 total', () => {
     expect(Object.keys(DAEMON_MANIFEST).sort()).toEqual([
-      'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release',
+      'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep',
       ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch']
         .flatMap((p) => REPO_KEYS.map((k) => `${p}-${k}`)),
     ].sort());
+  });
+
+  it('epic #3383 merge-orphan-sweep runs the BARE (no --label) orphan sweep every 15 min, against a script that exists', () => {
+    const e = DAEMON_MANIFEST['merge-orphan-sweep'];
+    expect(e.script).toBe('scripts/merge-ai-prs.mjs');
+    expect(e.args).toEqual([]); // bare — never --label=ready-to-merge (a different, already-covered role)
+    expect(e.intervalMs).toBe(15 * 60 * 1000);
+    expect(existsSync(join(REPO_ROOT, e.script))).toBe(true);
   });
 
   it('every entry is independently valid (no manifest entry ships broken)', () => {
@@ -46,6 +54,14 @@ describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
     for (const name of ['branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release']) {
       expect(DAEMON_MANIFEST[name].args.some((a) => a.startsWith('--repo='))).toBe(false);
     }
+  });
+
+  it('merge-orphan-sweep carries no --repo/--repos/--this-repo flag — bare already defaults to the full constellation', () => {
+    expect(DAEMON_MANIFEST['merge-orphan-sweep'].args.some((a) => a.startsWith('--repo'))).toBe(false);
+  });
+
+  it('merge-orphan-sweep never carries --label=ready-to-merge — that is the separate, already-covered /drain role', () => {
+    expect(DAEMON_MANIFEST['merge-orphan-sweep'].args.some((a) => a.startsWith('--label'))).toBe(false);
   });
 
   it('the 4 repo-generic passes each get one entry per constellation repo, with the matching --repo=<slug>', () => {

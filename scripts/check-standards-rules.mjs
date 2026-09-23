@@ -38,6 +38,76 @@ export function scanInvisibleCharacters(docs) {
   });
 }
 
+/**
+ * #3960 (multi-repo slice 4) — conveyor briefs that `cd` INTO an acquired lane clone and then invoke a WE tool
+ * by a RELATIVE `node scripts/...` path are wrong the moment that lane's checkout is not WE's own: there is no
+ * `scripts/` directory to find at that relative location, because the agent's cwd is the TARGET repo, not WE
+ * (`we:reports/2026-09-23-conveyor-multi-repo-gap-map.md`, root cause 2 — "the tools' repo is the target repo").
+ * The fix is to qualify every such call with an absolute WE root (`{{WE_ROOT}}` in the templates this repo
+ * ships); this scan is what keeps that qualification from silently rotting back to a relative path.
+ *
+ * WHY THIS IS NOT EVERY `skills-src/conveyor/*.md`. `delivery-agent-brief.md` (and its v2, plus the
+ * investigation/prepare-scope/prepare-decision briefs) also `cd "$LANE"` and then call WE tools by relative
+ * path — but THEIR `$LANE` is acquired with no `--repo=` at all (`lane-pool.mjs acquire --lane=… --item=…`, no
+ * repo flag), so it is always a WE lane by construction; a cross-locus build's SECOND, impl-repo lane is a
+ * DIFFERENT variable acquired separately and never `cd`-relied-on for a WE tool call. `fix-agent-brief.md` /
+ * `fix-agent-ci-brief.md` are different: `{{LANE_REF}}` is an EXISTING PR's head ref, which under multi-repo
+ * fix/ci-heal dispatch (slice 5, not turned on by this item) can belong to any constellation repo — so THEIR
+ * lane is the one that can silently stop being WE's own. {@link WE_ONLY_LANE_CONVEYOR_BRIEFS} names the briefs
+ * exempt for that reason; anything NOT listed is checked by default, so a new conveyor brief earns the same
+ * bug-closed default the rest of this file uses rather than needing to remember to opt in.
+ */
+export const WE_ONLY_LANE_CONVEYOR_BRIEFS = new Set([
+  'skills-src/conveyor/delivery-agent-brief.md',
+  'skills-src/conveyor/delivery-agent-brief-v2.md',
+  'skills-src/conveyor/investigation-agent-brief.md',
+  'skills-src/conveyor/prepare-decision-agent-brief.md',
+  'skills-src/conveyor/prepare-scope-agent-brief.md',
+]);
+
+/**
+ * Find every RELATIVE `node scripts/...` invocation that appears AFTER a `cd "$LANE"` / `cd "{{SOME_TOKEN}}"`
+ * line, in any `skills-src/conveyor/*.md` brief not in {@link WE_ONLY_LANE_CONVEYOR_BRIEFS}. Pure; takes the
+ * same `{file, content}[]` shape every other rule here does (the recursive `skills-src` markdown walk
+ * `check-standards.mjs` already builds for the #3224/#3253 scans).
+ *
+ * "AFTER", once tripped, stays tripped for the REST OF THE FILE — not just the same fenced code block. A brief
+ * `cd`s into its lane once (near the top) and then references WE tools across many separate steps/headers for
+ * the rest of the document; the bug is exactly as real in step 7 as it would be immediately after the `cd`.
+ *
+ * A qualified call — `node "{{WE_ROOT}}/scripts/..."` or `node "/abs/path/scripts/..."` — never matches: the
+ * regex requires `scripts/` to follow `node` (plus optional whitespace/quote) immediately, and an interposed
+ * `{{WE_ROOT}}`/absolute segment breaks that adjacency.
+ * @param {Array<{file: string, content: string}>} docs
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: []}}
+ */
+export function findRelativeNodeScriptsAfterLaneCd(docs) {
+  const CD_LANE_RE = /\bcd\s+"(?:\$LANE|\{\{[A-Za-z0-9_]+\}\})"/;
+  const RELATIVE_NODE_SCRIPTS_RE = /\bnode\s+"?scripts\//;
+  const errors = docs.flatMap(({ file, content }) => {
+    if (!/^skills-src\/conveyor\/.*\.md$/.test(file) || WE_ONLY_LANE_CONVEYOR_BRIEFS.has(file)) return [];
+    const lines = String(content ?? '').split('\n');
+    let afterCd = false;
+    const found = [];
+    lines.forEach((line, i) => {
+      if (!afterCd) {
+        if (CD_LANE_RE.test(line)) afterCd = true;
+        return;
+      }
+      if (RELATIVE_NODE_SCRIPTS_RE.test(line)) {
+        found.push({
+          message: `${file}:${i + 1}: a relative \`node scripts/...\` call after \`cd "$LANE"\`/\`cd "{{…}}"\` — `
+            + 'that lane may not be a WE checkout, so there is no `scripts/` directory at this relative path. '
+            + 'Qualify the tool with an absolute WE root (e.g. `node "{{WE_ROOT}}/scripts/..."`) (#3960).',
+          descriptor: { kind: 'conveyor-brief-relative-node-after-lane-cd', fix: 'model', file, line: i + 1 },
+        });
+      }
+    });
+    return found;
+  });
+  return { errors, warnings: [] };
+}
+
 // ── Definition-of-green THRESHOLD registry (#2786) ─────────────────────────────────────────────
 // check-standards.conformance.test.mjs proves no definition-of-green knob escapes
 // check-standards.contract.json. The suite's two knob classes use two different discovery

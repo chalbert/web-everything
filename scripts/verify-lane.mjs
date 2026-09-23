@@ -191,7 +191,13 @@ if (MODE === 'reset') {
 // #3372 — the DEFAULT gate is diff-driven (scripts/lib/verify-lane-gate.mjs): an explicit `--gate=` always wins
 // (unchanged); otherwise resolve off the lane's actual diff against origin/main. Computed here (not above, with
 // the other flags) so `check`/`reset` — which never reach this section — never pay for the git diff it needs.
-const GATE = typeof flags.gate === 'string' ? flags.gate : resolveDefaultGate({ runGit: git, env: process.env }).command;
+// #3919 — inject the TARGET checkout's npm script names so a sibling repo (plateau-app has no `test:unit` /
+// `check:standards`) gets a gate it can actually run. Unreadable package.json ⇒ undefined ⇒ WE-shaped (unchanged).
+function readCheckoutScripts() {
+  try { return Object.keys(JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).scripts || {}); } catch { return undefined; }
+}
+const GATE = typeof flags.gate === 'string' ? flags.gate
+  : resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() }).command;
 
 // 1. Stamp the `running` marker BEFORE the suites start, so a kill mid-run leaves a stranded (detectably
 //    unfinished) marker rather than nothing.

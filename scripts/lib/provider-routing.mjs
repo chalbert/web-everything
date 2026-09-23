@@ -779,5 +779,12 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
     level,
     auditTrail,
     reasoning: summaryReason,
+    // Structured predicates alongside the audit trail's prose, so a caller (graduation-progress-report,
+    // #xtw2rap) never re-derives them from parsing `auditTrail[].dataConsulted` text. Rule 1 of
+    // #delegation-trial-record-graduation: every reader of this record uses the SAME predicates this
+    // function already computed — never a second, parallel implementation.
+    cleanStreak,
+    hasInformativeTrial,
+    mostRecentVetoed: mostRecentHasFinding,
   };
 }

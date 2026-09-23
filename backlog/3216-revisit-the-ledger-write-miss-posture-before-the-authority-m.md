@@ -1,8 +1,8 @@
 ---
 bornAs: xksotz7
-kind: task
+kind: decision
 parent: "2405"
-blockedBy: ["3214"]
+blockedBy: ["3255"]
 status: open
 dateOpened: "2026-08-20"
 tags: []

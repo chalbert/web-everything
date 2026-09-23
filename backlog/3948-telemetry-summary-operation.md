@@ -1,9 +1,10 @@
 ---
+bornAs: xaxks4j
 kind: story
 size: 3
-parent: "xjtmptc"
+parent: "3943"
 status: resolved
-blockedBy: ["xs0eutz"]
+blockedBy: ["3947"]
 scope: ["we:scripts/lib/telemetry-machine.mjs", "we:scripts/__tests__/telemetry-machine.test.mjs", "we:scripts/operations/telemetry-summary.mjs", "we:scripts/operations/telemetry-summary-io.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/telemetry-summary.test.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/lib/telemetry-summary.mjs", "we:scripts/__tests__/telemetry-summary.test.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-23"

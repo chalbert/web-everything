@@ -41,6 +41,35 @@
  *   • {@link runReviewTick} is the pure-ish per-tick sequence (every effect — reconcile, dispatch, the two
  *     taggers — is injectable, so the whole sequence is unit-tested with fakes, no real `gh`/`claude`).
  *   • The IO SHELL (`main()`) wires the real functions and the real keyed runner-lock lease (#3877).
+ *
+ * THE SESSION REAPER LIVES HERE TOO (epic #3383, daemon split). `we:scripts/conveyor/session-reaper.mjs`'s
+ * `runSessionReaperPass` used to run only inside `we:skills-src/conveyor/runner.mjs`'s own per-tick
+ * `makeCliMechanicalPasses` — a dispatcher that this repo's daemons have since REPLACED and that is not
+ * itself running. Left uncalled, every `review-*`/`review-pa-*`/`fix-*`/`fix-pa-*` session this daemon (and
+ * `reconcile-fix-dispatch-daemon.mjs`) ever dispatches accumulates forever once it finishes — a real, observed
+ * cost: ~40 finished sessions and ~200 lingering `claude` child processes (~24 GB) in one overnight run before
+ * this wiring existed. THIS daemon claims it, not `reconcile-fix-dispatch-daemon.mjs`, for three reasons:
+ *   1. `session-reaper.mjs` reads the WHOLE `claude agents --json --all` listing and reaps ANY matching
+ *      session regardless of which daemon spawned it — placement is about who's the natural OWNER of session
+ *      lifecycle, not about scoping which sessions get swept (both daemons' own dispatches are covered either
+ *      way).
+ *   2. `reconcile-fix-dispatch-daemon.mjs`'s whole job is narrowly single-purpose and safe-by-construction to
+ *      run twice at once (its own header: every dispatch decision fences through `action-store.mjs`'s durable
+ *      ledger) — folding in an unrelated OS-process-cleanup concern would blur that narrow contract for no
+ *      benefit, where this daemon already owns a broader "review session lifecycle" concern (dispatch AND the
+ *      two cosmetic tags that describe a session's own progress).
+ *   3. This daemon is ALREADY cross-repo (`REVIEW_DAEMON_REPOS`, #xvyuwtg) and already ticks on the same
+ *      120s cadence `runner.mjs`'s own mechanical pass used for `session-reaper.mjs` — no new interval, no new
+ *      lease, no new cross-repo plumbing to add.
+ * `neverReapWorking: true` and `allowedCwd: REPO_ROOT` (imported from `session-reaper.mjs` itself, resolved
+ * by THAT file's own script location — i.e., whichever checkout is actually running, the SAME one every
+ * `review-*`/`fix-*` session it dispatches inherits as its own `cwd`, per `review-dispatch.mjs`'s `root`) are
+ * BOTH opted into deliberately, stricter than `session-reaper.mjs`'s own historical CLI default — this is the
+ * first caller to run that pass against LIVE, unattended production sessions on a recurring schedule rather
+ * than a one-off/dry-run invocation, so it takes every available safety axis rather than the original
+ * ground-truth-only default. See {@link defaultReapSessions} and `session-reaper.mjs`'s own doc for exactly
+ * what each guard does. A session-reap failure is swallowed exactly like every other best-effort mechanical
+ * pass in this repo (`runner.mjs`'s `makeCliMechanicalPasses`) — it never fails the review tick itself.
  */
 
 import { resolve } from 'node:path';
@@ -51,7 +80,11 @@ import { dispatchReview } from '../../scripts/operations/review-dispatch.mjs';
 import { tagReviewRound } from '../../scripts/conveyor/review-round-tag.mjs';
 import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+import { runSessionReaperPass, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
+import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
+import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
+import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -158,24 +191,21 @@ export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) =>
  *   dispatched:Array<object>, failed:Array<object>, refusals:number}}
  */
 export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, ...tickOpts } = {}) {
-  const perRepo = [];
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
   const dispatched = [];
   const failed = [];
   let reviewsOwed = 0;
   let refusals = 0;
-  for (const repo of repos) {
-    try {
-      const result = tick({ ...tickOpts, repo });
-      perRepo.push({ repo, result });
-      reviewsOwed += result.reviewsOwed;
-      refusals += result.refusals;
-      for (const d of result.dispatched) dispatched.push({ ...d, repo });
-      for (const f of result.failed) failed.push({ ...f, repo });
-    } catch (e) {
-      const error = String((e && e.message) || e).split('\n')[0];
-      perRepo.push({ repo, error });
-      failed.push({ prNumber: null, repo, error });
+  for (const entry of perRepo) {
+    if (entry.error) {
+      failed.push({ prNumber: null, repo: entry.repo, error: entry.error });
+      continue;
     }
+    const { repo, result } = entry;
+    reviewsOwed += result.reviewsOwed;
+    refusals += result.refusals;
+    for (const d of result.dispatched) dispatched.push({ ...d, repo });
+    for (const f of result.failed) failed.push({ ...f, repo });
   }
   return { repos: perRepo, reviewsOwed, dispatched, failed, refusals };
 }
@@ -190,16 +220,57 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
 // daemon needs: the sleep IS the reason it stays alive between ticks.
 export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
 
-export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
+/**
+ * THE DEFAULT SESSION-REAP EFFECT for one tick — see the file header ("THE SESSION REAPER LIVES HERE TOO")
+ * for why this daemon owns it and why every option below is deliberately stricter than
+ * `session-reaper.mjs`'s own CLI default:
+ *   - `allowedCwd: SESSION_REAPER_REPO_ROOT` — scopes reaping to sessions spawned from THIS checkout (the
+ *     naming-pattern-plus-cwd safety rule); resolved by `session-reaper.mjs`'s OWN script location, so it is
+ *     always this daemon's real dedicated-clone root, never a hardcoded path.
+ *   - `neverReapWorking: true` — a session the listing itself reports as still actively `working` is never
+ *     touched, full stop, even if a secondary signal (a merged PR, a completion record) suggests otherwise.
+ *   - `idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS` — the generous last-resort backstop for a `blocked`
+ *     session neither the completion-record nor the backlog/PR axis can confirm either way.
+ * Every other option (the listing read, the ground-truth resolver, the completion-record resolver, the real
+ * `claude stop`) is `session-reaper.mjs`'s own default. Injectable so a test can swap it for a fake.
+ */
+export function defaultReapSessions() {
+  return runSessionReaperPass({
+    allowedCwd: SESSION_REAPER_REPO_ROOT,
+    neverReapWorking: true,
+    idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
+  });
+}
+
+export function buildCliDaemonEffects({
+  owner, intervalMs = DEFAULT_INTERVAL_MS, log = console,
+  reapSessions = defaultReapSessions, runReview = runReviewTickAllRepos,
+} = {}) {
   return {
     intervalMs,
-    tickOnce: () => runReviewTickAllRepos(),
+    tickOnce: async () => {
+      const result = await runReview();
+      // Best-effort, mirrors `runner.mjs`'s own `makeCliMechanicalPasses` discipline: a session-reap failure
+      // is logged and swallowed, never lets a lingering `claude` process take down this tick's real job
+      // (dispatching/tagging reviews).
+      let sessionReap = null;
+      try {
+        sessionReap = reapSessions();
+      } catch (e) {
+        log.error(`review-daemon: session-reap failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
+      }
+      return { ...result, sessionReap };
+    },
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
     onTick: (result) => {
       log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}`);
       for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);
       for (const r of result.repos) if (r.error) log.error(`review-daemon: ${r.repo} reconcile failed (non-fatal, other repos unaffected): ${r.error}`);
+      if (result.sessionReap && !result.sessionReap.unreadable) {
+        const sr = result.sessionReap;
+        log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}, ${sr.kept} kept`);
+      }
     },
     onTickError: (error) => {
       log.error(`review-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);
@@ -225,7 +296,17 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
   console.error(`review-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
-  const { stoppedReason } = await runDaemonLoop(buildCliDaemonEffects({ owner }));
+  // xv6fciw — keep this daemon's dedicated clone on origin/main, and restart onto new code BETWEEN ticks
+  // (launchd KeepAlive brings it back), instead of refusing every dispatch until someone re-syncs by hand.
+  const selfRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
+  const restartOntoNewCode = () => {
+    stopping = true;
+    releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
+    process.exit(0);
+  };
+  const { stoppedReason } = await runDaemonLoop(
+    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), { root: selfRoot, onRestart: restartOntoNewCode }),
+  );
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });

@@ -1,4 +1,5 @@
 ---
+bornAs: xjtmptc
 kind: epic
 parent: "3383"
 status: open
@@ -12,11 +13,11 @@ An operator page in plateau-app, sibling of /wip, that answers: how much Claude 
 
 ## Slices (in order)
 
-1. xs0eutz — WE pure usage core (week, days by model, roles, cache, output).
-2. xaxks4j — WE machine + sources core and the declared `telemetry-summary` operation (blockedBy 1).
-3. x0lb6js — plateau types, validator, Node reader, dev `/api/telemetry` (contract only; parallel to 1–2).
-4. xlt8y1j — plateau view + `/telemetry` route from the mock, fixture-fed (blockedBy 3).
-5. x3izqob — plateau live data over the relay's ask channel + integrated sighted review (blockedBy 4).
+1. 3947 — WE pure usage core (week, days by model, roles, cache, output).
+2. 3948 — WE machine + sources core and the declared `telemetry-summary` operation (blockedBy 1).
+3. 3942 — plateau types, validator, Node reader, dev `/api/telemetry` (contract only; parallel to 1–2).
+4. 3944 — plateau view + `/telemetry` route from the mock, fixture-fed (blockedBy 3).
+5. 3945 — plateau live data over the relay's ask channel + integrated sighted review (blockedBy 4).
 
 Out of scope, owned elsewhere: per-agent live activity (/wip), model graduation and scorecards (the graduation
 page), usage by task type (#3738), queue depth and dispatch rate (#3569), the collector's launchd repoint (#3739).

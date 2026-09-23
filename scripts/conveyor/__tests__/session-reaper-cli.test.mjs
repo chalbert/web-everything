@@ -29,11 +29,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { newCompletionRecord, writeCompletion } from '../../operations/completion-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REAPER_CLI = resolve(HERE, '..', 'session-reaper.mjs');
@@ -354,5 +355,150 @@ describe('the ground-truth axis, end to end through the real CLI wiring — the 
     runReaperCli([], { agents, env: { WE_BACKLOG_DIR: backlogDir } });
     const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
     expect(calls).toEqual(['agents --json --all', 'stop blocked1']);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('--allowed-cwd — the daemon-scoping guard, end to end (epic #3383)', () => {
+  it('a `done` session from a DIFFERENT cwd is kept, not reaped, once --allowed-cwd is passed', () => {
+    const agents = JSON.stringify([{ id: 'done1', sessionId: 'done-1-full-uuid', kind: 'background', cwd: '/some/other/checkout', state: 'done', name: 'conveyor-1' }]);
+    const out = runReaperCli(['--dry-run', '--json', '--allowed-cwd=/wev-review-daemon'], { agents });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('a `done` session whose cwd matches --allowed-cwd is reaped as normal', () => {
+    const agents = JSON.stringify([{ id: 'done1', sessionId: 'done-1-full-uuid', kind: 'background', cwd: '/wev-review-daemon', state: 'done', name: 'conveyor-1' }]);
+    const out = runReaperCli(['--dry-run', '--json', '--allowed-cwd=/wev-review-daemon'], { agents });
+    const report = JSON.parse(out);
+    expect(report.wouldStop.map((r) => r.id)).toEqual(['done1']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('omitting --allowed-cwd never filters on cwd at all (every pre-existing fixture above carries no `cwd` field)', () => {
+    const agents = JSON.stringify([{ id: 'done1', sessionId: 'done-1-full-uuid', kind: 'background', state: 'done', name: 'conveyor-1' }]);
+    const out = runReaperCli(['--dry-run', '--json'], { agents });
+    const report = JSON.parse(out);
+    expect(report.wouldStop.map((r) => r.id)).toEqual(['done1']);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('--never-reap-working — the stricter caller-scoped mode, end to end (epic #3383)', () => {
+  let backlogDir;
+  afterEach(() => {
+    if (backlogDir) rmSync(backlogDir, { recursive: true, force: true });
+    backlogDir = undefined;
+  });
+
+  it('a `working` review-<PR> session whose PR is merged is kept when --never-reap-working is passed', () => {
+    backlogDir = makeBacklogDir({});
+    const agents = JSON.stringify([{ id: 'review1', sessionId: 'review-1-full-uuid', kind: 'background', state: 'working', name: 'review-1862' }]);
+    const out = runReaperCli(['--dry-run', '--json', '--never-reap-working'], {
+      agents,
+      env: { WE_BACKLOG_DIR: backlogDir, STUB_GH_PR_1862: JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-03T11:57:41Z' }) },
+    });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('without the flag, the SAME merged `working` session is still reaped — the pre-#3383 default is unchanged', () => {
+    backlogDir = makeBacklogDir({});
+    const agents = JSON.stringify([{ id: 'review1', sessionId: 'review-1-full-uuid', kind: 'background', state: 'working', name: 'review-1862' }]);
+    const out = runReaperCli(['--dry-run', '--json'], {
+      agents,
+      env: { WE_BACKLOG_DIR: backlogDir, STUB_GH_PR_1862: JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-03T11:57:41Z' }) },
+    });
+    const report = JSON.parse(out);
+    expect(report.wouldStop.map((r) => r.id)).toEqual(['review1']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('a `blocked` (never `working`) resolved session is still reaped even with the flag on', () => {
+    backlogDir = makeBacklogDir({ 3451: 'resolved' });
+    const agents = JSON.stringify([{ id: 'blocked1', sessionId: 'blocked-1-full-uuid', kind: 'background', state: 'blocked', name: 'conveyor-3451' }]);
+    const out = runReaperCli(['--dry-run', '--json', '--never-reap-working'], { agents, env: { WE_BACKLOG_DIR: backlogDir } });
+    const report = JSON.parse(out);
+    expect(report.wouldStop.map((r) => r.id)).toEqual(['blocked1']);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('the completion-record axis, end to end through the real CLI wiring (#3436, epic #3383)', () => {
+  let completionsDir;
+  afterEach(() => {
+    if (completionsDir) rmSync(completionsDir, { recursive: true, force: true });
+    completionsDir = undefined;
+  });
+
+  it('a `blocked` review session with a `status: done` completion record is planned for reap, no gh call needed', () => {
+    completionsDir = mkdtempSync(join(tmpdir(), 'we-session-reaper-cli-completions-'));
+    const started = newCompletionRecord({ session: 'review-1862', kind: 'review', pr: '1862' });
+    writeCompletion({ ...started, status: 'done' }, completionsDir);
+    const agents = JSON.stringify([{ id: 'review1', sessionId: 'review-1-full-uuid', kind: 'background', state: 'blocked', name: 'review-1862' }]);
+    const out = runReaperCli(['--dry-run', '--json'], { agents, env: { OPERATION_COMPLETIONS_DIR: completionsDir } });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([{ id: 'review1', sessionId: 'review-1-full-uuid', name: 'review-1862', reason: 'completion-record-done' }]);
+    // No `gh pr view` call at all — the completion record answered it first, cheaper than the network axis.
+    // The stub `gh` never writes its argv file unless invoked at least once, so its ABSENCE is itself the proof.
+    expect(existsSync(ghArgvFile)).toBe(false);
+  }, EXEC_TIMEOUT_MS);
+
+  it('a `status: started` (not yet done) completion record falls through to the (still-open) backlog/PR axis', () => {
+    completionsDir = mkdtempSync(join(tmpdir(), 'we-session-reaper-cli-completions-'));
+    writeCompletion(newCompletionRecord({ session: 'review-1871', kind: 'review', pr: '1871' }), completionsDir);
+    const agents = JSON.stringify([{ id: 'review2', sessionId: 'review-2-full-uuid', kind: 'background', state: 'blocked', name: 'review-1871' }]);
+    const out = runReaperCli(['--dry-run', '--json'], {
+      agents,
+      env: { OPERATION_COMPLETIONS_DIR: completionsDir, STUB_GH_PR_1871: JSON.stringify({ state: 'OPEN', mergedAt: null }) },
+    });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('`--no-completion-record` disables the axis entirely — the rollback escape hatch', () => {
+    completionsDir = mkdtempSync(join(tmpdir(), 'we-session-reaper-cli-completions-'));
+    const started = newCompletionRecord({ session: 'review-1862', kind: 'review', pr: '1862' });
+    writeCompletion({ ...started, status: 'done' }, completionsDir);
+    const agents = JSON.stringify([{ id: 'review1', sessionId: 'review-1-full-uuid', kind: 'background', state: 'blocked', name: 'review-1862' }]);
+    const out = runReaperCli(['--dry-run', '--json', '--no-completion-record'], {
+      agents,
+      env: { OPERATION_COMPLETIONS_DIR: completionsDir, STUB_GH_PR_1862: JSON.stringify({ state: 'OPEN', mergedAt: null }) },
+    });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('--idle-hours — the idle-timeout backstop, end to end (epic #3383)', () => {
+  it('a `blocked` session with no confirmable target, older than the threshold, is planned for reap', () => {
+    const agents = JSON.stringify([{
+      id: 'stale1', sessionId: 'stale-1-full-uuid', kind: 'background', state: 'blocked',
+      name: 'test-dontask', startedAt: Date.now() - 60 * 60 * 1000, // 1 hour old
+    }]);
+    const out = runReaperCli(['--dry-run', '--json', '--idle-hours=0.5'], { agents });
+    const report = JSON.parse(out);
+    expect(report.wouldStop.map((r) => r.id)).toEqual(['stale1']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('omitting --idle-hours never times a session out, no matter how old', () => {
+    const agents = JSON.stringify([{
+      id: 'stale1', sessionId: 'stale-1-full-uuid', kind: 'background', state: 'blocked',
+      name: 'test-dontask', startedAt: 0,
+    }]);
+    const out = runReaperCli(['--dry-run', '--json'], { agents });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+
+  it('never times out a `working` session, even past the threshold', () => {
+    const agents = JSON.stringify([{
+      id: 'stale1', sessionId: 'stale-1-full-uuid', kind: 'background', state: 'working',
+      name: 'test-dontask', startedAt: Date.now() - 60 * 60 * 1000,
+    }]);
+    const out = runReaperCli(['--dry-run', '--json', '--idle-hours=0.5'], { agents });
+    const report = JSON.parse(out);
+    expect(report.wouldStop).toEqual([]);
+    expect(report.kept).toBe(1);
   }, EXEC_TIMEOUT_MS);
 });

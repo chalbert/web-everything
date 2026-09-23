@@ -111,6 +111,21 @@ function fenceTracker() {
  * @returns {string[]}
  */
 function splitParagraphs(text) {
+  return splitParagraphsRaw(text).map((p) => p.trim());
+}
+
+/**
+ * Same blank-line/fence-aware split as `splitParagraphs`, but WITHOUT trimming each paragraph's leading
+ * whitespace — only `splitParagraphs`' own `.filter(Boolean)` (on the trimmed check) drops genuinely-blank
+ * entries. A paragraph's leading indent is the one signal that survives `splitParagraphs`' trim only on its
+ * FIRST line (internal lines keep their own indent regardless) — and that first-line signal is exactly what
+ * `walkOptionParagraphs` needs to tell "a markdown list item's own continuation paragraph" (indented — e.g.
+ * a fenced code sample or nested sub-bullet inside an option, backlog/3055 Fork 2 option (a)) apart from "a
+ * new top-level paragraph" (column 0 — a sibling option, or the fork's post-options commentary).
+ * @param {string} text
+ * @returns {string[]}
+ */
+function splitParagraphsRaw(text) {
   const paras = [];
   let cur = [];
   const inFence = fenceTracker();
@@ -123,7 +138,7 @@ function splitParagraphs(text) {
     }
   }
   if (cur.length) paras.push(cur.join('\n'));
-  return paras.map((p) => p.trim()).filter(Boolean);
+  return paras.filter((p) => p.trim());
 }
 
 /**
@@ -214,17 +229,33 @@ function splitSections(bodyAfterTitle) {
 // no marker intent at all ("one typed, named error per rejected input", backlog/2096 Fork 2's option (a),
 // which is in fact the DEFAULT) and a case-insensitive match misread that as the option's own rejection.
 const REJECTED_MARKER_RE = /(?:\*\*|\*|_)?\b(?:Rejected|REJECTED)\b:?(?:\*\*|\*|_)?/;
-// A DEFAULT marker likewise shows up as the canonical trailing "← **RECOMMENDED**", a bare "RECOMMENDED"
+// A DEFAULT marker likewise shows up as the canonical trailing "← **RECOMMENDED**" (or, one item's own
+// spelling of the same arrow convention, "← **default**" — same structural shape, case-insensitive on the
+// word since the arrow itself is what makes it unambiguous, not the casing), a bare "RECOMMENDED"
 // substring, or a bracketed inline marker — "[bold default]" (the most common legacy spelling, 119
-// instances), "[default]", or "[recommended default]" — used by items that bold the option's own
-// label+title and mark it default inline rather than appending a trailing arrow-marker.
+// instances), "[default]", "[recommended default]", or "[RECOMMENDED DEFAULT]" — used by items that bold the
+// option's own label+title and mark it default inline rather than appending a trailing arrow-marker.
+const ARROW_MARKER_RE = /\s*←\s*\*\*(?:RECOMMENDED|default)\*\*/i;
 const DEFAULT_BRACKET_RE = /\[\s*(?:bold\s+)?(?:recommended\s+)?default\s*\]/i;
-// A same-shaped trailing PARENTHETICAL — "(default)" — right after the option's own bolded title, rather than
-// square brackets. Round parens are only trusted as a marker here (case-insensitively) because they're
-// wrapped tightly around the marker word itself, not a bare substring search over the whole option — the
-// bare-word searches above (Rejected/RECOMMENDED) are exactly what had to stay narrow to avoid mid-prose
-// false positives; a parenthetical this specific carries far less of that risk.
-const DEFAULT_PAREN_RE = /\(\s*(?:bold\s+)?(?:recommended\s+)?default\s*\)/i;
+// A same-shaped trailing PARENTHETICAL — "(default)", or "(default / ruling)"-style with trailing words
+// after the marker itself (mirrors REJECTED_PAREN_RE's own trailing-text allowance below) — right after the
+// option's own bolded title, rather than square brackets. Round parens are only trusted as a marker here
+// (case-insensitively) because they're wrapped tightly around the marker word itself, not a bare substring
+// search over the whole option — the bare-word searches above (Rejected/RECOMMENDED) are exactly what had
+// to stay narrow to avoid mid-prose false positives; a parenthetical this specific carries far less of that
+// risk.
+const DEFAULT_PAREN_RE = /\(\s*(?:bold\s+)?(?:recommended\s+)?default\b[^)]{0,40}\)/i;
+// The canonical BARE marker (docs/agent/backlog-workflow.md via backlog/3281's own worked catalogue):
+// "**DEFAULT.**", "**NEW DEFAULT.**", "**BOLD DEFAULT.**", or the same word as the tail of a larger bold
+// span ("**… — DEFAULT.**", "**… ; DEFAULT.**") — 25+ live instances across the corpus, always spelled in
+// ALL CAPS when used as this marker (never the common lowercase "default" that appears constantly in
+// ordinary prose describing a config/flag's own default VALUE — "a `drain` flag (default false)" is never a
+// marker). Case-SENSITIVE on the word for exactly that reason: unlike RECOMMENDED (already matched
+// case-insensitively above), "default" lowercase is far too common in incidental prose to search bare.
+// "**SUPERSEDED DEFAULT …**" (backlog/3281's own documented retraction convention) is the one carve-out —
+// an amendment's superseded marker records history, not a live pick — so it never counts here.
+const SUPERSEDED_DEFAULT_RE = /\*\*SUPERSEDED\s+DEFAULT\b[^*]*\*\*/g;
+const BARE_DEFAULT_WORD_RE = /\bDEFAULT\b/;
 // Likewise a trailing parenthetical rejection marker — "(rejected …)", "(dominated)" — the latter a distinct
 // but equally common rejection-flavored word for an option strictly worse than another live option (a
 // game-theory framing several items use interchangeably with "Rejected").
@@ -242,10 +273,24 @@ function hasPositiveRecommendedMarker(text) {
   return /RECOMMENDED/i.test(stripped);
 }
 
-function buildOption(label, flatText) {
+/** True when `text` carries the bare ALL-CAPS "DEFAULT" marker (see `BARE_DEFAULT_WORD_RE` above), ignoring
+ * any "SUPERSEDED DEFAULT …" retraction mention (which records history, never a live pick). */
+function hasPositiveDefaultMarker(text) {
+  const stripped = text.replace(SUPERSEDED_DEFAULT_RE, '');
+  return BARE_DEFAULT_WORD_RE.test(stripped);
+}
+
+/**
+ * @param {string} label - the option's letter/number identifier (already lower-cased for a letter).
+ * @param {string} flatText - the option's own tidied body text.
+ * @param {boolean} [forceDefault] - true when the option's own label carried an inline marker (e.g. the
+ *   "(a · DEFAULT)" convention) that already settled `kind` before any text-content marker is checked.
+ */
+function buildOption(label, flatText, forceDefault = false) {
   const isRejected = REJECTED_MARKER_RE.test(flatText) || REJECTED_PAREN_RE.test(flatText);
   const isDefault = !isRejected
-    && (hasPositiveRecommendedMarker(flatText) || DEFAULT_BRACKET_RE.test(flatText) || DEFAULT_PAREN_RE.test(flatText));
+    && (forceDefault || hasPositiveRecommendedMarker(flatText) || hasPositiveDefaultMarker(flatText)
+      || DEFAULT_BRACKET_RE.test(flatText) || DEFAULT_PAREN_RE.test(flatText));
   const kind = isRejected ? OPTION_KINDS.REJECTED : isDefault ? OPTION_KINDS.DEFAULT : OPTION_KINDS.OPEN;
   // Strip the recognized default markers from the displayed body (redundant with `kind`, shown instead via the
   // ✓/✕ badge) — keep everything else verbatim, INCLUDING any punctuation right after it and the stated
@@ -254,9 +299,11 @@ function buildOption(label, flatText) {
   // sentences together. The bracket-marker variant is stripped in two passes — first the form immediately
   // followed by a stray closing "**" (the "title **[bold default]**" convention closes its bold span right at
   // the marker), then the bare bracket alone — so a trailing "**" from the FIRST pass never survives into the
-  // final body only to be counted as an orphaned bold delimiter downstream.
+  // final body only to be counted as an orphaned bold delimiter downstream. The bare "**DEFAULT.**"-family
+  // marker is intentionally left in the displayed body (same precedent as a bare "RECOMMENDED" mention —
+  // detection-only, never stripped) rather than risk mis-trimming the larger bold span it often tails.
   const body = flatText
-    .replace(/\s*←\s*\*\*RECOMMENDED\*\*/i, '')
+    .replace(ARROW_MARKER_RE, '')
     .replace(/\s*\[\s*(?:bold\s+)?(?:recommended\s+)?default\s*\]\s*\*\*/i, '**')
     .replace(/\s*\[\s*(?:bold\s+)?(?:recommended\s+)?default\s*\]/i, '')
     .trim();
@@ -322,6 +369,69 @@ function extractVerdicts(text) {
   return { skeptic: null, screen: null };
 }
 
+const TOP_BULLET_LINE_RE = /^-\s+/;
+
+/**
+ * Split a paragraph's raw lines into its top-level "- " bullet items (one entry per bullet, its own wrapped
+ * continuation lines joined in). Returns `null` when the paragraph doesn't itself open with a bullet line —
+ * nothing to split; the whole paragraph is one unit.
+ * @param {string} paragraph - raw (pre-`tidy`) paragraph text.
+ * @returns {string[]|null}
+ */
+function splitTopBulletItems(paragraph) {
+  const lines = paragraph.split('\n');
+  if (!TOP_BULLET_LINE_RE.test(lines[0])) return null;
+  const items = [];
+  let current = null;
+  for (const line of lines) {
+    if (TOP_BULLET_LINE_RE.test(line)) {
+      if (current !== null) items.push(current.join('\n'));
+      current = [line.replace(TOP_BULLET_LINE_RE, '')];
+    } else if (current !== null) {
+      current.push(line);
+    }
+  }
+  if (current !== null) items.push(current.join('\n'));
+  return items;
+}
+
+/**
+ * Pull the Skeptic:/Screen: verdict(s) out of ONE raw top-level paragraph — including the common shape where
+ * the verdict is one bullet inside a "- **Verdict:** … / - **Skeptic:** …" list with NO blank line between
+ * bullets (so the whole list is ONE paragraph to `splitParagraphs`, and the verdict bullet isn't at the
+ * paragraph's own start — e.g. backlog/2224, backlog/1648, backlog/2544's "## Recommendation" bullet lists).
+ * @param {string} paragraph - raw (pre-`tidy`) paragraph text.
+ * @returns {{ skeptic: string|null, screen: string|null, leftover: string|null }} `leftover` is the
+ *   paragraph's remaining real content (verbatim, minus any consumed verdict bullet), tidied; `null` when
+ *   the whole paragraph WAS the verdict(s).
+ */
+function extractParagraphVerdicts(paragraph) {
+  const flat = tidy(paragraph);
+  const whole = extractVerdicts(flat);
+  if (whole.skeptic !== null || whole.screen !== null) return { ...whole, leftover: null };
+
+  const items = splitTopBulletItems(paragraph);
+  if (items && items.length > 1) {
+    let skeptic = null;
+    let screen = null;
+    let matchedAny = false;
+    const keptItems = [];
+    for (const item of items) {
+      const iv = extractVerdicts(tidy(item));
+      if (iv.skeptic !== null || iv.screen !== null) {
+        if (iv.skeptic !== null) skeptic = iv.skeptic;
+        if (iv.screen !== null) screen = iv.screen;
+        matchedAny = true;
+      } else {
+        keptItems.push(`- ${item}`);
+      }
+    }
+    if (matchedAny) return { skeptic, screen, leftover: keptItems.length ? tidy(keptItems.join('\n')) : null };
+  }
+
+  return { skeptic: null, screen: null, leftover: flat };
+}
+
 /**
  * Parse ONE `## Fork N` section body into its structured shape: the fork-existence justification, the lettered
  * options (default / rejected / open), any leftover context paragraphs (code samples, scope narrowing — real
@@ -334,20 +444,159 @@ function extractVerdicts(text) {
  * @param {string} sectionText
  * @returns {object}
  */
+// Letter-family option start: "- **(x)**", "- (x)" (bold optional — plenty of older items bold only the
+// DEFAULT option's label and leave sibling options unbolded, e.g. "- **(a)** …" beside a plain "- (b) …" —
+// widened here so option (b) is recognized as its OWN option instead of silently swallowed as a
+// continuation of (a)'s text), with an optional inline default/recommended marker inside the label's own
+// parens — "(a · DEFAULT)" / "(a · RECOMMENDED)" — a real, if less common, recurring authoring convention.
+// The inline label-marker's own trailing text varies ("(a · DEFAULT)", "(a — recommended, FLIPPED by the
+// red-team)") — capture whatever sits between the separator and the closing paren (bounded, so it can't run
+// away into the option's own body) and test IT for the marker word, rather than requiring an exact "DEFAULT"/
+// "RECOMMENDED"-only match immediately before ")".
+const LETTER_OPTION_RE = /^-\s*(\*\*)?\(([a-z])(?:\s*[·:—–-]\s*([^)]{0,60}))?\)(\*\*)?\s*(.*)$/i;
+// A rarer variant with NO leading "- " at all — the option starts its own top-level paragraph directly with
+// a bolded lettered label (e.g. backlog/2981: "**(a) Never split — status quo.** All judgment-shaped …").
+// Bold is REQUIRED here (unlike the dash-bulleted form above, where it's optional) specifically to keep this
+// narrow: every real no-dash instance in the corpus bolds the label, and requiring it avoids matching an
+// unrelated line that merely opens with a bare "(a) …" parenthetical mid-prose.
+const LETTER_OPTION_NO_DASH_RE = /^\*\*\(([a-z])(?:\s*[·:—–-]\s*([^)]{0,60}))?\)(\*\*)?\s*(.*)$/i;
+// Number-family fallback (used only when NO letter-family bullet exists anywhere in the fork): "1. **Title**"
+// / "2) **Title**" — a real, recurring alternate convention (e.g. backlog/3132, backlog/3136) for a fork
+// whose options are enumerated rather than lettered. The bold title immediately after the number is
+// required (not optional, unlike the letter family) specifically to keep this fallback narrow — an ordinary
+// numbered prose list (e.g. inside a fork-existence paragraph) never bolds its very first word this way.
+const NUMBER_OPTION_RE = /^(\d+)[.)]\s+(\*\*)(.*)$/;
+
+/**
+ * Match one line against an option-start pattern, returning the parsed pieces in a family-neutral shape, or
+ * `null` when the line doesn't open a new option.
+ * @param {string} line
+ * @returns {{ label: string, bodyStart: string, forceDefault: boolean }|null}
+ */
+const LABEL_MARKER_WORD_RE = /\b(?:DEFAULT|RECOMMENDED)\b/i;
+
+/** Strip fenced and inline code spans, so a literal "**" inside one (a glob like `we:scripts/**`) is never
+ * mistaken for a markdown emphasis delimiter by a structural balance check. */
+function stripCodeSpans(text) {
+  return text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
+}
+
+function matchLetterOptionDash(line) {
+  const m = LETTER_OPTION_RE.exec(line);
+  if (!m) return null;
+  const [, boldOpen, letter, marker, boldCloseImmediate, rest] = m;
+  // If the label's bold span was NOT closed immediately ("- **(a) title…" with no "**" right after the
+  // letter), the "**" is still open going into the captured rest-of-line — re-add it so the eventual
+  // closing "**" further into the option's own prose (the "…title.**" convention) pairs back up correctly
+  // instead of reading as one stray, unmatched delimiter (see buildOption's bold-count check).
+  const reopen = boldOpen && !boldCloseImmediate;
+  return { label: letter.toLowerCase(), bodyStart: (reopen ? '**' : '') + rest, forceDefault: LABEL_MARKER_WORD_RE.test(marker || '') };
+}
+function matchLetterOptionNoDash(line) {
+  const nd = LETTER_OPTION_NO_DASH_RE.exec(line);
+  if (!nd) return null;
+  const [, letter, marker, boldCloseImmediate, rest] = nd;
+  return { label: letter.toLowerCase(), bodyStart: (boldCloseImmediate ? '' : '**') + rest, forceDefault: LABEL_MARKER_WORD_RE.test(marker || '') };
+}
+// Combined matcher for "does this line open a new option" — used ONLY at a paragraph's own first line (see
+// `walkOptionParagraphs`), never for the within-paragraph bullet re-split: the no-dash form has no dash
+// marker to distinguish it from an ordinary mid-sentence line a source's own soft-wrap happens to start with
+// "**(c)**" (a REAL false positive hit during development — a wrapped cross-reference "…captured instead by
+// **(c)** below…" was misread as opening a new option (c)). Bundling multiple options into one
+// blank-line-free paragraph (backlog/3128's "(a)"/"(b)" pair) is a dash-bulleted-list convention only, so the
+// within-paragraph re-split stays dash-only.
+function matchLetterOption(line) {
+  return matchLetterOptionDash(line) || matchLetterOptionNoDash(line);
+}
+function matchNumberOption(line) {
+  const m = NUMBER_OPTION_RE.exec(line);
+  if (!m) return null;
+  const [, num, , rest] = m;
+  return { label: num, bodyStart: `**${rest}`, forceDefault: false };
+}
+
+/**
+ * Walk `paras` from `start`, building one option per `matchParaStart`-recognized paragraph. A bullet's OWN
+ * content isn't always one blank-line-delimited paragraph — a fenced code sample or a nested sub-bullet
+ * inside the option gets its own paragraph the moment a blank line surrounds it (docs/agent's own multi-code
+ * shape, e.g. backlog/3055 Fork 2 option (a); backlog/3013's nested "Strongest case" sub-bullets) — so this
+ * also absorbs every subsequent INDENTED paragraph (a markdown list item's own continuation) into the option
+ * most recently opened. A column-0 paragraph that neither opens a new option nor continues one (the fork's
+ * own "why (a)"/Skeptic/Screen/Default-crossref prose) ends the block — that's the real signal a *paragraph*
+ * boundary alone can't give, since the fork's post-options commentary is itself just more top-level prose.
+ * @param {string[]} paras
+ * @param {number} start
+ * @param {(line: string) => { label: string, bodyStart: string, forceDefault: boolean }|null} matchParaStart
+ *   - tested ONLY against a paragraph's own first line, to decide whether the paragraph opens a new option.
+ * @param {(line: string) => { label: string, bodyStart: string, forceDefault: boolean }|null} matchBundledLine
+ *   - tested against EVERY line of an opening paragraph, to split several bundled options sharing one
+ *   blank-line-free paragraph. Deliberately narrower than `matchParaStart` (see the two letter-family
+ *   matchers above) — a form with no distinguishing marker (no leading dash) can't safely be re-tested
+ *   mid-paragraph without risking a false hit on an ordinary wrapped line.
+ * @returns {{ options: object[], cursor: number }}
+ */
+function walkOptionParagraphs(paras, start, matchParaStart, matchBundledLine) {
+  const options = [];
+  let currentLabel = null;
+  let currentForceDefault = false;
+  let currentBuf = [];
+  const flush = () => {
+    if (currentLabel) options.push(buildOption(currentLabel, tidy(currentBuf.join('\n')), currentForceDefault));
+  };
+  let cursor = start;
+  while (cursor < paras.length) {
+    const para = paras[cursor];
+    const opensHere = matchParaStart(para.split('\n')[0]);
+    const isIndentedContinuation = cursor > start && !opensHere && /^[ \t]/.test(para);
+    if (!opensHere && !isIndentedContinuation) break;
+    if (opensHere) {
+      // The paragraph may hold SEVERAL option bullets back to back (no blank line between list items, e.g.
+      // backlog/3128's "(a)"/"(b)" pair) — re-split it line by line.
+      let first = true;
+      for (const line of para.split('\n')) {
+        const m = first ? opensHere : matchBundledLine(line);
+        first = false;
+        if (m) {
+          flush();
+          currentLabel = m.label;
+          currentForceDefault = m.forceDefault;
+          currentBuf = [m.bodyStart];
+        } else {
+          // A continuation line belongs to the option's own content, which starts two columns in (after
+          // "- "/"N. "): strip up to that much indent so a nested bullet is read as a nested list, not an
+          // over-indented line of the option's first paragraph.
+          currentBuf.push(line.replace(/^ {1,2}/, ''));
+        }
+      }
+    } else {
+      currentBuf.push('', ...para.split('\n').map((l) => l.replace(/^ {1,2}/, '')));
+    }
+    cursor += 1;
+  }
+  flush();
+  return { options, cursor };
+}
+
 export function parseForkSection(n, headingRest, sectionText) {
   const crux = headingRest.replace(/^[—-]\s*/, '').trim();
-  const paras = splitParagraphs(sectionText);
+  const paras = splitParagraphsRaw(sectionText);
 
-  // Find the first paragraph that STARTS with a lettered-option bullet: "- **(x)** …".
-  // The canonical shape (docs/agent/backlog-workflow.md#decision-docket) is "- **(a)** text …", bold closed
-  // right after the label. Many older items (pre-dating that convention hardening) instead bold the option's
-  // own short label+title and don't close the span until partway into the option's own text (e.g.
-  // "- **(a) short title.** unbolded prose…") — accept both: the closing `**` right after the label is
-  // optional (captured so the caller can tell which shape matched — see the reconstruction below).
-  const optionLineRe = /^-\s*\*\*\(([a-z])\)(\*\*)?\s*(.*)$/i;
+  // Find the first paragraph that STARTS with a lettered-option bullet: "- **(x)** …" (the canonical shape;
+  // see `matchLetterOption` for the accepted variants). When NONE exists anywhere in the fork, fall back to
+  // the number-family convention (see `matchNumberOption`) — used only then, so a fork that already commits
+  // to lettered options is never re-read as numbered by accident.
   let optionsStart = -1;
+  let matchParaStart = matchLetterOption;
+  let matchBundledLine = matchLetterOptionDash;
   for (let i = 0; i < paras.length; i += 1) {
-    if (optionLineRe.test(paras[i].split('\n')[0])) { optionsStart = i; break; }
+    if (matchLetterOption(paras[i].split('\n')[0])) { optionsStart = i; break; }
+  }
+  if (optionsStart === -1) {
+    for (let i = 0; i < paras.length; i += 1) {
+      if (matchNumberOption(paras[i].split('\n')[0])) {
+        optionsStart = i; matchParaStart = matchNumberOption; matchBundledLine = matchNumberOption; break;
+      }
+    }
   }
 
   if (optionsStart === -1) {
@@ -361,53 +610,37 @@ export function parseForkSection(n, headingRest, sectionText) {
   const beforeParas = paras.slice(0, optionsStart);
   const why = beforeParas.length ? beforeParas.map(tidy).join('\n\n') : null;
 
-  // Options block: one or more consecutive paragraphs, each itself potentially containing several "- **(x)**"
-  // bullets when the author separated bullets with single (not blank) newlines.
-  const options = [];
-  let cursor = optionsStart;
-  while (cursor < paras.length && optionLineRe.test(paras[cursor].split('\n')[0])) {
-    const bulletLines = paras[cursor].split('\n');
-    let currentLabel = null;
-    let currentBuf = [];
-    const flush = () => {
-      if (currentLabel) options.push(buildOption(currentLabel, tidy(currentBuf.join('\n'))));
-    };
-    for (const line of bulletLines) {
-      const m = optionLineRe.exec(line);
-      if (m) {
-        flush();
-        currentLabel = m[1].toLowerCase();
-        // If the label's bold span was NOT closed immediately ("- **(a) title…" with no "**" right after the
-        // letter), the "**" is still open going into the captured rest-of-line — re-add it so the eventual
-        // closing "**" further into the option's own prose (the "…title.**" convention) pairs back up
-        // correctly instead of reading as one stray, unmatched delimiter (see buildOption's bold-count check).
-        currentBuf = [(m[2] ? '' : '**') + m[3]];
-      } else {
-        // A continuation line belongs to the option's own content, which starts two columns in (after "- "):
-        // strip up to that much indent so a nested bullet ("  - sub") is read by the renderer as a nested list,
-        // not as an over-indented line of the option's first paragraph.
-        currentBuf.push(line.replace(/^ {1,2}/, ''));
-      }
-    }
-    flush();
-    cursor += 1;
-  }
+  const { options, cursor } = walkOptionParagraphs(paras, optionsStart, matchParaStart, matchBundledLine);
 
   // Remaining paragraphs: Skeptic / Screen lines, plus any real leftover context (notes) in between — kept
   // verbatim rather than dropped, since dropping real item content is its own kind of fabrication-by-omission.
   const rest = paras.slice(cursor);
 
   // A very common legacy default-marking convention (69+ instances across the corpus) states the default in
-  // its OWN standalone paragraph after the option bullets — "**Default: (a).** <reasoning…>" — rather than
-  // marking the option bullet itself ("← **RECOMMENDED**" / "[bold default]"). Cross-reference it against the
-  // lettered options built above; the paragraph stays in `notes` too (via the loop below) since it usually
-  // carries real supporting reasoning, not just the letter.
-  const defaultDeclRe = /\*{0,2}Default:\*{0,2}\s*\(([a-z])\)/i;
+  // its OWN standalone paragraph after the option bullets — "**Default: (a).** <reasoning…>" or "**Recommended
+  // default: (1)** …" (digit labels too, for the number-family fallback) — rather than marking the option
+  // bullet itself ("← **RECOMMENDED**" / "[bold default]"). Cross-reference it against the options built
+  // above; the paragraph stays in `notes` too (via the loop below) since it usually carries real supporting
+  // reasoning, not just the label.
+  const defaultDeclRe = /\*{0,2}(?:Recommended\s+)?Default:\*{0,2}\s*\(([a-z0-9]+)\)/i;
   for (const p of rest) {
     const dm = defaultDeclRe.exec(joinSoft(p));  // detection only — one flowing line
     if (!dm) continue;
     const opt = options.find((o) => o.label === `(${dm[1].toLowerCase()})`);
     if (opt && opt.kind !== OPTION_KINDS.REJECTED) opt.kind = OPTION_KINDS.DEFAULT;
+  }
+
+  // Sole-survivor-by-elimination: a prepared fork's options are exhaustive by construction, so once every
+  // OTHER option is explicitly excluded ("Rejected"/"dominated"/…) and exactly one is left unmarked, that
+  // survivor IS the fork's default — not a guess, a logical consequence of the exclusions the body already
+  // states (e.g. backlog/3043 Fork 1: (a) "Rejected as the implementation shape…", (c) "Rejected as the
+  // default, not as unreasonable…", (b) carries no marker of its own at all — it's the only one left).
+  // Never fires with zero exclusions (an un-attacked, genuinely-open set of options stays un-resolved) or
+  // with 2+ survivors (a real ambiguity the body hasn't settled — e.g. backlog/3123's four live options).
+  if (!options.some((o) => o.kind === OPTION_KINDS.DEFAULT)) {
+    const rejected = options.filter((o) => o.kind === OPTION_KINDS.REJECTED);
+    const open = options.filter((o) => o.kind === OPTION_KINDS.OPEN);
+    if (rejected.length >= 1 && open.length === 1) open[0].kind = OPTION_KINDS.DEFAULT;
   }
 
   let skeptic = null;
@@ -421,14 +654,10 @@ export function parseForkSection(n, headingRest, sectionText) {
     const fenceMatch = fenceRe.exec(p.trim());
     if (fenceMatch) { notes.push({ kind: 'code', text: fenceMatch[2] }); continue; }
 
-    const flat = tidy(p);
-    const verdicts = extractVerdicts(flat);
-    if (verdicts.skeptic !== null || verdicts.screen !== null) {
-      if (verdicts.skeptic !== null) skeptic = verdicts.skeptic;
-      if (verdicts.screen !== null) screen = verdicts.screen;
-      continue;
-    }
-    notes.push({ kind: 'text', text: flat });
+    const verdicts = extractParagraphVerdicts(p);
+    if (verdicts.skeptic !== null) skeptic = verdicts.skeptic;
+    if (verdicts.screen !== null) screen = verdicts.screen;
+    if (verdicts.leftover !== null) notes.push({ kind: 'text', text: verdicts.leftover });
   }
 
   const hasDefault = options.some((o) => o.kind === OPTION_KINDS.DEFAULT);
@@ -452,8 +681,10 @@ export function parseForkSection(n, headingRest, sectionText) {
   // classic tell of a legacy item whose sub-bullets (nested lists INSIDE one option's body, each with its own
   // bold markers) got flattened into one run-on line by the source's own soft wrapping. Rendering that produces
   // stray literal asterisks and mismatched emphasis — worse than showing nothing. Flag it structurally rather
-  // than let a malformed render reach the page.
-  if (options.some((o) => (o.body.match(/\*\*/g) || []).length % 2 !== 0)) {
+  // than let a malformed render reach the page. Strip fenced/inline CODE first — a literal "**" inside one
+  // (a glob like `we:scripts/**`, an exponent in a code sample) is not a markdown emphasis delimiter, and
+  // counting it produced a false positive here (backlog/3049's option (a) cites `we:scripts/**` three times).
+  if (options.some((o) => (stripCodeSpans(o.body).match(/\*\*/g) || []).length % 2 !== 0)) {
     warnings.push(`Fork ${n}: an option's text has an unclosed bold marker — likely a legacy item whose nested sub-bullets don't flatten cleanly.`);
   }
 
@@ -495,13 +726,10 @@ export function parseGateSections(sections) {
   let screen = null;
   const kept = [];
   for (const p of splitParagraphs(recSection.text)) {
-    const verdicts = extractVerdicts(tidy(p));
-    if (verdicts.skeptic !== null || verdicts.screen !== null) {
-      if (verdicts.skeptic !== null) skeptic = verdicts.skeptic;
-      if (verdicts.screen !== null) screen = verdicts.screen;
-      continue;
-    }
-    kept.push(tidy(p));
+    const verdicts = extractParagraphVerdicts(p);
+    if (verdicts.skeptic !== null) skeptic = verdicts.skeptic;
+    if (verdicts.screen !== null) screen = verdicts.screen;
+    if (verdicts.leftover !== null) kept.push(verdicts.leftover);
   }
 
   const warning = skeptic ? null : 'Gate: no "Skeptic:" verdict line found under "## Recommendation".';
@@ -517,6 +745,50 @@ export function parseGateSections(sections) {
  * @param {string} rawBody - the file content AFTER the `---` frontmatter fence, including the `# Title` line.
  * @returns {{ digest: string[], forks: object[], gate: object|null, doneWhen: string[], parseOk: boolean, warnings: string[] }}
  */
+// A legacy/alternate fork heading some prepared decisions use: `### Fork A` — h3, LETTER-named instead of
+// the canonical `## Fork N` (h2, numbered). A real recurring shape across the corpus (4 items, e.g.
+// backlog/2544), not a one-off typo — accepted as an equivalent spelling ONLY as a fallback, when the body
+// carries no canonical `## Fork N` at all: letter position maps directly to fork number (A→1, B→2, C→3…),
+// same as if the author had written `## Fork 1`/`## Fork 2`/`## Fork 3`.
+const LETTER_FORK_HEADING_RE = /^###\s+Fork\s+([A-Z])\b\s*(.*)$/;
+
+/**
+ * Fallback for the `### Fork [A-Z]` shape (see above): split the body into one section per h3 fork heading,
+ * bounded by the next h2/h3 heading (whichever comes first) or the body's end. Returns `[]` when the body
+ * carries no such heading.
+ * @param {string} bodyAfterTitle
+ * @returns {Array<{ letter: string, heading: string, text: string }>}
+ */
+function splitLetterForkSections(bodyAfterTitle) {
+  const lines = String(bodyAfterTitle ?? '').split('\n');
+  const sections = [];
+  let current = null;
+  const inFence = fenceTracker();
+  for (const line of lines) {
+    if (inFence(line)) { if (current) current.text.push(line); continue; }
+    const m = LETTER_FORK_HEADING_RE.exec(line);
+    if (m) {
+      if (current) sections.push(current);
+      current = { letter: m[1], heading: `Fork ${m[1]} ${m[2]}`.trim(), text: [] };
+      continue;
+    }
+    if (/^#{2,3}\s+/.test(line)) {
+      if (current) { sections.push(current); current = null; }
+      continue;
+    }
+    if (current) current.text.push(line);
+  }
+  if (current) sections.push(current);
+  return sections.map((s) => ({ ...s, text: s.text.join('\n') }));
+}
+
+// A single-fork item sometimes skips the number entirely — "## Fork" or "## The fork" (backlog/3114,
+// backlog/3115) — since there's only one to number. Accepted as "Fork 1" ONLY as a last-resort fallback
+// (no canonical `## Fork N`, no `### Fork [A-Z]`), and ONLY when exactly one such heading exists in the
+// body — two or more would be a real ambiguity the item's own numbering left unresolved, not a case this
+// fallback should silently guess an order for.
+const BARE_FORK_HEADING_RE = /^(?:The\s+)?Fork\b(?!\s*\d)\s*(.*)$/i;
+
 export function parseDecisionBody(rawBody) {
   // Strip leading blank lines first — a caller-stripped frontmatter fence often leaves one behind, and an
   // anchored `^#` title match must not be defeated by it.
@@ -534,7 +806,24 @@ export function parseDecisionBody(rawBody) {
     if (digestSection) digest = splitParagraphs(digestSection.text).map(tidy);
   }
 
-  const forkSections = sections.filter((s) => s.heading && /^Fork\s+\d+/i.test(s.heading));
+  let forkSections = sections.filter((s) => s.heading && /^Fork\s+\d+/i.test(s.heading));
+  // Fallback 1: no canonical numbered fork heading anywhere — try the `### Fork [A-Z]` h3/letter shape.
+  if (!forkSections.length) {
+    forkSections = splitLetterForkSections(afterTitle).map((s) => ({
+      heading: `Fork ${s.letter.charCodeAt(0) - 64} ${s.heading.replace(/^Fork\s+[A-Z]\s*/, '')}`.trim(),
+      text: s.text,
+    }));
+  }
+  // Fallback 2: still nothing — try a single bare "## Fork"/"## The fork" heading (no number at all,
+  // because there's only one fork in the item). Only when there's EXACTLY one such heading; 2+ is a real
+  // ambiguity this fallback leaves alone rather than guessing an order for.
+  if (!forkSections.length) {
+    const bare = sections.filter((s) => s.heading && BARE_FORK_HEADING_RE.test(s.heading));
+    if (bare.length === 1) {
+      const m = BARE_FORK_HEADING_RE.exec(bare[0].heading);
+      forkSections = [{ heading: `Fork 1 ${m[1]}`.trim(), text: bare[0].text }];
+    }
+  }
   const warnings = [];
   const forks = forkSections.map((s, idx) => {
     const m = /^Fork\s+(\d+)\s*(.*)$/i.exec(s.heading);

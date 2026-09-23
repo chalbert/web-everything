@@ -1,7 +1,8 @@
 ---
+bornAs: xs0eutz
 kind: story
 size: 3
-parent: "xjtmptc"
+parent: "3943"
 status: resolved
 scope: ["we:scripts/lib/telemetry-summary.mjs", "we:scripts/__tests__/telemetry-summary.test.mjs"]
 dateOpened: "2026-09-22"
