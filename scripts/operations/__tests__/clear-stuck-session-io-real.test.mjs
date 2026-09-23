@@ -40,9 +40,12 @@ async function reapedPid() {
 }
 
 describe('scanPsForSession — the REAL process table on this platform', () => {
-  it('really finds a live child process whose argv carries the marker id', async () => {
-    const marker = 'clear-stuck-session-fidelity-11112222-3333-4444-5555-666677778888';
-    const child = spawn(process.execPath, ['-e', `/*${marker}*/ setTimeout(() => {}, 5000)`], { stdio: 'ignore' });
+  it('really finds a live child process whose argv carries the marker id as --resume=<id>', async () => {
+    // `--resume=<id>` is the real shape (see this scan's own header comment) — a bare marker with no flag no
+    // longer matches, by design: that used to be indistinguishable from this OPERATION's own
+    // `--session=<id>` invocation, which is the #3383 bug this file's sibling suite fixes.
+    const marker = '11112222-3333-4444-5555-666677778888';
+    const child = spawn(process.execPath, ['-e', `/*--resume=${marker}*/ setTimeout(() => {}, 5000)`], { stdio: 'ignore' });
     try {
       // Real `ps aux`, no injected exec — give the OS a moment to make the child visible in the table.
       const seen = await (async () => {
