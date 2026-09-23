@@ -123,7 +123,33 @@ A human handles it via `/finish`.
 Make the smallest change that addresses the finding, in `$LANE`, on the lane's **current branch** (its local
 `main` — do **NOT** `git checkout -b`; the single-branch hook blocks branch creation even in a lane clone).
 Keep scope tight: the repair's files should stay within `{{SCOPE}}`. Do not fold in unrelated work, and do not
-weaken or delete a test to sidestep the finding. If `origin/main` advanced under the lane and a **conflict**
+weaken or delete a test to sidestep the finding.
+
+**Change a tracked file's content (source, a backlog card, docs) with the Edit/Write tool — never a `Bash`
+rewrite** (a `python`/`node`/`sed` heredoc or one-liner that reads the file and overwrites it). Even inside
+your own lane clone, where Bash is fully permitted, a Bash command whose EFFECT is to rewrite a git-tracked
+file can be denied by Claude Code's own auto-mode permission classifier as `[Modify Shared Resources]`, with
+nobody watching this session to answer it — confirmed live on PR #2518 (`fix-2518`, 2026-09-23): a `python3`
+heredoc rewriting `backlog/3945-*.md` was denied exactly this way, and the fix agent then (wrongly) treated
+the denial as a judgment call rather than the tooling failure it actually was. Edit/Write is the sanctioned,
+already-allow-listed surface for this — reach for it first (see *If applying the fix is denied* below for what
+to do if it, or anything else, gets refused).
+
+**If applying an otherwise-CLEAR fix is denied by a permission or tool-use guard, that is INFRASTRUCTURE
+FRICTION, not a judgment call — do NOT stand down.** The reviewer's finding still says exactly what to do; only
+the *mechanism* to do it failed. Report it as `blocked-on-infra` instead, so the reconciler retries this PR
+once the friction has had time to clear (`we:scripts/conveyor/reconcile-core.mjs#INFRA_RETRY_COOLOFF_MS`) —
+never `stand-down.mjs`, which is terminal and reserved for a genuine judgment call (see step 2):
+
+```bash
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=blocked-on-infra
+```
+
+Then report `#{{ITEM_NUM}} → blocked-on-infra (tool/permission denial applying an otherwise-clear fix on PR
+#{{PR_NUM}})` and exit — do not retry the same denied action yourself in a loop, and do not fall back to a
+Bash rewrite to work around the denial (that is the exact shape that got denied).
+
+If `origin/main` advanced under the lane and a **conflict**
 blocks the gate, resolve it the `/finish` way (regenerate derived artifacts, take-main for coordination JSON) —
 or, if it is a genuine same-line code overlap you cannot safely resolve, **record the stand-down on the PR
 first** (`#xu2krte` — this call was missing here until then; only the *manual* `/finish` path posted it, so an
@@ -240,8 +266,9 @@ Skip only if you genuinely hit no generalizable friction.
 `review:accepted`. Your process EXIT is the signal you are done; the conveyor's merge watcher
 (`scripts/conveyor/pr-watch.mjs {{PR_NUM}}`) is re-armed by the conveyor skill, sees the PR return to
 `review:pending` (still parked, exit 2), and surfaces it for `/review`. Return a one-line result:
-`#{{ITEM_NUM}} → PR #{{PR_NUM}} (re-armed review:pending | fix escalated <reason> | fix gate-red)`. A red gate /
-red CI is NOT watcher-visible — your one-line RETURN is the only signal that surfaces it, so always report it.
+`#{{ITEM_NUM}} → PR #{{PR_NUM}} (re-armed review:pending | fix escalated <reason> | fix gate-red)`, or, for the
+tooling-denial exit in step 3, `#{{ITEM_NUM}} → blocked-on-infra (...)`. A red gate / red CI / a blocked-on-infra
+exit is NOT watcher-visible — your one-line RETURN is the only signal that surfaces it, so always report it.
 
 ---
 
