@@ -30,7 +30,7 @@ describe('logDelegationTrial', () => {
     expect(stored).toEqual({
       ...input, v: 1, subjectClass: 'work-agent', dispatchKind: 'session-delegation',
       rubricVersion: 'session-delegation.1', criteriaEvaluated: 0, score: null,
-      deductions: [], handle: null, informative: false, rootCause: null,
+      deductions: [], handle: null, informative: false, rootCause: null, comparisonId: null,
     });
     expect(readStore(io).records).toEqual([{ existing: true }, stored]);
   });
@@ -102,6 +102,32 @@ describe('logDelegationTrial', () => {
     const rootCauseOnly = logDelegationTrial({ ...baseRow(), rootCause: 'Just a root cause' }, memIo());
     expect(rootCauseOnly.rootCause).toBe('Just a root cause');
     expect(rootCauseOnly.findings).toBeNull();
+  });
+
+  it('accepts a non-empty comparisonId string, or null, and writes it to its own field (#3783, #3690 Fork 2)', () => {
+    const storedText = logDelegationTrial({ ...baseRow(), comparisonId: 'cmp-abc123' }, memIo());
+    expect(storedText.comparisonId).toBe('cmp-abc123');
+
+    const storedNull = logDelegationTrial({ ...baseRow(), comparisonId: null }, memIo());
+    expect(storedNull.comparisonId).toBeNull();
+
+    const storedOmitted = logDelegationTrial(baseRow(), memIo());
+    expect(Object.hasOwn(storedOmitted, 'comparisonId')).toBe(true);
+    expect(storedOmitted.comparisonId).toBeNull();
+  });
+
+  it('rejects a comparisonId that is not a non-empty string or null, by name, without writing (#3783)', () => {
+    for (const comparisonId of ['', '  ', 123, false, true, 0]) {
+      const io = memIo();
+      expect(() => logDelegationTrial({ ...baseRow(), comparisonId }, io)).toThrow('comparisonId');
+      expect(readStore(io).records).toEqual([]);
+    }
+  });
+
+  it('rejects a secret-shaped comparisonId without writing (#3783, same scrub as findings/rootCause)', () => {
+    const io = memIo();
+    expect(() => logDelegationTrial({ ...baseRow(), comparisonId: 'leaked key AKIA1234567890ABCDEF' }, io)).toThrow('secret scrub');
+    expect(readStore(io).records).toEqual([]);
   });
 
   it.each(['taskType', 'outcome', 'verifiedBy'])('rejects an invalid %s before writing', (field) => {
@@ -235,6 +261,29 @@ describe('log-delegation-trial CLI', () => {
     expect(main([...args, '--root-cause='], io)).toBe(1);
     expect(readStore(io).records).toEqual([]);
     expect(error).toHaveBeenLastCalledWith(expect.stringContaining('rootCause'));
+  });
+
+  it('parses --comparison-id=TEXT onto its own comparisonId field (#3783, #3690 Fork 2)', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const io = memIo();
+    expect(main([...args, '--comparison-id=cmp-abc123'], io)).toBe(0);
+    expect(readStore(io).records[0].comparisonId).toBe('cmp-abc123');
+    log.mockRestore();
+  });
+
+  it('defaults comparisonId to null when the CLI flag is omitted (#3783)', () => {
+    const io = memIo();
+    expect(main(args, io)).toBe(0);
+    expect(Object.hasOwn(readStore(io).records[0], 'comparisonId')).toBe(true);
+    expect(readStore(io).records[0].comparisonId).toBeNull();
+  });
+
+  it('rejects an empty --comparison-id value by name, without writing (#3783)', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const io = memIo();
+    expect(main([...args, '--comparison-id='], io)).toBe(1);
+    expect(readStore(io).records).toEqual([]);
+    expect(error).toHaveBeenLastCalledWith(expect.stringContaining('comparisonId'));
   });
 
   it('prints help without writing', () => {
