@@ -3173,3 +3173,31 @@ place with PR #2206 as a fresh confirming instance, with no seat-count change, r
 `elevated`-care PR can still get fewer lenses than its own dial says it earned, silently, because the record
 only states what ran, not what the touch-set was owed.** `#3393` remains open and unresolved; this entry adds
 evidence, not a fix.
+
+## Session update (2026-09-23) — Daemon POC: lane/daemon-poc registered, self-sync (main+POC) built, pass-daemon self-sync, decision card filed
+
+Operator ruling (in conversation, verbatim): "I'd thought we would first fix the deamon in
+protoytpe to go quick and then graduat to main once perfect" — a POC branch holding daemon fixes
+that land without review wait, daemons run from it, and each fix also graduates to main through
+the normal PR.
+
+Delivered this session:
+- Registered `lane/daemon-poc` in `we:scripts/lib/poc-branches.json` (owner 3383, target main,
+  graduationItem `xii6vye`, autoSync true) — landed to main as PR #2543 (parked `review:pending`,
+  blast-radius on the registry file; checks green).
+- `we:scripts/lib/daemon-self-sync.mjs`: opt-in POC mode (`DAEMON_SELF_SYNC_BRANCH`) — a clone can now
+  track a registered POC branch instead of `main`, fetching + merging BOTH upstreams each tick
+  (merge commits only, never rebase/push; a conflict aborts and skips). Default (unset) behavior
+  is byte-identical to the shipped code. Proven with injected-git unit tests AND two real temporary
+  git repos (real merge, real conflict-abort).
+- `we:skills-src/conveyor/pass-daemon.mjs`: opt-in self-sync between pass runs (reuses the same
+  `withSelfSync`), so the `lane-pool-health-watch`/`parked-pr-conflict-watch` watchers can also
+  self-sync once opted in — unset stays exactly today's "never updates" behavior.
+- Filed a `kind: decision` card (`x923r7y`) proposing to ratify the operator's ruling above as an
+  amendment to clause 4(a) of `we:docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode`
+  (today: "a POC branch is a delivery TARGET … never the default tracking ref") — filed for
+  ratification, the statute itself is untouched pending that.
+
+Still open: land the two daemon-self-sync commits onto `origin/lane/daemon-poc` itself (this note
+unblocks that push), then open the graduation PR to `main` for them. The decision card above needs
+an operator ratification pass before `lane/daemon-poc` daemon-tracking is more than a POC.
