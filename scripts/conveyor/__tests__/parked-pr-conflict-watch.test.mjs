@@ -20,6 +20,9 @@ import {
   defaultPostConflictRearm,
   defaultListPrFiles,
   GH_FILES_GRAPHQL_CAP,
+  isQueuedConflictTarget,
+  QUEUED_CONFLICT_GRACE_MS,
+  defaultConflictLabelAgeMs,
 } from '../parked-pr-conflict-watch.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
@@ -576,4 +579,111 @@ prFileContract({
   name: 'parked-pr-conflict-watch', load: () => import('../parked-pr-conflict-watch.mjs'),
   reader: 'defaultListParkedPrs', run: 'watchParkedPrConflicts',
   fields: 'number,headRefName,mergeable,mergeStateStatus,labels,files',
+});
+
+
+// ── x832e2v — APPROVED/queued PRs that drift into a conflict (live 2026-09-23: #2503, #2505, #2514, #2515) ──────
+describe('approved PRs that drift into a conflict (x832e2v)', () => {
+  const L = (...n) => n.map((name) => ({ name }));
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => { calls.push(['ensureLabel', repo, name]); },
+      setLabels: (repo, pr, spec) => { calls.push(['setLabels', repo, pr, spec]); },
+      postComment: (repo, pr, body) => { calls.push(['postComment', repo, pr, body]); },
+    };
+  };
+
+  it('isQueuedConflictTarget: accepted or ready-to-merge + CONFLICTING, never a PR the parked path owns', () => {
+    expect(isQueuedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:accepted') })).toBe(true);
+    expect(isQueuedConflictTarget({ mergeable: 'CONFLICTING', labels: L('ready-to-merge') })).toBe(true);
+    expect(isQueuedConflictTarget({ mergeable: 'MERGEABLE', labels: L('review:accepted') })).toBe(false);
+    expect(isQueuedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:pending') })).toBe(false);
+    expect(isQueuedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:accepted', 'review:human') })).toBe(false);
+    expect(isQueuedConflictTarget({ mergeable: 'CONFLICTING', labels: L('checking') })).toBe(false);
+  });
+
+  it('first sighting: labelled + commented (drain goes first), NOT bounced yet', () => {
+    const provider = fakeProvider(); const routed = [];
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', 'ready-to-merge') }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+    });
+    expect(r.routedTo).toBe('deferred-to-drain');
+    expect(routed).toEqual([]);
+    const comment = provider.calls.find((c) => c[0] === 'postComment')[3];
+    expect(comment).toContain('drain gets the first try');
+    expect(comment).toContain(`${QUEUED_CONFLICT_GRACE_MS / 60000} minutes`);
+  });
+
+  it('already flagged, grace NOT yet elapsed → nothing happens', () => {
+    const provider = fakeProvider(); const routed = [];
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS - 1000, listPrFiles: () => [],
+    });
+    expect(results).toEqual([]);
+    expect(routed).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('already flagged, grace elapsed → bounced to a fix agent (the bounce itself strips the approval)', () => {
+    const provider = fakeProvider(); const routed = [];
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS + 1000, listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(routed).toEqual([2514]);
+    expect(provider.calls).toEqual([]); // no second label write, no second comment
+  });
+
+  it('grace elapsed but label age unknown → waits (never bounces on a guess)', () => {
+    const routed = [];
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('ready-to-merge', CONFLICT_LABEL) }];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(), postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => null, listPrFiles: () => [],
+    });
+    expect(routed).toEqual([]);
+  });
+
+  it('statute-tier: handed to a human at first sighting, and NEVER re-posted by the grace path', () => {
+    const routed = [];
+    const statuteFiles = [{ path: 'docs/agent/platform-decisions.md' }];
+    const first = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [{ number: 2505, mergeable: 'CONFLICTING', labels: L('review:accepted'), files: statuteFiles }],
+      provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
+    });
+    expect(first[0].routedTo).toBe('stand-down');
+    const later = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [{ number: 2505, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }],
+      provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
+    });
+    expect(later).toEqual([]);
+    expect(routed).toEqual(['sd']);
+  });
+
+  it('healed by the drain within the grace window → label removed, nothing bounced', () => {
+    const provider = fakeProvider(); const routed = [];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [{ number: 2514, mergeable: 'MERGEABLE', labels: L('review:accepted', CONFLICT_LABEL) }],
+      provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {}, postRearm: () => routed.push('rearm'),
+    });
+    expect(r.newlyResolved).toBe(true);
+    expect(routed).toEqual([]); // no review:changes to rearm — the approval stands
+    expect(provider.calls).toEqual([['setLabels', 'o/n', 2514, { add: undefined, remove: [CONFLICT_LABEL] }]]);
+  });
+
+  it('defaultConflictLabelAgeMs reads the LATEST labeled event across pages; unparseable → null', () => {
+    const now = Date.parse('2026-09-23T16:00:00Z');
+    const exec = () => 'null\n2026-09-23T15:00:00Z\n2026-09-23T15:20:00Z\n';
+    expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec, now })).toBe(40 * 60 * 1000);
+    expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec: () => 'null\n', now })).toBeNull();
+    expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec: () => { throw new Error('x'); }, now })).toBeNull();
+  });
 });

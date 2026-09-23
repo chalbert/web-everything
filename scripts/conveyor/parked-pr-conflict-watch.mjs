@@ -57,9 +57,14 @@
  * on the PR, and the label is removed (self-healing, no comment) the tick the conflict clears — no git note, no
  * `.claude/locks` entry, no new JSON store (per the #2612 "no parallel state store" ruling).
  *
- * THE CADENCE. Wired into `we:skills-src/conveyor/runner.mjs`'s `makeCliMechanicalPasses`, beside the
- * `we:scripts/conveyor/branch-drift.mjs sweep` line — the SAME "piggyback on a pass the headless runner already
- * ticks" shape #3464 used, so a parked PR's conflict state is checked every tick with no new cron/daemon.
+ * APPROVED PRS TOO (x832e2v, live 2026-09-23). An approved/queued PR (`review:accepted` / `ready-to-merge`)
+ * that drifts into a conflict used to be skipped by this pass AND silently skipped by the drain. It is now
+ * labelled at once but bounced only after {@link QUEUED_CONFLICT_GRACE_MS}, giving the drain first try at
+ * the one conflict it heals itself; the bounce strips the old approval, so the resolved diff is re-reviewed.
+ *
+ * THE CADENCE. Each constellation repo runs this as its own resident `pass-daemon` watcher
+ * (`we:skills-src/conveyor/daemon-manifest.mjs`, `parked-pr-conflict-watch-<repo>`); the headless runner's
+ * `makeCliMechanicalPasses` also calls it when that runner is up.
  */
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,6 +118,46 @@ export function isParkedConflictTarget(pr) {
   return hasUnclearedReviewLabel(pr?.labels, { allowPending: false });
 }
 
+/** How long an APPROVED/queued PR may sit conflicting before it is bounced to a fix agent. The drain runs every
+ *  minute or so but a pass can take many minutes; this gives it a real chance at the one conflict it heals on
+ *  its own (a shared-manifest-only conflict, rebase-dropped on land) before the PR is sent back through fix
+ *  and review. */
+export const QUEUED_CONFLICT_GRACE_MS = 30 * 60 * 1000;
+
+/**
+ * Is this an APPROVED/queued PR (`review:accepted` or `ready-to-merge`, no uncleared hold) that has drifted into
+ * a real conflict? PURE. Live-caught 2026-09-23: four approved PRs (#2503, #2505, #2514, #2515) sat DIRTY with
+ * nothing acting on them — the parked predicate above skips a cleared PR, and the drain silently skips a
+ * conflict it cannot rebase-drop. Such a PR is not bounced at once (the drain gets {@link QUEUED_CONFLICT_GRACE_MS}
+ * first); once bounced, its old approval is stripped and it goes through fix and re-review like any other.
+ * @param {{mergeable?:string, labels?:Array}} pr
+ * @returns {boolean}
+ */
+export function isQueuedConflictTarget(pr) {
+  if (String(pr?.mergeable || '').toUpperCase() !== 'CONFLICTING') return false;
+  if (hasUnclearedReviewLabel(pr?.labels, { allowPending: false })) return false; // the parked path owns it
+  return hasReviewLabel(pr?.labels, REVIEW_LABELS.accepted) || hasReviewLabel(pr?.labels, 'ready-to-merge');
+}
+
+/**
+ * How long ago the conflict label was last applied to this PR, from the issue's own event timeline. Returns
+ * `null` when it cannot tell — the caller then waits rather than bouncing (the safe direction).
+ * @returns {number|null} milliseconds since the label was applied
+ */
+export function defaultConflictLabelAgeMs({ pr, repo, exec = execFileSyncThrottled, now = Date.now() }) {
+  try {
+    // Events come oldest-first and a busy PR can span pages: paginate, one line per page, keep the latest date.
+    const path = `repos/${repo}/issues/${pr?.number}/events?per_page=100`;
+    const out = exec('gh', ['api', '--paginate', path, '--jq',
+      `[.[] | select(.event=="labeled" and .label.name=="${CONFLICT_LABEL}") | .created_at] | last`],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const times = String(out || '').split('\n').map((l) => Date.parse(l.trim())).filter(Number.isFinite);
+    return times.length ? now - Math.max(...times) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * PURE: add the conflict marker on detection, remove it on confirmed resolution, and report the transition.
  * `isResolved` comes from GitHub's
@@ -136,9 +181,14 @@ export function planConflictLabelChange({ isConflicting, isResolved = false, cur
  * @param {{num:number|string, headRefName?:string}} pr
  * @returns {string}
  */
-export function buildConflictComment(pr, { isStatuteTier = false } = {}) {
+export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrain = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
-  const nextStep = isStatuteTier
+  const nextStep = deferredToDrain && !isStatuteTier
+    ? 'This PR is already approved/queued, so the drain gets the first try — it auto-rebases a PR whose only ' +
+      `conflict is the shared manifest. If it is still conflicting in ${QUEUED_CONFLICT_GRACE_MS / 60000} minutes, ` +
+      'it is bounced to `review:changes` for a fix agent to resolve, then re-reviewed: the old approval does not ' +
+      'cover the resolved diff.'
+    : isStatuteTier
     ? 'Left as a **judgment call for a human or `/finish`**, not auto-resolved: the conflicting hunk touches a ' +
       "declarative-leash/statute-tier file, so choosing which side's edit wins is drafting principle content, " +
       'not ordinary code — exactly the judgment this repo reserves for a person (`#xu2krte` Fork 2).'
@@ -146,9 +196,9 @@ export function buildConflictComment(pr, { isStatuteTier = false } = {}) {
       'is already parked behind still applies before anything lands; nobody is rewriting this content ' +
       'unreviewed. If it cannot be resolved safely, it stands down to a human instead of guessing.';
   return [
-    '⚠️ **This parked PR has drifted into a real merge conflict against `main`**',
+    `⚠️ **This ${deferredToDrain ? 'approved' : 'parked'} PR has drifted into a real merge conflict against \`main\`**`,
     '',
-    `GitHub reports \`mergeable: CONFLICTING\` on this PR${ref} while it is parked for review — it will not ` +
+    `GitHub reports \`mergeable: CONFLICTING\` on this PR${ref} while it is ${deferredToDrain ? 'queued to land' : 'parked for review'} — it will not ` +
       'resolve on its own. One or more PRs merged to `main` since this one opened touched overlapping content.',
     '',
     nextStep,
@@ -330,6 +380,7 @@ export function watchParkedPrConflicts({
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
   postRearm = defaultPostConflictRearm,
   listPrFiles = defaultListPrFiles,
+  labelAgeMs = defaultConflictLabelAgeMs,
 } = {}) {
   const prs = listPrs({ repo });
   const results = [];
@@ -347,15 +398,33 @@ export function watchParkedPrConflicts({
   // docblock) and was simply never called here.
   let resolvedRepo = repo;
   for (const pr of Array.isArray(prs) ? prs : []) {
-    const isConflicting = isParkedConflictTarget(pr);
+    const parked = isParkedConflictTarget(pr);
+    const queued = !parked && isQueuedConflictTarget(pr);
+    const isConflicting = parked || queued;
     const plan = planConflictLabelChange({
       isConflicting, isResolved: String(pr?.mergeable || '').toUpperCase() === 'MERGEABLE', currentLabels: pr?.labels,
     });
-    if (!plan.add && plan.remove.length === 0) continue;
+    // An approved PR already flagged on an earlier sweep: bounce it once the drain's grace window has passed.
+    const graceDue = queued && !plan.add && hasReviewLabel(pr?.labels, CONFLICT_LABEL);
+    if (!plan.add && plan.remove.length === 0 && !graceDue) continue;
     const entry = { num: pr?.number, isConflicting, ...plan, commented: false };
     if (dryRun) { results.push(entry); continue; }
     try {
       if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+      if (graceDue) {
+        const age = labelAgeMs({ pr, repo: resolvedRepo });
+        if (age == null || age < QUEUED_CONFLICT_GRACE_MS) continue; // the drain still has its turn
+        let isStatuteTier;
+        try { isStatuteTier = isStatuteTierConflict(listPrFiles({ number: pr?.number, repo: resolvedRepo })); }
+        catch { isStatuteTier = true; } // over-cautious, same safe direction as the fresh-detection path
+        // A statute-tier conflict was already handed to a human at detection; never re-post it every sweep.
+        if (isStatuteTier) continue;
+        // The bounce strips review:accepted + ready-to-merge, so this PR is no longer a queued target next sweep.
+        postFinding({ pr, repo: resolvedRepo });
+        entry.routedTo = 'reconcile-finding (after drain grace)';
+        results.push(entry);
+        continue;
+      }
       if (plan.add) provider.ensureLabel(resolvedRepo, CONFLICT_LABEL, CONFLICT_LABEL_META);
       provider.setLabels(resolvedRepo, pr?.number, { add: plan.add ?? undefined, remove: plan.remove });
       if (plan.newlyDetected) {
@@ -382,7 +451,7 @@ export function watchParkedPrConflicts({
           }
         }
         const isStatuteTier = statuteCheckFailed || isStatuteTierConflict(filesForCheck);
-        provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr, { isStatuteTier }));
+        provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr, { isStatuteTier, deferredToDrain: queued }));
         entry.commented = true;
         // Fork 2/4 (#xu2krte) — route to exactly one downstream pipeline. Failures here are reported on the
         // entry the SAME way a label/comment failure already is; the alert above has already posted either way.
@@ -390,6 +459,8 @@ export function watchParkedPrConflicts({
           if (isStatuteTier) {
             postStandDown({ pr, repo: resolvedRepo });
             entry.routedTo = 'stand-down';
+          } else if (queued) {
+            entry.routedTo = 'deferred-to-drain'; // bounced by a later sweep once QUEUED_CONFLICT_GRACE_MS passes
           } else {
             postFinding({ pr, repo: resolvedRepo });
             entry.routedTo = 'reconcile-finding';
