@@ -25,6 +25,22 @@ describe('isAllowlistedLitterPath', () => {
     expect(isAllowlistedLitterPath('commit-msg-fix-1.txt')).toBe(true);
   });
 
+  // #3383 — live-observed 2026-09-23 on the plateau-app pool: these are the newly-added patterns, one live
+  // example per pattern plus the exact filenames actually found in a real lane (`.pr-body-2759.md`,
+  // `.pr-body-wip-postdeploy-smoke.md`, `.open-pr-out.json`, one `.converge-*` file per extension observed —
+  // `.json`, `.stderr`, `.diff` — proving the single `.converge-*` prefix pattern covers all of them without
+  // one entry per extension/round).
+  it('matches the #3383 open-pr / pr-body-suffixed / pr-land-result / converge-* patterns', () => {
+    expect(isAllowlistedLitterPath('.pr-body-2759.md')).toBe(true);
+    expect(isAllowlistedLitterPath('.pr-body-wip-postdeploy-smoke.md')).toBe(true);
+    expect(isAllowlistedLitterPath('.open-pr.json')).toBe(true);
+    expect(isAllowlistedLitterPath('.open-pr-out.json')).toBe(true);
+    expect(isAllowlistedLitterPath('.pr-land-result.json')).toBe(true);
+    expect(isAllowlistedLitterPath('.converge-state.json')).toBe(true);
+    expect(isAllowlistedLitterPath('.converge-panel-r1-result.stderr')).toBe(true);
+    expect(isAllowlistedLitterPath('.converge-material-r1-current.diff')).toBe(true);
+  });
+
   it('does not match an unrelated file', () => {
     expect(isAllowlistedLitterPath('scratch-notes-mine.txt')).toBe(false);
     expect(isAllowlistedLitterPath('file.txt')).toBe(false);
@@ -100,6 +116,7 @@ describe('LANE_RELEASE_LITTER_ALLOWLIST', () => {
     expect(LANE_RELEASE_LITTER_ALLOWLIST).toEqual([
       '.commit-msg.txt', '.pr-body.md', '.pr-body.txt', 'review-*-output.json', 'commit-msg-fix-*.txt',
       '.commit-msg-fix-*.txt', '.review-*-output.json',
+      '.pr-body-*.md', '.open-pr*.json', '.pr-land-result.json', '.converge-*',
     ]);
   });
 
