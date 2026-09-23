@@ -110,3 +110,87 @@ comparing it to the desired one. This matches the ratified #2501 drain-daemon ru
 - Codification changed from "amend the drain anchor" to "mint a new resident-daemon anchor that cites it".
 - The draft's "second registry" was dropped: `we:skills-src/conveyor/supervisor-launcher.mjs:4-7` already treats
   `DAEMON_MANIFEST` as the resident-daemon list.
+
+---
+
+## Addendum — 2026-09-23 evening re-prep (supersedes the fork recommendations above)
+
+
+Session: reprep-3681 (lane-999999). Item: `we:backlog/3681-mechanize-long-running-daemon-lifecycle-health-check-stalene.md`.
+Supersedes the fork recommendations in the sections above (morning,
+against `fcc756b2c`); that report's prior-art survey and loss-window analysis still stand.
+
+Grounded on WE `origin/main` `051f2fcb3`, plateau-app `origin/main` `701ea85`, and read-only inspection of the live
+host at about 18:45 ET (launchd labels, process table, daemon-clone reflogs and logs). Nothing was changed on the
+host.
+
+### 1. Why the morning prep went stale
+
+Within hours of the morning prep, a narrow slice of #3681 shipped (#3954, bornAs xv6fciw), and the operator gave
+direction that settles two forks:
+
+- "This has to happen automatically" (daemon staleness)
+- "no manual fixes, improve the daemon if needed"
+- "I'd thought we would first fix the deamon in protoytpe to go quick and then graduat to main once perfect"
+- "restart daemonn from lane as soon as the fix is ready"
+
+The morning prep recommended "restart only when a loaded file changed" (Fork 2 b) and "detect drift, never
+self-update by default" (Fork 4 a). What now runs is the opposite of both.
+
+### 2. What runs (who self-syncs, and how)
+
+| Daemon | Clone | Self-sync | Guards | Floor |
+|---|---|---|---|---|
+| review daemon | `wev-review-daemon` (shared) | always on | on `main`, clean tree | none |
+| fix-dispatch daemon | `wev-review-daemon` (shared) | always on | on `main`, clean tree | none |
+| six pass-daemon watchers | `wev-review-daemon` (shared) | none (in flight, with POC mode) | — | — |
+| `merge-orphan-sweep` pass | `wev-merge-daemon` | none | — | — |
+| dispatcher (`we:skills-src/conveyor/runner.mjs`) | plist staged, not loaded | opt-in `--self-sync` | the flag only | none |
+| drain daemon (plateau) | `plateau-drain-daemon` (alone) | opt-in env | primary-root guard | 5 min |
+
+Helper: `we:scripts/lib/daemon-self-sync.mjs` — fetch, `git merge origin/main` (abort on failure), restart only
+the process that merged. Every git call has a 60 s timeout (#2533). No lock, no test gate, no rollback.
+
+### 3. Evidence gathered
+
+- **Restarts work for the merging process.** 33 self-sync merges in `wev-review-daemon` between 10:28 and 18:30;
+  the drain clone fast-forwarded at 14:06 and 14:52 with matching restart log lines.
+- **The other daemons in the clone do not restart.** At 18:45 the fix daemon (up since ~18:10) was older than
+  the clone's 18:21 and 18:30 merges; the six watchers had been up ~5 h across 30+ merges.
+- **Launch-from-lane hang.** Hand merge of unreviewed `38b8b0ab9` (PR #2542, open) at 18:20 added an
+  O(lanes×heads) `git cherry` to `we:scripts/lane-pool.mjs`; the fix daemon's WE tick hung > 5 min; hand revert at
+  18:40 (`fff012906`); a `list` child from ~18:22 still ran at 18:45.
+- **Force-kill leaves a stale lease** (#3952), caused by `kickstart -k` landing mid-tick while the tick is inside
+  synchronous `execFileSync`. This contradicts #2501 clause 2's premise that `kickstart -k`'s SIGTERM runs the
+  clean handler.
+- **Clone drift.** `wev-review-daemon` is 54 commits ahead of `origin/main`; earlier hand merges of lane commits at
+  08:25, 09:22, 09:30, 17:51.
+- **Primary protected by accident.** WE's helper has no primary guard; the primary is skipped only because it sits
+  on a detached HEAD (`head-failed`).
+- **Tracked runtime state.** `we:scripts/conveyor/run-scorecard-store.mjs:50` writes a tracked JSON file found by
+  script location, and `we:scripts/review-set-label.mjs:491` commits it locally — a reset-based sync must not wipe it.
+
+### 4. How the forks moved
+
+- **Fork 1 (reload primitive)** — dissolved into "supported by default": exit at the safe point plus relaunch is
+  forced by Node and is what runs.
+- **Fork 2 (what counts as stale)** — flipped to "any new commit", re-worded after the skeptic: a daemon is stale
+  when the input heads its clone was built from (`main`, and a POC head if any) moved since it booted, checked by
+  every daemon each tick. 5-minute floor for every daemon.
+- **Fork 4 (who moves the clone)** — flipped to "automatic, by the daemons", gated by a coded primary guard, a
+  per-clone reader/writer lock, a fixed state root, and the floor. New sub-fork: rebuild the clone from its input
+  heads (#2501 clause 1's form), not merge on top; refuse and alert if the tree is dirty or carries foreign commits.
+- **Fork 5 (new: code not yet on `main`)** — per-clone opt-in POC branch, off by default, never in a clone that
+  reviews, labels or lands PRs, behind a test gate and an outside rollback, and only after amending
+  #poc-branch-declared-delivery-mode clause 4(a).
+
+### 5. Red-team record
+
+- Skeptic round 1 (Opus): Fork 2 REFUTED as first worded (shared clone); Fork 4 SURVIVES-WITH-AMENDMENT (lock,
+  guard rollout order, merge-vs-reset statute conflict); Fork 5 REFUTED as a plain default (clause 4(a) collision,
+  self-approval, rollback inside new code).
+- Screen round 1 (fresh Sonnet): Fork 1 flagged(impl) → dissolved; Fork 5 flagged(impl) → timeout and pin details
+  moved to the build slice.
+- Skeptic round 2 (Opus) on the rewrite: all three SURVIVES-WITH-AMENDMENT (input-head comparison instead of HEAD;
+  reader/writer lock and refuse-on-dirty; capability-based exclusion naming `merge-orphan-sweep`).
+- Screen round 2 (fresh Sonnet): all clear; no live choice left in prose.
