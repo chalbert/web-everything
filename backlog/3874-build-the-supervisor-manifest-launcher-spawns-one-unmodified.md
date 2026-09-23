@@ -74,14 +74,100 @@ further test that resolves every REAL currently-registered name (guarded to skip
 the manifest is ever empty again) -- proving the launcher genuinely handles today's real 15-entry manifest,
 not only a fixture. 19/19 now.
 
+**Fourth correction, found in review (PR #2472, round 2, review:changes) — a real design defect, not a stale
+literal.** The reviewer read we:skills-src/conveyor/supervisor-launcher.mjs directly against what
+we:skills-src/conveyor/daemon-manifest.mjs's `DAEMON_MANIFEST` actually holds today (#3873's 15 real entries,
+landed per correction 3 above) and found two compounding bugs, not one:
+
+1. `planLaunchTargets` (we:skills-src/conveyor/supervisor-launcher.mjs) carried only `script`/`args` from each
+   resolved manifest entry into the launch target, silently dropping the entry's own `intervalMs` — the field
+   `DaemonManifestEntry`'s own typedef (we:skills-src/conveyor/daemon-manifest.mjs) documents as "how often
+   we:skills-src/conveyor/pass-daemon.mjs re-runs this pass."
+2. Worse, this ALSO falsified this card's own "WHY NO SEPARATE LEASE HERE" claim (that every resident script
+   already protects itself via we:skills-src/conveyor/pass-daemon.mjs's `passDaemonLeaseKey(name)`): none of
+   we:branch-drift.mjs/we:ci-queue-watch.mjs/etc. take that lease directly — only
+   we:skills-src/conveyor/pass-daemon.mjs's own IO shell does, which this launcher bypassed entirely by
+   spawning each entry's script straight from `launchEntry`. Combined with bug 1, a launched entry's clean exit
+   fell straight into we:skills-src/conveyor/supervisor.mjs's `decideRestart`, which gives an ordinary clean
+   exit `delayMs: 0` — a permanent, zero-delay busy-loop re-running every currently-registered entry nonstop
+   the instant `main()` is invoked against real manifest entries, with no real lease taken against a
+   concurrently-running we:skills-src/conveyor/pass-daemon.mjs instance either. Worse than the "occasional
+   overlap" race the reviewer's own written finding described as the worst case.
+
+**Why this is a real architecture mismatch, not a wiring typo.** Every one of the 15 real manifest entries
+today is a PERIODIC ONE-SHOT pass (run to completion, wait `intervalMs`, run again) — exactly what
+we:skills-src/conveyor/pass-daemon.mjs already correctly does. we:skills-src/conveyor/supervisor.mjs's own
+reused-unmodified `classifyExit`/`decideRestart` core is built for a DIFFERENT shape: a long-running process
+that should basically never exit, where any exit (including a fast, clean one) is a crash to restart with
+backoff. Weighed three shapes (never just took the first): (a) refuse to launch any of today's entries at
+all, since we:skills-src/conveyor/pass-daemon.mjs already correctly owns them — rejected because this card's
+own scope and title explicitly name the 8 watchers as intended launch targets, so refusing them contradicts
+the card's own stated purpose, not just a defect in it; (b) **chosen** — make `launchEntry` pace a periodic
+entry correctly (wait `intervalMs` after a clean exit, mirroring we:skills-src/conveyor/pass-daemon.mjs's own
+`runPassDaemonLoop` shape) AND take that entry's own `passDaemonLeaseKey(name)` lease (imported from
+we:skills-src/conveyor/pass-daemon.mjs, never re-derived) before spawning, while still routing a GENUINE crash
+(non-zero exit / signal death) through the reused, unmodified `classifyExit`/`decideRestart` doubling backoff;
+(c) redesign we:skills-src/conveyor/daemon-manifest.mjs's schema to add a resident-vs-periodic discriminator —
+rejected as out of THIS card's scope (that file belongs to #3871, and no resident entry exists yet to need it;
+noted below as an open question for whichever slice registers the first one).
+
+**Fix.** `planLaunchTargets` now carries `intervalMs` through unchanged. A new pure-core function,
+`runPeriodicSupervisorLoop` (we:skills-src/conveyor/supervisor-launcher.mjs, NOT
+we:skills-src/conveyor/supervisor.mjs — zero edits there, same invariant as corrections 1–3), reuses
+`classifyExit`/`decideRestart` unmodified for the crash question but paces a clean exit by `intervalMs`
+instead of `decideRestart`'s own `delayMs: 0`. It also disables `classifyExit`'s `too-short` heuristic (default
+`crashThresholdMs` 0, not we:skills-src/conveyor/supervisor.mjs's 3s) — that heuristic is tuned for
+we:skills-src/conveyor/runner.mjs's own tick-timing assumption ("a real tick costs low-hundreds of ms"), which
+does not hold for an arbitrary one-shot watcher pass that may legitimately finish in well under 3s; a
+non-zero exit code or signal death is still always classified `'crash'` regardless of this value. `launchEntry`
+now acquires `passDaemonLeaseKey(name)` (we:skills-src/conveyor/pass-daemon.mjs, imported unmodified) before
+spawning anything, held for the entry's whole lifetime via one heartbeat timer and released on stop or on
+throw — a denied lease (already held by a live we:skills-src/conveyor/pass-daemon.mjs instance or a sibling
+launcher) returns immediately without spawning, isolated per-entry exactly like an unresolvable name already
+was.
+
+**Prevention owed, delivered: the integration-level test the reviewer explicitly asked for.** Every existing
+test in we:skills-src/conveyor/__tests__/supervisor-launcher.test.mjs injects a fake `spawnChild`/`runLoop`, so
+none of them ever exercised the real `classifyExit`/`runPeriodicSupervisorLoop`/lease path against a real
+one-shot script's real exit — precisely the gap the review named. New file
+we:skills-src/conveyor/__tests__/supervisor-launcher.integration.test.mjs drives `launchEntry` with NO injected
+`spawnChild`/`runLoop` (only file-system PATHS — `root`/`logRoot`/`lockRoot` — redirected to an isolated temp
+dir, and small pacing NUMBERS for test speed): (1) a clean real `node -e "process.exit(0)"` child's second real
+spawn never follows the first by less than its own `intervalMs`; (2) a real non-zero exit still gets the real
+crash backoff, never confused with interval pacing (asserted with `intervalMs` deliberately far larger than
+the crash backoff, so a misclassification would time out loudly rather than pass silently); (3) the real,
+disk-backed `passDaemonLeaseKey` lease is genuinely held for the run's whole lifetime and genuinely released
+after — read via `runnerLeaseStatus` (we:skills-src/conveyor/runner-lock.mjs) against an isolated temp
+`lockRoot`, never the shared production one. None of the 15 real manifest entries are safe to actually spawn
+in a test (each shells real git state and/or the real `gh` CLI); `node -e` is the SAME realistic-fixture
+technique we:skills-src/conveyor/__tests__/supervisor.test.mjs's own `makeRealSpawnChild` suite already
+established for exercising a real subprocess without a real pass script.
+
+**Confirmed by reintroduction.** Temporarily reverted just we:skills-src/conveyor/supervisor-launcher.mjs to
+its pre-fix (round-1) state and re-ran the full suite: 18 of 35 tests failed, including the new integration
+test proving the pacing defect directly (the pre-fix second spawn followed the first almost instantly, not
+after `intervalMs`). Restored the fix; all 35 pass again.
+
+**Open question, not this fix's scope.** we:skills-src/conveyor/daemon-manifest.mjs's schema (#3871) requires
+`intervalMs` on every entry with no discriminator for a genuinely long-running RESIDENT (Dispatcher,
+Fix-dispatch, Review, Verify — this card's own eventual targets). Whichever slice registers the first such
+entry will need to teach `launchEntry` to route it through we:skills-src/conveyor/supervisor.mjs's own
+unmodified `runSupervisorLoop` instead of the new periodic path — not resolved here, since no resident entry
+exists yet to need it.
+
 ## Done when
 
-1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/supervisor-launcher.test.mjs` passes
-   (19/19): the pure `planLaunchTargets`/`defaultLaunchNames` resolve every valid manifest name and isolate an
-   unresolvable one without aborting the rest; `launchEntry`/`launchAll` wire the resolved `script`/`args` into
-   we:skills-src/conveyor/supervisor.mjs's own (injected, never real-in-tests) `runSupervisorLoop`/
+1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/supervisor-launcher.test.mjs
+   we:skills-src/conveyor/__tests__/supervisor-launcher.integration.test.mjs` passes (35/35 — 32 unit + 3
+   integration): the pure `planLaunchTargets`/`defaultLaunchNames` resolve every valid manifest name
+   (including its own `intervalMs`, carried through unchanged) and isolate an unresolvable one without
+   aborting the rest; the new pure `runPeriodicSupervisorLoop` paces a clean exit by `intervalMs` and routes a
+   genuine crash through we:skills-src/conveyor/supervisor.mjs's own reused, unmodified
+   `classifyExit`/`decideRestart`; `launchEntry`/`launchAll` take the real `passDaemonLeaseKey(name)` lease
+   before spawning (a denial isolates per-entry, never aborting a sibling launch) and wire the resolved
+   `script`/`args`/`intervalMs` into we:skills-src/conveyor/supervisor.mjs's own (injected, never real-in-tests)
    `makeRealSpawnChild`/`makeJsonlLog` correctly, one call per manifest entry, with per-entry log isolation;
-   every case touching the real, shared `DAEMON_MANIFEST` asserts against its own current state, never a
-   value hardcoded at write time. This proves the launcher's own resolution + wiring logic; it does not spawn
-   a real subprocess (that path is exercised by we:skills-src/conveyor/__tests__/supervisor.test.mjs's own
-   real-subprocess suite, reused here unmodified).
+   every case touching the real, shared `DAEMON_MANIFEST` asserts against its own current state, never a value
+   hardcoded at write time. The SEPARATE integration suite proves the same wiring with NO injected
+   `spawnChild`/`runLoop` — a real one-shot child process, the real crash-vs-clean classification, and the
+   real disk-backed lease, exactly the gap round 2 of PR #2472's review named.

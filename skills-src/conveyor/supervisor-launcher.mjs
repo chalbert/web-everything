@@ -35,27 +35,77 @@
  * slice actually wires each script, not a side effect of building this launcher (this item's own `scope`
  * only ever named we:skills-src/conveyor/supervisor.mjs).
  *
- * WHY NO SEPARATE LEASE HERE. Every resident script this launcher can target already protects itself against
- * a duplicate live instance with its OWN lease (we:skills-src/conveyor/review-daemon.mjs's
- * `REVIEW_DAEMON_LEASE_KEY`, we:skills-src/conveyor/pass-daemon.mjs's `passDaemonLeaseKey(name)`, #3877's
- * keyed runner-lock scheme). If this launcher is ever accidentally started twice, each of the SECOND
- * instance's per-entry children just loses its lease race immediately, exits fast, and the reused
- * `classifyExit`/`decideRestart` pair (imported unmodified from supervisor.mjs) correctly reads that as a
- * too-short crash and backs it off toward the ceiling — the same self-healing-but-silent behavior
- * supervisor.mjs's own header already documents (and #3398 already alerts on, for the Dispatcher case). No
- * new locking primitive is needed at this layer.
+ * CORRECTED PREMISE #3 (round 2 of PR #2472's review; documented in full in backlog/3874-…md's `## Progress`
+ * section, fourth correction). The paragraph immediately below this one, as originally written, claimed "no
+ * new locking primitive is needed at this layer" and that EVERY resident script this launcher targets
+ * "already protects itself against a duplicate live instance with its OWN lease." Read directly against what
+ * this file's OWN manifest entries actually are TODAY (every one of the 15 real {@link DAEMON_MANIFEST}
+ * entries, #3873): none of `branch-drift.mjs`/`ci-queue-watch.mjs`/etc. take their own lease directly — that
+ * lease (we:skills-src/conveyor/pass-daemon.mjs's `passDaemonLeaseKey(name)`) is acquired ONLY by
+ * we:skills-src/conveyor/pass-daemon.mjs's OWN IO shell, which THIS launcher bypassed entirely by spawning
+ * each entry's script directly. Worse, {@link planLaunchTargets} silently dropped every entry's own
+ * `intervalMs` (documented on {@link ../daemon-manifest.mjs}'s own `DaemonManifestEntry` typedef as "how often
+ * pass-daemon.mjs re-runs this pass"), so a launched entry's clean, expected exit (`code:0`) fell straight
+ * into supervisor.mjs's `decideRestart`, which gives an ordinary clean exit `delayMs: 0` — an IMMEDIATE
+ * respawn, forever, completely ignoring the entry's own pacing. That is worse than the race this section
+ * used to describe as the worst case: not an occasional overlap with a concurrently-running
+ * `pass-daemon.mjs --pass=<name>`, but a permanent zero-delay busy-loop re-running every currently-registered
+ * entry nonstop the instant this launcher's `main()` is ever actually invoked against real manifest entries.
+ *
+ * FIXED by making {@link launchEntry} do two things supervisor.mjs's own reused-unmodified core cannot do on
+ * its own, since every current manifest entry is a PERIODIC ONE-SHOT pass (runs to completion, then waits
+ * `intervalMs`, then runs again) — a fundamentally different shape than supervisor.mjs's own target
+ * (we:skills-src/conveyor/runner.mjs, a process that should basically never exit, where any exit is a crash to
+ * restart-with-backoff):
+ *   1. Take the SAME `passDaemonLeaseKey(name)` lease we:skills-src/conveyor/pass-daemon.mjs would take for
+ *      `--pass=<name>` — imported and reused UNMODIFIED, never re-derived — before spawning anything, so a
+ *      real concurrent `pass-daemon.mjs --pass=<name>` instance and this launcher's own copy of the same
+ *      entry genuinely contend for one lease rather than both running. One held for this entry's WHOLE
+ *      lifetime (acquired once, heartbeat throughout, released on stop) — mirrors
+ *      we:skills-src/conveyor/pass-daemon.mjs's own `main()` shape exactly, not a per-run acquire/release.
+ *   2. Drive each entry through {@link runPeriodicSupervisorLoop} (this file's own new pure-core function,
+ *      NOT supervisor.mjs's `runSupervisorLoop`) instead: reuses supervisor.mjs's `classifyExit`/`decideRestart`
+ *      UNMODIFIED for the "was this actually a crash" question (a non-zero exit or death-by-signal is still
+ *      classified and backed off exactly as supervisor.mjs already does), but a CLEAN exit paces the next run
+ *      by the entry's own `intervalMs` (now threaded through by {@link planLaunchTargets}) — mirroring
+ *      we:skills-src/conveyor/pass-daemon.mjs's own `runPassDaemonLoop` pacing — rather than supervisor.mjs's
+ *      `delayMs: 0` assumption, which is only correct for a long-running resident whose exit is a polite
+ *      stand-down, never for a periodic pass whose clean exit is the NORMAL, expected outcome of every run.
+ *
+ * `classifyExit`'s own `too-short` heuristic (anything under `crashThresholdMs`, default 3s) is tuned for
+ * we:skills-src/conveyor/runner.mjs's own tick shape — "a real tick reliably costs low-hundreds of ms," per
+ * that file's own doc comment — which does NOT hold for an arbitrary one-shot watcher pass that may
+ * legitimately finish in well under 3s (e.g. a quick "nothing to do" check). Reusing the 3s default here would
+ * misclassify a fast, successful, expected run as a crash. {@link runPeriodicSupervisorLoop} therefore calls
+ * `classifyExit` with `crashThresholdMs: 0` by default (still overridable) — signal-death and a non-zero exit
+ * code are UNAMBIGUOUS crash signals regardless of runtime and are still always classified `'crash'`; only the
+ * runtime-based `'too-short'` heuristic (inapplicable to this class of script) is disabled.
+ *
+ * WHAT THIS DOES NOT SOLVE (open question, not this fix's scope — see backlog/3874-…md's own THIRD
+ * correction). {@link DAEMON_MANIFEST}'s schema (#3871) requires `intervalMs` on EVERY entry; there is today no
+ * discriminator marking an entry as a genuinely long-running RESIDENT (Dispatcher, Fix-dispatch, Review,
+ * Verify — this card's own stated eventual targets) rather than a periodic one-shot pass. A resident entry
+ * has no periodic-pacing concept and should still go through supervisor.mjs's own `runSupervisorLoop`
+ * unchanged; that split needs a manifest-schema addition (e.g. an explicit `kind` field) belonging to whichever
+ * slice actually registers the first resident entry — this fix only corrects what is real today, where every
+ * entry is a periodic one-shot pass.
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors this epic's established shape — see we:skills-src/conveyor/pass-daemon.mjs
  * and we:skills-src/conveyor/review-daemon.mjs headers):
- *   • {@link planLaunchTargets} and {@link defaultLaunchNames} are the pure core — no IO of their own,
- *     `resolveEntry`/`manifest` injected, unit-tested against fixture manifests
- *     (skills-src/conveyor/__tests__/supervisor-launcher.test.mjs) — never the real (today empty)
- *     `DAEMON_MANIFEST`. One bad name never aborts the rest (mirrors this epic's own "one bad entry never
- *     aborts the rest" discipline: reconcile-pass.mjs's per-PR isolation, review-daemon.mjs's per-repo
- *     isolation).
+ *   • {@link planLaunchTargets}, {@link defaultLaunchNames}, and {@link runPeriodicSupervisorLoop} are the pure
+ *     core — no IO of their own, `resolveEntry`/`manifest`/every effect injected, unit-tested against fixture
+ *     manifests and fake effects (skills-src/conveyor/__tests__/supervisor-launcher.test.mjs) — never the real
+ *     `DAEMON_MANIFEST` for the fixture-driven cases. One bad name never aborts the rest (mirrors this epic's
+ *     own "one bad entry never aborts the rest" discipline: reconcile-pass.mjs's per-PR isolation,
+ *     review-daemon.mjs's per-repo isolation).
  *   • {@link launchEntry} and {@link launchAll} are IO-shell GLUE that itself takes injectable
- *     `runLoop`/`makeSpawnChild`/`makeLog` (defaulting to supervisor.mjs's own real, unmodified exports) —
- *     unit-tested with fakes for those three, so no real subprocess is ever spawned by the unit suite.
+ *     `runLoop`/`makeSpawnChild`/`makeLog`/`acquireLease`/`heartbeatLease`/`releaseLease` (defaulting to the
+ *     real, unmodified exports this header describes above) — unit-tested with fakes for all of those, so no
+ *     real subprocess and no real lease file is ever touched by the unit suite. A SEPARATE integration suite
+ *     (skills-src/conveyor/__tests__/supervisor-launcher.integration.test.mjs) drives `launchEntry` with NO
+ *     injected `spawnChild`/`runLoop` against a realistic one-shot fixture script, proving the real
+ *     `classifyExit`/`runPeriodicSupervisorLoop`/lease path — the exact gap the review named (every prior test
+ *     here only ever exercised injected fakes).
  *   • `main()` (gated on direct invocation, exactly like supervisor.mjs's own) is the ONLY code path that
  *     actually spawns real children — it resolves the CLI's requested names, launches one supervised loop
  *     per entry, and forwards SIGINT/SIGTERM to every live child so a stopped launcher never leaves one
@@ -65,8 +115,14 @@
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveManifestEntry, DAEMON_MANIFEST } from './daemon-manifest.mjs';
-import { runSupervisorLoop, makeRealSpawnChild, makeJsonlLog } from './supervisor.mjs';
-import { RUNNER_LOCK_ROOT } from './runner-lock.mjs';
+import {
+  classifyExit, decideRestart, makeRealSpawnChild, makeJsonlLog,
+  DEFAULT_BASE_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS,
+} from './supervisor.mjs';
+import { passDaemonLeaseKey, DEFAULT_HEARTBEAT_INTERVAL_MS } from './pass-daemon.mjs';
+import {
+  RUNNER_LOCK_ROOT, makeOwner, acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
+} from './runner-lock.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -81,11 +137,17 @@ export const DEFAULT_LOG_ROOT = join(RUNNER_LOCK_ROOT, 'supervisor-launcher');
  * Resolve a requested list of manifest names into concrete launch targets, isolating one unresolvable name
  * from the rest rather than aborting the whole launch over one typo or one not-yet-registered entry. Pure —
  * `resolveEntry` is injected (defaults to the real {@link resolveManifestEntry}) so this is unit-tested
- * against a fixture manifest, never the real (today empty) `DAEMON_MANIFEST`.
+ * against a fixture manifest, never the real `DAEMON_MANIFEST`.
+ *
+ * CORRECTED (round 2 of PR #2472's review — see this file's own header, "CORRECTED PREMISE #3"): this used to
+ * drop each entry's own `intervalMs` on the floor, carrying only `script`/`args` into the resolved target. That
+ * silently threw away the ONE piece of information {@link launchEntry} needs to pace a periodic one-shot pass
+ * correctly instead of handing every exit straight to supervisor.mjs's crash-restart machinery. Now carried
+ * through unchanged from the resolved manifest entry.
  * @param {string[]} names
  * @param {{ manifest?: Record<string, object>, resolveEntry?: (name:string, manifest:object) => object }} [o]
  * @returns {{
- *   targets: Array<{ name:string, script:string, args:string[] }>,
+ *   targets: Array<{ name:string, script:string, args:string[], intervalMs:number }>,
  *   failures: Array<{ name:string, error:string }>,
  * }}
  */
@@ -96,7 +158,9 @@ export function planLaunchTargets(names, { manifest = DAEMON_MANIFEST, resolveEn
   for (const name of list) {
     try {
       const entry = resolveEntry(name, manifest);
-      targets.push({ name, script: entry.script, args: Array.isArray(entry.args) ? entry.args : [] });
+      targets.push({
+        name, script: entry.script, args: Array.isArray(entry.args) ? entry.args : [], intervalMs: entry.intervalMs,
+      });
     } catch (e) {
       failures.push({ name, error: String((e && e.message) || e) });
     }
@@ -116,6 +180,87 @@ export function defaultLaunchNames(manifest = DAEMON_MANIFEST) {
   return Object.keys(manifest).sort();
 }
 
+/** Below this runtime, a `classifyExit`-eligible exit would ordinarily read as `'too-short'` (see
+ *  supervisor.mjs's own `DEFAULT_CRASH_THRESHOLD_MS`, 3s) — a heuristic tuned for we:runner.mjs's own tick
+ *  shape, not for an arbitrary periodic one-shot pass, which may legitimately finish in well under 3s (e.g. a
+ *  quick "nothing to do" check). `0` disables that ONE heuristic — a non-zero exit code or death-by-signal is
+ *  still always classified `'crash'` by `classifyExit` regardless of this value. See this file's own header,
+ *  "CORRECTED PREMISE #3". */
+export const DEFAULT_PERIODIC_CRASH_THRESHOLD_MS = 0;
+
+/**
+ * Drive ONE periodic one-shot manifest entry's own run/pace/backoff control flow — a reducer over injected
+ * effects, unit-testable with fakes, no IO of its own. Reuses supervisor.mjs's {@link classifyExit} and
+ * {@link decideRestart} UNMODIFIED for the "was this actually a crash" question (a non-zero exit or
+ * death-by-signal still gets the exact same doubling backoff supervisor.mjs itself applies to `runner.mjs`),
+ * but a CLEAN exit paces the NEXT run by `intervalMs` — mirroring we:skills-src/conveyor/pass-daemon.mjs's own
+ * `runPassDaemonLoop` pacing — rather than supervisor.mjs's own `decideRestart`, which gives an ordinary clean
+ * exit `delayMs: 0` (correct for a long-running resident whose exit is a polite stand-down; wrong here, where
+ * a clean exit is the NORMAL, expected outcome of every run of a periodic pass). See this file's own header,
+ * "CORRECTED PREMISE #3", for the full review-round context this function was built to close.
+ *
+ * @param {object} effects
+ * @param {()=>Promise<{code:number|null,signal:string|null,ranMs:number}>} effects.spawnChild
+ * @param {number} effects.intervalMs        how long to wait after a CLEAN exit before the next run
+ * @param {(entry:object)=>any} [effects.log]
+ * @param {(ms:number)=>any} [effects.sleep]
+ * @param {number} [effects.maxRestarts]
+ * @param {()=>boolean} [effects.shouldStop]
+ * @param {number} [effects.baseBackoffMs]
+ * @param {number} [effects.maxBackoffMs]
+ * @param {number} [effects.crashThresholdMs]  see {@link DEFAULT_PERIODIC_CRASH_THRESHOLD_MS}
+ * @returns {Promise<{ restarts: number, stoppedReason: 'max-restarts'|'signal' }>}
+ */
+export async function runPeriodicSupervisorLoop({
+  spawnChild,
+  intervalMs,
+  log = () => {},
+  sleep = () => {},
+  maxRestarts = Infinity,
+  shouldStop = () => false,
+  baseBackoffMs = DEFAULT_BASE_BACKOFF_MS,
+  maxBackoffMs = DEFAULT_MAX_BACKOFF_MS,
+  crashThresholdMs = DEFAULT_PERIODIC_CRASH_THRESHOLD_MS,
+} = {}) {
+  if (typeof spawnChild !== 'function') throw new TypeError('runPeriodicSupervisorLoop requires a spawnChild effect');
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    throw new TypeError('runPeriodicSupervisorLoop requires a positive intervalMs (the manifest entry\'s own pacing)');
+  }
+  let consecutiveCrashes = 0;
+  let restarts = 0;
+  for (;;) {
+    if (shouldStop()) return { restarts, stoppedReason: 'signal' };
+    restarts += 1;
+    const attempt = restarts;
+    log({ event: 'spawn', at: new Date().toISOString(), attempt, kind: attempt === 1 ? 'initial' : 'restart' });
+    const result = await spawnChild();
+    const classification = classifyExit(result, { crashThresholdMs });
+    log({
+      event: 'exit', at: new Date().toISOString(), attempt,
+      code: result.code, signal: result.signal, ranMs: result.ranMs,
+      kind: classification.kind, reason: classification.reason,
+      shutdownRequested: shouldStop(),
+    });
+    if (attempt >= maxRestarts) return { restarts, stoppedReason: 'max-restarts' };
+    if (shouldStop()) return { restarts, stoppedReason: 'signal' };
+    if (classification.kind === 'crash') {
+      // A genuine crash (non-zero exit / signal death) — same doubling backoff supervisor.mjs itself applies,
+      // reused unmodified. `consecutiveIdleStops` has no periodic-pass analogue; always 0.
+      const restart = decideRestart({ classification, consecutiveCrashes, consecutiveIdleStops: 0 }, { baseBackoffMs, maxBackoffMs });
+      consecutiveCrashes = restart.consecutiveCrashes;
+      log({ event: 'backoff', at: new Date().toISOString(), delayMs: restart.delayMs, kind: 'crash', consecutiveCrashes });
+      if (restart.delayMs > 0) await sleep(restart.delayMs);
+    } else {
+      // A clean, expected one-shot completion — pace the NEXT run by this entry's own intervalMs, never
+      // supervisor.mjs's delayMs:0 assumption (see this function's own header for why that assumption is
+      // wrong here).
+      consecutiveCrashes = 0;
+      log({ event: 'backoff', at: new Date().toISOString(), delayMs: intervalMs, kind: 'interval' });
+      await sleep(intervalMs);
+    }
+  }
+}
+
 // ── IO SHELL (owns the real child processes — every effect defaults to supervisor.mjs's own real, UNMODIFIED
 //    exports, but is injectable so the unit suite never spawns a real subprocess) ───────────────────────────
 
@@ -131,12 +276,21 @@ export function entryLogPath(name, { logRoot = DEFAULT_LOG_ROOT } = {}) {
 }
 
 /**
- * Drive ONE manifest entry's own restart/backoff supervisor loop to completion (which, absent a stop signal,
- * is "forever" — mirrors supervisor.mjs's own `main()` shape one level up, one entry at a time). Every real
- * effect (`makeSpawnChild`, `makeLog`, `runLoop`) defaults to supervisor.mjs's own real, UNMODIFIED exports;
- * all three are injectable so the unit suite proves this function wires its target's `runnerPath`/`extraArgs`
- * and per-entry log path correctly WITHOUT ever spawning a real subprocess.
- * @param {{ name:string, script:string, args:string[] }} target
+ * Drive ONE manifest entry's own run/pace/backoff loop to completion (which, absent a stop signal, is
+ * "forever" — mirrors supervisor.mjs's own `main()` shape one level up, one entry at a time). Every real
+ * effect (`makeSpawnChild`, `makeLog`, `runLoop`, `acquireLease`/`heartbeatLease`/`releaseLease`) defaults to
+ * the real, UNMODIFIED exports this file's own header describes; all are injectable so the unit suite proves
+ * this function's wiring WITHOUT ever spawning a real subprocess or touching a real lease file.
+ *
+ * TAKES THE PASS-DAEMON-COMPATIBLE LEASE FIRST (round 2 of PR #2472's review — see this file's own header,
+ * "CORRECTED PREMISE #3"): before spawning anything, acquires the SAME `passDaemonLeaseKey(name)` lease
+ * we:skills-src/conveyor/pass-daemon.mjs would take for `--pass=<name>`, held for this entry's WHOLE lifetime
+ * (one heartbeat timer, released on stop) — mirrors we:skills-src/conveyor/pass-daemon.mjs's own `main()`
+ * shape exactly. A name whose lease is already held elsewhere (a real concurrent `pass-daemon.mjs
+ * --pass=<name>`, or a second copy of this launcher) is never spawned at all — returns immediately with
+ * `stoppedReason: 'lease-denied'` rather than racing it, and never aborts a sibling entry's own launch (same
+ * per-entry isolation {@link launchAll} already gives a plan-time resolution failure).
+ * @param {{ name:string, script:string, args:string[], intervalMs:number }} target
  * @param {{
  *   root?: string, logRoot?: string,
  *   onChild?: (name:string, child: import('node:child_process').ChildProcess|null) => void,
@@ -144,20 +298,57 @@ export function entryLogPath(name, { logRoot = DEFAULT_LOG_ROOT } = {}) {
  *   sleep?: (ms:number) => Promise<void>,
  *   makeSpawnChild?: typeof makeRealSpawnChild,
  *   makeLog?: typeof makeJsonlLog,
- *   runLoop?: typeof runSupervisorLoop,
+ *   runLoop?: typeof runPeriodicSupervisorLoop,
+ *   lockRoot?: string,
+ *   heartbeatIntervalMs?: number,
+ *   acquireLease?: typeof acquireRunnerLease,
+ *   heartbeatLease?: typeof heartbeatRunnerLease,
+ *   releaseLease?: typeof releaseRunnerLeaseIfOwned,
+ *   maxRestarts?: number, baseBackoffMs?: number, maxBackoffMs?: number, crashThresholdMs?: number,
+ *     — forwarded to `runLoop` unchanged (see {@link runPeriodicSupervisorLoop}'s own defaults); exposed here
+ *     so a bounded caller (e.g. an integration test) can cap a real run without racing a `shouldStop` timer.
  * }} [o]
  * @returns {Promise<{ restarts:number, stoppedReason:string }>}
  */
-export async function launchEntry({ name, script, args }, {
+export async function launchEntry({ name, script, args, intervalMs }, {
   root = REPO_ROOT, logRoot = DEFAULT_LOG_ROOT,
   onChild = () => {}, shouldStop = () => false, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-  makeSpawnChild = makeRealSpawnChild, makeLog = makeJsonlLog, runLoop = runSupervisorLoop,
+  makeSpawnChild = makeRealSpawnChild, makeLog = makeJsonlLog, runLoop = runPeriodicSupervisorLoop,
+  lockRoot = RUNNER_LOCK_ROOT, heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS,
+  acquireLease = acquireRunnerLease, heartbeatLease = heartbeatRunnerLease, releaseLease = releaseRunnerLeaseIfOwned,
+  maxRestarts, baseBackoffMs, maxBackoffMs, crashThresholdMs,
 } = {}) {
   const runnerPath = resolveScriptPath(script, { root });
-  const spawnChild = makeSpawnChild({ runnerPath, extraArgs: args, onChild: (child) => onChild(name, child) });
   const baseLog = makeLog(entryLogPath(name, { logRoot }));
   const log = (entry) => baseLog({ name, ...entry });
-  return runLoop({ spawnChild, log, sleep, shouldStop });
+
+  const leaseKey = passDaemonLeaseKey(name);
+  const leaseOwner = makeOwner(`supervisor-launcher:${name}`);
+  const acquired = acquireLease(lockRoot, leaseOwner, { key: leaseKey });
+  if (!acquired.ok) {
+    log({ event: 'lease-denied', at: new Date().toISOString(), heldBy: acquired.heldBy || null });
+    return { restarts: 0, stoppedReason: 'lease-denied' };
+  }
+
+  let leaseAlive = true;
+  const heartbeatTimer = setInterval(() => {
+    if (!heartbeatLease(lockRoot, leaseOwner, { key: leaseKey })) {
+      leaseAlive = false;
+      log({ event: 'lease-lost', at: new Date().toISOString() });
+    }
+  }, heartbeatIntervalMs);
+  heartbeatTimer.unref?.();
+
+  try {
+    const spawnChild = makeSpawnChild({ runnerPath, extraArgs: args, onChild: (child) => onChild(name, child) });
+    return await runLoop({
+      spawnChild, intervalMs, log, sleep, shouldStop: () => shouldStop() || !leaseAlive,
+      maxRestarts, baseBackoffMs, maxBackoffMs, crashThresholdMs,
+    });
+  } finally {
+    clearInterval(heartbeatTimer);
+    releaseLease(lockRoot, leaseOwner, { key: leaseKey });
+  }
 }
 
 /**
@@ -171,7 +362,7 @@ export async function launchEntry({ name, script, args }, {
  *   {@link launchEntry} (everything else), plus `onFailure((failure) => void)`.
  * @returns {{
  *   failures: Array<{ name:string, error:string }>,
- *   launched: Array<{ name:string, script:string, args:string[] }>,
+ *   launched: Array<{ name:string, script:string, args:string[], intervalMs:number }>,
  *   running: Promise<{ restarts:number, stoppedReason:string }>[],
  * }}
  */
