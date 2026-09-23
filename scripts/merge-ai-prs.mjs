@@ -135,6 +135,7 @@ import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.
 // #3215 — the drain applies holds of its own (a fresh park, a #2409 stale-acceptance re-park); this is the
 // same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
 import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
+import { ensureFreshGithubAppEnv } from './lib/github-app-auth-env.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -3092,6 +3093,12 @@ const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLTo
 if (IS_CLI) runCli().catch((e) => { process.stderr.write(`merge-ai-prs ✗ ${String(e && e.stack || e)}\n`); process.exit(1); });
 
 async function runCli() {
+  // #3866 (ratified) — opt-in only: a no-op unless WE_GITHUB_APP_* is configured, in which case every `gh`
+  // call this drain run makes draws from the App installation's own rate-limit bucket instead of the
+  // operator's personal one. Awaited HERE, before any gh work, so a fresh env var is in place for even the
+  // very first discovery call; a `--watch` run re-checks at the top of every pass (see the watch loop). See
+  // github-app-auth-env.mjs's own header for why this lives outside gh-throttle.mjs.
+  await ensureFreshGithubAppEnv({ log: console });
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
@@ -4940,6 +4947,10 @@ async function runCli() {
   let lastDup = [];
   let redMainStopped = false; // #2681 — a freeze raised MID-watch stops the line this pass
   for (let pass = 1; ; pass++) {
+    // #3881 — refresh the App token at the top of EVERY pass (a no-op unless configured, and a plain cache read
+    // until the token nears expiry). Never on a timer: this loop sleeps with `sleepSync`, so the event loop is
+    // never free for a background refresh to run — the top of a pass is the only point it can.
+    if (pass > 1) await ensureFreshGithubAppEnv({ log: console });
     if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope, repoKey: localSlug }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite; #3440 repoKey selects the same per-repo lock dir
     // #2681 — RE-CHECK the red-main dispatch-freeze EVERY pass: a post-land red can be raised DURING a running
     // watch (the resident drain daemon is a long-lived `--watch`), and stop-the-line must catch it, not just a
