@@ -401,9 +401,9 @@ function main(argv) {
     for (const s of plan.skip) counts[s.reason] = (counts[s.reason] || 0) + 1;
     if (plan.skip.length) log(`  skipped: ${Object.entries(counts).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
   }
-  process.exit(report.failed?.length ? 1 : 0);
+  process.exitCode = report.failed?.length ? 1 : 0; // exitCode, not exit() — never truncate the JSON on stdout
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  try { main(process.argv.slice(2)); } catch (e) { log(`orphan-claim-release ✗ ${String(e?.stderr || e?.message || e).split('\n')[0]}`); process.exit(1); }
+  try { main(process.argv.slice(2)); } catch (e) { log(`orphan-claim-release ✗ ${String(e?.stderr || e?.message || e).split('\n')[0]}`); process.exitCode = 1; }
 }
