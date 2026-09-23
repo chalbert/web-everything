@@ -12,8 +12,11 @@
  * (`ci-heal-mark.mjs#countCiHealComments`). It never touches a `review:*` label; the wrapper's only PR write is a comment.
  */
 import { readFileSync } from 'node:fs';
-import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, fillBrief, sessionSlugFor, DISPATCH_EFFECT } from './dispatch-lane.mjs';
+import {
+  BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor, DISPATCH_EFFECT,
+} from './dispatch-lane.mjs';
 import { briefPath, createDispatchSinks, REPO_ROOT } from './dispatch-lane-io.mjs';
+import { briefTokensForRepo } from '../lib/repo-profile.mjs';
 
 /**
  * @param {{itemNum:(string|null), pr:number, laneRef:string, scope:string[], lane:number, reason?:string}} planned - a `planFixesFromReconcile`
@@ -28,10 +31,13 @@ export async function dispatchCiHeal(planned, {
 } = {}) {
   const sessionSlug = sessionSlugFor(planned.itemNum, 'ci-heal', planned.pr);
   const reason = planned.reason ?? 'red-ci';
+  // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here).
+  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr });
+  if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the ci-heal brief`);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
     ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
-    SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason,
-  }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM']);
+    SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
+  }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'], REPO_AWARE_VALUE_PATTERNS);
   const out = await sinks[DISPATCH_EFFECT]({
     launchKind: 'ci-heal', prompt, sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
     pr: planned.pr, reason, repo,

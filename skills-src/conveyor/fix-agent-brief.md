@@ -25,6 +25,11 @@
 | `{{LANE}}` | a FREE lane id the conveyor assigned this repair (a fresh clone; the repair is reconstituted from `{{LANE_REF}}`, not the original lease) |
 | `{{SESSION_SLUG}}` | a stable per-repair session slug, e.g. `fix-{{PR_NUM}}` (ties `acquire`↔`release`) |
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
+| `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
+| `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — `.` for WE, an absolute checkout path for a sibling repo |
+| `{{GATE_COMMAND}}` | the target repo's own gate command (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`) |
+| `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`rearm-review.mjs`, `stand-down.mjs`, …) |
+| `{{ATTRIBUTION}}` | the commit-title reference — `WE #{{ITEM_NUM}}`-shaped for WE today, `PR #{{PR_NUM}}` for an item-less fix |
 
 > **`{{LIKE_THIS}}`** are **conveyor-injected** (the table above). **`<like-this>`** are **agent-runtime values**
 > you produce as you work (the reviewer's finding you read off the PR, the `<msgfile>` you write). Do not expect
@@ -50,7 +55,7 @@ indistinguishable from one never dispatched at all — no `claude logs` archaeol
 already applies to a fixer's own escalation marker.
 
 ```bash
-node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --kind=fix --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=fix --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
 
 ### 1. Reconstitute the bounced PR's work in a lane clone (reuse the ref — never rebuild from scratch)
@@ -60,7 +65,7 @@ The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a fre
 
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
-LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-fix \
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --lane={{LANE}} --purpose=conveyor-fix \
   --session={{SESSION_SLUG}} --scope={{SCOPE}} --base={{LANE_REF}}) && cd "$LANE"
 ```
 
@@ -69,8 +74,12 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-fix
   deleted / the PR was force-closed), report the completion record (`--status=done --outcome=not-applicable`)
   and stop and report `#{{ITEM_NUM}} → fix not-applicable (lane ref gone)`:
   ```bash
-  node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
+  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
   ```
+- **`cd "$LANE"` just left WE's own checkout.** `{{LANE_REF}}` can belong to any constellation repo, so from
+  here on your cwd may hold no `scripts/` directory at all — every remaining tool call in this brief is
+  qualified with `{{WE_ROOT}}` for exactly that reason. Never drop the `{{WE_ROOT}}/` qualifier for a bare
+  relative path.
 - Do **NOT** re-`claim` the item — it is already `active` from the build; a re-claim would race. The repair is
   a diff on an existing PR, not a fresh item pickup.
 
@@ -80,7 +89,7 @@ The `/review` changes-verdict posts a durable PR comment (header `🔁 human rev
 `🔁 review — changes requested`) summarizing what to fix. Read it — and the escalation block in the PR body:
 
 ```bash
-gh pr view {{PR_NUM}} --json title,body,comments --repo <owner/name>
+gh pr view {{PR_NUM}} --json title,body,comments --repo {{REPO}}
 ```
 
 Take the **latest** changes-requested comment as the authoritative ask. If the finding is ambiguous or needs a
@@ -88,9 +97,9 @@ judgment you cannot safely make, do **NOT** guess. **Record the stand-down on th
 `review:changes` (do **not** re-arm) and RETURN `#{{ITEM_NUM}} → fix escalated (finding needs human judgment)`:
 
 ```bash
-node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=needs-judgment \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=needs-judgment \
   --detail="<one line — what you could not decide>"
-node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-judgment
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-judgment
 ```
 
 A human handles it via `/finish`.
@@ -116,9 +125,9 @@ auto-dispatched escalation was silently re-dispatched at the same unresolved con
 by the 5-attempt rearm cap instead of this terminal exit), THEN report the completion record and stop:
 
 ```bash
-node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=conflict \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=conflict \
   --detail="<one line — what made the overlap unsafe to resolve automatically>"
-node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 ```
 
 Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
@@ -133,16 +142,22 @@ test if the finding touches a call path, not only a unit test of the isolated pi
 ### 4. Run the gate GREEN (the item's own locus gate)
 
 ```bash
-npm run check:standards          # (or the item's locus gate — LOCI[item.locus] in check-standards-rules.mjs)
+{{GATE_COMMAND}}          # this repo's own gate ({{REPO}}'s package.json — gateFor(...) in scripts/lib/repo-profile.mjs)
 ```
+
+If the repair also touches a WE-side file (docs, the backlog item itself, WE-side glue) — i.e. `{{SCOPE}}` names
+anything outside `{{REPO}}` — additionally run `npm run check:standards` from `{{WE_ROOT}}` before re-pushing:
+`{{GATE_COMMAND}}` is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself
+(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already **is** `npm run test:unit && npm run check:standards`, so this is a
+no-op today.
 
 A red gate is a hard stop. Record the stand-down on the PR, leave it `review:changes` (do **not** re-arm), and
 RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
 
 ```bash
-node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=gate-red \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=gate-red \
   --detail="<one line — which check stayed red>"
-node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=gate-red
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=gate-red
 ```
 
 Same reason as the exit in step 2 (#3296): without the durable marker the reconcile pass cannot tell your
@@ -164,7 +179,7 @@ then push HEAD to `{{LANE_REF}}` — this **updates the existing PR**, it does n
 `gh pr create`, never `pr-land` — the PR already exists; you are pushing a new head to it):
 
 ```bash
-printf '%s\n' "WE #{{ITEM_NUM}}: address review:changes on PR #{{PR_NUM}} — <one-line what you fixed>" "" \
+printf '%s\n' "{{ATTRIBUTION}}: address review:changes on PR #{{PR_NUM}} — <one-line what you fixed>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
 git push origin HEAD:refs/heads/{{LANE_REF}}
@@ -180,8 +195,8 @@ The bounce is repaired and re-pushed; now hand it back. This is **the one label 
 a script, so you cannot route around the invariant:
 
 ```bash
-node scripts/conveyor/rearm-review.mjs {{PR_NUM}} && \
-  node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=re-armed
+node "{{WE_ROOT}}/scripts/conveyor/rearm-review.mjs" {{PR_NUM}} --repo={{REPO}} && \
+  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=re-armed
 ```
 
 `rearm-review.mjs` swaps `review:changes → review:pending` (an independent re-review is owed) and posts a
@@ -193,7 +208,7 @@ review:accepted`, **do NOT** merge, **do NOT** run a drain. If the script refuse
 do not force a label:
 
 ```bash
-node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-rearm-refused
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-rearm-refused
 ```
 
 ### 8. Append a structured learnings entry to the session drop-box (#2614)
@@ -203,7 +218,7 @@ improvement idea) from the repair — a write-time-gated scrub that rejects raw 
 absolute/repo paths, or PII, so keep every field a short generalized lesson:
 
 ```bash
-node scripts/conveyor/learnings-drop.mjs \
+node "{{WE_ROOT}}/scripts/conveyor/learnings-drop.mjs" \
   --kind=<friction|missing-convention|doc-gap|skill-gap|improvement> \
   --summary="<one sentence — the lesson>" \
   --area="<coarse label, e.g. review-changes repair / re-arm>" \
@@ -234,10 +249,11 @@ it. When a human takes over a `review:changes` bounce (the `/finish` `review-cha
 2. **Read the reviewer's finding** off the PR's latest changes-requested comment (step 2 above).
 3. **Repair only the finding**, resolve any conflict the `/finish` way (regenerate derived artifacts; take-main
    for coordination JSON; STOP on a genuine same-line overlap), get the locus gate green (steps 3–5 above).
-   If you stop instead, run `node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=conflict` so the PR records
-   that a repair was attempted and deliberately abandoned — the auto-fix loop then leaves it to you (#3296).
+   If you stop instead, run `node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=conflict`
+   so the PR records that a repair was attempted and deliberately abandoned — the auto-fix loop then leaves it
+   to you (#3296).
 4. **Re-push HEAD to the same `lane/*` ref** — update the PR in place, never open a new one (step 6 above).
-5. **Re-arm, never clear.** Hand back with `node scripts/conveyor/rearm-review.mjs {{PR_NUM}}` — the same
+5. **Re-arm, never clear.** Hand back with `node "{{WE_ROOT}}/scripts/conveyor/rearm-review.mjs" {{PR_NUM}} --repo={{REPO}}` — the same
    invariant-guarded swap (`review:changes → review:pending`; never `review:accepted`; never removes
    `review:human`). A human still clears the eventual re-review via `/review` — repairing a bounce is not
    accepting it.

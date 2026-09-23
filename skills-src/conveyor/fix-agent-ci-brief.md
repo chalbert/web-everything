@@ -32,6 +32,11 @@
 | `{{SESSION_SLUG}}` | a stable per-heal session slug, e.g. `ci-heal-{{PR_NUM}}` (ties `acquire`↔`release`) |
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
 | `{{REASON}}` | why it fired — `red-ci` (a required check went red) or `behind` (BEHIND + parked) — for the durable comment |
+| `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
+| `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — `.` for WE, an absolute checkout path for a sibling repo |
+| `{{GATE_COMMAND}}` | the target repo's own gate command (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`) |
+| `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`ci-heal-mark.mjs`, `lane-pool.mjs`, …) |
+| `{{ATTRIBUTION}}` | the commit-title reference — `WE #{{ITEM_NUM}}`-shaped for WE today, `PR #{{PR_NUM}}` for an item-less heal |
 
 > **`{{LIKE_THIS}}`** are **conveyor-injected** (the table above). **`<like-this>`** are **agent-runtime values**
 > you produce as you work (the `<msgfile>` you write). Do not expect the conveyor to fill a `<...>`; that's your
@@ -56,13 +61,17 @@ your clone opens at the exact HEAD that was pushed:
 
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
-LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-ci-heal \
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --lane={{LANE}} --purpose=conveyor-ci-heal \
   --session={{SESSION_SLUG}} --scope={{SCOPE}} --base={{LANE_REF}}) && cd "$LANE"
 ```
 
 - `--base={{LANE_REF}}` lands the clone on the pushed lane tip, so you **reuse the built work** — you are healing a
   diff's CI, not redoing the item. If `--base` fails to resolve (the ref was deleted / the PR was force-closed),
   stop and report `#{{ITEM_NUM}} → ci-heal not-applicable (lane ref gone)`.
+- **`cd "$LANE"` just left WE's own checkout.** `{{LANE_REF}}` can belong to any constellation repo, so from
+  here on your cwd may hold no `scripts/` directory at all — every remaining tool call in this brief is
+  qualified with `{{WE_ROOT}}` for exactly that reason. Never drop the `{{WE_ROOT}}/` qualifier for a bare
+  relative path.
 - Do **NOT** re-`claim` the item — it is already `active` (or `resolved`) from the build; a re-claim would race.
 
 ### 2. Rebase onto current `main` (the usual root cause — `main` advanced under the branch)
@@ -82,8 +91,8 @@ it is (do NOT force-push a bad rebase). A clean rebase alone often fixes a BEHIN
 Read what actually failed, then make the **smallest** change that turns it green:
 
 ```bash
-gh pr checks {{PR_NUM}} --repo <owner/name>          # which required check is red
-gh run view <run-id> --log-failed --repo <owner/name> # the failing step's log (optional, for a non-obvious break)
+gh pr checks {{PR_NUM}} --repo {{REPO}}          # which required check is red
+gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (optional, for a non-obvious break)
 ```
 
 - If a clean rebase already fixes it (the failure was purely BEHIND against the new main), no code change is
@@ -104,8 +113,14 @@ as "closes"/"fixes" the item itself — it heals CI on an already-open PR, it do
 ### 4. Run the gate GREEN (the item's own locus gate)
 
 ```bash
-npm run check:standards          # (or the item's locus gate — LOCI[item.locus] in check-standards-rules.mjs)
+{{GATE_COMMAND}}          # this repo's own gate ({{REPO}}'s package.json — gateFor(...) in scripts/lib/repo-profile.mjs)
 ```
+
+If the heal also touches a WE-side file (docs, the backlog item itself, WE-side glue) — i.e. `{{SCOPE}}` names
+anything outside `{{REPO}}` — additionally run `npm run check:standards` from `{{WE_ROOT}}` before re-pushing:
+`{{GATE_COMMAND}}` is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself
+(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already **is** `npm run test:unit && npm run check:standards`, so this is a
+no-op today.
 
 A red gate is a hard stop: do **not** re-push, and report `#{{ITEM_NUM}} → ci-heal gate-red`.
 
@@ -124,7 +139,7 @@ you rebased, push with `--force-with-lease` to update the existing PR's head —
 open a new one (never `gh pr create`, never `pr-land` — the PR already exists):
 
 ```bash
-printf '%s\n' "WE #{{ITEM_NUM}}: CI-heal PR #{{PR_NUM}} — rebase onto main + repair the failing check" "" \
+printf '%s\n' "{{ATTRIBUTION}}: CI-heal PR #{{PR_NUM}} — rebase onto main + repair the failing check" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>   # omit if the rebase alone healed it and there is nothing new to commit
 git push --force-with-lease origin HEAD:refs/heads/{{LANE_REF}}
@@ -141,7 +156,7 @@ The heal is re-pushed. Record it with a durable comment — this is **the ONLY t
 a comment, **NOT** a label change:
 
 ```bash
-node scripts/conveyor/ci-heal-mark.mjs {{PR_NUM}} --reason={{REASON}}
+node "{{WE_ROOT}}/scripts/conveyor/ci-heal-mark.mjs" {{PR_NUM}} --repo={{REPO}} --reason={{REASON}}
 ```
 
 `ci-heal-mark.mjs` posts one comment whose leading line is the CI-heal marker. The conveyor counts those comments
@@ -158,7 +173,7 @@ improvement idea) from the heal — a write-time-gated scrub that rejects raw co
 paths, or PII, so keep every field a short generalized lesson:
 
 ```bash
-node scripts/conveyor/learnings-drop.mjs \
+node "{{WE_ROOT}}/scripts/conveyor/learnings-drop.mjs" \
   --kind=<friction|missing-convention|doc-gap|skill-gap|improvement> \
   --summary="<one sentence — the lesson>" \
   --area="<coarse label, e.g. ci-heal / rebase-on-main>" \

@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { repoProfile, gateFor } from '../repo-profile.mjs';
+import { repoProfile, gateFor, briefTokensForRepo } from '../repo-profile.mjs';
 import { composeGate } from '../verify-lane-gate.mjs';
 
 const HOME = '/home/test';
@@ -132,5 +132,62 @@ describe('gateFor', () => {
       readPackageJson: () => { throw new Error('ENOENT'); },
     });
     expect(result).toBe('npm run test:unit && npm run check:standards');
+  });
+});
+
+// #3960 (multi-repo slice 4) — `briefTokensForRepo` is the ONE place `dispatchFix`/`dispatchCiHeal` get the five
+// repo-aware brief placeholders from; these tests pin its WE shape (must reproduce today's hardcoded literal
+// values byte-for-byte) and prove it also resolves correctly for a sibling repo, ready for slice 5.
+describe('briefTokensForRepo', () => {
+  const WE_PACKAGE_JSON = JSON.stringify({ scripts: { 'test:unit': 'vitest run', 'check:standards': 'node scripts/check-standards.mjs' } });
+  const PLATEAU_PACKAGE_JSON = JSON.stringify({ scripts: { test: 'vitest run' } });
+
+  it('for `we`, reproduces exactly what the pre-#3960 briefs hardcoded', () => {
+    const tokens = briefTokensForRepo('we', {
+      itemNum: '3960', prNum: 743,
+      checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON,
+    });
+    expect(tokens).toEqual({
+      REPO: 'chalbert/web-everything',
+      LANE_REPO: '.',
+      GATE_COMMAND: 'npm run test:unit && npm run check:standards',
+      WE_ROOT: expect.any(String),
+      ATTRIBUTION: 'WE #3960',
+    });
+    // `WE_ROOT` is THIS checkout's own root, not injected — it must be absolute either way.
+    expect(tokens.WE_ROOT.startsWith('/')).toBe(true);
+  });
+
+  it('ATTRIBUTION falls back to `PR #<n>` when there is no item (an item-less fix, slice 6)', () => {
+    const tokens = briefTokensForRepo('we', {
+      prNum: 743, checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON,
+    });
+    expect(tokens.ATTRIBUTION).toBe('PR #743');
+  });
+
+  it('for a sibling repo, WE_ROOT still points at WE (the tools live only there), everything else is the target repo\'s own', () => {
+    const tokens = briefTokensForRepo('plateau-app', {
+      itemNum: '3960', home: '/home/test',
+      checkoutExists: () => true, readPackageJson: () => PLATEAU_PACKAGE_JSON,
+    });
+    expect(tokens.REPO).toBe('chalbert/plateau-app');
+    expect(tokens.LANE_REPO).toBe('/home/test/workspace/plateau-app');
+    expect(tokens.GATE_COMMAND).toBe('npm test'); // no test:unit/check:standards script — see `gateFor`'s own tests
+    expect(tokens.ATTRIBUTION).toBe('PLATEAU #3960');
+    expect(tokens.WE_ROOT.startsWith('/')).toBe(true);
+    expect(tokens.WE_ROOT).not.toBe(tokens.LANE_REPO);
+  });
+
+  it('returns null for an unknown repo', () => {
+    expect(briefTokensForRepo('not-a-repo', { itemNum: '1' })).toBeNull();
+  });
+
+  it('returns null when the target checkout does not exist (gate unresolvable) — fail-closed, never a guess', () => {
+    expect(briefTokensForRepo('frontierui', { itemNum: '1', checkoutExists: () => false })).toBeNull();
+  });
+
+  it('the returned tokens are frozen', () => {
+    const tokens = briefTokensForRepo('we', { itemNum: '1', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
+    expect(Object.isFrozen(tokens)).toBe(true);
   });
 });
