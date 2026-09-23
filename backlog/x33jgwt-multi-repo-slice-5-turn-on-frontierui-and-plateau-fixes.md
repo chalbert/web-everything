@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 5
-parent: "xtfrvc3-real-multi-repo-support-across-the-conveyor"
+parent: "xtfrvc3"
 status: open
 blockedBy: ["x1rr9rh", "xdx3ifb", "xn7fg50", "xx478x6"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs"]

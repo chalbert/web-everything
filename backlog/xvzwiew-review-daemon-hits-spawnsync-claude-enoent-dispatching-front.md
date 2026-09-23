@@ -1,6 +1,6 @@
 ---
 kind: task
-parent: "xtfrvc3-real-multi-repo-support-across-the-conveyor"
+parent: "xtfrvc3"
 status: open
 scope: ["we:skills-src/conveyor/review-daemon.mjs", "we:scripts/operations/review-dispatch.mjs"]
 dateOpened: "2026-09-23"

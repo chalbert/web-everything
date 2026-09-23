@@ -1,6 +1,6 @@
 ---
 kind: task
-parent: "xtfrvc3-real-multi-repo-support-across-the-conveyor"
+parent: "xtfrvc3"
 status: open
 blockedBy: ["xjko7gy", "3908"]
 scope: ["we:scripts/operations/review-dispatch-wrapper.mjs"]
