@@ -165,10 +165,20 @@ export const BOOKKEEPING_MARKERS = Object.freeze([
  * The label phases where this pass has something to dispatch, and what it dispatches. Everything else is a
  * refusal — `owed-elsewhere` when a phase means real work by someone else, `nothing-owed` when it does not.
  * `classifyPr` produces the keys; they are not re-derived here.
+ *
+ * `needs-human` dispatches a `review` too (live-caught 2026-09-23, item xpprcdz: PR #2486/#2492, both
+ * `review:human` from open, sat with zero advisory-panel comments and no status label — nothing ever ran
+ * `we:scripts/operations/review-pr.mjs` against them, so its own `advise` step — built exactly for this
+ * population, an automatic PR comment plus an `advisory:*` label that never touches `review:human` or
+ * `review:accepted` — never fired). Dispatching `review` here does not clear the human gate: `review-pr.mjs`'s
+ * own `confirm` step still suspends waiting on an operator; only `advise`, `record`'s label swap is untouched.
+ * The existing round cap already covers this population — `countAdvisoryComments` below was unioned in
+ * specifically because a PR that is ALSO `review:human` can round forever without a rearm comment ever posting
+ * (#2117), so a `needs-human` PR that keeps re-dispatching still hits `cap-exhausted` once its own advisory
+ * comments reach `roundCap`, same as today's `bounced`+`review:human` population.
  */
-const OWED = Object.freeze({ bounced: 'fix', 'needs-review': 'review' });
+const OWED = Object.freeze({ bounced: 'fix', 'needs-review': 'review', 'needs-human': 'review' });
 const OWED_ELSEWHERE = Object.freeze({
-  'needs-human': 'a human must clear the review gate on this PR',
   'ci-red': 'a required check is failing — the conveyor tick plans CI-heals, this pass does not',
   conflicted: 'the branch needs a rebase before it can merge',
 });

@@ -88,7 +88,7 @@ demoted to a support-both constraint below.
 
 | Fork | Question | Recommended default (post-skeptic) | Alternatives |
 | --- | --- | --- | --- |
-| 1 | How is the component-render (+ data-table) CLI delivered to WE's build? | **FUI ships the tool as a consumable package WE installs; the build hook resolves it from `node_modules`.** Beats the status-quo sibling checkout on operational grounds (single-repo build, Workers Builds, lockfile pin). | **status-quo sibling checkout** (works today; couples the build cross-repo — the incumbent A/D improve on operationally, not on correctness) · **(B) vendor the built CLI** (dominated — happy-dom trap + re-vendor toil; *not* statute-broken) · **(C) fetch at build** (dominated — network + still needs publish + happy-dom) |
+| 1 | How is the component-render (+ data-table) CLI delivered to WE's build? | **(a) FUI ships the tool as a consumable package WE installs; the build hook resolves it from `node_modules`.** Beats the status-quo sibling checkout on operational grounds (single-repo build, Workers Builds, lockfile pin). | **(b) status-quo sibling checkout** (works today; couples the build cross-repo — the incumbent A/D improve on operationally, not on correctness) · **(c) vendor the built CLI** (dominated — happy-dom trap + re-vendor toil; *not* statute-broken) · **(d) fetch at build** (dominated — network + still needs publish + happy-dom) |
 | 1-sub | Delivery channel for "FUI ships a consumable" | **(D) git-dependency — WE installs FUI at a pinned SHA/tag via a git-read token; drops the registry + publish workflow while keeping single-repo resolution + a lockfile/SHA pin.** | **(A) private registry** (GitHub Packages + `NPM_TOKEN` + a publish workflow) — pick only if a registry is independently wanted; strictly more infra than D for the same WE-facing win |
 
 **Supported by default (not a fork):**
@@ -115,7 +115,7 @@ package, a committed file, a fetched file, or the sibling checkout — one wins)
 weighing, and the winner is "FUI ships a consumable WE installs," which beats the incumbent on operational
 grounds and dominates B/C on cost.
 
-- **FUI ships a consumable package WE installs (default).** WE depends on the tool (both harnesses); the build
+- **(a) FUI ships a consumable package WE installs (default).** WE depends on the tool (both harnesses); the build
   hooks resolve it from `node_modules` instead of the FUI sibling path
   (`we:scripts/lib/component-render-build-hook.cjs:76`). Deletes the sibling checkout + `build:tools` from
   `we:.github/workflows/deploy.yml:33-38,48-53`, gives a single-repo build (unblocks Workers Builds), and a
@@ -128,17 +128,17 @@ grounds and dominates B/C on cost.
     `"private": true`, and npm git-deps install the repo-root package — so a standalone-package or subdir shaping
     is required either way). A (private registry) is strictly more infra for the same win — choose it only if a
     registry is independently on the roadmap.
-- **Status-quo sibling checkout (incumbent — operationally worse, not broken).** Keep
+- **(b) Status-quo sibling checkout (incumbent — operationally worse, not broken).** Keep
   `we:.github/workflows/deploy.yml:33-38`. Deploys green today (#1137). Its cost is the cross-repo coupling this
   card exists to remove (a second-repo PAT, per-deploy FUI build, no single-repo build) — an operational
   deficit, not a correctness one. The default beats it on those operational grounds; name it honestly rather
   than pretend it's broken.
-- **(B) vendor the built CLI (dominated).** Commit the bundle into WE. The `packages:'external'` bundle
+- **(c) vendor the built CLI (dominated).** Commit the bundle into WE. The `packages:'external'` bundle
   (`fui:scripts/build-tools.mjs:56`) won't run without `happy-dom` in WE anyway, and it adds re-vendor-on-change
   toil (staleness caught only by the producer-pin, `we:scripts/lib/component-render-build-hook.cjs:91`).
   Dominated — **but not statute-broken** (byte-replication is a sanctioned interim,
   `we:docs/agent/platform-decisions.md:142`).
-- **(C) fetch the artifact at build (dominated).** Network dependency + still needs FUI to publish + still needs
+- **(d) fetch the artifact at build (dominated).** Network dependency + still needs FUI to publish + still needs
   `happy-dom` locally. Strictly dominated by D.
 
 Package + resolution shape under the default (D + FUI-internal source/bundle; keyed to the real hook):

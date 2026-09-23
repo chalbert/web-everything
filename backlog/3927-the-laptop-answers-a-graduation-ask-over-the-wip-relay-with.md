@@ -3,12 +3,15 @@ bornAs: xeudj65
 kind: story
 size: 3
 parent: "3925"
-status: open
+status: resolved
 scaffoldedBy: "graduation-page-file"
 dateScaffolded: "2026-09-22"
 blockedBy: ["3926"]
 scope: ["plateau:src/graduation/graduation-read.ts", "plateau:src/graduation/types.ts", "plateau:wip-relay.js", "plateau:scripts/wip-publish.ts", "plateau:vite.config.mts"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: "plateau:src/graduation/graduation-read.ts"
 tags: [delegation, graduation, operator-page]
 ---
 
@@ -38,3 +41,10 @@ The agent graduation page gets its data the way /decide does: the page sends a r
 3. **Observable** — with the dev server running, `curl -s localhost:<port>/api/graduation` returns JSON whose
    `schema` is 2 (needs `3926` on WE main).
 4. **Clean gate** — `npx vitest run` passes in the lane.
+
+## Delivered
+
+Built on plateau-app PR #177 (`chalbert/plateau-app`, `lane/3927-graduation-ask`). Verified: the two targeted
+test files plus the full `npx vitest run` (2241 tests) pass in that lane; a live curl of `GET /api/graduation`
+on a throwaway dev server correctly rejects WE main's current (pre-`3926`) shape with the named schema error —
+Done when 3's schema-2 response still needs `3926`/WE PR #2502 merged.

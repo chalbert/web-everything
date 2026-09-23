@@ -5258,6 +5258,93 @@ gate by itself; the build is separately-scoped work tracked on the backlog.
 extending `#2409` (the SHA binding). Full reasoning and the rejected options:
 [#3735](/backlog/3735-may-a-review-human-approval-carry-across-a-push-that-only-me/).
 
+### Five rulings on the #3717 dispatch-routing build's open forks: a single-worker launch routes as the work-doer, no path defaults to `other`, role dispatches are subject classes in the one graduation core, an unsized card blocks for prepare rather than assuming a size, and the per-item delivery-agent marker is the one provider override {#dispatch-routing-fork-rulings}
+
+**Ratified 2026-09-21 by the operator (Nicolas Gilbert), all five forks reviewed interactively (`#3801`).**
+Forks 1, 2 and 5 keep or settle the #3717 build's own direction, with the skeptic-pass amendments folded in;
+Forks 3 and 4 reverse the build and are multi-part. Five rules:
+
+1. **A single-worker code-change launch is routed and recorded as the work-doer (Fork 1).** A `dispatch-lane`
+   launch of `build`, `fix` or `ci-heal` passes `stage: 'task'`, runs the provider-selection cascade, and its
+   trial counts against its own `{provider, model, taskType}` — because the launch starts one worker that
+   writes the whole card, so the launched agent is honestly the task agent, not a supervisor. Carried: the
+   trial row records when a Claude converge editor also edited the lane after the agent (a single-worker lane
+   is not necessarily single-editor); what satisfies a `full` supervision route for a single-worker lane is
+   left to `#3784` and must be ruled before supervision enforcement is switched on. Reopens only if a
+   `dispatch-lane` build ever launches separate agents per task under it (the G2 planner build) — that event
+   is the trigger to file a new decision, not this one.
+2. **No dispatch path produces `self-fix` or a default `other` (Fork 2).** `self-fix` and `other` are never
+   produced; `conflict-resolution` is produced only from a `fix` dispatch with the `conflict` cause. A
+   mechanical route never runs on trust earned on unlabelled work. Carried: any derivation that still falls
+   back to `other` by default is removed or made to refuse, in the same change that builds this rule — never
+   left to route silently on "we did not know."
+3. **Role dispatches are subject classes inside the one graduation and routing model (Fork 3).** A role
+   dispatch (`prepare`, `prepare-decision`, `investigate`, `review`) is not outside the trust model with its
+   own separate mechanism; it is routed and recorded by the same core as work, with the subject key being the
+   role kind or the review lens rather than a `taskType`. Trust is per `{provider, model, subject}` and never
+   carries across subjects, work and reviewer evidence stay in separate subject classes, and the evidence bar
+   and promotion rule are the same ones
+   [#delegation-trial-record-graduation](#delegation-trial-record-graduation) already states (rules 3 and 6).
+   The entry gate for a tool-bearing seat is capability — the declared-operations surface under
+   [#reviewer-tool-surface-and-containment](#reviewer-tool-surface-and-containment) clauses 1–2 — never a
+   streak alone. No graduated candidate for a subject means Claude, the same absent-evidence handling
+   `build-new-feature` and `doc-fix` already get. Carried, as an interim: `prepare`, `prepare-decision` and
+   `investigate` stay on Claude (no subject key or positive control exists for them yet) until a follow-up
+   prepares one; `review-dispatch` becomes a router caller now.
+4. **A code-change card that declares no size is blocked and sent to prepare, not dispatched on an assumed
+   size (Fork 4).** The default is `unsizedCardPolicy: block`: an unsized card is held and routed to prepare,
+   which authors a declared size (or, for a task, a declared estimate in its own field, distinct from story
+   points so the burndown is not double-counted) — real, reviewed evidence beats a constant. The operator may
+   instead set `default-size` (a settable fallback, an explicit ratified act, not a code constant); any
+   `default-size` below the `13` band must not be enabled until #3784 lands its promotion-threshold fixes —
+   today the placeholder thresholds promote automatically, so a low `default-size` would delegate on an
+   unmeasured number. `fix` and `ci-heal` dispatches, which pass no
+   size at all, are never held by this block: their size comes from the ordered fallback chain
+   `card-size` → `measured-diff` → `assumed`, itself a settable option. Every dispatch that used a fallback
+   records `sized: false` and where the number came from, so an assumed size is never mistaken for a declared
+   one.
+5. **The per-item `deliveryAgent:` marker, with a required reason, is the one provider override (Fork 5).**
+   `deliveryAgent:` plus a required `deliveryAgentReason:` field is the only override surface; a marker with
+   no reason is refused. Both process-wide override variables are retired for the reason a process-wide
+   variable is always wrong for a per-item choice — it silently re-routes every dispatch the process launches,
+   not one item: `WE_DISPATCH_PROVIDER_OVERRIDE` / `WE_DISPATCH_OVERRIDE_REASON`
+   (`we:scripts/operations/dispatch-lane-io.mjs`) and `DELIVERY_AGENT_PROVIDER`
+   (`we:scripts/operations/fix-run.mjs`). The marker's fields stay the
+   [#agent-vendor-registry](#agent-vendor-registry) rule-4 fields (`requestedVendor`, `executedVendor`,
+   `reason`); the routing record references them rather than copying them into `routed`, which stays the
+   router criteria's own choice. An override never bypasses Fork 4's block on an unsized card — admission is
+   decided before routing, so an unsized card with a `deliveryAgent:` marker is still held for prepare. A
+   marker-driven run is a real trial of its own triple, starting at `full` supervision.
+
+**Also settled by this review, not itself a fork, and built with the ruling whatever each fork said:**
+supervision is computed for the triple that actually runs, never inherited from an override or another
+triple's history; `executed` records the vendor actually spawned rather than a constant, so a Claude-only
+assumption never writes a false trial row; and `routed` stays the criteria's own choice, with a human override
+recorded beside it, never written over it. All three apply
+[#delegation-trial-record-graduation](#delegation-trial-record-graduation) rules 1 and 3 to defects the review
+found in the #3717 build, not to a new principle.
+
+**Reach.** Forks 1 and 2 rule the dispatch-routing build's own implementation surface —
+`we:scripts/lib/dispatch-contracts.mjs` and `we:scripts/lib/dispatch-task-type.mjs`, which exist only on the
+prototype branch `lane/mechanical-dispatcher`, not on `main` — and bind that build's stage argument and
+task-type derivation specifically. Forks 3, 4 and 5 state general principles (subject-class graduation over
+role dispatches, admission policy for an unsized code-change card, and the one provider-override mechanism)
+that reach beyond this one build to any mechanical dispatch path built afterward.
+
+**What this ruling does not do.** It does not itself build the child that lands these forks (predicted
+touch-set: `we:scripts/lib/dispatch-contracts.mjs`, `we:scripts/lib/dispatch-task-type.mjs`,
+`we:scripts/operations/dispatch-lane-io.mjs`, `we:scripts/operations/dispatch-providers/`, and siblings) or
+switch on supervision enforcement (`WE_DISPATCH_SUPERVISION_ENFORCE`, `#3784`'s work); it rules only what the
+build must do when it lands.
+
+**Lineage:** ratified via `#3801` (2026-09-21), filed under the background mechanical dispatcher epic `#3383`,
+reviewing the five forks the `#3717` dispatch-routing build left open, extending
+[#delegation-trial-record-graduation](#delegation-trial-record-graduation) (`#3690`) and
+[#agent-vendor-registry](#agent-vendor-registry) (`#3658`), grounded in
+`/research/dispatch-routing-build-review/` and
+`we:reports/2026-09-21-dispatch-routing-review-and-branch-health-grounding.md`. Full reasoning:
+[#3801](/backlog/3801-decision-review-the-five-choices-the-3717-dispatch-routing-b/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
