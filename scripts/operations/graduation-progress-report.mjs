@@ -10,10 +10,19 @@
  * The pure declaration takes injected data (`records`, `promotions`, `probation`, `asOfIso`) and does no IO;
  * the io file (graduation-progress-report-io.mjs) reads the scorecard store plus the two optional registry
  * files, classifying each source `ok` | `absent` | `invalid` before this module ever sees it.
+ *
+ * `selectSupervisionLevel` and its default thresholds are INJECTED (a constructor parameter), never
+ * statically imported here, even though `provider-routing.mjs` is itself pure. That module's `selectProvider`
+ * transitively imports `model-capability-ratings.mjs` for an unrelated exploration-hint helper, which pulls
+ * in `node:fs`/`node:path`/`node:url` — reachable, never called from this path, but still visible to the
+ * static import-graph scanner `#3036`'s read-only property is checked with (every operation registered as
+ * read-only must declare in a module whose own import graph "reaches nothing that can act"). Injecting the
+ * function (the same escape the scanner's own header documents: "a module that imports nothing can still be
+ * HANDED a writer at call time") keeps rule 1's real predicates without smuggling that transitive dependency
+ * into this module's graph. `run.mjs` — not a graph-checked declaring module — does the real import.
  */
 import { op } from './registry.mjs';
 import { compute } from './step-kinds.mjs';
-import { selectSupervisionLevel, DEFAULT_BACKDOWN_THRESHOLDS } from '../lib/provider-routing.mjs';
 
 export const GRADUATION_PROGRESS_REPORT_OP = 'graduation-progress-report';
 export const REPORT_SCHEMA = 2;
@@ -88,7 +97,7 @@ function findPromotion(promotionEntries, provider, model, taskType) {
  * Build one triple's report row. `evidenceLevel`, `cleanStreak`, `hasInformative` and `mostRecentVetoed` all
  * come from `selectSupervisionLevel`'s own result — never a second copy of its predicates (rule 1).
  */
-function buildTriple(group, { thresholds, promotionsOk, promotionEntries }) {
+function buildTriple(group, { thresholds, promotionsOk, promotionEntries, selectSupervisionLevel }) {
   const { provider, model, taskType, rows } = group;
   const trialList = buildTrialList(rows);
   const countedTrials = trialList.filter((t) => t.counted).length;
@@ -190,8 +199,17 @@ function buildCriteria({ thresholds, promotionsOk, anyRowHasInformativeField }) 
   ];
 }
 
-/** Pure report envelope (schema 2); the timestamp and every source are supplied by the reader, never sampled here. */
-export function buildGraduationProgressReport({ records, asOfIso, promotions, probation }) {
+/**
+ * Pure report envelope (schema 2); the timestamp and every source are supplied by the reader, never sampled
+ * here. `selectSupervisionLevel` and `backdownThresholds` are INJECTED (never imported by this module) — see
+ * the file header for why: it keeps this declaration's own import graph reaching nothing that can act.
+ */
+export function buildGraduationProgressReport({
+  records, asOfIso, promotions, probation, selectSupervisionLevel, backdownThresholds,
+}) {
+  if (typeof selectSupervisionLevel !== 'function') {
+    throw new TypeError('graduation-progress-report: needs a `selectSupervisionLevel` function (injected, never imported)');
+  }
   const recordsIsArray = Array.isArray(records);
   const recordsArray = recordsIsArray ? records : [];
   const delegationRows = recordsArray.filter((row) => row && row.dispatchKind === 'session-delegation');
@@ -205,10 +223,10 @@ export function buildGraduationProgressReport({ records, asOfIso, promotions, pr
   const probationEntries = probationOk && Array.isArray(probation.entries) ? probation.entries : [];
 
   const thresholds = {
-    minCleanStreak: DEFAULT_BACKDOWN_THRESHOLDS.minCleanStreak,
-    requireInformativeTrial: DEFAULT_BACKDOWN_THRESHOLDS.requireInformativeTrial,
+    minCleanStreak: backdownThresholds.minCleanStreak,
+    requireInformativeTrial: backdownThresholds.requireInformativeTrial,
     source: 'config-default',
-    postMissK: typeof DEFAULT_BACKDOWN_THRESHOLDS.k === 'number' ? DEFAULT_BACKDOWN_THRESHOLDS.k : null,
+    postMissK: typeof backdownThresholds.k === 'number' ? backdownThresholds.k : null,
   };
 
   const anyRowHasInformativeField = delegationRows.some((row) =>
@@ -220,7 +238,7 @@ export function buildGraduationProgressReport({ records, asOfIso, promotions, pr
     if (!triplesByAgent.has(agentKey)) {
       triplesByAgent.set(agentKey, { provider: group.provider, model: group.model, triples: [] });
     }
-    triplesByAgent.get(agentKey).triples.push(buildTriple(group, { thresholds, promotionsOk, promotionEntries }));
+    triplesByAgent.get(agentKey).triples.push(buildTriple(group, { thresholds, promotionsOk, promotionEntries, selectSupervisionLevel }));
   }
 
   const agents = [...triplesByAgent.values()]
@@ -254,8 +272,15 @@ export function buildGraduationProgressReport({ records, asOfIso, promotions, pr
   };
 }
 
-/** Bind the injected scorecard/promotions/probation readers, following the compute-only gate-health declaration. */
-export function graduationProgressReportOperation({ readScorecards, readPromotions, readProbation } = {}) {
+/**
+ * Bind the injected scorecard/promotions/probation readers plus the router, following the compute-only
+ * gate-health declaration. `selectSupervisionLevel`/`backdownThresholds` are constructor parameters — see
+ * the file header for why the real `provider-routing.mjs` values must be handed in by the caller (`run.mjs`)
+ * rather than imported here.
+ */
+export function graduationProgressReportOperation({
+  readScorecards, readPromotions, readProbation, selectSupervisionLevel, backdownThresholds,
+} = {}) {
   if (typeof readScorecards !== 'function') {
     throw new TypeError('graduation-progress-report: needs a `readScorecards()` reader');
   }
@@ -264,6 +289,12 @@ export function graduationProgressReportOperation({ readScorecards, readPromotio
   }
   if (typeof readProbation !== 'function') {
     throw new TypeError('graduation-progress-report: needs a `readProbation()` reader');
+  }
+  if (typeof selectSupervisionLevel !== 'function') {
+    throw new TypeError('graduation-progress-report: needs a `selectSupervisionLevel` function (injected, never imported)');
+  }
+  if (!backdownThresholds || typeof backdownThresholds !== 'object') {
+    throw new TypeError('graduation-progress-report: needs a `backdownThresholds` object (injected, never imported)');
   }
   return op(GRADUATION_PROGRESS_REPORT_OP, {
     input: {},
@@ -278,6 +309,8 @@ export function graduationProgressReportOperation({ readScorecards, readPromotio
         asOfIso: view.findings.scorecards.asOfIso,
         promotions: view.findings.promotions,
         probation: view.findings.probation,
+        selectSupervisionLevel,
+        backdownThresholds,
       }),
     }),
   });

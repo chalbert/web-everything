@@ -41,6 +41,7 @@ import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs'
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
 import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from './graduation-progress-report.mjs';
 import { createScorecardReader, createPromotionsReader, createProbationReader } from './graduation-progress-report-io.mjs';
+import { selectSupervisionLevel, DEFAULT_BACKDOWN_THRESHOLDS } from '../lib/provider-routing.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
 import { createPrReader } from './pr-status-io.mjs';
 import { staleStateOperation, STALE_STATE_OP } from './stale-state.mjs';
@@ -214,6 +215,8 @@ export const OPERATIONS = Object.freeze({
       readScorecards: createScorecardReader(),
       readPromotions: createPromotionsReader(),
       readProbation: createProbationReader(),
+      selectSupervisionLevel,
+      backdownThresholds: DEFAULT_BACKDOWN_THRESHOLDS,
     }),
     sinks: {},
   }),
