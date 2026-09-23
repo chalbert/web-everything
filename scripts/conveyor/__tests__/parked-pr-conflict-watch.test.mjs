@@ -213,7 +213,7 @@ describe('defaultListPrFiles — argv shape (exec injected, no real gh call) —
     let capturedArgv;
     const exec = (cmd, argv) => { capturedArgv = argv; return 'a.mjs\nb.mjs\n'; };
     const out = defaultListPrFiles({ number: 42, repo: 'o/n', exec });
-    expect(capturedArgv).toEqual(['api', '--paginate', '-F', 'per_page=100', 'repos/o/n/pulls/42/files', '--jq', '.[].filename']);
+    expect(capturedArgv).toEqual(['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', 'repos/o/n/pulls/42/files', '--jq', '.[].filename']);
     expect(out).toEqual(['a.mjs', 'b.mjs']);
   });
 
@@ -221,12 +221,26 @@ describe('defaultListPrFiles — argv shape (exec injected, no real gh call) —
     let capturedArgv;
     const exec = (cmd, argv) => { capturedArgv = argv; return ''; };
     defaultListPrFiles({ number: 7, exec });
-    expect(capturedArgv[4]).toBe('repos/{owner}/{repo}/pulls/7/files');
+    expect(capturedArgv[6]).toBe('repos/{owner}/{repo}/pulls/7/files');
   });
 
   it('returns an empty array for a PR touching no files (never blank/undefined entries)', () => {
     const exec = () => '\n\n';
     expect(defaultListPrFiles({ number: 1, repo: 'o/n', exec })).toEqual([]);
+  });
+
+  // Live 2026-09-23, confirmed against real PR #2514: `gh api` silently switches to POST whenever an `-f`/`-F`
+  // parameter is present UNLESS `--method GET` is also passed, and `pulls/{n}/files` has no POST handler — every
+  // call was failing 404 with no `--method` present. Because the queued-grace path in `watchParkedPrConflicts`
+  // reads a `listPrFiles` failure as "assume statute-tier, stand down" (the safe direction), this silently meant
+  // no approved/queued conflicting PR had ever actually been bounced (#2503/#2514/#2515 sat well past grace).
+  it('#2514-post-vs-get — always passes --method GET whenever -F is present (never silently switches to POST)', () => {
+    let capturedArgv;
+    defaultListPrFiles({ number: 1, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    const fIndex = capturedArgv.indexOf('-F');
+    expect(fIndex).toBeGreaterThan(-1);
+    expect(capturedArgv).toContain('--method');
+    expect(capturedArgv[capturedArgv.indexOf('--method') + 1]).toBe('GET');
   });
 });
 
@@ -685,14 +699,24 @@ describe('defaultListPrPatches — argv shape + @tsv round-trip (exec injected, 
     let capturedArgv;
     const exec = () => '';
     defaultListPrPatches({ number: 42, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
-    expect(capturedArgv).toEqual(['api', '--paginate', '-F', 'per_page=100', 'repos/o/n/pulls/42/files',
+    expect(capturedArgv).toEqual(['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', 'repos/o/n/pulls/42/files',
       '--jq', '.[] | [.filename, (.patch // "")] | @tsv']);
   });
 
   it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
     let capturedArgv;
     defaultListPrPatches({ number: 7, exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
-    expect(capturedArgv[4]).toBe('repos/{owner}/{repo}/pulls/7/files');
+    expect(capturedArgv[6]).toBe('repos/{owner}/{repo}/pulls/7/files');
+  });
+
+  // Same `-F` → silent-POST hazard {@link defaultListPrFiles}'s own regression test pins — this call site copied
+  // its `-F 'per_page=100'` shape, so it inherits the same 404-on-POST failure without the same guard.
+  it('#2514-post-vs-get — always passes --method GET whenever -F is present (never silently switches to POST)', () => {
+    let capturedArgv;
+    defaultListPrPatches({ number: 1, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv.indexOf('-F')).toBeGreaterThan(-1);
+    expect(capturedArgv).toContain('--method');
+    expect(capturedArgv[capturedArgv.indexOf('--method') + 1]).toBe('GET');
   });
 
   it('recovers a multi-line patch that @tsv escaped onto one output line, per file', () => {

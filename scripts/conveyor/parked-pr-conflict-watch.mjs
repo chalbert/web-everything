@@ -372,12 +372,22 @@ export const GH_FILES_GRAPHQL_CAP = 100;
  * every page via the response `Link` header rather than `gh`'s own single-shot, 100-capped GraphQL `files`
  * field. Only called when {@link watchParkedPrConflicts} suspects the cheap `gh pr list --json files` read may
  * be truncated (its length hit {@link GH_FILES_GRAPHQL_CAP}) — the common small-PR tick never pays for it.
+ *
+ * `--method GET` IS LOAD-BEARING, not decoration. `gh api`'s documented default method is `GET`, UNLESS the
+ * invocation ALSO passes an `-f`/`-F` parameter, in which case `gh` silently switches to `POST` — and
+ * `pulls/{n}/files` has no `POST` handler, so the call fails `404 Not Found` on EVERY invocation, paginated or
+ * not. Confirmed live 2026-09-23 against real PR #2514: `gh api --paginate -F per_page=100
+ * repos/.../pulls/2514/files` returns `404`; adding `--method GET` (unchanged otherwise) returns the file list.
+ * Because {@link watchParkedPrConflicts}'s queued-grace path reads a `listPrFiles` failure as "assume
+ * statute-tier, stand down" (the safe direction), this silently meant NO approved/queued conflicting PR had EVER
+ * actually been bounced past its `#2412` GRAPHQL-cap check — #2503/#2514/#2515 sat well past
+ * {@link QUEUED_CONFLICT_GRACE_MS} with the grace path quietly refusing every one of them.
  * @param {{number:number|string, repo?:string|null, exec?:Function}} o
  * @returns {string[]} every changed file's path, real pagination applied — no cap.
  */
 export function defaultListPrFiles({ number, repo, exec = execFileSyncThrottled }) {
   const path = repo ? `repos/${repo}/pulls/${number}/files` : `repos/{owner}/{repo}/pulls/${number}/files`;
-  const argv = ['api', '--paginate', '-F', 'per_page=100', path, '--jq', '.[].filename'];
+  const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[].filename'];
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
@@ -419,7 +429,9 @@ function unescapeTsvField(s) {
  */
 export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottled }) {
   const path = repo ? `repos/${repo}/pulls/${number}/files` : `repos/{owner}/{repo}/pulls/${number}/files`;
-  const argv = ['api', '--paginate', '-F', 'per_page=100', path, '--jq', '.[] | [.filename, (.patch // "")] | @tsv'];
+  // `--method GET` is required whenever `-F`/`-f` is present — see {@link defaultListPrFiles}'s docblock for the
+  // confirmed-live 404-on-POST failure this avoids.
+  const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[] | [.filename, (.patch // "")] | @tsv'];
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   const patches = {};
   for (const line of String(out || '').split('\n')) {
