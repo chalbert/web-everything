@@ -130,18 +130,7 @@ export function itemNumsFromPr(headRefName = '', title = '') {
  */
 export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '', changedFiles = null } = {}) {
   const ref = String(headRefName || '');
-  // #3473 guard 7 — an all-.md changed-file set is pure backlog/doc housekeeping and can never be a real
-  // delivery, whatever the ref/title reads as. Checked FIRST, before any other computation, so a housekeeping
-  // PR short-circuits regardless of which other rule below would otherwise have credited it.
-  if (Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every((f) => /\.md$/i.test(String(f?.path ?? f)))) {
-    return [];
-  }
-  // #3473 guard 8 — a blanket "no code changes" disclaimer in the PR's own body excludes it entirely,
-  // independent of (and a backstop for) guard 7's changed-file check, which a stale `gh` files list can defeat.
-  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(String(body || ''))) {
-    return [];
-  }
-  if (isAnnotationPr({ headRefName: ref, title })) return []; // scope-authoring / prepare-decision — not a build
+  if (isNonDeliveryPr(ref, title, { body, changedFiles })) return [];
   // Only a `lane/<slug>` ref is ever a delivery vehicle (matches itemNumsFromPr's own gate above) — a random
   // branch name with an embedded number (`release-2026`) must never be read as an id.
   const laneMatch = ref.match(/(?:^|\/)lane\/(.+)$/);
@@ -252,6 +241,43 @@ export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '
   const disclaimed = new Set();
   for (const m of String(body || '').matchAll(/\bdoes\s+not\s+resolve\s+#?(\d{2,5})\b/gi)) disclaimed.add(m[1].padStart(3, '0'));
   return [...nums].map((n) => n.padStart(3, '0')).filter((n) => !disclaimed.has(n));
+}
+
+/**
+ * The whole-PR exclusions every delivery extractor applies before reading ids (#3473 guards 7/8 + the #3441
+ * annotation guard). Pure; inert under the default `{ body: '', changedFiles: null }`.
+ */
+function isNonDeliveryPr(ref, title, { body = '', changedFiles = null } = {}) {
+  // #3473 guard 7 — an all-.md changed-file set is pure backlog/doc housekeeping and can never be a real
+  // delivery, whatever the ref/title reads as.
+  if (Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every((f) => /\.md$/i.test(String(f?.path ?? f)))) return true;
+  // #3473 guard 8 — a blanket "no code changes" disclaimer in the PR's own body excludes it entirely,
+  // independent of (and a backstop for) guard 7's changed-file check, which a stale `gh` files list can defeat.
+  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(String(body || ''))) return true;
+  return isAnnotationPr({ headRefName: ref, title }); // scope-authoring / prepare-decision — not a build
+}
+
+/**
+ * #3914 — the hash-born item a lane PR DELIVERS, when the lane was cut for a card it filed in the SAME PR.
+ * A `--session` scaffold is born active under a provisional hash (`backlog/x<6>-….md`, #2288) and its lane ref
+ * leads with that hash (`lane/xaa7r2n-…`). `deliveredItemNumsFromPr` deliberately matches digits only, so these
+ * PRs contributed nothing to resolve-on-land and the drain JIT-numbered the card and left it `active` forever
+ * (#3459/#3492/#3638). Only the LEAD ref segment counts (the id the lane was cut for, same grammar as the
+ * numeric lead) — a hash the PR merely filed in passing (a spin-off) is never in that position, so it is never
+ * credited. When the changed-file list is known it must include the card itself (`backlog/<hash>-…`), i.e. the
+ * PR filed it; the caller's hash→NNN re-key (`planResolveOnLand`) then only flips a card numbered THIS land.
+ * Same whole-PR guards as `deliveredItemNumsFromPr`. Pure.
+ * @returns {string|null} the provisional hash, or null
+ */
+export function deliveredHashFromPr(headRefName = '', title = '', { body = '', changedFiles = null } = {}) {
+  const ref = String(headRefName || '');
+  const lane = ref.match(/(?:^|\/)lane\/(.+)$/);
+  const lead = lane ? lane[1].split(/[-_]/).filter(Boolean)[0] : '';
+  if (!/^x[0-9a-z]{6}$/.test(lead || '')) return null;
+  if (isNonDeliveryPr(ref, title, { body, changedFiles })) return null;
+  if (Array.isArray(changedFiles) && changedFiles.length > 0
+    && !changedFiles.some((f) => String(f?.path ?? f).startsWith(`backlog/${lead}-`))) return null;
+  return lead;
 }
 
 export function extractItemNums(prs) {

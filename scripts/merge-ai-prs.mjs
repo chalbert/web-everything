@@ -127,7 +127,7 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { deliveredItemNumsFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path
+import { deliveredItemNumsFromPr, deliveredHashFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path
 // #2859 — the single canonical argv→flags reduction and reconcile predicate, pulled out to a dependency-free
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
@@ -1436,8 +1436,16 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
   const base = deliveredItemNumsFromPr(c.headRef, c.title);
-  if (!base.length) return [];
+  // #3914 — a lane cut for a hash-born card it filed in the SAME PR (`lane/x<6>-…`) names no digits, so `base`
+  // is empty and the drain used to JIT-number the card and leave it `active` forever. Credit the HASH; the
+  // caller's `planResolveOnLand` re-keys it to the NNN `numberPendingHashes` mints in this same land.
+  const hashLed = !base.length && deliveredHashFromPr(c.headRef, c.title) != null;
+  if (!base.length && !hashLed) return [];
   const { body, changedFiles } = fetchGuardSignals(c) || {};
+  if (hashLed) {
+    const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles });
+    return hash ? [hash] : [];
+  }
   return deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles }).map(asItemId);
 }
 

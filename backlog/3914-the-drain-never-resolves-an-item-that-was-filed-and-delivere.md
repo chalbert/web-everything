@@ -3,8 +3,10 @@ bornAs: xyi4m1w
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
 tags: []
 ---
 

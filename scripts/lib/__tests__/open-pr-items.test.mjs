@@ -4,7 +4,7 @@
  *   and unit-tested without a real `gh`.
  */
 import { describe, it, expect } from 'vitest';
-import { itemNumsFromPr, extractItemNums, openPrItemNums, openPrsByItem, deliveredItemNumsFromPr } from '../open-pr-items.mjs';
+import { itemNumsFromPr, extractItemNums, openPrItemNums, openPrsByItem, deliveredItemNumsFromPr, deliveredHashFromPr } from '../open-pr-items.mjs';
 
 describe('itemNumsFromPr', () => {
   it('a batch lane ref → the item numbers, with the YYYY-MM-DD date prefix NOT read as items', () => {
@@ -349,5 +349,33 @@ describe('openPrsByItem (the PR identity the Decision Docket lists under each it
     expect(openPrsByItem({ run: () => ({ status: 1, stdout: '', stderr: 'no gh\n' }), repos: ['o/we'] })).toEqual({ nums: [], byItem: {}, unavailable: true, reason: 'no gh' });
     const r = openPrItemNums({ run: () => ({ status: 0, stdout: JSON.stringify([prs[0]]) }), repos: ['o/we'] });
     expect(r).toEqual({ nums: ['3375'] });
+  });
+});
+
+describe('deliveredHashFromPr (#3914 — a card filed AND delivered in the same hash-led lane PR)', () => {
+  it('credits the lane-ref LEAD hash (the real #3459/#3492/#3638 refs)', () => {
+    expect(deliveredHashFromPr('lane/xaa7r2n-itemnumfromref-attempt-tag', '')).toBe('xaa7r2n');
+    expect(deliveredHashFromPr('lane/x3jmao3-review-dispatch-wait-ms', 'WE #x3jmao3: bounded retry')).toBe('x3jmao3');
+  });
+
+  it('a hash NOT in the lead position (a spin-off named later in the slug) is never credited', () => {
+    expect(deliveredHashFromPr('lane/3412-fix-and-file-xspin01', '')).toBeNull();
+    expect(deliveredHashFromPr('lane/fix-xspin01', '')).toBeNull();
+  });
+
+  it('non-lane refs and numeric leads return null (the numeric path is deliveredItemNumsFromPr)', () => {
+    expect(deliveredHashFromPr('xaa7r2n-feature', '')).toBeNull();
+    expect(deliveredHashFromPr('lane/3412-resolve-fix', '')).toBeNull();
+  });
+
+  it('requires the PR to have FILED the card when the changed-file list is known', () => {
+    expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xaa7r2n-card.md', 'scripts/a.mjs'] })).toBe('xaa7r2n');
+    expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xother1-card.md', 'scripts/a.mjs'] })).toBeNull();
+  });
+
+  it('shares the whole-PR guards: annotation, all-.md housekeeping, "no code changes"', () => {
+    expect(deliveredHashFromPr('lane/xaa7r2n-scope', 'WE #xaa7r2n: author scope: for #xaa7r2n')).toBeNull();
+    expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xaa7r2n-card.md'] })).toBeNull();
+    expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { body: 'No code changes — backlog only.' })).toBeNull();
   });
 });
