@@ -85,6 +85,7 @@ import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -210,6 +211,21 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
   return { repos: perRepo, reviewsOwed, dispatched, failed, refusals };
 }
 
+/**
+ * #3383 bug 1 — did this tick's own result show it hit `assertMainNotStale`'s refusal for at least one PR or
+ * repo? Two shapes both carry it: a per-PR `dispatchReview` throw (`runReviewTick`'s own `failed.push({
+ * prNumber, error })` loop) and a whole-repo tick failure (`forEachRepo`'s own `{repo, error}` capture, surfaced
+ * here as `result.repos[].error`). Wired into `withSelfSync`'s `hasStaleRefusal` option so the daemon re-syncs
+ * immediately instead of wasting the full interval on a race it will otherwise keep losing. Pure.
+ * @param {{failed?:Array<{error?:string}>, repos?:Array<{error?:string}>}} tickResult
+ * @returns {boolean}
+ */
+export function hasStaleMainRefusal(tickResult) {
+  const failed = tickResult?.failed ?? [];
+  const repos = tickResult?.repos ?? [];
+  return failed.some((f) => isStaleMainRefusalMessage(f?.error)) || repos.some((r) => isStaleMainRefusalMessage(r?.error));
+}
+
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
 
 // Live-caught bug (this daemon's own first launchd-managed run, and the sibling #3870/pass-daemon.mjs
@@ -305,7 +321,9 @@ async function main() {
     process.exit(0);
   };
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), { root: selfRoot, onRestart: restartOntoNewCode }),
+    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
+      root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
+    }),
   );
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);

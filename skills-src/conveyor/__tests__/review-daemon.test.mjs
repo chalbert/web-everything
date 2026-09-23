@@ -18,11 +18,39 @@ vi.mock('../../../scripts/conveyor/session-reaper.mjs', async (importOriginal) =
 
 import {
   runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
-  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions,
+  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../../scripts/conveyor/session-reaper.mjs';
+import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
+
+// #3383 bug 1 — wired into withSelfSync's `hasStaleRefusal` option in main(); tested here in isolation
+// (pure, no IO) against the exact shapes `runReviewTickAllRepos` returns (`failed[]` per-PR, `repos[].error`
+// whole-repo).
+describe('hasStaleMainRefusal', () => {
+  const staleMessage = () => {
+    let message = null;
+    try { assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'diverged', behind: 1, ahead: 5, dirty: false })); }
+    catch (e) { message = e.message; }
+    return message;
+  };
+  it('true when a per-PR dispatch failed with the real assertMainNotStale refusal message', () => {
+    expect(hasStaleMainRefusal({ failed: [{ prNumber: 42, repo: 'chalbert/web-everything', error: staleMessage() }] })).toBe(true);
+  });
+  it('true when a WHOLE-REPO tick failed with it (forEachRepo\'s own {repo, error} capture)', () => {
+    expect(hasStaleMainRefusal({ repos: [{ repo: 'chalbert/plateau-app', error: staleMessage() }] })).toBe(true);
+  });
+  it('false for an ordinary, unrelated failure in either shape', () => {
+    expect(hasStaleMainRefusal({ failed: [{ prNumber: 1, error: 'gh: rate limited' }] })).toBe(false);
+    expect(hasStaleMainRefusal({ repos: [{ repo: 'x', error: 'ENOTFOUND' }] })).toBe(false);
+  });
+  it('false with nothing failed, or a missing/malformed result', () => {
+    expect(hasStaleMainRefusal({ failed: [], repos: [] })).toBe(false);
+    expect(hasStaleMainRefusal({})).toBe(false);
+    expect(hasStaleMainRefusal(undefined)).toBe(false);
+  });
+});
 
 describe('runDaemonLoop — the pure control flow', () => {
   it('requires a tickOnce effect', async () => {

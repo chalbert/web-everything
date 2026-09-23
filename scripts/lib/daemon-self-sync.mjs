@@ -21,6 +21,34 @@
  * PURE CORE / IO SHELL: {@link decideSelfSync} is pure; {@link selfSyncCheckout} does the git IO through an
  * injected runner (defaults to `main-staleness.mjs#gitRun`); {@link withSelfSync} wraps a daemon's
  * `runDaemonLoop` effects.
+ *
+ * #3383 — TWO LIVE BUGS FOUND 2026-09-23, BOTH FIXED HERE, BOTH ADDITIVE (every existing caller's behavior is
+ * unchanged unless it opts in / the new drift check below is the one exception, see its own note):
+ *
+ *   BUG 1 — a multi-repo tick takes long enough (several `gh` calls per repo, several repos) that
+ *   `origin/main` moves again AFTER this file's own tick-start sync ran but BEFORE the tick finishes — the
+ *   real dispatch chokepoint (`main-staleness.mjs#assertMainNotStale`, called once per repo deep inside the
+ *   tick) then refuses that repo outright ("refusing to dispatch... STALE code..."). Before this fix, that
+ *   refusal was just absorbed as an ordinary per-repo tick failure and the daemon slept the FULL interval
+ *   before trying again — losing the same race next tick too, since main moves every few minutes, well within
+ *   a 3-repo tick's own duration (confirmed live: 345 refusal lines, ALL 3 repos on the latest tick). The fix:
+ *   `withSelfSync` now accepts an optional `hasStaleRefusal(tickResult)` predicate; when a tick's own result
+ *   is flagged, it re-syncs IMMEDIATELY (not waiting for the next scheduled tick) and restarts if that finds
+ *   new commits — the same `onRestart` path the tick-start sync already uses. Omitting `hasStaleRefusal`
+ *   (every caller that existed before this fix) is byte-identical to today.
+ *
+ *   BUG 2 — the review-daemon and reconcile-fix-dispatch-daemon run from ONE shared dedicated clone.
+ *   Whichever self-syncs first performs the merge and restarts (via the branch above); the OTHER then calls
+ *   `selfSyncCheckout` itself, finds `behind: 0` (someone else already brought the checkout current) and,
+ *   before this fix, just ticked on — forever, on its own now-stale in-memory module cache, since nothing
+ *   about "up-to-date" told it the code underneath it had changed. Confirmed live: the fix-dispatch daemon ran
+ *   from 18:09 to ~19:17 on stale code before a human noticed and restarted it by hand. The fix: `withSelfSync`
+ *   now records the on-disk HEAD sha once, when the daemon BOOTS (i.e., once, when this function itself is
+ *   called to build the effects — before the loop's first tick), and every tick re-reads HEAD and restarts
+ *   whenever it no longer matches — regardless of WHICH process (this one, or a sibling sharing the same
+ *   clone) moved it. This is unconditional (not behind an option) because it changes nothing for a daemon
+ *   running from its OWN clone (its own merges already restart it via the existing branch; nothing else ever
+ *   moves its HEAD) and only ever ADDS a restart, never removes one — never a regression, by construction.
  */
 
 import { gitRun } from './main-staleness.mjs';
@@ -88,14 +116,43 @@ export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs 
   return { merged: true, commits: behind, reason: 'merged' };
 }
 
+/** Read the on-disk `HEAD` sha, fail-safe: any git failure (a bad `root`, a timeout, a detached-but-unreadable
+ *  ref) returns `null` rather than throwing. Used only by {@link withSelfSync}'s boot-drift check (#3383 bug
+ *  2) — a `null` (either at boot or on a later read) simply SKIPS that check for the affected read, it never
+ *  reads as "moved" and never falsely restarts.
+ * @param {{root:string, run?:typeof gitRun, timeoutMs?:number}} o
+ * @returns {string|null}
+ */
+export function readHeadSha({ root, run = gitRun, timeoutMs = 60_000 }) {
+  const r = run(['rev-parse', 'HEAD'], { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  const out = String(r.stdout ?? '').trim();
+  return r.status === 0 && out ? out : null;
+}
+
 /**
  * Wrap a daemon's `runDaemonLoop` effects so each tick first self-syncs the clone. When new commits arrive,
  * `onRestart` runs in place of the tick (the caller releases its lease and exits); otherwise the tick runs.
- * @param {{tickOnce:()=>any}} effects
- * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, log?:Console, timeoutMs?:number}} o
+ *
+ * #3383 bug 2 (unconditional, see file header): the on-disk `HEAD` sha is recorded once, right now, when this
+ * function builds the wrapped effects (i.e., at the daemon's own boot, before `runDaemonLoop`'s first tick).
+ * Every tick re-reads it; if it no longer matches — this process's OWN merge (the branch below), a SIBLING
+ * process sharing the same clone having already merged, or a human's own `git merge`/`pull` — this process's
+ * in-memory code no longer matches the checkout on disk, so it restarts too, regardless of who moved it.
+ *
+ * #3383 bug 1 (opt-in via `hasStaleRefusal`, see file header): when the wrapped tick's OWN result shows it hit
+ * the stale-main refusal mid-tick, re-sync immediately and restart if that finds new commits, instead of
+ * waiting out the full `intervalMs` to lose the same race again. A caller that omits `hasStaleRefusal` (every
+ * caller that existed before this option) is byte-identical to before.
+ * @param {{tickOnce:(...args:any[])=>any}} effects
+ * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, log?:Console,
+ *   timeoutMs?:number, readHead?:typeof readHeadSha, hasStaleRefusal?:(tickResult:any)=>boolean}} o
  */
-export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout, log = console, timeoutMs }) {
+export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout, log = console, timeoutMs, readHead = readHeadSha, hasStaleRefusal }) {
   const tick = effects.tickOnce;
+  const syncOpts = () => ({ root, ...(timeoutMs != null ? { timeoutMs } : {}) });
+  // Boot-time HEAD — read ONCE, here, before any tick ever runs. A read failure (null) permanently disables
+  // the drift check for this process's lifetime rather than risk comparing against a wrong/stale value.
+  const bootSha = readHead(syncOpts());
   return {
     ...effects,
     // Forwards whatever arguments the caller's own tickOnce takes (e.g. runner.mjs's per-tick bookkeeping
@@ -103,10 +160,17 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
     // dropping them would silently reset a payload-threading caller's state every tick. The daemons that
     // built this helper pass a zero-arg tickOnce, so `...args` is empty for them and nothing changes.
     tickOnce: async (...args) => {
-      const r = sync({ root, ...(timeoutMs != null ? { timeoutMs } : {}) });
+      const r = sync(syncOpts());
       if (r.merged) {
         log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
         return onRestart(r);
+      }
+      // #3383 bug 2 — HEAD moved since boot even though THIS sync found nothing to merge (someone else,
+      // typically a sibling daemon process sharing this same clone, already brought it current first).
+      const headNow = bootSha != null ? readHead(syncOpts()) : null;
+      if (bootSha != null && headNow != null && headNow !== bootSha) {
+        log.error?.(`daemon-self-sync: HEAD moved from ${bootSha} to ${headNow} since this process booted (likely a sibling process sharing this clone self-synced first) — restarting onto the new code (#3383)`);
+        return onRestart({ merged: false, commits: 0, reason: 'head-moved', headSha: headNow });
       }
       if (r.reason === 'conflict' || r.reason === 'dirty' || r.reason === 'not-on-main') {
         log.error?.(`daemon-self-sync: behind origin/main but NOT syncing (${r.reason}) — needs a hand merge`);
@@ -119,7 +183,18 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
       } else if (r.reason === 'head-failed') {
         log.error?.('daemon-self-sync: behind origin/main but NOT syncing (head-failed) — `git symbolic-ref HEAD` failed or timed out; retrying next tick');
       }
-      return tick(...args);
+      const result = await tick(...args);
+      // #3383 bug 1 — this SAME tick's own result shows it hit the stale-main refusal (origin/main moved
+      // AFTER the tick-start sync above but before the tick finished). Re-sync right now rather than wait out
+      // the rest of `intervalMs` to lose the same race again.
+      if (typeof hasStaleRefusal === 'function' && hasStaleRefusal(result)) {
+        const r2 = sync(syncOpts());
+        if (r2.merged) {
+          log.error?.(`daemon-self-sync: tick hit the stale-main refusal — merged ${r2.commits} new commit(s) immediately and restarting onto the new code (#3383), instead of waiting the full interval to lose the same race again`);
+          return onRestart(r2);
+        }
+      }
+      return result;
     },
   };
 }
