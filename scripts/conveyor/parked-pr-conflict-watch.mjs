@@ -183,15 +183,28 @@ export function planConflictLabelChange({ isConflicting, isResolved = false, cur
  */
 export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrain = false, appendOnlyStatute = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
-  const nextStep = deferredToDrain && !isStatuteTier
+  // Precedence mirrors the IO shell's routing EXACTLY (PR #2531 review): stand-down (`isStatuteTier`) wins,
+  // then an append-only statute conflict — dispatched AT ONCE, bypassing the queued-PR drain grace, so it must
+  // never get the drain-grace wording — then the queued drain grace, then an ordinary dispatch. The watch never
+  // passes `isStatuteTier` and `appendOnlyStatute` both true; if a caller does, stand-down wins and the
+  // append-only note is suppressed, so the comment can never claim two outcomes at once.
+  const appendOnly = appendOnlyStatute && !isStatuteTier;
+  const nextStep = isStatuteTier
+    ? 'Left as a **judgment call for a human or `/finish`**, not auto-resolved: the conflicting hunk touches a ' +
+      "declarative-leash/statute-tier file, so choosing which side's edit wins is drafting principle content, " +
+      'not ordinary code — exactly the judgment this repo reserves for a person (`#xu2krte` Fork 2).'
+    : appendOnly
+    ? (deferredToDrain
+        ? 'A fix agent is being dispatched now to resolve it (`#xu2krte`), with no drain grace period: the drain ' +
+          'only auto-rebases a shared-manifest conflict, which this is not. The PR is bounced to `review:changes` ' +
+          'and re-reviewed once resolved: the old approval does not cover the resolved diff.'
+        : 'A fix agent is being dispatched now to resolve it (`#xu2krte`). The SAME independent-review gate this ' +
+          'PR is already parked behind still applies before anything lands.')
+    : deferredToDrain
     ? 'This PR is already approved/queued, so the drain gets the first try — it auto-rebases a PR whose only ' +
       `conflict is the shared manifest. If it is still conflicting in ${QUEUED_CONFLICT_GRACE_MS / 60000} minutes, ` +
       'it is bounced to `review:changes` for a fix agent to resolve, then re-reviewed: the old approval does not ' +
       'cover the resolved diff.'
-    : isStatuteTier
-    ? 'Left as a **judgment call for a human or `/finish`**, not auto-resolved: the conflicting hunk touches a ' +
-      "declarative-leash/statute-tier file, so choosing which side's edit wins is drafting principle content, " +
-      'not ordinary code — exactly the judgment this repo reserves for a person (`#xu2krte` Fork 2).'
     : 'A fix agent is being dispatched to resolve it (`#xu2krte`) — the SAME independent-review gate this PR ' +
       'is already parked behind still applies before anything lands; nobody is rewriting this content ' +
       'unreviewed. If it cannot be resolved safely, it stands down to a human instead of guessing.';
@@ -199,7 +212,7 @@ export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrai
   // NEW `### ` section at the same spot; no existing rule text is in dispute. Said explicitly, beside `nextStep`
   // rather than folded into it, so a reader sees at a glance this is a MECHANICAL resolution with a re-review
   // still owed, not a silent downgrade of the statute-tier care this PR would otherwise get.
-  const appendOnlyNote = appendOnlyStatute
+  const appendOnlyNote = appendOnly
     ? '\n\n**This is being resolved mechanically, not by a human judgment call.** Both sides only ADDED separate ' +
       'new rule sections at the same insertion point — nobody edited any existing rule text — so this is being ' +
       'handled as an append-only statute conflict (keep both sections) and will go through a fresh independent ' +

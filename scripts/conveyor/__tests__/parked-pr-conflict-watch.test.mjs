@@ -190,6 +190,41 @@ describe('buildConflictComment', () => {
   });
 });
 
+// PR #2531 review — a queued PR whose fresh conflict is append-only statute got the drain-grace wording ("the
+// drain gets the first try… bounced in 30 minutes") while the watch dispatched it the same tick. Pin the EXACT
+// next-step paragraph for every {isStatuteTier, deferredToDrain, appendOnlyStatute} combination, not just
+// substring presence, so no combination can claim an outcome the router does not take (same drift class as
+// PR #1966).
+describe('buildConflictComment — next-step wording across the full routing combination space', () => {
+  const STAND_DOWN = /^Left as a \*\*judgment call for a human or `\/finish`\*\*/;
+  const DRAIN_GRACE = /^This PR is already approved\/queued, so the drain gets the first try .* still conflicting in 30 minutes/;
+  const DISPATCH = /^A fix agent is being dispatched to resolve it \(`#xu2krte`\) — the SAME independent-review gate/;
+  const APPEND_QUEUED = /^A fix agent is being dispatched now to resolve it \(`#xu2krte`\), with no drain grace period: .*The PR is bounced to `review:changes` and re-reviewed once resolved: the old approval does not cover the resolved diff\.$/;
+  const APPEND_PARKED = /^A fix agent is being dispatched now to resolve it \(`#xu2krte`\)\. The SAME independent-review gate this PR is already parked behind still applies before anything lands\.$/;
+  const cases = [
+    // [isStatuteTier, deferredToDrain, appendOnlyStatute, expected next-step, append-only note shown]
+    [false, false, false, DISPATCH, false],
+    [false, true, false, DRAIN_GRACE, false],
+    [true, false, false, STAND_DOWN, false],
+    [true, true, false, STAND_DOWN, false],
+    [false, false, true, APPEND_PARKED, true],
+    [false, true, true, APPEND_QUEUED, true],
+    [true, false, true, STAND_DOWN, false],
+    [true, true, true, STAND_DOWN, false],
+  ];
+  it.each(cases)('isStatuteTier=%s deferredToDrain=%s appendOnlyStatute=%s', (isStatuteTier, deferredToDrain, appendOnlyStatute, expected, noteShown) => {
+    const body = buildConflictComment({ num: 2505 }, { isStatuteTier, deferredToDrain, appendOnlyStatute });
+    const paragraphs = body.split('\n\n');
+    expect(paragraphs[2]).toMatch(expected);
+    for (const other of [STAND_DOWN, DRAIN_GRACE, DISPATCH, APPEND_QUEUED, APPEND_PARKED].filter((r) => r !== expected)) {
+      expect(paragraphs[2]).not.toMatch(other);
+    }
+    expect(/resolved mechanically/i.test(body)).toBe(noteShown);
+    // Exactly one of: header, status line, next step, [append-only note], footer.
+    expect(paragraphs).toHaveLength(noteShown ? 5 : 4);
+  });
+});
+
 describe('defaultListParkedPrs — argv shape (exec injected, no real gh call)', () => {
   it('queries open PRs with the narrow field set, no --repo when omitted', () => {
     let capturedArgv;
@@ -1025,6 +1060,10 @@ describe('watchParkedPrConflicts — the append-only statute exception (#3383)',
     });
     expect(results[0].routedTo).toBe('reconcile-finding (append-only statute)');
     expect(routed).toEqual([['finding', 2505]]);
+    // PR #2531 review — the alert posted in the same tick must not promise a drain grace this route bypasses.
+    const comment = provider.calls.find((c) => c[0] === 'postComment')?.[3];
+    expect(comment).toMatch(/dispatched now .* no drain grace period/);
+    expect(comment).not.toMatch(/drain gets the first try|still conflicting in \d+ minutes/);
   });
 
   it('an ordinary non-statute conflict never pays for a patch fetch (listPrPatches uncalled)', () => {
