@@ -10,6 +10,16 @@
       "scope": ["we:scripts/conveyor/", "we:skills-src/conveyor/"],
       "graduationItem": "3443",
       "autoSync": true
+    },
+    {
+      "branch": "lane/daemon-poc",
+      "purpose": "Epic #3383's daemon prototype branch — conveyor daemons (review/merge/drain) run FROM this branch so daemon fixes land fast, with no per-landing review tax; each fix also graduates to main through its own normal PR. Operator ruling 2026-09-23 (in conversation, verbatim): \"I'd thought we would first fix the deamon in protoytpe to go quick and then graduat to main once perfect.\"",
+      "owner": "3383",
+      "dateOpened": "2026-09-23",
+      "target": "main",
+      "scope": ["we:scripts/conveyor/", "we:skills-src/conveyor/", "we:scripts/lib/", "we:scripts/lane-pool.mjs", "we:scripts/merge-ai-prs.mjs"],
+      "graduationItem": "xii6vye",
+      "autoSync": true
     }
   ]
 }
