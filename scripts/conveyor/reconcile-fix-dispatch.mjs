@@ -54,6 +54,8 @@
  * the tick.
  */
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
+import { resolvePrWorkUnit } from './pr-work-unit.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -64,11 +66,11 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
   defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
-  resumeSucceeded, REPO_ROOT,
+  resolveGhShimSettingsEnv, resumeSucceeded, REPO_ROOT,
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
-import { BRIEF_REQUIRED_BY_KIND, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
+import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
@@ -105,39 +107,39 @@ export function defaultConfirmWait(ms) {
  * act on, and NAME why each one it drops cannot be (mirroring `reconcile-core.mjs`'s own REFUSAL_KINDS
  * discipline: a refusal a reader cannot audit is exactly the defect this whole chain exists to remove).
  *
- * TWO THINGS CAN MAKE AN OTHERWISE-OWED FIX UNDISPATCHABLE, BOTH NAMED:
- *   `no-item-num` — the PR's head ref carries no conveyor item number (`laneRefItemNum` returns `null` — not
- *     every open PR is a `lane/<NUM>-<slug>` branch; a hand-opened or externally-branched PR is not). Without an
- *     item number there is no `{{ITEM_NUM}}` and no honest `WE #<n>:` commit prefix for the fix-agent-brief to
- *     use — undispatchable, not a bug to route around. `#3634` — checked live against every `no-item-num` PR on
- *     `lane/mechanical-dispatcher` on 2026-09-14 (`#2210`, `lane/file-2206-review-findings`; `#2212`,
- *     `lane/agent-capability-parity-principle`; `#2170`, `lane/stuck-session-op-docs`): NONE of these numbers,
- *     even where one is present (`file-2206`), names the item this PR actually delivers — `2206` there is the
- *     REVIEWED PR's number, not an item this PR builds, and backlog item `#2206` is a real, unrelated card
- *     (`sanctioned-pack-phase-cli-retype...`). Extracting it and stamping `WE #2206:` on this PR's fix commits
- *     would be an honest-looking but WRONG attribution — worse than the refusal it replaces. There is no
- *     general, safe derivation of `{{ITEM_NUM}}` for this population; it stays a hard refusal.
- *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (an item
+ * THINGS CAN MAKE AN OTHERWISE-OWED FIX UNDISPATCHABLE, BOTH NAMED (the `no-item-num` refusal `#3634` documented
+ * here previously is GONE as of #xmtbdgs multi-repo slice 6 — an item-less PR is attributed to the PR itself
+ * instead, per the ratified `#conveyor-multi-repo-model` clause 3; see the loop body below):
+ *   `no-scope`     — EITHER the item number resolves but the backlog loader has no scope for it (an item
  *     scaffolded with no `scope:` frontmatter; an UNRESOLVABLE number — deleted/ghost card — is refused outright
  *     and never reaches the fallback — measured live #3634: EVERY currently-open `kind:'fix'` entry
  *     whose item number resolves hits this, epics included, e.g. `#2220` on `lane/3383-host-process-granularity`
- *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own). Unlike
- *     `no-item-num`, THIS one has a safe fallback: {@link resolveFallbackScope}, called with `(pr, itemNum)`,
- *     may return the PR's OWN already-changed files (`we:`-prefixed) as the fence instead. This is never a
- *     LOOSER fence than a declared `scope:` would have been — a fix agent can only touch what this PR already
- *     touches — so it is safe exactly where a declared scope is unknown. Only when the fallback ALSO comes back
- *     empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN scope-refusal (`itemScope.length`
- *     check) for exactly the same reason: a fix agent with no fence at all is undispatchable.
+ *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own) OR the PR names no
+ *     item at all AND its own diff is empty too (slice 6, rare — an item-less PR that changed nothing). Both
+ *     have the SAME safe fallback: {@link resolveFallbackScope} (item-carrying) / {@link resolvePrWorkUnit}'s
+ *     own diff read (item-less) may return the PR's OWN already-changed files (repo-prefixed) as the fence
+ *     instead. This is never a LOOSER fence than a declared `scope:` would have been — a fix agent can only
+ *     touch what this PR already touches — so it is safe exactly where a declared scope is unknown. Only when
+ *     the fallback ALSO comes back empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN
+ *     scope-refusal (`itemScope.length` check) for exactly the same reason: a fix agent with no fence at all is
+ *     undispatchable.
  * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
  * @param {Function} loadItems
  * @param {(pr:number, itemNum:string)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
  *   caller with nothing better to offer degrades to the pre-#3634 behaviour byte-for-byte); the real binding is
- *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default.
- * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
+ *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default. Used ONLY for the item-carrying
+ *   `no-scope` fallback (an item resolved but declared no `scope:` of its own).
+ * @param {string} [repo] - any vocabulary {@link repoProfile} accepts; defaults to `'we'`. Threaded through to
+ *   {@link resolvePrWorkUnit} so both the item lookup and the item-less diff-attribution below are repo-aware.
+ * @param {(pr:number)=>string[]} [fetchItemlessDiffPaths] - #xmtbdgs multi-repo slice 6: injected, UN-prefixed
+ *   (matches {@link resolvePrWorkUnit}'s own `fetchDiffPaths` contract — it adds the repo prefix itself).
+ *   Defaults to `() => []`; the real binding is {@link fetchPrDiffPaths} via {@link runReconcileFixDispatch}'s
+ *   own default. Used ONLY when the PR names no backlog item at all.
+ * @returns {{planned:Array<{itemNum:string|null,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
-export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => []) {
+export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => [], repo = 'we', fetchItemlessDiffPaths = () => []) {
   const planned = [];
   const refusals = [];
   for (const entry of Array.isArray(dispatchEntries) ? dispatchEntries : []) {
@@ -146,11 +148,54 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     const headRefName = entry.headRefName ?? null;
     const itemNum = laneRefItemNum(headRefName);
     if (!itemNum) {
-      refusals.push({ pr, kind: 'no-item-num', why: `PR #${pr}'s head ref (${headRefName ?? '?'}) carries no conveyor item number — nothing to fill {{ITEM_NUM}}/{{SCOPE}} with` });
+      // #xmtbdgs multi-repo slice 6 — a PR whose head ref names no conveyor item is NO LONGER refused outright
+      // (ratified `#conveyor-multi-repo-model` clause 3: "a PR with no backlog item is fixed with the PR as the
+      // attribution and scope from its own diff under its repo's prefix"). `resolvePrWorkUnit` re-derives
+      // `laneRefItemNum(headRefName)` itself, finds the same `null`, skips `findItem` entirely, and returns its
+      // `attribution:'pr'` branch: the PR's own already-changed files, repo-prefixed. Safe for the exact reason
+      // the item-carrying `no-scope` fallback above is safe — a fix agent can only touch what the PR already
+      // touches, never a looser fence than nothing.
+      const unit = resolvePrWorkUnit({
+        repo,
+        pr: { number: pr, headRefName },
+        findItem: (key) => findItemFn(key, loadItems),
+        fetchDiffPaths: fetchItemlessDiffPaths,
+      });
+      const itemlessScope = (Array.isArray(unit?.scope) ? unit.scope : []).filter(isSafeFallbackScopeEntry);
+      if (!itemlessScope.length) {
+        refusals.push({ pr, kind: 'no-scope', why: `PR #${pr} names no backlog item, and its own changed-file diff found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
+        continue;
+      }
+      const isConflictItemless = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
+      planned.push({
+        itemNum: null, pr, laneRef: headRefName, scope: itemlessScope, scopeSource: 'pr-diff',
+        isConflict: isConflictItemless, body: entry.body ?? null, headRefOid: entry.headRefOid ?? null,
+      });
       continue;
     }
-    const item = findItemFn(itemNum, loadItems);
-    let scope = item && Array.isArray(item.scope) ? item.scope : [];
+    // #xdx3ifb multi-repo slice 3 — resolve the item through the SAME cross-repo resolver every other
+    // PR-to-work-unit consumer uses ({@link resolvePrWorkUnit}), rather than a second, hand-rolled
+    // `findItemFn` call that could drift from it. This also means a WE-half land that JIT-renumbers this
+    // branch's own card (`xHASH → NNNN`, #2288) is now found automatically — `findItemFn` itself matches
+    // the rename's `bornAs` record — with zero extra code here.
+    //
+    // ONLY the resolver's `attribution:'item'` result is trusted for scope. Its `attribution:'pr'` branch
+    // (item not found at all) is DELIBERATELY not used to fall back to the PR's own diff here: an item
+    // number that resolves to nothing real (a ghost/deleted card — never a `bornAs` hit, which `findItemFn`
+    // already recovers) must still refuse `no-scope` outright — using the PR's diff as fence AND stamping
+    // `WE #<n>:` with a number naming no item would be precisely the "honest-looking but WRONG attribution"
+    // this file's own history already ruled unsafe (see this function's own top-of-file docblock). That is a
+    // DIFFERENT population from "no item number at all" (handled above, slice 6): this branch is only ever
+    // reached once `itemNum` is truthy — hence `fetchDiffPaths: () => []` below: the resolver is asked ONLY
+    // "does an item resolve", never for a diff-based fallback it would otherwise be entitled to compute.
+    const unit = resolvePrWorkUnit({
+      repo,
+      pr: { number: pr, headRefName },
+      findItem: (key) => findItemFn(key, loadItems),
+      fetchDiffPaths: () => [],
+    });
+    const item = unit && unit.attribution === 'item' ? { scope: unit.scope } : null;
+    let scope = item ? item.scope : [];
     let scopeSource = 'item';
     if (item && !scope.length) {
       // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
@@ -216,22 +261,42 @@ export function isSafeFallbackScopeEntry(entry) {
  * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
  * as it did before this fallback existed, never throws the whole pass over one bad read.
  * @param {number} pr
- * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug) pins the `gh` call
- *   to that repo, the same `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use.
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug, or any other
+ *   vocabulary {@link repoProfile} accepts) pins the `gh` call to that repo, the same
+ *   `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use, AND selects the prefix this
+ *   function tags each path with — #xdx3ifb multi-repo slice 3: this used to hard-code `we:` regardless of
+ *   `repo`, which was silently wrong the moment a caller ever passed a non-WE repo (dead code today, since
+ *   {@link runReconcileFixDispatch} only reaches this for `repo === 'we'` — see its own `unsupported-repo`
+ *   early return — but a latent bug slices 5-6 would otherwise have inherited unnoticed). `repo == null`
+ *   (today's only reachable case) still resolves to `'we'`, so existing callers see byte-identical output.
  * @returns {string[]}
  */
 export function fetchPrDiffScope(pr, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
+  const profile = repoProfile(repo ?? 'we');
+  const prefix = profile ? profile.canonicalPrefix : 'we';
+  return fetchPrDiffPaths(pr, { exec, root, repo }).map((p) => `${prefix}:${p}`);
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchPrDiffPaths — #xmtbdgs multi-repo slice 6: the SAME
+ * `gh pr diff <pr> --name-only` read {@link fetchPrDiffScope} always did, factored out UN-prefixed — this is
+ * exactly the `fetchDiffPaths` shape `we:scripts/conveyor/pr-work-unit.mjs#resolvePrWorkUnit` itself declares
+ * ("REPO-RELATIVE and un-prefixed — this resolver adds the prefix"). {@link fetchPrDiffScope} is now a one-line
+ * wrapper over this that adds its own prefix back on top, so the two can never drift. Best-effort, exactly like
+ * its wrapper: any `gh` failure degrades to `[]`, never throws.
+ * @param {number} pr
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - see {@link fetchPrDiffScope}'s own docblock;
+ *   `repo` here only pins the `gh --repo` flag, since there is no prefix left for this function to add.
+ * @returns {string[]}
+ */
+export function fetchPrDiffPaths(pr, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
   try {
     const argv = ['pr', 'diff', String(pr), '--name-only'];
     if (repo) argv.push('--repo', repo);
     const out = exec('gh', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
     });
-    return String(out || '')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((p) => `we:${p}`);
+    return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
   } catch {
     return [];
   }
@@ -268,12 +333,15 @@ export function findResumeCandidate({ body, agentsAll }) {
  * SAME brief's own conflict-handling + escalation rules by reference, rather than duplicating them here — a
  * second, drifting copy of "how to resolve a conflict" is exactly the twin-template risk this whole item's Fork
  * 4 argues against one file over.
- * @param {{pr:number, itemNum:string, cwd?:string|null}} o
+ * @param {{pr:number, itemNum:string|null, cwd?:string|null}} o - #xmtbdgs multi-repo slice 6: `itemNum` is
+ *   `null` for an item-less PR (no backlog item names this repair) — the prompt then says so in plain words
+ *   rather than printing a literal `item #null`.
  * @returns {string}
  */
 export function buildResumePrompt({ pr, itemNum, cwd = null }) {
+  const itemRef = itemNum ? `item #${itemNum}` : 'no backlog item';
   return [
-    `New work on PR #${pr} (item #${itemNum}), which you previously worked: it has drifted into a real merge `
+    `New work on PR #${pr} (${itemRef}), which you previously worked: it has drifted into a real merge `
       + 'conflict against `main` since your last commit here — GitHub reports `mergeable: CONFLICTING`.',
     '',
     cwd
@@ -290,13 +358,19 @@ export function buildResumePrompt({ pr, itemNum, cwd = null }) {
 /** we:scripts/conveyor/reconcile-fix-dispatch.mjs#freeLaneNumbers — the SAME `lane-pool.mjs list --acquirable
  *  --json` read `we:scripts/conveyor/tick-core.mjs`'s own IO shell uses to build `freeLanes`, reused rather than
  *  re-derived. A READ, not a lock — see the file header for why that is the correct trade here.
- * @param {{exec?:Function, root?:string}} [o]
+ * @param {{exec?:Function, root?:string, lanePoolRepo?:string|null}} [o] - `lanePoolRepo` is what
+ *   `lane-pool.mjs --repo=` itself expects (`we:scripts/lib/repo-profile.mjs#repoProfile`'s own `lanePoolRepo`
+ *   field — `.` for WE, an absolute checkout path for a sibling repo). Omitted/`null` falls back to whatever
+ *   `lane-pool.mjs` itself defaults to with no `--repo=` (the cwd's own git toplevel — WE, in every real caller
+ *   before multi-repo slice 5), so a pre-slice-5 caller sees byte-identical behaviour.
  * @returns {number[]} ascending lane ids currently acquirable, or `[]` on any read failure (fail-soft — the
  *   caller reports `no-lane` for every planned fix rather than throwing the whole pass over a `gh`/pool hiccup).
  */
-export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) {
+export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT, lanePoolRepo = null } = {}) {
   try {
-    const out = exec('node', [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'], {
+    const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'];
+    if (lanePoolRepo) argv.push(`--repo=${lanePoolRepo}`);
+    const out = exec('node', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024,
     });
     const paths = JSON.parse(String(out || '[]'));
@@ -389,7 +463,11 @@ export function tryResumeFix(planned, {
   resolveHead = resolveLaneHead,
   wait = defaultConfirmWait,
 } = {}) {
-  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
+  // #x33jgwt multi-repo slice 5 — no repo gate HERE any more: `runReconcileFixDispatch` is the ONE place that
+  // decides whether this repo's `fix` capability is on (`docs/agent/platform-decisions.md#conveyor-multi-repo-
+  // model` clause 1, "capability, not repo identity"), before this function is ever called. This primitive is
+  // repo-generic; `repo` only threads through to keep the resume-candidate's session-name check (below) and any
+  // fresh dispatch fallback correctly repo-tagged.
   assertNotALaneCheckout(root);
   if (!planned.isConflict) return { resumed: false, resumeAttempt: null };
 
@@ -413,7 +491,14 @@ export function tryResumeFix(planned, {
   // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
   const candidateCwd = candidateRow?.cwd || null;
   const candidateHead = candidateCwd ? resolveHead(candidateCwd) : null;
-  const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix', null, '', repo)]);
+  // #xmtbdgs multi-repo slice 6 — an item-less PR (`planned.itemNum === null`) never had an ordinary `build`
+  // dispatch to begin with (there was no backlog item to build), so `conveyor-<itemNum>` is not a legitimate
+  // name for ITS original builder to carry. Only compute that candidate name when an item actually exists;
+  // `sessionSlugFor(null, 'build')` would otherwise throw (`mintSessionSlug` rejects a non-numeric, non-hash id).
+  const expectedNames = new Set([
+    ...(planned.itemNum ? [sessionSlugFor(planned.itemNum, 'build')] : []),
+    sessionSlugFor(planned.pr, 'fix', null, '', repo),
+  ]);
   const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
   const headConfirmed = Boolean(planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
   const ownershipConfirmed = headConfirmed && nameConfirmed;
@@ -514,19 +599,46 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   resumeAttempt = null,
+  // #x8mpubm — same never-throwing, opt-in-gated resolver `we:scripts/operations/dispatch-lane-io.mjs`'s own
+  // `createDispatchSinks` uses for a fresh build dispatch; a fix dispatch is a SEPARATE fresh-dispatch call
+  // site (see the `buildAgentArgv` call below) so it needs its own seam, but reuses the SAME wrapper rather
+  // than re-deriving the gh-app-shim.mjs composition here.
+  resolveSettingsEnv = resolveGhShimSettingsEnv,
+  // #x33jgwt multi-repo slice 5 — threaded straight through to `briefTokensForRepo`/`repoProfile`/`gateFor`
+  // (all three already accept them), never re-derived here. Before this slice only `we` ever reached this
+  // function, and WE's own checkout + real `homedir()` are always correct/present wherever this process runs,
+  // so nothing injected these. A sibling repo's checkout is NOT guaranteed present (or, in a test, must not be
+  // touched at all — see `constellation-repos-profile.test.mjs`'s own "hermetic" header), so a real dispatch for
+  // a sibling repo — and every test of one — needs these seams open.
+  home,
+  checkoutExists,
+  readPackageJson,
 } = {}) {
-  if (repo !== 'we') throw new Error(`unsupported-repo: ${repo} requires its own fix brief and gate`);
+  // #x33jgwt multi-repo slice 5 — no repo gate HERE any more (see {@link tryResumeFix}'s own docblock for why):
+  // `runReconcileFixDispatch` already refused a repo whose profile lacks the `fix` capability before this ever
+  // runs. `briefTokensForRepo` still fails closed (`null`) for a genuinely unknown/unresolvable profile below.
   assertNotALaneCheckout(root);
 
   const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
+  // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here). The
+  // token computation itself is repo-generic, so slice 5's capability gate (moved up to
+  // `runReconcileFixDispatch`) needed no change here at all.
+  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
+  if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the fix brief`);
+  // #xmtbdgs multi-repo slice 6 — an item-less PR (`planned.itemNum === null`) has no real number to fill
+  // `{{ITEM_NUM}}` with; `''` is the honest value (never a fabricated number), and `ITEM_NUM` is allowed to
+  // resolve blank ONLY for this population (`tokens.ATTRIBUTION` is already `PR #<n>` in this case —
+  // `briefTokensForRepo` computed that from the same `itemNum: null` above, with zero extra logic needed here).
+  const optionalNames = planned.itemNum ? undefined : [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'];
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
-    ITEM_NUM: planned.itemNum,
+    ITEM_NUM: planned.itemNum ?? '',
     PR_NUM: planned.pr,
     LANE_REF: planned.laneRef,
     LANE: planned.lane,
     SESSION_SLUG: sessionSlug,
     SCOPE: planned.scope.join(','),
-  }, BRIEF_REQUIRED_BY_KIND.fix);
+    ...tokens,
+  }, BRIEF_REQUIRED_BY_KIND.fix, optionalNames, REPO_AWARE_VALUE_PATTERNS);
   const sessionId = String(mintSessionId());
   const argv = buildAgentArgv({
     sessionId,
@@ -535,6 +647,10 @@ export function dispatchFix(planned, {
     // unfilled template and self-aborts (3/3 live).
     systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
     extraArgs,
+    // #x8mpubm — see `resolveSettingsEnv`'s own param comment above; resolved once, here, for this FRESH
+    // dispatch only (never for `tryResumeFix`'s own `buildAgentArgv` call, which must stay a bare
+    // `--bg --resume` with no other flag — see that function's docblock).
+    settingsEnv: resolveSettingsEnv(),
   });
   // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
   // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
@@ -562,12 +678,36 @@ export function dispatchFix(planned, {
  * a successful resume returns straight into `dispatched` and `continue`s to the next entry having never touched
  * `lanes` — the pool is left exactly as {@link pickFreeLanes} produced it for every entry that resolves via
  * resume.
+ *
+ * #x33jgwt (multi-repo slice 5) — THE REPO GATE LIVES HERE, ON CAPABILITY, NOT IDENTITY
+ * (`docs/agent/platform-decisions.md#conveyor-multi-repo-model` clause 1). This function reads `repo`'s profile
+ * ONCE and asks two INDEPENDENT questions of it — `fix` and `ci-heal` are separate stages/capabilities, each
+ * with its own on/off switch, not one "is this repo supported at all" bit:
+ *   - `!profile.capabilities.fix` → this whole pass is a no-op for the repo: every `fix` entry `reconcile-pass`
+ *     offered is recorded `unsupported-repo` (never touching the lane pool or a dispatch sink), exactly as
+ *     EVERY non-WE repo behaved before this slice. Only `we` was ever missing this bit before; frontierui and
+ *     plateau-app both flip it on in `repo-profile.mjs` as part of this same slice, so in practice this branch
+ *     is only reachable today via an injected `resolveProfile` (see below) — a real, un-injected call never
+ *     takes it for a real constellation repo, but the check itself must stay capability-shaped so the NEXT repo
+ *     this constellation ever grows (with `fix` genuinely off) is refused for the right reason, not silently
+ *     let through because it happens to resolve to *some* profile.
+ *   - `!profile.capabilities.ciHeal` → independently of the above, any `ci-heal` entry in the SAME
+ *     `reconcile-pass` reading is recorded `unsupported-repo` too (CI-heal is its own stage, its own future
+ *     slice — #3958). This file dispatches no `ci-heal` itself either way; recording the refusal here (rather
+ *     than dropping the entry silently) preserves the exact visibility the pre-slice-5 blanket branch gave every
+ *     non-WE repo's ci-heal population, now scoped to its own capability instead of riding on `fix`'s.
+ * Both checks read the SAME `profile`, computed once, never re-derived per entry or per kind.
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.
  * @param {Function} [o.tryResume] - injectable, defaults to the real {@link tryResumeFix}.
  * @param {Function} [o.resolveFallbackScope] - injectable, defaults to the real {@link fetchPrDiffScope} (one
  *   `gh pr diff --name-only` per entry that reaches it — see {@link planFixesFromReconcile}'s own docblock for
  *   why this is only ever called once a declared `scope:` has already come back empty, never unconditionally).
+ * @param {Function} [o.resolveProfile] - injectable, defaults to the real {@link repoProfile}; a pure lookup, so
+ *   the only reason a test ever overrides it is to exercise a `capabilities.fix === false` repo now that every
+ *   REAL constellation repo profile has `fix` on (see the docblock above).
+ * @param {Function} [o.pickFreeLanes] - injectable; when omitted, defaults to {@link freeLaneNumbers} scoped to
+ *   THIS repo's own lane pool (`profile.lanePoolRepo`) — never the WE pool for a non-WE repo.
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
  */
 export function runReconcileFixDispatch({
@@ -575,31 +715,66 @@ export function runReconcileFixDispatch({
   repo = null,
   findItemFn = findItem,
   loadItems = () => defaultLoadItems(root),
-  pickFreeLanes = () => freeLaneNumbers({ root }),
+  pickFreeLanes = null,
   tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
   resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
+  // #xmtbdgs multi-repo slice 6 — the item-less diff read; UN-prefixed (see `planFixesFromReconcile`'s own
+  // docblock for why this is a distinct binding from `resolveFallbackScope` above, which IS prefixed).
+  fetchItemlessDiffPaths = (pr) => fetchPrDiffPaths(pr, { root, repo }),
+  resolveProfile = repoProfile,
   checkStaleness,
   prsFile, unsupportedPath,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
-  if (repoKey === 'we') assertMainNotStale(root, checkStaleness);
+  // #x1rr9rh (multi-repo slice 2) — this staleness check guards the DISPATCHING checkout (this WE checkout's
+  // own import path), not the target repo: the fix path always runs WE's own code, whatever repo it dispatches
+  // (or, for an unsupported repo, merely records as unsupported) a fix for. Gating it on `repoKey === 'we'`
+  // was therefore the wrong condition — it let a stale WE checkout record foreign-repo unsupported rows (and
+  // will, once fix dispatch is turned on for that repo, dispatch fixes) from code that had already been proven
+  // stale. Run it for every repo.
+  assertMainNotStale(root, checkStaleness);
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
-  if (repoKey !== 'we') {
-    // Foreign fixes need their own brief and gate; never consult or lease the WE pool.
-    const refusals = (reconciled.dispatch ?? []).filter((entry) => ['fix', 'ci-heal'].includes(entry.kind)).map((entry) => ({
-      kind: 'unsupported-repo', repo: repoKey, prNumber: entry.prNumber, action: entry.kind,
-      why: 'Fix and CI-heal dispatch require a repo-specific brief and gate; the existing worker is WE-only.',
-    }));
+  const dispatchEntries = Array.isArray(reconciled.dispatch) ? reconciled.dispatch : [];
+  const profile = resolveProfile(repoKey);
+
+  const unsupportedFor = (kind, action, why) => dispatchEntries
+    .filter((entry) => entry.kind === kind)
+    .map((entry) => ({ kind: 'unsupported-repo', repo: repoKey, prNumber: entry.prNumber, action, why }));
+
+  // CI-heal is a capability of its own — refused independently of whatever `fix` decides below (see this
+  // function's own docblock).
+  const ciHealRefusals = profile?.capabilities?.ciHeal ? [] : unsupportedFor(
+    'ci-heal', 'ci-heal', 'CI-heal dispatch requires a repo-specific brief and gate; the existing worker is WE-only.',
+  );
+
+  if (!profile?.capabilities?.fix) {
+    // This repo's fix stage is off entirely: every `fix` entry is unsupported, never touching the lane pool or
+    // a dispatch sink. Durable ledger write mirrors the pre-slice-5 blanket branch exactly — preserve any
+    // already-recorded `review` rows for this repo (a DIFFERENT stage this file knows nothing about), replace
+    // its `fix`/`ci-heal` rows with what THIS pass just computed.
+    const fixRefusals = unsupportedFor(
+      'fix', 'fix', 'Fix dispatch requires a repo-specific brief and gate; the existing worker is WE-only.',
+    );
+    const refusals = [...fixRefusals, ...ciHealRefusals];
     const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
     return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
   }
-  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope);
+  // `fix` IS supported here — still durably record any ci-heal refusals (a separate capability, possibly still
+  // off), preserving prior `review` rows exactly as above.
+  if (ciHealRefusals.length) {
+    const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
+    recordUnsupported({ repo: repoKey, rows: [...reviews, ...ciHealRefusals], path: unsupportedPath });
+  }
+  const { planned, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths);
+  const refusals = [...ciHealRefusals, ...planRefusals];
 
-  const lanes = [...pickFreeLanes()];
+  // Lanes: THIS repo's own pool (`profile.lanePoolRepo` — `.` for WE, an absolute checkout path for a sibling
+  // repo), never the WE pool for a non-WE repo (#x33jgwt).
+  const lanes = [...(typeof pickFreeLanes === 'function' ? pickFreeLanes() : freeLaneNumbers({ root, lanePoolRepo: profile.lanePoolRepo }))];
   const dispatched = [];
   for (const entry of planned) {
     // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
@@ -669,7 +844,10 @@ if (IS_CLI) {
       // #3331 — report the ADDRESSABLE id (`claude logs/stop` take it) when we have one; a resume reports the
       // session it continued, and an unparseable spawn falls back to the slug, which `claude agents` carries.
       const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
-      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
+      // #xmtbdgs multi-repo slice 6 — `d.itemNum` is `null` for an item-less PR; print "no backlog item"
+      // rather than a literal "item #null".
+      const itemLabel = d.itemNum ? `item #${d.itemNum}` : 'no backlog item';
+      lines.push(`  → fix    PR #${d.pr} (${itemLabel}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
     }
     for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');

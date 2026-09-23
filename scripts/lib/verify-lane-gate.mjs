@@ -44,12 +44,52 @@
  *
  * `resolveDefaultGate` is pure — no fs, no child_process, no clock. It takes an injectable `runGit` (mirroring
  * `test-selection.mjs`'s own convention) so tests drive it deterministically.
+ *
+ * PER-REPO SCRIPTS (#3919). The gate halves above name WE's own npm scripts (`test:unit`, `check:standards`), but
+ * `verify-lane.mjs --repo=` also verifies sibling checkouts (plateau-app, frontierui). plateau-app has neither
+ * script (its suite is `"test": "vitest run"`), so the WE-shaped gate always failed there with "Missing script".
+ * The IO shell now injects the target checkout's npm script NAMES (`scripts`, read from its package.json) and
+ * {@link composeGate} builds only the halves that checkout actually has:
+ *   - vitest half: `test:unit` present ⇒ today's logic, unchanged (diff-driven shrink or `npm run test:unit`);
+ *     absent but `test` present ⇒ `npm test` (full — the shrink's allow-list is WE-shaped, so it is never applied
+ *     to a checkout without WE's `test:unit` convention); neither ⇒ skipped, with an explicit reason.
+ *   - check:standards half: included (scoped exactly as before) only when the checkout has `check:standards`.
+ * `scripts` omitted/unknown ⇒ assumed WE-shaped, so a WE checkout's command is byte-for-byte unchanged. frontierui
+ * has both `test:unit` and `check:standards`, so it too gets today's gate unchanged.
  */
 import { decideSelection, selectTests } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
 
 /** The historical, always-safe fallback gate: the full unit suite plus the repo health gate. */
 export const FULL_GATE = 'npm run test:unit && npm run check:standards';
+
+/** Script names a WE-shaped checkout is assumed to have when the caller injects none (back-compat default). */
+const WE_SCRIPTS = Object.freeze(['test:unit', 'check:standards']);
+
+/**
+ * Build the gate command from its two halves, keeping only the halves the checkout's npm scripts support (#3919).
+ * Pure. With both WE scripts present the output is exactly `${vitestCmd} && ${checkStandardsCmd}` — today's shape.
+ * @param {{vitestCmd: string, checkStandardsCmd: string, scripts?: Iterable<string>|null}} args
+ * @returns {{command: string, gateReasons: string[]}}
+ */
+export function composeGate({ vitestCmd, checkStandardsCmd, scripts }) {
+  const have = new Set(scripts == null ? WE_SCRIPTS : scripts);
+  const gateReasons = [];
+  let testHalf = null;
+  if (have.has('test:unit')) testHalf = vitestCmd;
+  else if (have.has('test')) {
+    testHalf = 'npm test';
+    gateReasons.push('no `test:unit` script in this checkout — running `npm test` (full, no diff shrink)');
+  } else gateReasons.push('no `test:unit` or `test` script in this checkout — test half skipped');
+  let standardsHalf = null;
+  if (have.has('check:standards')) standardsHalf = checkStandardsCmd;
+  else gateReasons.push('no `check:standards` script in this checkout — health-gate half skipped');
+  const halves = [testHalf, standardsHalf].filter(Boolean);
+  if (halves.length === 0) {
+    return { command: `echo ${shellQuote('verify-lane: no test:unit/test/check:standards npm script in this checkout — nothing to run')}`, gateReasons };
+  }
+  return { command: halves.join(' && '), gateReasons };
+}
 
 /** Single-quote a string for safe inclusion in a shell command (handles an embedded `'`). */
 function shellQuote(str) {
@@ -88,10 +128,11 @@ export function canScopeCheckStandards(changedFiles) {
  * The selection flag defaults ON for this call site specifically (unless the ambient environment explicitly sets
  * it) — verify-lane does not require the operator to separately export `WE_DIFF_TEST_SELECTION` for its own
  * local gate; an explicit override (e.g. `WE_DIFF_TEST_SELECTION=0`) still wins. It governs only the vitest half.
- * @param {{base?: string, runGit: (args:string[]) => string, env?: Record<string,string|undefined>}} args
- * @returns {{ command: string, decision: import('../readiness/test-selection.mjs').SelectionDecision & {changedFiles: string[]|null} }}
+ * `scripts` (#3919): the target checkout's npm script names; omitted ⇒ WE-shaped (unchanged). See {@link composeGate}.
+ * @param {{base?: string, runGit: (args:string[]) => string, env?: Record<string,string|undefined>, scripts?: Iterable<string>|null}} args
+ * @returns {{ command: string, gateReasons: string[], decision: import('../readiness/test-selection.mjs').SelectionDecision & {changedFiles: string[]|null} }}
  */
-export function resolveDefaultGate({ base = 'origin/main', runGit, env = process.env } = {}) {
+export function resolveDefaultGate({ base = 'origin/main', runGit, env = process.env, scripts } = {}) {
   // The committed diff cannot account for staged or unstaged tracked edits (#3389).
   // Like an unresolvable diff, dirty or unknown status must keep BOTH halves unscoped.
   let statusReason;
@@ -104,7 +145,7 @@ export function resolveDefaultGate({ base = 'origin/main', runGit, env = process
   }
   if (statusReason) {
     return {
-      command: FULL_GATE,
+      ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd: 'npm run check:standards', scripts }),
       decision: {
         changedFiles: null,
         ...decideSelection({ changedFiles: [], flagEnabled: false }),
@@ -125,7 +166,7 @@ export function resolveDefaultGate({ base = 'origin/main', runGit, env = process
 
   if (decision.mode === 'shrink' && decision.selectedFiles.length > 0) {
     const files = decision.selectedFiles.map(shellQuote).join(' ');
-    return { command: `npx vitest related ${files} --run && ${checkStandardsCmd}`, decision };
+    return { ...composeGate({ vitestCmd: `npx vitest related ${files} --run`, checkStandardsCmd, scripts }), decision };
   }
-  return { command: `npm run test:unit && ${checkStandardsCmd}`, decision };
+  return { ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd, scripts }), decision };
 }

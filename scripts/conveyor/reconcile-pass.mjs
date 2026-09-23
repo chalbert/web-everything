@@ -49,7 +49,8 @@ import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone } from './reconcile-core.mjs';
+import { tryReadCompletion } from '../operations/completion-store.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -98,9 +99,10 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * @param {{exec?:Function, env?:object}} [o]
  * @returns {Array<object>}
  */
-export function defaultReadAgents({ exec = execFileSync, env = process.env } = {}) {
+export function defaultReadAgents({ exec = execFileSync, env = process.env, completionFor = tryReadCompletion, now = Date.now() } = {}) {
   const listed = defaultListAgents({ exec, env });
-  return Array.isArray(listed) ? listed : [];
+  // xpb0zyq — a session that already wrote its own completion record is finished, whatever the listing says.
+  return markSelfReportedDone(Array.isArray(listed) ? listed : [], completionFor, now);
 }
 
 /**

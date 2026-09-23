@@ -1,0 +1,72 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3867-decision-should-a-delegated-vendor-graduate-past-spot-check/">#3867</a> asks whether a
+delegated vendor (Codex, Gemini via Antigravity) that has a long, clean record at <code>spot-check</code> could
+graduate one rung further — to a lighter level, or to no independent check at all. Rule 7 of
+<a href="/docs/agent/platform-decisions/#delegation-trial-record-graduation">#delegation-trial-record-graduation</a>
+(ratified via #3690) says the independent look "gets shallower but never goes away". This survey builds on
+the #3690 survey, <a href="/research/delegation-graduation-and-supervision-tiers/">When has a delegated
+non-Claude agent earned lighter supervision?</a>, and does not repeat it. The full working is in
+<a href="/reports/2026-09-23-delegation-below-spot-check-grounding.md">the session report</a>.</p>
+
+<h2>Finding 1 — spot-check is already at the floor</h2>
+
+<p>The router has exactly two levels, <code>full</code> and <code>spot-check</code>
+(<code>SUPERVISION_LEVELS</code> in <code>scripts/lib/provider-routing.mjs</code>). Rule 7 defines
+<code>spot-check</code>'s independent pass by reference to
+<a href="/docs/agent/platform-decisions/#every-pr-gets-a-look-advisory-floor">#every-pr-gets-a-look-advisory-floor</a>
+(#3313): one tool-free juror, one round, the diff and the card, capped findings, non-blocking. #3313 gives
+that floor to every PR that trips no escalation reason, whoever built it. So a graduated delegated triple is
+already checked as lightly as ordinary Claude-built work.</p>
+
+<p>Every reading of "lighter than spot-check" is already placed:</p>
+
+<table>
+<thead><tr><th>Reading</th><th>Where it stands</th></tr></thead>
+<tbody>
+<tr><td>No independent pass</td><td>Rejected in #3690 Fork 5 (b), against #3313's "the capacity floor is never zero".</td></tr>
+<tr><td>Review a sample of the triple's diffs</td><td>Rejected by #3313: "never a random sample of a few".</td></tr>
+<tr><td>Rely on the PR's own review only</td><td>That is already what <code>spot-check</code> is.</td></tr>
+<tr><td>A cheaper or batched juror</td><td>Not a level. It is the floor's own depth dial, changed for every PR, never per producer.</td></tr>
+</tbody>
+</table>
+
+<h2>Finding 2 — removing the look breaks the loop that measures it</h2>
+
+<p>A clean streak counts how often the independent pass found nothing. Remove the pass and no streak can
+justify its removal. Three rules of the ratified model depend on it: a confirmed miss is a hard veto
+(rule 3), the positive control is a trial where independent review found a real problem (rule 4), and
+demotion is computed from the record (rule 6). With no independent look, misses stop arriving, positive
+controls stop, and demotion can no longer fire. Promotion would become one-way.</p>
+
+<p><strong>This breach already exists in code.</strong> <code>scripts/review-set-label.mjs</code> writes a
+delegation trial row only while the triple is not yet graduated, and always as a clean
+<code>landed</code> row. So once a triple graduates, its record stops growing and can never demote it.
+The prep filed this as a separate build; it is owed whichever way #3867 is decided.</p>
+
+<h2>Finding 3 — prior art keys lighter checking to the change, not the producer</h2>
+
+<ul>
+<li><strong>Depth moves, coverage stays:</strong> ANSI/ASQ Z1.4 / ISO 2859-1 reduced inspection samples
+fewer items from every lot, and one rejected lot returns it to normal. Google requires an LGTM on every
+change; readability waives only a co-signer.</li>
+<li><strong>Coverage drops only as a sampler:</strong> ISO 2859-3 skip-lot lets whole lots through after
+qualification, and one rejected lot ends it. This is the sampler shape #3313 already rejected.</li>
+<li><strong>Per-item review is dropped by change class:</strong> Renovate and Dependabot automerge chosen
+update types (lockfiles, dev dependencies, digests). Chromium's Rubber Stamper approves clean reverts,
+clean cherry-picks and benign files, and "never provides OWNERS approval". SLSA lets an organisation give
+a named "Trusted Robot" an exception — a governance act, not a streak.</li>
+<li><strong>AI coding agents, Sept 2026:</strong> GitHub Copilot coding agent, OpenAI Codex, Devin and
+Claude Code review all keep a required review before an agent PR merges.</li>
+</ul>
+
+<p>The WE delta: the proposal keys lighter checking to <em>who built it</em>; the prior art keys it to
+<em>what kind of change it is</em>. The first breaks the measurement loop. The second does not, but it is a
+builder-neutral change to #3313's floor, not to rule 7.</p>
+
+<h2>What this survey does not settle</h2>
+
+<p>Nothing here rules. The recommended verdict — no, keep rule 7 — and its re-open triggers are on
+<a href="/backlog/3867-decision-should-a-delegated-vendor-graduate-past-spot-check/">#3867</a> itself.</p>
+{% endraw %}

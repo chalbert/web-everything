@@ -26,6 +26,9 @@ const stage = (root) => {
   copyFileSync(join(dirname(LEAF), 'constellation-repos.mjs'), join(root, 'lib', 'constellation-repos.mjs'));
   mkdirSync(join(root, 'conveyor'));
   copyFileSync(join(dirname(LEAF), '../conveyor/unsupported-repo.mjs'), join(root, 'conveyor/unsupported-repo.mjs'));
+  // The queue also reads its STOOD DOWN section off `../conveyor/stand-down.mjs` (we:backlog/x6cjgz5) — stage it
+  // too, or the staged copy fails to import and `main()` never runs.
+  copyFileSync(join(dirname(LEAF), '../conveyor/stand-down.mjs'), join(root, 'conveyor/stand-down.mjs'));
 };
 
 let dir;

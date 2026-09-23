@@ -20,6 +20,7 @@ import {
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
+  findRelativeNodeScriptsAfterLaneCd, WE_ONLY_LANE_CONVEYOR_BRIEFS,
 } from '../check-standards-rules.mjs';
 import { require, ROOT, SRC } from './fixtures/check-standards-rules-fixtures.mjs';
 
@@ -605,5 +606,72 @@ describe('findStaleRatifiedClaims — dated ratified/verified-done body assertio
   it('returns [] for an empty or non-string body', () => {
     expect(findStaleRatifiedClaims('')).toEqual([]);
     expect(findStaleRatifiedClaims(undefined)).toEqual([]);
+  });
+});
+
+// #3960 (multi-repo slice 4) — a conveyor fix/ci-heal brief that `cd`s into an acquired lane and then invokes a
+// WE tool by a RELATIVE `node scripts/...` path breaks the moment that lane is not WE's own checkout.
+describe('findRelativeNodeScriptsAfterLaneCd (#3960)', () => {
+  const OLD_PATTERN = [
+    '### 1. Reconstitute',
+    '',
+    '```bash',
+    'LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}}) && cd "$LANE"',
+    '```',
+    '',
+    '### 2. Repair',
+    '',
+    '```bash',
+    'node scripts/conveyor/rearm-review.mjs {{PR_NUM}}',
+    '```',
+  ].join('\n');
+
+  it('fails a fixture with the old pattern — a relative call after `cd "$LANE"`', () => {
+    const { errors } = findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content: OLD_PATTERN }]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/relative `node scripts\/\.\.\.` call after `cd "\$LANE"`/);
+    expect(errors[0].descriptor).toMatchObject({ kind: 'conveyor-brief-relative-node-after-lane-cd', file: 'skills-src/conveyor/fix-agent-brief.md', line: 10 });
+  });
+
+  it('also fires for `cd "{{SOME_TOKEN}}"`, not only the literal `$LANE`', () => {
+    const content = 'cd "{{LANE_DIR}}"\nnode scripts/conveyor/stand-down.mjs 1\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-ci-brief.md', content }]).errors).toHaveLength(1);
+  });
+
+  it('does not fire before the `cd` line, or for a call already qualified with an absolute root', () => {
+    const before = 'node scripts/lane-pool.mjs acquire --lane=1\ncd "$LANE"\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content: before }]).errors).toEqual([]);
+    const qualified = 'cd "$LANE"\nnode "{{WE_ROOT}}/scripts/conveyor/rearm-review.mjs" 1\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content: qualified }]).errors).toEqual([]);
+  });
+
+  it('passes on the REAL, rewritten fix and ci-heal briefs on disk', () => {
+    const fixBrief = readFileSync(join(ROOT, 'skills-src/conveyor/fix-agent-brief.md'), 'utf8');
+    const ciHealBrief = readFileSync(join(ROOT, 'skills-src/conveyor/fix-agent-ci-brief.md'), 'utf8');
+    expect(findRelativeNodeScriptsAfterLaneCd([
+      { file: 'skills-src/conveyor/fix-agent-brief.md', content: fixBrief },
+      { file: 'skills-src/conveyor/fix-agent-ci-brief.md', content: ciHealBrief },
+    ]).errors).toEqual([]);
+  });
+
+  it('exempts the WE-only-lane briefs (delivery-agent-brief.md et al.) even though they share the same `cd` shape', () => {
+    for (const file of WE_ONLY_LANE_CONVEYOR_BRIEFS) {
+      expect(findRelativeNodeScriptsAfterLaneCd([{ file, content: OLD_PATTERN }]).errors, file).toEqual([]);
+    }
+    // The real delivery-agent-brief.md IS this exact shape today (`cd "$LANE"` then many relative `node
+    // scripts/...` calls) — proving the exemption is load-bearing, not merely untested.
+    const deliveryBrief = readFileSync(join(ROOT, 'skills-src/conveyor/delivery-agent-brief.md'), 'utf8');
+    expect(deliveryBrief).toMatch(/cd "\$LANE"/);
+    expect(deliveryBrief).toMatch(/\bnode scripts\//);
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/delivery-agent-brief.md', content: deliveryBrief }]).errors).toEqual([]);
+  });
+
+  it('ignores a file outside skills-src/conveyor entirely', () => {
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'docs/agent/some-doc.md', content: OLD_PATTERN }]).errors).toEqual([]);
+  });
+
+  it('a `cd` once tripped stays tripped for the rest of the file, across separate fenced blocks/headers', () => {
+    const content = 'cd "$LANE"\n\n### later step\n\n```bash\nnode scripts/conveyor/x.mjs\n```\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content }]).errors).toHaveLength(1);
   });
 });

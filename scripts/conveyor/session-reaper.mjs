@@ -113,8 +113,20 @@ import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
+import { tryReadCompletion } from '../operations/completion-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/** This file's own checkout root, resolved by SCRIPT LOCATION (never `process.cwd()`) — same convention
+ *  `dispatch-lane-io.mjs#REPO_ROOT` / `completion-store.mjs#COMPLETIONS_ROOT` already use, and load-bearing
+ *  here for a NEW reason (epic #3383, the daemon split): once a daemon calls this reaper from ITS OWN
+ *  dedicated clone (e.g. `we:skills-src/conveyor/review-daemon.mjs` running out of a `wev-review-daemon`
+ *  checkout), every `review-*`/`fix-*` session it dispatches inherits that SAME clone as its own `cwd`
+ *  (`review-dispatch.mjs`'s `root = REPO_ROOT`, resolved the identical way). So a caller that passes
+ *  `allowedCwd: REPO_ROOT` (this constant, computed fresh in whichever checkout is actually running) scopes
+ *  reaping to "sessions THIS checkout's own dispatchers spawned" with no hardcoded path and no new
+ *  configuration — see {@link classifySessionReap}'s cwd guard below. */
+export const REPO_ROOT = join(HERE, '..', '..');
 
 // ── PURE CORE (no fs / exec / clock — every signal is injected) ────────────────────────────────────────────
 
@@ -131,13 +143,25 @@ export const ALREADY_STOPPED_STATES = new Set(['stopped']);
  * the STATE-ONLY axis; see {@link classifySessionReapWithGroundTruth} for the axis that can ALSO reap a
  * `not-terminal` row once its target is independently confirmed done.
  *
+ * `allowedCwd` IS A SECOND STRUCTURAL GUARD, CHECKED RIGHT AFTER `kind` (epic #3383 daemon split). A caller
+ * that only spawns sessions into ONE dedicated checkout (every daemon in this repo does — see {@link REPO_ROOT}'s
+ * own doc) can pass that checkout's root here to scope reaping to "sessions THIS process's own dispatchers
+ * spawned", never a session that merely happens to share a name pattern from some other checkout (a lane, the
+ * primary tree, a different daemon's clone). Omitting it (the default) makes this byte-identical to the
+ * pre-#3383 behavior — additive, never a behavior change for an existing caller that doesn't opt in.
+ *
  * @param {object|null} session - one element of a `claude agents --json` listing.
- * @returns {{reap:boolean, reason:('done'|'failed'|'already-stopped'|'not-background'|'not-terminal')}}
+ * @param {{allowedCwd?:string}} [opts]
+ * @returns {{reap:boolean, reason:('done'|'failed'|'already-stopped'|'not-background'|'wrong-cwd'|'not-terminal')}}
  */
-export function classifySessionReap(session) {
+export function classifySessionReap(session, { allowedCwd } = {}) {
   if (!session || typeof session !== 'object') return { reap: false, reason: 'not-terminal' };
-  // Structural guard FIRST — see the file header on why this can never be state-dependent.
+  // Structural guards FIRST, in order — see the file header (`kind`) and this function's own doc (`cwd`) on
+  // why neither can ever be state-dependent.
   if (session.kind !== 'background') return { reap: false, reason: 'not-background' };
+  if (typeof allowedCwd === 'string' && allowedCwd && session.cwd !== allowedCwd) {
+    return { reap: false, reason: 'wrong-cwd' };
+  }
   const state = session.state;
   if (TERMINAL_REAP_STATES.has(state)) return { reap: true, reason: state };
   if (ALREADY_STOPPED_STATES.has(state)) return { reap: false, reason: 'already-stopped' };
@@ -168,42 +192,110 @@ export function sessionTarget(name) {
 
 /**
  * {@link classifySessionReap}'s verdict, UPGRADED to `reap:true` when the base verdict is `not-terminal` AND
- * the injected `groundTruthFor` resolver independently confirms the session's own target is done. Never
- * downgrades a verdict, never touches `not-background`/`already-stopped`/already-terminal rows, and never
- * fires without BOTH a derivable target ({@link sessionTarget}) and a resolver answer of `resolved: true` —
- * an unresolvable name, a `null` answer (unknown), or `resolved: false` all fall through to the base verdict
- * unchanged. Omitting `groundTruthFor` (or passing a non-function) makes this byte-identical to
- * {@link classifySessionReap} — the new axis is strictly additive.
+ * one of THREE independent axes confirms the session is actually done, tried in this order:
+ *
+ *   1. **The session's own self-reported completion record** ({@link ../operations/completion-store.mjs},
+ *      #3436) — the most direct signal there is, since `review-*`/`fix-*` agent briefs write `status: 'done'`
+ *      to it at their own exit, keyed by their own exact session name. Injected as `completionFor(name)`;
+ *      never called for a name `completionPath` would refuse (an interactive session's free-text name, say) —
+ *      the caller (`makeCompletionResolver`, below) already wraps that in a try/catch, so this axis simply
+ *      never fires rather than throwing.
+ *   2. **The pre-existing backlog-item / PR-merged ground truth** ({@link groundTruthForItem} /
+ *      {@link groundTruthForPr}, unchanged from before #3383) — same as before this file's daemon-split work.
+ *   3. **A generous idle timeout**, LAST RESORT ONLY: a `blocked` session (never `working` — see
+ *      `neverReapWorking` below — and never a bare `undefined` state, which is too ambiguous a shape to time
+ *      out on) that axes 1–2 could not confirm EITHER WAY (no completion record, no derivable target, or a
+ *      resolver answer of `null`/unknown) is reaped once it has sat past `idleThresholdMs` since its own
+ *      `startedAt`. Deliberately gated OFF a `resolved: false` answer — if axis 2 explicitly said "still
+ *      genuinely open" (`we:backlog/2786-*.md`'s own shape), age never overrides that. `idleThresholdMs`
+ *      defaults to `0` (disabled) — this is an approximation (session START time, not last-activity time; no
+ *      such field exists in a `claude agents --json` row), so a caller opts in deliberately rather than this
+ *      function silently starting to time sessions out.
+ *
+ * `neverReapWorking` (default `false`, preserving every existing caller's behavior byte for byte) is a
+ * caller-scoped STRICTER MODE: when `true`, a `state: 'working'` row is never upgraded by ANY of the three
+ * axes above, full stop — even a completion record or a merged PR leaves it `not-terminal`/kept. This exists
+ * because a daemon calling this reaper against LIVE production sessions for the first time (epic #3383) wants
+ * a stronger guarantee than the original 2026-09-03 ground-truth axis shipped with: "the listing says this
+ * session is still actively doing something" is treated as authoritative over any secondary signal, never
+ * second-guessed. The ORIGINAL axis (this flag `false`, still the function's own default) is unchanged and
+ * still exercised by every pre-existing test in this file — see `session-reaper.test.mjs`'s own
+ * `review-1862`-while-`working` case, which predates this flag and still passes exactly as before.
+ *
+ * Never downgrades a verdict, never touches `not-background`/`wrong-cwd`/`already-stopped`/already-terminal
+ * rows. Omitting every new option (or passing a non-function `groundTruthFor`) makes this byte-identical to
+ * the pre-#3383 function — every addition here is strictly additive.
  *
  * @param {object|null} session
  * @param {((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null} [groundTruthFor]
+ * @param {{
+ *   allowedCwd?: string,
+ *   neverReapWorking?: boolean,
+ *   completionFor?: ((name:string) => ({done:boolean}|null))|null,
+ *   idleThresholdMs?: number,
+ *   now?: number,
+ * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
-export function classifySessionReapWithGroundTruth(session, groundTruthFor) {
-  const base = classifySessionReap(session);
-  if (base.reap || base.reason !== 'not-terminal' || typeof groundTruthFor !== 'function') return base;
-  const target = sessionTarget(session?.name);
-  if (!target) return base; // no derivable target — never guess
-  const truth = groundTruthFor(target);
-  if (truth && truth.resolved === true) {
-    return { reap: true, reason: `ground-truth-${target.kind}:${truth.evidence || target.id}` };
+export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
+  const { allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now() } = opts || {};
+  const base = classifySessionReap(session, { allowedCwd });
+  if (base.reap || base.reason !== 'not-terminal') return base;
+  if (neverReapWorking && session?.state === 'working') return base; // strictly-stricter mode — see doc above
+
+  // Axis 1 — the session's own completion record (see doc above for why this is tried first).
+  if (typeof completionFor === 'function') {
+    const record = completionFor(session?.name);
+    if (record && record.done === true) return { reap: true, reason: 'completion-record-done' };
   }
-  return base; // unresolved / unknown / not yet done — leave it exactly as the state-only axis would
+
+  // Axis 2 — the pre-existing backlog-item / PR-merged ground truth, unchanged.
+  let confirmedStillOpen = false; // a definite `resolved:false` — axis 3 must never override this
+  if (typeof groundTruthFor === 'function') {
+    const target = sessionTarget(session?.name);
+    if (target) {
+      const truth = groundTruthFor(target);
+      if (truth && truth.resolved === true) {
+        return { reap: true, reason: `ground-truth-${target.kind}:${truth.evidence || target.id}` };
+      }
+      if (truth && truth.resolved === false) confirmedStillOpen = true;
+    }
+  }
+
+  // Axis 3 — the idle-timeout backstop, LAST resort only (see doc above for every gating condition).
+  if (
+    !confirmedStillOpen && idleThresholdMs > 0 && session?.state === 'blocked'
+    && typeof session?.startedAt === 'number' && Number.isFinite(session.startedAt)
+  ) {
+    const age = now - session.startedAt;
+    if (age >= idleThresholdMs) return { reap: true, reason: `idle-threshold:${age}ms` };
+  }
+
+  return base; // unresolved / unknown / not yet done / still too young — leave it exactly as the state-only axis would
 }
 
 /**
  * Map {@link classifySessionReapWithGroundTruth} over a full `claude agents --json` listing. Passing no
- * `groundTruthFor` (the default) makes this byte-identical to mapping {@link classifySessionReap} alone —
- * every existing caller/test is unaffected.
+ * `groundTruthFor` and no other option (the default) makes this byte-identical to mapping
+ * {@link classifySessionReap} alone — every existing caller/test is unaffected. Every option is a straight
+ * pass-through to {@link classifySessionReapWithGroundTruth} — see that function's own doc for what each one
+ * does.
  * @param {unknown[]} sessions
- * @param {{groundTruthFor?: ((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null}} [opts]
+ * @param {{
+ *   groundTruthFor?: ((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null,
+ *   allowedCwd?: string,
+ *   neverReapWorking?: boolean,
+ *   completionFor?: ((name:string) => ({done:boolean}|null))|null,
+ *   idleThresholdMs?: number,
+ *   now?: number,
+ * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
-export function sessionReapPlan(sessions, { groundTruthFor = null } = {}) {
+export function sessionReapPlan(sessions, { groundTruthFor = null, ...rest } = {}) {
   const reap = [];
   const keep = [];
   for (const session of Array.isArray(sessions) ? sessions : []) {
-    const verdict = classifySessionReapWithGroundTruth(session, groundTruthFor);
+    const verdict = classifySessionReapWithGroundTruth(session, groundTruthFor, rest);
     const row = { session, reason: verdict.reason };
     (verdict.reap ? reap : keep).push(row);
   }
@@ -320,6 +412,39 @@ export function makeGroundTruthResolver({
 }
 
 /**
+ * Build a `completionFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth}:
+ * reads the session's OWN self-reported completion record ({@link ../operations/completion-store.mjs}, #3436)
+ * by its exact `name` (the same slug `review-dispatch.mjs`/`reconcile-fix-dispatch.mjs` mint and the agent
+ * brief reports against — no attempt-letter suffix exists for PR-kind names, see `session-slug.mjs`, so this
+ * is an exact match, never a prefix guess). `done: true` iff the record's `status` is `'done'`; a missing
+ * record, an invalid slug (`completionPath` refuses one — e.g. an interactive session's free-text name), or
+ * any read failure all answer `null` (unknown) — NEVER a guess, matching every other resolver in this file.
+ * @param {{dir?:string}} [io]
+ * @returns {(name:string) => ({done:boolean}|null)}
+ */
+export function makeCompletionResolver({ dir } = {}) {
+  return function completionFor(name) {
+    if (typeof name !== 'string' || !name) return null;
+    try {
+      const record = tryReadCompletion(name, dir);
+      return record ? { done: record.status === 'done' } : null;
+    } catch {
+      return null; // invalid slug / unreadable record — unknown, never reap on an unreadable signal
+    }
+  };
+}
+
+/**
+ * The idle-timeout backstop's default threshold (6 hours) — see {@link classifySessionReapWithGroundTruth}'s
+ * "Axis 3" doc for exactly when this applies (a `blocked` session, name+cwd already confirmed spawned by THIS
+ * checkout, that neither the completion-record nor the backlog/PR axis could confirm either way). Generous on
+ * purpose: this is measured from `startedAt` (session START, not last-activity — no such field exists in a
+ * `claude agents --json` row), so it is a deliberately loose approximation, not a tight SLA. A caller that
+ * wants it OFF passes `idleThresholdMs: 0` (also this function's own default when omitted).
+ */
+export const DEFAULT_IDLE_REAP_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+
+/**
  * How many total attempts (1 initial + retries) the stop loop below makes for ONE candidate before counting it
  * a real failure — found live 2026-09-04 (WE #3435/#3383 epic): a live tick's `runQuiet` (`we:skills-src/
  * conveyor/runner.mjs`) logged exactly one mechanical-pass failure for this file over 190+ ticks of a live
@@ -382,14 +507,46 @@ function parseFlags(argv) {
   return flags;
 }
 
-function main(argv) {
-  const flags = parseFlags(argv);
-  const dryRun = !!flags['dry-run'];
-  // `--no-ground-truth` is an escape hatch back to the original state-only axis, for a rollback or an
-  // A/B live comparison — the default is ON, matching the operator's own instruction that this axis should
-  // actually run, not merely exist.
-  const groundTruthFor = flags['no-ground-truth'] ? null : makeGroundTruthResolver({ exec: execFileSync });
-
+/**
+ * THE REUSABLE IO-SHELL PASS (epic #3383 daemon split) — everything `main()` used to do BETWEEN reading argv
+ * and printing/exiting, pulled out so a resident daemon (e.g. `we:skills-src/conveyor/review-daemon.mjs`) can
+ * call this directly, once per tick, exactly like it already calls `runReconcilePass`/`dispatchReview` — no
+ * `node <this file>` subprocess needed. Never calls `process.exit`; the CLI `main()` below is now a thin argv
+ * → options mapper plus printing, calling this and translating the result into stdout/exit code.
+ *
+ * Every IO dependency is injectable, defaulting to the real one, so this is unit-tested with fakes exactly like
+ * every other function in this file. `listAgents` defaults to the real `defaultListAgents({ all: true })` —
+ * see the inline comment at that call site (moved here verbatim) for why `all: true` is load-bearing.
+ *
+ * @param {{
+ *   listAgents?: () => unknown[],
+ *   groundTruthFor?: ((target:object) => object|null)|null,
+ *   completionFor?: ((name:string) => object|null)|null,
+ *   allowedCwd?: string,
+ *   neverReapWorking?: boolean,
+ *   idleThresholdMs?: number,
+ *   now?: number,
+ *   dryRun?: boolean,
+ *   stop?: Function,
+ *   log?: (msg:string) => void,
+ * }} [o]
+ * @returns {{
+ *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
+ *   wouldStop: Array|undefined, collected: Array|undefined, kept: number,
+ * }}
+ */
+export function runSessionReaperPass({
+  listAgents = () => defaultListAgents({ exec: execFileSync, all: true }),
+  groundTruthFor = makeGroundTruthResolver({ exec: execFileSync }),
+  completionFor = makeCompletionResolver(),
+  allowedCwd,
+  neverReapWorking = false,
+  idleThresholdMs = 0,
+  now = Date.now(),
+  dryRun = false,
+  stop = stopSessionWithRetry,
+  log: logFn = log,
+} = {}) {
   let sessions;
   try {
     // `all: true` IS LOAD-BEARING (#3435 review finding): every OTHER caller of `defaultListAgents` (the
@@ -399,16 +556,19 @@ function main(argv) {
     // made `sessionReapPlan` compute `reap: []` on every real invocation; `claude stop` was never called, and
     // the clutter #3435 was filed to fix never actually got touched. See `defaultListAgents`'s own docblock
     // (`we:scripts/operations/dispatch-lane-io.mjs`) for why the OTHER callers must not also flip this.
-    sessions = defaultListAgents({ exec: execFileSync, all: true });
+    sessions = listAgents();
   } catch (e) {
     // Best-effort like every other mechanical pass (Done-when #3): an unreadable listing means there is
     // nothing safe to act on this tick, not a hard failure — the next tick tries again.
-    log(`  ⚠ \`claude agents --json\` unreadable — session-reaper skipping this tick: ${String(e?.message || e).split('\n')[0]}`);
-    process.exit(0);
+    logFn(`  ⚠ \`claude agents --json\` unreadable — session-reaper skipping this tick: ${String(e?.message || e).split('\n')[0]}`);
+    // `unreadable: true` lets a caller (the CLI `main()` below) reproduce the pre-#3383 behavior exactly — an
+    // unreadable listing exits clean with NO stdout report at all, not a "0 of everything" summary that could
+    // be misread as a real, empty, successfully-scanned tick.
+    return { scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, wouldStop: dryRun ? [] : undefined, collected: dryRun ? undefined : [], kept: 0, unreadable: true };
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -424,62 +584,89 @@ function main(argv) {
     // this guard exists to catch).
     const handle = normalizeHandle(session.id);
     if (!handle) {
-      log(`  ⚠ ${session.sessionId ?? session.name ?? 'unknown'}: reap candidate is missing \`id\` — should never happen for a \`kind: background\` row, skipping and flagging as an anomaly`);
+      logFn(`  ⚠ ${session.sessionId ?? session.name ?? 'unknown'}: reap candidate is missing \`id\` — should never happen for a \`kind: background\` row, skipping and flagging as an anomaly`);
       anomalies++;
       continue;
     }
     if (dryRun) {
-      log(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
+      logFn(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       continue;
     }
     try {
       // Retried — see {@link stopSessionWithRetry}'s own doc for why: a `claude stop` failure found live
       // 2026-09-04 was a transient CLI-internal hiccup, not a hard bug, and usually clears within a beat.
-      const res = stopSessionWithRetry({ handle, exec: execFileSync });
+      const res = stop({ handle, exec: execFileSync });
       if (res.alreadyGone) alreadyGone++;
       else stopped++;
-      log(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
+      logFn(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       done.push({ id: handle, sessionId: normalizeHandle(session.sessionId) || null, name: session.name ?? null, reason, alreadyGone: res.alreadyGone });
     } catch (e) {
       // ONE session's stop failing never blocks the rest of the pass (Done-when #3) — the same
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
       // as per-candidate, not pass-fatal. Reaches here only after `STOP_RETRY_ATTEMPTS` all failed, so this IS
       // a real (not merely transient) failure — worth saying so, since the retry count is otherwise invisible.
-      log(`  ⚠ ${handle}: stop failed after ${STOP_RETRY_ATTEMPTS} attempts (${String(e?.message || e).split('\n')[0]}) — left for the next tick`);
+      logFn(`  ⚠ ${handle}: stop failed after ${STOP_RETRY_ATTEMPTS} attempts (${String(e?.message || e).split('\n')[0]}) — left for the next tick`);
       failures++;
     }
   }
 
+  return {
+    scanned: sessions.length,
+    stopped: dryRun ? 0 : stopped,
+    alreadyGone: dryRun ? 0 : alreadyGone,
+    failures: dryRun ? 0 : failures,
+    anomalies,
+    wouldStop: dryRun
+      ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
+      : undefined,
+    collected: dryRun ? undefined : done,
+    kept: keep.length,
+  };
+}
+
+function main(argv) {
+  const flags = parseFlags(argv);
+  const dryRun = !!flags['dry-run'];
+  // `--no-ground-truth` is an escape hatch back to the original state-only axis, for a rollback or an
+  // A/B live comparison — the default is ON, matching the operator's own instruction that this axis should
+  // actually run, not merely exist.
+  const groundTruthFor = flags['no-ground-truth'] ? null : makeGroundTruthResolver({ exec: execFileSync });
+  // `--no-completion-record` is the same kind of rollback escape hatch, for the newer (epic #3383) axis.
+  const completionFor = flags['no-completion-record'] ? null : makeCompletionResolver();
+  // `--allowed-cwd=<path>` scopes reaping to sessions spawned from that checkout (see `classifySessionReap`'s
+  // own doc) — opt-in, so every pre-existing invocation of this CLI (fixtures with no `cwd` field at all)
+  // keeps working unchanged. A daemon wires this to its OWN `REPO_ROOT` (this file's own, when it imports
+  // {@link runSessionReaperPass} directly instead of shelling this CLI).
+  const allowedCwd = typeof flags['allowed-cwd'] === 'string' ? flags['allowed-cwd'] : undefined;
+  // `--never-reap-working` is the caller-scoped stricter mode described on `classifySessionReapWithGroundTruth`
+  // — opt-in for the identical backward-compatibility reason.
+  const neverReapWorking = !!flags['never-reap-working'];
+  // `--idle-hours=<n>` enables the idle-timeout backstop (axis 3) — `0`/omitted keeps it off, matching the
+  // pure core's own default.
+  const idleThresholdMs = flags['idle-hours'] !== undefined ? Number(flags['idle-hours']) * 60 * 60 * 1000 : 0;
+
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun });
+
+  if (result.unreadable) {
+    // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
+    // stdout report (the warning already went to stderr inside `runSessionReaperPass`).
+    process.exit(0);
+  }
+
   if (flags.json) {
-    process.stdout.write(
-      JSON.stringify(
-        {
-          scanned: sessions.length,
-          stopped: dryRun ? 0 : stopped,
-          alreadyGone: dryRun ? 0 : alreadyGone,
-          failures: dryRun ? 0 : failures,
-          anomalies,
-          wouldStop: dryRun
-            ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
-            : undefined,
-          collected: dryRun ? undefined : done,
-          kept: keep.length,
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } else {
+    const { scanned, stopped, alreadyGone, failures, anomalies, wouldStop, kept } = result;
     log(
-      `session-reaper: ${sessions.length} session(s) listed · ` +
-        `${dryRun ? `${reap.length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${keep.length} kept`,
+      `session-reaper: ${scanned} session(s) listed · ` +
+        `${dryRun ? `${(wouldStop ?? []).length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${kept} kept`,
     );
   }
   // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its
   // `id` (the anomaly case — see the loop above) — mirrors lease-reaper.mjs's own convention, so a cron/loop
   // wrapper can tell a clean sweep from a partial one. `runQuiet` (the runner's own caller) swallows this
   // either way — it is surfaced for anyone invoking the CLI directly.
-  process.exit(failures > 0 || anomalies > 0 ? 1 : 0);
+  process.exit(result.failures > 0 || result.anomalies > 0 ? 1 : 0);
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).

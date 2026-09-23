@@ -17,11 +17,14 @@ import {
   groundTruthForItem,
   groundTruthForPr,
   makeGroundTruthResolver,
+  makeCompletionResolver,
+  DEFAULT_IDLE_REAP_THRESHOLD_MS,
   TERMINAL_REAP_STATES,
   ALREADY_STOPPED_STATES,
   stopSessionWithRetry,
   STOP_RETRY_ATTEMPTS,
   STOP_RETRY_BACKOFF_MS,
+  runSessionReaperPass,
 } from '../session-reaper.mjs';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
@@ -403,4 +406,187 @@ it('shares the lookup cap across repos', () => {
   expect(calls).toBe(1);
   expect(plan.reap.map((r) => r.session.name)).toEqual(['review-49']);
   expect(plan.keep.map((r) => r.session.name)).toEqual(['review-fui-49']);
+});
+
+// ── epic #3383 daemon split: cwd scoping, the never-reap-working stricter mode, the completion-record axis,
+//    and the idle-timeout backstop. All four are ADDITIVE (see each function's own doc) — every test above
+//    this point exercises the pre-#3383 default and still passes unchanged. ──────────────────────────────────
+
+describe('classifySessionReap — allowedCwd, a second structural guard (epic #3383)', () => {
+  it('omitting allowedCwd is byte-identical to before — no behavior change for an existing caller', () => {
+    expect(classifySessionReap(bg({ state: 'done' }))).toEqual({ reap: true, reason: 'done' });
+    expect(classifySessionReap(bg({ state: 'done' }), {})).toEqual({ reap: true, reason: 'done' });
+  });
+  it('a session whose cwd does not match allowedCwd is never reaped, even a `done` one', () => {
+    expect(classifySessionReap(bg({ state: 'done', cwd: '/some/other/checkout' }), { allowedCwd: '/repo' }))
+      .toEqual({ reap: false, reason: 'wrong-cwd' });
+  });
+  it('a session whose cwd matches allowedCwd is reaped normally', () => {
+    expect(classifySessionReap(bg({ state: 'done', cwd: '/repo' }), { allowedCwd: '/repo' }))
+      .toEqual({ reap: true, reason: 'done' });
+  });
+  it('the cwd guard is checked before the state axis — a wrong-cwd working session is `wrong-cwd`, not `not-terminal`', () => {
+    expect(classifySessionReap(bg({ state: 'working', cwd: '/elsewhere' }), { allowedCwd: '/repo' }))
+      .toEqual({ reap: false, reason: 'wrong-cwd' });
+  });
+  it('an empty-string allowedCwd is treated as "no guard" (never refuses every session with a falsy cwd)', () => {
+    expect(classifySessionReap(bg({ state: 'done' }), { allowedCwd: '' })).toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — neverReapWorking (epic #3383 stricter mode)', () => {
+  const alwaysResolved = () => ({ resolved: true, evidence: 'x' });
+  const alwaysDone = () => ({ done: true });
+
+  it('defaults to false — a `working` session is still upgradable by ground truth (unchanged pre-existing behavior)', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-1862' }), alwaysResolved))
+      .toEqual({ reap: true, reason: 'ground-truth-pr:x' });
+  });
+  it('true — a `working` session is NEVER upgraded, even when ground truth says resolved', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-1862' }), alwaysResolved, { neverReapWorking: true }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('true — a `working` session is NEVER upgraded, even by a completion record reporting done', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-1862' }), null, { neverReapWorking: true, completionFor: alwaysDone }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('true — a `blocked` session (never `working`) is still upgradable', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-1862' }), alwaysResolved, { neverReapWorking: true }))
+      .toEqual({ reap: true, reason: 'ground-truth-pr:x' });
+  });
+  it('true — an already-terminal `done` session is unaffected (the flag only touches the ground-truth axis)', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'done', name: 'review-1862' }), alwaysResolved, { neverReapWorking: true }))
+      .toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — the completion-record axis (epic #3383, #3436)', () => {
+  it('a `blocked` session whose completion record reports done is reaped, tried BEFORE backlog/PR ground truth', () => {
+    let groundTruthCalled = false;
+    const groundTruthFor = () => { groundTruthCalled = true; return { resolved: false }; };
+    const completionFor = () => ({ done: true });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-1862' }), groundTruthFor, { completionFor }))
+      .toEqual({ reap: true, reason: 'completion-record-done' });
+    expect(groundTruthCalled).toBe(false); // axis 1 fired first — axis 2 never needed to run
+  });
+  it('a completion record reporting NOT done falls through to the backlog/PR axis, never reaps on its own', () => {
+    const completionFor = () => ({ done: false });
+    const groundTruthFor = () => ({ resolved: true, evidence: 'pr#1862:merged' });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-1862' }), groundTruthFor, { completionFor }))
+      .toEqual({ reap: true, reason: 'ground-truth-pr:pr#1862:merged' });
+  });
+  it('a `null` (unknown) completion-record answer falls through cleanly — never a guess', () => {
+    const completionFor = () => null;
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-1862' }), () => ({ resolved: false }), { completionFor }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('omitting completionFor entirely is byte-identical to before — additive only', () => {
+    const groundTruthFor = () => ({ resolved: false });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-1862' }), groundTruthFor))
+      .toEqual(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-1862' }), groundTruthFor, {}));
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — the idle-timeout backstop, axis 3 (epic #3383)', () => {
+  it('disabled by default (idleThresholdMs: 0) — a stale, unconfirmed `blocked` session is kept', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'test-dontask', startedAt: 0 }), null, { now: DEFAULT_IDLE_REAP_THRESHOLD_MS * 10 }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('reaps a `blocked` session once it has aged past the threshold with no other axis able to confirm it', () => {
+    const now = 10_000_000;
+    const startedAt = now - DEFAULT_IDLE_REAP_THRESHOLD_MS - 1;
+    const verdict = classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'test-dontask', startedAt }), null, { idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS, now });
+    expect(verdict.reap).toBe(true);
+    expect(verdict.reason).toBe(`idle-threshold:${DEFAULT_IDLE_REAP_THRESHOLD_MS + 1}ms`);
+  });
+  it('never fires before the threshold is reached', () => {
+    const now = 10_000_000;
+    const startedAt = now - DEFAULT_IDLE_REAP_THRESHOLD_MS + 1;
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'test-dontask', startedAt }), null, { idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS, now }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('NEVER fires for `working` — the idle clock is not a way around neverReapWorking or the working axis', () => {
+    const now = 10_000_000;
+    const startedAt = now - DEFAULT_IDLE_REAP_THRESHOLD_MS - 1;
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'test-dontask', startedAt }), null, { idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS, now }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('never overrides an explicit `resolved: false` from the backlog/PR axis — positive "still open" evidence wins over age', () => {
+    const now = 10_000_000;
+    const startedAt = now - DEFAULT_IDLE_REAP_THRESHOLD_MS - 1;
+    const stillOpen = () => ({ resolved: false });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'conveyor-2786', startedAt }), stillOpen, { idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS, now }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+  it('a missing/non-numeric startedAt never crashes and never fires', () => {
+    const { startedAt, ...noStart } = bg({ state: 'blocked', name: 'test-dontask' });
+    expect(classifySessionReapWithGroundTruth(noStart, null, { idleThresholdMs: 1 }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+});
+
+describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls directly (epic #3383)', () => {
+  it('with every effect injected (no real fs/exec), stops the reaped session and reports the same shape the CLI prints', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => [
+        { id: 'done1', sessionId: 'done-1-full-uuid', cwd: '/daemon-clone', kind: 'background', state: 'done', name: 'review-1862' },
+        { id: 'live1', sessionId: 'live-1-full-uuid', cwd: '/daemon-clone', kind: 'background', state: 'working', name: 'fix-99' },
+      ],
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      allowedCwd: '/daemon-clone',
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      log: () => {},
+    });
+    expect(result.scanned).toBe(2);
+    expect(result.stopped).toBe(1);
+    expect(result.kept).toBe(1);
+    expect(result.collected).toEqual([{ id: 'done1', sessionId: 'done-1-full-uuid', name: 'review-1862', reason: 'done', alreadyGone: false }]);
+  });
+
+  it('an unreadable listing returns `unreadable: true` and touches nothing else — never throws', () => {
+    const result = runSessionReaperPass({ listAgents: () => { throw new Error('claude: command not found'); }, log: () => {} });
+    expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, wouldStop: undefined, collected: [], kept: 0, unreadable: true });
+  });
+
+  it('a `dry-run` pass never calls `stop` at all', () => {
+    let stopCalls = 0;
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'done1', sessionId: 'done-1-full-uuid', kind: 'background', state: 'done', name: 'conveyor-1' }],
+      groundTruthFor: null,
+      completionFor: null,
+      dryRun: true,
+      stop: () => { stopCalls++; return { stopped: true, alreadyGone: false, output: '' }; },
+      log: () => {},
+    });
+    expect(stopCalls).toBe(0);
+    expect(result.wouldStop).toEqual([{ id: 'done1', sessionId: 'done-1-full-uuid', name: 'conveyor-1', reason: 'done' }]);
+  });
+
+  it('threads neverReapWorking + completionFor + allowedCwd through to the plan exactly like sessionReapPlan does directly', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'w1', sessionId: 'w1-full', cwd: '/daemon-clone', kind: 'background', state: 'working', name: 'review-1862' }],
+      groundTruthFor: () => ({ resolved: true, evidence: 'pr#1862:merged' }),
+      completionFor: () => ({ done: true }),
+      allowedCwd: '/daemon-clone',
+      neverReapWorking: true,
+      dryRun: true,
+      log: () => {},
+    });
+    expect(result.wouldStop).toEqual([]);
+    expect(result.kept).toBe(1);
+  });
+});
+
+describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3436)', () => {
+  it('returns null for a name completionPath refuses (e.g. an interactive session\'s free-text name) — never throws', () => {
+    const resolver = makeCompletionResolver({ dir: '/does/not/matter' });
+    expect(resolver('my terminal')).toBeNull();
+    expect(resolver('')).toBeNull();
+    expect(resolver(null)).toBeNull();
+  });
+  it('returns null when no record exists on disk for an otherwise-valid slug', () => {
+    const resolver = makeCompletionResolver({ dir: '/tmp/we-session-reaper-completion-resolver-test-nonexistent' });
+    expect(resolver('review-999999')).toBeNull();
+  });
 });

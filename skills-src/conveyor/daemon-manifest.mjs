@@ -86,8 +86,46 @@ function perRepoEntries(passName, script, args) {
  */
 const ORPHAN_CLAIM_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * epic #3383 — the ORPHAN-PR SWEEP (`scripts/merge-ai-prs.mjs`, bare/no `--label`), wired onto `pass-daemon.mjs`
+ * for the FIRST time. Found live (PR #2504, `lane/wip-socket-card`): a PR carrying ONLY the `checking` label
+ * (CI green, nothing else) has no `.lane-manifest.json`-derived owner, so `reconcile-pass.mjs` reports it
+ * `nothing-owed`/phase `open` — genuinely correct, since reconcile only tracks producer-completed
+ * (`ready-to-merge`-labelled) or review-parked PRs, never a bare AI-authored PR sitting on `checking` with no
+ * label transition at all. The one pass that DOES cover this population is documented in `merge-ai-prs.mjs`'s
+ * own header: bare (no `--label`) is "the `/merge` orphan sweep" — every OTHER daemon in this epic (the
+ * review daemon, the fix-dispatch daemon, every `pass-daemon.mjs` watcher above) is downstream of
+ * `reconcile-pass.mjs`'s own discovery, so NONE of them would ever surface #2504 either; only the bare sweep
+ * lists ALL open PRs directly via its own `gh pr list`, independent of reconcile.
+ *
+ * SAFE TO RUN PERIODICALLADY, UNCONDITIONALLY, ALONGSIDE ANY OTHER LANDER. `merge-ai-prs.mjs`'s own header
+ * ("SOLE WRITER TO MAIN #2290") already serializes every real `gh pr merge` through its own whole-process drain
+ * lease + `pr-merge-gate.mjs` — the SAME mutual-exclusion primitive an interactive `/merge`/`/pr`/`/finish`
+ * run, or an already-resident `--label=ready-to-merge --watch` drain (if one is running), also goes through.
+ * So EITHER this periodic bare sweep is the only lander touching an orphan PR (the live #2504 case — it does
+ * real, needed work), OR another lander already holds the drain lease this tick (a no-op, exactly the
+ * "efficiency no-op, not a safety refusal" shape `reconcile-fix-dispatch-daemon.mjs`'s own header already
+ * documents for its analogous case) — this manifest entry is correct and inert-when-redundant either way, so
+ * it does not need to know which case is live before being added. `pass-daemon.mjs`'s OWN lease (this entry's
+ * name, `merge-orphan-sweep`) only prevents TWO COPIES of this SAME periodic sweep — a separate concern from
+ * `merge-ai-prs.mjs`'s own internal drain lease, which is what actually protects `main`.
+ *
+ * NEVER `--label=ready-to-merge` here — that is the DIFFERENT, already-covered `/drain` role (a resident watch,
+ * if one exists, is out of this epic's scope; this entry deliberately does not duplicate it). No `--repos`/
+ * `--this-repo` either — bare already defaults to the full constellation (self + WE/FrontierUI/plateau-app,
+ * confirmed by direct read of `resolveRepos`'s own `#2287` comment), matching the `/merge` skill's own scope.
+ *
+ * INTERVAL: real merges are heavier than a read-only watch (a `gh pr list` sweep across the constellation plus
+ * a possible `gh pr merge`+branch-delete per qualifying PR) — 15 minutes is generous enough that an orphaned
+ * PR is never stuck for long (unlike `orphan-claim-release`'s 6 h, which acts on cards idle for 48 h+) while
+ * staying well clear of API rate-limit pressure the file header's own `xsdm0n7` finding named for this exact
+ * daemon family.
+ */
+const MERGE_ORPHAN_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+
 export const DAEMON_MANIFEST = {
   'orphan-claim-release': { script: 'scripts/conveyor/orphan-claim-release.mjs', args: ['--apply'], intervalMs: ORPHAN_CLAIM_INTERVAL_MS },
+  'merge-orphan-sweep': { script: 'scripts/merge-ai-prs.mjs', args: [], intervalMs: MERGE_ORPHAN_SWEEP_INTERVAL_MS },
   'branch-drift': { script: 'scripts/conveyor/branch-drift.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   'infra-blocked': { script: 'scripts/conveyor/infra-blocked.mjs', args: ['retry'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   'duplicate-pr-watch': { script: 'scripts/conveyor/duplicate-pr-watch.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },

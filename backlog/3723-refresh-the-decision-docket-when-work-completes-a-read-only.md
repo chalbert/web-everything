@@ -3,10 +3,13 @@ bornAs: xc1u3pi
 kind: story
 size: 3
 parent: "3718"
-status: open
+status: resolved
 relatedTo: ["3562", "3277", "3720", "3719"]
 scope: ["we:scripts/operations/docket-refresh.mjs", "we:scripts/operations/docket-refresh-io.mjs", "we:scripts/gen-decision-docket.mjs", "we:scripts/operations/__tests__/docket-refresh.test.mjs"]
 dateOpened: "2026-09-19"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: "the docket-refresh declared operation (scripts/operations/docket-refresh.mjs + docket-refresh-io.mjs), registered in scripts/operations/run.mjs and skills-src/decision-docket/SKILL.md"
 tags: []
 ---
 
