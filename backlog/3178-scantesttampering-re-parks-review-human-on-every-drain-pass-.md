@@ -1,7 +1,7 @@
 ---
 bornAs: xuboo0q
 kind: task
-status: active
+status: open
 dateOpened: "2026-08-17"
 dateStarted: "2026-08-17"
 tags: []

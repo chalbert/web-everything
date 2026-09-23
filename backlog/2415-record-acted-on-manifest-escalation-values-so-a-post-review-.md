@@ -2,7 +2,7 @@
 kind: story
 size: 2
 parent: "2405"
-status: active
+status: open
 dateOpened: "2026-07-10"
 tags: [gate, review, drain, gate-self]
 scope:

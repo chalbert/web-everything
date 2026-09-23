@@ -79,7 +79,15 @@ function perRepoEntries(passName, script, args) {
  * pass-by-pass cutover, the same discipline #3870/#3876 already followed): standing up a daemon here does
  * not yet retire the old runner's own copy of the same sweep.
  */
+/**
+ * #3913 — the orphaned-claim release pass runs far less often than the watchers: it acts on cards idle for
+ * over 48 h and each writing run opens a PR, so a 6-hour cadence loses nothing and keeps the PR rate low. It
+ * never stacks PRs — a run that sees its own previous PR still open writes nothing.
+ */
+const ORPHAN_CLAIM_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 export const DAEMON_MANIFEST = {
+  'orphan-claim-release': { script: 'scripts/conveyor/orphan-claim-release.mjs', args: ['--apply'], intervalMs: ORPHAN_CLAIM_INTERVAL_MS },
   'branch-drift': { script: 'scripts/conveyor/branch-drift.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   'infra-blocked': { script: 'scripts/conveyor/infra-blocked.mjs', args: ['retry'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   'duplicate-pr-watch': { script: 'scripts/conveyor/duplicate-pr-watch.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
