@@ -2,9 +2,10 @@
 kind: story
 size: 3
 parent: "xii6vye"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/pass-daemon.mjs", "we:skills-src/conveyor/__tests__/pass-daemon.test.mjs", "we:scripts/lib/daemon-self-sync.mjs"]
 dateOpened: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
