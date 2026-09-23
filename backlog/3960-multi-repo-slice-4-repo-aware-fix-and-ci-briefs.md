@@ -3,11 +3,12 @@ bornAs: xn7fg50
 kind: story
 size: 5
 parent: "3963"
-status: active
+status: resolved
 blockedBy: ["3956"]
 scope: ["we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-23"
 dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
