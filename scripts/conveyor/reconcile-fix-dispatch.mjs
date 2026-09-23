@@ -66,7 +66,7 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
   defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
-  resumeSucceeded, REPO_ROOT,
+  resolveGhShimSettingsEnv, resumeSucceeded, REPO_ROOT,
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
@@ -599,6 +599,11 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   resumeAttempt = null,
+  // #x8mpubm — same never-throwing, opt-in-gated resolver `we:scripts/operations/dispatch-lane-io.mjs`'s own
+  // `createDispatchSinks` uses for a fresh build dispatch; a fix dispatch is a SEPARATE fresh-dispatch call
+  // site (see the `buildAgentArgv` call below) so it needs its own seam, but reuses the SAME wrapper rather
+  // than re-deriving the gh-app-shim.mjs composition here.
+  resolveSettingsEnv = resolveGhShimSettingsEnv,
   // #x33jgwt multi-repo slice 5 — threaded straight through to `briefTokensForRepo`/`repoProfile`/`gateFor`
   // (all three already accept them), never re-derived here. Before this slice only `we` ever reached this
   // function, and WE's own checkout + real `homedir()` are always correct/present wherever this process runs,
@@ -642,6 +647,10 @@ export function dispatchFix(planned, {
     // unfilled template and self-aborts (3/3 live).
     systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
     extraArgs,
+    // #x8mpubm — see `resolveSettingsEnv`'s own param comment above; resolved once, here, for this FRESH
+    // dispatch only (never for `tryResumeFix`'s own `buildAgentArgv` call, which must stay a bare
+    // `--bg --resume` with no other flag — see that function's docblock).
+    settingsEnv: resolveSettingsEnv(),
   });
   // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
   // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what

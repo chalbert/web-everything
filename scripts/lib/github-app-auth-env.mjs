@@ -206,11 +206,12 @@ export function readGithubAppStatus(path = defaultStatusPath()) {
  * the same way a failed mint is — personal auth stays in effect, and the log names exactly what to grant — so
  * switching the App on can never leave the fleet less able to act than it was before. Only a token that
  * passed this check is ever written to the cache, so a cache hit needs no re-check.
- * RECORDS ITS OUTCOME (#x8mpubm), always, on every path below — including `not-configured` — to
- * {@link defaultStatusPath} by default, so a fail-closed state that would otherwise sit invisible in one
- * daemon's own log is checkable from anywhere with one file read (`we:scripts/conveyor/github-app-status.mjs`).
- * The write is best-effort ({@link writeStatusFile} never throws) and never changes what this function
- * returns — a caller that ignores `statusPath`/`writeStatus` entirely sees byte-identical behavior to before.
+ * RECORDS ITS OUTCOME (#x8mpubm) to {@link defaultStatusPath} by default, on every path EXCEPT
+ * `not-configured` (see the inline comment on `record` below for why that one reason is deliberately never
+ * written) — so a fail-closed state that would otherwise sit invisible in one daemon's own log is checkable
+ * from anywhere with one file read (`we:scripts/conveyor/github-app-status.mjs`). The write is best-effort
+ * ({@link writeStatusFile} never throws) and never changes what this function returns — a caller that ignores
+ * `statusPath`/`writeStatus` entirely sees byte-identical behavior to before.
  * @param {{env?:NodeJS.ProcessEnv, cachePath?:string, now?:number, readCache?:Function, writeCache?:Function,
  *   mint?:typeof mintInstallationToken, listRepos?:(token:string)=>Promise<string[]>,
  *   required?:{permissions?:object, repos?:string[]}, setEnv?:(token:string)=>void, log?:Console,
@@ -232,7 +233,16 @@ export async function ensureFreshGithubAppEnv({
   writeStatus = writeStatusFile,
 } = {}) {
   const record = (result) => {
-    writeStatus(statusPath, { ...result, checkedAt: new Date(now).toISOString() });
+    // `not-configured` is skipped, deliberately (#x8mpubm follow-up): this shared file reports the FLEET's
+    // installation state, and `not-configured` means only "THIS caller never opted in" — a fact about the
+    // caller, not the installation. Recording it would let any incidental, unconfigured caller (a stray local
+    // script, a test that forgot to inject `statusPath`/`writeStatus` — live-caught the same day this was
+    // added) stomp a real `insufficient-access`/`ok` a properly-configured daemon just wrote. A reader with no
+    // file at all already gets its own honest, distinct message (`readGithubAppStatus` returning `null`), so
+    // nothing is lost by skipping this one reason.
+    if (result.reason !== 'not-configured') {
+      writeStatus(statusPath, { ...result, checkedAt: new Date(now).toISOString() });
+    }
     return result;
   };
 

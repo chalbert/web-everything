@@ -15,7 +15,7 @@
  * exactly (it is the contract with the `claude` CLI), and no `claude` process is ever started by the suite.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -694,6 +694,37 @@ describe('the declared effect is a dispatch', () => {
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].expectedBy).toBe('2026-08-13T10:15:00.000Z');
   });
+
+  it('#x8mpubm — resolveSettingsEnv is called once per dispatch and its result reaches the real argv via --settings', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    let seenArgv = null;
+    const resolveSettingsEnv = vi.fn(() => ({ PATH: '/shim:/usr/bin' }));
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv) => { seenArgv = argv; return ''; },
+      mintSessionId: () => 'sess-shim',
+      resolveSettingsEnv,
+    });
+    await applyPendingEffects(run, { sinks, store });
+    expect(resolveSettingsEnv).toHaveBeenCalledTimes(1);
+    expect(seenArgv).toContain('--settings');
+    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+  });
+
+  it('#x8mpubm — resolveSettingsEnv returning null (the real default, unconfigured host) emits no --settings at all', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    let seenArgv = null;
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv) => { seenArgv = argv; return ''; },
+      mintSessionId: () => 'sess-noshim',
+      resolveSettingsEnv: () => null,
+    });
+    await applyPendingEffects(run, { sinks, store });
+    expect(seenArgv).not.toContain('--settings');
+  });
 });
 
 // ── 5. the sink's argv IS the contract with the CLI ─────────────────────────────────────────────────────────
@@ -723,6 +754,25 @@ describe('what the sink actually runs', () => {
     ]);
   });
 
+  it('#x8mpubm — settingsEnv folds into --settings \'{"env":...}\', ahead of systemPromptFile/extraArgs', () => {
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).not.toContain('--settings');
+    const argv = buildAgentArgv({
+      sessionId: 'sess-c3', payload, settingsEnv: { PATH: '/shim:/usr/bin' },
+      systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'],
+    });
+    expect(argv).toEqual([
+      '--bg', '-n', 'conveyor-3037',
+      '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }),
+      '--append-system-prompt-file', '/path/to/identity.md',
+      '--model', 'sonnet', '# build #3037',
+    ]);
+  });
+
+  it('#x8mpubm — an empty settingsEnv object emits no --settings at all, same as null/omitted', () => {
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: {} })).not.toContain('--settings');
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: null })).not.toContain('--settings');
+  });
+
   it('#xu2krte — resumeSessionId emits a BARE `--bg --resume <id> <prompt>`, no -n/systemPromptFile/extraArgs', () => {
     // The live build-time probe (docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted)
     // found any OTHER flag alongside `--resume` makes the CLI fork a copy instead of continuing the named
@@ -730,6 +780,14 @@ describe('what the sink actually runs', () => {
     const argv = buildAgentArgv({
       sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
       systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'],
+    });
+    expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
+  });
+
+  it('#x8mpubm — settingsEnv is NEVER emitted on the resume branch either, same reasoning as extraArgs above', () => {
+    const argv = buildAgentArgv({
+      sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
+      settingsEnv: { PATH: '/shim:/usr/bin' },
     });
     expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
   });

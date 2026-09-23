@@ -5,7 +5,7 @@
  *   no real network, no real GitHub App needed.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,6 +13,18 @@ import {
   REFRESH_BUFFER_MS, defaultCachePath, findInstallationGaps, CACHE_VERSION, REQUIRED_APP_PERMISSIONS, REQUIRED_APP_REPOS,
   defaultStatusPath, readGithubAppStatus,
 } from '../github-app-auth-env.mjs';
+
+// NEVER THE REAL HOME DIR (#x8mpubm follow-up, live-caught: before this existed, this suite's own pre-existing
+// tests — none of which had any reason to know status recording exists — silently wrote real, misleading
+// entries into the developer's actual `~/.claude/github-app-token/status.json` on every run, stomping
+// whatever a real daemon on the same machine had just recorded there; a `vi.mock('node:os', …)` attempt to
+// fix this at the module level was tried and DISCARDED — this suite's `environment: 'happy-dom'` resolves
+// the SUT's own `import { homedir } from 'node:os'` through a different path than this file's own import of
+// the same specifier, so the mock silently never reached the SUT). The reliable fix is explicit, at every
+// call site: this is a no-op `writeStatus` passed to every `ensureFreshGithubAppEnv` call below that is not
+// itself testing status recording (that describe block, further down, injects its own per case) — matching
+// this file's own established discipline of injecting every effect rather than trusting a real default.
+const NOOP_STATUS = { writeStatus: () => {} };
 
 const CONFIGURED_ENV = {
   WE_GITHUB_APP_ID: '5037855',
@@ -79,7 +91,7 @@ describe('THE DEPLOY INCIDENT (2026-09-23) — an unvalidated token cached by an
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
       env: CONFIGURED_ENV, now: Date.parse('2026-09-23T13:20:00Z'), readCache: () => oldEntry, writeCache: vi.fn(),
-      mint, listRepos: vi.fn(async () => []), setEnv, log: { error: vi.fn() },
+      mint, listRepos: vi.fn(async () => []), setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     expect(mint).toHaveBeenCalled();
     expect(result.reason).toBe('insufficient-access');
@@ -106,7 +118,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const mint = vi.fn();
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, setEnv,
+      env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, setEnv, ...NOOP_STATUS,
     });
     expect(result).toEqual({ applied: true, reason: 'ok' });
     expect(mint).not.toHaveBeenCalled();
@@ -120,7 +132,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_fresh', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv,
+      env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv, ...NOOP_STATUS,
     });
     expect(result).toEqual({ applied: true, reason: 'ok' });
     expect(mint).toHaveBeenCalledWith({
@@ -137,7 +149,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const writeCache = vi.fn();
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_new', expiresAt: '2026-09-23T14:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
-    await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv });
+    await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv, ...NOOP_STATUS });
     expect(mint).toHaveBeenCalled();
     expect(setEnv).toHaveBeenCalledWith('ghs_new');
   });
@@ -147,7 +159,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const mint = vi.fn().mockRejectedValue(new Error('github-app-token: mint failed (HTTP 401): bad credentials'));
     const setEnv = vi.fn();
     const log = { error: vi.fn() };
-    const result = await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, mint, setEnv, log });
+    const result = await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, mint, setEnv, log, ...NOOP_STATUS });
     expect(result).toEqual({ applied: false, reason: 'mint-failed' });
     expect(setEnv).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('mint failed'));
@@ -160,7 +172,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const writeCache = vi.fn();
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_recovered', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
-    const result = await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv });
+    const result = await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv, ...NOOP_STATUS });
     expect(result.applied).toBe(true);
     expect(setEnv).toHaveBeenCalledWith('ghs_recovered');
   });
@@ -174,7 +186,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const setEnv = vi.fn();
     const log = { error: vi.fn() };
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache, mint, listRepos, setEnv, log,
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache, mint, listRepos, setEnv, log, ...NOOP_STATUS,
     });
     expect(result.applied).toBe(false);
     expect(result.reason).toBe('insufficient-access');
@@ -190,7 +202,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const listRepos = vi.fn(async () => REQUIRED_APP_REPOS.slice(0, 1));
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv, log: { error: vi.fn() },
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     expect(result.reason).toBe('insufficient-access');
     expect(result.missingPermissions).toEqual([]);
@@ -202,7 +214,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const listRepos = vi.fn(async () => { throw new Error('HTTP 502'); });
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv, log: { error: vi.fn() },
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     expect(result).toEqual({ applied: false, reason: 'mint-failed' });
     expect(setEnv).not.toHaveBeenCalled();
@@ -239,7 +251,7 @@ describe('withGithubAppAuth — refresh at the top of every tick, never on a tim
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_t', expiresAt: '2099-01-01T00:00:00Z', permissions: FULL_PERMS });
     const effects = { tickOnce: vi.fn(() => { order.push('tick'); return { ok: 1 }; }), sleep: vi.fn(), intervalMs: 5 };
     const wrapped = withGithubAppAuth(effects, {
-      env: CONFIGURED_ENV, readCache: () => null, writeCache: vi.fn(), mint, listRepos: allRepos, setEnv,
+      env: CONFIGURED_ENV, readCache: () => null, writeCache: vi.fn(), mint, listRepos: allRepos, setEnv, ...NOOP_STATUS,
     });
     const result = await wrapped.tickOnce();
     expect(order).toEqual(['setEnv', 'tick']);
@@ -259,7 +271,7 @@ describe('withGithubAppAuth — refresh at the top of every tick, never on a tim
     const tick = vi.fn(() => 'ran');
     const mint = vi.fn().mockRejectedValue(new Error('fetch failed'));
     const wrapped = withGithubAppAuth({ tickOnce: tick }, {
-      env: CONFIGURED_ENV, readCache: () => null, mint, listRepos: allRepos, setEnv: vi.fn(), log: { error: vi.fn() },
+      env: CONFIGURED_ENV, readCache: () => null, mint, listRepos: allRepos, setEnv: vi.fn(), log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     await expect(wrapped.tickOnce()).resolves.toBe('ran');
     expect(tick).toHaveBeenCalledTimes(1);
@@ -292,13 +304,21 @@ describe('defaultStatusPath — one shared status file, sibling of the cache, ke
   });
 });
 
-describe('ensureFreshGithubAppEnv — records its outcome to the status file on EVERY path (#x8mpubm)', () => {
+describe('ensureFreshGithubAppEnv — records its outcome to the status file on every REAL path (#x8mpubm)', () => {
   const NOW = Date.parse('2026-09-23T12:00:00Z');
 
-  it('not-configured is recorded, even though nothing else runs', async () => {
+  // Live-caught the same day #x8mpubm's own status write shipped: a caller with nothing configured (a stray
+  // local script, or a test that forgot to inject `statusPath`/`writeStatus`) would otherwise stomp a REAL
+  // daemon's `insufficient-access`/`ok` with a misleading `not-configured` — which is exactly what happened
+  // to `~/.claude/github-app-token/status.json` on this machine while this file's OWN pre-existing tests
+  // (below, none of which pass `statusPath`) ran against the real default. `not-configured` describes the
+  // CALLER, not the fleet's installation, so it is never written; a reader with no file at all already gets
+  // its own honest, distinct message (see `readGithubAppStatus`'s null case in `github-app-status.mjs`).
+  it('not-configured is NEVER recorded — it describes the caller, not the installation, and must not stomp a real status', async () => {
     const writeStatus = vi.fn();
     const result = await ensureFreshGithubAppEnv({ env: {}, now: NOW, statusPath: '/x/status.json', writeStatus });
-    expect(writeStatus).toHaveBeenCalledWith('/x/status.json', { ...result, checkedAt: new Date(NOW).toISOString() });
+    expect(result).toEqual({ applied: false, reason: 'not-configured' });
+    expect(writeStatus).not.toHaveBeenCalled();
   });
 
   it('a live apply (cache hit) is recorded as applied:true', async () => {
@@ -338,23 +358,40 @@ describe('ensureFreshGithubAppEnv — records its outcome to the status file on 
     });
   });
 
-  it('a failing status write never throws and never changes the returned result — diagnostic only', async () => {
-    const writeStatus = vi.fn(() => { throw new Error('disk full'); });
-    // The real default writeStatusFile swallows its own error; this test pins that a CALLER's own injected
-    // writeStatus throwing is the caller's problem to fix, not something ensureFreshGithubAppEnv should have
-    // to guard — so this asserts against the REAL default instead, which must not throw.
-    const result = await ensureFreshGithubAppEnv({ env: {}, now: NOW, statusPath: join(mkdtempSync(join(tmpdir(), 'we-app-status-')), 'status.json') });
-    expect(result).toEqual({ applied: false, reason: 'not-configured' });
+  it('a failing REAL status write never throws and never changes the returned result — diagnostic only', async () => {
+    // Exercises the REAL default writeStatusFile (no writeStatus override) against a path that CANNOT be
+    // created (`blocker` is a plain file, so `mkdirSync(dirname(badStatusPath))` fails) — proving the real
+    // writer swallows its own error rather than the caller having to guard against one.
+    const dir = mkdtempSync(join(tmpdir(), 'we-app-status-'));
+    const blocker = join(dir, 'blocker-file');
+    writeFileSync(blocker, 'x', 'utf8');
+    const badStatusPath = join(blocker, 'status.json');
+    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    try {
+      const result = await ensureFreshGithubAppEnv({
+        env: CONFIGURED_ENV, now: NOW, readCache: () => cached, writeCache: vi.fn(), setEnv: vi.fn(),
+        statusPath: badStatusPath,
+      });
+      expect(result).toEqual({ applied: true, reason: 'ok' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
 describe('readGithubAppStatus / the real writeStatusFile default — round trip through real fs', () => {
   it('reads back exactly what a real ensureFreshGithubAppEnv call wrote, in a scratch dir', async () => {
+    // `not-configured` is deliberately never written (see the describe block above), so this round trip
+    // uses a CONFIGURED env reaching a real recorded reason instead.
     const dir = mkdtempSync(join(tmpdir(), 'we-app-status-'));
     const statusPath = join(dir, 'status.json');
+    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
     try {
-      const result = await ensureFreshGithubAppEnv({ env: {}, now: Date.parse('2026-09-23T12:00:00Z'), statusPath });
-      expect(result).toEqual({ applied: false, reason: 'not-configured' });
+      const result = await ensureFreshGithubAppEnv({
+        env: CONFIGURED_ENV, now: Date.parse('2026-09-23T12:00:00Z'), readCache: () => cached, writeCache: vi.fn(),
+        setEnv: vi.fn(), statusPath,
+      });
+      expect(result).toEqual({ applied: true, reason: 'ok' });
       expect(readGithubAppStatus(statusPath)).toEqual({ ...result, checkedAt: '2026-09-23T12:00:00.000Z' });
     } finally {
       rmSync(dir, { recursive: true, force: true });
