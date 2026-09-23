@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
   STAND_DOWN_MARKER, STAND_DOWN_REASONS, countStandDownComments, buildStandDownComment,
+  standDownComments, standDownReason,
 } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
@@ -138,5 +139,39 @@ describe('the fix-agent brief actually CALLS it — the half that would otherwis
 
   it('still tells the agent NOT to re-arm at an escalation — the marker is not a hand-back', () => {
     expect(brief).toMatch(/do \*\*not\*\* re-arm/i);   // markdown emphasis and all — the instruction is unchanged
+  });
+});
+
+// `standDownComments`/`standDownReason` — the reader half, added for the operator queue's STOOD DOWN section
+// (we:backlog/x6cjgz5). `countStandDownComments` is now built on `standDownComments`, so this also re-covers its
+// existing contract from the inside.
+describe('standDownComments and standDownReason — reading a stand-down comment back', () => {
+  it('returns the matching comments, normalized to {body, createdAt}, leading-marker only', () => {
+    const body = buildStandDownComment({ reason: 'gate-red' });
+    expect(standDownComments([
+      { body: 'unrelated' },
+      { body, createdAt: '2026-09-20T00:00:00Z' },
+      { body: `> ${STAND_DOWN_MARKER}\nquoted, not leading` },
+    ])).toEqual([{ body, createdAt: '2026-09-20T00:00:00Z' }]);
+  });
+
+  it('tolerates bare strings, giving them a null createdAt', () => {
+    expect(standDownComments([STAND_DOWN_MARKER])).toEqual([{ body: STAND_DOWN_MARKER, createdAt: null }]);
+  });
+
+  it('tolerates non-array / empty input the same way countStandDownComments does', () => {
+    for (const input of [null, undefined, [], 'not an array']) expect(standDownComments(input)).toEqual([]);
+  });
+
+  it('extracts the stated reason clause for each named reason', () => {
+    for (const [reason, clause] of Object.entries(STAND_DOWN_REASONS)) {
+      expect(standDownReason(buildStandDownComment({ reason }))).toBe(clause);
+    }
+  });
+
+  it('returns null for a body with no "stopped rather than guessing" sentence', () => {
+    expect(standDownReason('some other comment')).toBeNull();
+    expect(standDownReason('')).toBeNull();
+    expect(standDownReason(undefined)).toBeNull();
   });
 });

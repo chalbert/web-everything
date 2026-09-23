@@ -1,9 +1,10 @@
 ---
 kind: task
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/operations/operator-queue.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
 tags: []
 ---
 

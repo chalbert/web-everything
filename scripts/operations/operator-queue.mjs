@@ -16,6 +16,14 @@
  * UNKNOWN PR is re-polled a few times with backoff (GitHub computes on request); one that is STILL unknown lands in
  * PENDING — "transient, re-run", where no agent work is owed. A PR with a real failure stays in NOT READY and does
  * not list the transient state among its reasons.
+ *
+ * A FIFTH SECTION, STOOD DOWN, ORTHOGONAL TO ALL OF THE ABOVE (we:backlog/x6cjgz5). A conveyor stand-down comment
+ * (`we:scripts/conveyor/stand-down.mjs`) is posted whenever a fix agent stops to ask for human judgment, and BY
+ * DESIGN it changes no label — `review:human` stays whatever it already was, which for most stood-down PRs is
+ * nothing at all. So a stood-down PR without `review:human` was in nobody's queue (live: PR #2505 sat stood down
+ * and invisible). This section lists every OPEN PR carrying at least one stand-down comment, regardless of its
+ * labels, reusing `countStandDownComments`/`STAND_DOWN_MARKER` rather than re-deriving the match rule — and never
+ * duplicates a PR already shown in NEEDS YOU.
  */
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -27,6 +35,7 @@ import {
 
 import { CONSTELLATION_REPOS, repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { readUnsupported } from '../conveyor/unsupported-repo.mjs';
+import { countStandDownComments, standDownComments, standDownReason } from '../conveyor/stand-down.mjs';
 const hasLabel = (pr, name) => (pr.labels ?? []).some((label) => label.name === name);
 
 /** How many times an UNKNOWN mergeability is re-polled, and the first backoff (doubling each attempt). */
@@ -90,6 +99,34 @@ export function evaluatePr(pr) {
   return { ready: reasons.length === 0 && !mergeabilityUnknown, reasons, transient };
 }
 
+/**
+ * Build the STOOD DOWN row for a PR that carries at least one stand-down comment, or `null` for a PR that carries
+ * none. Pure — reuses {@link countStandDownComments}/{@link standDownComments}/{@link standDownReason} rather than
+ * re-deriving the leading-line marker match; this function only shapes the ones that already matched.
+ *
+ * When a PR has stood down more than once (cleared, then stood down again), the MOST RECENT comment is what's
+ * surfaced — same "most recent wins" convention `latestAdvisory` uses, sorted by `createdAt` (ties keep array
+ * order) rather than assuming `gh` always returns comments oldest-first.
+ * @param {string} repo
+ * @param {{number:number, title:string, comments?: unknown, labels?: Array<{name:string}>}} pr
+ * @returns {{repo:string, number:number, title:string, standDownAt: ?string, reason: ?string, alsoReviewHuman: boolean}|null}
+ */
+export function standDownRow(repo, pr) {
+  const matches = standDownComments(pr.comments);
+  if (!matches.length) return null;
+  const latest = matches
+    .map((c, index) => ({ ...c, time: Date.parse(c.createdAt) || 0, index }))
+    .sort((a, b) => b.time - a.time || b.index - a.index)[0];
+  return {
+    repo,
+    number: pr.number,
+    title: pr.title,
+    standDownAt: latest.createdAt,
+    reason: standDownReason(latest.body),
+    alsoReviewHuman: hasLabel(pr, 'review:human'),
+  };
+}
+
 /** Blocking sleep — `main` is synchronous, and this only runs on the rare UNKNOWN-mergeability path. */
 const blockingSleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -121,13 +158,14 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
   const unsupported = readUnsupported({ path: unsupportedPath }).filter(
     (row) => !requested.length || requested.some((repo) => repoKeyForSlug(repo) === row.repo),
   );
-  const report = { ready: [], pending: [], notReady: [], errors: [], unsupported };
+  const report = { ready: [], pending: [], notReady: [], stoodDown: [], errors: [], unsupported };
   for (const repo of requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug)) {
     try {
       const prs = JSON.parse(execFileSync('gh', [
         'pr', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json',
         'number,title,labels,headRefOid,mergeable,statusCheckRollup,comments',
       ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+      const readyNumbersThisRepo = new Set();
       for (const listed of prs.filter((candidate) => hasLabel(candidate, 'review:human'))) {
         let pr = listed;
         let result = evaluatePr(pr);
@@ -140,9 +178,18 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
           result = evaluatePr(pr);
         }
         const row = { repo, number: pr.number, title: pr.title };
-        if (result.ready) report.ready.push(row);
-        else if (result.transient) report.pending.push(row);
+        if (result.ready) {
+          report.ready.push(row);
+          readyNumbersThisRepo.add(pr.number);
+        } else if (result.transient) report.pending.push(row);
         else report.notReady.push({ ...row, reasons: result.reasons });
+      }
+      // STOOD DOWN — every OPEN PR (any labels) carrying a stand-down comment, minus anything already in NEEDS
+      // YOU above. `countStandDownComments` is the reused, single-sourced gate for "does this PR qualify at all".
+      for (const pr of prs) {
+        if (readyNumbersThisRepo.has(pr.number)) continue;
+        if (countStandDownComments(pr.comments) === 0) continue;
+        report.stoodDown.push(standDownRow(repo, pr));
       }
     } catch (error) {
       const detail = String(error.stderr || error.message).trim().replace(/\s+/g, ' ');
@@ -161,6 +208,10 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
     console.log(report.unsupported.map((row) => `${row.repo}#${row.prNumber}  ${row.action}  ${row.why}`).join('\n') || '(none)');
     console.log('NOT READY — agent work (review:human but gates fail):');
     console.log(report.notReady.map((pr) => `${pr.repo}#${pr.number}  ${pr.reasons.join('; ')}`).join('\n') || '(none)');
+    console.log('STOOD DOWN — needs your judgment (a fix agent asked a question; no label changed):');
+    console.log(report.stoodDown.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}  `
+      + `[stood down ${pr.standDownAt || 'time unknown'}] ${pr.reason || '(no reason recorded)'}`
+      + (pr.alsoReviewHuman ? '  [also review:human]' : '')).join('\n') || '(none)');
   }
 }
 
