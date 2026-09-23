@@ -35,7 +35,7 @@ import {
   assertPanelDepth,
   assertPanelBudget,
 } from '../judge-panel.mjs';
-import { deriveSessionId, sessionSeed, buildJudgeArgv, DEFAULT_BUDGET_USD } from '../judge-spawn.mjs';
+import { deriveSessionId, sessionSeed, buildJudgeArgv, DEFAULT_BUDGET_USD, JUDGE_CLI } from '../judge-spawn.mjs';
 import { PANEL_LENSES, panelRigorForCareLevel } from '../jury-core.mjs';
 import { CARE_LEVELS } from '../review-escalation.mjs';
 
@@ -595,7 +595,10 @@ describe('PARTIAL FAILURE — a rejecting juror is a reported seat, never an orp
     };
     const panel = await judgePanel({ ...BASE, jurors: FOUR_SEATS, spawnFn: fn });
     expect(panel.failedCount).toBe(1);
-    expect(panel.jurors[1].error).toMatch(/could not start `claude`/);
+    // Live-caught 2026-09-23: JUDGE_CLI is no longer always the bare literal 'claude' (see
+    // judge-spawn.mjs's own resolveJudgeCli) — the interpolated error text now names whatever it actually
+    // resolved to. Assert against the real constant, not a hardcoded literal that only held before that fix.
+    expect(panel.jurors[1].error).toContain(`could not start \`${JUDGE_CLI}\``);
     expect(panel.jurors.filter((j) => j.ok)).toHaveLength(3);
   });
 });
