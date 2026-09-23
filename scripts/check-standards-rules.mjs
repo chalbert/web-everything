@@ -997,6 +997,18 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
         `not-actually-a-choice. See docs/agent/backlog-workflow.md → "no live choice may sit outside a Fork N".`);
   }
 
+  // Stale-ratified/verified-done status guard (#3383) — see the header comment above findStaleRatifiedClaims.
+  if ((item.status === 'open' || item.status === 'active') && item.kind !== 'epic') {
+    const staleHits = findStaleRatifiedClaims(body);
+    if (staleHits.length) {
+      const where = staleHits.map((h) => `"${h.match}" (${h.label}, line ${h.line})`).join('; ');
+      warnings.push(`Backlog item "${id}" is \`status: ${item.status}\` but its body reads as already ` +
+        `ratified or built — ${where}. If the work is genuinely done, flip the status (\`resolved\`, with a ` +
+        `\`graduatedTo\`) or file/link the follow-through that finishes it; if this only cites another ` +
+        `item's ratification in passing, reword it so it doesn't read as a claim about THIS card (#3383).`);
+    }
+  }
+
   // #3637 Fork 3 — `deliveryTarget:` must name a DECLARED POC branch (or be absent / `main`).
   //
   // WHY IT IS CHECKED HERE, in the shared rule module, rather than only in the dispatcher: an unknown branch
@@ -1984,6 +1996,66 @@ export function scanHarnessScaffolding(docs) {
     const hits = findHarnessScaffoldingMarkers(content);
     if (hits.length) findings.push({ file, hits });
   }
+  return findings;
+}
+
+// ── Stale-ratified/verified-done status guard (#3383 session lesson) ─────────────────────────────
+// This session found the same defect at least 11 times on the `lane/mechanical-dispatcher` prototype
+// branch (#3838–#3849, #3801): frontmatter said `status: open` while the body already recorded the work
+// as ratified or built — a decision ratified inline per-fork ("ratified at operator review, <date>") with
+// no status flip, or a build story carrying a "Verified done, <date>" blockquote (the convention this
+// session introduced while fixing #3838–#3849) whose status was never resolved. A batch pass re-selected
+// several of these as "ready to build" though they were already done — real wasted effort, and it
+// depended on a human/agent noticing by luck. This is the standing mechanical check for it.
+//
+// WARN, never ERROR: this is a heuristic over prose, and a body may legitimately DISCUSS "ratified"
+// without asserting that THIS card is done — most commonly by citing ANOTHER item's ratified anchor
+// ("Ruled in #3801 Fork 2", "ratified #2089 Fork 1(b)"). Calibrated against the real corpus: a bare
+// "ratified"/"Ratified" match is FAR too broad (1000+ backlog files mention it, almost all citing some
+// other anchor), so the markers below require a DATED, EMPHASIZED (bold/italic) assertion or the specific
+// blockquote convention — and even then, a matched span naming a `#NNNN` reference is treated as citing
+// that OTHER item's ratification and dropped (this alone cleared 3 of 7 raw hits found calibrating against
+// the current corpus — #1137, #2821, #3374 — each citing a different item's ratification date, not its
+// own).
+//
+// Scoped to `open`/`active` — a `resolved` item is definitionally not stale in this sense (#3383's own
+// framing) — and skips `kind: epic`: an epic's own "## Ratified …" heading routinely documents a ratified
+// DESIGN for its children's build, not completion of the umbrella itself (verified against two real open
+// epics with exactly that shape, #2612 and #2804 — both carry a dated "## Ratified …" heading for how their
+// children should be built, while the epic itself correctly stays open pending those children). A `kind:
+// decision` whose forks are ratified inline is the readiest true-positive case (#3801) but is still only a
+// WARN, never auto-resolved — a decision can rule some forks and leave others open, so a human/skill must
+// read the body and decide whether the CARD is done, only a follow-through item is missing, or the mention
+// is legitimately partial.
+const STALE_RATIFIED_MARKERS = [
+  { label: '"Verified done" blockquote', re: /^>\s*\*\*[^*\n]*\bVerified done\b[^*\n]*\*\*/i },
+  { label: '"## Ratified" heading', re: /^#{1,4}\s*Ratified\b/i },
+  { label: 'dated "ratified" assertion', re: /\*{1,2}[^*\n]{0,80}\bratified\b[^*\n]{0,60}\d{4}-\d{2}-\d{2}[^*\n]{0,40}\*{1,2}/i },
+];
+
+/**
+ * Find dated completion/ratification assertions in a markdown body, outside fenced code blocks (mirrors
+ * findHarnessScaffoldingMarkers's fence-toggle scan). A match naming a `#NNNN` reference is dropped — that
+ * shape reads as citing ANOTHER item's ratification (`ratified #2089 Fork 1(b)`, `RATIFIED … (#2607)`),
+ * not asserting this card's own. Returns `[{ line, label, match }]`.
+ */
+export function findStaleRatifiedClaims(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  let fenceChar = null;
+  let fenceLen = 0;
+  body.split('\n').forEach((line, i) => {
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceChar) {
+      if (fm && fm[1][0] === fenceChar && fm[1].length >= fenceLen) { fenceChar = null; fenceLen = 0; }
+      return; // inside a fence — a documented example, not an assertion
+    }
+    if (fm) { fenceChar = fm[1][0]; fenceLen = fm[1].length; return; }
+    for (const { label, re } of STALE_RATIFIED_MARKERS) {
+      const m = line.match(re);
+      if (m && !/#\d/.test(m[0])) findings.push({ line: i + 1, label, match: m[0].trim() });
+    }
+  });
   return findings;
 }
 

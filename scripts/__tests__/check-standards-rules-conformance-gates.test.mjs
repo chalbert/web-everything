@@ -360,6 +360,43 @@ describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)
       expect(lintBacklogItemRendering({ item: decision({ status: 'resolved' }), body }).warnings.some((w) => /defers a choice in prose/.test(w))).toBe(false);
     });
   });
+
+  describe('stale-ratified/verified-done status guard (#3383)', () => {
+    const verifiedDoneBody = '# T\n\n> **Verified done, 2026-09-22.** Already built and committed to the branch.\n';
+    const ratifiedForkBody = '# T\n\n**(c) same core — ratified at operator review, 2026-09-21.**\n';
+
+    it('warns when an OPEN item body carries the "Verified done, <date>" convention', () => {
+      const { warnings } = lintBacklogItemRendering({ item: item({ status: 'open' }), body: verifiedDoneBody });
+      expect(warnings.some((w) => /reads as already ratified or built/.test(w))).toBe(true);
+    });
+
+    it('warns when an ACTIVE decision body carries a dated, emphasized "ratified at operator review"', () => {
+      const { warnings } = lintBacklogItemRendering({ item: item({ kind: 'decision', status: 'active' }), body: ratifiedForkBody });
+      expect(warnings.some((w) => /reads as already ratified or built/.test(w))).toBe(true);
+    });
+
+    it('does not fire once the item is resolved (definitionally not stale)', () => {
+      const { warnings } = lintBacklogItemRendering({ item: item({ status: 'resolved' }), body: verifiedDoneBody });
+      expect(warnings.some((w) => /reads as already ratified or built/.test(w))).toBe(false);
+    });
+
+    it('does not fire on an epic — a ratified heading there documents design for its children, not epic completion', () => {
+      const epicBody = '# T\n\n## Ratified shape (settled 2026-07-22)\n\nHow the children should be built.\n';
+      const { warnings } = lintBacklogItemRendering({ item: item({ kind: 'epic', status: 'open' }), body: epicBody });
+      expect(warnings.some((w) => /reads as already ratified or built/.test(w))).toBe(false);
+    });
+
+    it('does not fire on a body that only cites another item\'s ratification', () => {
+      const body = '# T\n\nRuled in #3801 Fork 2 (a): the criteria stays ratified as shape.\n';
+      const { warnings } = lintBacklogItemRendering({ item: item({ status: 'open' }), body });
+      expect(warnings.some((w) => /reads as already ratified or built/.test(w))).toBe(false);
+    });
+
+    it('is clean for a well-formed open body with no completion assertion', () => {
+      const { warnings } = lintBacklogItemRendering({ item: item({ status: 'open' }), body: 'A normal open item, still in progress.' });
+      expect(warnings.some((w) => /reads as already ratified or built/.test(w))).toBe(false);
+    });
+  });
 });
 
 // ── #1247 classification-axis loud-fail ──────────────────────────────────────
