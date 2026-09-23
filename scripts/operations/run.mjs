@@ -84,6 +84,8 @@ import { gapSweepStatusOperation, GAP_SWEEP_STATUS_OP } from './gap-sweep-status
 import { createGapSweepSinks } from './gap-sweep-status-io.mjs';
 import { clearStuckSessionOperation, CLEAR_STUCK_SESSION_OP } from './clear-stuck-session.mjs';
 import { createClearStuckSessionReader, createClearStuckSessionSinks } from './clear-stuck-session-io.mjs';
+import { docketRefreshOperation, DOCKET_REFRESH_OP, finishDocketOutcome } from './docket-refresh.mjs';
+import { createDocketRefreshReader, createDocketRefreshSinks } from './docket-refresh-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -298,6 +300,19 @@ export const OPERATIONS = Object.freeze({
     ),
     sinks: createStagePrViewSinks(),
   }),
+  // #3723 (under epic #3383) — refreshes the Decision Docket's data: fetch, refuse a primary checkout or one
+  // whose HEAD is not the ref, run THAT checkout's own generator with outputs under `<coordination root>/docket/`
+  // (nothing inside any checkout, nothing committed), and hash the data (clock fields removed) against the last
+  // run. Only a changed hash (or `--force`) renders the page and writes ONE `publish-owed.json` hand-off — which
+  // carries the Artifact URL to republish (read from the tracked `skills-src/decision-docket/artifact.json`) and
+  // the parseOk:false count + item numbers, so a session sees at a glance whether hand-fill is owed. The publish
+  // itself is a session's `Artifact` call (`we:skills-src/decision-docket/SKILL.md`), never this operation. Last
+  // stdout line is `publish: owed` or `publish: none`.
+  [DOCKET_REFRESH_OP]: () => ({
+    declaration: docketRefreshOperation({ readFacts: createDocketRefreshReader() }),
+    sinks: createDocketRefreshSinks(),
+    finish: finishDocketOutcome,
+  }),
 });
 
 /**
@@ -348,10 +363,14 @@ export function resolveOperation(name, opts = {}) {
       `operations: no operation named ${JSON.stringify(name)} (known: ${Object.keys(OPERATIONS).sort().join(', ')})`,
     );
   }
-  const { declaration, sinks } = build(opts);
+  // `finish` is OPTIONAL (most builders omit it): a per-operation post-process over `runOperationCli`'s
+  // `{run, code, lines}` outcome, for an operation whose stdout needs more than the generic run summary
+  // (docket-refresh's `publish: owed|none` trailer, `we:scripts/operations/docket-refresh.mjs#finishDocketOutcome`).
+  // Absent, the CLI prints `runOperationCli`'s own lines unchanged — every existing operation is unaffected.
+  const { declaration, sinks, finish } = build(opts);
   const registry = createRegistry();
   registry.register(declaration);
-  return { declaration, registry, sinks };
+  return { declaration, registry, sinks, finish };
 }
 
 /** The usage text when no operation is named. */
@@ -382,7 +401,7 @@ if (IS_CLI) {
     writeAllSync(1, `error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
     process.exit(2);
   }
-  const { declaration, registry, sinks } = resolved;
+  const { declaration, registry, sinks, finish } = resolved;
   if (rest.includes('--help')) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
@@ -424,7 +443,13 @@ if (IS_CLI) {
     makeJudge: createCliJudgeFactory(),
     newRunId: () => newRunId(declaration.name),
   })
-    .then(({ code, lines }) => {
+    .then((outcome) => {
+      // `finish` (when the table entry declares one) re-shapes `runOperationCli`'s generic `{run, code, lines}`
+      // outcome into the operation's own trailer (e.g. docket-refresh's `publish: owed|none` last line) — every
+      // operation that omits it prints `outcome` unchanged, so this is additive, never a behavior change.
+      const { code, lines } = typeof finish === 'function'
+        ? finish({ run: outcome.run, code: outcome.code, lines: outcome.lines, json: hasJsonFlag(rest) })
+        : outcome;
       writeAllSync(1, `${lines.join('\n')}\n`);
       process.exit(code);
     })
