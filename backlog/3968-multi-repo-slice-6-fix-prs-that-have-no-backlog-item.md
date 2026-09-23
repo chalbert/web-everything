@@ -3,7 +3,7 @@ bornAs: xmtbdgs
 kind: task
 parent: "3963"
 status: open
-blockedBy: ["3966", "3965", "3908"]
+blockedBy: ["3966", "3965"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-23"
 tags: []

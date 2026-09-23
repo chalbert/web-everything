@@ -5365,8 +5365,9 @@ frontierui or plateau-app. Six clauses:
    runs additionally only when the change touches a WE half.
 5. **CI-heal covers every repo.** A red required check on any constellation repo's PR is owed a CI-heal,
    capped by the durable heal-mark count.
-6. **Order.** The profile, resolver and repo-aware-brief slices land before #3908's port; turning on
-   frontierui/plateau fixes lands after it (or inside it if its HOLD lifts first).
+6. **Order.** The repo profile, resolver and repo-aware-brief slices land first; turning on frontierui/plateau
+   fixes and item-less-PR fixes follows them directly, without waiting on #3908 (amended 2026-09-23: #3908 is
+   on HOLD, and its port rebases over these slices instead).
 
 ---
 

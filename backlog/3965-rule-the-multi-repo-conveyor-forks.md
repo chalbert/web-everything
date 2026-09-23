@@ -34,7 +34,9 @@ pass (no skeptic or two-confusion screen was run on this card); the grounding is
   `check:standards` only when the fix touches a WE half.
 - **Fork 5 — RATIFIED:** CI-heal is owed for every constellation repo's red CI, capped by the durable
   heal-mark count.
-- **Fork 6 — RATIFIED:** slices 1–4 land before #3908's port; slice 5 lands after it (or inside it if its
-  HOLD lifts first).
+- **Fork 6 — RATIFIED, then AMENDED the same day:** slices 5–6 (turning on frontierui/plateau fixes, and
+  fixing item-less PRs) no longer wait for #3908's port. #3908 was on HOLD, so the original order could stall
+  plateau fixes indefinitely. The operator accepted the one consequence: #3908's port rebases over slices 5–6
+  later. Operator: "ok as long as not consequence because not the end of the world".
 
 Codified as [#conveyor-multi-repo-model](../docs/agent/platform-decisions.md#conveyor-multi-repo-model).
