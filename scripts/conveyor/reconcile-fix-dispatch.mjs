@@ -620,7 +620,13 @@ export function runReconcileFixDispatch({
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
-  if (repoKey === 'we') assertMainNotStale(root, checkStaleness);
+  // #x1rr9rh (multi-repo slice 2) — this staleness check guards the DISPATCHING checkout (this WE checkout's
+  // own import path), not the target repo: the fix path always runs WE's own code, whatever repo it dispatches
+  // (or, for a foreign repo today, merely records as unsupported) a fix for. Gating it on `repoKey === 'we'`
+  // was therefore the wrong condition — it let a stale WE checkout record foreign-repo unsupported rows (and
+  // will, once a later slice turns on foreign fix dispatch, dispatch fixes) from code that had already been
+  // proven stale. Run it for every repo.
+  assertMainNotStale(root, checkStaleness);
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
   if (repoKey !== 'we') {
     // Foreign fixes need their own brief and gate; never consult or lease the WE pool.
