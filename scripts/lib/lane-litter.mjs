@@ -13,6 +13,14 @@
  * one lags the other. This module is that single source of truth: `we:scripts/lane-pool.mjs#cmdRelease` and
  * `we:scripts/conveyor/lane-pool-health-watch.mjs` both import it rather than re-deriving it.
  *
+ * #3383 — the SAME allowlist also answers a second, ACQUIRE-time question: is a lane misread as "dirty" only
+ * because of this litter? `we:scripts/lane-pool.mjs`'s auto-pick (`infoFor`), its pre-reset re-verify, and the
+ * read-only `list --acquirable` / `provision --acquirable` picker (`laneAcquirableInfo`) all consult
+ * {@link planLitterCleanup} (via `lane-pool.mjs`'s own `litterAdjustedDirty` helper) to set aside allowlisted
+ * untracked paths before deciding `dirty`. Reusing this exact list — never a second, separately-maintained one
+ * — is what keeps "a lane the picker calls acquirable" and "a lane whose litter release/reap will discard"
+ * answering the same question from the same data.
+ *
  * PURE CORE / IO SPLIT:
  *   • {@link LANE_RELEASE_LITTER_ALLOWLIST}, {@link isAllowlistedLitterPath}, {@link planLitterCleanup} are
  *     PURE — no fs/git/process.
@@ -46,6 +54,22 @@ export const LANE_RELEASE_LITTER_ALLOWLIST = [
   // already-vetted patterns, dotted.
   '.commit-msg-fix-*.txt',
   '.review-*-output.json',
+  // #3383 — live-observed 2026-09-23 on the plateau-app pool: `.pr-body.md`/`.pr-body.txt` above are the
+  // EXACT-name forms, but `we:scripts/operations/deliver-item-wrapper.mjs` and the open-PR / land-PR steps
+  // also write a per-item/per-round SUFFIXED name (`.pr-body-2759.md`, `.pr-body-wip-postdeploy-smoke.md`),
+  // an `.open-pr*.json` result file (`.open-pr.json`, `.open-pr-out.json`), and a fixed `.pr-land-result.json`
+  // — none of which any existing pattern matched, so lanes carrying ONLY these were misread as dirty forever
+  // (the exact #3568 failure mode, just with a scratch name this list hadn't caught up to yet).
+  '.pr-body-*.md',
+  '.open-pr*.json',
+  '.pr-land-result.json',
+  // #3383 — the converge loop (`we:scripts/operations/deliver-item-wrapper.mjs`'s per-round bookkeeping,
+  // `we:scripts/converge-cli.mjs`) writes a whole family of `.converge-*` scratch files per round
+  // (`.converge-state.json`, `.converge-material-r1.txt`, `.converge-panel-r1-result.stderr`,
+  // `.converge-*.diff`, …) — live-caught 2026-09-23 with one plateau-app lane carrying 44 of them as its
+  // ONLY dirty content. One prefix pattern (not one entry per extension/round) since the round number and
+  // extension both vary and `[^/]*` already matches across dots within a path segment.
+  '.converge-*',
 ];
 
 /**
