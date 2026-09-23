@@ -30,6 +30,10 @@ const REAL_SCORECARDS_PATH = resolve(HERE, '..', '..', 'conveyor', 'run-scorecar
 const REAL_RECORDS = JSON.parse(readFileSync(REAL_SCORECARDS_PATH, 'utf8')).records;
 
 const ABSENT_SOURCE = { source: 'absent', entries: [] };
+// The router is INJECTED into `buildGraduationProgressReport`/`graduationProgressReportOperation`, never
+// imported by the declaration itself (see graduation-progress-report.mjs's header) -- spread this into every
+// call in this file so each test supplies the SAME real predicates run.mjs wires in production.
+const ROUTER = { selectSupervisionLevel, backdownThresholds: DEFAULT_BACKDOWN_THRESHOLDS };
 
 const REAL_TRIALS = [
   { scoredAt: '2026-09-15T01:00:00.000Z', provider: 'codex', model: 'gpt-6-astra', dispatchKind: 'session-delegation', taskType: 'bugfix', verifiedBy: 'claude-subagent', findings: null, outcome: 'landed' },
@@ -53,7 +57,7 @@ function runReport(store, { promotions = ABSENT_SOURCE, probation = ABSENT_SOURC
   const readScorecards = createScorecardReader({ exists: () => true, read: () => JSON.stringify(store), now: () => AS_OF });
   const readPromotions = () => promotions;
   const readProbation = () => probation;
-  const declaration = graduationProgressReportOperation({ readScorecards, readPromotions, readProbation });
+  const declaration = graduationProgressReportOperation({ readScorecards, readPromotions, readProbation, ...ROUTER });
   const registry = createRegistry();
   registry.register(declaration);
   const run = advanceWhileRunning(startRun({ op: GRADUATION_PROGRESS_REPORT_OP, id: 'graduation-test', input: {}, registry }), { registry });
@@ -91,21 +95,18 @@ describe('graduation progress registration and engine', () => {
     expect(isReadOnlyDeclaration(declaration)).toBe(true);
   });
 
-  it('reaches the router as a pure dependency, never its own io module', () => {
+  it('never imports the router: it is injected, so this declaration reaches nothing that can act (#3036)', () => {
+    // The file's own header names `provider-routing.mjs` in prose (explaining WHY it is injected, not
+    // imported), so this asserts the real import-graph property rather than grepping raw source text.
     const { files, external } = importGraph(resolve(HERE, '..', 'graduation-progress-report.mjs'));
-    expect(files.some((f) => f.endsWith('/provider-routing.mjs'))).toBe(true);
+    expect(files.some((f) => f.endsWith('/provider-routing.mjs'))).toBe(false);
     expect(files.filter((f) => f.endsWith('graduation-progress-report-io.mjs'))).toEqual([]);
-    // provider-routing.mjs statically imports model-capability-ratings.mjs for its OWN exploration-hint
-    // helper (used only by `selectProvider`, never `selectSupervisionLevel`) -- that is the only reason
-    // `node:fs`/`node:path`/`node:url` are reachable at all from here: reachable, never called. This
-    // declaration imports only `selectSupervisionLevel` and `DEFAULT_BACKDOWN_THRESHOLDS`, neither of
-    // which performs IO.
-    expect(external.filter((s) => s.startsWith('node:')).sort()).toEqual(['node:fs', 'node:path', 'node:url']);
+    expect(external).toEqual([]);
   });
 
-  it('runs the full declaration with all three readers and an injected clock', () => {
+  it('runs the full declaration with all three readers, the injected router, and an injected clock', () => {
     const run = runReport({ version: 1, records: REAL_TRIALS });
-    expect(run.verdict).toEqual(buildGraduationProgressReport({ records: REAL_TRIALS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE }));
+    expect(run.verdict).toEqual(buildGraduationProgressReport({ records: REAL_TRIALS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER }));
     expect(run.verdict).toMatchObject({ schema: 2, asOf: AS_OF, sources: { scorecards: 'ok', promotions: 'absent', probation: 'absent' } });
     expect(run.verdict.agents.length).toBeGreaterThan(0);
   });
@@ -116,10 +117,17 @@ describe('graduation progress registration and engine', () => {
     expect(report.criteria).toHaveLength(6);
   });
 
-  it('refuses construction without all three readers', () => {
+  it('refuses construction without all five dependencies', () => {
     expect(() => graduationProgressReportOperation({})).toThrow(/readScorecards/);
     expect(() => graduationProgressReportOperation({ readScorecards: () => {} })).toThrow(/readPromotions/);
     expect(() => graduationProgressReportOperation({ readScorecards: () => {}, readPromotions: () => {} })).toThrow(/readProbation/);
+    expect(() => graduationProgressReportOperation({ readScorecards: () => {}, readPromotions: () => {}, readProbation: () => {} })).toThrow(/selectSupervisionLevel/);
+    expect(() => graduationProgressReportOperation({ readScorecards: () => {}, readPromotions: () => {}, readProbation: () => {}, selectSupervisionLevel: () => {} })).toThrow(/backdownThresholds/);
+  });
+
+  it('refuses buildGraduationProgressReport without an injected selectSupervisionLevel', () => {
+    expect(() => buildGraduationProgressReport({ records: [], asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, backdownThresholds: DEFAULT_BACKDOWN_THRESHOLDS }))
+      .toThrow(/selectSupervisionLevel/);
   });
 });
 
@@ -174,7 +182,7 @@ describe('graduation-progress-report-io: promotions and probation sources', () =
 });
 
 describe('graduation report: real we:scripts/conveyor/run-scorecards.json data', () => {
-  const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE });
+  const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER });
 
   it('matches the exact real-data triples named in the card', () => {
     expect(findTriple(report, 'codex', 'gpt-6-astra', 'other')).toMatchObject({
@@ -233,7 +241,7 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
 
   it('excludes unrelated dispatch kinds and non-delegation rows', () => {
     const unrelated = [{ ...REAL_RECORDS[0], dispatchKind: 'fix' }];
-    const withNoise = buildGraduationProgressReport({ records: [...REAL_RECORDS, ...unrelated], asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE });
+    const withNoise = buildGraduationProgressReport({ records: [...REAL_RECORDS, ...unrelated], asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER });
     expect(withNoise).toEqual(report);
   });
 
@@ -266,7 +274,7 @@ describe('graduation report: promotion record (rule 6)', () => {
       source: 'ok',
       entries: [{ provider: 'codex', model: 'gpt-6-astra', taskType: 'other', ratifiedBy: '#3690', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation' }],
     };
-    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions, probation: ABSENT_SOURCE });
+    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions, probation: ABSENT_SOURCE, ...ROUTER });
     const triple = findTriple(report, 'codex', 'gpt-6-astra', 'other');
     expect(triple.state).toBe('promoted');
     expect(triple.effectiveLevel).toBe('spot-check');
@@ -280,7 +288,7 @@ describe('graduation report: promotion record (rule 6)', () => {
       source: 'ok',
       entries: [{ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', ratifiedBy: '#3690', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#x' }],
     };
-    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions, probation: ABSENT_SOURCE });
+    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions, probation: ABSENT_SOURCE, ...ROUTER });
     const triple = findTriple(report, 'codex', 'gpt-6-astra', 'bugfix');
     expect(triple.evidenceLevel).toBe('full');
     expect(triple.effectiveLevel).toBe('full');
@@ -288,7 +296,7 @@ describe('graduation report: promotion record (rule 6)', () => {
   });
 
   it('an invalid promotions source promotes nothing: effectiveLevel is full for every triple', () => {
-    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: { source: 'invalid', entries: [] }, probation: ABSENT_SOURCE });
+    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: { source: 'invalid', entries: [] }, probation: ABSENT_SOURCE, ...ROUTER });
     expect(report.sources.promotions).toBe('invalid');
     for (const agent of report.agents) {
       for (const triple of agent.triples) {
@@ -305,6 +313,7 @@ describe('graduation report: promotion record (rule 6)', () => {
       records: rows, asOfIso: AS_OF,
       promotions: { source: 'ok', entries: [{ provider: rows[0].provider, model: rows[0].model, taskType: rows[0].taskType, ratifiedBy: '#1', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#x' }] },
       probation: ABSENT_SOURCE,
+      ...ROUTER,
     });
     expect(findTriple(promoted, rows[0].provider, rows[0].model, rows[0].taskType)).toMatchObject({ state: 'promoted', effectiveLevel: 'spot-check' });
 
@@ -313,6 +322,7 @@ describe('graduation report: promotion record (rule 6)', () => {
       records: [...rows, miss], asOfIso: AS_OF,
       promotions: { source: 'ok', entries: [{ provider: miss.provider, model: miss.model, taskType: miss.taskType, ratifiedBy: '#1', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#x' }] },
       probation: ABSENT_SOURCE,
+      ...ROUTER,
     });
     expect(findTriple(demoted, miss.provider, miss.model, miss.taskType)).toMatchObject({ state: 'vetoed', evidenceLevel: 'full', effectiveLevel: 'full' });
   });
@@ -321,7 +331,7 @@ describe('graduation report: promotion record (rule 6)', () => {
 describe('graduation report: probation (#3893)', () => {
   it('surfaces a readable probation entry on its agent', () => {
     const probation = { source: 'ok', entries: [{ provider: 'codex', model: 'gpt-6-astra', roles: { delivery: 'probation', 'advisory-review': 'probation' }, since: '2026-09-13' }] };
-    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation });
+    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation, ...ROUTER });
     const agent = report.agents.find((a) => a.provider === 'codex' && a.model === 'gpt-6-astra');
     expect(agent.probation).toEqual({ roles: { delivery: 'probation', 'advisory-review': 'probation' }, since: '2026-09-13' });
     expect(report.sources.probation).toBe('ok');
@@ -329,7 +339,7 @@ describe('graduation report: probation (#3893)', () => {
 
   it('leaves probation null for every agent when the source is absent or invalid', () => {
     for (const probation of [ABSENT_SOURCE, { source: 'invalid', entries: [] }]) {
-      const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation });
+      const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation, ...ROUTER });
       expect(report.agents.every((a) => a.probation === null)).toBe(true);
     }
   });
@@ -337,7 +347,7 @@ describe('graduation report: probation (#3893)', () => {
 
 describe('graduation arithmetic: streak/informative/veto boundary cases', () => {
   function soleTriple(records, options = {}) {
-    return buildGraduationProgressReport({ records, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...options }).agents[0].triples[0];
+    return buildGraduationProgressReport({ records, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER, ...options }).agents[0].triples[0];
   }
 
   it.each([5, 6])('reaches spot-check evidence after a prior informative miss and %i counted clean trials', (n) => {
@@ -383,7 +393,7 @@ describe('graduation arithmetic: streak/informative/veto boundary cases', () => 
   });
 
   it('reports `failed` scorecards when records is not an array, without throwing', () => {
-    const report = buildGraduationProgressReport({ records: null, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE });
+    const report = buildGraduationProgressReport({ records: null, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER });
     expect(report.sources.scorecards).toBe('failed');
     expect(report.agents).toEqual([]);
   });
