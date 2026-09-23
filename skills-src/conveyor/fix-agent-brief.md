@@ -15,16 +15,22 @@
 > this SAME procedure** (see *Manual take-over* at the end) — the auto and manual repairs are one procedure, not
 > two.
 
+> **(no backlog item) case (multi-repo slice 6).** Most bounced PRs deliver a backlog item, but some don't (a
+> hand-opened PR, an externally-branched fix). For those, `{{ITEM_NUM}}` is filled **blank** and
+> `{{ATTRIBUTION}}` reads `PR #{{PR_NUM}}` instead of `<REPO-TAG> #{{ITEM_NUM}}` — every step below still works
+> unchanged (this brief never resolves, claims, or otherwise touches a backlog card at any point; the repair is
+> always scoped to the PR's own diff, item or no item).
+
 ## Fill these before spawning
 
 | Placeholder | What the conveyor fills it with |
 |---|---|
-| `{{ITEM_NUM}}` | the backlog item number the bounced PR delivers — e.g. `2608` |
+| `{{ITEM_NUM}}` | the backlog item number the bounced PR delivers — e.g. `2608`; **blank** for a PR that names no backlog item at all (multi-repo slice 6 — `{{ATTRIBUTION}}` is `PR #{{PR_NUM}}` in that case, never a fabricated number) |
 | `{{PR_NUM}}` | the bounced PR's number (the one carrying `review:changes`) — e.g. `701` |
-| `{{LANE_REF}}` | the PR's head ref — `lane/{{ITEM_NUM}}-<slug>` (`gh pr view {{PR_NUM}} --json headRefName`) |
+| `{{LANE_REF}}` | the PR's head ref — `lane/{{ITEM_NUM}}-<slug>` for an item-carrying PR, any ref shape for an item-less one (`gh pr view {{PR_NUM}} --json headRefName`) |
 | `{{LANE}}` | a FREE lane id the conveyor assigned this repair (a fresh clone; the repair is reconstituted from `{{LANE_REF}}`, not the original lease) |
 | `{{SESSION_SLUG}}` | a stable per-repair session slug, e.g. `fix-{{PR_NUM}}` (ties `acquire`↔`release`) |
-| `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
+| `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) — for an item-less PR, its own already-changed files under its repo's prefix instead |
 | `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
 | `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — `.` for WE, an absolute checkout path for a sibling repo |
 | `{{GATE_COMMAND}}` | the target repo's own gate command (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`) |

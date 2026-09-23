@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  dispatchFix, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
+  dispatchFix, fetchPrDiffPaths, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
@@ -54,11 +54,35 @@ describe('planFixesFromReconcile', () => {
     }]);
   });
 
-  it('refuses `no-item-num` for a PR whose head ref carries no conveyor item number', () => {
+  // #xmtbdgs multi-repo slice 6 — `no-item-num` is GONE: a PR whose head ref carries no conveyor item number is
+  // now attributed to the PR itself (ratified `#conveyor-multi-repo-model` clause 3), scoped by its own diff.
+  it('a PR whose head ref carries no conveyor item number is attributed to the PR itself, scoped by its own diff (no longer refused)', () => {
     const entries = [{ kind: 'fix', prNumber: 42, headRefName: 'some-hand-opened-branch' }];
-    const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
+    const diffCalls = [];
+    const fetchItemlessDiffPaths = (pr) => { diffCalls.push(pr); return ['src/x.ts', 'src/y.ts']; };
+    const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => [], () => [], 'we', fetchItemlessDiffPaths);
+    expect(diffCalls).toEqual([42]);
+    expect(refusals).toEqual([]);
+    expect(planned).toEqual([{
+      itemNum: null, pr: 42, laneRef: 'some-hand-opened-branch',
+      scope: ['we:src/x.ts', 'we:src/y.ts'], scopeSource: 'pr-diff',
+      isConflict: false, body: null, headRefOid: null,
+    }]);
+  });
+
+  it('an item-less PR whose own diff is ALSO empty still refuses `no-scope` — no fence at all is undispatchable', () => {
+    const entries = [{ kind: 'fix', prNumber: 42, headRefName: 'some-hand-opened-branch' }];
+    const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => [], () => [], 'we', () => []);
     expect(planned).toEqual([]);
-    expect(refusals).toEqual([{ pr: 42, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
+    expect(refusals).toEqual([{ pr: 42, kind: 'no-scope', why: expect.stringContaining('names no backlog item') }]);
+  });
+
+  it('an item-less PR never calls `findItemFn` at all — the resolver\'s own `laneRefItemNum` re-check finds nothing to look up', () => {
+    const findCalls = [];
+    const findItemSpy = (key) => { findCalls.push(key); return null; };
+    const entries = [{ kind: 'fix', prNumber: 42, headRefName: 'some-hand-opened-branch' }];
+    planFixesFromReconcile(entries, findItemSpy, () => [], () => [], 'we', () => ['src/x.ts']);
+    expect(findCalls).toEqual([]);
   });
 
   it('refuses `no-scope` for an item the loader cannot resolve, or one with an empty scope, when the fallback ALSO finds nothing', () => {
@@ -156,17 +180,25 @@ describe('planFixesFromReconcile', () => {
     });
   });
 
-  describe('#3634 — PR #2210-shaped: a `lane/file-<PR-reviewed>-...` branch — CONFIRMED NOT the same bug, must stay refused', () => {
-    it('still refuses `no-item-num` for `lane/file-2206-review-findings` — the trailing number is the REVIEWED PR, not an item this PR delivers, and backlog item #2206 is a real, unrelated card', () => {
+  describe('#3634 — PR #2210-shaped: a `lane/file-<PR-reviewed>-...` branch — CONFIRMED NOT the same bug as #2220', () => {
+    // #xmtbdgs multi-repo slice 6 — `no-item-num` is gone, so this shape is no longer hard-refused either; it
+    // is item-less (2206 is never extracted as an item number — `lane/file-...` doesn't match the lane-ref
+    // grammar at all) and now goes through the SAME PR-attribution path as any other item-less PR. The
+    // #3634 lesson survives in a stronger form: `findItemFn` is STILL never consulted with "2206" (or anything
+    // else) for this shape, so it can never be fooled into stamping the wrong item's number — there is simply
+    // no item-number extraction attempted here at all any more.
+    it('`lane/file-2206-review-findings` is attributed to the PR itself, never to backlog item #2206 (a real, unrelated card)', () => {
       const entries = [{ kind: 'fix', prNumber: 2210, headRefName: 'lane/file-2206-review-findings', labels: ['review:changes', 'checking', 'merge-status:conflicting'] }];
-      // Even a findItemFn/fallback that WOULD happily resolve "2206" must never be consulted — proof the
-      // no-item-num refusal fires before any lookup, so it can never be fooled into a wrong attribution.
       const findCalls = [];
       const findItemSpy = (key) => { findCalls.push(key); return null; };
-      const { planned, refusals } = planFixesFromReconcile(entries, findItemSpy, () => [], () => ['we:should/not/be/used.mjs']);
-      expect(findCalls).toEqual([]);
-      expect(planned).toEqual([]);
-      expect(refusals).toEqual([{ pr: 2210, kind: 'no-item-num', why: expect.stringContaining('carries no conveyor item number') }]);
+      const { planned, refusals } = planFixesFromReconcile(entries, findItemSpy, () => [], () => ['we:should/not/be/used.mjs'], 'we', () => ['scripts/file-review-findings.mjs']);
+      expect(findCalls).toEqual([]); // never looked up "2206" — no item-number extraction is attempted at all
+      expect(refusals).toEqual([]);
+      expect(planned).toEqual([{
+        itemNum: null, pr: 2210, laneRef: 'lane/file-2206-review-findings',
+        scope: ['we:scripts/file-review-findings.mjs'], scopeSource: 'pr-diff',
+        isConflict: true, body: null, headRefOid: null,
+      }]);
     });
   });
 });
@@ -199,6 +231,19 @@ describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
   it('fails soft to `[]` on any `gh` failure — never throws the whole pass over one bad read', () => {
     const exec = () => { throw new Error('gh: PR not found'); };
     expect(fetchPrDiffScope(404, { exec, root: '/repo' })).toEqual([]);
+  });
+});
+
+// #xmtbdgs multi-repo slice 6 — `fetchPrDiffScope` is now a one-line wrapper over this un-prefixed read.
+describe('fetchPrDiffPaths — the un-prefixed read `resolvePrWorkUnit`\'s own `fetchDiffPaths` contract wants', () => {
+  it('returns raw, un-prefixed paths (no repo tag added)', () => {
+    const exec = () => 'src/a.ts\nsrc/b.ts\n';
+    expect(fetchPrDiffPaths(49, { exec, root: '/repo' })).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('fails soft to `[]` on any `gh` failure', () => {
+    const exec = () => { throw new Error('gh: PR not found'); };
+    expect(fetchPrDiffPaths(404, { exec, root: '/repo' })).toEqual([]);
   });
 });
 
@@ -287,6 +332,27 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     )).toThrow(/lane/i);
   });
 
+  // #xmtbdgs multi-repo slice 6 — an item-less PR (`planned.itemNum: null`) fills `{{ITEM_NUM}}` blank and
+  // `{{ATTRIBUTION}}` as `PR #<n>` — never a fabricated number, never a throw for a "missing" required token.
+  it('fills an item-less fix\'s `{{ITEM_NUM}}` blank and `{{ATTRIBUTION}}` as `PR #<n>` (no backlog item)', () => {
+    const calls = [];
+    const template = [
+      '# fix brief for {{PR_NUM}} (item [{{ITEM_NUM}}])',
+      '{{ATTRIBUTION}}: address review:changes on PR #{{PR_NUM}}',
+      'acquire: node scripts/lane-pool.mjs acquire --lane={{LANE}} --session={{SESSION_SLUG}} --scope={{SCOPE}} --base={{LANE_REF}}',
+    ].join('\n');
+    const result = dispatchFix(
+      { itemNum: null, pr: 49, laneRef: 'some-hand-opened-branch', scope: ['we:src/x.ts'], lane: 9 },
+      {
+        root: '/repo', readBrief: () => template, mintSessionId: () => 'session',
+        spawnAgent: (argv) => { calls.push(argv); return ''; },
+      },
+    );
+    const prompt = calls[0][calls[0].length - 1];
+    expect(prompt).toContain('item []'); // {{ITEM_NUM}} substituted blank, never "undefined"/"null"
+    expect(prompt).toContain('PR #49: address review:changes on PR #49'); // {{ATTRIBUTION}} = `PR #49`
+    expect(result.itemNum).toBeNull();
+  });
 });
 
 describe('tryResumeFix — #xu2krte Fork 1, and #xazl9u3\'s whole reason to exist: this runs with NO lane involved at all', () => {
@@ -769,6 +835,14 @@ describe('buildResumePrompt — #xu2krte Fork 1', () => {
     expect(prompt).not.toContain('undefined');
     expect(prompt).not.toContain('null');
   });
+
+  // #xmtbdgs multi-repo slice 6 — an item-less PR's resume prompt must never print a literal `item #null`.
+  it('says "no backlog item" rather than `item #null` when itemNum is null (item-less PR, slice 6)', () => {
+    const prompt = buildResumePrompt({ pr: 49, itemNum: null });
+    expect(prompt).toContain('no backlog item');
+    expect(prompt).not.toContain('null');
+    expect(prompt).not.toContain('undefined');
+  });
 });
 
 // ── #3331 — a fresh fix dispatch reports the id `claude --bg` assigned, not the minted one ────────────────────
@@ -960,3 +1034,60 @@ it('tryResumeFix no longer throws for a sibling repo\'s conflict-caused entry ei
   expect(calls).toEqual(['list']); // isConflict:true DOES consult the listing; no stamped body → no candidate
 });
 
+// #xmtbdgs multi-repo slice 6 — end-to-end: an item-less PR is dispatched with PR attribution and diff scope,
+// for WE and for a sibling repo alike.
+describe('runReconcileFixDispatch — item-less PRs (#xmtbdgs multi-repo slice 6)', () => {
+  it('an item-less WE PR (branch like `lane/dispatcher-daemon-ready`) is dispatched with PR attribution and diff scope', () => {
+    const dispatchCalls = [];
+    const result = runReconcileFixDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 900, headRefName: 'lane/dispatcher-daemon-ready' }], refusals: [] }),
+      findItemFn: findItemStub, loadItems: () => [],
+      pickFreeLanes: () => [5],
+      fetchItemlessDiffPaths: (pr) => { expect(pr).toBe(900); return ['scripts/conveyor/runner.mjs']; },
+      dispatch: (planned, opts) => { dispatchCalls.push({ planned, opts }); return { sessionId: 's', sessionSlug: 'fix-900', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] }; },
+      checkStaleness: FRESH,
+    });
+    expect(dispatchCalls).toEqual([{
+      planned: expect.objectContaining({ pr: 900, itemNum: null, scope: ['we:scripts/conveyor/runner.mjs'], scopeSource: 'pr-diff', lane: 5 }),
+      opts: expect.objectContaining({ repo: 'we' }),
+    }]);
+    expect(result.dispatched).toEqual([{ sessionId: 's', sessionSlug: 'fix-900', pr: 900, itemNum: null, lane: 5, unknownTokens: [] }]);
+    expect(result.refusals).toEqual([]);
+  });
+
+  it('an item-less plateau-app PR (branch like `lane/wip-fix`) is dispatched with a `plateau:`-prefixed scope', () => {
+    const dispatchCalls = [];
+    const result = runReconcileFixDispatch({
+      root: '/repo', repo: 'chalbert/plateau-app',
+      reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 171, headRefName: 'lane/wip-fix' }], refusals: [] }),
+      findItemFn: findItemStub, loadItems: () => [],
+      pickFreeLanes: () => [6],
+      fetchItemlessDiffPaths: () => ['src/components/Loan.tsx'],
+      dispatch: (planned, opts) => { dispatchCalls.push({ planned, opts }); return { sessionId: 's', sessionSlug: 'fix-pa-171', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] }; },
+      checkStaleness: FRESH,
+    });
+    expect(dispatchCalls).toEqual([{
+      planned: expect.objectContaining({ pr: 171, itemNum: null, scope: ['plateau:src/components/Loan.tsx'], scopeSource: 'pr-diff', lane: 6 }),
+      opts: expect.objectContaining({ repo: 'plateau-app' }),
+    }]);
+    expect(result.dispatched).toEqual([{ sessionId: 's', sessionSlug: 'fix-pa-171', pr: 171, itemNum: null, lane: 6, unknownTokens: [] }]);
+    expect(result.refusals).toEqual([]);
+  });
+
+  it('an item WITH no scope and an empty diff is still refused `no-scope` (this behaviour is unchanged by slice 6)', () => {
+    const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
+    const epic3383 = { num: '3383', slug: 's', specPath: 'backlog/3383-x.md', scope: [] };
+    const result = runReconcileFixDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: entries, refusals: [] }),
+      findItemFn: (key) => (key === '3383' ? epic3383 : null), loadItems: () => [],
+      pickFreeLanes: () => [7],
+      resolveFallbackScope: () => [],
+      dispatch: () => { throw new Error('must not be called'); },
+      checkStaleness: FRESH,
+    });
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.any(String) }]);
+  });
+});
