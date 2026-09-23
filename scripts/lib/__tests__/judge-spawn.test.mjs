@@ -191,20 +191,25 @@ describe('buildJudgeArgv — the recipe, pinned exactly (#3028)', () => {
   // the grandchild juror spawn, relying on PATH lookup from inside that session's own env, broke). Fixed by
   // resolving the binary as a sibling of the currently-running node executable (nvm's own install layout)
   // instead of a bare name — see resolveJudgeCli's own header for the full incident.
-  it('names the CLI once, so a caller can point at another binary without re-deriving flags — an absolute path on this dev box (nvm sibling), never a bare name that needs a PATH lookup', () => {
+  // NOT environment-portable to assert WHICH branch this takes: an nvm-managed dev machine has a real
+  // sibling (CI does not — GitHub Actions installs node via actions/setup-node, no claude binary anywhere
+  // near it, confirmed live: this exact assertion failed in CI moments after this fix first shipped). Only
+  // the SHAPE is a portable invariant; which branch resolveJudgeCli actually took on any given machine is
+  // proven instead by the fully-injected tests below, which need no real filesystem state to hold.
+  it('names the CLI once, so a caller can point at another binary without re-deriving flags — either an absolute sibling-of-node path, or the bare fallback name, never anything else', () => {
     expect(JUDGE_CLI.endsWith('/claude') || JUDGE_CLI === 'claude').toBe(true);
-    // On THIS machine (nvm-managed node), the sibling genuinely exists, so the resolved value must be the
-    // absolute path, not the bare fallback — proves the fix is actually active in this dev environment, not
-    // merely present in the source.
-    expect(JUDGE_CLI).not.toBe('claude');
   });
 });
 
 describe('resolveJudgeCli — PATH-independent binary resolution (live-caught 2026-09-23)', () => {
-  it('resolves the sibling of process.execPath when a real exists() confirms it — the real default path', () => {
+  it('resolves the sibling of process.execPath when a real exists() confirms it — the real default path, whichever branch this machine actually takes', () => {
     const resolved = resolveJudgeCli();
-    expect(resolved).toBe(join(dirname(process.execPath), 'claude'));
-    expect(existsSync(resolved)).toBe(true); // genuinely exists on disk, not just string-shaped
+    // Portable across dev machines and CI alike: report the sibling path ONLY when the caller's REAL
+    // existsSync() (unmocked here) agrees it is actually there; otherwise the documented fallback.
+    const expected = existsSync(join(dirname(process.execPath), 'claude'))
+      ? join(dirname(process.execPath), 'claude')
+      : 'claude';
+    expect(resolved).toBe(expected);
   });
 
   it('resolves the sibling of an injected execPath when the injected exists() says it is there', () => {
