@@ -3,10 +3,11 @@ bornAs: xs6zvqt
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-task.mjs", "we:scripts/operations/dispatch-task-io.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-task.test.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs"]
 relatedTo: ["3717", "3801", "3643", "3730", "3784", "3798", "3690"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-22"
 tags: [dispatch, model-routing, prototype]
 ---
 
