@@ -1,7 +1,8 @@
 ---
+bornAs: xn146t1
 kind: story
 size: 3
-parent: "x9ah1zb"
+parent: "3931"
 status: open
 locus: plateau-app
 dateOpened: "2026-09-22"

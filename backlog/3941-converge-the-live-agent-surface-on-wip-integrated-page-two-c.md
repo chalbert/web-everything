@@ -1,10 +1,11 @@
 ---
+bornAs: xjusaki
 kind: story
 size: 3
-parent: "x9ah1zb"
+parent: "3931"
 status: open
 locus: plateau-app
-blockedBy: ["x6uo0kt", "xxhf15c"]
+blockedBy: ["3939", "3940"]
 dateOpened: "2026-09-22"
 tags: []
 ---

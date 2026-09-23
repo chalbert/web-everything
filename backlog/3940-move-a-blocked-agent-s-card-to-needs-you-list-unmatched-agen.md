@@ -1,10 +1,11 @@
 ---
+bornAs: xxhf15c
 kind: story
 size: 2
-parent: "x9ah1zb"
+parent: "3931"
 status: open
 locus: plateau-app
-blockedBy: ["x7dqrln"]
+blockedBy: ["3938"]
 dateOpened: "2026-09-22"
 tags: []
 ---

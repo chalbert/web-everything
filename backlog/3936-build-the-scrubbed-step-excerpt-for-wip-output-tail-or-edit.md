@@ -1,9 +1,10 @@
 ---
+bornAs: x8gsl5r
 kind: story
 size: 2
-parent: "x9ah1zb"
+parent: "3931"
 status: open
-blockedBy: ["xp8mn7g"]
+blockedBy: ["3934"]
 dateOpened: "2026-09-22"
 tags: []
 ---

@@ -1,4 +1,5 @@
 ---
+bornAs: x9ah1zb
 kind: epic
 parent: "3383"
 status: open
@@ -25,16 +26,16 @@ Today a Doing card says only that something is claimed or has a PR. What the age
 
 ## Slices (in order)
 
-1. #xa59gb9 — join each running agent to its card (first; everything needs it).
-2. #xp8mn7g — transcripts → steps.
-3. #x8gsl5r — scrubbed step excerpt.
-4. #x27g4f0 — coarse agent summary in the snapshot.
-5. #xn146t1 — relay watch/interest.
-6. #xd47p14 — laptop agent stream.
-7. #x7dqrln — live L1 line + L2 timeline.
-8. #x6uo0kt — L3 step detail.
-9. #xxhf15c — blocked → Needs you, unmatched strip, several runs.
-10. #xjusaki — converge the surface.
+1. #3932 — join each running agent to its card (first; everything needs it).
+2. #3934 — transcripts → steps.
+3. #3936 — scrubbed step excerpt.
+4. #3935 — coarse agent summary in the snapshot.
+5. #3933 — relay watch/interest.
+6. #3937 — laptop agent stream.
+7. #3938 — live L1 line + L2 timeline.
+8. #3939 — L3 step detail.
+9. #3940 — blocked → Needs you, unmatched strip, several runs.
+10. #3941 — converge the surface.
 
 ## Defaults the slices assume (still open for the operator — design doc §8)
 

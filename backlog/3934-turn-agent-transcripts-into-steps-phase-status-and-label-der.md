@@ -1,9 +1,10 @@
 ---
+bornAs: xp8mn7g
 kind: story
 size: 3
-parent: "x9ah1zb"
+parent: "3931"
 status: open
-blockedBy: ["xa59gb9"]
+blockedBy: ["3932"]
 dateOpened: "2026-09-22"
 tags: []
 ---

@@ -1,10 +1,11 @@
 ---
+bornAs: x7dqrln
 kind: story
 size: 3
-parent: "x9ah1zb"
+parent: "3931"
 status: open
 locus: plateau-app
-blockedBy: ["x27g4f0", "xd47p14"]
+blockedBy: ["3935", "3937"]
 dateOpened: "2026-09-22"
 tags: []
 ---
