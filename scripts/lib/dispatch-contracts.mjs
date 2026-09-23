@@ -737,13 +737,13 @@ export function shadowTrialFromVerdict(r, shadow, acting, options = {}) {
 export const SUPERVISION_ENFORCEMENT_ENV = 'WE_DISPATCH_SUPERVISION_ENFORCE';
 
 /**
- * WHETHER SUPERVISION IS ENFORCED AS A GATE, or only RECORDED. **Off by default, deliberately.**
+ * WHETHER SUPERVISION IS ENFORCED AS A GATE, or only RECORDED. **On by default — #3784, rule 6 of #3690.**
  *
  * The supervision level `selectSupervisionLevel` computes implements #3690's progressive-backdown graduation
- * model, and **#3690 is an OPEN, unratified decision** (worker `prepare-3690` is preparing it). Turning a
- * computed level into a dispatch gate would put that model into force ahead of the ruling, which #3717's own
- * card flags for the operator. So the level is computed and written into the run record on every dispatch —
- * the data the eventual ruling needs — and the gate stays behind this switch until #3690 is ratified.
+ * model. #3690 is now ratified (we:docs/agent/platform-decisions.md#delegation-trial-record-graduation), so
+ * the gate that was withheld pending that ruling is on by default: a computed level is enforced, not merely
+ * recorded. `WE_DISPATCH_SUPERVISION_ENFORCE=0/false/off` still disables it explicitly for a caller that needs
+ * to record without gating.
  *
  * An unrecognised value THROWS rather than picking a side, for the same reason
  * `dispatch-provider-registry.mjs#dispatchModeFor` does: a typo'd `WE_DISPATCH_SUPERVISION_ENFORCE=ture`
@@ -755,20 +755,21 @@ export const SUPERVISION_ENFORCEMENT_ENV = 'WE_DISPATCH_SUPERVISION_ENFORCE';
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
 export function supervisionEnforcementFrom(env = {}) {
   const raw = String(env?.[SUPERVISION_ENFORCEMENT_ENV] ?? '').trim().toLowerCase();
-  if (!raw) return false;
+  if (!raw) return true;
   if (['1', 'true', 'on'].includes(raw)) return true;
   if (['0', 'false', 'off'].includes(raw)) return false;
   throw new TypeError(
     `dispatch-contracts: ${SUPERVISION_ENFORCEMENT_ENV} must be 1/true/on or 0/false/off (the default — `
-    + `#3690 is not ratified, so supervision is RECORDED, not enforced), got ${JSON.stringify(raw)}`,
+    + `#3690 is ratified, so supervision is ENFORCED unless explicitly disabled), got ${JSON.stringify(raw)}`,
   );
 }
 
 /**
- * THE SUPERVISION GATE, once #3690 ratifies. `null` means "nothing holds this dispatch".
+ * THE SUPERVISION GATE — #3690 is ratified, so this is on by default (see {@link supervisionEnforcementFrom}).
+ * `null` means "nothing holds this dispatch".
  *
- * With `enforce` off (the default) it ALWAYS returns `null`: byte-identical dispatch behaviour, the level
- * recorded either way. With it on, a dispatch whose computed level is `full` and which names no supervisor is
+ * With `enforce` off it ALWAYS returns `null`: byte-identical dispatch behaviour, the level recorded either
+ * way. With it on (the default), a dispatch whose computed level is `full` and which names no supervisor is
  * held — a `full`-supervision route with nobody supervising it is the exact case the level exists to name.
  *
  * @param {{supervision?: string, supervisor?: unknown}} routing
@@ -781,8 +782,8 @@ export function supervisionHold(routing, { enforce = false } = {}) {
   if (routing?.supervision !== SUPERVISION_LEVELS.FULL) return null;
   if (routing?.supervisor) return null;
   return `computed supervision level is \`${SUPERVISION_LEVELS.FULL}\` and this dispatch names no supervisor — `
-    + `held because ${SUPERVISION_ENFORCEMENT_ENV} is on. Unset it to record the level without gating on it `
-    + '(#3690 is not ratified).';
+    + `held because ${SUPERVISION_ENFORCEMENT_ENV} is on. Unset it, or set it to 0/false/off, to record the `
+    + 'level without gating on it.';
 }
 
 /**
@@ -802,9 +803,12 @@ export const UNSIZED_CARD_POLICIES = Object.freeze(['block', 'default-size']);
 export const FIX_SIZE_SOURCES = Object.freeze(['card-size', 'measured-diff', 'assumed', 'policy']);
 
 /**
- * #3784's constraint, carried here per #3801 Fork 4 (b): a `defaultSize` below this makes unsized cards
- * eligible for delegation on an unmeasured number, and must not be enabled before #3784's rule-3 and rule-6
- * fixes land. #3784 removes this floor.
+ * The largest size band (#3801 Fork 4 (b)) — the safe, largest-LOC fallback `resolveFixSize` walks to when
+ * nothing else in its `fixSizeSource` chain resolves a number. #3784 (rule 6 of #3690) removed this
+ * constant's earlier job as a `defaultSize` floor in {@link validateSizePolicy}: that refusal named #3784's
+ * own rule-3/rule-6 fixes as the reason a smaller `defaultSize` was unsafe, and those fixes have now landed
+ * (the promotion record below, and enforcement on by default) — an unsized card's fallback size is an
+ * ordinary policy choice again, not a gate on this card.
  */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
 export const MIN_DEFAULT_SIZE = 13;
@@ -825,8 +829,12 @@ export const DEFAULT_SIZE_POLICY = Object.freeze({
  * VALIDATE THE CHECKED-IN SIZE-POLICY SETTING (#3801 Fork 4 (b)). Pure: takes whatever
  * `we:scripts/lib/dispatch-size-policy.json` parsed to (or any candidate override), returns a normalized,
  * frozen policy or the reasons it fails closed. A missing field reads as {@link DEFAULT_SIZE_POLICY}'s own
- * value for it, so a partial override still validates. Refuses a `defaultSize` below {@link MIN_DEFAULT_SIZE},
- * naming #3784; refuses `policy` in `fixSizeSource` unless `unsizedCardPolicy` is `default-size`.
+ * value for it, so a partial override still validates. Refuses `policy` in `fixSizeSource` unless
+ * `unsizedCardPolicy` is `default-size`.
+ *
+ * #3784 (rule 6 of #3690) removed the earlier `defaultSize < 13` refusal this function carried: it named
+ * #3784's own rule-3/rule-6 fixes as the precondition for a smaller `defaultSize`, and those fixes are this
+ * same diff.
  *
  * @param {unknown} raw
  * @returns {{ok: true, policy: {unsizedCardPolicy: string, defaultSize: number, fixSizeSource: string[]}} | {ok: false, errors: string[]}}
@@ -844,11 +852,6 @@ export function validateSizePolicy(raw) {
   const defaultSize = owns(p, 'defaultSize') ? p.defaultSize : DEFAULT_SIZE_POLICY.defaultSize;
   if (typeof defaultSize !== 'number' || !owns(SIZE_TO_ESTIMATED_LOC, defaultSize)) {
     errors.push(`defaultSize must be one of ${Object.keys(SIZE_TO_ESTIMATED_LOC).join(', ')}, got ${JSON.stringify(defaultSize)}`);
-  } else if (defaultSize < MIN_DEFAULT_SIZE) {
-    errors.push(
-      `defaultSize ${defaultSize} is below ${MIN_DEFAULT_SIZE} — #3784's rule-3 and rule-6 fixes must land `
-      + 'before an unsized card can be admitted on an unmeasured number this small',
-    );
   }
 
   const fixSizeSourceRaw = owns(p, 'fixSizeSource') ? p.fixSizeSource : DEFAULT_SIZE_POLICY.fixSizeSource;
@@ -871,6 +874,65 @@ export function validateSizePolicy(raw) {
     ok: true,
     policy: Object.freeze({ unsizedCardPolicy, defaultSize, fixSizeSource: Object.freeze([...fixSizeSourceRaw]) }),
   };
+}
+
+/**
+ * #3784 — RULE 6 of #3690 (`#delegation-trial-record-graduation`): THE PROMOTION RECORD. A ratified decision
+ * card is the ACT; this checked-in file (`we:scripts/lib/dispatch-supervision-promotions.json`) is its
+ * machine-readable transcript. Ships empty — no triple is promoted by this card.
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export const DEFAULT_PROMOTIONS = Object.freeze({ promotions: Object.freeze([]) });
+
+/**
+ * VALIDATE A CANDIDATE PROMOTION RECORD (#3784, rule 6 of #3690). Pure: takes whatever
+ * `we:scripts/lib/dispatch-supervision-promotions.json` parsed to (or any candidate override). Each row is
+ * `{provider, model, taskType, level, ratifiedOn, ratifiedBy, anchor}` — the citation to the ratified act that
+ * authorized it (`ratifiedBy: "#NNNN"`, `anchor: "we:docs/agent/platform-decisions.md#…"`). A row missing
+ * `ratifiedBy` or `anchor` (or carrying any other invalid field) is refused BY NAME.
+ *
+ * **Unlike {@link validateSizePolicy}, an invalid candidate here is never handed to a caller as "every field
+ * defaults" — see {@link decideDispatchRoute}'s own use of this function, which fails CLOSED on any error: a
+ * missing, unparseable or invalid promotions file promotes NOTHING; it does not refuse the dispatch (that
+ * would hold every route, not just an unproven one), it simply grants no promotion, so every computed
+ * `spot-check` stays gated to `full`. That is rule 6's own stated default: "With no such act, a triple stays
+ * at `full`."
+ *
+ * The citation itself (does `anchor` resolve to a real heading? is the `ratifiedBy` card `status: resolved`?)
+ * is NOT checked here — that is script-decidable against the live repo (`docs/agent/platform-decisions.md`,
+ * `backlog/*.md`), so it belongs to `check:standards`
+ * (`we:scripts/check-standards-rules.mjs#findInvalidPromotionCitations`), not this pure, io-free function.
+ *
+ * @param {unknown} raw
+ * @returns {{ok: true, promotions: Array<{provider:string, model:string, taskType:string, level:string, ratifiedOn:string, ratifiedBy:string, anchor:string}>} | {ok: false, errors: string[]}}
+ */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function validatePromotions(raw) {
+  const errors = [];
+  const p = object(raw) ? raw : Array.isArray(raw) ? { promotions: raw } : {};
+  const list = owns(p, 'promotions') ? p.promotions : undefined;
+  if (!Array.isArray(list)) {
+    return { ok: false, errors: [`promotions must be an array, got ${JSON.stringify(list ?? raw)}`] };
+  }
+  const rows = [];
+  list.forEach((row, i) => {
+    const e = [];
+    if (!object(row)) { errors.push(`promotions[${i}] must be an object`); return; }
+    check(e, PROVIDERS.includes(row.provider), 'provider is invalid');
+    check(e, nonempty(row.model), 'model is required');
+    check(e, isTaskType(row.taskType), 'taskType is invalid');
+    check(e, Object.values(SUPERVISION_LEVELS).includes(row.level), 'level is invalid');
+    check(e, nonempty(row.ratifiedOn) && /^\d{4}-\d{2}-\d{2}$/.test(row.ratifiedOn), 'ratifiedOn must be an ISO date (YYYY-MM-DD)');
+    check(e, nonempty(row.ratifiedBy) && /^#\d+$/.test(row.ratifiedBy), 'ratifiedBy is required and must be `#NNN`');
+    check(e, nonempty(row.anchor) && row.anchor.startsWith('we:docs/agent/platform-decisions.md#'), 'anchor is required and must cite we:docs/agent/platform-decisions.md#…');
+    if (e.length) { errors.push(...e.map((m) => `promotions[${i}]: ${m}`)); return; }
+    rows.push(Object.freeze({
+      provider: row.provider, model: row.model, taskType: row.taskType, level: row.level,
+      ratifiedOn: row.ratifiedOn, ratifiedBy: row.ratifiedBy, anchor: row.anchor,
+    }));
+  });
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, promotions: Object.freeze(rows) };
 }
 
 /**
@@ -1014,11 +1076,16 @@ function executedVendorFor(override) {
  *     here, not a second vocabulary), and its supervision is the level of the OVERRIDE's own
  *     `{provider, model, taskType}` triple (an override to a triple with no trials starts at `full`), never the
  *     level the routed triple earned. It does not touch admission: an unsized card is still held for prepare.
- * @param {{scorecards?: unknown, enforceSupervision?: boolean, sizePolicy?: unknown}} [deps]
+ * @param {{scorecards?: unknown, enforceSupervision?: boolean, sizePolicy?: unknown, promotions?: unknown}} [deps]
  *   - `sizePolicy` — the checked-in `we:scripts/lib/dispatch-size-policy.json` setting (#3801 Fork 4 (b)), read
  *     at the io edge and handed across as data exactly like `scorecards`. Defaults to
  *     {@link DEFAULT_SIZE_POLICY} and is validated by {@link validateSizePolicy}; an invalid policy refuses the
  *     whole route rather than routing on a setting nobody checked.
+ *   - `promotions` — the checked-in `we:scripts/lib/dispatch-supervision-promotions.json` promotion record
+ *     (#3784, rule 6 of #3690), read at the io edge and handed across as data. Defaults to
+ *     {@link DEFAULT_PROMOTIONS} and is validated by {@link validatePromotions}; UNLIKE `sizePolicy`, an
+ *     invalid/missing candidate fails CLOSED to no promotions (every computed `spot-check` gates to `full`)
+ *     rather than refusing the route.
  *   - `dispatch.measuredDiffLoc` (#3844) — the changed-line count of the PR being repaired, read at the io edge
  *     (e.g. `reconcile-fix-dispatch.mjs`'s own `gh` read) and handed in as data; consulted only for a
  *     {@link REPAIR_KINDS} dispatch, and only when `card-size` (the dispatch's own `size`/`estimatedLoc`)
@@ -1026,7 +1093,7 @@ function executedVendorFor(override) {
  * @returns {object} the routing record — see the file's own test for the exact shape.
  */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
-export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSupervision = false, sizePolicy: rawSizePolicy = DEFAULT_SIZE_POLICY } = {}) {
+export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSupervision = false, sizePolicy: rawSizePolicy = DEFAULT_SIZE_POLICY, promotions: rawPromotions = DEFAULT_PROMOTIONS } = {}) {
   try {
     const kind = String(dispatch?.kind ?? '').trim();
     const scopePaths = Array.isArray(dispatch?.scopePaths) ? dispatch.scopePaths.map(String) : [];
@@ -1068,6 +1135,13 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       return routeRefused(kind, derivation, `the size policy does not validate: ${sizePolicyResult.errors.join('; ')}`);
     }
     const sizePolicy = sizePolicyResult.policy;
+
+    // #3784 — RULE 6 of #3690: THE PROMOTION RECORD, resolved once per route. UNLIKE `sizePolicy` above, an
+    // invalid/missing/unparseable candidate never refuses the route — it fails CLOSED to an empty list, so
+    // every computed `spot-check` below is gated to `full` rather than the whole dispatch being held. See
+    // {@link validatePromotions}'s own docblock for why this departs from the size-policy precedent.
+    const promotionsResult = validatePromotions(rawPromotions);
+    const promotedRows = promotionsResult.ok ? promotionsResult.promotions : [];
 
     // #3801 Fork 4 (b) — WHERE THE SIZE CAME FROM, recorded beside the number itself. An explicit override or
     // the card's own `size:` is `sized: true`, source `card`. Otherwise (`sized: false`) `unsizedCardPolicy`
@@ -1120,6 +1194,8 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
     // picks it) and matches no trial, so the triple starts at `full`.
     let supervision = out.supervision;
     let spotCheck = out.spotCheck;
+    let supervisionProvider = out.provider;
+    let supervisionModel = out.model;
     const overrideAudit = [];
     if (override.value) {
       const provider = DELIVERY_VENDOR_PROVIDERS[override.value.requestedVendor];
@@ -1132,12 +1208,36 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       spotCheck = supervision === SUPERVISION_LEVELS.SPOT_CHECK && taskSessionName(dispatch?.taskKey)
         ? spotCheckSample(dispatch.taskKey, built.profile.risk)
         : null;
+      supervisionProvider = provider;
+      supervisionModel = model;
       overrideAudit.push(
         audit('provider-override', override.value.requestedVendor, `criteria routed ${out.provider}`, override.value.reason),
         audit('override-supervision', supervision, `triple=${provider}/${model ?? 'unknown-model'}/${derivation.taskType}; routed triple was ${out.supervision}`, 'An override is a trial of its own triple, supervised at that triple\'s level, never at the routed one\'s.'),
         ...own.auditTrail,
       );
     }
+
+    // #3784 — RULE 6 of #3690: a computed `spot-check` survives ONLY when its own `{provider, model, taskType}`
+    // triple is named (at that level) in the ratified promotion record; otherwise it is gated to `full`, with a
+    // reason naming the missing act. A computed `full` is NEVER lifted by a promotion row — demotion stays
+    // automatic (the data demotes), promotion never happens without a named, cited act (the operator promotes).
+    // `selectSupervisionLevel` (provider-routing.mjs) is NOT touched by this — the clamp lives here, one layer up.
+    if (supervision === SUPERVISION_LEVELS.SPOT_CHECK) {
+      const named = promotedRows.some((p) => p.level === SUPERVISION_LEVELS.SPOT_CHECK
+        && p.provider === supervisionProvider && p.model === supervisionModel && p.taskType === derivation.taskType);
+      if (!named) {
+        supervision = SUPERVISION_LEVELS.FULL;
+        spotCheck = null;
+        overrideAudit.push(audit(
+          'promotion-required', SUPERVISION_LEVELS.FULL,
+          `triple=${supervisionProvider ?? 'unknown-provider'}/${supervisionModel ?? 'unknown-model'}/${derivation.taskType}`,
+          'Rule 6 of #delegation-trial-record-graduation: no ratified promotion act '
+            + '(we:scripts/lib/dispatch-supervision-promotions.json) names this {provider, model, taskType} '
+            + 'triple at spot-check, so the computed level is held at full until one does.',
+        ));
+      }
+    }
+
     const routed = out.provider;
     const record = {
       kind,
@@ -1152,6 +1252,24 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       tier: out.tier,
       supervision,
       spotCheck,
+      // #3850 Fork 1 (ratified 2026-09-22, we:backlog/3850-…md): the independent pass for a single-worker
+      // lane is the review panel on the lane's OWN PR, enforced as a merge hold at the land seam — not a live
+      // supervisor the dispatch-time gate can name. So every routed dispatch records that as its supervisor
+      // here, which is what the ruling's own text says makes `supervisionHold` stop holding it
+      // ("the dispatch records the supervisor as that PR review … so supervisionHold no longer holds it").
+      // `supervisionHold` itself is UNCHANGED by this diff (#3784 rule 6 does not touch it) — this is the one
+      // piece of #3850's OWN ratified fix this diff carries, because #3784 flips supervision enforcement ON
+      // by default and, absent this, EVERY full-supervision routed dispatch — the ordinary case, since the
+      // promotion record ships empty — would be held at spawn with nobody ever naming a supervisor,
+      // freezing the mechanical dispatcher outright. Fork 2 (which routes force `review:pending` at PR-open
+      // and hold the MERGE for a delegated run) is #3850's own remaining scope — the wrapper files
+      // (`deliver-item-wrapper.mjs`, `fix-dispatch-wrapper.mjs`, `ci-heal-dispatch-wrapper.mjs`,
+      // `review-set-label.mjs`) are outside this card's `scope:` and are NOT touched here.
+      supervisor: Object.freeze({
+        role: 'pr-review', mode: 'land-seam-hold',
+        note: 'Independent review is the review panel on this dispatch\'s own PR, enforced as a merge hold '
+          + 'at land (#3850 Fork 1) rather than a live supervisor named at spawn time.',
+      }),
       risk: built.profile.risk,
       complexity: built.profile.complexity,
       estimatedLoc,

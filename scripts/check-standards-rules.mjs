@@ -3656,3 +3656,40 @@ export function gitHookAllFlagError(file, hit) {
     + `a tree the operator already has), or write \`# ${GITHOOK_ALL_ALLOW} <why>\` on that line or the one above.`
     + `\n    ${hit.text}`;
 }
+
+/**
+ * #3784 — RULE 6 of #3690 (`#delegation-trial-record-graduation`): THE PROMOTION RECORD'S CITATION CHECK.
+ *
+ * `we:scripts/lib/dispatch-contracts.mjs#validatePromotions` checks a promotions row's SHAPE (does it have an
+ * `anchor`, a `ratifiedBy`, etc.) — pure, no repo state. This function checks whether the citation is TRUE:
+ * does `anchor` resolve to a real heading in `we:docs/agent/platform-decisions.md`, and is the `ratifiedBy`
+ * card actually `status: resolved`? That is script-decidable against the live repo, so it belongs in
+ * `check:standards`, not in a reviewer's head (or in the pure library, which never reads a file).
+ *
+ * Pure: the doc's extracted anchor set and a status lookup arrive as DATA — `extractAnchors(platformDecisionsSrc).anchors`
+ * (`we:scripts/lib/rules-loader.cjs`) and a `Map<string, string>` of backlog num → status — read once at the
+ * driver's io edge exactly like every other citation gate in this file's caller.
+ *
+ * @param {unknown} promotions - the `promotions` array (already read from the checked-in JSON; a malformed
+ *   candidate is reported as its own error elsewhere — this function only walks what IS an array).
+ * @param {{platformDecisionAnchors: Set<string>, backlogStatusByNum: Map<string, string>}} ctx
+ * @returns {Array<{provider: unknown, model: unknown, taskType: unknown, reason: string}>}
+ */
+export function findInvalidPromotionCitations(promotions, { platformDecisionAnchors, backlogStatusByNum }) {
+  const findings = [];
+  for (const row of Array.isArray(promotions) ? promotions : []) {
+    if (!row || typeof row !== 'object') continue;
+    const label = { provider: row.provider, model: row.model, taskType: row.taskType };
+    const anchorMatch = typeof row.anchor === 'string' ? /^we:docs\/agent\/platform-decisions\.md#([\w-]+)$/.exec(row.anchor) : null;
+    if (!anchorMatch || !platformDecisionAnchors.has(anchorMatch[1])) {
+      findings.push({ ...label, reason: `anchor ${JSON.stringify(row.anchor)} does not resolve to a heading in we:docs/agent/platform-decisions.md` });
+      continue;
+    }
+    const numMatch = typeof row.ratifiedBy === 'string' ? /^#(\d+)$/.exec(row.ratifiedBy) : null;
+    const status = numMatch ? backlogStatusByNum.get(String(Number(numMatch[1]))) : undefined;
+    if (!numMatch || status !== 'resolved') {
+      findings.push({ ...label, reason: `ratifiedBy ${JSON.stringify(row.ratifiedBy)} does not cite a \`status: resolved\` backlog card` });
+    }
+  }
+  return findings;
+}

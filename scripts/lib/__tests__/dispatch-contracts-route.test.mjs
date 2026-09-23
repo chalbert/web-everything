@@ -121,9 +121,19 @@ describe('the deliveryAgent marker override', () => {
     expect(c.decideDispatchRoute(dispatch({ deliveryAgent: 'codex' })).refusal).toContain('deliveryAgentReason');
     expect(c.decideDispatchRoute(dispatch({ deliveryAgentReason: 'x' })).refusal).toContain('deliveryAgent:');
   });
+  // #3784 (rule 6 of #3690) — a promotion row is required for the criteria's computed `spot-check` to
+  // survive as this test's own assertion demonstrates; see the dedicated rule-6 suite below for the
+  // no-promotion (fails-closed) case.
+  const PROMOTED_CODEX_BUILD = {
+    promotions: [{
+      provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', level: 'spot-check',
+      ratifiedOn: '2026-09-22', ratifiedBy: '#3690',
+      anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation',
+    }],
+  };
   it('leaves routed as the criteria chose it and records the override beside it', () => {
-    const plain = c.decideDispatchRoute(dispatch(), { scorecards: trials() });
-    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), { scorecards: trials() });
+    const plain = c.decideDispatchRoute(dispatch(), { scorecards: trials(), promotions: PROMOTED_CODEX_BUILD });
+    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), { scorecards: trials(), promotions: PROMOTED_CODEX_BUILD });
     expect(plain).toMatchObject({ routed: 'codex', supervision: 'spot-check' });
     expect(over).toMatchObject({ routed: 'codex', model: plain.model, override: { requestedVendor: 'claude-restricted', executedVendor: 'claude-restricted', reason: 'pin' } });
   });
@@ -170,10 +180,13 @@ describe('the size-policy setting', () => {
     expect(result.errors.join(' ')).toContain('`policy`');
     expect(c.validateSizePolicy({ unsizedCardPolicy: 'default-size', defaultSize: 13, fixSizeSource: ['policy'] }).ok).toBe(true);
   });
-  it('refuses a `defaultSize` below 13, naming #3784', () => {
+  // #3784 (rule 6 of #3690) removed the `defaultSize < 13` floor this validator used to carry: it named
+  // #3784's own rule-3/rule-6 fixes as the precondition, and those fixes are this same diff. A small
+  // `defaultSize` is now an ordinary valid setting.
+  it('no longer refuses a `defaultSize` below 13 — #3784 removed that floor', () => {
     const result = c.validateSizePolicy({ unsizedCardPolicy: 'default-size', defaultSize: 2, fixSizeSource: ['card-size'] });
-    expect(result.ok).toBe(false);
-    expect(result.errors.join(' ')).toContain('#3784');
+    expect(result.ok).toBe(true);
+    expect(result.policy.defaultSize).toBe(2);
     expect(c.validateSizePolicy({ unsizedCardPolicy: 'default-size', defaultSize: 13, fixSizeSource: ['card-size'] }).ok).toBe(true);
   });
   it('under default-size an unsized route records the setting as the source; a sized route records the card', () => {
@@ -188,6 +201,71 @@ describe('the size-policy setting', () => {
     expect(sized.outcome).toBe('routed');
     expect(sized.sized).toBe(true);
     expect(sized.sizeSource).toBe('card');
+  });
+});
+
+// #3784 — RULE 6 of #3690 (`#delegation-trial-record-graduation`): the promotion record. A computed
+// `spot-check` survives only when its own `{provider, model, taskType}` triple is named at that level in a
+// VALID promotion row; a computed `full` is never lifted; an invalid/missing/unparseable candidate fails
+// CLOSED to no promotions (unlike the size-policy precedent, which fails open — and never refuses the route).
+describe('the supervision-promotion record (#3784, rule 6 of #3690)', () => {
+  const dispatch = (extra = {}) => ({ kind: 'build', scopePaths: ['we:scripts/operations/example.mjs'], size: 3, taskKey: { storyRef: '3784', round: 1, taskId: 'build' }, ...extra });
+  const trials = () => history().map((r) => ({ ...r, taskType: 'build-new-feature' }));
+  const row = (extra = {}) => ({
+    provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', level: 'spot-check',
+    ratifiedOn: '2026-09-22', ratifiedBy: '#3690',
+    anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation',
+    ...extra,
+  });
+
+  it('supervisionEnforcementFrom({}) is true — #3690 is ratified', () => {
+    expect(c.supervisionEnforcementFrom({})).toBe(true);
+  });
+
+  it('a missing, unparseable or invalid promotions candidate fails CLOSED: every route records full', () => {
+    for (const bad of [undefined, null, {}, { promotions: 'nope' }, { promotions: [{ provider: 'codex' }] }, 'not an object']) {
+      const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), promotions: bad });
+      expect(out.outcome).toBe('routed');
+      expect(out.supervision).toBe('full');
+      expect(out.spotCheck).toBeNull();
+    }
+  });
+
+  it('a computed spot-check for a triple named in a valid row records spot-check', () => {
+    const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), promotions: { promotions: [row()] } });
+    expect(out.supervision).toBe('spot-check');
+    expect(out.spotCheck).not.toBeNull();
+  });
+
+  it('the same computed spot-check for a triple NOT named records full, with a reason naming the missing act', () => {
+    // A row for a DIFFERENT taskType does not name this triple.
+    const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), promotions: { promotions: [row({ taskType: 'doc-fix' })] } });
+    expect(out.supervision).toBe('full');
+    expect(out.spotCheck).toBeNull();
+    const entry = out.auditTrail.find((a) => a.criterion === 'promotion-required');
+    expect(entry).toBeTruthy();
+    expect(entry.reasoning).toContain('no ratified promotion act');
+  });
+
+  it('a computed full for a triple that IS named still records full — a promotion never lifts a demotion', () => {
+    const out = c.decideDispatchRoute(dispatch({ risk: 'high' }), { scorecards: trials(), promotions: { promotions: [row()] } });
+    expect(out.supervision).toBe('full');
+  });
+
+  it('a row missing ratifiedBy or anchor is refused by name', () => {
+    const noRatifiedBy = c.validatePromotions({ promotions: [row({ ratifiedBy: undefined })] });
+    expect(noRatifiedBy.ok).toBe(false);
+    expect(noRatifiedBy.errors.join(' ')).toContain('ratifiedBy');
+    const noAnchor = c.validatePromotions({ promotions: [row({ anchor: undefined })] });
+    expect(noAnchor.ok).toBe(false);
+    expect(noAnchor.errors.join(' ')).toContain('anchor');
+  });
+
+  it('the checked-in promotions file exists, parses, and ships empty', () => {
+    const raw = JSON.parse(readFileSync('scripts/lib/dispatch-supervision-promotions.json', 'utf8'));
+    expect(raw).toEqual({ promotions: [] });
+    expect(c.validatePromotions(raw)).toEqual({ ok: true, promotions: [] });
+    expect(c.DEFAULT_PROMOTIONS).toEqual({ promotions: [] });
   });
 });
 

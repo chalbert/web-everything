@@ -86,6 +86,9 @@ import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, det
 // `shapeDispatchRead`; this file only supplies the two things that need a filesystem and an environment: the
 // scorecards and this flag.
 import { decideDispatchRoute, supervisionEnforcementFrom, CLAUDE_NATIVE_MODEL_BY_TIER } from '../lib/dispatch-contracts.mjs';
+// #3784 — rule 6 of #3690: `defaultReadPromotions` below is this module's own read of the checked-in
+// promotion record, exported next to `defaultReadSizePolicy`. No extra import is needed here for it —
+// `decideDispatchRoute`'s own `validatePromotions` does the (fail-closed) validation on the pure side.
 
 /**
  * The three native Claude model ids {@link ../lib/dispatch-contracts.mjs#CLAUDE_NATIVE_MODEL_BY_TIER} maps to
@@ -232,6 +235,8 @@ export function readTick({
   readScorecards = () => defaultReadScorecards({ root, readText }),
   // #3843 (#3801 Fork 4 (b)) — the checked-in unsized-card size policy, read at this same io edge.
   readSizePolicy = () => defaultReadSizePolicy({ root, readText }),
+  // #3784 (rule 6 of #3690) — the checked-in supervision-promotion record, read at this same io edge.
+  readPromotions = () => defaultReadPromotions({ root, readText }),
   // #3717 step 3 — supervision is RECORDED, not enforced, until #3690 is ratified. Off by default.
   enforceSupervision = supervisionEnforcementFrom(process.env),
   // #3840 (Fork 5 of #3801) — THE ONE PROVIDER OVERRIDE: the item's own `deliveryAgent:` frontmatter marker and
@@ -349,6 +354,8 @@ export function readTick({
   const scorecards = readScorecards();
   // #3843 — same reasoning, for the checked-in size policy.
   const sizePolicy = readSizePolicy();
+  // #3784 — same reasoning, for the checked-in supervision-promotion record.
+  const promotions = readPromotions();
   return {
     resolvedNum: key,
     launch,
@@ -389,7 +396,7 @@ export function readTick({
         // #3840 — the marker and its reason ride in as data; `null` (no marker, unreadable file) is no override, and the
         // router ignores them for a kind that does not honour the marker.
         ...(readDeliveryAgentOverride(key) ?? {}),
-      }, { scorecards, enforceSupervision: enforceSupervision === true, sizePolicy })
+      }, { scorecards, enforceSupervision: enforceSupervision === true, sizePolicy, promotions })
       : null,
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
@@ -440,6 +447,29 @@ export function defaultReadScorecards({ root = REPO_ROOT, readText = (p) => read
 export function defaultReadSizePolicy({ root = REPO_ROOT, readText = (p) => readFileSync(p, 'utf8') } = {}) {
   try {
     const parsed = JSON.parse(String(readText(join(root, 'scripts', 'lib', 'dispatch-size-policy.json'))));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #3784 (rule 6 of #3690) — THE CHECKED-IN PROMOTION RECORD, `we:scripts/lib/dispatch-supervision-promotions.json`,
+ * read the same way {@link defaultReadSizePolicy} reads its own file: at this io edge, handed across as data.
+ *
+ * A missing or unreadable file returns `null` — `decideDispatchRoute`'s `validatePromotions` treats a `null`
+ * (or any non-object) candidate as invalid and, UNLIKE `defaultReadSizePolicy`'s own null (which resolves to
+ * {@link DEFAULT_SIZE_POLICY}'s safe defaults), this fails CLOSED to NO promotions: every computed
+ * `spot-check` is gated to `full` rather than the route itself being refused. That is rule 6's own stated
+ * default — "with no such act, a triple stays at `full`" — the deliberate departure from the size-policy
+ * precedent (see `validatePromotions`'s own docblock).
+ *
+ * @param {{root?: string, readText?: (p: string) => string}} [io]
+ * @returns {object|null} the parsed record, or `null`.
+ */
+export function defaultReadPromotions({ root = REPO_ROOT, readText = (p) => readFileSync(p, 'utf8') } = {}) {
+  try {
+    const parsed = JSON.parse(String(readText(join(root, 'scripts', 'lib', 'dispatch-supervision-promotions.json'))));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;

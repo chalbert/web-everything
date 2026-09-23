@@ -1070,9 +1070,9 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
         + 'the provider is computed from declared criteria before launch, never chosen after it.',
     };
   }
-  // #3717 step 3 — the SUPERVISION GATE, OFF unless `WE_DISPATCH_SUPERVISION_ENFORCE` says otherwise, because
-  // the graduation model it implements (#3690) is not ratified. With the switch off this is always `null` and
-  // the dispatch is byte-identical to before; the level is RECORDED either way.
+  // #3717 step 3 — the SUPERVISION GATE. #3690 is ratified, so `WE_DISPATCH_SUPERVISION_ENFORCE` is ON unless
+  // explicitly disabled (#3784, rule 6 of #3690); with it off this is always `null` and the dispatch is
+  // byte-identical to before — the level is RECORDED either way.
   if (routing?.supervisionHold) {
     return {
       ...base,

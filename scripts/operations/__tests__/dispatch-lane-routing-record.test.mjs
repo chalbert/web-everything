@@ -17,8 +17,13 @@
  *      #3801). `deliveryAgent:` with no `deliveryAgentReason:` is refused; a complete one is recorded BESIDE
  *      `routed` (which stays the criteria's choice) and supervised as its own triple. No process-wide
  *      environment variable reaches the router any more.
- *   4. **SUPERVISION IS RECORDED, NOT ENFORCED** — until #3690 is ratified. Enforcement exists, off by
- *      default, behind one switch, and the default path is byte-identical to before.
+ *   4. **SUPERVISION IS ENFORCED BY DEFAULT, RECORDED ALWAYS** — #3690 is ratified (#3784, rule 6).
+ *      Enforcement lives behind one switch (`WE_DISPATCH_SUPERVISION_ENFORCE`), on unless explicitly disabled.
+ *      #3850 Fork 1 (also ratified) moves the independent-pass obligation for a routed dispatch to the PR land
+ *      seam, so `decideDispatchRoute` now names that land-seam review as every routed record's `supervisor` —
+ *      the practical effect is that the switch being on never holds a well-formed routed dispatch at SPAWN
+ *      time any more; the level is still always recorded, and the hold moves to land (#3850 Fork 2, not built
+ *      here — out of this card's scope).
  *
  * REAL MECHANISM WHERE THE SEAM IS IO (#2949): the run record assertions drive the REAL engine, the REAL
  * effect executor and the REAL `createDispatchSinks` sink over an in-memory run store, so what is asserted is
@@ -66,8 +71,19 @@ const CODEX_TRIALS = [
 function route(over = {}) {
   return decideDispatchRoute({
     kind: 'build', cause: null, scopePaths: ['we:scripts/operations/example.mjs'], size: 3, ...over,
-  }, { scorecards: over.scorecards ?? [], enforceSupervision: over.enforceSupervision === true });
+  }, { scorecards: over.scorecards ?? [], enforceSupervision: over.enforceSupervision === true, promotions: over.promotions });
 }
+
+// #3784 (rule 6 of #3690) — a promotion row naming the CODEX_TRIALS triple, for fixtures that need the
+// criteria's computed `spot-check` to survive the rule-6 clamp (the dedicated rule-6 suite elsewhere covers
+// the no-promotion, fails-closed default).
+const CODEX_BUILD_PROMOTED = {
+  promotions: [{
+    provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', level: 'spot-check',
+    ratifiedOn: '2026-09-22', ratifiedBy: '#3690',
+    anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation',
+  }],
+};
 
 function tickRead(over = {}) {
   const launchKind = over.launchKind ?? 'build';
@@ -262,10 +278,10 @@ describe('3. the override is the item\'s own marker, reasoned and recorded — o
   });
 
   it('(c) supervises an override as its OWN triple: routed at spot-check, override with no trials starts at full', () => {
-    const plain = route({ scorecards: CODEX_TRIALS });
+    const plain = route({ scorecards: CODEX_TRIALS, ...CODEX_BUILD_PROMOTED });
     expect(plain).toMatchObject({ routed: 'codex', model: 'gpt-5', supervision: 'spot-check' });
     // an override to a triple with NO trials (claude has none here) must not inherit codex's spot-check
-    const overridden = route({ scorecards: CODEX_TRIALS, deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin to claude' });
+    const overridden = route({ scorecards: CODEX_TRIALS, deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin to claude', ...CODEX_BUILD_PROMOTED });
     expect(overridden.routed).toBe('codex'); // still the criteria's choice
     expect(overridden.override.requestedVendor).toBe('claude-restricted');
     expect(overridden.supervision).toBe('full');
@@ -276,7 +292,7 @@ describe('3. the override is the item\'s own marker, reasoned and recorded — o
   });
 
   it('an override onto the routed triple keeps that triple\'s own supervision (same provider, same model)', () => {
-    const same = route({ scorecards: CODEX_TRIALS, deliveryAgent: 'codex', deliveryAgentReason: 'pin to codex' });
+    const same = route({ scorecards: CODEX_TRIALS, deliveryAgent: 'codex', deliveryAgentReason: 'pin to codex', ...CODEX_BUILD_PROMOTED });
     expect(same.routed).toBe('codex');
     expect(same.supervision).toBe('spot-check');
   });
@@ -342,13 +358,14 @@ describe('3b. #3840 — no process-wide environment variable reaches the routing
   });
 });
 
-describe('4. supervision is recorded, not enforced, until #3690 is ratified', () => {
-  it('is OFF by default and reads its switch from data, never from the ambient environment', () => {
-    expect(supervisionEnforcementFrom({})).toBe(false);
-    expect(supervisionEnforcementFrom({ [SUPERVISION_ENFORCEMENT_ENV]: '' })).toBe(false);
+describe('4. supervision enforcement — #3690 is ratified, so it is ON by default (#3784, rule 6)', () => {
+  it('is ON by default and reads its switch from data, never from the ambient environment', () => {
+    expect(supervisionEnforcementFrom({})).toBe(true);
+    expect(supervisionEnforcementFrom({ [SUPERVISION_ENFORCEMENT_ENV]: '' })).toBe(true);
     expect(supervisionEnforcementFrom({ [SUPERVISION_ENFORCEMENT_ENV]: '1' })).toBe(true);
     expect(supervisionEnforcementFrom({ [SUPERVISION_ENFORCEMENT_ENV]: 'TRUE' })).toBe(true);
     expect(supervisionEnforcementFrom({ [SUPERVISION_ENFORCEMENT_ENV]: 'off' })).toBe(false);
+    expect(supervisionEnforcementFrom({ [SUPERVISION_ENFORCEMENT_ENV]: '0' })).toBe(false);
   });
 
   it('THROWS on a typo rather than silently disabling the gate', () => {
@@ -363,17 +380,28 @@ describe('4. supervision is recorded, not enforced, until #3690 is ratified', ()
     expect(supervisionHold({ supervision: 'full', supervisor: { provider: 'claude' } }, { enforce: true })).toBeNull();
   });
 
-  it('with the switch ON, the dispatch path holds — and with it off the same dispatch goes', () => {
+  // #3850 Fork 1 (ratified 2026-09-22, we:backlog/3850-…md) — a single-worker lane's independent pass is the
+  // review panel on the lane's OWN PR, enforced as a merge hold at the LAND seam, not a live supervisor the
+  // dispatch-time gate can name. So `decideDispatchRoute` now names that land-seam review as `supervisor` on
+  // every routed record, which — per the ruling's own text ("so `supervisionHold` no longer holds it") — means
+  // the switch being ON never actually holds a well-formed routed dispatch any more: the level is always
+  // recorded, and the ratified obligation moves to land (a separate, NOT-built-here mechanism, #3850 Fork 2).
+  it('with the switch ON, a routed dispatch no longer holds — #3850 Fork 1 names the land-seam review as supervisor', () => {
     const enforced = route({ enforceSupervision: true });
-    expect(enforced.supervisionHold).toBeTruthy();
-    const held = shapeDispatchRead(tickRead({ routing: enforced }), { num: '3717', expectedWithinMinutes: 45 });
-    expect(held.dispatching).toBe(false);
-    expect(held.holdReason).toContain('supervision gate');
+    expect(enforced.supervisor).toBeTruthy();
+    expect(enforced.supervisionHold).toBeNull();
+    expect(shapeDispatchRead(tickRead({ routing: enforced }), { num: '3717', expectedWithinMinutes: 45 }).dispatching).toBe(true);
 
     const recorded = route();
     expect(recorded.supervisionHold).toBeNull();
     expect(recorded.supervision).toBe('full');
     expect(shapeDispatchRead(tickRead({ routing: recorded }), { num: '3717', expectedWithinMinutes: 45 }).dispatching).toBe(true);
+  });
+
+  it('the pure supervisionHold function itself would still hold a route that named no supervisor', () => {
+    // decideDispatchRoute never omits `supervisor` on a routed record (see above) — this pins the function's
+    // OWN defensive behavior for any other caller that hands it a routing object with none.
+    expect(supervisionHold({ supervision: 'full' }, { enforce: true })).toContain('names no supervisor');
   });
 });
 

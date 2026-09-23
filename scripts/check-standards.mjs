@@ -74,8 +74,12 @@ import {
   findGitHookAllFlags,
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
+  findInvalidPromotionCitations,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
+// #3784 (rule 6 of #3690) — the promotion record's own SHAPE validator, reused here so the check:standards
+// gate and `decideDispatchRoute` can never disagree about what a valid row looks like.
+import { validatePromotions } from './lib/dispatch-contracts.mjs';
 // #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
 import { readRegistry as readPocRegistry } from './lib/poc-branches.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
@@ -1432,6 +1436,38 @@ try {
       `were SKIPPED, not verified (detect-or-skip; a gate that cannot see a target must never report it present).`);
 } catch (e) {
   err(`reference-resolution gate failed: ${e.message}`);
+}
+
+// ── 6f-ii-c. PROMOTION-RECORD CITATION gate (#3784, rule 6 of #3690) ────────────────────────────────
+// The checked-in we:scripts/lib/dispatch-supervision-promotions.json is the machine-readable transcript of a
+// RATIFIED ACT — a decision card naming which {provider, model, taskType} triples a promotion authorizes at
+// `spot-check`. `dispatch-contracts.mjs#validatePromotions` checks a row's SHAPE (pure, no repo state); this
+// gate checks whether the CITATION is TRUE: does `anchor` resolve to a real heading in
+// docs/agent/platform-decisions.md, and is the `ratifiedBy` card actually `status: resolved`? ERROR-level,
+// unconditionally — an unresolved citation here is not stale prose, it is a promotion the record cannot
+// actually prove, and `decideDispatchRoute` trusts this file at runtime (rule 6's own point: the citation is
+// checked, not trusted). The checked-in file ships `{"promotions": []}`, so this gate has nothing to walk
+// today; it exists so the FIRST real promotion cannot land with a dead anchor or an unratified card.
+try {
+  const promotionsPath = join(ROOT, 'scripts', 'lib', 'dispatch-supervision-promotions.json');
+  const promotionsRaw = JSON.parse(readFileSync(promotionsPath, 'utf8'));
+  const shape = validatePromotions(promotionsRaw);
+  if (!shape.ok) {
+    for (const message of shape.errors)
+      err(`scripts/lib/dispatch-supervision-promotions.json: ${message} (#3784, rule 6 of #3690).`,
+        { kind: 'promotion-record-shape', file: 'scripts/lib/dispatch-supervision-promotions.json' });
+  } else {
+    const { extractAnchors } = require('./lib/rules-loader.cjs');
+    const platformDecisionsSrc = readFileSync(join(ROOT, 'docs', 'agent', 'platform-decisions.md'), 'utf8');
+    const { anchors: platformDecisionAnchors } = extractAnchors(platformDecisionsSrc);
+    for (const f of findInvalidPromotionCitations(shape.promotions, { platformDecisionAnchors, backlogStatusByNum: statusByNum }))
+      err(`scripts/lib/dispatch-supervision-promotions.json: the row for ${f.provider}/${f.model}/${f.taskType} — ` +
+        `${f.reason} (#3784, rule 6 of #3690: the citation to a promotion's ratifying act is checked, not trusted).`,
+        { kind: 'promotion-record-citation', file: 'scripts/lib/dispatch-supervision-promotions.json' });
+  }
+} catch (e) {
+  err(`promotion-record citation gate failed: ${e.message}`,
+    { kind: 'promotion-record-citation', file: 'scripts/lib/dispatch-supervision-promotions.json' });
 }
 
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──

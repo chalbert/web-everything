@@ -21,6 +21,7 @@ import {
   computeNativeFirstConformance,
   classifySurfacePaths,
   validatePolyglotWideningGate, POLYGLOT_WIDENING_TAG, PILOT_EVIDENCE_NUMS,
+  findInvalidPromotionCitations,
 } from '../check-standards-rules.mjs';
 import { require, ROOT } from './fixtures/check-standards-rules-fixtures.mjs';
 
@@ -544,5 +545,54 @@ describe('validatePolyglotWideningGate — the new-target evidence edge', () => 
     const violations = (Array.isArray(backlog) ? backlog : [])
       .flatMap((item) => validatePolyglotWideningGate(item).errors);
     expect(violations).toEqual([]);
+  });
+});
+
+// #3784 — RULE 6 of #3690: the promotion record's citation check. `validatePromotions`
+// (dispatch-contracts.mjs) checks a row's SHAPE; this checks whether the citation is TRUE — synthetic
+// anchors/status map, no live repo state, so the case is isolated from whatever the checkout's own
+// docs/agent/platform-decisions.md or backlog/ happen to contain right now.
+describe('findInvalidPromotionCitations (#3784, rule 6 of #3690)', () => {
+  const ANCHORS = new Set(['delegation-trial-record-graduation']);
+  const STATUS = new Map([['3690', 'resolved'], ['3801', 'open']]);
+  const row = (extra = {}) => ({
+    provider: 'codex', model: 'gpt-5', taskType: 'bugfix',
+    anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation',
+    ratifiedBy: '#3690',
+    ...extra,
+  });
+
+  it('passes a row whose anchor resolves and whose ratifiedBy card is resolved', () => {
+    expect(findInvalidPromotionCitations([row()], { platformDecisionAnchors: ANCHORS, backlogStatusByNum: STATUS })).toEqual([]);
+  });
+
+  it('flags a row whose anchor does not resolve to a real heading', () => {
+    const findings = findInvalidPromotionCitations(
+      [row({ anchor: 'we:docs/agent/platform-decisions.md#no-such-heading' })],
+      { platformDecisionAnchors: ANCHORS, backlogStatusByNum: STATUS },
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).toContain('does not resolve to a heading');
+  });
+
+  it('flags a row whose ratifiedBy card is not status: resolved', () => {
+    const findings = findInvalidPromotionCitations(
+      [row({ ratifiedBy: '#3801' })],
+      { platformDecisionAnchors: ANCHORS, backlogStatusByNum: STATUS },
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).toContain('status: resolved');
+  });
+
+  it('flags a row whose ratifiedBy card does not exist at all', () => {
+    const findings = findInvalidPromotionCitations(
+      [row({ ratifiedBy: '#404404' })],
+      { platformDecisionAnchors: ANCHORS, backlogStatusByNum: STATUS },
+    );
+    expect(findings).toHaveLength(1);
+  });
+
+  it('passes an empty promotions array — the checked-in file ships {"promotions": []}', () => {
+    expect(findInvalidPromotionCitations([], { platformDecisionAnchors: ANCHORS, backlogStatusByNum: STATUS })).toEqual([]);
   });
 });
