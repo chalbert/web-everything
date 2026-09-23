@@ -1,8 +1,7 @@
 ---
 bornAs: x3q28ce
-kind: story
-size: 3
-blockedBy: ["3214", "3215", "3217", "3216"]
+kind: epic
+blockedBy: ["3214", "3215", "3217", "3216", "3255", "xvkpykk"]
 status: open
 parent: "2405"
 dateOpened: "2026-08-08"
