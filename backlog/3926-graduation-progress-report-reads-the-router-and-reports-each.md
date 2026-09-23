@@ -3,12 +3,15 @@ bornAs: xtw2rap
 kind: story
 size: 3
 parent: "3925"
-status: open
+status: resolved
 scaffoldedBy: "graduation-page-file"
 dateScaffolded: "2026-09-22"
 scope: ["we:scripts/operations/graduation-progress-report.mjs", "we:scripts/operations/graduation-progress-report-io.mjs", "we:scripts/operations/__tests__/graduation-progress-report.test.mjs"]
 relatedTo: ["3690", "3693", "3784", "3893"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: "we:scripts/operations/graduation-progress-report.mjs"
 tags: [delegation, graduation]
 ---
 
