@@ -181,6 +181,8 @@ export default defineConfig({
       // #3383 — same tier: real throwaway origin/reference/filler clones, real `git cherry`/`ls-remote`, real
       // spawned `lane-pool.mjs` CLI invocations (list/provision/acquire).
       'scripts/__tests__/lane-pool-squash-merge-and-litter-acquirable.test.mjs',
+      // #3383-perf — same tier, plus a real PATH-shimmed git-spawn-counting wrapper (like its #2920 sibling).
+      'scripts/__tests__/lane-pool-ahead-patch-equivalent-bounded-spawn.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',
