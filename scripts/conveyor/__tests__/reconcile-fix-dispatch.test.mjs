@@ -219,6 +219,16 @@ describe('freeLaneNumbers', () => {
     const exec = () => { throw new Error('pool unreachable'); };
     expect(freeLaneNumbers({ exec, root: '/repo' })).toEqual([]);
   });
+
+  // #x33jgwt multi-repo slice 5 — a sibling repo's fix dispatch must pop lanes from ITS OWN pool, never WE's.
+  it('passes `--repo=<lanePoolRepo>` through to lane-pool.mjs when given a sibling repo\'s lane pool', () => {
+    const calls = [];
+    const exec = (file, argv) => { calls.push({ file, argv }); return JSON.stringify(['/lanes/plateau-app/lane-3']); };
+    expect(freeLaneNumbers({ exec, root: '/repo', lanePoolRepo: '/home/test/workspace/plateau-app' })).toEqual([3]);
+    expect(calls[0].argv).toEqual([
+      '/repo/scripts/lane-pool.mjs', 'list', '--acquirable', '--json', '--repo=/home/test/workspace/plateau-app',
+    ]);
+  });
 });
 
 describe('dispatchFix — the composition: plan → fill → mint → spawn', () => {
@@ -276,6 +286,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
       { root: '/some/path/.lanes/web-everything/lane-3', readBrief: () => REAL_TEMPLATE_STUB, spawnAgent: () => { throw new Error('must not be called'); } },
     )).toThrow(/lane/i);
   });
+
 });
 
 describe('tryResumeFix — #xu2krte Fork 1, and #xazl9u3\'s whole reason to exist: this runs with NO lane involved at all', () => {
@@ -691,7 +702,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     expect(reconcileCalls).toBe(0);
   });
 
-  it('a FRESH non-WE repo still proceeds past the staleness check into the unsupported-repo recording path', async () => {
+  it('a FRESH non-WE repo still proceeds past the staleness check into the ordinary plan/dispatch path', async () => {
     const { mkdtempSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
@@ -826,45 +837,126 @@ describe('#3606 — dispatchFix always passes the dispatched-agent system prompt
   });
 });
 
-it('refuses a direct sibling fix before spawning', () => {
+// #x33jgwt multi-repo slice 5 — `dispatchFix`/`tryResumeFix` no longer gate on repo identity themselves; the
+// capability gate moved up to `runReconcileFixDispatch` (see its own docblock). These two primitives are now
+// repo-generic, and both pin the ONE thing that must still hold: a sibling repo's dispatch is never confusable
+// with WE's for the same PR number.
+
+it('dispatches for a sibling repo, filling the brief from THAT repo\'s own profile (never WE\'s)', () => {
   const calls = [];
-  expect(() => dispatchFix({ itemNum: '3438', pr: 49, laneRef: 'lane/3438-x', scope: ['we:x'], lane: 9 }, {
-    root: '/repo', repo: 'frontierui', readBrief: () => REAL_TEMPLATE_STUB,
-    mintSessionId: () => 'session', spawnAgent: (argv) => { calls.push(argv); return ''; },
-  })).toThrow(/unsupported-repo/);
-  expect(calls).toEqual([]);
+  const result = dispatchFix(
+    { itemNum: '3438', pr: 49, laneRef: 'lane/3438-x', scope: ['plateau:src/x.ts'], lane: 9 },
+    {
+      root: '/repo', repo: 'plateau-app', readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => 'session', spawnAgent: (argv) => { calls.push(argv); return ''; },
+      home: '/home/test', checkoutExists: () => true,
+      readPackageJson: () => JSON.stringify({ scripts: { test: 'vitest run' } }),
+    },
+  );
+  expect(calls).toHaveLength(1);
+  // #x33jgwt — the session slug carries the repo tag (`fix-pa-<pr>`), never bare `fix-<pr>` — see the
+  // "distinct sessions" test below for why this is the collision-safety property that matters.
+  expect(result.sessionSlug).toBe('fix-pa-49');
+  const argv = calls[0];
+  expect(argv[argv.indexOf('-n') + 1]).toBe('fix-pa-49');
 });
 
-it('refuses foreign fixes and CI-heals without touching a lane or dispatch sink', async () => {
-  const { mkdtempSync, rmSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const { recordUnsupported, readUnsupported } = await import('../unsupported-repo.mjs');
-  const dir = mkdtempSync(join(tmpdir(), 'fix-refusals-'));
-  const unsupportedPath = join(dir, 'rows.json');
-  const calls = [];
-  try {
-    recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'review', prNumber: 9 }], path: unsupportedPath });
-    const options = { root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
-      reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 49, headRefName: 'lane/3438-wire-reconcile-pass', labels: ['review:changes'] }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
-      findItemFn: findItemStub, loadItems: () => [], pickFreeLanes: () => { calls.push('pool'); return [2]; },
-      tryResume: () => calls.push('resume'), dispatch: () => calls.push('dispatch'),
-    };
-    const result = runReconcileFixDispatch(options);
-    expect(result.dispatched).toEqual([]);
-    expect(result.refusals).toEqual(['fix', 'ci-heal'].map((action, i) => ({ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 49 + i, action, why: expect.any(String) })));
-    expect(calls).toEqual([]);
-    expect(readUnsupported({ path: unsupportedPath })).toHaveLength(3);
-    runReconcileFixDispatch({ ...options, reconcile: () => ({ dispatch: [], refusals: [] }) });
-    expect(readUnsupported({ path: unsupportedPath })).toEqual([expect.objectContaining({ action: 'review', prNumber: 9 })]);
-    expect(() => runReconcileFixDispatch({ repo: 'unknown/repo' })).toThrow(/not a constellation repo/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+it('same PR number in two different repos mints distinct session slugs — plateau-app PR #49 never collides with WE PR #49', () => {
+  const weResult = dispatchFix(
+    { itemNum: '3438', pr: 49, laneRef: 'lane/3438-x', scope: ['we:x'], lane: 2 },
+    { root: '/repo', readBrief: () => REAL_TEMPLATE_STUB, mintSessionId: () => 'we-session', spawnAgent: () => '' },
+  );
+  const plateauResult = dispatchFix(
+    { itemNum: '3438', pr: 49, laneRef: 'lane/3438-x', scope: ['plateau:x'], lane: 3 },
+    {
+      root: '/repo', repo: 'plateau-app', readBrief: () => REAL_TEMPLATE_STUB, mintSessionId: () => 'pa-session', spawnAgent: () => '',
+      home: '/home/test', checkoutExists: () => true, readPackageJson: () => JSON.stringify({ scripts: { test: 'vitest run' } }),
+    },
+  );
+  expect(weResult.sessionSlug).toBe('fix-49');
+  expect(plateauResult.sessionSlug).toBe('fix-pa-49');
+  expect(weResult.sessionSlug).not.toBe(plateauResult.sessionSlug);
 });
 
-it('refuses a foreign resume before listing or spawning agents', () => {
+it('tryResumeFix no longer throws for a sibling repo — a non-conflict entry still short-circuits at no IO cost', () => {
   const calls = [];
-  expect(() => tryResumeFix({ pr: 49, isConflict: true }, { repo: 'frontierui', root: '/repo',
+  const result = tryResumeFix({ pr: 49, isConflict: false }, {
+    repo: 'frontierui', root: '/repo',
     listAgentsAll: () => { calls.push('list'); return []; }, spawnAgent: () => calls.push('spawn'),
-  })).toThrow(/unsupported-repo/);
-  expect(calls).toEqual([]);
+  });
+  expect(result).toEqual({ resumed: false, resumeAttempt: null });
+  expect(calls).toEqual([]); // isConflict:false returns before ever touching `claude agents`
 });
+
+describe('runReconcileFixDispatch — repo capability gate (#x33jgwt multi-repo slice 5)', () => {
+  it('a repo whose profile has `fix:false` still refuses `unsupported-repo`, never touching a lane or dispatch sink', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { recordUnsupported, readUnsupported } = await import('../unsupported-repo.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'fix-refusals-'));
+    const unsupportedPath = join(dir, 'rows.json');
+    const calls = [];
+    try {
+      recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'review', prNumber: 9 }], path: unsupportedPath });
+      const options = {
+        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 49, headRefName: 'lane/3438-wire-reconcile-pass', labels: ['review:changes'] }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
+        findItemFn: findItemStub, loadItems: () => [], pickFreeLanes: () => { calls.push('pool'); return [2]; },
+        tryResume: () => calls.push('resume'), dispatch: () => calls.push('dispatch'),
+        // #x33jgwt — every REAL constellation repo now has `fix:true` (this slice's own point); inject a
+        // profile resolver reporting `fix:false` to exercise the refusal branch, which stays capability-shaped
+        // for whatever repo the constellation grows next with the capability genuinely off.
+        resolveProfile: () => ({ capabilities: { fix: false, ciHeal: false }, lanePoolRepo: '/nonexistent' }),
+      };
+      const result = runReconcileFixDispatch(options);
+      expect(result.dispatched).toEqual([]);
+      expect(result.refusals).toEqual(['fix', 'ci-heal'].map((action, i) => ({ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 49 + i, action, why: expect.any(String) })));
+      expect(calls).toEqual([]);
+      expect(readUnsupported({ path: unsupportedPath })).toHaveLength(3);
+      runReconcileFixDispatch({ ...options, reconcile: () => ({ dispatch: [], refusals: [] }) });
+      expect(readUnsupported({ path: unsupportedPath })).toEqual([expect.objectContaining({ action: 'review', prNumber: 9 })]);
+      expect(() => runReconcileFixDispatch({ repo: 'unknown/repo' })).toThrow(/not a constellation repo/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a plateau-app PR with a backlog item is dispatched into a plateau lane (real profile: fix is on, ci-heal is not)', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'fix-plateau-dispatch-'));
+    const unsupportedPath = join(dir, 'rows.json');
+    const dispatchCalls = [];
+    try {
+      // Real `resolveProfile` (the default) — plateau-app's own profile now has `capabilities.fix: true`.
+      const result = runReconcileFixDispatch({
+        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 177, headRefName: 'lane/3438-wire-reconcile-pass' }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
+        findItemFn: findItemStub, loadItems: () => [],
+        pickFreeLanes: () => [4],
+        dispatch: (planned, opts) => { dispatchCalls.push({ planned, opts }); return { sessionId: 's', sessionSlug: `fix-pa-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] }; },
+        checkStaleness: FRESH,
+      });
+      // The fix entry is dispatched — NOT refused `unsupported-repo` — with `repo: 'plateau-app'` threaded to
+      // `dispatch`, which is what lets `dispatchFix` resolve the plateau-app lane pool + gate for it.
+      expect(dispatchCalls).toEqual([{
+        planned: expect.objectContaining({ pr: 177, itemNum: '3438', lane: 4 }),
+        opts: expect.objectContaining({ repo: 'plateau-app' }),
+      }]);
+      expect(result.dispatched).toEqual([{ sessionId: 's', sessionSlug: 'fix-pa-177', pr: 177, itemNum: '3438', lane: 4, unknownTokens: [] }]);
+      // ci-heal is a SEPARATE capability, still off for plateau-app (slice 7) — recorded, not silently dropped.
+      expect(result.refusals).toEqual([{ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 50, action: 'ci-heal', why: expect.any(String) }]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+it('tryResumeFix no longer throws for a sibling repo\'s conflict-caused entry either — no candidate found falls through cleanly', () => {
+  const calls = [];
+  const result = tryResumeFix({ pr: 49, isConflict: true, body: null }, {
+    repo: 'frontierui', root: '/repo',
+    listAgentsAll: () => { calls.push('list'); return []; }, spawnAgent: () => calls.push('spawn'),
+  });
+  expect(result).toEqual({ resumed: false, resumeAttempt: null });
+  expect(calls).toEqual(['list']); // isConflict:true DOES consult the listing; no stamped body → no candidate
+});
+
