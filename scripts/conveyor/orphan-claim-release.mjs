@@ -58,6 +58,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AGENT_GONE_STATES, itemNumFromSession, laneRefItemNum } from './lease-reaper.mjs';
 import { prDeliveredItem, readFrontmatterField, idTokenOf } from '../backlog-stranded-sweep.mjs';
 import { LEASE_FILENAME } from '../lib/lane-lease.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+
+const WE_SLUG = CONSTELLATION_REPOS.we.slug;
 
 // ── PURE CORE ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -279,7 +283,9 @@ function readAllLeases() {
 
 function ghPrs(state, limit, fields) {
   try {
-    return JSON.parse(execFileSync('gh', ['pr', 'list', '--state', state, '--limit', String(limit), '--json', fields], {
+    // WE-only: backlog ids name WE cards, and a WE card's delivery/claim PR lives in the WE repo.
+    // Through the shared gh throttle (concurrency cap + points budget + backoff) — the fleet shares one quota.
+    return JSON.parse(execFileSyncThrottled('gh', ['pr', 'list', '--repo', WE_SLUG, '--state', state, '--limit', String(limit), '--json', fields], {
       cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 128 * 1024 * 1024, timeout: 120_000,
     }));
   } catch (e) {
