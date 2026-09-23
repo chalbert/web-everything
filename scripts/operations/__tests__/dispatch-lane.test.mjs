@@ -2462,6 +2462,31 @@ describe('findItem — carries `openBlockers` through, where it used to be dropp
   });
 });
 
+// ── #xdx3ifb multi-repo slice 3: `findItem` also matches a renamed card's `bornAs` ────────────────────────────
+describe('findItem — falls back to `bornAs` when `num` doesn\'t match (#xdx3ifb)', () => {
+  // Live shape: WE PR #2518's card `x3izqob` was JIT-renumbered to `#3945` at land (#2288) while its
+  // still-open impl-repo branch (`lane/x3izqob-...`) kept naming the pre-rename hash — the fix daemon's own
+  // `laneRefItemNum` extraction can only ever produce that hash, never the new number it has no way to learn.
+  const renamed = { num: '3945', bornAs: 'x3izqob', slug: 'review-human-advisory-gap', scope: ['we:scripts/conveyor/reconcile-pass.mjs'] };
+
+  it('resolves a hash key against the renamed card\'s `bornAs` when no item\'s `num` matches it', () => {
+    const it_ = findItem('x3izqob', () => [renamed]);
+    expect(it_).not.toBeNull();
+    expect(it_.num).toBe('3945');
+    expect(it_.scope).toEqual(['we:scripts/conveyor/reconcile-pass.mjs']);
+  });
+
+  it('still prefers a direct `num` match over `bornAs` when both are present (no ambiguity introduced)', () => {
+    const it_ = findItem('3945', () => [renamed, { num: 'x3izqob', slug: 'stale-provisional-twin', scope: [] }]);
+    expect(it_.num).toBe('3945');
+    expect(it_.slug).toBe('review-human-advisory-gap');
+  });
+
+  it('still returns null for a hash with no `num` OR `bornAs` match anywhere (a genuinely unknown key)', () => {
+    expect(findItem('xnotreal', () => [renamed])).toBeNull();
+  });
+});
+
 describe('shapeDispatchRead — refuses a dispatch for an item with an unresolved `blockedBy` edge (#3462)', () => {
   // THE REAL #3398 SHAPE: the tick core cleared it for `spawnBuilds` anyway (three times, live, on
   // 2026-09-02) while its own frontmatter carried `blockedBy: ["3443"]`, an item still `status: open`. A
