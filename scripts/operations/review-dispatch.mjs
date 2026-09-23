@@ -111,7 +111,8 @@
  * shapes individually is the game this file was already losing.
  */
 
-import { repoKeyForSlug, repoProfile, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { repoProfile } from '../lib/repo-profile.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';

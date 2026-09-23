@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { repoProfile, gateFor } from '../constellation-repos.mjs';
+import { repoProfile, gateFor } from '../repo-profile.mjs';
 import { composeGate } from '../verify-lane-gate.mjs';
 
 const HOME = '/home/test';
