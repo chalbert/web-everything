@@ -181,7 +181,7 @@ export function planConflictLabelChange({ isConflicting, isResolved = false, cur
  * @param {{num:number|string, headRefName?:string}} pr
  * @returns {string}
  */
-export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrain = false } = {}) {
+export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrain = false, appendOnlyStatute = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
   const nextStep = deferredToDrain && !isStatuteTier
     ? 'This PR is already approved/queued, so the drain gets the first try — it auto-rebases a PR whose only ' +
@@ -195,13 +195,23 @@ export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrai
     : 'A fix agent is being dispatched to resolve it (`#xu2krte`) — the SAME independent-review gate this PR ' +
       'is already parked behind still applies before anything lands; nobody is rewriting this content ' +
       'unreviewed. If it cannot be resolved safely, it stands down to a human instead of guessing.';
+  // #3383-append-only-statute — this touches a statute file, but ONLY because both sides independently appended a
+  // NEW `### ` section at the same spot; no existing rule text is in dispute. Said explicitly, beside `nextStep`
+  // rather than folded into it, so a reader sees at a glance this is a MECHANICAL resolution with a re-review
+  // still owed, not a silent downgrade of the statute-tier care this PR would otherwise get.
+  const appendOnlyNote = appendOnlyStatute
+    ? '\n\n**This is being resolved mechanically, not by a human judgment call.** Both sides only ADDED separate ' +
+      'new rule sections at the same insertion point — nobody edited any existing rule text — so this is being ' +
+      'handled as an append-only statute conflict (keep both sections) and will go through a fresh independent ' +
+      'review once resolved, exactly like any other bounce.'
+    : '';
   return [
     `⚠️ **This ${deferredToDrain ? 'approved' : 'parked'} PR has drifted into a real merge conflict against \`main\`**`,
     '',
     `GitHub reports \`mergeable: CONFLICTING\` on this PR${ref} while it is ${deferredToDrain ? 'queued to land' : 'parked for review'} — it will not ` +
       'resolve on its own. One or more PRs merged to `main` since this one opened touched overlapping content.',
     '',
-    nextStep,
+    nextStep + appendOnlyNote,
     '',
     '_Auto-detected by the parked-PR conflict watch (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, `#xw0odtv`). ' +
       `This will self-clear (the \`${CONFLICT_LABEL}\` label is removed, no further comment) once the conflict resolves._`,
@@ -240,6 +250,113 @@ export function isStatuteTierConflict(files) {
 }
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#isAppendOnlyStatuteChange — the PURE classifier behind the
+ * append-only statute exception (live 2026-09-23, PR #2505). A concurrent statute-tier PR conflicts with `main`
+ * ONLY because both sides independently appended a NEW `### ` rule section at the same insertion point (the tail
+ * of a `##` section, right before the next one) — nobody edited any EXISTING rule text. That is mechanically
+ * resolvable (keep both sections); an edit that touches shared rule text is not, and must still stand down to a
+ * human. Every concurrent statute PR collides this exact way, since they all append at the same spot (#2524 will
+ * too) — this exists so that shape stops costing a human review each time.
+ *
+ * Given ONE file's unified-diff `patch` (the per-file field `gh api .../pulls/{n}/files` returns — a bare hunk
+ * body, no `--- a/`/`+++ b/` file-header lines), returns true ONLY if:
+ *   (a) the patch removes NOTHING — any `-`-prefixed line fails it outright, whatever it says;
+ *   (b) EVERY contiguous run of `+`-prefixed lines, once blank lines and lone `---` separator lines are trimmed
+ *       off its own top/bottom edge, BEGINS with a `### ` heading line — proving the run is a WHOLE inserted
+ *       section, never a line spliced into an existing one's body;
+ *   (c) the first non-blank UNCHANGED (context) line following each such run — if the hunk has one at all — is
+ *       itself a `---`, a `### ` or a `## ` line, proving the insertion point is a real section BOUNDARY, not the
+ *       middle of a rule.
+ * Anything the parser cannot make sense of (not a string, no hunk header at all, a run that trims to nothing) reads
+ * as false — the safe direction: false only ever costs the stand-down that was already today's behaviour.
+ * @param {string} patch
+ * @returns {boolean}
+ */
+export function isAppendOnlyStatuteChange(patch) {
+  if (typeof patch !== 'string' || patch === '') return false;
+  const lines = patch.split('\n');
+  if (!lines.some((l) => l.startsWith('@@'))) return false; // no hunk at all — unparseable
+  if (lines.some((l) => l.startsWith('-'))) return false; // (a) — any removal fails it outright, full stop
+
+  const isBlankOrRule = (s) => { const t = s.trim(); return t === '' || t === '---'; };
+
+  // Split into hunks so "the next context line" can never cross a `@@` boundary into an unrelated hunk.
+  const hunks = [];
+  let hunkStart = -1;
+  lines.forEach((l, i) => {
+    if (l.startsWith('@@')) { if (hunkStart !== -1) hunks.push(lines.slice(hunkStart, i)); hunkStart = i; }
+  });
+  if (hunkStart !== -1) hunks.push(lines.slice(hunkStart));
+
+  let sawAnyRun = false;
+  for (const hunk of hunks) {
+    let i = 1; // index 0 is the `@@ … @@` header line itself
+    while (i < hunk.length) {
+      if (!hunk[i].startsWith('+')) { i += 1; continue; }
+      const runStart = i;
+      while (i < hunk.length && hunk[i].startsWith('+')) i += 1;
+      const runEnd = i; // exclusive
+      sawAnyRun = true;
+
+      const content = hunk.slice(runStart, runEnd).map((l) => l.slice(1));
+      let lo = 0;
+      let hi = content.length;
+      while (lo < hi && isBlankOrRule(content[lo])) lo += 1;
+      while (hi > lo && isBlankOrRule(content[hi - 1])) hi -= 1;
+      if (lo >= hi) return false; // (b) — trims to nothing, no heading in this run at all
+      if (!content[lo].startsWith('### ')) return false; // (b) — not a whole-section insert
+
+      // (c) — the first non-blank CONTEXT line after the run, within this same hunk. A `\ No newline…` meta line
+      // is skipped without counting; no other line kind can occur here (a `+`-run is maximal by construction and
+      // removals were already ruled out above), so hitting anything else just means "no context line follows".
+      let j = runEnd;
+      let nextContext = null;
+      while (j < hunk.length) {
+        const l = hunk[j];
+        if (l.startsWith('\\')) { j += 1; continue; }
+        if (l.startsWith(' ')) {
+          const c = l.slice(1);
+          if (c.trim() !== '') { nextContext = c; break; }
+          j += 1; continue;
+        }
+        break;
+      }
+      if (nextContext != null) {
+        const t = nextContext.trim();
+        if (!(t === '---' || nextContext.startsWith('### ') || nextContext.startsWith('## '))) return false;
+      }
+    }
+  }
+  return sawAnyRun;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#isAppendOnlyStatuteConflict — lifts
+ * {@link isAppendOnlyStatuteChange} from "one file's patch" to "this conflict's whole statute-tier file set".
+ * PURE — `patchesByFile` is supplied by the caller (the IO shell fetches it via {@link defaultListPrPatches}).
+ *
+ * Dispatchable ONLY when EVERY statute-tier file in the conflict is BOTH a statute-path `.md` file (never a
+ * declarative-leash file — those are code/contracts with no such thing as an append-only edit) AND its own patch
+ * is append-only. A missing/non-string patch entry reads as a fetch failure for THAT file and fails the whole
+ * conflict closed — the safe direction, matching {@link isAppendOnlyStatuteChange}'s own contract.
+ * @param {string[]} statuteTierFiles - the subset of the conflict's file list that is statute-tier (leash or
+ *   statute path) — the same predicate {@link isStatuteTierConflict} already applies.
+ * @param {Record<string,string>} patchesByFile - path → that file's unified-diff patch text.
+ * @returns {boolean}
+ */
+export function isAppendOnlyStatuteConflict(statuteTierFiles, patchesByFile) {
+  const files = Array.isArray(statuteTierFiles) ? statuteTierFiles : [];
+  if (files.length === 0) return false;
+  const patches = patchesByFile && typeof patchesByFile === 'object' ? patchesByFile : {};
+  return files.every((p) => {
+    if (isDeclarativeLeashPath(p)) return false; // leash files are never append-only-eligible
+    if (!isStatutePath(p) || !String(p).toLowerCase().endsWith('.md')) return false;
+    const patch = patches[p];
+    return typeof patch === 'string' && isAppendOnlyStatuteChange(patch);
+  });
+}
+
+/**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#GH_FILES_GRAPHQL_CAP — `#xgfzlj1`. The exact, confirmed
  * hard cap `gh`'s own `files(first: 100)` GraphQL query imposes on `--json files` (`gh pr list`/`gh pr view`),
  * with NO pagination and NO truncation signal — a PR with exactly this many or more changed files returns an
@@ -265,6 +382,56 @@ export function defaultListPrFiles({ number, repo, exec = execFileSyncThrottled 
   return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
+/** Undo jq's `@tsv` per-field escaping (`\\`, `\t`, `\n`, `\r`) — the inverse of what {@link defaultListPrPatches}'s
+ *  own jq filter applies to reconstitute a multi-line patch onto one output line. */
+function unescapeTsvField(s) {
+  let out = '';
+  for (let i = 0; i < s.length; i += 1) {
+    if (s[i] === '\\' && i + 1 < s.length) {
+      const n = s[i + 1];
+      if (n === 'n') { out += '\n'; i += 1; continue; }
+      if (n === 't') { out += '\t'; i += 1; continue; }
+      if (n === 'r') { out += '\r'; i += 1; continue; }
+      if (n === '\\') { out += '\\'; i += 1; continue; }
+    }
+    out += s[i];
+  }
+  return out;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListPrPatches — the fetch {@link isAppendOnlyStatuteConflict}
+ * needs: a COMPLETE, injectable read of every changed file's own unified-diff `patch` text, keyed by filename.
+ * Paginated REST (`pulls/{number}/files`), mirroring {@link defaultListPrFiles}'s own shape/cap concerns exactly
+ * — same endpoint, same `-F per_page=100` + `--paginate`, no `gh pr view`/`gh pr list` 100-file GraphQL cap here.
+ *
+ * PROJECTS VIA `@tsv`, NOT `tojson`/a bare JSON object per line — a `patch` legitimately spans many source lines,
+ * and jq's default (non-`-c`) object rendering is pretty-printed across MULTIPLE output lines, which would break
+ * any "one record per line" reader silently. `@tsv` escapes each field's own newlines/tabs/backslashes to a
+ * literal `\n`/`\t`/`\\` so one file's whole patch always reaches this process as ONE line; {@link unescapeTsvField}
+ * undoes that escaping to recover the real multi-line patch text `isAppendOnlyStatuteChange` expects.
+ *
+ * A file with no `patch` (binary, a pure rename, or one whose diff GitHub declined to compute) projects `.patch`
+ * as `null` — mapped to `""` before `@tsv` (which cannot render `null`) so it still reads as ONE empty field
+ * rather than corrupting the row; the caller/classifier already treats a non-append/empty patch as ineligible.
+ * @param {{number:number|string, repo?:string|null, exec?:Function}} o
+ * @returns {Record<string,string>} filename → that file's own patch text (possibly `""`)
+ */
+export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottled }) {
+  const path = repo ? `repos/${repo}/pulls/${number}/files` : `repos/{owner}/{repo}/pulls/${number}/files`;
+  const argv = ['api', '--paginate', '-F', 'per_page=100', path, '--jq', '.[] | [.filename, (.patch // "")] | @tsv'];
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  const patches = {};
+  for (const line of String(out || '').split('\n')) {
+    if (line === '') continue;
+    const tab = line.indexOf('\t');
+    if (tab === -1) continue;
+    const filename = unescapeTsvField(line.slice(0, tab));
+    patches[filename] = unescapeTsvField(line.slice(tab + 1));
+  }
+  return patches;
+}
+
 /**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#buildConflictFindingBody — the write-up handed to
  * `we:scripts/conveyor/reconcile-finding.mjs --body-file=` for a DISPATCHABLE (non-statute-tier) fresh
@@ -275,8 +442,20 @@ export function defaultListPrFiles({ number, repo, exec = execFileSyncThrottled 
  * @param {{num:number|string, headRefName?:string}} pr
  * @returns {string}
  */
-export function buildConflictFindingBody(pr) {
+export function buildConflictFindingBody(pr, { appendOnlyStatute = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
+  // #3383-append-only-statute — an EXPLICIT, narrower instruction for the one case this file's classifier proves
+  // mechanical: both sides only ADDED a new `### ` section at the same spot in a statute doc. Stated as its own
+  // paragraph, ahead of the generic "read both sides' intent" instruction, so a fixer never has to re-derive from
+  // the raw conflict markers that no existing rule text is actually in dispute here.
+  const appendOnlyInstruction = appendOnlyStatute
+    ? [
+      '',
+      "**Append-only statute conflict: resolve by keeping `main`'s version of the file unchanged and " +
+        "re-inserting this PR's new `###` section(s), in the same place relative to the neighbouring sections, " +
+        "after `main`'s new ones. Change no existing rule text.**",
+    ]
+    : [];
   return [
     `PR #${pr?.num ?? pr?.number ?? '?'}${ref} has drifted into a real GIT merge conflict against \`main\` — ` +
       "GitHub reports `mergeable: CONFLICTING`. This is the WHOLE finding; there is no separate reviewer comment " +
@@ -285,6 +464,7 @@ export function buildConflictFindingBody(pr) {
     '**Resolving the conflict IS the task.** Rebase or merge `main` into this branch, resolve every conflicted ' +
       "hunk by reading BOTH sides' intent (this diff's own and whatever landed on `main` since), push the " +
       'resolution, and let the normal fix-agent flow (this bounce) carry it back to independent review.',
+    ...appendOnlyInstruction,
     '',
     '_Auto-detected by the parked-PR conflict watch (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, ' +
       '`#xw0odtv`), dispatched per `#xu2krte`._',
@@ -319,9 +499,9 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
  * path (`we:scripts/review-set-label.mjs#bodyFileRoots`) and removed afterward either way.
  * @param {{pr:object, repo:string|null, exec?:Function}} o
  */
-export function defaultPostConflictFinding({ pr, repo, exec = execFileSync }) {
+export function defaultPostConflictFinding({ pr, repo, exec = execFileSync, appendOnlyStatute = false }) {
   const bodyPath = join(tmpdir(), `reconcile-finding-conflict-${pr?.number}-${randomUUID()}.md`);
-  writeFileSync(bodyPath, buildConflictFindingBody({ num: pr?.number, headRefName: pr?.headRefName }), 'utf8');
+  writeFileSync(bodyPath, buildConflictFindingBody({ num: pr?.number, headRefName: pr?.headRefName }, { appendOnlyStatute }), 'utf8');
   try {
     const argv = [
       join(REPO_ROOT, 'scripts', 'conveyor', 'reconcile-finding.mjs'), String(pr?.number),
@@ -372,7 +552,7 @@ export function defaultPostConflictRearm({ pr, repo, exec = execFileSync }) {
  * straight to a human, no dispatch attempt). Best-effort like every other write here: a failure is reported on
  * the entry, never thrown, and never stops the sweep from checking the rest of the PRs.
  * On `newlyResolved`, a remaining `review:changes` bounce goes to {@link defaultPostConflictRearm}.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, listPrFiles?:Function}} [o]
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, listPrFiles?:Function, listPrPatches?:Function}} [o]
  * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
 export function watchParkedPrConflicts({
@@ -380,6 +560,7 @@ export function watchParkedPrConflicts({
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
   postRearm = defaultPostConflictRearm,
   listPrFiles = defaultListPrFiles,
+  listPrPatches = defaultListPrPatches,
   labelAgeMs = defaultConflictLabelAgeMs,
 } = {}) {
   const prs = listPrs({ repo });
@@ -451,14 +632,40 @@ export function watchParkedPrConflicts({
           }
         }
         const isStatuteTier = statuteCheckFailed || isStatuteTierConflict(filesForCheck);
-        provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr, { isStatuteTier, deferredToDrain: queued }));
+        // #3383-append-only-statute — live 2026-09-23, PR #2505: a statute-tier conflict where BOTH sides only
+        // appended a separate new `### ` section is mechanically resolvable (keep both) and does not need to cost
+        // a human review the way an actual overlapping-content statute edit must. Only checked when the file set
+        // already qualifies as statute-tier at all (the common non-statute tick pays nothing extra), and only
+        // over the STATUTE-TIER subset of files — a declarative-leash file anywhere in that subset, a non-`.md`
+        // statute path, or any patch-fetch failure all fail this closed (stand-down), the safe direction.
+        let appendOnlyStatute = false;
+        if (isStatuteTier && !statuteCheckFailed) {
+          try {
+            const statuteTierFiles = filesForCheck
+              .map((f) => (typeof f === 'string' ? f : f?.path))
+              .filter((p) => p && (isDeclarativeLeashPath(p) || isStatutePath(p)));
+            const patches = listPrPatches({ number: pr?.number, repo: resolvedRepo });
+            appendOnlyStatute = isAppendOnlyStatuteConflict(statuteTierFiles, patches);
+          } catch {
+            appendOnlyStatute = false; // fetch failure → stand down, the safe direction
+          }
+        }
+        const standDown = isStatuteTier && !appendOnlyStatute;
+        provider.postComment(resolvedRepo, pr?.number,
+          buildConflictComment(pr, { isStatuteTier: standDown, deferredToDrain: queued, appendOnlyStatute }));
         entry.commented = true;
         // Fork 2/4 (#xu2krte) — route to exactly one downstream pipeline. Failures here are reported on the
         // entry the SAME way a label/comment failure already is; the alert above has already posted either way.
+        // An append-only statute conflict is dispatched AT ONCE, bypassing the queued-PR drain grace below: that
+        // grace exists to let the drain auto-rebase a shared-manifest-only conflict, which is not this case (a
+        // real content insertion in a statute doc), so waiting on it would only delay the mechanical fix.
         try {
-          if (isStatuteTier) {
+          if (standDown) {
             postStandDown({ pr, repo: resolvedRepo });
             entry.routedTo = 'stand-down';
+          } else if (isStatuteTier) {
+            postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+            entry.routedTo = 'reconcile-finding (append-only statute)';
           } else if (queued) {
             entry.routedTo = 'deferred-to-drain'; // bounced by a later sweep once QUEUED_CONFLICT_GRACE_MS passes
           } else {

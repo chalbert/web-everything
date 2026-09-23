@@ -4,6 +4,7 @@
  * mirroring `we:scripts/conveyor/__tests__/review-status-tag.test.mjs`'s own shape.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import {
   CONFLICT_LABEL,
@@ -23,6 +24,9 @@ import {
   isQueuedConflictTarget,
   QUEUED_CONFLICT_GRACE_MS,
   defaultConflictLabelAgeMs,
+  isAppendOnlyStatuteChange,
+  isAppendOnlyStatuteConflict,
+  defaultListPrPatches,
 } from '../parked-pr-conflict-watch.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
@@ -173,6 +177,16 @@ describe('buildConflictComment', () => {
   it('defaults to the dispatchable wording when isStatuteTier is omitted (matches the common case)', () => {
     const body = buildConflictComment({ num: 1920 });
     expect(body).toMatch(/fix agent is being dispatched/i);
+  });
+
+  // #3383-append-only-statute — the watch passes `isStatuteTier: false` alongside `appendOnlyStatute: true` for
+  // this case (it IS being dispatched, not stood down), so the comment must say so plainly rather than falling
+  // into the generic "judgment call for a human" wording a bare isStatuteTier:true would otherwise pick.
+  it('an append-only statute conflict says it is resolved mechanically and will be re-reviewed — no human-judgment wording', () => {
+    const body = buildConflictComment({ num: 2505 }, { isStatuteTier: false, appendOnlyStatute: true });
+    expect(body).toMatch(/resolved mechanically/i);
+    expect(body).toMatch(/fresh independent review/i);
+    expect(body).not.toMatch(/judgment call for a human/i);
   });
 });
 
@@ -526,6 +540,171 @@ describe('buildConflictFindingBody', () => {
     expect(body).toMatch(/Resolving the conflict IS the task/);
     expect(body).not.toContain('undefined');
   });
+
+  it('#3383-append-only-statute — adds the explicit keep-main-reinsert-new-sections instruction when flagged', () => {
+    const body = buildConflictFindingBody({ num: 2505 }, { appendOnlyStatute: true });
+    expect(body).toMatch(/Append-only statute conflict/);
+    expect(body).toMatch(/keeping `main`'s version of the file unchanged/);
+    expect(body).toMatch(/re-inserting this PR's new `###` section/);
+    expect(body).toMatch(/Change no existing rule text/);
+  });
+
+  it('omits the append-only instruction by default', () => {
+    const body = buildConflictFindingBody({ num: 2505 });
+    expect(body).not.toMatch(/Append-only statute conflict/);
+  });
+});
+
+// #3383-append-only-statute — live 2026-09-23, PR #2505: a concurrent statute-tier PR conflicts with `main` ONLY
+// because both sides independently appended a separate new `### ` section at the same insertion point. This is
+// mechanically resolvable (keep both); a real overlapping edit to existing rule text is not.
+describe('isAppendOnlyStatuteChange', () => {
+  // The exact shape PR #2505 collided in: the tail of `## The standing rules`, right before the `---` that
+  // precedes `## Standing process & method rules` in docs/agent/platform-decisions.md.
+  const real2505Shape = [
+    '@@ -5340,6 +5340,11 @@ found in the #3717 build, not to a new principle.',
+    ' [#3801](/backlog/3801-decision-review-the-five-choices-the-3717-dispatch-routing-b/).',
+    ' ',
+    '+### A new statute rule appended by this PR {#new-rule-anchor}',
+    '+',
+    '+The body of the newly-ratified rule.',
+    '+',
+    ' ---',
+    ' ',
+    ' ## Standing process & method rules (codified in the topical docs — pointers)',
+  ].join('\n');
+
+  it('true: a pure section insert right before the `---` boundary (the real PR #2505 shape)', () => {
+    expect(isAppendOnlyStatuteChange(real2505Shape)).toBe(true);
+  });
+
+  it('true: a section insert whose next context is a `## ` heading (no `---` in between)', () => {
+    const patch = [
+      '@@ -1,3 +1,7 @@',
+      ' last line of the previous section',
+      ' ',
+      '+### Freshly appended rule {#anchor}',
+      '+',
+      '+Body.',
+      '+',
+      ' ## The next top-level section',
+    ].join('\n');
+    expect(isAppendOnlyStatuteChange(patch)).toBe(true);
+  });
+
+  it('false: a line added inside an existing rule\'s body (not a whole-section insert)', () => {
+    const patch = [
+      '@@ -10,3 +10,4 @@',
+      ' existing sentence one.',
+      '+a sentence spliced into the middle of the rule.',
+      ' existing sentence two.',
+    ].join('\n');
+    expect(isAppendOnlyStatuteChange(patch)).toBe(false);
+  });
+
+  it('false: any deletion at all, even alongside an otherwise-valid section insert', () => {
+    const patch = [
+      '@@ -10,4 +10,8 @@',
+      ' context',
+      '-an old line being removed',
+      '+### New Rule {#x}',
+      '+',
+      '+body',
+      '+',
+      ' ---',
+    ].join('\n');
+    expect(isAppendOnlyStatuteChange(patch)).toBe(false);
+  });
+
+  it('false: a heading insert not at a section boundary (followed by ordinary body text)', () => {
+    const patch = [
+      '@@ -1,3 +1,6 @@',
+      ' context before',
+      '+### New Rule {#x}',
+      '+body',
+      ' some ordinary paragraph text, not a heading or separator',
+    ].join('\n');
+    expect(isAppendOnlyStatuteChange(patch)).toBe(false);
+  });
+
+  it('false: malformed / unparseable input', () => {
+    expect(isAppendOnlyStatuteChange('not a diff at all')).toBe(false);
+    expect(isAppendOnlyStatuteChange('')).toBe(false);
+    expect(isAppendOnlyStatuteChange(undefined)).toBe(false);
+    expect(isAppendOnlyStatuteChange(null)).toBe(false);
+  });
+
+  it('false: an add-run that trims to nothing (only blank/--- lines added)', () => {
+    const patch = ['@@ -1,2 +1,4 @@', ' context', '+', '+---', ' more context'].join('\n');
+    expect(isAppendOnlyStatuteChange(patch)).toBe(false);
+  });
+
+  it('false: no additions at all (nothing to prove append-only about)', () => {
+    const patch = ['@@ -1,2 +1,2 @@', ' unchanged one', ' unchanged two'].join('\n');
+    expect(isAppendOnlyStatuteChange(patch)).toBe(false);
+  });
+});
+
+describe('isAppendOnlyStatuteConflict', () => {
+  const goodPatch = [
+    '@@ -1,3 +1,7 @@',
+    ' last line of the previous section',
+    ' ',
+    '+### Freshly appended rule {#anchor}',
+    '+',
+    '+Body.',
+    '+',
+    ' ---',
+  ].join('\n');
+
+  it('true: every statute-tier file is a statute .md path with an append-only patch', () => {
+    expect(isAppendOnlyStatuteConflict(
+      ['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': goodPatch },
+    )).toBe(true);
+  });
+
+  it('false: a declarative-leash file is present — never append-only-eligible', () => {
+    expect(isAppendOnlyStatuteConflict(
+      ['docs/agent/platform-decisions.md', 'scripts/lib/review-policy.contract.json'],
+      { 'docs/agent/platform-decisions.md': goodPatch, 'scripts/lib/review-policy.contract.json': goodPatch },
+    )).toBe(false);
+  });
+
+  it('false: missing patch entry for a statute file (fetch/parse failure) — safe direction', () => {
+    expect(isAppendOnlyStatuteConflict(['docs/agent/platform-decisions.md'], {})).toBe(false);
+  });
+
+  it('false: no statute-tier files at all', () => {
+    expect(isAppendOnlyStatuteConflict([], { 'docs/agent/platform-decisions.md': goodPatch })).toBe(false);
+  });
+});
+
+describe('defaultListPrPatches — argv shape + @tsv round-trip (exec injected, no real gh call)', () => {
+  it('paginates the REST files endpoint projecting filename + patch via @tsv', () => {
+    let capturedArgv;
+    const exec = () => '';
+    defaultListPrPatches({ number: 42, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv).toEqual(['api', '--paginate', '-F', 'per_page=100', 'repos/o/n/pulls/42/files',
+      '--jq', '.[] | [.filename, (.patch // "")] | @tsv']);
+  });
+
+  it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
+    let capturedArgv;
+    defaultListPrPatches({ number: 7, exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv[4]).toBe('repos/{owner}/{repo}/pulls/7/files');
+  });
+
+  it('recovers a multi-line patch that @tsv escaped onto one output line, per file', () => {
+    // jq's @tsv escapes each field's own tabs/newlines/backslashes — this is what that looks like on the wire.
+    const wire = 'a.md\t@@ -1,1 +1,2 @@\\n+line one\\n+line two\nb.md\t';
+    const out = defaultListPrPatches({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual({ 'a.md': '@@ -1,1 +1,2 @@\n+line one\n+line two', 'b.md': '' });
+  });
+
+  it('an empty listing yields an empty map', () => {
+    expect(defaultListPrPatches({ number: 1, repo: 'o/n', exec: () => '\n\n' })).toEqual({});
+  });
 });
 
 describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPostConflictRearm — argv shape (exec injected, no real gh/node)', () => {
@@ -685,5 +864,153 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec, now })).toBe(40 * 60 * 1000);
     expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec: () => 'null\n', now })).toBeNull();
     expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec: () => { throw new Error('x'); }, now })).toBeNull();
+  });
+});
+
+// #3383-append-only-statute — live 2026-09-23, PR #2505: routing-level coverage over the append-only exception,
+// via injected fakes (no real gh/node process).
+describe('watchParkedPrConflicts — the append-only statute exception (#3383)', () => {
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => calls.push(['ensureLabel', repo, name]),
+      setLabels: (repo, pr, spec) => calls.push(['setLabels', repo, pr, spec]),
+      postComment: (repo, pr, body) => calls.push(['postComment', repo, pr, body]),
+    };
+  };
+  const goodPatch = [
+    '@@ -1,3 +1,7 @@',
+    ' last line of the previous section',
+    ' ',
+    '+### Freshly appended rule {#anchor}',
+    '+',
+    '+Body.',
+    '+',
+    ' ---',
+  ].join('\n');
+
+  it('an append-only statute conflict is dispatched to the finding path, not stood down, with the resolve instruction', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2505, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: [{ path: 'docs/agent/platform-decisions.md' }],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number, o.appendOnlyStatute]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': goodPatch }),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding (append-only statute)');
+    expect(routed).toEqual([['finding', 2505, true]]);
+    const comment = provider.calls.find((c) => c[0] === 'postComment')[3];
+    expect(comment).toMatch(/resolved mechanically/i);
+  });
+
+  it('end-to-end: defaultPostConflictFinding actually writes the resolve instruction into the body file it shells', () => {
+    let capturedArgv;
+    const writtenBodies = [];
+    // Exercise the real defaultPostConflictFinding (not a test stub) so the body-file plumbing itself is covered,
+    // not just buildConflictFindingBody in isolation.
+    const exec = (cmd, argv) => {
+      capturedArgv = argv;
+      const bodyFileArg = argv.find((a) => a.startsWith('--body-file='));
+      writtenBodies.push(readFileSync(bodyFileArg.slice('--body-file='.length), 'utf8'));
+      return '';
+    };
+    defaultPostConflictFinding({ pr: { number: 2505 }, repo: 'o/n', exec, appendOnlyStatute: true });
+    expect(capturedArgv[0]).toMatch(/reconcile-finding\.mjs$/);
+    expect(writtenBodies[0]).toMatch(/Append-only statute conflict/);
+  });
+
+  it('mixed conflict — a statute file that is NOT append-only alongside one that is — stands down (fails closed)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const badPatch = ['@@ -1,3 +1,3 @@', ' context', '-old line', '+new line'].join('\n');
+    const listPrs = () => [{
+      number: 2506, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: [{ path: 'docs/agent/platform-decisions.md' }, { path: 'docs/agent/some-other-statute.md' }],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrPatches: () => ({
+        'docs/agent/platform-decisions.md': goodPatch,
+        'docs/agent/some-other-statute.md': badPatch,
+      }),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 2506]]);
+  });
+
+  it('a declarative-leash (code/contract) file in the conflict always stands down, even with an append-only-shaped statute patch alongside it', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2507, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: [
+        { path: 'docs/agent/platform-decisions.md' },
+        { path: 'scripts/lib/review-policy.contract.json' },
+      ],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrPatches: () => ({
+        'docs/agent/platform-decisions.md': goodPatch,
+        'scripts/lib/review-policy.contract.json': goodPatch,
+      }),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 2507]]);
+  });
+
+  it('a patch-fetch failure stands down — never trusts an unfetched patch as append-only', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2508, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: [{ path: 'docs/agent/platform-decisions.md' }],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrPatches: () => { throw new Error('gh api failed'); },
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 2508]]);
+  });
+
+  it('an append-only statute conflict on an already-QUEUED (approved) PR is dispatched at once, bypassing the drain grace', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2505, mergeable: 'CONFLICTING', labels: [{ name: 'review:accepted' }],
+      files: [{ path: 'docs/agent/platform-decisions.md' }],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': goodPatch }),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding (append-only statute)');
+    expect(routed).toEqual([['finding', 2505]]);
+  });
+
+  it('an ordinary non-statute conflict never pays for a patch fetch (listPrPatches uncalled)', () => {
+    let called = false;
+    const listPrs = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }] }];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: () => {}, postStandDown: () => {},
+      listPrPatches: () => { called = true; return {}; },
+    });
+    expect(called).toBe(false);
   });
 });
