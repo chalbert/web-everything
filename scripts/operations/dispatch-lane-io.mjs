@@ -60,6 +60,7 @@ import { classifyPr } from '../conveyor/pr-watch.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo } from '../lib/repo-profile.mjs';
+import { buildGhShimSettingsEnv } from '../lib/gh-app-shim.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
@@ -982,6 +983,12 @@ export function createDispatchSinks({
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
+  // #x8mpubm — resolved ONCE per dispatch, here at the sink (the one place real fs/env effects belong in this
+  // file), never inside `defaultClaudeProvider`/`buildAgentArgv` themselves, both of which stay side-effect-free
+  // by default so every OTHER existing test of either keeps working unchanged. `resolveGhShimSettingsEnv`
+  // itself never throws and is a no-op (fs untouched) on any host that has not opted into App auth — see
+  // `we:scripts/lib/gh-app-shim.mjs`'s own header.
+  resolveSettingsEnv = resolveGhShimSettingsEnv,
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
@@ -997,6 +1004,7 @@ export function createDispatchSinks({
           num: payload?.num,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+          settingsEnv: resolveSettingsEnv(),
         });
       } catch (e) {
         // A validation failure `buildAgentArgv` already proved happened before any process existed (e.g. an
@@ -1034,7 +1042,7 @@ export function createDispatchSinks({
  * every such dispatch into the executor's `unknown` bucket, which only a person can close out. So an
  * unparseable spawn degrades to the old, unmatchable handle; it never gets worse than before.
  *
- * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
+ * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null, settingsEnv?:Record<string,string>|null}} request
  * @param {{spawnAgent?: Function}} [io]
  * @returns {string}
  */
@@ -1044,6 +1052,10 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },
     extraArgs: request.extraArgs,
     systemPromptFile: request.systemPromptFile,
+    // #x8mpubm — resolved once by the SINK (`createDispatchSinks`), not here: this function never reaches
+    // for `process.env`/real fs on its own (`request.settingsEnv` defaults to nothing, i.e. `null`), so every
+    // existing caller/test of this port that never mentions it sees byte-identical behaviour.
+    settingsEnv: request.settingsEnv ?? null,
   });
   const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
   return parseBackgroundedId(stdout) || request.sessionId;
@@ -1128,18 +1140,44 @@ export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(im
  * {@link resumeSucceeded} and falling back to a fresh, full dispatch (this same function, `resumeSessionId`
  * omitted) when it does.
  */
-export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null }) {
+/**
+ * #x8mpubm — THE ONE PLACE a dispatch resolves whether (and how) to route a dispatched session's own `gh`
+ * calls through the App-token shim (`we:scripts/lib/gh-app-shim.mjs`). NEVER throws: any failure (no real
+ * `gh` on `PATH`, App auth not configured on this host, a read-only shim dir) resolves to `null`, meaning the
+ * caller omits `--settings` entirely and the dispatch proceeds exactly as it would have before this existed.
+ * A thin wrapper, not re-exported logic — `gh-app-shim.mjs` owns every real decision; this only guarantees
+ * the "never blocks a dispatch" contract every sink in this file already holds itself to.
+ * @returns {Record<string,string>|null}
+ */
+export function resolveGhShimSettingsEnv() {
+  try { return buildGhShimSettingsEnv(); } catch { return null; }
+}
+
+export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null, settingsEnv = null }) {
   const prompt = String(payload?.prompt || '');
   if (!prompt.trim()) throw notApplied('dispatch-lane: refusing to start an agent with an empty prompt');
   if (prompt.trimStart().startsWith('-')) {
     throw notApplied('dispatch-lane: refusing a brief that begins with `-` — an argument parser can read it as a flag');
   }
+  // `settingsEnv` (#x8mpubm) is DELIBERATELY NEVER EMITTED HERE — the resume branch's own docblock (above)
+  // measured live that adding ANY flag beside `--resume` makes the CLI silently fork a fresh copy instead of
+  // truly resuming. A resumed session does not need it anyway: it is the SAME still-running process its first,
+  // fresh dispatch already gave a `--settings` PATH override to (see the non-resume branch below), and the
+  // shim that override points at re-reads the shared token cache fresh on every `gh` call regardless of how
+  // long the session has been running — so nothing is lost by never re-asserting it on resume.
   if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
   // NO `--session-id` — see this function's own header. `sessionId` is deliberately unreferenced here.
   void sessionId;
   return [
     '--bg',
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
+    // #x8mpubm — a `PATH` (or other) override, folded into `--settings '{"env":{...}}'`. THIS is how a
+    // dispatched session's own `gh` calls end up authenticating as the App installation: `claude --bg` does
+    // NOT inherit the spawning process's ambient env (live-confirmed — see gh-app-shim.mjs's own header), but
+    // DOES apply `--settings`'s `env` to the session's own Bash-tool subprocess environment (also
+    // live-confirmed). Omitted entirely when `settingsEnv` is `null`/empty — a caller that never resolves one
+    // (or a host with App auth unconfigured) gets a `--bg` argv byte-identical to before this existed.
+    ...(settingsEnv && Object.keys(settingsEnv).length ? ['--settings', JSON.stringify({ env: settingsEnv })] : []),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
     ...extraArgs.map(String),
     prompt,

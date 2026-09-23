@@ -313,6 +313,35 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(result.resumed).toBe(false);
   });
 
+  it('#x8mpubm — resolveSettingsEnv is called once and its result folds into the argv as --settings', () => {
+    const calls = [];
+    const resolveSettingsEnv = () => ({ PATH: '/shim:/usr/bin' });
+    dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9 },
+      {
+        root: '/repo', readBrief: () => REAL_TEMPLATE_STUB, mintSessionId: () => 'sid',
+        spawnAgent: (argv) => { calls.push(argv); return ''; },
+        resolveSettingsEnv,
+      },
+    );
+    expect(calls[0]).toContain('--settings');
+    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+  });
+
+  it('#x8mpubm — the REAL default resolveSettingsEnv (unconfigured host) emits no --settings at all', () => {
+    const calls = [];
+    dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9 },
+      {
+        root: '/repo', readBrief: () => REAL_TEMPLATE_STUB, mintSessionId: () => 'sid',
+        spawnAgent: (argv) => { calls.push(argv); return ''; },
+        // no `resolveSettingsEnv` override — exercises the REAL `resolveGhShimSettingsEnv` default, which is
+        // opt-in gated on WE_GITHUB_APP_* and must stay a safe no-op on this (unconfigured) test host.
+      },
+    );
+    expect(calls[0]).not.toContain('--settings');
+  });
+
   it('attaches a carried-forward `resumeAttempt` (from a prior tryResumeFix call) to the reported result, without re-attempting anything itself', () => {
     const result = dispatchFix(
       { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9 },
