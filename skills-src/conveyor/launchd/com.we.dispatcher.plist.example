@@ -16,8 +16,11 @@
 	     real values into this repo; this file only ever holds placeholders.
 	  2. Confirm the WorkingDirectory clone (/Users/nicolasgilbert/workspace/wev-review-daemon) is the
 	     Dispatcher's own dedicated checkout, on `main`, clean — the same clone the standalone Review daemon
-	     already runs from (self-sync, wired in runner.mjs's `wireSelfSyncAndAppAuth`, keeps it caught up with
-	     `origin/main` between ticks and restarts onto new code rather than refusing every dispatch).
+	     already runs from. The --self-sync flag below is what turns self-sync ON (runner.mjs's
+	     `wireSelfSyncAndAppAuth` — keeps the clone caught up with `origin/main` between ticks and restarts
+	     onto new code rather than refusing every dispatch). It is OPT-IN and OFF by default because it runs
+	     `git merge origin/main` in the checkout: never pass --self-sync to a runner started from the
+	     operator's own live checkout — only from this dedicated clone.
 	  3. The four --skip-pass flags below name the mechanical passes that ALREADY run as their own standalone
 	     daemon/watcher today — reconcile-fix-dispatch-daemon.mjs, review-daemon.mjs (the reconcile-pass →
 	     review-dispatch → review-round-tag/review-status-tag group, skipped here under the single name
@@ -33,6 +36,7 @@
 		<string>/Users/nicolasgilbert/.nvm/versions/node/v22.1.0/bin/node</string>
 		<string>/Users/nicolasgilbert/workspace/wev-review-daemon/skills-src/conveyor/runner.mjs</string>
 		<string>--json</string>
+		<string>--self-sync</string>
 		<string>--skip-pass=reconcile-fix-dispatch</string>
 		<string>--skip-pass=reconcile-pass</string>
 		<string>--skip-pass=parked-pr-conflict-watch</string>

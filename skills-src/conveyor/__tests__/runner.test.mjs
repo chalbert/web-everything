@@ -761,6 +761,7 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async (payload) => { order.push('tick'); payloadsSeen.push(payload); return { nextState: { fromTick: true } }; },
       root: '/irrelevant-since-sync-is-injected',
+      selfSync: true,
       onRestart: () => { throw new Error('onRestart must not run when nothing merged'); },
       sync: () => ({ merged: false, commits: 0, reason: 'up-to-date' }),
       authOpts: {
@@ -783,6 +784,7 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async () => { order.push('tick'); return {}; },
       root: '/irrelevant-since-sync-is-injected',
+      selfSync: true,
       onRestart: () => { order.push('restart'); return 'restarted'; },
       sync: () => ({ merged: true, commits: 3, reason: 'merged' }),
       authOpts: {
@@ -803,6 +805,7 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async () => { order.push('tick'); return {}; },
       root: '/irrelevant-since-sync-is-injected',
+      selfSync: true,
       onRestart: () => { throw new Error('must not restart on a conflict'); },
       sync: () => ({ merged: false, commits: 0, reason: 'conflict' }),
       authOpts: { log: { error: () => {} } }, // not-configured → token refresh is a fast no-op, still runs first
@@ -810,5 +813,51 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
 
     await wrapped({});
     expect(order).toEqual(['tick']); // no App env configured, so no 'token-refresh' entry — but no throw, and the tick still ran
+  });
+});
+
+describe('wireSelfSyncAndAppAuth — self-sync is OPT-IN (never mutates an interactive checkout by default)', () => {
+  const syncWouldMerge = (calls) => () => { calls.push('sync'); return { merged: true, commits: 2, reason: 'merged' }; };
+
+  it.each([
+    ['omitted', {}],
+    ['false', { selfSync: false }],
+    ['a truthy non-boolean string', { selfSync: 'true' }],
+    ['a truthy non-boolean number', { selfSync: 1 }],
+  ])('selfSync %s: sync never runs, no restart, token refresh + tick still run with the payload', async (_label, extra) => {
+    const calls = [];
+    const payloadsSeen = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async (payload) => { calls.push('tick'); payloadsSeen.push(payload); return { ok: 1 }; },
+      root: '/irrelevant',
+      onRestart: () => { throw new Error('must never restart without the self-sync opt-in'); },
+      sync: syncWouldMerge(calls),
+      authOpts: {
+        env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
+        readCache: () => ({ v: 2, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }),
+        setEnv: () => { calls.push('token-refresh'); },
+        log: { error: () => {} },
+      },
+      ...extra,
+    });
+
+    const out = await wrapped({ carriedOver: 'x' });
+    expect(calls).toEqual(['token-refresh', 'tick']); // no 'sync' — the git mutation was never attempted
+    expect(payloadsSeen).toEqual([{ carriedOver: 'x' }]);
+    expect(out).toEqual({ ok: 1 });
+  });
+
+  it('selfSync: true is the only value that wires the sync (and a merge then restarts)', async () => {
+    const calls = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async () => { calls.push('tick'); return {}; },
+      root: '/irrelevant',
+      onRestart: () => { calls.push('restart'); return 'restarted'; },
+      sync: syncWouldMerge(calls),
+      authOpts: { log: { error: () => {} } },
+      selfSync: true,
+    });
+    expect(await wrapped({})).toBe('restarted');
+    expect(calls).toEqual(['sync', 'restart']);
   });
 });

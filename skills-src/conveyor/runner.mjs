@@ -564,7 +564,7 @@ export function resolveSkipPasses(flagValue, { names = MECHANICAL_PASS_NAMES } =
  */
 /**
  * Wire a real `tickOnce` through the two per-tick daemon primitives a resident Dispatcher now needs, in
- * order: SELF-SYNC first ({@link withSelfSync} — fetch + merge `origin/main`; a merge PRE-EMPTS the tick with
+ * order: SELF-SYNC first (only when opted in — see below; {@link withSelfSync} — fetch + merge `origin/main`; a merge PRE-EMPTS the tick with
  * a restart instead of ticking on stale code), then the GitHub App TOKEN REFRESH
  * ({@link withGithubAppAuth} — opt-in via `WE_GITHUB_APP_*` env vars, a no-op otherwise), then the real tick.
  * This is the exact ordering `skills-src/conveyor/review-daemon.mjs`'s own `main()` already composes
@@ -572,14 +572,25 @@ export function resolveSkipPasses(flagValue, { names = MECHANICAL_PASS_NAMES } =
  * forward whatever arguments their wrapped `tickOnce` takes (see each module's own header), so the runner's
  * per-tick bookkeeping payload (threaded tick-to-tick via {@link carryForward}) still reaches the real
  * `tickOnce` unchanged — this function adds no IO of its own, only the composition.
- * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function}} o
+ *
+ * SELF-SYNC IS OPT-IN (`selfSync: true`, default OFF). Self-sync MUTATES the checkout (`git merge
+ * origin/main`, then a restart) and is only safe in a DEDICATED unattended clone nobody else touches — the
+ * precondition `daemon-self-sync.mjs` was designed around. runner.mjs is ALSO run interactively from the
+ * operator's own live checkout (the /conveyor skill's documented flow), where an unasked-for merge commit or
+ * a mid-session `process.exit(0)` is wrong. So unless the caller explicitly asserts "this is the dedicated
+ * clone" (the CLI's `--self-sync` flag, which the staged launchd plist passes), only the App-token refresh
+ * wraps the tick and no git mutation ever happens.
+ * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function, selfSync?:boolean}} o
  *   `sync` is forwarded to {@link withSelfSync} (defaults to the real `selfSyncCheckout`) — exposed so a test
- *   can simulate "new commits arrived" without a real git checkout.
+ *   can simulate "new commits arrived" without a real git checkout. `selfSync` must be exactly `true` to wire
+ *   the self-sync wrapper at all.
  * @returns {Function} the wrapped `tickOnce` effect, same call signature as the one passed in.
  */
-export function wireSelfSyncAndAppAuth({ tickOnce, root, onRestart, authOpts, sync }) {
+export function wireSelfSyncAndAppAuth({ tickOnce, root, onRestart, authOpts, sync, selfSync = false }) {
+  const authed = withGithubAppAuth({ tickOnce }, authOpts);
+  if (selfSync !== true) return authed.tickOnce;
   const selfSyncOpts = { root, onRestart, ...(sync ? { sync } : {}) };
-  return withSelfSync(withGithubAppAuth({ tickOnce }, authOpts), selfSyncOpts).tickOnce;
+  return withSelfSync(authed, selfSyncOpts).tickOnce;
 }
 
 export async function driveConveyor({
@@ -638,6 +649,18 @@ async function main(argv) {
   const { skipPasses } = skipResolution;
   if (skipPasses.size) process.stderr.write(`conveyor runner: skipping mechanical pass(es): ${[...skipPasses].join(', ')}\n`);
 
+  // --self-sync — the explicit opt-in asserting "this runner is in its own DEDICATED unattended clone" (the
+  // staged launchd plist passes it). Without it the runner NEVER fetches/merges `origin/main` into the
+  // checkout it runs from — an interactive launch from the operator's live checkout stays untouched.
+  // Bare flag only: `--self-sync=true` would otherwise parse as the STRING 'true' and silently leave it OFF.
+  if (flags['self-sync'] !== undefined && flags['self-sync'] !== true) {
+    process.stderr.write(`✗ --self-sync takes no value (got --self-sync=${flags['self-sync']}); pass the bare flag to opt in, or omit it.\n`);
+    process.exit(1);
+    return;
+  }
+  const selfSync = flags['self-sync'] === true;
+  if (selfSync) process.stderr.write(`conveyor runner: self-sync ON — will merge origin/main into ${REPO_ROOT} between ticks (dedicated clone only)\n`);
+
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = (owner) => {
     const restartOntoNewCode = () => {
@@ -652,6 +675,7 @@ async function main(argv) {
         tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
         root: REPO_ROOT,
         onRestart: restartOntoNewCode,
+        selfSync,
       }),
       emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
       mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession, skipPasses }),
