@@ -38,6 +38,7 @@ import {
 } from './runner-lock.mjs';
 import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
+import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
 
 /** This daemon's own lease key — distinct from the Dispatcher's default sentinel and from the Verify
  *  daemon's own key (#3878), so none of the three ever contend on the same lock dir (#3877). */
@@ -136,7 +137,17 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
   console.error(`reconcile-fix-dispatch-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
-  const { stoppedReason } = await runDaemonLoop(withGithubAppAuth(buildCliDaemonEffects({ owner })));
+  // xv6fciw — keep this daemon's dedicated clone on origin/main, and restart onto new code BETWEEN ticks
+  // (launchd KeepAlive brings it back), instead of refusing every dispatch until someone re-syncs by hand.
+  const selfRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
+  const restartOntoNewCode = () => {
+    stopping = true;
+    releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY });
+    process.exit(0);
+  };
+  const { stoppedReason } = await runDaemonLoop(
+    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), { root: selfRoot, onRestart: restartOntoNewCode }),
+  );
   if (!stopping) {
     console.error(`reconcile-fix-dispatch-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY });

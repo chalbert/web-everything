@@ -53,6 +53,7 @@ import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
+import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -226,7 +227,17 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
   console.error(`review-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
-  const { stoppedReason } = await runDaemonLoop(withGithubAppAuth(buildCliDaemonEffects({ owner })));
+  // xv6fciw — keep this daemon's dedicated clone on origin/main, and restart onto new code BETWEEN ticks
+  // (launchd KeepAlive brings it back), instead of refusing every dispatch until someone re-syncs by hand.
+  const selfRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
+  const restartOntoNewCode = () => {
+    stopping = true;
+    releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
+    process.exit(0);
+  };
+  const { stoppedReason } = await runDaemonLoop(
+    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), { root: selfRoot, onRestart: restartOntoNewCode }),
+  );
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
