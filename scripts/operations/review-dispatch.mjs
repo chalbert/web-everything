@@ -111,7 +111,7 @@
  * shapes individually is the game this file was already losing.
  */
 
-import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, repoProfile, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -321,7 +321,7 @@ export function planReviewDispatch({ pr, repo, checkoutExists = existsSync, home
   const repoStr = String(repo ?? '').trim();
   const repoKey = repoKeyForSlug(repoStr);
   if (repoKey === null) throw new Error(`review-dispatch: --repo ${repoStr} is not a constellation repo`);
-  const laneRepo = repoKey === 'we' ? '.' : resolve(CONSTELLATION_REPOS[repoKey].path.replace(/^\$HOME(?=\/|$)/, home));
+  const laneRepo = repoProfile(repoKey, { home }).lanePoolRepo;
   if (repoKey !== 'we' && !checkoutExists(laneRepo)) {
     throw new Error(`unsupported-repo: ${repoKey} checkout does not exist at ${laneRepo}`);
   }
