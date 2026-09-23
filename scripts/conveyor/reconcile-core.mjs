@@ -331,6 +331,45 @@ export function isAwaitingPermission(agent) {
     && /permission/i.test(String(agent?.waitingFor ?? ''));
 }
 
+/** How long after a review/fix session reports `blocked-on-infra` before it counts as finished, so the PR is
+ *  retried. Long enough that a persistent outage (a spent rate limit, GitHub down) is not hammered by a fresh
+ *  agent every two-minute tick; short enough that a recovered outage is retried within one coffee. */
+export const INFRA_RETRY_COOLOFF_MS = 15 * 60 * 1000;
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone — mark each listed session that has REPORTED its
+ * own completion. Pure (the record lookup is injected).
+ *
+ * WHY (xpb0zyq, live 2026-09-23). When the GitHub rate limit ran out, every dispatched review ended by writing
+ * its completion record (`status: done`, `outcome: blocked-on-infra`), yet `claude agents` kept listing those
+ * sessions as `blocked`. {@link assessLiveness} only trusted `state: 'done'`, so each PR stayed bound to a
+ * reviewer that had already quit: the review daemon reported 0 owed on every tick and six PRs never retried,
+ * even after the rate limit was fixed.
+ *
+ * A session counts as finished when its name's record says `done` AND was updated at or after the session
+ * started. Records are keyed by session NAME and a name is reused for every re-dispatch, so the timestamp is
+ * what keeps a fresh run from being read as the old one's completion. A `blocked-on-infra` outcome counts only
+ * after {@link INFRA_RETRY_COOLOFF_MS}.
+ * @param {Array<object>} agents - the `claude agents --json` rows
+ * @param {(name:string)=>({status?:string, outcome?:string, updatedAt?:string}|null)} completionFor
+ * @param {number} nowMs
+ * @returns {Array<object>} the same rows; finished ones gain `selfReportedDone: true` and `selfReportedOutcome`
+ */
+export function markSelfReportedDone(agents, completionFor, nowMs) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    const name = a?.name;
+    if (!name || String(a?.state ?? '').toLowerCase() === 'done') return a;
+    let rec = null;
+    try { rec = completionFor(String(name)); } catch { rec = null; }
+    if (!rec || rec.status !== 'done') return a;
+    const updatedMs = Date.parse(rec.updatedAt ?? '');
+    const startedMs = startedAtMs(a?.startedAt);
+    if (!Number.isFinite(updatedMs) || !Number.isFinite(startedMs) || updatedMs < startedMs) return a;
+    if (rec.outcome === 'blocked-on-infra' && !(nowMs - updatedMs >= INFRA_RETRY_COOLOFF_MS)) return a;
+    return { ...a, selfReportedDone: true, selfReportedOutcome: rec.outcome ?? null };
+  });
+}
+
 /**
  * we:scripts/conveyor/reconcile-core.mjs#assessLiveness — the liveness verdict for ONE PR, over the sessions
  * bound to it. Pure, and it is refusal 4 in code.
@@ -357,11 +396,14 @@ export function isAwaitingPermission(agent) {
  * the actual work on this PR is long done — the pid didn't die, it was just handed to unrelated later work. A
  * raw pid probe is only a stand-in for a session that has NOT reported its own terminal state; once an agent
  * says `done`, that is authoritative and a live pid proves nothing about THIS PR anymore.
+ *
+ * The same holds for a session whose OWN completion record says done ({@link markSelfReportedDone} sets
+ * `selfReportedDone`), even when the listing still reads `blocked` (xpb0zyq, live 2026-09-23).
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
-  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done';
+  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done' || agent?.selfReportedDone === true;
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
     kind,

@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone,
 } from '../reconcile-core.mjs';
 import { STAND_DOWN_MARKER } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
@@ -670,4 +670,56 @@ it('binds names only for the invocation repo', () => {
   const live = [{ name: 'review-fui-49', pidAlive: true, pid: 1 }];
   expect(planReconcile({ prs: [pr], agents: live, repo: 'frontierui' }).refusals.some((r) => r.kind === 'live-process')).toBe(true);
   expect(planReconcile({ prs: [pr], agents: live }).dispatch).toHaveLength(1);
+});
+
+// ── xpb0zyq — a session that REPORTED its own completion is finished, whatever the listing says ──────────────
+describe('markSelfReportedDone + assessLiveness — self-reported completion (xpb0zyq, live 2026-09-23)', () => {
+  const T0 = Date.parse('2026-09-23T13:51:10Z');
+  // The live shape: `claude agents` still says `blocked`; the session's own record says done/blocked-on-infra.
+  const listed = { name: 'review-2513', state: 'blocked', status: 'idle', startedAt: T0, pid: 4242 };
+  const record = { status: 'done', outcome: 'blocked-on-infra', updatedAt: '2026-09-23T13:52:01Z' };
+  const recFor = (r) => (name) => (name === 'review-2513' ? r : null);
+
+  it('THE LIVE CASE: blocked-on-infra, cool-off elapsed → finished, so the PR is re-dispatched', () => {
+    const [a] = markSelfReportedDone([listed], recFor(record), Date.parse('2026-09-23T14:30:00Z'));
+    expect(a.selfReportedDone).toBe(true);
+    expect(a.selfReportedOutcome).toBe('blocked-on-infra');
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('blocked-on-infra INSIDE the cool-off is not yet finished — a persistent outage is not retried every tick', () => {
+    const [a] = markSelfReportedDone([listed], recFor(record), Date.parse('2026-09-23T13:55:00Z'));
+    expect(a.selfReportedDone).toBeUndefined();
+  });
+
+  it('any other done outcome counts at once', () => {
+    const [a] = markSelfReportedDone([listed], recFor({ ...record, outcome: 'accepted' }), Date.parse('2026-09-23T13:52:30Z'));
+    expect(a.selfReportedDone).toBe(true);
+  });
+
+  it('a record OLDER than the session is a previous run with the same name — the fresh run stays live', () => {
+    const fresh = { ...listed, startedAt: Date.parse('2026-09-23T14:10:00Z') };
+    const [a] = markSelfReportedDone([fresh], recFor(record), Date.parse('2026-09-23T15:00:00Z'));
+    expect(a.selfReportedDone).toBeUndefined();
+  });
+
+  it('no record, a not-done record, or a reader that throws → the row is untouched', () => {
+    const now = Date.parse('2026-09-23T15:00:00Z');
+    expect(markSelfReportedDone([listed], () => null, now)[0]).toBe(listed);
+    expect(markSelfReportedDone([listed], recFor({ ...record, status: 'running' }), now)[0]).toBe(listed);
+    expect(markSelfReportedDone([listed], () => { throw new Error('corrupt'); }, now)[0]).toBe(listed);
+  });
+
+  it('end to end: a review:pending PR bound (by name) only to a self-reported-done reviewer is owed a review again', () => {
+    const pr = pr1563({ number: 2513, labels: lbl('review:pending'), comments: [] });
+    const agents = markSelfReportedDone([listed], recFor(record), Date.parse('2026-09-23T14:30:00Z'));
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2513 })]);
+  });
+
+  it('the same PR with the RAW listing (no self-report marking) stays refused — the bug this fixes', () => {
+    const pr = pr1563({ number: 2513, labels: lbl('review:pending'), comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [listed], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+  });
 });
