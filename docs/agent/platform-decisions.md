@@ -5349,7 +5349,7 @@ reviewing the five forks the `#3717` dispatch-routing build left open, extending
 
 ### The conveyor serves every constellation repo through one per-repo profile — refusal is a missing capability, never "not WE" {#conveyor-multi-repo-model}
 
-**Ratified 2026-09-23** (`xx478x6`, operator: "I ratify") — all six forks accepted as the card's recommended
+**Ratified 2026-09-23** (`3965`, operator: "I ratify") — all six forks accepted as the card's recommended
 defaults. Grounded in the 2026-09-23 multi-repo audit (`we:reports/2026-09-23-conveyor-multi-repo-gap-map.md`),
 which found review, verify and the drain already serving all three repos while fix and CI-heal never ran for
 frontierui or plateau-app. Six clauses:
