@@ -30,7 +30,9 @@ The read-only operation we:scripts/operations/graduation-progress-report.mjs (#3
   decision #3734, each with its status and card) are specified in `plateau:docs/graduation-page.md` →
   "Data contract" and "The bar". Rule statuses that can be detected are detected (rule 4: any row carries an
   `informative` key; rule 5: `DEFAULT_BACKDOWN_THRESHOLDS` has `k`; rule 6: promotions source is `ok`); the rest
-  are stated with their card. Never invent a threshold value.
+  are stated with their card. Never invent a threshold value. Each criterion's `detail` text is derived from
+  the same source state as its tag (mock review found a promoted state whose rule-6 tag said "In force" over text
+  saying no promotion exists).
 - Group triples under `{provider, model}` agents; sort agents by trial count, triples by trial count.
 
 ## Done when
