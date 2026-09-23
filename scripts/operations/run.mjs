@@ -39,6 +39,8 @@ import { createReviewPrepReader, createReviewPrepSinks } from './review-prep-io.
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
+import { telemetrySummaryOperation, TELEMETRY_SUMMARY_OP } from './telemetry-summary.mjs';
+import { createTelemetrySummaryReader } from './telemetry-summary-io.mjs';
 import { graduationProgressReportOperation, GRADUATION_PROGRESS_REPORT_OP } from './graduation-progress-report.mjs';
 import { createScorecardReader } from './graduation-progress-report-io.mjs';
 import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
@@ -207,6 +209,13 @@ export const OPERATIONS = Object.freeze({
   }),
   [GATE_HEALTH_OP]: () => ({
     declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
+    sinks: {},
+  }),
+  // backlog `xaxks4j` (epic `xjtmptc`) — the /telemetry operator page's one data producer. Read-only, same
+  // no-sinks reasoning as `gate-health`/`suggest-next`/`pr-status`: every step is `compute`, so no effect
+  // exists for a sink to apply.
+  [TELEMETRY_SUMMARY_OP]: () => ({
+    declaration: telemetrySummaryOperation({ loadFacts: createTelemetrySummaryReader() }),
     sinks: {},
   }),
   [GRADUATION_PROGRESS_REPORT_OP]: () => ({
