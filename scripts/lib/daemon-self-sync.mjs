@@ -77,7 +77,11 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
   const tick = effects.tickOnce;
   return {
     ...effects,
-    tickOnce: async () => {
+    // Forwards whatever arguments the caller's own tickOnce takes (e.g. runner.mjs's per-tick bookkeeping
+    // payload) straight through to the wrapped `tick` — this wrapper never needs to see them itself, and
+    // dropping them would silently reset a payload-threading caller's state every tick. The daemons that
+    // built this helper pass a zero-arg tickOnce, so `...args` is empty for them and nothing changes.
+    tickOnce: async (...args) => {
       const r = sync({ root });
       if (r.merged) {
         log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
@@ -86,7 +90,7 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
       if (r.reason === 'conflict' || r.reason === 'dirty' || r.reason === 'not-on-main') {
         log.error?.(`daemon-self-sync: behind origin/main but NOT syncing (${r.reason}) — needs a hand merge`);
       }
-      return tick();
+      return tick(...args);
     },
   };
 }

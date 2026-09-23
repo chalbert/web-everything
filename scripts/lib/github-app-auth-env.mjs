@@ -298,9 +298,12 @@ export function withGithubAppAuth(effects, opts = { log: console }) {
   const tick = effects.tickOnce;
   return {
     ...effects,
-    tickOnce: async () => {
+    // See daemon-self-sync.mjs#withSelfSync's own note: forwards whatever arguments the wrapped tickOnce
+    // takes (e.g. runner.mjs's per-tick bookkeeping payload) straight through — this wrapper never needs to
+    // see them itself.
+    tickOnce: async (...args) => {
       await ensureFreshGithubAppEnv(opts); // never throws — a failure logs and leaves personal auth in place
-      return tick();
+      return tick(...args);
     },
   };
 }

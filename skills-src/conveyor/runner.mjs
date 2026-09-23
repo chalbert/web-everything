@@ -51,6 +51,8 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../../scripts/lib/constella
 import { readUnsupported, recordUnsupported } from '../../scripts/conveyor/unsupported-repo.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { localDateString } from '../../scripts/lib/local-date.mjs';
+import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -264,11 +266,44 @@ export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR
   return full.replace(/\s+/g, ' ').trim().slice(0, maxChars);
 }
 
+/**
+ * Every mechanical pass this runner ticks, as the STABLE name `--skip-pass=<name>` (repeatable, see
+ * `parseFlags`/`main()`) accepts — either the name the pass already logs (`warn(path, key, e)`'s `key`
+ * doubles as a repo-scope tag, not this) or its script's basename without `.mjs`. `'reconcile-pass'` names
+ * the WHOLE reconcile-pass → review-dispatch → review-round-tag/review-status-tag sequence (they run as one
+ * group below, exactly the sequence `skills-src/conveyor/review-daemon.mjs` now runs standalone) — skipping
+ * it skips all four steps together, never a partial slice of the group. `'hiccup-sink'` is the one pass with
+ * no standalone `node <script>` invocation (a dynamic import, not `exec`), included here for completeness
+ * since it is still one of the runner's mechanical passes and a real skip target.
+ *
+ * WHY A FIXED LIST (not derived from the call sites at runtime): an unknown `--skip-pass` name must refuse
+ * the runner from starting at all (typo safety — a mistyped name must never silently no-op instead of
+ * skipping the pass the operator meant), and doing that BEFORE the first tick needs a name list that exists
+ * independent of ever calling {@link makeCliMechanicalPasses}.
+ */
+export const MECHANICAL_PASS_NAMES = Object.freeze([
+  'infra-blocked',
+  'lease-reaper',
+  'session-reaper',
+  'branch-drift',
+  'lane-pool-health-watch',
+  'operator-notify',
+  'reconcile-fix-dispatch',
+  'ci-queue-watch',
+  'parked-pr-conflict-watch',
+  'advisory-label-sweep',
+  'reconcile-pass',
+  'duplicate-pr-watch',
+  'parked-pr-progress-watch',
+  'hiccup-sink',
+]);
+
 export function makeCliMechanicalPasses({
   scriptsDir, repo = null, hiccupSession, exec = execFileSync,
   fetchOpenPrs = defaultFetchOpenPrs, repos = CONSTELLATION_REPOS,
-  unsupportedPath,
+  unsupportedPath, skipPasses = new Set(),
 } = {}) {
+  const skip = (name) => skipPasses.has(name);
   return async ({ out } = {}) => {
     const warn = (path, key, e) => process.stderr.write(
       `⚠ mechanical pass ${path} [${key}] failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`,
@@ -284,18 +319,19 @@ export function makeCliMechanicalPasses({
       }
     };
     // WE-only: retries WE backlog infrastructure holds.
-    run('conveyor/infra-blocked.mjs', ['retry'], 'we', repo);
+    if (!skip('infra-blocked')) run('conveyor/infra-blocked.mjs', ['retry'], 'we', repo);
     // WE-only: reaps the WE delivery pool's leases.
-    run('conveyor/lease-reaper.mjs', [], 'we', repo);
+    if (!skip('lease-reaper')) run('conveyor/lease-reaper.mjs', [], 'we', repo);
     // WE-only invocation: session ground truth already resolves repo-aware slugs.
-    run('conveyor/session-reaper.mjs', [], 'we', repo);
+    if (!skip('session-reaper')) run('conveyor/session-reaper.mjs', [], 'we', repo);
     // WE-only: monitors the WE mechanical-dispatcher branch.
-    run('conveyor/branch-drift.mjs', ['sweep'], 'we', repo);
-    // WE-only: cleans litter in the WE lane pool.
-    run('conveyor/lane-pool-health-watch.mjs', [], 'we', repo);
+    if (!skip('branch-drift')) run('conveyor/branch-drift.mjs', ['sweep'], 'we', repo);
+    // WE-only: cleans litter in the WE lane pool. Already runs as its own pass-daemon watcher
+    // (skills-src/conveyor/pass-daemon.mjs) — a resident Dispatcher must skip this to avoid double-running it.
+    if (!skip('lane-pool-health-watch')) run('conveyor/lane-pool-health-watch.mjs', [], 'we', repo);
     // Repo-agnostic: notifies from one cross-repo operator queue and ignores --repo, so run once.
     // Mechanical, no model: the only push to the operator after the advisory sweep.
-    run('operations/operator-notify.mjs', ['--once'], 'we', repo);
+    if (!skip('operator-notify')) run('operations/operator-notify.mjs', ['--once'], 'we', repo);
     // pr-watch is armed by tick-core for item-keyed conveyor builds/prepares in WE only.
     const explicitKey = repo === null ? null : repoKeyForSlug(repo);
     const selected = repo === null ? Object.entries(repos)
@@ -314,65 +350,74 @@ export function makeCliMechanicalPasses({
           writeFileSync(prsFile, JSON.stringify(prs), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
           prsArgs = [`--prs-file=${prsFile}`];
         } catch (e) { warn('open-pr-fetch', key, e); }
-        run('conveyor/reconcile-fix-dispatch.mjs', prsArgs, key, slug);
-        run('conveyor/ci-queue-watch.mjs', ['sweep'], key, slug);
-        run('conveyor/parked-pr-conflict-watch.mjs', ['sweep', ...prsArgs], key, slug);
-        run('conveyor/advisory-label-sweep.mjs', ['sweep', ...prsArgs], key, slug);
-        const result = run('conveyor/reconcile-pass.mjs', ['--json', ...prsArgs], key, slug, true);
-        if (result.ok) {
-          try {
-            const plan = JSON.parse(result.output);
-            const reviews = (plan.dispatch ?? []).filter((d) => d?.kind === 'review');
-            // Live-caught 2026-09-22, #xli631k: a PR owed a FIX (not a review) never reached
-            // selectStatusCandidates at all, so its review-status:* label could go stale indefinitely once
-            // its review session finished. Same fix as we:skills-src/conveyor/review-daemon.mjs's own.
-            const fixes = (plan.dispatch ?? []).filter((d) => d?.kind === 'fix');
-            const unsupported = [];
-            for (const d of reviews) {
-              const dispatched = run('operations/review-dispatch.mjs', [`--pr=${d.prNumber}`], key, slug);
-              if (!dispatched.ok) {
-                const why = String(dispatched.error.stderr || dispatched.error.message || dispatched.error).trim().replace(/\s+/g, ' ');
-                if (key !== 'we' && why.includes('unsupported-repo')) {
-                  unsupported.push({ kind: 'unsupported-repo', repo: key, prNumber: d.prNumber, action: 'review', why });
+        if (!skip('reconcile-fix-dispatch')) run('conveyor/reconcile-fix-dispatch.mjs', prsArgs, key, slug);
+        if (!skip('ci-queue-watch')) run('conveyor/ci-queue-watch.mjs', ['sweep'], key, slug);
+        // Already runs as its own pass-daemon watcher (skills-src/conveyor/pass-daemon.mjs) — a resident
+        // Dispatcher must skip this to avoid double-running it.
+        if (!skip('parked-pr-conflict-watch')) run('conveyor/parked-pr-conflict-watch.mjs', ['sweep', ...prsArgs], key, slug);
+        if (!skip('advisory-label-sweep')) run('conveyor/advisory-label-sweep.mjs', ['sweep', ...prsArgs], key, slug);
+        // GROUP (skipped as ONE unit): reconcile-pass → review-dispatch (per PR) → review-round-tag /
+        // review-status-tag — the exact sequence skills-src/conveyor/review-daemon.mjs now runs standalone,
+        // per PR (#3876). A resident Dispatcher must skip 'reconcile-pass' whole to avoid duplicating it.
+        if (!skip('reconcile-pass')) {
+          const result = run('conveyor/reconcile-pass.mjs', ['--json', ...prsArgs], key, slug, true);
+          if (result.ok) {
+            try {
+              const plan = JSON.parse(result.output);
+              const reviews = (plan.dispatch ?? []).filter((d) => d?.kind === 'review');
+              // Live-caught 2026-09-22, #xli631k: a PR owed a FIX (not a review) never reached
+              // selectStatusCandidates at all, so its review-status:* label could go stale indefinitely once
+              // its review session finished. Same fix as we:skills-src/conveyor/review-daemon.mjs's own.
+              const fixes = (plan.dispatch ?? []).filter((d) => d?.kind === 'fix');
+              const unsupported = [];
+              for (const d of reviews) {
+                const dispatched = run('operations/review-dispatch.mjs', [`--pr=${d.prNumber}`], key, slug);
+                if (!dispatched.ok) {
+                  const why = String(dispatched.error.stderr || dispatched.error.message || dispatched.error).trim().replace(/\s+/g, ' ');
+                  if (key !== 'we' && why.includes('unsupported-repo')) {
+                    unsupported.push({ kind: 'unsupported-repo', repo: key, prNumber: d.prNumber, action: 'review', why });
+                  }
+                  continue;
                 }
-                continue;
+                run('conveyor/review-round-tag.mjs', [String(d.prNumber), `--round=${(d.attempts ?? 0) + 1}`], key, slug);
               }
-              run('conveyor/review-round-tag.mjs', [String(d.prNumber), `--round=${(d.attempts ?? 0) + 1}`], key, slug);
-            }
-            for (const c of selectStatusCandidates(reviews, plan.refusals, fixes)) {
-              run('conveyor/review-status-tag.mjs', [String(c.prNumber)], key, slug);
-            }
-            if (key !== 'we') {
-              // Each producer replaces its own actions, preserving the sibling producer's refusals.
-              const fixes = readUnsupported({ path: unsupportedPath }).filter((r) => r.repo === key && r.action !== 'review');
-              recordUnsupported({ repo: key, rows: [...fixes, ...unsupported], path: unsupportedPath });
-            }
-          } catch (e) { warn('review-reconcile', key, e); }
+              for (const c of selectStatusCandidates(reviews, plan.refusals, fixes)) {
+                run('conveyor/review-status-tag.mjs', [String(c.prNumber)], key, slug);
+              }
+              if (key !== 'we') {
+                // Each producer replaces its own actions, preserving the sibling producer's refusals.
+                const fixes = readUnsupported({ path: unsupportedPath }).filter((r) => r.repo === key && r.action !== 'review');
+                recordUnsupported({ repo: key, rows: [...fixes, ...unsupported], path: unsupportedPath });
+              }
+            } catch (e) { warn('review-reconcile', key, e); }
+          }
         }
         // WE-only: duplicate item numbers refer to WE backlog ids, not cross-repo deliveries.
-        if (key === 'we' || repo !== null) {
+        if (!skip('duplicate-pr-watch') && (key === 'we' || repo !== null)) {
           run('conveyor/duplicate-pr-watch.mjs', ['sweep', ...prsArgs], 'we', repo);
           duplicateRan = true;
         }
-        run('conveyor/parked-pr-progress-watch.mjs', ['sweep', ...prsArgs], key, slug);
+        if (!skip('parked-pr-progress-watch')) run('conveyor/parked-pr-progress-watch.mjs', ['sweep', ...prsArgs], key, slug);
       } finally {
         if (prsFile) { try { unlinkSync(prsFile); } catch { /* best-effort cleanup */ } }
       }
     }
-    if (!duplicateRan) run('conveyor/duplicate-pr-watch.mjs', ['sweep'], 'we', repo);
+    if (!duplicateRan && !skip('duplicate-pr-watch')) run('conveyor/duplicate-pr-watch.mjs', ['sweep'], 'we', repo);
     // WE-only: hiccups describe suppressed item-keyed WE builds.
-    try {
-      // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
-      // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
-      // what every bundler's static import graph expects. runner.mjs lives in skills-src/conveyor/, these
-      // two in scripts/conveyor/ — the SAME relative hop TICK_CORE itself resolves via SCRIPTS_DIR above.
-      const { classifySuppressedBuilds } = await import('../../scripts/conveyor/hiccup-classify.mjs');
-      const { fileHiccups } = await import('../../scripts/conveyor/hiccup-sink.mjs');
-      const suppressed = out && out.decisions && out.decisions.suppressedBuilds;
-      const hiccups = classifySuppressedBuilds(suppressed);
-      if (hiccups.length) fileHiccups(hiccups, { session: hiccupSession });
-    } catch (e) {
-      process.stderr.write(`⚠ mechanical pass hiccup-sink [we] failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+    if (!skip('hiccup-sink')) {
+      try {
+        // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
+        // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
+        // what every bundler's static import graph expects. runner.mjs lives in skills-src/conveyor/, these
+        // two in scripts/conveyor/ — the SAME relative hop TICK_CORE itself resolves via SCRIPTS_DIR above.
+        const { classifySuppressedBuilds } = await import('../../scripts/conveyor/hiccup-classify.mjs');
+        const { fileHiccups } = await import('../../scripts/conveyor/hiccup-sink.mjs');
+        const suppressed = out && out.decisions && out.decisions.suppressedBuilds;
+        const hiccups = classifySuppressedBuilds(suppressed);
+        if (hiccups.length) fileHiccups(hiccups, { session: hiccupSession });
+      } catch (e) {
+        process.stderr.write(`⚠ mechanical pass hiccup-sink [we] failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+      }
     }
   };
 }
@@ -463,13 +508,24 @@ function makeCliEmit({ json = false, statusPath = null, traceDir = null } = {}) 
   };
 }
 
+/** The one flag `parseFlags` accumulates into an ARRAY rather than overwriting (every other flag is
+ *  last-wins) — `--skip-pass=<name>` is documented as repeatable, so a second occurrence must ADD, not
+ *  replace, the first. */
+const REPEATABLE_FLAGS = new Set(['skip-pass']);
+
 function parseFlags(argv) {
   const flags = {};
   for (const a of argv) {
     if (!a.startsWith('--')) continue;
     const eq = a.indexOf('=');
-    if (eq === -1) flags[a.slice(2)] = true;
-    else flags[a.slice(2, eq)] = a.slice(eq + 1);
+    const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
+    const value = eq === -1 ? true : a.slice(eq + 1);
+    if (REPEATABLE_FLAGS.has(name)) {
+      if (!Array.isArray(flags[name])) flags[name] = [];
+      flags[name].push(value);
+    } else {
+      flags[name] = value;
+    }
   }
   return flags;
 }
@@ -482,6 +538,23 @@ function finiteOr(val, fallback) {
 }
 
 /**
+ * Resolve the parsed `--skip-pass` flag(s) (a string, an array from repeated flags, or absent) against the
+ * known {@link MECHANICAL_PASS_NAMES} — PURE, so the typo-safety refusal is unit-testable with no CLI/process
+ * involved. Any name outside the known list makes the WHOLE result invalid (`ok:false`) — a single typo must
+ * refuse the runner's start, not silently skip nothing / skip everything else.
+ * @param {string|string[]|undefined} flagValue
+ * @param {{names?: readonly string[]}} [o]
+ * @returns {{ok:true, skipPasses:Set<string>}|{ok:false, unknown:string[]}}
+ */
+export function resolveSkipPasses(flagValue, { names = MECHANICAL_PASS_NAMES } = {}) {
+  const requested = Array.isArray(flagValue) ? flagValue : (flagValue === undefined ? [] : [flagValue]);
+  const known = new Set(names);
+  const unknown = requested.filter((n) => typeof n !== 'string' || !known.has(n));
+  if (unknown.length) return { ok: false, unknown: [...new Set(unknown.map((n) => String(n)))] };
+  return { ok: true, skipPasses: new Set(requested) };
+}
+
+/**
  * Acquire the singleton lease, drive the loop, and ALWAYS release the lease — the lifecycle wrapper, kept
  * SEPARATE from `main()` so it is unit-testable without `process.exit` (which does NOT unwind a `finally`, so
  * the release MUST NOT sit behind an exit). A held lease returns `{ started: false }` so the caller stands
@@ -489,6 +562,37 @@ function finiteOr(val, fallback) {
  * IN here (over the injected `heartbeat`), so the loop's lease-loss stop reflects the real singleton right.
  * @returns {Promise<{ started: boolean, reason?: string, heldBy?: string|null, ticks?: number, stoppedReason?: string }>}
  */
+/**
+ * Wire a real `tickOnce` through the two per-tick daemon primitives a resident Dispatcher now needs, in
+ * order: SELF-SYNC first (only when opted in — see below; {@link withSelfSync} — fetch + merge `origin/main`; a merge PRE-EMPTS the tick with
+ * a restart instead of ticking on stale code), then the GitHub App TOKEN REFRESH
+ * ({@link withGithubAppAuth} — opt-in via `WE_GITHUB_APP_*` env vars, a no-op otherwise), then the real tick.
+ * This is the exact ordering `skills-src/conveyor/review-daemon.mjs`'s own `main()` already composes
+ * (`withSelfSync(withGithubAppAuth(effects), {...})` — the OUTERMOST wrapper runs FIRST). Both wrappers
+ * forward whatever arguments their wrapped `tickOnce` takes (see each module's own header), so the runner's
+ * per-tick bookkeeping payload (threaded tick-to-tick via {@link carryForward}) still reaches the real
+ * `tickOnce` unchanged — this function adds no IO of its own, only the composition.
+ *
+ * SELF-SYNC IS OPT-IN (`selfSync: true`, default OFF). Self-sync MUTATES the checkout (`git merge
+ * origin/main`, then a restart) and is only safe in a DEDICATED unattended clone nobody else touches — the
+ * precondition `daemon-self-sync.mjs` was designed around. runner.mjs is ALSO run interactively from the
+ * operator's own live checkout (the /conveyor skill's documented flow), where an unasked-for merge commit or
+ * a mid-session `process.exit(0)` is wrong. So unless the caller explicitly asserts "this is the dedicated
+ * clone" (the CLI's `--self-sync` flag, which the staged launchd plist passes), only the App-token refresh
+ * wraps the tick and no git mutation ever happens.
+ * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function, selfSync?:boolean}} o
+ *   `sync` is forwarded to {@link withSelfSync} (defaults to the real `selfSyncCheckout`) — exposed so a test
+ *   can simulate "new commits arrived" without a real git checkout. `selfSync` must be exactly `true` to wire
+ *   the self-sync wrapper at all.
+ * @returns {Function} the wrapped `tickOnce` effect, same call signature as the one passed in.
+ */
+export function wireSelfSyncAndAppAuth({ tickOnce, root, onRestart, authOpts, sync, selfSync = false }) {
+  const authed = withGithubAppAuth({ tickOnce }, authOpts);
+  if (selfSync !== true) return authed.tickOnce;
+  const selfSyncOpts = { root, onRestart, ...(sync ? { sync } : {}) };
+  return withSelfSync(authed, selfSyncOpts).tickOnce;
+}
+
 export async function driveConveyor({
   lockRoot = RUNNER_LOCK_ROOT,
   owner = runnerOwner(),
@@ -531,16 +635,56 @@ async function main(argv) {
   const intervalMs = finiteOr(flags['interval-ms'], DEFAULT_TICK_INTERVAL_MS);
   const maxTicks = flags.once ? 1 : finiteOr(flags['max-ticks'], Infinity);
 
+  // --skip-pass=<name> (repeatable) — a resident daemon launch names the mechanical passes that ALREADY run
+  // as their own standalone daemon/watcher (reconcile-fix-dispatch, the reconcile-pass→review-dispatch group,
+  // parked-pr-conflict-watch, lane-pool-health-watch — see MECHANICAL_PASS_NAMES's own header), so this
+  // runner never duplicates their dispatch. An unknown name refuses the runner from starting (typo safety) —
+  // it never silently skips zero passes.
+  const skipResolution = resolveSkipPasses(flags['skip-pass']);
+  if (!skipResolution.ok) {
+    process.stderr.write(`✗ unknown --skip-pass name(s): ${skipResolution.unknown.join(', ')}. Valid pass names: ${MECHANICAL_PASS_NAMES.join(', ')}\n`);
+    process.exit(1);
+    return;
+  }
+  const { skipPasses } = skipResolution;
+  if (skipPasses.size) process.stderr.write(`conveyor runner: skipping mechanical pass(es): ${[...skipPasses].join(', ')}\n`);
+
+  // --self-sync — the explicit opt-in asserting "this runner is in its own DEDICATED unattended clone" (the
+  // staged launchd plist passes it). Without it the runner NEVER fetches/merges `origin/main` into the
+  // checkout it runs from — an interactive launch from the operator's live checkout stays untouched.
+  // Bare flag only: `--self-sync=true` would otherwise parse as the STRING 'true' and silently leave it OFF.
+  if (flags['self-sync'] !== undefined && flags['self-sync'] !== true) {
+    process.stderr.write(`✗ --self-sync takes no value (got --self-sync=${flags['self-sync']}); pass the bare flag to opt in, or omit it.\n`);
+    process.exit(1);
+    return;
+  }
+  const selfSync = flags['self-sync'] === true;
+  if (selfSync) process.stderr.write(`conveyor runner: self-sync ON — will merge origin/main into ${REPO_ROOT} between ticks (dedicated clone only)\n`);
+
   const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
-  const buildEffects = () => ({
-    tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
-    emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
-    mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession }),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    intervalMs,
-    maxTicks,
-    initial: {},
-  });
+  const buildEffects = (owner) => {
+    const restartOntoNewCode = () => {
+      // Between ticks only (never mid-dispatch): release the singleton lease ourselves — `process.exit`
+      // never unwinds `driveConveyor`'s own `finally` release, so skipping this would leak the lease for its
+      // full TTL. launchd's KeepAlive then relaunches onto the merged code (see daemon-self-sync.mjs header).
+      releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner);
+      process.exit(0);
+    };
+    return {
+      tickOnce: wireSelfSyncAndAppAuth({
+        tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
+        root: REPO_ROOT,
+        onRestart: restartOntoNewCode,
+        selfSync,
+      }),
+      emit: makeCliEmit({ json, statusPath: STATUS_PATH, traceDir: TRACE_DIR }),
+      mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession, skipPasses }),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      intervalMs,
+      maxTicks,
+      initial: {},
+    };
+  };
 
   // #2702 SINGLETON LOCK — `driveConveyor` acquires the sole-driver right, runs the loop, and ALWAYS releases
   // the lease (in its `finally`, before we exit). A LIVE runner already driving ⇒ `started:false`, a polite
