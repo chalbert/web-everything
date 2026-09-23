@@ -3,11 +3,12 @@ bornAs: xktw9vz
 kind: story
 size: 5
 parent: "3383"
-status: active
+status: resolved
 blockedBy: ["3871"]
 scope: ["we:skills-src/conveyor/supervisor.mjs", "we:skills-src/conveyor/supervisor-launcher.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
 tags: []
 ---
 
