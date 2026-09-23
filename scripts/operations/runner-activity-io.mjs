@@ -15,8 +15,6 @@ import { lockDirFor, parseLockEntry } from '../readiness/file-locks.mjs';
 import { looksLikeRunnerProcess, pidToCwd, RUNNER_SCRIPT_TOKEN } from '../conveyor/resolve-runner-checkout.mjs';
 import { RUNNER_LOCK_ROOT, RUNNER_LEASE_PATH, RUNNER_LEASE_MINUTES } from '../../skills-src/conveyor/runner-lock.mjs';
 import { DRIVER_STATUS_FILENAME } from '../../skills-src/conveyor/runner.mjs';
-import { RECONCILE_FIX_DISPATCH_LEASE_KEY } from '../../skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs';
-import { REVIEW_DAEMON_LEASE_KEY } from '../../skills-src/conveyor/review-daemon.mjs';
 
 export const READ_TIMEOUT_MS = 10_000;
 const PROCESS_TIMEOUT_MS = 2_000;
@@ -41,12 +39,22 @@ const SELF = fileURLToPath(import.meta.url);
  *
  * `name` is the stable key a consumer keys off in `runners[]` (never the lease key or script path — those
  * are internal plumbing a consumer should not need to know).
+ *
+ * The fix-dispatch and review daemons' own lease-key CONSTANTS are deliberately NOT imported here (even
+ * though each is a real, stable export) — live-caught 2026-09-22: `reconcile-fix-dispatch-daemon.mjs`
+ * transitively imports this file (via `reconcile-fix-dispatch.mjs` → `dispatch-abort.mjs` → `wake.mjs` →
+ * `run.mjs` → here), so importing its lease key back FROM it closed a real ESM circular-import cycle and
+ * crashed the daemon at startup with a TDZ `ReferenceError` the moment it was launched standalone. These
+ * two strings are copied literally instead — they are each daemon's own hardcoded lease-key sentinel, not
+ * derived from anything else, so a literal copy carries zero risk of drifting from the real value; a
+ * daemon renaming its own lease key is already a breaking change to itself, not something this list could
+ * silently paper over either way.
  * @type {Array<{ name: string, leaseKey: string, scriptToken: string }>}
  */
 export const KNOWN_DAEMONS = [
   { name: 'dispatcher', leaseKey: RUNNER_LEASE_PATH, scriptToken: RUNNER_SCRIPT_TOKEN },
-  { name: 'fix-dispatch', leaseKey: RECONCILE_FIX_DISPATCH_LEASE_KEY, scriptToken: 'skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs' },
-  { name: 'review', leaseKey: REVIEW_DAEMON_LEASE_KEY, scriptToken: 'skills-src/conveyor/review-daemon.mjs' },
+  { name: 'fix-dispatch', leaseKey: '<conveyor:reconcile-fix-dispatch-daemon-lease>', scriptToken: 'skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs' },
+  { name: 'review', leaseKey: '<conveyor:review-daemon-lease>', scriptToken: 'skills-src/conveyor/review-daemon.mjs' },
 ];
 
 /** Missing is distinct from corrupt/unreadable. All real calls are covered by the outer read deadline. */
