@@ -2,10 +2,12 @@
 kind: story
 size: 3
 parent: "xjtmptc"
-status: active
+status: resolved
 scope: ["we:scripts/lib/telemetry-summary.mjs", "we:scripts/__tests__/telemetry-summary.test.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: "we:scripts/lib/telemetry-summary.mjs"
 tags: []
 ---
 
