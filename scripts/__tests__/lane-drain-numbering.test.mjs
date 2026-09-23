@@ -444,3 +444,39 @@ describe('#2899 A1 — the card is located in the origin/main TREE, not the loca
     expect(cardPathInTree(repo, '2202', { tree: 'no/such/ref' })).toBe(null);
   });
 });
+
+// #3914 — a lane that FILES a born-active (`--session`) card under a provisional hash AND delivers it in the
+// same PR (`lane/<hash>-…`, no manifest — the #3459/#3492/#3638 shape) used to be JIT-numbered at land and left
+// `active` forever: the non-manifest resolve-on-land extractor matched digits only, so the hash-led lane ref
+// contributed nothing. This drives the drain's real land-time chain on a fixture main — numbering, the landed-id
+// credit, and the resolve plan — and asserts the freshly-minted NNN is the one handed to the resolve writer,
+// while a spin-off the same PR merely filed in passing is not.
+describe('#3914 — resolve-on-land for a card filed AND delivered in the same hash-led lane PR', () => {
+  it('credits the lane-ref hash, re-keys it to the minted NNN, and leaves the spin-off alone', async () => {
+    const { landedIdsForCandidate, planResolveOnLand } = await import('../merge-ai-prs.mjs');
+    write('backlog/2200-legacy.md', '---\nkind: story\nstatus: resolved\n---\n# Legacy\n');
+    write('backlog/xaa7r2n-itemnumfromref.md', '---\nkind: story\nstatus: active\nscaffoldedBy: session\n---\n# Delivered here\n');
+    write('backlog/xspin01-follow-up.md', '---\nkind: story\nstatus: open\n---\n# Filed in passing\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'land lane/xaa7r2n-itemnumfromref-attempt-tag');
+
+    const n = numberPendingHashes(repo);
+    const nnnOf = (h) => n.assigned.find((a) => a.hash === h).nnn;
+
+    const landedPr = {
+      hasManifest: false, item: null, repo: null, num: 1852,
+      headRef: 'lane/xaa7r2n-itemnumfromref-attempt-tag',
+      title: 'itemNumFromRef: parse a retried lane PR ref\'s attempt-tag letter (#xaa7r2n)',
+    };
+    const fetchGuardSignals = () => ({
+      body: '',
+      changedFiles: ['backlog/xaa7r2n-itemnumfromref.md', 'backlog/xspin01-follow-up.md', 'scripts/readiness/conveyor-state.mjs'],
+    });
+    const landedItems = landedIdsForCandidate(landedPr, { isLocalRepo: (r) => r == null, fetchGuardSignals });
+    const plan = planResolveOnLand({ landedItems, assigned: n.assigned });
+
+    expect(plan.resolve).toEqual([nnnOf('xaa7r2n')]);            // failed before #3914: [] → stayed `active`
+    expect(plan.resolve).not.toContain(nnnOf('xspin01'));        // a spin-off is never resolved by this PR
+    expect(backlogNames()).toContain(`${nnnOf('xaa7r2n')}-itemnumfromref.md`); // the id the writer will flip exists
+  });
+});
