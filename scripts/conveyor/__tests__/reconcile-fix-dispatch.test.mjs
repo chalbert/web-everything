@@ -675,6 +675,39 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     })).toThrow(/behind origin\/main/);
     expect(reconcileCalls).toBe(0);
   });
+
+  // #x1rr9rh (multi-repo slice 2) — this check used to run ONLY when `repoKey === 'we'`, which was the wrong
+  // condition: the fix pass always runs WE's own code from THIS checkout, whatever repo it targets (even when,
+  // as for a foreign repo today, all it does with the result is record an `unsupported-repo` refusal). A stale
+  // WE checkout must be refused for every repo, not just `we`.
+  it('the staleness check now runs for a non-WE repo too (#x1rr9rh) — refuses before even reaching reconcile', () => {
+    let reconcileCalls = 0;
+    expect(() => runReconcileFixDispatch({
+      root: '/repo',
+      repo: 'chalbert/plateau-app',
+      reconcile: () => { reconcileCalls += 1; return { dispatch: [], refusals: [], notes: [] }; },
+      checkStaleness: () => ({ action: 'warn', behind: 5 }),
+    })).toThrow(/behind origin\/main/);
+    expect(reconcileCalls).toBe(0);
+  });
+
+  it('a FRESH non-WE repo still proceeds past the staleness check into the unsupported-repo recording path', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'fix-staleness-fresh-'));
+    const unsupportedPath = join(dir, 'rows.json');
+    try {
+      const result = runReconcileFixDispatch({
+        root: '/repo',
+        repo: 'chalbert/frontierui',
+        unsupportedPath,
+        reconcile: () => ({ dispatch: [], refusals: [] }),
+        checkStaleness: FRESH,
+      });
+      expect(result).toEqual({ dispatched: [], refusals: [], reconcileRefusals: 0 });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 describe('fixBriefPath', () => {

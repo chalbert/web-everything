@@ -52,6 +52,7 @@ import { tagReviewRound } from '../../scripts/conveyor/review-round-tag.mjs';
 import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
+import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
 import {
@@ -160,24 +161,21 @@ export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) =>
  *   dispatched:Array<object>, failed:Array<object>, refusals:number}}
  */
 export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, ...tickOpts } = {}) {
-  const perRepo = [];
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
   const dispatched = [];
   const failed = [];
   let reviewsOwed = 0;
   let refusals = 0;
-  for (const repo of repos) {
-    try {
-      const result = tick({ ...tickOpts, repo });
-      perRepo.push({ repo, result });
-      reviewsOwed += result.reviewsOwed;
-      refusals += result.refusals;
-      for (const d of result.dispatched) dispatched.push({ ...d, repo });
-      for (const f of result.failed) failed.push({ ...f, repo });
-    } catch (e) {
-      const error = String((e && e.message) || e).split('\n')[0];
-      perRepo.push({ repo, error });
-      failed.push({ prNumber: null, repo, error });
+  for (const entry of perRepo) {
+    if (entry.error) {
+      failed.push({ prNumber: null, repo: entry.repo, error: entry.error });
+      continue;
     }
+    const { repo, result } = entry;
+    reviewsOwed += result.reviewsOwed;
+    refusals += result.refusals;
+    for (const d of result.dispatched) dispatched.push({ ...d, repo });
+    for (const f of result.failed) failed.push({ ...f, repo });
   }
   return { repos: perRepo, reviewsOwed, dispatched, failed, refusals };
 }
