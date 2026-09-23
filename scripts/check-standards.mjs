@@ -76,6 +76,7 @@ import {
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
   checkLeashPin,
+  findRelativeNodeScriptsAfterLaneCd,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 // #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
@@ -2453,6 +2454,12 @@ try {
   const wiring = findSkillsNamingUndelegatedHomes(skills, operations, homeSources);
   for (const e of wiring.errors) err(e.message, e.descriptor);
   for (const w of wiring.warnings) warn(w.message, w.descriptor);
+
+  // #3960 (multi-repo slice 4) — a conveyor fix/ci-heal brief that `cd`s into an acquired lane and then calls a
+  // WE tool by a relative `node scripts/...` path breaks the moment that lane is not WE's own checkout.
+  const relativeNodeAfterCd = findRelativeNodeScriptsAfterLaneCd(skills);
+  for (const e of relativeNodeAfterCd.errors) err(e.message, e.descriptor);
+  for (const w of relativeNodeAfterCd.warnings) warn(w.message, w.descriptor);
 
   // ── #3253 — the CALL SITE, judged against the operation's own declared `input` ──────────────────────────
   // Scans `docs/` as well as `skills-src/`, because the #3224 walk above is `skills-src/**/*.md` only and a

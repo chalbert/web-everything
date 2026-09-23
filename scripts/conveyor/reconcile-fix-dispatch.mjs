@@ -68,7 +68,8 @@ import {
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
-import { BRIEF_REQUIRED_BY_KIND, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
+import { BRIEF_REQUIRED_BY_KIND, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
+import { briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
@@ -519,6 +520,11 @@ export function dispatchFix(planned, {
   assertNotALaneCheckout(root);
 
   const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
+  // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here). The
+  // `repo !== 'we'` refusal above means only `we`'s profile ever reaches this today; the token computation
+  // itself is repo-generic so slice 5 only has to lift that guard, not touch this fill.
+  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr });
+  if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the fix brief`);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
     ITEM_NUM: planned.itemNum,
     PR_NUM: planned.pr,
@@ -526,7 +532,8 @@ export function dispatchFix(planned, {
     LANE: planned.lane,
     SESSION_SLUG: sessionSlug,
     SCOPE: planned.scope.join(','),
-  }, BRIEF_REQUIRED_BY_KIND.fix);
+    ...tokens,
+  }, BRIEF_REQUIRED_BY_KIND.fix, undefined, REPO_AWARE_VALUE_PATTERNS);
   const sessionId = String(mintSessionId());
   const argv = buildAgentArgv({
     sessionId,

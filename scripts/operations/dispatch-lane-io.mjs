@@ -59,6 +59,7 @@ import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../con
 import { classifyPr } from '../conveyor/pr-watch.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
+import { briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
@@ -320,6 +321,16 @@ export function readTick({
     ? laneRefForPr(launch.pr)
     : null;
 
+  // #3960 (multi-repo slice 4) — the repo-aware brief quintet (`{{REPO}}`/`{{LANE_REPO}}`/`{{GATE_COMMAND}}`/
+  // `{{WE_ROOT}}`/`{{ATTRIBUTION}}`), lazy on the SAME `launchKind` gate as `laneRef` just above: only a
+  // fix/ci-heal fill ever references them. Hardcoded to the `we` profile — this tick-core-driven launch list
+  // only ever plans a fix/ci-heal for a WE item/PR today (`tick-core.mjs#planFixSpawns`/`#planCiHealSpawns`
+  // read only the WE backlog/PR pool); a REAL per-repo selection here is multi-repo slice 5's job, not this
+  // one's — this file stays correct for `we` now and has exactly one line to change once that lands.
+  const repoTokens = (launchKind === 'fix' || launchKind === 'ci-heal')
+    ? briefTokensForRepo('we', { itemNum: key, prNum: launch?.pr ?? null })
+    : null;
+
   // #3457/#3460 — THE PRE-SPAWN GROUND-TRUTH CHECK, LAZY on the SAME reason `laneRef` above is: `launch` is
   // null on most reads (nothing cleared, or an in-flight guard already holds the item), and spending a `gh pr
   // list --search` call on a read that was never going to dispatch would violate the ratified cost discipline
@@ -355,6 +366,11 @@ export function readTick({
     notes: Array.isArray(decisions.notes) ? decisions.notes : [],
     // THE FIX/CI-HEAL LANE REF, or `null` for the three kinds that never need one — see above.
     laneRef,
+    // #3960 — the fix/ci-heal repo-aware brief quintet, or `null` for the four kinds that never need it, or
+    // when the `we` profile/gate could not be resolved (fail-closed: `shapeDispatchRead` then has no value for
+    // `{{REPO}}` et al. and `fillBrief`'s own required-value refusal stops the dispatch, exactly as a missing
+    // `laneRef` already does for `{{LANE_REF}}`).
+    repoTokens,
     // #3457/#3460 — the ground-truth verdict, or the not-checked default when nothing was cleared for launch.
     alreadyDone,
     bookkeepingSource,

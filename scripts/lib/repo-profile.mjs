@@ -139,3 +139,48 @@ export function gateFor(keyOrSlugOrPrefix, { home, checkoutExists = existsSync, 
   }
   return composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd: 'npm run check:standards', scripts }).command;
 }
+
+/**
+ * The FIVE `{{REPO}}`/`{{LANE_REPO}}`/`{{GATE_COMMAND}}`/`{{WE_ROOT}}`/`{{ATTRIBUTION}}` conveyor-brief
+ * placeholders (multi-repo slice 4, `we:backlog/3960-*.md`) computed together from ONE profile, so
+ * `dispatchFix`/`dispatchCiHeal` (`we:scripts/conveyor/reconcile-fix-dispatch.mjs`,
+ * `we:scripts/operations/ci-heal-pr-dispatch.mjs`) never re-derive any of them a second, possibly-diverging way.
+ *
+ * `WE_ROOT` is ALWAYS this checkout's own root, regardless of which repo is being profiled — the tools a
+ * fix/ci-heal brief runs (`rearm-review.mjs`, `stand-down.mjs`, `ci-heal-mark.mjs`, `lane-pool.mjs`, …) live only
+ * in WE, never in the target repo, so a brief needs WE's location even when repairing a sibling repo's PR.
+ *
+ * `ATTRIBUTION` folds in the item/PR-only distinction the gap-map's "Proposed design C"
+ * (`we:reports/2026-09-23-conveyor-multi-repo-gap-map.md`) names for a future item-less fix (slice 6, not wired
+ * yet): an item-carrying dispatch (today, every fix/ci-heal) is `<REPO-TAG> #<item>` — `profile.canonicalPrefix`
+ * upper-cased, so for `we` this is `WE #<item>`, reproducing the commit-title prefix both briefs hardcoded
+ * before this slice, byte-for-byte; a PR with no backlog item is `PR #<pr>`.
+ *
+ * Returns `null` when the profile is unknown OR its gate is unresolvable (mirrors {@link gateFor}'s own
+ * fail-closed shape) — the caller decides what that means. Today only `we` ever reaches this (`dispatchFix`
+ * refuses any other repo before it gets here; nothing yet dispatches `ci-heal` for a sibling repo either), and
+ * WE's own checkout always resolves, so the `null` branch is exercised only by tests and by whatever turns on
+ * multi-repo dispatch next (slice 5).
+ * @param {unknown} keyOrSlugOrPrefix
+ * @param {{itemNum?: (string|number|null), prNum?: (string|number|null), home?: string,
+ *   checkoutExists?: (p: string) => boolean, readPackageJson?: (p: string) => string}} [o] - `itemNum`/`prNum`
+ *   feed `ATTRIBUTION` only; `home`/`checkoutExists`/`readPackageJson` are injectable exactly as
+ *   {@link repoProfile}/{@link gateFor} take them (so a test can resolve a sibling repo's tokens without
+ *   touching the real filesystem).
+ * @returns {{REPO: string, LANE_REPO: string, GATE_COMMAND: string, WE_ROOT: string, ATTRIBUTION: string}|null}
+ */
+export function briefTokensForRepo(keyOrSlugOrPrefix, { itemNum = null, prNum = null, home, checkoutExists, readPackageJson } = {}) {
+  const profile = repoProfile(keyOrSlugOrPrefix, { home });
+  if (!profile) return null;
+  const gateCommand = gateFor(keyOrSlugOrPrefix, { home, checkoutExists, readPackageJson });
+  if (!gateCommand) return null;
+  const item = itemNum === null || itemNum === undefined || String(itemNum).trim() === '' ? null : String(itemNum).trim();
+  const attribution = item ? `${profile.canonicalPrefix.toUpperCase()} #${item}` : `PR #${prNum}`;
+  return Object.freeze({
+    REPO: profile.slug,
+    LANE_REPO: profile.lanePoolRepo,
+    GATE_COMMAND: gateCommand,
+    WE_ROOT: WE_CHECKOUT_ROOT,
+    ATTRIBUTION: attribution,
+  });
+}
