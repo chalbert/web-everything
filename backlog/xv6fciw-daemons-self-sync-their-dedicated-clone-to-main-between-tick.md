@@ -1,9 +1,11 @@
 ---
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:skills-src/conveyor/review-daemon.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
