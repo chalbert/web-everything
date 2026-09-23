@@ -5008,3 +5008,76 @@ a genuine three-way merge, not a fast-forward, when that happens.
 
 Backlog card `status`/`resolved` flip for `#3783` itself is DEFERRED to a separate closeout pass on `main`,
 same pattern `#3888`/`#3889`/`#3887` used (`eff0426ea`, "already built on lane/mechanical-dispatcher").
+
+## Session update (2026-09-22) — #3857: one checked-in model-tier table decides a dispatch worker's Claude tier, and a hand-set model with no reason is refused
+
+Built and pushed to `lane/mechanical-dispatcher` (commit `2ac32c3cf`, rebased onto `c546f6e61`). Adds
+`workerTierFor` (`we:scripts/lib/provider-routing.mjs`) — the ONE checked-in table deciding a dispatch
+worker's Claude tier (`sonnet` or `opus`, never `haiku`) by `{kind, taskType, scopePaths, tags}`, raise-only:
+`prepare-decision`/`architectural-decision` → opus ("preparing a decision's forks is judgment"); a statute-tier
+scope path or `statute-wording` → opus ("rewording statute or rule text"); `security-fix` or a `security` tag
+→ opus ("a security-critical fix"); a `DISPATCH_MACHINERY_PATHS` scope path or `dispatch-machinery` → opus
+("wide-blast-radius dispatch machinery"); `sonnet` otherwise. Folds in and retires the old standalone
+`STORY_KIND_RUNGS` table in `we:scripts/lib/dispatch-contracts.mjs` (renamed `RUNG_KINDS`, now just the list of
+kinds that get a rung — the tier itself comes from `workerTierFor`), so a role/story kind's tier is the same
+table a code-change dispatch's tier is, not a second one that could drift from it.
+
+**The router's tier is now READ by the spawn, closing the gap the card's own FOUND section measured**
+(`decideDispatchRoute` computed `tier`/`model` and nothing executed them). `buildAgentArgv`
+(`we:scripts/operations/dispatch-lane-io.mjs`) — the one argv builder every Claude dispatch shares
+(`dispatch-lane`'s `claude --bg` path, `dispatch-task`) — now takes an optional `table` (the tier table's
+answer) and `modelReason`, and calls the new pure `resolveWorkerModel` to decide + enforce the worker's model:
+a hand-set `--model` in `WE_DISPATCH_AGENT_ARGS` is honoured ONLY alongside a `--modelReason=<text>` on the
+SAME call (a new input on both `dispatch-task` and `dispatch-lane`); an unreasoned override, a reason with no
+model, or a model naming Fable is refused before any process exists. `we:scripts/operations/review-dispatch.mjs`
+and `we:scripts/conveyor/reconcile-fix-dispatch.mjs` (out of this card's declared `scope:`, per its own text)
+call `buildAgentArgv` with no `table`, which keeps their behaviour byte-identical to before — #3857 does not
+reach them.
+
+Deliberate, named behaviour changes to the old inline Opus criteria (documented in the card's own "Rows that
+CHANGE" list, and in each updated test's own comment): the size/file-count blast-radius trigger (>8 files or
+>500 LOC) and `acceptanceTestable: false` no longer force Opus; `triage-research`/`investigate` no longer
+force Opus by taskType/kind alone. `selectProvider`'s Step 4 is now a thin call into `workerTierFor`, so
+these changes apply everywhere `selectProvider` is the Claude-tier source — `we:scripts/operations/fix-run.mjs`,
+`we:scripts/operations/ci-heal-run.mjs`, `we:scripts/operations/deliver-item-run.mjs` inherit them too, all
+within the mechanical dispatch path the card's Reach note (citing
+[delegation-trial-record-graduation](/docs/agent/platform-decisions.md#delegation-trial-record-graduation))
+says this table binds; `we:docs/agent/backlog-workflow.md#model-routing` (the INTERACTIVE loop's own sub-agent
+routing) is untouched.
+
+The run record's `dispatch` block gets a `workerModel: {name, tier, source, tableTier, reason}` field beside
+`routedProvider`/`executedProvider`; `supervisorModel` is now read from it on the `claude-bg` route rather
+than re-parsed from `extraArgs` — the pre-#3857 extraArgs-scan is kept, unchanged, as the fallback for the
+`detached` (build wrapper) route, which #3857 does not extend to yet (a `decideDispatchRoute` record's
+`model` can name a non-Claude id there when the router recommends Gemini/Codex, and `executed` still runs
+Claude with no `deliveryAgent:` override — injecting that id into `--model` would be wrong, so injection is
+gated on the model being one of the three real `CLAUDE_NATIVE_MODEL_BY_TIER` ids). `dispatch-task`'s model is
+keyed on `--kind` and, best-effort, `--item`'s own `scope:`/`tags:` (`readItemRoutingFacts`,
+`we:scripts/operations/dispatch-task-io.mjs`).
+
+**Scope drift, reconciled on `main` in the same session (commit `4d1431c9c`):** the card's own `scope:`
+predates its finished Done-when list — `we:scripts/operations/dispatch-lane.mjs` (the new `modelReason`
+input) and five test files (`we:scripts/operations/__tests__/dispatch-lane.test.mjs`,
+`we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs`,
+`we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs`, `we:scripts/lib/__tests__/dispatch-contracts.test.mjs`,
+the shared `we:scripts/operations/__tests__/helpers/fake-claude.mjs` test helper, which needed a `--model`
+flag added to its argv parser) were touched but not originally declared; the item's `scope:` frontmatter was
+widened to match, on `main` directly (the item file's own home), not on this branch.
+
+**Tests:** `we:scripts/lib/__tests__/provider-routing.test.mjs` (89, +8 new `workerTierFor` cases),
+`we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs` (28, +6 new #3857 cases),
+`we:scripts/lib/__tests__/dispatch-contracts.test.mjs` (82), `we:scripts/operations/__tests__/dispatch-task.test.mjs`
+(61, including two live subprocess probes through the real `defaultSpawnAgent` against the fake `claude` CLI
+on `PATH` — Done-when 5's "probed live" claim, same standard `we:scripts/operations/__tests__/helpers/fake-claude.mjs`'s
+own header sets, though not a literal shell invocation of `we:scripts/operations/run.mjs`'s CLI entry point),
+`we:scripts/operations/__tests__/dispatch-lane.test.mjs` (226, including one pinned argv pin updated to show
+the newly-injected `--model`), `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` (32, +3
+new #3857 cases) — all pass. Full `scripts/operations` + `scripts/lib` + `scripts/conveyor` run: 9280+ tests
+passing; the only two failures (`we:scripts/operations/__tests__/host-sampler-capacity.test.mjs`,
+`we:scripts/operations/__tests__/host-sampler-large-file.test.mjs`) are confirmed pre-existing and unrelated —
+reproduced identically on the unmodified base commit via `git stash`. `npm run check:standards`: 0 errors.
+
+Backlog card `status`/`resolved` flip for `#3857` itself is DEFERRED to a separate closeout pass on `main`,
+same pattern `#3888`/`#3889`/`#3887`/`#3783` used above. `#3857` was claimed (commit on `main`, local only,
+not yet pushed — see the scope-reconciliation commit above for the same local-only-pending-closeout
+reasoning) rather than resolved, per this session's own convention for prototype-branch work.
